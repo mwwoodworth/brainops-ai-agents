@@ -2,11 +2,11 @@ services:
   - type: worker
     name: brainops-ai-agents
     runtime: python
-    plan: starter
+    plan: standard
     repo: https://github.com/mwwoodworth/brainops-ai-agents
     branch: main
     buildCommand: pip install -r requirements.txt
-    startCommand: python3.11 ai_os_complete.py
+    startCommand: ./startup.sh
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
