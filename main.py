@@ -38,8 +38,8 @@ DB_CONFIG = {
 
 SYSTEM_USER_ID = os.environ.get("SYSTEM_USER_ID", "44491c1c-0e28-4aa1-ad33-552d1386769c")
 
-# Connection pool
-db_pool = ThreadedConnectionPool(minconn=5, maxconn=30, **DB_CONFIG)
+# Connection pool - reduced for Supabase pooler limits
+db_pool = ThreadedConnectionPool(minconn=1, maxconn=3, **DB_CONFIG)
 
 class AgentCapability(Enum):
     """Agent capabilities for multi-system support"""
