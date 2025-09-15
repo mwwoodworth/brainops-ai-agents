@@ -44,7 +44,7 @@ DB_CONFIG = {
 
 SYSTEM_USER_ID = os.environ.get("SYSTEM_USER_ID", "44491c1c-0e28-4aa1-ad33-552d1386769c")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://default:NBUl3B1zlWXPY6MXuMFLAwSrAcNphvnJ@redis-14008.c289.us-west-1-2.ec2.redns.redis-cloud.com:14008")
 
 # Initialize connections
 db_pool = ThreadedConnectionPool(minconn=2, maxconn=10, **DB_CONFIG)
