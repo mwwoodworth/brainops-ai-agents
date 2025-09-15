@@ -928,26 +928,46 @@ def initialize_database():
 
 def main():
     """Main entry point"""
-    # Initialize database
-    initialize_database()
+    logger.info("=" * 60)
+    logger.info("BRAINOPS AI AGENT SYSTEM STARTING")
+    logger.info("=" * 60)
+    logger.info(f"Database Host: {DB_CONFIG['host']}")
+    logger.info(f"Database Name: {DB_CONFIG['database']}")
+    logger.info(f"System User ID: {SYSTEM_USER_ID}")
 
-    # Create orchestrator
-    orchestrator = ProductionOrchestrator()
-
-    # Add production agents
-    orchestrator.add_agent(EstimationAgent())
-    orchestrator.add_agent(IntelligentScheduler())
-    orchestrator.add_agent(RevenueOptimizer())
-    orchestrator.add_agent(WorkflowAutomation())
-    orchestrator.add_agent(CustomerIntelligence())
-    orchestrator.add_agent(SystemMonitor())
-
-    # Start all agents
-    orchestrator.start()
-
-    # Monitor forever
     try:
+        # Test database connection
+        logger.info("Testing database connection...")
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT version()")
+            version = cur.fetchone()
+            logger.info(f"Database connected: {version[0][:50]}...")
+        db_pool.putconn(conn)
+
+        # Initialize database
+        initialize_database()
+
+        # Create orchestrator
+        orchestrator = ProductionOrchestrator()
+
+        # Add production agents
+        orchestrator.add_agent(EstimationAgent())
+        orchestrator.add_agent(IntelligentScheduler())
+        orchestrator.add_agent(RevenueOptimizer())
+        orchestrator.add_agent(WorkflowAutomation())
+        orchestrator.add_agent(CustomerIntelligence())
+        orchestrator.add_agent(SystemMonitor())
+
+        # Start all agents
+        orchestrator.start()
+
+        # Monitor forever
         orchestrator.monitor()
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        logger.error(traceback.format_exc())
+        sys.exit(1)
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully...")
         sys.exit(0)
