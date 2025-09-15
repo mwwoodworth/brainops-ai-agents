@@ -1,0 +1,22 @@
+services:
+  - type: worker
+    name: brainops-ai-agents
+    runtime: python
+    plan: starter
+    repo: https://github.com/mwwoodworth/brainops-ai-agents
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: DB_HOST
+        value: aws-0-us-east-2.pooler.supabase.com
+      - key: DB_NAME
+        value: postgres
+      - key: DB_USER
+        value: postgres.yomagoqdmxszqtdwuhab
+      - key: DB_PASSWORD
+        value: REDACTED_SUPABASE_DB_PASSWORD
+      - key: DB_PORT
+        value: 5432
+      - key: SYSTEM_USER_ID
+        value: 44491c1c-0e28-4aa1-ad33-552d1386769c
