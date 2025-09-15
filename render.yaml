@@ -7,6 +7,7 @@ services:
     branch: main
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
+    pythonVersion: "3.11"
     envVars:
       - key: DB_HOST
         value: aws-0-us-east-2.pooler.supabase.com
