@@ -10,6 +10,7 @@ pydantic==2.6.1
 numpy==1.26.4
 scikit-learn==1.4.0
 pandas==2.2.0
+asyncio==3.4.3
 aiohttp==3.9.3
 celery==5.3.6
 fastapi==0.109.2

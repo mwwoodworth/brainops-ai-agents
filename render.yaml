@@ -6,7 +6,7 @@ services:
     repo: https://github.com/mwwoodworth/brainops-ai-agents
     branch: main
     buildCommand: pip install -r requirements.txt
-    startCommand: python3.11 main.py
+    startCommand: python3.11 ai_os_complete.py
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
@@ -22,3 +22,7 @@ services:
         value: 5432
       - key: SYSTEM_USER_ID
         value: 44491c1c-0e28-4aa1-ad33-552d1386769c
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
