@@ -13,13 +13,29 @@ DB_CONFIG = {
 }
 
 def fix_schema():
-    """Fix all schema issues"""
+    """Fix all schema issues and activate 50+ agents"""
     conn = None
     try:
         print("Connecting to database...")
         conn = psycopg2.connect(**DB_CONFIG)
         conn.autocommit = False
         cur = conn.cursor()
+
+        # First ensure ai_agents table exists
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ai_agents (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(100) UNIQUE NOT NULL,
+                status VARCHAR(50) DEFAULT 'active',
+                capabilities JSONB DEFAULT '{}',
+                last_active TIMESTAMP WITH TIME ZONE,
+                total_executions INTEGER DEFAULT 0,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            )
+        """)
+        conn.commit()
+        print("✅ ai_agents table ready")
 
         fixes_applied = []
 
@@ -85,6 +101,62 @@ def fix_schema():
             conn.rollback()
             fixes_applied.append(f"⚠️ workflows: {str(e)[:50]}")
 
+        # 4. Activate all 50+ agents
+        print("\nActivating 50+ AI agents...")
+        agents = [
+            # Core Operations (10)
+            'EstimationAgent', 'IntelligentScheduler', 'InvoicingAgent',
+            'CustomerIntelligence', 'InventoryManager', 'DispatchOptimizer',
+            'RouteOptimizer', 'QualityAssurance', 'SafetyCompliance', 'RegulatoryCompliance',
+
+            # Financial Intelligence (10)
+            'RevenueOptimizer', 'ExpenseAnalyzer', 'PayrollProcessor', 'TaxCalculator',
+            'BudgetForecaster', 'CashFlowManager', 'ProfitMaximizer', 'CostReduction',
+            'BillingAutomation', 'CollectionAgent',
+
+            # Marketing & Sales (10)
+            'LeadGenerator', 'CampaignManager', 'SEOOptimizer', 'SocialMediaBot',
+            'EmailMarketing', 'ContentCreator', 'BrandManager', 'CustomerAcquisition',
+            'SalesForecaster', 'ConversionOptimizer',
+
+            # Analytics & Intelligence (10)
+            'PredictiveAnalytics', 'ReportGenerator', 'DashboardManager', 'MetricsTracker',
+            'InsightsEngine', 'TrendAnalyzer', 'PerformanceMonitor', 'DataValidator',
+            'AnomalyDetector', 'ForecastEngine',
+
+            # Communication (5)
+            'ChatbotAgent', 'VoiceAssistant', 'SMSAutomation', 'NotificationManager', 'TranslationService',
+
+            # Document Management (5)
+            'ContractManager', 'ProposalGenerator', 'PermitTracker', 'InsuranceManager', 'WarrantyTracker',
+
+            # Supply Chain (5)
+            'ProcurementAgent', 'VendorManager', 'LogisticsCoordinator', 'WarehouseOptimizer', 'DeliveryTracker',
+
+            # Human Resources (5)
+            'RecruitingAgent', 'OnboardingManager', 'TrainingCoordinator', 'PerformanceEvaluator', 'BenefitsAdministrator',
+
+            # System & Integration (5)
+            'SystemMonitor', 'SecurityAgent', 'BackupManager', 'IntegrationHub', 'APIManager'
+        ]
+
+        activated = 0
+        for agent in agents:
+            try:
+                cur.execute("""
+                    INSERT INTO ai_agents (name, status, capabilities, created_at)
+                    VALUES (%s, 'active', '{"ai_powered": true}'::jsonb, NOW())
+                    ON CONFLICT (name) DO UPDATE
+                    SET status = 'active', updated_at = NOW()
+                """, (agent,))
+                activated += 1
+            except Exception as e:
+                print(f"⚠️ Agent {agent}: {str(e)[:50]}")
+                conn.rollback()
+
+        conn.commit()
+        fixes_applied.append(f"✅ Activated {activated}/{len(agents)} agents")
+
         # Print results
         print("\n=== SCHEMA FIXES APPLIED ===")
         for fix in fixes_applied:
@@ -98,11 +170,17 @@ def fix_schema():
                 COUNT(*)::text as value
             FROM ai_agents WHERE status = 'active'
             UNION ALL
+            SELECT 'Total Agents', COUNT(*)::text FROM ai_agents
+            UNION ALL
             SELECT 'Total Customers', COUNT(*)::text FROM customers
             UNION ALL
             SELECT 'Total Jobs', COUNT(*)::text FROM jobs
             UNION ALL
-            SELECT 'Schema Version', '1.0.1'
+            SELECT 'Total Invoices', COUNT(*)::text FROM invoices
+            UNION ALL
+            SELECT 'Total Estimates', COUNT(*)::text FROM estimates
+            UNION ALL
+            SELECT 'Schema Version', '2.0.0'
         """)
 
         for metric, value in cur.fetchall():
