@@ -187,9 +187,9 @@ async def execute_agent(agent_id: str, task: Dict[str, Any]):
         import uuid
         task_execution_id = str(uuid.uuid4())
         cursor.execute("""
-            INSERT INTO task_executions (id, workflow_id, status, created_at)
+            INSERT INTO task_executions (id, task_id, status, created_at)
             VALUES (%s, %s, 'running', NOW())
-        """, (task_execution_id, 'wf_' + datetime.now().strftime("%Y%m%d%H%M%S")))
+        """, (task_execution_id, f"agent_{agent['type']}_{datetime.now().strftime('%Y%m%d%H%M%S')}"))
 
         # Then create agent_execution entry
         execution_id = str(uuid.uuid4())
@@ -224,11 +224,21 @@ async def execute_agent(agent_id: str, task: Dict[str, Any]):
         # Update execution status
         conn = get_db_connection()
         cursor = conn.cursor()
+
+        # Update agent_execution
         cursor.execute("""
             UPDATE agent_executions
             SET status = %s, response = %s, completed_at = NOW()
             WHERE id = %s
         """, (result.get('status', 'completed'), json.dumps(result), execution_id))
+
+        # Update task_execution
+        cursor.execute("""
+            UPDATE task_executions
+            SET status = %s, result = %s, completed_at = NOW()
+            WHERE id = %s
+        """, (result.get('status', 'completed'), json.dumps(result), task_execution_id))
+
         conn.commit()
         cursor.close()
         conn.close()
