@@ -42,7 +42,7 @@ class AgentExecutor:
 
     def __init__(self):
         self.agents = {}
-        self._load_agent_implementations()
+        # Agents will be loaded after class definitions
 
     def _load_agent_implementations(self):
         """Load all agent implementations"""
@@ -65,6 +65,9 @@ class AgentExecutor:
         self.agents['ContractGenerator'] = ContractGeneratorAgent()
         self.agents['ProposalGenerator'] = ProposalGeneratorAgent()
         self.agents['ReportingAgent'] = ReportingAgent()
+
+        # Meta Agent
+        self.agents['SelfBuilder'] = SelfBuildingAgent()
 
     async def execute(self, agent_name: str, task: Dict[str, Any]) -> Dict[str, Any]:
         """Execute task with specific agent"""
@@ -1433,8 +1436,6 @@ class SelfBuildingAgent(BaseAgent):
             return {"status": "error", "error": str(e)}
 
 
-# Create executor instance
+# Create executor instance AFTER all classes are defined
 executor = AgentExecutor()
-
-# Add self-building agent
-executor.agents['SelfBuilder'] = SelfBuildingAgent()
+executor._load_agent_implementations()  # Load agents after classes are defined
