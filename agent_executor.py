@@ -106,15 +106,23 @@ class BaseAgent:
     async def log_execution(self, task: Dict, result: Dict):
         """Log execution to database"""
         try:
+            import uuid
             conn = self.get_db_connection()
             cursor = conn.cursor()
+
+            exec_id = str(uuid.uuid4())
             cursor.execute("""
-                INSERT INTO agent_executions (agent_id, task, result, status, completed_at)
-                VALUES (
-                    (SELECT id FROM ai_agents WHERE name = %s),
-                    %s, %s, %s, NOW()
+                INSERT INTO agent_executions (
+                    id, task_execution_id, agent_type, prompt,
+                    response, status, created_at, completed_at
                 )
-            """, (self.name, json.dumps(task), json.dumps(result), result.get('status', 'completed')))
+                VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+            """, (
+                exec_id, exec_id, self.type,
+                json.dumps(task), json.dumps(result),
+                result.get('status', 'completed')
+            ))
+
             conn.commit()
             cursor.close()
             conn.close()
