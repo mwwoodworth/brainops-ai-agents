@@ -17,7 +17,7 @@ from pydantic import BaseModel
 import uvicorn
 
 # Import the main orchestrator
-from main import AIOrchestrator
+from main import SimpleOrchestrator as AIOrchestrator
 
 # Configure logging
 logging.basicConfig(
