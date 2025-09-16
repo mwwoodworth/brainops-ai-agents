@@ -183,14 +183,21 @@ async def execute_agent(agent_id: str, task: Dict[str, Any]):
             WHERE id = %s
         """, (agent['id'],))
 
-        # Log execution start
+        # First create task_execution entry
         import uuid
+        task_execution_id = str(uuid.uuid4())
+        cursor.execute("""
+            INSERT INTO task_executions (id, workflow_id, status, created_at)
+            VALUES (%s, %s, 'running', NOW())
+        """, (task_execution_id, 'wf_' + datetime.now().strftime("%Y%m%d%H%M%S")))
+
+        # Then create agent_execution entry
         execution_id = str(uuid.uuid4())
         cursor.execute("""
             INSERT INTO agent_executions (id, task_execution_id, agent_type, prompt, status, created_at)
             VALUES (%s, %s, %s, %s, 'running', NOW())
             RETURNING id
-        """, (execution_id, execution_id, agent['type'], json.dumps(task)))
+        """, (execution_id, task_execution_id, agent['type'], json.dumps(task)))
 
         execution_id = cursor.fetchone()['id']
 
