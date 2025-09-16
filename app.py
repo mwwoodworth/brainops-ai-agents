@@ -146,8 +146,13 @@ async def get_agent(agent_id: str):
 async def execute_agent(agent_id: str, task: Dict[str, Any]):
     """Execute a task with specific agent"""
     try:
-        # Import the real executor
-        from agent_executor import executor
+        # Try to import the real executor
+        try:
+            from agent_executor import executor
+            has_executor = True
+        except Exception as e:
+            logger.error(f"Failed to import executor: {e}")
+            has_executor = False
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -193,41 +198,42 @@ async def execute_agent(agent_id: str, task: Dict[str, Any]):
         cursor.close()
         conn.close()
 
-        # Execute with real executor
-        try:
-            result = await executor.execute(agent['name'], task)
-
-            # Update execution status
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE agent_executions
-                SET status = %s, response = %s, completed_at = NOW()
-                WHERE id = %s
-            """, (result.get('status', 'completed'), json.dumps(result), execution_id))
-            conn.commit()
-            cursor.close()
-            conn.close()
-
-            return {
-                "execution_id": execution_id,
-                "agent_id": agent['id'],
-                "agent_name": agent['name'],
-                "status": result.get('status', 'completed'),
-                "result": result,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+        # Execute with real executor if available
+        if has_executor:
+            try:
+                result = await executor.execute(agent['name'], task)
+            except Exception as exec_error:
+                logger.error(f"Executor failed: {exec_error}")
+                result = {"status": "error", "error": str(exec_error)}
+        else:
+            # Fallback execution
+            result = {
+                "status": "simulated",
+                "agent": agent['name'],
+                "task": task,
+                "message": "Executor not available, using simulation"
             }
-        except Exception as exec_error:
-            logger.error(f"Agent execution error: {exec_error}")
-            # Fallback to simulated response
-            return {
-                "execution_id": execution_id,
-                "agent_id": agent['id'],
-                "agent_name": agent['name'],
-                "status": "error",
-                "message": str(exec_error),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
+
+        # Update execution status
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE agent_executions
+            SET status = %s, response = %s, completed_at = NOW()
+            WHERE id = %s
+        """, (result.get('status', 'completed'), json.dumps(result), execution_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return {
+            "execution_id": execution_id,
+            "agent_id": agent['id'],
+            "agent_name": agent['name'],
+            "status": result.get('status', 'completed'),
+            "result": result,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
     except Exception as e:
         logger.error(f"Error executing agent {agent_id}: {e}")
