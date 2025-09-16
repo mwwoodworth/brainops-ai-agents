@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+.env
+*.md
+.python-version
+render.yaml
+startup.sh
+deploy_agents.py
+fix_production.py
+*.log
+.DS_Store
