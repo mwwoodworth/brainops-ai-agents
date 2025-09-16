@@ -179,11 +179,13 @@ async def execute_agent(agent_id: str, task: Dict[str, Any]):
         """, (agent['id'],))
 
         # Log execution start
+        import uuid
+        execution_id = str(uuid.uuid4())
         cursor.execute("""
-            INSERT INTO agent_executions (agent_id, task, status, started_at)
-            VALUES (%s, %s, 'running', NOW())
+            INSERT INTO agent_executions (id, task_execution_id, agent_type, prompt, status, created_at)
+            VALUES (%s, %s, %s, %s, 'running', NOW())
             RETURNING id
-        """, (agent['id'], json.dumps(task)))
+        """, (execution_id, execution_id, agent['type'], json.dumps(task)))
 
         execution_id = cursor.fetchone()['id']
 
@@ -200,7 +202,7 @@ async def execute_agent(agent_id: str, task: Dict[str, Any]):
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE agent_executions
-                SET status = %s, result = %s, completed_at = NOW()
+                SET status = %s, response = %s, completed_at = NOW()
                 WHERE id = %s
             """, (result.get('status', 'completed'), json.dumps(result), execution_id))
             conn.commit()
