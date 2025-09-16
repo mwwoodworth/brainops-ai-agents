@@ -146,27 +146,44 @@ async def get_agent(agent_id: str):
 async def execute_agent(agent_id: str, task: Dict[str, Any]):
     """Execute a task with specific agent"""
     try:
+        # Import the real executor
+        from agent_executor import executor
+
         conn = get_db_connection()
         cursor = conn.cursor()
+
+        # Get agent by ID or name
+        if agent_id.startswith('srv-') or len(agent_id) == 36:  # UUID format
+            cursor.execute("""
+                SELECT id, name, type, capabilities
+                FROM ai_agents
+                WHERE id = %s
+            """, (agent_id,))
+        else:
+            # Try by name
+            cursor.execute("""
+                SELECT id, name, type, capabilities
+                FROM ai_agents
+                WHERE LOWER(name) = LOWER(%s)
+            """, (agent_id,))
+
+        agent = cursor.fetchone()
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
         # Update agent last_active
         cursor.execute("""
             UPDATE ai_agents
             SET last_active = NOW()
             WHERE id = %s
-            RETURNING name, type, capabilities
-        """, (agent_id,))
+        """, (agent['id'],))
 
-        agent = cursor.fetchone()
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-
-        # Log execution
+        # Log execution start
         cursor.execute("""
             INSERT INTO agent_executions (agent_id, task, status, started_at)
             VALUES (%s, %s, 'running', NOW())
             RETURNING id
-        """, (agent_id, json.dumps(task)))
+        """, (agent['id'], json.dumps(task)))
 
         execution_id = cursor.fetchone()['id']
 
@@ -174,17 +191,41 @@ async def execute_agent(agent_id: str, task: Dict[str, Any]):
         cursor.close()
         conn.close()
 
-        # TODO: Implement actual agent execution logic
-        # For now, return a simulated response
-        return {
-            "execution_id": execution_id,
-            "agent_id": agent_id,
-            "agent_name": agent['name'],
-            "status": "accepted",
-            "message": f"Task accepted by {agent['name']}",
-            "estimated_completion": "2-5 seconds",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
+        # Execute with real executor
+        try:
+            result = await executor.execute(agent['name'], task)
+
+            # Update execution status
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE agent_executions
+                SET status = %s, result = %s, completed_at = NOW()
+                WHERE id = %s
+            """, (result.get('status', 'completed'), json.dumps(result), execution_id))
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            return {
+                "execution_id": execution_id,
+                "agent_id": agent['id'],
+                "agent_name": agent['name'],
+                "status": result.get('status', 'completed'),
+                "result": result,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        except Exception as exec_error:
+            logger.error(f"Agent execution error: {exec_error}")
+            # Fallback to simulated response
+            return {
+                "execution_id": execution_id,
+                "agent_id": agent['id'],
+                "agent_name": agent['name'],
+                "status": "error",
+                "message": str(exec_error),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
 
     except Exception as e:
         logger.error(f"Error executing agent {agent_id}: {e}")
@@ -228,13 +269,24 @@ async def get_recent_activity():
 async def orchestrate_agents(workflow: Dict[str, Any]):
     """Orchestrate multiple agents for a workflow"""
     try:
-        # TODO: Implement actual orchestration logic
-        # For now, return a simulated response
+        from agent_executor import executor
+
+        workflow_type = workflow.get('type', 'custom')
+        workflow_id = "wf_" + datetime.now().strftime("%Y%m%d%H%M%S")
+
+        # Execute with WorkflowEngine
+        workflow_task = {
+            'workflow_type': workflow_type,
+            'workflow_id': workflow_id,
+            **workflow
+        }
+
+        result = await executor.execute('WorkflowEngine', workflow_task)
+
         return {
-            "workflow_id": "wf_" + datetime.now().strftime("%Y%m%d%H%M%S"),
-            "status": "initiated",
-            "agents_involved": workflow.get("agents", []),
-            "estimated_completion": "10-30 seconds",
+            "workflow_id": workflow_id,
+            "status": result.get('status', 'completed'),
+            "result": result,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except Exception as e:
