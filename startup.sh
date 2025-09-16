@@ -27,10 +27,10 @@ cleanup() {
 
 trap cleanup SIGTERM SIGINT
 
-# Start main application
+# Start web service
 while true; do
-    echo "Starting AI agent system..."
-    python3 main.py &
+    echo "Starting AI agent web service..."
+    python3 web_service.py &
     MAIN_PID=$!
 
     # Wait for process
