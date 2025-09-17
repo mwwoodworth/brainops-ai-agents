@@ -652,8 +652,32 @@ class AutonomousRevenueSystem:
 
     async def _schedule_email(self, email_data: Dict):
         """Schedule email for sending"""
-        # Integrate with email service
-        pass
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+
+            # Store email in outbound queue
+            cursor.execute("""
+                INSERT INTO ai_email_queue
+                (id, recipient, subject, body, scheduled_for, status, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                str(uuid.uuid4()),
+                email_data.get('to'),
+                email_data.get('subject'),
+                email_data.get('body'),
+                datetime.now(timezone.utc),
+                'queued',
+                json.dumps(email_data.get('metadata', {}))
+            ))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            logger.info(f"Email queued for {email_data.get('to')}")
+        except Exception as e:
+            logger.error(f"Failed to queue email: {e}")
 
     async def _create_opportunity(self, lead_id: str, value: float) -> str:
         """Create revenue opportunity"""
@@ -688,8 +712,45 @@ class AutonomousRevenueSystem:
 
     async def _schedule_nurture_campaign(self, lead_id: str):
         """Schedule nurture campaign for low-quality leads"""
-        # Implement nurture campaign logic
-        pass
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+
+            # Create nurture campaign
+            campaign_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO ai_nurture_campaigns
+                (id, lead_id, campaign_type, status, next_touch_date, touch_count)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                campaign_id,
+                lead_id,
+                'educational_drip',
+                'active',
+                datetime.now(timezone.utc) + timedelta(days=3),
+                0
+            ))
+
+            # Schedule first touch
+            cursor.execute("""
+                INSERT INTO ai_campaign_touches
+                (id, campaign_id, touch_type, scheduled_for, content_template)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                str(uuid.uuid4()),
+                campaign_id,
+                'email',
+                datetime.now(timezone.utc) + timedelta(days=3),
+                'educational_content_1'
+            ))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            logger.info(f"Nurture campaign scheduled for lead {lead_id}")
+        except Exception as e:
+            logger.error(f"Failed to schedule nurture campaign: {e}")
 
     async def _generate_closing_documents(self, lead_id: str, terms: Dict) -> Dict:
         """Generate closing documents"""
@@ -698,8 +759,57 @@ class AutonomousRevenueSystem:
 
     async def _initiate_onboarding(self, lead_id: str):
         """Initiate customer onboarding"""
-        # Trigger onboarding workflow
-        pass
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+
+            # Create onboarding record
+            onboarding_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO ai_onboarding_workflows
+                (id, lead_id, status, current_step, total_steps, started_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                onboarding_id,
+                lead_id,
+                'in_progress',
+                1,
+                5,
+                datetime.now(timezone.utc)
+            ))
+
+            # Create onboarding steps
+            steps = [
+                ('welcome_email', 'Send welcome email and credentials'),
+                ('data_collection', 'Collect necessary customer information'),
+                ('system_setup', 'Configure customer account and preferences'),
+                ('training_schedule', 'Schedule training sessions'),
+                ('first_project', 'Initiate first project or service')
+            ]
+
+            for idx, (step_name, description) in enumerate(steps, 1):
+                cursor.execute("""
+                    INSERT INTO ai_onboarding_steps
+                    (id, workflow_id, step_number, step_name, description, status)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (
+                    str(uuid.uuid4()),
+                    onboarding_id,
+                    idx,
+                    step_name,
+                    description,
+                    'pending' if idx > 1 else 'in_progress'
+                ))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            logger.info(f"Onboarding initiated for lead {lead_id}")
+            return onboarding_id
+        except Exception as e:
+            logger.error(f"Failed to initiate onboarding: {e}")
+            return None
 
     async def _generate_negotiation_response(self, lead_id: str, analysis: Dict) -> Dict:
         """Generate negotiation response based on analysis"""
