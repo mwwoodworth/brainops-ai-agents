@@ -7,11 +7,5 @@ anthropic==0.7.0
 google-generativeai==0.3.0
 requests==2.31.0
 numpy==1.24.3
-langchain
-langchain-openai
-langchain-anthropic
-langchain-community
-langgraph
-tiktoken
-pgvector
-aiohttp
+aiohttp==3.9.0
+httpx==0.25.0
