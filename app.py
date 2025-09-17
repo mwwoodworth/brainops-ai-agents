@@ -45,6 +45,11 @@ INTELLIGENT_FOLLOWUP_AVAILABLE = False
 CUSTOMER_ONBOARDING_AVAILABLE = False
 AUTOMATED_REPORTING_AVAILABLE = False
 COST_OPTIMIZATION_AVAILABLE = False
+AB_TESTING_AVAILABLE = False
+PERFORMANCE_OPT_AVAILABLE = False
+FAILOVER_AVAILABLE = False
+MULTI_REGION_AVAILABLE = False
+AI_OS_AVAILABLE = False
 
 # Try to import advanced modules
 try:
@@ -372,11 +377,62 @@ except ImportError as e:
     OptimizationStrategy = None
     CostLevel = None
 
+# Task 24-28: Final Components
+try:
+    from ab_testing_framework import get_ab_testing_framework, ABTestingFramework
+    AB_TESTING_AVAILABLE = True
+    logger.info("A/B testing framework loaded successfully")
+    ab_testing = None
+except ImportError as e:
+    logger.warning(f"A/B testing not available: {e}")
+    AB_TESTING_AVAILABLE = False
+    ab_testing = None
+
+try:
+    from performance_optimization_layer import get_performance_optimizer
+    PERFORMANCE_OPT_AVAILABLE = True
+    logger.info("Performance optimization loaded successfully")
+    performance_optimizer = None
+except ImportError as e:
+    logger.warning(f"Performance optimization not available: {e}")
+    PERFORMANCE_OPT_AVAILABLE = False
+    performance_optimizer = None
+
+try:
+    from failover_redundancy_system import get_redundancy_orchestrator
+    FAILOVER_AVAILABLE = True
+    logger.info("Failover system loaded successfully")
+    failover_system = None
+except ImportError as e:
+    logger.warning(f"Failover system not available: {e}")
+    FAILOVER_AVAILABLE = False
+    failover_system = None
+
+try:
+    from multi_region_deployment import get_multi_region_orchestrator
+    MULTI_REGION_AVAILABLE = True
+    logger.info("Multi-region deployment loaded successfully")
+    multi_region = None
+except ImportError as e:
+    logger.warning(f"Multi-region not available: {e}")
+    MULTI_REGION_AVAILABLE = False
+    multi_region = None
+
+try:
+    from ai_operating_system import get_ai_operating_system
+    AI_OS_AVAILABLE = True
+    logger.info("AI Operating System loaded successfully")
+    ai_os = None
+except ImportError as e:
+    logger.warning(f"AI OS not available: {e}")
+    AI_OS_AVAILABLE = False
+    ai_os = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="3.2.0"  # Added AI Customer Onboarding
+    version="3.5.0"  # Added Tasks 24-28: Complete AI Operating System
 )
 
 # Add CORS middleware
@@ -454,7 +510,12 @@ async def health():
                 "intelligent_followup": INTELLIGENT_FOLLOWUP_AVAILABLE,
                 "customer_onboarding": CUSTOMER_ONBOARDING_AVAILABLE,
                 "automated_reporting": AUTOMATED_REPORTING_AVAILABLE,
-                "cost_optimization": COST_OPTIMIZATION_AVAILABLE
+                "cost_optimization": COST_OPTIMIZATION_AVAILABLE,
+                "ab_testing": AB_TESTING_AVAILABLE,
+                "performance_optimization": PERFORMANCE_OPT_AVAILABLE,
+                "failover_redundancy": FAILOVER_AVAILABLE,
+                "multi_region": MULTI_REGION_AVAILABLE,
+                "ai_operating_system": AI_OS_AVAILABLE
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
