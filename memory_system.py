@@ -20,10 +20,10 @@ class AIMemorySystem:
 
     def __init__(self):
         self.db_config = {
-            "host": "aws-0-us-east-2.pooler.supabase.com",
+            "host": os.getenv("DB_HOST"),
             "database": "postgres",
-            "user": "postgres.yomagoqdmxszqtdwuhab",
-            "password": "Brain0ps2O2S",
+            "user": os.getenv("DB_USER"),
+            "password": os.getenv("DB_PASSWORD"),
             "port": 5432
         }
 
@@ -294,9 +294,9 @@ def initialize_system():
 
     # Store database configuration
     db_config = {
-        'host': 'aws-0-us-east-2.pooler.supabase.com',
+        'host': os.getenv('DB_HOST'),
         'database': 'postgres',
-        'user': 'postgres.yomagoqdmxszqtdwuhab',
+        'user': os.getenv('DB_USER'),
         'port': 5432
     }
     memory.store_context('system', 'database_config', db_config, critical=True)
