@@ -13,7 +13,7 @@ import logging
 import uuid
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 import uvicorn
 import asyncio
@@ -41,6 +41,7 @@ SYSTEM_STATE_AVAILABLE = False
 DECISION_TREE_AVAILABLE = False
 REALTIME_MONITOR_AVAILABLE = False
 LEAD_NURTURING_AVAILABLE = False
+INTELLIGENT_FOLLOWUP_AVAILABLE = False
 
 # Try to import advanced modules
 try:
@@ -288,11 +289,34 @@ except ImportError as e:
     PersonalizationEngine = None
     DeliveryManager = None
 
+# Intelligent Follow-up System
+try:
+    from intelligent_followup_system import (
+        get_intelligent_followup_system,
+        FollowUpType,
+        FollowUpPriority,
+        FollowUpStatus,
+        DeliveryChannel,
+        ResponseType
+    )
+    INTELLIGENT_FOLLOWUP_AVAILABLE = True
+    logger.info("Intelligent follow-up system loaded successfully")
+    intelligent_followup_system = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"Intelligent follow-up system not available: {e}")
+    get_intelligent_followup_system = None
+    intelligent_followup_system = None
+    FollowUpType = None
+    FollowUpPriority = None
+    FollowUpStatus = None
+    DeliveryChannel = None
+    ResponseType = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="3.0.0"  # Added Lead Nurturing System
+    version="3.1.0"  # Added Intelligent Follow-up System
 )
 
 # Add CORS middleware
@@ -1738,6 +1762,80 @@ if LEAD_NURTURING_AVAILABLE:
 
         return {"status": "tracked"}
 
+# Intelligent Follow-up System Endpoints
+if INTELLIGENT_FOLLOWUP_AVAILABLE:
+    @app.post("/followup/sequences")
+    async def create_followup_sequence(sequence_data: Dict[str, Any]):
+        """Create intelligent follow-up sequence"""
+        global intelligent_followup_system
+        if not intelligent_followup_system:
+            intelligent_followup_system = get_intelligent_followup_system()
+
+        sequence_id = await intelligent_followup_system.create_followup_sequence(
+            followup_type=FollowUpType[sequence_data["followup_type"].upper()],
+            entity_id=sequence_data["entity_id"],
+            entity_type=sequence_data["entity_type"],
+            context=sequence_data.get("context", {}),
+            priority=FollowUpPriority[sequence_data.get("priority", "MEDIUM").upper()],
+            custom_rules=sequence_data.get("custom_rules")
+        )
+
+        return {"sequence_id": sequence_id, "status": "created"}
+
+    @app.post("/followup/execute")
+    async def execute_scheduled_followups():
+        """Execute scheduled follow-ups"""
+        global intelligent_followup_system
+        if not intelligent_followup_system:
+            intelligent_followup_system = get_intelligent_followup_system()
+
+        results = await intelligent_followup_system.execute_scheduled_followups()
+
+        return {
+            "executed_count": len(results),
+            "results": results
+        }
+
+    @app.post("/followup/responses/{execution_id}")
+    async def track_followup_response(
+        execution_id: str,
+        response_data: Dict[str, Any]
+    ):
+        """Track response to follow-up"""
+        global intelligent_followup_system
+        if not intelligent_followup_system:
+            intelligent_followup_system = get_intelligent_followup_system()
+
+        result = await intelligent_followup_system.track_response(
+            execution_id=execution_id,
+            response_type=ResponseType[response_data["response_type"].upper()],
+            response_data=response_data.get("data")
+        )
+
+        return result
+
+    @app.get("/followup/analytics")
+    async def get_followup_analytics(
+        entity_id: Optional[str] = None,
+        followup_type: Optional[str] = None,
+        days: int = 30
+    ):
+        """Get follow-up analytics"""
+        global intelligent_followup_system
+        if not intelligent_followup_system:
+            intelligent_followup_system = get_intelligent_followup_system()
+
+        date_from = datetime.now(timezone.utc) - timedelta(days=days)
+
+        analytics = await intelligent_followup_system.get_followup_analytics(
+            entity_id=entity_id,
+            followup_type=FollowUpType[followup_type.upper()] if followup_type else None,
+            date_from=date_from,
+            date_to=datetime.now(timezone.utc)
+        )
+
+        return analytics
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -1757,6 +1855,7 @@ async def startup_event():
     logger.info(f"Document Processor Available: {DOCUMENT_PROCESSOR_AVAILABLE}")
     logger.info(f"Context Awareness Available: {CONTEXT_AWARENESS_AVAILABLE}")
     logger.info(f"Lead Nurturing Available: {LEAD_NURTURING_AVAILABLE}")
+    logger.info(f"Intelligent Follow-up Available: {INTELLIGENT_FOLLOWUP_AVAILABLE}")
 
     try:
         from scheduled_executor import scheduler
