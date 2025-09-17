@@ -414,7 +414,7 @@ async def health():
 
         return {
             "status": "healthy",
-            "version": "3.2.0",
+            "version": "3.3.0",
             "database": "connected",
             "features": {
                 "langgraph": LANGGRAPH_AVAILABLE,
@@ -433,7 +433,8 @@ async def health():
                 "context_awareness": CONTEXT_AWARENESS_AVAILABLE,
                 "lead_nurturing": LEAD_NURTURING_AVAILABLE,
                 "intelligent_followup": INTELLIGENT_FOLLOWUP_AVAILABLE,
-                "customer_onboarding": CUSTOMER_ONBOARDING_AVAILABLE
+                "customer_onboarding": CUSTOMER_ONBOARDING_AVAILABLE,
+                "automated_reporting": AUTOMATED_REPORTING_AVAILABLE
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
