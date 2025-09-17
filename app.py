@@ -96,7 +96,7 @@ except ImportError as e:
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.0.2"  # Fixed task_execution_id requirement
+    version="2.0.3"  # Complete fix for agent execution
 )
 
 # Add CORS middleware
@@ -240,9 +240,23 @@ async def execute_agent(agent_id: str, config: Dict[str, Any] = None):
             conn.close()
             raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found or inactive")
 
-        # Log execution
+        # Create task execution first
+        task_execution_id = str(uuid.uuid4())
+
+        # Get a default task ID (or create one)
+        cursor.execute("SELECT id FROM tasks LIMIT 1")
+        task_result = cursor.fetchone()
+        task_id = task_result['id'] if task_result else str(uuid.uuid4())
+
+        # Create task execution
+        cursor.execute("""
+            INSERT INTO task_executions (
+                id, task_id, status, created_at
+            ) VALUES (%s, %s, %s, %s)
+        """, (task_execution_id, task_id, 'running', datetime.now(timezone.utc)))
+
+        # Log agent execution
         execution_id = str(uuid.uuid4())
-        task_execution_id = str(uuid.uuid4())  # Generate task execution ID
         cursor.execute("""
             INSERT INTO agent_executions (
                 id, task_execution_id, agent_type, status, created_at, prompt, response
@@ -268,6 +282,13 @@ async def execute_agent(agent_id: str, config: Dict[str, Any] = None):
             SET status = %s, completed_at = %s, response = %s
             WHERE id = %s
         """, ('completed', datetime.now(timezone.utc), json.dumps(result), execution_id))
+
+        # Update task execution status
+        cursor.execute("""
+            UPDATE task_executions
+            SET status = %s, completed_at = %s, result = %s
+            WHERE id = %s
+        """, ('completed', datetime.now(timezone.utc), json.dumps(result), task_execution_id))
 
         conn.commit()
         cursor.close()
