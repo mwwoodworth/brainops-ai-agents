@@ -99,7 +99,7 @@ class RealAICore:
                         temperature=temperature,
                         max_tokens=max_tokens,
                         stream=True,
-                        timeout=30  # Add timeout
+                        timeout=5  # Add timeout
                     )
                     return response
                 else:
@@ -109,7 +109,7 @@ class RealAICore:
                         messages=messages,
                         temperature=temperature,
                         max_tokens=max_tokens,
-                        timeout=30  # Add timeout
+                        timeout=5  # Add timeout
                     )
                     return response.choices[0].message.content
 
@@ -372,7 +372,7 @@ class RealAICore:
             messages=full_messages,
             temperature=0.7,
             max_tokens=1000,
-            timeout=30  # Add timeout
+            timeout=5  # Add timeout
         )
 
         return response.choices[0].message.content
