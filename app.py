@@ -242,11 +242,33 @@ except ImportError as e:
     ProcessingStatus = None
     DocumentCategory = None
 
+# AI Context Awareness
+CONTEXT_AWARENESS_AVAILABLE = False
+try:
+    from ai_context_awareness import (
+        get_context_awareness,
+        UserRole,
+        ContextType,
+        PersonalizationType,
+        PrivacyLevel
+    )
+    CONTEXT_AWARENESS_AVAILABLE = True
+    logger.info("AI context awareness module loaded successfully")
+    context_awareness = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"AI context awareness not available: {e}")
+    get_context_awareness = None
+    context_awareness = None
+    UserRole = None
+    ContextType = None
+    PersonalizationType = None
+    PrivacyLevel = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.8.0"  # Added Document Processor
+    version="2.9.0"  # Added AI Context Awareness
 )
 
 # Add CORS middleware
@@ -1429,6 +1451,142 @@ if DOCUMENT_PROCESSOR_AVAILABLE:
         result = await document_processor.process_document(document_id)
         return result
 
+# AI Context Awareness Endpoints
+if CONTEXT_AWARENESS_AVAILABLE:
+    from fastapi import Header, Depends, HTTPException
+    from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+    security = HTTPBearer()
+
+    async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+        """Get current user from token"""
+        global context_awareness
+        if not context_awareness:
+            context_awareness = get_context_awareness()
+
+        token_data = await context_awareness.verify_token(credentials.credentials)
+        if not token_data.get('valid'):
+            raise HTTPException(status_code=401, detail=token_data.get('error', 'Invalid token'))
+
+        return token_data
+
+    @app.post("/auth/register")
+    async def register_user(user_data: Dict[str, Any]):
+        """Register a new user profile"""
+        global context_awareness
+        if not context_awareness:
+            context_awareness = get_context_awareness()
+
+        profile = await context_awareness.create_user_profile(
+            user_id=user_data.get("user_id"),
+            email=user_data.get("email"),
+            role=UserRole[user_data.get("role", "USER").upper()],
+            organization=user_data.get("organization"),
+            department=user_data.get("department"),
+            metadata=user_data.get("metadata", {})
+        )
+
+        return profile
+
+    @app.post("/auth/login")
+    async def login(credentials: Dict[str, Any]):
+        """Authenticate user and create session"""
+        global context_awareness
+        if not context_awareness:
+            context_awareness = get_context_awareness()
+
+        session = await context_awareness.authenticate_user(credentials)
+        return session
+
+    @app.get("/auth/context")
+    async def get_context(current_user: Dict = Depends(get_current_user)):
+        """Get current user context"""
+        global context_awareness
+        if not context_awareness:
+            context_awareness = get_context_awareness()
+
+        context = await context_awareness.get_user_context(
+            current_user['user_id']
+        )
+        return context
+
+    @app.post("/auth/track")
+    async def track_interaction(
+        interaction: Dict[str, Any],
+        current_user: Dict = Depends(get_current_user)
+    ):
+        """Track user interaction"""
+        global context_awareness
+        if not context_awareness:
+            context_awareness = get_context_awareness()
+
+        interaction_id = await context_awareness.track_interaction(
+            user_id=current_user['user_id'],
+            interaction_type=interaction.get("type"),
+            action=interaction.get("action"),
+            entity_type=interaction.get("entity_type"),
+            entity_id=interaction.get("entity_id"),
+            context=interaction.get("context", {}),
+            result=interaction.get("result", {}),
+            duration_ms=interaction.get("duration_ms")
+        )
+
+        return {"interaction_id": interaction_id}
+
+    @app.post("/auth/permission")
+    async def check_permission(
+        permission_check: Dict[str, Any],
+        current_user: Dict = Depends(get_current_user)
+    ):
+        """Check user permission"""
+        global context_awareness
+        if not context_awareness:
+            context_awareness = get_context_awareness()
+
+        allowed = await context_awareness.check_permission(
+            user_id=current_user['user_id'],
+            resource_type=permission_check.get("resource_type"),
+            resource_id=permission_check.get("resource_id"),
+            action=permission_check.get("action")
+        )
+
+        return {"allowed": allowed}
+
+    @app.post("/auth/personalize")
+    async def personalize_content(
+        content_request: Dict[str, Any],
+        current_user: Dict = Depends(get_current_user)
+    ):
+        """Personalize content for user"""
+        global context_awareness
+        if not context_awareness:
+            context_awareness = get_context_awareness()
+
+        personalized = await context_awareness.personalize_content(
+            user_id=current_user['user_id'],
+            content_type=content_request.get("content_type"),
+            base_content=content_request.get("base_content")
+        )
+
+        return {"personalized_content": personalized}
+
+    @app.get("/auth/similar-users")
+    async def find_similar_users(
+        limit: int = 5,
+        current_user: Dict = Depends(get_current_user)
+    ):
+        """Find similar users"""
+        global context_awareness
+        if not context_awareness:
+            context_awareness = get_context_awareness()
+
+        similar = await context_awareness.find_similar_users(
+            user_id=current_user['user_id'],
+            limit=limit
+        )
+
+        return {"similar_users": similar}
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -1446,6 +1604,7 @@ async def startup_event():
     logger.info(f"Self-Healing Available: {SELF_HEALING_AVAILABLE}")
     logger.info(f"Training Pipeline Available: {TRAINING_PIPELINE_AVAILABLE}")
     logger.info(f"Document Processor Available: {DOCUMENT_PROCESSOR_AVAILABLE}")
+    logger.info(f"Context Awareness Available: {CONTEXT_AWARENESS_AVAILABLE}")
 
     try:
         from scheduled_executor import scheduler
