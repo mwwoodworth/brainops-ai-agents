@@ -35,6 +35,7 @@ VECTOR_MEMORY_AVAILABLE = False
 REVENUE_SYSTEM_AVAILABLE = False
 ACQUISITION_AVAILABLE = False
 PRICING_ENGINE_AVAILABLE = False
+NOTEBOOK_LM_AVAILABLE = False
 
 # Try to import advanced modules
 try:
@@ -92,11 +93,23 @@ except ImportError as e:
     PricingFactors = None
     CustomerSegment = None
 
+try:
+    from notebook_lm_plus import get_notebook_lm, KnowledgeType, LearningSource
+    NOTEBOOK_LM_AVAILABLE = True
+    logger.info("Notebook LM+ module loaded successfully")
+    notebook_lm = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"Notebook LM+ not available: {e}")
+    get_notebook_lm = None
+    notebook_lm = None
+    KnowledgeType = None
+    LearningSource = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.0.3"  # Complete fix for agent execution
+    version="2.1.0"  # Added Notebook LM+ learning system
 )
 
 # Add CORS middleware
@@ -133,7 +146,8 @@ async def root():
             "vector_memory": VECTOR_MEMORY_AVAILABLE,
             "revenue_system": REVENUE_SYSTEM_AVAILABLE,
             "acquisition": ACQUISITION_AVAILABLE,
-            "pricing_engine": PRICING_ENGINE_AVAILABLE
+            "pricing_engine": PRICING_ENGINE_AVAILABLE,
+            "notebook_lm": NOTEBOOK_LM_AVAILABLE
         },
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
@@ -157,7 +171,8 @@ async def health():
                 "vector_memory": VECTOR_MEMORY_AVAILABLE,
                 "revenue_system": REVENUE_SYSTEM_AVAILABLE,
                 "acquisition": ACQUISITION_AVAILABLE,
-                "pricing_engine": PRICING_ENGINE_AVAILABLE
+                "pricing_engine": PRICING_ENGINE_AVAILABLE,
+                "notebook_lm": NOTEBOOK_LM_AVAILABLE
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -531,6 +546,71 @@ if PRICING_ENGINE_AVAILABLE:
             logger.error(f"Quote generation failed: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+# Notebook LM+ endpoints (conditional)
+if NOTEBOOK_LM_AVAILABLE:
+    @app.post("/notebook-lm/learn")
+    async def learn_from_interaction(data: Dict[str, Any]):
+        """Learn from an interaction"""
+        try:
+            global notebook_lm
+            if notebook_lm is None:
+                notebook_lm = get_notebook_lm()
+
+            # Start session if needed
+            if not notebook_lm.active_session:
+                notebook_lm.start_learning_session(data.get('topics', []))
+
+            # Learn from the interaction
+            knowledge_id = notebook_lm.learn_from_interaction(
+                content=data['content'],
+                context=data.get('context', {}),
+                source=LearningSource[data.get('source', 'USER_INTERACTION')]
+            )
+
+            return {
+                "knowledge_id": knowledge_id,
+                "status": "learned" if knowledge_id else "failed",
+                "session_id": notebook_lm.active_session
+            }
+        except Exception as e:
+            logger.error(f"Learning failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/notebook-lm/query")
+    async def query_knowledge(query: str, limit: int = 10):
+        """Query the knowledge base"""
+        try:
+            global notebook_lm
+            if notebook_lm is None:
+                notebook_lm = get_notebook_lm()
+
+            results = notebook_lm.query_knowledge(query, limit)
+            return {
+                "query": query,
+                "results": results,
+                "count": len(results)
+            }
+        except Exception as e:
+            logger.error(f"Query failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/notebook-lm/insights")
+    async def get_insights(min_impact: float = 0.5):
+        """Get synthesized insights"""
+        try:
+            global notebook_lm
+            if notebook_lm is None:
+                notebook_lm = get_notebook_lm()
+
+            insights = notebook_lm.get_insights(min_impact=min_impact)
+            return {
+                "insights": insights,
+                "count": len(insights)
+            }
+        except Exception as e:
+            logger.error(f"Failed to get insights: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -540,6 +620,7 @@ async def startup_event():
     logger.info(f"Revenue System Available: {REVENUE_SYSTEM_AVAILABLE}")
     logger.info(f"Acquisition Available: {ACQUISITION_AVAILABLE}")
     logger.info(f"Pricing Engine Available: {PRICING_ENGINE_AVAILABLE}")
+    logger.info(f"Notebook LM+ Available: {NOTEBOOK_LM_AVAILABLE}")
 
     try:
         from scheduled_executor import scheduler
