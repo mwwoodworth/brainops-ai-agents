@@ -244,9 +244,10 @@ async def execute_agent(agent_id: str, config: Dict[str, Any] = None):
         execution_id = str(uuid.uuid4())
         cursor.execute("""
             INSERT INTO agent_executions (
-                id, agent_id, status, created_at
-            ) VALUES (%s, %s, %s, %s)
-        """, (execution_id, agent_id, 'running', datetime.now(timezone.utc)))
+                id, agent_type, status, created_at, prompt, response
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+        """, (execution_id, agent['type'], 'running', datetime.now(timezone.utc),
+              f"Execute agent {agent['name']}", "Executing..."))
 
         conn.commit()
 
@@ -263,7 +264,7 @@ async def execute_agent(agent_id: str, config: Dict[str, Any] = None):
         # Update execution status
         cursor.execute("""
             UPDATE agent_executions
-            SET status = %s, completed_at = %s, result = %s
+            SET status = %s, completed_at = %s, response = %s
             WHERE id = %s
         """, ('completed', datetime.now(timezone.utc), json.dumps(result), execution_id))
 
