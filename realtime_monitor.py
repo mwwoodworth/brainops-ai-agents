@@ -8,7 +8,7 @@ import asyncio
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, Tuple
 from enum import Enum
 from dataclasses import dataclass, asdict
 import os
