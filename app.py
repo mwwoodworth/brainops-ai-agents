@@ -11,15 +11,21 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import uuid
 
-# Import REAL AI Core
-from ai_core import RealAICore, ai_generate, ai_analyze
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize REAL AI
-ai_core = RealAICore()
+# Import REAL AI Core with error handling
+try:
+    from ai_core import RealAICore, ai_generate, ai_analyze
+    # Initialize REAL AI
+    ai_core = RealAICore()
+    AI_AVAILABLE = True
+    logger.info("✅ Real AI Core initialized successfully")
+except Exception as e:
+    logger.error(f"❌ AI Core initialization failed: {e}")
+    AI_AVAILABLE = False
+    ai_core = None
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -206,10 +212,10 @@ async def get_active_agents():
 
 @app.get("/ai/status")
 async def ai_status():
-    """AI system status"""
+    """AI system status with diagnostics"""
     conn = get_db_connection()
     if not conn:
-        return {"status": "degraded", "database": "disconnected"}
+        return {"status": "degraded", "database": "disconnected", "ai_available": AI_AVAILABLE}
 
     try:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -226,15 +232,25 @@ async def ai_status():
         cursor.close()
         conn.close()
 
+        # Check API key status
+        api_status = {
+            "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+            "anthropic_configured": bool(os.getenv("ANTHROPIC_API_KEY")),
+            "ai_core_initialized": AI_AVAILABLE
+        }
+
         return {
-            "status": "operational",
+            "status": "operational" if AI_AVAILABLE else "degraded",
+            "ai_available": AI_AVAILABLE,
+            "api_status": api_status,
             "metrics": metrics,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "version": "4.0.0" if AI_AVAILABLE else "3.5.1"
         }
     except Exception as e:
         if conn:
             conn.close()
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": str(e), "ai_available": AI_AVAILABLE}
 
 @app.post("/ai/analyze")
 async def ai_analyze_endpoint(request: Dict[str, Any]):
@@ -242,6 +258,17 @@ async def ai_analyze_endpoint(request: Dict[str, Any]):
     # Validate input
     if not request.get('prompt'):
         raise HTTPException(status_code=400, detail="Prompt required")
+
+    # Check if AI is available
+    if not AI_AVAILABLE or not ai_core:
+        logger.error("AI Core not available - check API keys")
+        return {
+            "analysis_id": str(uuid.uuid4()),
+            "status": "degraded",
+            "result": "AI service temporarily unavailable. Please check API key configuration.",
+            "model": "unavailable",
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
     conn = get_db_connection()
     if not conn:
