@@ -43,6 +43,7 @@ REALTIME_MONITOR_AVAILABLE = False
 LEAD_NURTURING_AVAILABLE = False
 INTELLIGENT_FOLLOWUP_AVAILABLE = False
 CUSTOMER_ONBOARDING_AVAILABLE = False
+AUTOMATED_REPORTING_AVAILABLE = False
 
 # Try to import advanced modules
 try:
@@ -331,6 +332,25 @@ except ImportError as e:
     OnboardingStatus = None
     CustomerSegment = None
     OnboardingAction = None
+
+# Automated Reporting System
+try:
+    from automated_reporting_system import (
+        get_automated_reporting_system,
+        ReportType,
+        ReportFrequency,
+        DeliveryChannel as ReportDeliveryChannel
+    )
+    AUTOMATED_REPORTING_AVAILABLE = True
+    logger.info("Automated reporting system loaded successfully")
+    automated_reporting_system = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"Automated reporting system not available: {e}")
+    get_automated_reporting_system = None
+    automated_reporting_system = None
+    ReportType = None
+    ReportFrequency = None
+    ReportDeliveryChannel = None
     InterventionType = None
 
 # Create FastAPI app
@@ -1939,6 +1959,140 @@ if CUSTOMER_ONBOARDING_AVAILABLE:
 
         return analytics
 
+# Automated Reporting Endpoints
+if AUTOMATED_REPORTING_AVAILABLE:
+    @app.post("/reports/generate")
+    async def generate_report(
+        report_type: str,
+        parameters: Optional[Dict[str, Any]] = None
+    ):
+        """Generate a report manually"""
+        global automated_reporting_system
+        if not automated_reporting_system:
+            automated_reporting_system = get_automated_reporting_system()
+
+        report = await automated_reporting_system.generate_report(
+            ReportType[report_type.upper()],
+            parameters or {}
+        )
+
+        return {
+            "report_id": report["report_id"],
+            "title": report["title"],
+            "summary": report["summary"],
+            "status": "generated",
+            "generated_at": datetime.now(timezone.utc).isoformat()
+        }
+
+    @app.post("/reports/{report_id}/deliver")
+    async def deliver_report(
+        report_id: str,
+        channels: List[str],
+        recipients: List[str]
+    ):
+        """Deliver a generated report"""
+        global automated_reporting_system
+        if not automated_reporting_system:
+            automated_reporting_system = get_automated_reporting_system()
+
+        delivery_results = await automated_reporting_system.deliver_report(
+            report_id,
+            channels,
+            recipients
+        )
+
+        return {
+            "report_id": report_id,
+            "deliveries": delivery_results,
+            "delivered_at": datetime.now(timezone.utc).isoformat()
+        }
+
+    @app.get("/reports/templates")
+    async def get_report_templates():
+        """Get available report templates"""
+        global automated_reporting_system
+        if not automated_reporting_system:
+            automated_reporting_system = get_automated_reporting_system()
+
+        templates = await automated_reporting_system.get_templates()
+
+        return {"templates": templates}
+
+    @app.post("/reports/schedule")
+    async def schedule_report(
+        template_id: str,
+        cron_expression: str,
+        recipients: List[str]
+    ):
+        """Schedule a recurring report"""
+        global automated_reporting_system
+        if not automated_reporting_system:
+            automated_reporting_system = get_automated_reporting_system()
+
+        schedule_id = await automated_reporting_system.schedule_report(
+            template_id,
+            cron_expression,
+            recipients
+        )
+
+        return {
+            "schedule_id": schedule_id,
+            "template_id": template_id,
+            "cron": cron_expression,
+            "status": "scheduled"
+        }
+
+    @app.get("/reports/history")
+    async def get_report_history(
+        report_type: Optional[str] = None,
+        days: int = 7,
+        limit: int = 100
+    ):
+        """Get report generation history"""
+        global automated_reporting_system
+        if not automated_reporting_system:
+            automated_reporting_system = get_automated_reporting_system()
+
+        history = await automated_reporting_system.get_report_history(
+            report_type=report_type,
+            days=days,
+            limit=limit
+        )
+
+        return {
+            "reports": history,
+            "count": len(history)
+        }
+
+    @app.get("/reports/{report_id}")
+    async def get_report(report_id: str):
+        """Get a specific report"""
+        global automated_reporting_system
+        if not automated_reporting_system:
+            automated_reporting_system = get_automated_reporting_system()
+
+        report = await automated_reporting_system.get_report(report_id)
+
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+
+        return report
+
+    @app.post("/reports/execute-scheduled")
+    async def execute_scheduled_reports():
+        """Execute all scheduled reports"""
+        global automated_reporting_system
+        if not automated_reporting_system:
+            automated_reporting_system = get_automated_reporting_system()
+
+        results = await automated_reporting_system.execute_scheduled_reports()
+
+        return {
+            "executed_count": len(results),
+            "reports": results,
+            "executed_at": datetime.now(timezone.utc).isoformat()
+        }
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -1960,6 +2114,7 @@ async def startup_event():
     logger.info(f"Lead Nurturing Available: {LEAD_NURTURING_AVAILABLE}")
     logger.info(f"Intelligent Follow-up Available: {INTELLIGENT_FOLLOWUP_AVAILABLE}")
     logger.info(f"Customer Onboarding Available: {CUSTOMER_ONBOARDING_AVAILABLE}")
+    logger.info(f"Automated Reporting Available: {AUTOMATED_REPORTING_AVAILABLE}")
 
     try:
         from scheduled_executor import scheduler
