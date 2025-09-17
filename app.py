@@ -36,6 +36,7 @@ REVENUE_SYSTEM_AVAILABLE = False
 ACQUISITION_AVAILABLE = False
 PRICING_ENGINE_AVAILABLE = False
 NOTEBOOK_LM_AVAILABLE = False
+CONVERSATION_MEMORY_AVAILABLE = False
 
 # Try to import advanced modules
 try:
@@ -105,11 +106,22 @@ except ImportError as e:
     KnowledgeType = None
     LearningSource = None
 
+try:
+    from conversation_memory import get_conversation_memory, MessageRole
+    CONVERSATION_MEMORY_AVAILABLE = True
+    logger.info("Conversation memory module loaded successfully")
+    conversation_memory = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"Conversation memory not available: {e}")
+    get_conversation_memory = None
+    conversation_memory = None
+    MessageRole = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.1.0"  # Added Notebook LM+ learning system
+    version="2.2.0"  # Added conversation memory persistence
 )
 
 # Add CORS middleware
@@ -147,7 +159,8 @@ async def root():
             "revenue_system": REVENUE_SYSTEM_AVAILABLE,
             "acquisition": ACQUISITION_AVAILABLE,
             "pricing_engine": PRICING_ENGINE_AVAILABLE,
-            "notebook_lm": NOTEBOOK_LM_AVAILABLE
+            "notebook_lm": NOTEBOOK_LM_AVAILABLE,
+            "conversation_memory": CONVERSATION_MEMORY_AVAILABLE
         },
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
@@ -172,7 +185,8 @@ async def health():
                 "revenue_system": REVENUE_SYSTEM_AVAILABLE,
                 "acquisition": ACQUISITION_AVAILABLE,
                 "pricing_engine": PRICING_ENGINE_AVAILABLE,
-                "notebook_lm": NOTEBOOK_LM_AVAILABLE
+                "notebook_lm": NOTEBOOK_LM_AVAILABLE,
+                "conversation_memory": CONVERSATION_MEMORY_AVAILABLE
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -609,6 +623,91 @@ if NOTEBOOK_LM_AVAILABLE:
             }
         except Exception as e:
             logger.error(f"Failed to get insights: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+# Conversation Memory endpoints (conditional)
+if CONVERSATION_MEMORY_AVAILABLE:
+    @app.post("/conversations/start")
+    async def start_conversation(data: Dict[str, Any]):
+        """Start a new conversation"""
+        try:
+            global conversation_memory
+            if conversation_memory is None:
+                conversation_memory = get_conversation_memory()
+
+            conversation_id = conversation_memory.start_conversation(
+                user_id=data['user_id'],
+                title=data.get('title'),
+                context=data.get('context', {})
+            )
+
+            return {
+                "conversation_id": conversation_id,
+                "status": "started" if conversation_id else "failed"
+            }
+        except Exception as e:
+            logger.error(f"Failed to start conversation: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/conversations/{conversation_id}/message")
+    async def add_message(conversation_id: str, data: Dict[str, Any]):
+        """Add a message to conversation"""
+        try:
+            global conversation_memory
+            if conversation_memory is None:
+                conversation_memory = get_conversation_memory()
+
+            message_id = conversation_memory.add_message(
+                conversation_id=conversation_id,
+                role=MessageRole[data['role'].upper()],
+                content=data['content'],
+                metadata=data.get('metadata', {})
+            )
+
+            return {
+                "message_id": message_id,
+                "status": "added" if message_id else "failed"
+            }
+        except Exception as e:
+            logger.error(f"Failed to add message: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/conversations/{conversation_id}/context")
+    async def get_conversation_context(conversation_id: str, num_messages: int = 10):
+        """Get conversation context"""
+        try:
+            global conversation_memory
+            if conversation_memory is None:
+                conversation_memory = get_conversation_memory()
+
+            context = conversation_memory.get_conversation_context(
+                conversation_id, num_messages
+            )
+
+            return context if context else {"error": "Conversation not found"}
+        except Exception as e:
+            logger.error(f"Failed to get context: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/conversations/search")
+    async def search_conversations(user_id: str, query: str, limit: int = 10):
+        """Search conversation history"""
+        try:
+            global conversation_memory
+            if conversation_memory is None:
+                conversation_memory = get_conversation_memory()
+
+            results = conversation_memory.search_conversations(
+                user_id, query, limit
+            )
+
+            return {
+                "query": query,
+                "results": results,
+                "count": len(results)
+            }
+        except Exception as e:
+            logger.error(f"Search failed: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
 @app.on_event("startup")
