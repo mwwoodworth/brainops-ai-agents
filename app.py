@@ -4,7 +4,7 @@ BrainOps AI Agent Service - Web API
 Provides REST API for AI agent orchestration
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Optional, Any
 import os
@@ -1439,8 +1439,6 @@ if TRAINING_PIPELINE_AVAILABLE:
 
 # Document Processor Endpoints
 if DOCUMENT_PROCESSOR_AVAILABLE:
-    from fastapi import UploadFile, File, Form
-
     @app.post("/documents/upload")
     async def upload_document(
         file: UploadFile = File(...),
