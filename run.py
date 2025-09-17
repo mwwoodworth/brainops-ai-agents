@@ -6,11 +6,13 @@ This file ensures the correct service runs in production
 
 import os
 import sys
+from datetime import datetime
 
 # Force app.py to be used
 print("="*50)
 print("BRAINOPS AI SERVICE LAUNCHER")
-print("Forcing app.py execution")
+print(f"Starting at: {datetime.now()}")
+print("Forcing app.py v2.0.3 execution")
 print("="*50)
 
 # Import and run the correct app
