@@ -15,6 +15,10 @@ import uuid
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Build timestamp for cache busting
+BUILD_TIME = "2025-09-17T21:40:00Z"
+logger.info(f"🚀 Starting BrainOps AI v4.0.1 - Build: {BUILD_TIME}")
+
 # Import REAL AI Core with error handling
 try:
     from ai_core import RealAICore, ai_generate, ai_analyze
@@ -29,9 +33,9 @@ except Exception as e:
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="BrainOps AI Agents",
-    description="Production AI System with 100% REAL AI - No Fake Responses",
-    version="4.0.0"  # Major version bump for REAL AI
+    title="BrainOps AI Agents - REAL AI",
+    description="Production AI System with 100% REAL AI - GPT-4 & Claude",
+    version="4.0.1"  # Cache bust + Real AI
 )
 
 # Add CORS middleware
@@ -131,17 +135,22 @@ async def root():
 
 @app.get("/health")
 async def health():
-    """Health check endpoint"""
+    """Health check endpoint with AI status"""
     conn = get_db_connection()
     db_status = "connected" if conn else "disconnected"
     if conn:
         conn.close()
 
     return {
-        "status": "healthy",
-        "version": "3.5.1",
+        "status": "healthy" if AI_AVAILABLE else "degraded",
+        "version": "4.0.1",
+        "build": BUILD_TIME,
         "database": db_status,
+        "ai_enabled": AI_AVAILABLE,
         "features": {
+            "real_ai": AI_AVAILABLE,
+            "gpt4": AI_AVAILABLE and bool(os.getenv("OPENAI_API_KEY")),
+            "claude": AI_AVAILABLE and bool(os.getenv("ANTHROPIC_API_KEY")),
             "ai_agents": True,
             "memory_system": True,
             "workflow_engine": True,
