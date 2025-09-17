@@ -1,0 +1,44 @@
+# Supabase Configuration
+
+[project]
+id = "yomagoqdmxszqtdwuhab"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[[db.seed.sql_paths]]
+path = "./seed.sql"
+
+[storage]
+enabled = true
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["https://myroofgenius.com"]
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = true
+
+[functions]
+enabled = true
+
+[[functions.ai-chat]]
+verify_jwt = false
+
+[[functions.ai-analyze]]
+verify_jwt = false
+
+[[functions.ai-execute]]
+verify_jwt = false
