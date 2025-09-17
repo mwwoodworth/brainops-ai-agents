@@ -447,5 +447,17 @@ class VectorMemorySystem:
             logger.error(f"Failed to prune memories: {e}")
             return 0
 
-# Global instance
-vector_memory = VectorMemorySystem()
+# Global instance - create lazily to avoid DB connection on import
+vector_memory = None
+
+def get_vector_memory():
+    """Get or create vector memory instance"""
+    global vector_memory
+    if vector_memory is None:
+        vector_memory = VectorMemorySystem()
+    return vector_memory
+
+# For backward compatibility
+def init_vector_memory():
+    """Initialize vector memory system"""
+    return get_vector_memory()

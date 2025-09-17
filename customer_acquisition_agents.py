@@ -609,5 +609,12 @@ class AcquisitionOrchestrator:
             logger.error(f"Failed to get metrics: {e}")
             return {}
 
-# Global orchestrator instance
-acquisition_orchestrator = AcquisitionOrchestrator()
+# Global orchestrator instance - create lazily
+acquisition_orchestrator = None
+
+def get_acquisition_orchestrator():
+    """Get or create acquisition orchestrator instance"""
+    global acquisition_orchestrator
+    if acquisition_orchestrator is None:
+        acquisition_orchestrator = AcquisitionOrchestrator()
+    return acquisition_orchestrator

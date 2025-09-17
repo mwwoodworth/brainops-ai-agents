@@ -727,5 +727,12 @@ class AutonomousRevenueSystem:
         except Exception as e:
             logger.error(f"Failed to update opportunity: {e}")
 
-# Global instance
-revenue_system = AutonomousRevenueSystem()
+# Global instance - create lazily
+revenue_system = None
+
+def get_revenue_system():
+    """Get or create revenue system instance"""
+    global revenue_system
+    if revenue_system is None:
+        revenue_system = AutonomousRevenueSystem()
+    return revenue_system

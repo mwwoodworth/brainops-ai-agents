@@ -393,5 +393,12 @@ class LangGraphOrchestrator:
             "execution_time": final_state["metadata"].get("end_time")
         }
 
-# Global orchestrator instance
-langgraph_orchestrator = LangGraphOrchestrator()
+# Global orchestrator instance - create lazily
+langgraph_orchestrator = None
+
+def get_langgraph_orchestrator():
+    """Get or create langgraph orchestrator instance"""
+    global langgraph_orchestrator
+    if langgraph_orchestrator is None:
+        langgraph_orchestrator = LangGraphOrchestrator()
+    return langgraph_orchestrator
