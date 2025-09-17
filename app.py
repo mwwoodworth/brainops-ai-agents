@@ -40,6 +40,7 @@ CONVERSATION_MEMORY_AVAILABLE = False
 SYSTEM_STATE_AVAILABLE = False
 DECISION_TREE_AVAILABLE = False
 REALTIME_MONITOR_AVAILABLE = False
+LEAD_NURTURING_AVAILABLE = False
 
 # Try to import advanced modules
 try:
@@ -264,11 +265,34 @@ except ImportError as e:
     PersonalizationType = None
     PrivacyLevel = None
 
+# Lead Nurturing System
+try:
+    from lead_nurturing_system import (
+        get_lead_nurturing_system,
+        NurtureSequenceType,
+        LeadSegment,
+        TouchpointType,
+        PersonalizationEngine,
+        DeliveryManager
+    )
+    LEAD_NURTURING_AVAILABLE = True
+    logger.info("Lead nurturing system module loaded successfully")
+    lead_nurturing_system = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"Lead nurturing system not available: {e}")
+    get_lead_nurturing_system = None
+    lead_nurturing_system = None
+    NurtureSequenceType = None
+    LeadSegment = None
+    TouchpointType = None
+    PersonalizationEngine = None
+    DeliveryManager = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.9.0"  # Added AI Context Awareness
+    version="3.0.0"  # Added Lead Nurturing System
 )
 
 # Add CORS middleware
@@ -1587,6 +1611,133 @@ if CONTEXT_AWARENESS_AVAILABLE:
 
         return {"similar_users": similar}
 
+# Lead Nurturing System Endpoints
+if LEAD_NURTURING_AVAILABLE:
+    @app.post("/nurturing/sequences")
+    async def create_nurture_sequence(sequence_data: Dict[str, Any]):
+        """Create a new nurture sequence"""
+        global lead_nurturing_system
+        if not lead_nurturing_system:
+            lead_nurturing_system = get_lead_nurturing_system()
+
+        sequence_id = await lead_nurturing_system.create_nurture_sequence(
+            name=sequence_data["name"],
+            sequence_type=NurtureSequenceType[sequence_data["sequence_type"].upper()],
+            target_segment=LeadSegment[sequence_data["target_segment"].upper()],
+            touchpoints=sequence_data["touchpoints"],
+            success_criteria=sequence_data.get("success_criteria"),
+            configuration=sequence_data.get("configuration")
+        )
+
+        return {"sequence_id": sequence_id, "status": "created"}
+
+    @app.get("/nurturing/sequences")
+    async def get_nurture_sequences(
+        status: Optional[str] = None,
+        sequence_type: Optional[str] = None,
+        limit: int = 20
+    ):
+        """Get nurture sequences"""
+        global lead_nurturing_system
+        if not lead_nurturing_system:
+            lead_nurturing_system = get_lead_nurturing_system()
+
+        sequences = await lead_nurturing_system.get_sequences(
+            status=status,
+            sequence_type=sequence_type,
+            limit=limit
+        )
+
+        return {"sequences": sequences}
+
+    @app.post("/nurturing/sequences/{sequence_id}/enroll")
+    async def enroll_lead(
+        sequence_id: str,
+        enrollment_data: Dict[str, Any]
+    ):
+        """Enroll a lead in a nurture sequence"""
+        global lead_nurturing_system
+        if not lead_nurturing_system:
+            lead_nurturing_system = get_lead_nurturing_system()
+
+        enrollment_id = await lead_nurturing_system.enroll_lead(
+            sequence_id=sequence_id,
+            lead_id=enrollment_data["lead_id"],
+            customer_id=enrollment_data.get("customer_id"),
+            enrollment_source=enrollment_data.get("enrollment_source", "manual"),
+            metadata=enrollment_data.get("metadata", {})
+        )
+
+        return {"enrollment_id": enrollment_id, "status": "enrolled"}
+
+    @app.get("/nurturing/sequences/{sequence_id}/enrollments")
+    async def get_sequence_enrollments(
+        sequence_id: str,
+        status: Optional[str] = None,
+        limit: int = 50
+    ):
+        """Get enrollments for a sequence"""
+        global lead_nurturing_system
+        if not lead_nurturing_system:
+            lead_nurturing_system = get_lead_nurturing_system()
+
+        enrollments = await lead_nurturing_system.get_sequence_enrollments(
+            sequence_id=sequence_id,
+            status=status,
+            limit=limit
+        )
+
+        return {"enrollments": enrollments}
+
+    @app.post("/nurturing/execute")
+    async def execute_scheduled_touchpoints():
+        """Execute scheduled touchpoints"""
+        global lead_nurturing_system
+        if not lead_nurturing_system:
+            lead_nurturing_system = get_lead_nurturing_system()
+
+        results = await lead_nurturing_system.execute_scheduled_touchpoints()
+
+        return {
+            "executed_count": len(results),
+            "executions": results
+        }
+
+    @app.get("/nurturing/metrics/{sequence_id}")
+    async def get_sequence_metrics(
+        sequence_id: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ):
+        """Get performance metrics for a sequence"""
+        global lead_nurturing_system
+        if not lead_nurturing_system:
+            lead_nurturing_system = get_lead_nurturing_system()
+
+        metrics = await lead_nurturing_system.get_sequence_performance(
+            sequence_id=sequence_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        return {"metrics": metrics}
+
+    @app.post("/nurturing/engagement")
+    async def track_engagement(engagement_data: Dict[str, Any]):
+        """Track engagement event"""
+        global lead_nurturing_system
+        if not lead_nurturing_system:
+            lead_nurturing_system = get_lead_nurturing_system()
+
+        await lead_nurturing_system.track_engagement(
+            enrollment_id=engagement_data["enrollment_id"],
+            engagement_type=engagement_data["engagement_type"],
+            engagement_value=engagement_data.get("engagement_value", 1.0),
+            metadata=engagement_data.get("metadata", {})
+        )
+
+        return {"status": "tracked"}
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -1605,6 +1756,7 @@ async def startup_event():
     logger.info(f"Training Pipeline Available: {TRAINING_PIPELINE_AVAILABLE}")
     logger.info(f"Document Processor Available: {DOCUMENT_PROCESSOR_AVAILABLE}")
     logger.info(f"Context Awareness Available: {CONTEXT_AWARENESS_AVAILABLE}")
+    logger.info(f"Lead Nurturing Available: {LEAD_NURTURING_AVAILABLE}")
 
     try:
         from scheduled_executor import scheduler
