@@ -76,7 +76,7 @@ class SyncAICore:
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    timeout=30
+                    timeout=5
                 )
                 return response.choices[0].message.content
 
@@ -90,7 +90,7 @@ class SyncAICore:
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=max_tokens,
                     temperature=temperature,
-                    timeout=30
+                    timeout=5
                 )
                 return response.content[0].text
 

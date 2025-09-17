@@ -1,3 +1,7 @@
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -132,6 +136,12 @@ async def root():
             "/memory/retrieve"
         ]
     }
+
+@app.on_event("startup")
+async def startup_event():
+    """Warm up on startup"""
+    logger.info("Starting up and warming models...")
+    # Warm up models here if needed
 
 @app.get("/health")
 async def health():
