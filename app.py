@@ -96,7 +96,7 @@ except ImportError as e:
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.0.1"  # Fixed schema issues
+    version="2.0.2"  # Fixed task_execution_id requirement
 )
 
 # Add CORS middleware
@@ -242,12 +242,13 @@ async def execute_agent(agent_id: str, config: Dict[str, Any] = None):
 
         # Log execution
         execution_id = str(uuid.uuid4())
+        task_execution_id = str(uuid.uuid4())  # Generate task execution ID
         cursor.execute("""
             INSERT INTO agent_executions (
-                id, agent_type, status, created_at, prompt, response
-            ) VALUES (%s, %s, %s, %s, %s, %s)
-        """, (execution_id, agent['type'], 'running', datetime.now(timezone.utc),
-              f"Execute agent {agent['name']}", "Executing..."))
+                id, task_execution_id, agent_type, status, created_at, prompt, response
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (execution_id, task_execution_id, agent['type'], 'running',
+              datetime.now(timezone.utc), f"Execute agent {agent['name']}", "Executing..."))
 
         conn.commit()
 
