@@ -394,6 +394,7 @@ async def health():
 
         return {
             "status": "healthy",
+            "version": "3.2.0",
             "database": "connected",
             "features": {
                 "langgraph": LANGGRAPH_AVAILABLE,
@@ -402,7 +403,17 @@ async def health():
                 "acquisition": ACQUISITION_AVAILABLE,
                 "pricing_engine": PRICING_ENGINE_AVAILABLE,
                 "notebook_lm": NOTEBOOK_LM_AVAILABLE,
-                "conversation_memory": CONVERSATION_MEMORY_AVAILABLE
+                "conversation_memory": CONVERSATION_MEMORY_AVAILABLE,
+                "system_state": SYSTEM_STATE_AVAILABLE,
+                "decision_tree": DECISION_TREE_AVAILABLE,
+                "realtime_monitor": REALTIME_MONITOR_AVAILABLE,
+                "self_healing": SELF_HEALING_AVAILABLE,
+                "training_pipeline": TRAINING_PIPELINE_AVAILABLE,
+                "document_processor": DOCUMENT_PROCESSOR_AVAILABLE,
+                "context_awareness": CONTEXT_AWARENESS_AVAILABLE,
+                "lead_nurturing": LEAD_NURTURING_AVAILABLE,
+                "intelligent_followup": INTELLIGENT_FOLLOWUP_AVAILABLE,
+                "customer_onboarding": CUSTOMER_ONBOARDING_AVAILABLE
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
