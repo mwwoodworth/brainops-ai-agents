@@ -353,6 +353,20 @@ async def search_knowledge(query: Dict[str, Any]):
     )
     return {"results": results, "count": len(results)}
 
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks on startup"""
+    from integration_bridge import bridge
+    from auto_executor import executor
+
+    # Start integration bridge in background
+    asyncio.create_task(bridge.continuous_integration_loop())
+
+    # Start auto executor in background
+    asyncio.create_task(executor.run_forever())
+
+    logger.info("Background tasks started")
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Starting AI Agent Service on port {port}")
