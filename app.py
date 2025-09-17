@@ -19,6 +19,9 @@ from memory_system import memory_system
 from orchestrator import orchestrator
 from langgraph_orchestrator import langgraph_orchestrator
 from vector_memory_system import vector_memory
+from revenue_generation_system import revenue_system
+from customer_acquisition_agents import acquisition_orchestrator
+from ai_pricing_engine import pricing_engine, PricingFactors, CustomerSegment
 from langchain_core.messages import HumanMessage, SystemMessage
 import asyncio
 
@@ -521,6 +524,113 @@ async def apply_memory_decay():
 
     except Exception as e:
         logger.error(f"Failed to apply decay: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Revenue Generation Endpoints
+@app.post("/revenue/identify-leads")
+async def identify_revenue_leads(criteria: Dict[str, Any]):
+    """Identify new revenue leads"""
+    try:
+        leads = await revenue_system.identify_new_leads(criteria)
+        return {"leads_found": len(leads), "lead_ids": leads}
+    except Exception as e:
+        logger.error(f"Lead identification failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/revenue/qualify-lead/{lead_id}")
+async def qualify_revenue_lead(lead_id: str):
+    """Qualify a lead for revenue potential"""
+    try:
+        score, qualification = await revenue_system.qualify_lead(lead_id)
+        return {"lead_id": lead_id, "score": score, "qualification": qualification}
+    except Exception as e:
+        logger.error(f"Lead qualification failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/revenue/generate-proposal/{lead_id}")
+async def generate_revenue_proposal(lead_id: str, requirements: Dict[str, Any]):
+    """Generate AI-powered proposal"""
+    try:
+        proposal = await revenue_system.generate_proposal(lead_id, requirements)
+        return proposal
+    except Exception as e:
+        logger.error(f"Proposal generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Customer Acquisition Endpoints
+@app.post("/acquisition/run-pipeline")
+async def run_acquisition_pipeline(criteria: Dict[str, Any]):
+    """Run customer acquisition pipeline"""
+    try:
+        result = await acquisition_orchestrator.run_acquisition_pipeline(criteria)
+        return result
+    except Exception as e:
+        logger.error(f"Acquisition pipeline failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/acquisition/metrics")
+async def get_acquisition_metrics():
+    """Get customer acquisition metrics"""
+    try:
+        metrics = await acquisition_orchestrator.get_acquisition_metrics()
+        return metrics
+    except Exception as e:
+        logger.error(f"Failed to get acquisition metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Pricing Engine Endpoints
+@app.post("/pricing/generate-quote")
+async def generate_price_quote(request: Dict[str, Any]):
+    """Generate AI-optimized price quote"""
+    try:
+        # Convert request to PricingFactors
+        factors = PricingFactors(
+            customer_segment=CustomerSegment[request.get('segment', 'SMALL_BUSINESS')],
+            company_size=request.get('company_size', 10),
+            revenue_range=(request.get('revenue_min', 0), request.get('revenue_max', 1000000)),
+            urgency_level=request.get('urgency', 0.5),
+            competition_present=request.get('competition', False),
+            feature_requirements=request.get('features', []),
+            contract_length=request.get('contract_months', 12),
+            payment_terms=request.get('payment_terms', 'Net 30'),
+            market_conditions=request.get('market_conditions', {}),
+            historical_data=request.get('historical_data', {})
+        )
+
+        quote = await pricing_engine.generate_quote(factors, request.get('lead_id'))
+
+        if quote:
+            return {
+                "quote_id": quote.id,
+                "base_price": quote.base_price,
+                "final_price": quote.final_price,
+                "discount": quote.discount_percentage,
+                "strategy": quote.pricing_strategy.value,
+                "win_probability": quote.win_probability,
+                "components": quote.components,
+                "terms": quote.terms,
+                "expires_at": quote.expires_at.isoformat()
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Quote generation failed")
+
+    except Exception as e:
+        logger.error(f"Quote generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/pricing/ab-test")
+async def run_pricing_ab_test(test_config: Dict[str, Any]):
+    """Run A/B test on pricing strategies"""
+    try:
+        result = await pricing_engine.run_ab_test(
+            test_config['name'],
+            test_config['variant_a'],
+            test_config['variant_b'],
+            test_config.get('sample_size', 100)
+        )
+        return result
+    except Exception as e:
+        logger.error(f"A/B test failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.on_event("startup")
