@@ -96,7 +96,7 @@ except ImportError as e:
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.0.0"
+    version="2.0.1"  # Fixed schema issues
 )
 
 # Add CORS middleware
