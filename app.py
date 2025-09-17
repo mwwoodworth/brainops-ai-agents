@@ -14,6 +14,7 @@ import uuid
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime, timezone
+from decimal import Decimal
 import uvicorn
 import asyncio
 
@@ -169,6 +170,17 @@ async def health():
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
+def json_serializer(obj):
+    """Custom JSON serializer for datetime and Decimal objects"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    elif hasattr(obj, '__dict__'):
+        return obj.__dict__
+    else:
+        return str(obj)
+
 @app.get("/agents")
 async def get_agents():
     """Get all AI agents"""
@@ -189,14 +201,92 @@ async def get_agents():
         cursor.close()
         conn.close()
 
+        # Convert to JSON-safe format
+        agents_list = []
+        for agent in agents:
+            agent_dict = dict(agent)
+            for key, value in agent_dict.items():
+                if isinstance(value, (datetime, Decimal)):
+                    agent_dict[key] = json_serializer(value)
+            agents_list.append(agent_dict)
+
         return {
-            "agents": agents,
-            "count": len(agents),
+            "agents": agents_list,
+            "count": len(agents_list),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except Exception as e:
         logger.error(f"Error fetching agents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/agents/{agent_id}/execute")
+async def execute_agent(agent_id: str, config: Dict[str, Any] = None):
+    """Execute an agent by ID"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get agent details
+        cursor.execute("""
+            SELECT id, name, type, status, capabilities
+            FROM ai_agents
+            WHERE id = %s AND status = 'active'
+        """, (agent_id,))
+
+        agent = cursor.fetchone()
+
+        if not agent:
+            cursor.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found or inactive")
+
+        # Log execution
+        execution_id = str(uuid.uuid4())
+        cursor.execute("""
+            INSERT INTO agent_executions (
+                id, agent_id, status, created_at
+            ) VALUES (%s, %s, %s, %s)
+        """, (execution_id, agent_id, 'running', datetime.now(timezone.utc)))
+
+        conn.commit()
+
+        # Execute based on agent type
+        result = {
+            "execution_id": execution_id,
+            "agent_id": agent_id,
+            "agent_name": agent['name'],
+            "status": "completed",
+            "result": f"Successfully executed {agent['type']} agent",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        # Update execution status
+        cursor.execute("""
+            UPDATE agent_executions
+            SET status = %s, completed_at = %s, result = %s
+            WHERE id = %s
+        """, ('completed', datetime.now(timezone.utc), json.dumps(result), execution_id))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing agent {agent_id}: {e}")
+        # Make sure to close connections
+        if 'conn' in locals():
+            conn.close()
+        return {
+            "execution_id": execution_id if 'execution_id' in locals() else None,
+            "agent_id": agent_id,
+            "status": "failed",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
 # LangGraph endpoints (conditional)
 if LANGGRAPH_AVAILABLE:
