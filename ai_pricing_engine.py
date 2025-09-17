@@ -644,5 +644,12 @@ class AIPricingEngine:
             logger.error(f"A/B test failed: {e}")
             return {}
 
-# Global instance
-pricing_engine = AIPricingEngine()
+# Global instance - create lazily
+pricing_engine = None
+
+def get_pricing_engine():
+    """Get or create pricing engine instance"""
+    global pricing_engine
+    if pricing_engine is None:
+        pricing_engine = AIPricingEngine()
+    return pricing_engine
