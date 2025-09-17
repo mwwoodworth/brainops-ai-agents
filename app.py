@@ -33,16 +33,23 @@ app.add_middleware(
 
 # Database configuration
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST'),
-    'database': 'postgres',
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'),
-    'port': 5432
+    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
+    'database': os.getenv('DB_NAME', 'postgres'),
+    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
+    'password': os.getenv('DB_PASSWORD', 'REDACTED_SUPABASE_DB_PASSWORD'),
+    'port': int(os.getenv('DB_PORT', 5432))
 }
+
+# Log configuration for debugging
+logger.info(f"Database config - Host: {DB_CONFIG['host']}, User: {DB_CONFIG['user'][:10]}..., Port: {DB_CONFIG['port']}")
 
 def get_db_connection():
     """Get database connection with error handling"""
     try:
+        # Ensure we have valid config
+        if not DB_CONFIG.get('host') or not DB_CONFIG.get('user') or not DB_CONFIG.get('password'):
+            logger.error(f"Missing database configuration. Host: {bool(DB_CONFIG.get('host'))}, User: {bool(DB_CONFIG.get('user'))}, Password: {bool(DB_CONFIG.get('password'))}")
+            return None
         conn = psycopg2.connect(**DB_CONFIG)
         return conn
     except Exception as e:
