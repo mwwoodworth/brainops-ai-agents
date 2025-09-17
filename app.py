@@ -18,6 +18,7 @@ import uvicorn
 from memory_system import memory_system
 from orchestrator import orchestrator
 from langgraph_orchestrator import langgraph_orchestrator
+from vector_memory_system import vector_memory
 from langchain_core.messages import HumanMessage, SystemMessage
 import asyncio
 
@@ -424,6 +425,103 @@ async def get_langgraph_status():
         },
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+
+@app.post("/vector-memory/store")
+async def store_vector_memory(data: Dict[str, Any]):
+    """Store a memory with vector embedding"""
+    try:
+        memory_id = vector_memory.store_memory(
+            content=data['content'],
+            memory_type=data.get('type', 'general'),
+            metadata=data.get('metadata', {}),
+            importance=data.get('importance', 0.5)
+        )
+
+        return {
+            "memory_id": memory_id,
+            "status": "stored" if memory_id else "failed"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to store vector memory: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/vector-memory/recall")
+async def recall_vector_memories(query: Dict[str, Any]):
+    """Recall memories using semantic search"""
+    try:
+        memories = vector_memory.recall_memories(
+            query=query['query'],
+            limit=query.get('limit', 10),
+            memory_type=query.get('type'),
+            threshold=query.get('threshold', 0.7)
+        )
+
+        return {
+            "memories": memories,
+            "count": len(memories)
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to recall memories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/vector-memory/associate")
+async def associate_vector_memories(data: Dict[str, Any]):
+    """Create association between memories"""
+    try:
+        vector_memory.associate_memories(
+            memory_id_1=data['memory_id_1'],
+            memory_id_2=data['memory_id_2'],
+            strength=data.get('strength', 0.5),
+            association_type=data.get('type', 'related')
+        )
+
+        return {"status": "associated"}
+
+    except Exception as e:
+        logger.error(f"Failed to associate memories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/vector-memory/consolidate")
+async def consolidate_vector_memories(data: Dict[str, Any]):
+    """Consolidate multiple memories"""
+    try:
+        new_memory_id = vector_memory.consolidate_memories(
+            memory_ids=data['memory_ids'],
+            consolidation_type=data.get('type', 'summary')
+        )
+
+        return {
+            "consolidated_memory_id": new_memory_id,
+            "status": "consolidated" if new_memory_id else "failed"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to consolidate memories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/vector-memory/stats")
+async def get_vector_memory_stats():
+    """Get vector memory statistics"""
+    try:
+        stats = vector_memory.get_memory_statistics()
+        return stats
+
+    except Exception as e:
+        logger.error(f"Failed to get memory stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/vector-memory/decay")
+async def apply_memory_decay():
+    """Apply decay to memories"""
+    try:
+        vector_memory.decay_memories()
+        return {"status": "decay applied"}
+
+    except Exception as e:
+        logger.error(f"Failed to apply decay: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.on_event("startup")
 async def startup_event():
