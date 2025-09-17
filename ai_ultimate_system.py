@@ -16,12 +16,7 @@ from datetime import datetime
 from openai import OpenAI
 from anthropic import Anthropic
 try:
-    try:
     import google.generativeai as genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    genai = None
-    GEMINI_AVAILABLE = False
     GEMINI_AVAILABLE = True
 except ImportError:
     genai = None
