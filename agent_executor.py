@@ -17,6 +17,15 @@ import openai
 import anthropic
 from psycopg2.extras import RealDictCursor
 
+# Import REAL AI Core
+try:
+    from ai_core import RealAICore, ai_generate, ai_analyze
+    ai_core = RealAICore()
+    USE_REAL_AI = True
+except ImportError:
+    USE_REAL_AI = False
+    logger.warning("AI Core not available - using fallback")
+
 logger = logging.getLogger(__name__)
 
 # Database configuration
@@ -941,7 +950,7 @@ class CustomerIntelligenceAgent(BaseAgent):
             return await self.customer_overview()
 
     async def analyze_churn_risk(self) -> Dict:
-        """Analyze customer churn risk"""
+        """Analyze customer churn risk using REAL AI"""
         try:
             conn = self.get_db_connection()
             cursor = conn.cursor()
@@ -951,12 +960,16 @@ class CustomerIntelligenceAgent(BaseAgent):
                 SELECT
                     c.id,
                     c.name,
+                    c.email,
+                    c.phone,
                     MAX(j.created_at) as last_job_date,
                     EXTRACT(days FROM NOW() - MAX(j.created_at)) as days_since_last_job,
-                    COUNT(j.id) as total_jobs
+                    COUNT(j.id) as total_jobs,
+                    AVG(i.amount) as avg_invoice_amount
                 FROM customers c
                 LEFT JOIN jobs j ON c.id = j.customer_id
-                GROUP BY c.id, c.name
+                LEFT JOIN invoices i ON c.id = i.customer_id
+                GROUP BY c.id, c.name, c.email, c.phone
                 HAVING MAX(j.created_at) < NOW() - INTERVAL '90 days'
                 ORDER BY days_since_last_job DESC
                 LIMIT 10
@@ -1210,11 +1223,36 @@ class ProposalGeneratorAgent(BaseAgent):
         super().__init__("ProposalGenerator", "generator")
 
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate proposal"""
+        """Generate proposal using REAL AI"""
         proposal_type = task.get('type', 'roofing')
         customer_data = task.get('customer', {})
+        job_data = task.get('job_data', {})
 
-        # Generate proposal (would use AI in production)
+        # Use REAL AI to generate proposal
+        if USE_REAL_AI:
+            try:
+                # Get real AI-generated proposal
+                proposal_content = await ai_core.generate_proposal(customer_data, job_data)
+
+                proposal = {
+                    "title": f"{proposal_type.title()} Services Proposal",
+                    "customer": customer_data.get('name', 'Valued Customer'),
+                    "date": datetime.now().strftime('%Y-%m-%d'),
+                    "content": proposal_content,  # REAL AI content
+                    "generated_by": "GPT-4",
+                    "ai_powered": True
+                }
+
+                return {
+                    "status": "completed",
+                    "proposal": proposal,
+                    "ai_generated": True
+                }
+            except Exception as e:
+                logger.error(f"AI proposal generation failed: {e}")
+                # Fallback to template if AI fails
+
+        # Fallback template (only if AI not available)
         proposal = {
             "title": f"{proposal_type.title()} Services Proposal",
             "customer": customer_data.get('name', 'Valued Customer'),
@@ -1224,12 +1262,14 @@ class ProposalGeneratorAgent(BaseAgent):
                 {"title": "Scope of Work", "content": "Complete roof inspection and repair"},
                 {"title": "Timeline", "content": "2-3 weeks"},
                 {"title": "Investment", "content": "$5,000 - $15,000"}
-            ]
+            ],
+            "ai_powered": False
         }
 
         return {
             "status": "completed",
-            "proposal": proposal
+            "proposal": proposal,
+            "ai_generated": False
         }
 
 
