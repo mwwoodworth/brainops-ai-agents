@@ -38,6 +38,7 @@ PRICING_ENGINE_AVAILABLE = False
 NOTEBOOK_LM_AVAILABLE = False
 CONVERSATION_MEMORY_AVAILABLE = False
 SYSTEM_STATE_AVAILABLE = False
+DECISION_TREE_AVAILABLE = False
 
 # Try to import advanced modules
 try:
@@ -140,11 +141,31 @@ except ImportError as e:
     monitor_component = None
     trigger_system_recovery = None
 
+try:
+    from ai_decision_tree import (
+        get_ai_decision_tree,
+        DecisionType,
+        DecisionContext,
+        ActionType,
+        ConfidenceLevel
+    )
+    DECISION_TREE_AVAILABLE = True
+    logger.info("AI decision tree module loaded successfully")
+    ai_decision_tree = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"AI decision tree not available: {e}")
+    get_ai_decision_tree = None
+    ai_decision_tree = None
+    DecisionType = None
+    DecisionContext = None
+    ActionType = None
+    ConfidenceLevel = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.3.0"  # Added system state management
+    version="2.4.0"  # Added AI decision tree
 )
 
 # Add CORS middleware
@@ -839,6 +860,115 @@ if SYSTEM_STATE_AVAILABLE:
             logger.error(f"Alert creation failed: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+# AI Decision Tree endpoints
+if DECISION_TREE_AVAILABLE:
+    @app.post("/decision/make")
+    async def make_decision(
+        decision_type: str,
+        current_state: Dict[str, Any],
+        objectives: List[str],
+        constraints: Optional[Dict[str, Any]] = None,
+        available_resources: Optional[Dict[str, float]] = None,
+        risk_tolerance: float = 0.5
+    ):
+        """Make an autonomous decision based on context"""
+        try:
+            global ai_decision_tree
+            if ai_decision_tree is None:
+                ai_decision_tree = get_ai_decision_tree()
+
+            # Create decision context
+            context = DecisionContext(
+                current_state=current_state,
+                historical_data=[],  # Would be loaded from database
+                constraints=constraints or {},
+                objectives=objectives,
+                available_resources=available_resources or {'budget': 10000},
+                time_constraints=None,
+                risk_tolerance=risk_tolerance,
+                metadata={}
+            )
+
+            # Make decision
+            decision_type_enum = DecisionType[decision_type.upper()]
+            result = await ai_decision_tree.make_decision(context, decision_type_enum)
+
+            return {
+                "decision_id": result.decision_id,
+                "selected_action": result.selected_option.description,
+                "confidence": result.selected_option.confidence,
+                "confidence_level": result.confidence_level.value,
+                "reasoning": result.reasoning,
+                "execution_plan": result.execution_plan,
+                "success_criteria": result.success_criteria,
+                "alternatives": [
+                    {
+                        "action": alt.description,
+                        "confidence": alt.confidence
+                    }
+                    for alt in result.alternative_options
+                ]
+            }
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Unknown decision type: {decision_type}")
+        except Exception as e:
+            logger.error(f"Decision making failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/decision/{decision_id}/outcome")
+    async def report_decision_outcome(
+        decision_id: str,
+        outcome: Dict[str, Any],
+        success: bool
+    ):
+        """Report outcome of a decision for learning"""
+        try:
+            global ai_decision_tree
+            if ai_decision_tree is None:
+                ai_decision_tree = get_ai_decision_tree()
+
+            ai_decision_tree.learn_from_outcome(decision_id, outcome, success)
+
+            return {
+                "status": "outcome_recorded",
+                "decision_id": decision_id,
+                "success": success
+            }
+        except Exception as e:
+            logger.error(f"Failed to record outcome: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/decision/stats")
+    async def get_decision_stats():
+        """Get decision-making statistics"""
+        try:
+            global ai_decision_tree
+            if ai_decision_tree is None:
+                ai_decision_tree = get_ai_decision_tree()
+
+            stats = ai_decision_tree.get_decision_stats()
+
+            return stats
+        except Exception as e:
+            logger.error(f"Failed to get stats: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/decision/types")
+    async def get_decision_types():
+        """Get available decision types"""
+        return {
+            "decision_types": [
+                {"type": "strategic", "description": "Long-term business decisions"},
+                {"type": "operational", "description": "Day-to-day operations"},
+                {"type": "tactical", "description": "Mid-term optimizations"},
+                {"type": "emergency", "description": "Crisis response"},
+                {"type": "financial", "description": "Revenue and cost decisions"},
+                {"type": "customer", "description": "Customer-facing decisions"},
+                {"type": "technical", "description": "Technical infrastructure"},
+                {"type": "learning", "description": "Self-improvement decisions"}
+            ]
+        }
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -851,6 +981,7 @@ async def startup_event():
     logger.info(f"Notebook LM+ Available: {NOTEBOOK_LM_AVAILABLE}")
     logger.info(f"Conversation Memory Available: {CONVERSATION_MEMORY_AVAILABLE}")
     logger.info(f"System State Available: {SYSTEM_STATE_AVAILABLE}")
+    logger.info(f"Decision Tree Available: {DECISION_TREE_AVAILABLE}")
 
     try:
         from scheduled_executor import scheduler
