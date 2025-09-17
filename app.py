@@ -39,6 +39,7 @@ NOTEBOOK_LM_AVAILABLE = False
 CONVERSATION_MEMORY_AVAILABLE = False
 SYSTEM_STATE_AVAILABLE = False
 DECISION_TREE_AVAILABLE = False
+REALTIME_MONITOR_AVAILABLE = False
 
 # Try to import advanced modules
 try:
@@ -161,11 +162,29 @@ except ImportError as e:
     ActionType = None
     ConfidenceLevel = None
 
+try:
+    from realtime_monitor import (
+        get_realtime_monitor,
+        EventType,
+        SubscriptionType,
+        RealtimeEvent
+    )
+    REALTIME_MONITOR_AVAILABLE = True
+    logger.info("Realtime monitor module loaded successfully")
+    realtime_monitor = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"Realtime monitor not available: {e}")
+    get_realtime_monitor = None
+    realtime_monitor = None
+    EventType = None
+    SubscriptionType = None
+    RealtimeEvent = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.4.0"  # Added AI decision tree
+    version="2.5.0"  # Added Supabase Realtime
 )
 
 # Add CORS middleware
@@ -969,6 +988,146 @@ if DECISION_TREE_AVAILABLE:
             ]
         }
 
+# Realtime monitoring endpoints
+if REALTIME_MONITOR_AVAILABLE:
+    @app.post("/realtime/subscribe")
+    async def subscribe_to_events(
+        client_id: str,
+        subscription_type: str = "all",
+        filters: Optional[Dict[str, Any]] = None
+    ):
+        """Subscribe to real-time AI events"""
+        try:
+            global realtime_monitor
+            if realtime_monitor is None:
+                realtime_monitor = get_realtime_monitor()
+
+            sub_type = SubscriptionType[subscription_type.upper()]
+            subscription_id = realtime_monitor.subscribe(
+                client_id=client_id,
+                subscription_type=sub_type,
+                filters=filters or {}
+            )
+
+            return {
+                "subscription_id": subscription_id,
+                "client_id": client_id,
+                "subscription_type": subscription_type,
+                "status": "subscribed"
+            }
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Invalid subscription type: {subscription_type}")
+        except Exception as e:
+            logger.error(f"Subscription failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/realtime/unsubscribe/{subscription_id}")
+    async def unsubscribe_from_events(subscription_id: str):
+        """Unsubscribe from real-time events"""
+        try:
+            global realtime_monitor
+            if realtime_monitor is None:
+                realtime_monitor = get_realtime_monitor()
+
+            realtime_monitor.unsubscribe(subscription_id)
+
+            return {
+                "subscription_id": subscription_id,
+                "status": "unsubscribed"
+            }
+        except Exception as e:
+            logger.error(f"Unsubscribe failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/realtime/emit")
+    async def emit_event(
+        event_type: str,
+        source: str,
+        data: Dict[str, Any],
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """Manually emit a real-time event"""
+        try:
+            global realtime_monitor
+            if realtime_monitor is None:
+                realtime_monitor = get_realtime_monitor()
+
+            event_type_enum = EventType[event_type.upper()]
+            realtime_monitor.emit_event(
+                event_type=event_type_enum,
+                source=source,
+                data=data,
+                metadata=metadata
+            )
+
+            return {
+                "status": "event_emitted",
+                "event_type": event_type,
+                "source": source
+            }
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Invalid event type: {event_type}")
+        except Exception as e:
+            logger.error(f"Event emission failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/realtime/activity-feed")
+    async def get_activity_feed(limit: int = 50):
+        """Get recent activity feed"""
+        try:
+            global realtime_monitor
+            if realtime_monitor is None:
+                realtime_monitor = get_realtime_monitor()
+
+            activities = realtime_monitor.get_activity_feed(limit)
+
+            return {
+                "activities": activities,
+                "count": len(activities)
+            }
+        except Exception as e:
+            logger.error(f"Failed to get activity feed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/realtime/events")
+    async def get_event_history(
+        event_type: Optional[str] = None,
+        limit: int = 100
+    ):
+        """Get event history"""
+        try:
+            global realtime_monitor
+            if realtime_monitor is None:
+                realtime_monitor = get_realtime_monitor()
+
+            event_type_enum = EventType[event_type.upper()] if event_type else None
+            events = realtime_monitor.get_event_history(event_type_enum, limit)
+
+            return {
+                "events": events,
+                "count": len(events)
+            }
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Invalid event type: {event_type}")
+        except Exception as e:
+            logger.error(f"Failed to get event history: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/realtime/stats")
+    async def get_realtime_stats():
+        """Get real-time monitoring statistics"""
+        try:
+            global realtime_monitor
+            if realtime_monitor is None:
+                realtime_monitor = get_realtime_monitor()
+
+            stats = realtime_monitor.get_subscription_stats()
+
+            return stats
+        except Exception as e:
+            logger.error(f"Failed to get stats: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -982,6 +1141,7 @@ async def startup_event():
     logger.info(f"Conversation Memory Available: {CONVERSATION_MEMORY_AVAILABLE}")
     logger.info(f"System State Available: {SYSTEM_STATE_AVAILABLE}")
     logger.info(f"Decision Tree Available: {DECISION_TREE_AVAILABLE}")
+    logger.info(f"Realtime Monitor Available: {REALTIME_MONITOR_AVAILABLE}")
 
     try:
         from scheduled_executor import scheduler
@@ -1004,6 +1164,21 @@ async def startup_event():
 
         asyncio.create_task(periodic_health_check())
         logger.info("System health monitoring started")
+
+    # Start realtime monitoring
+    if REALTIME_MONITOR_AVAILABLE:
+        async def start_realtime_monitor():
+            """Start realtime monitoring service"""
+            try:
+                global realtime_monitor
+                if realtime_monitor is None:
+                    realtime_monitor = get_realtime_monitor()
+                await realtime_monitor.start()
+                logger.info("Realtime monitoring service started")
+            except Exception as e:
+                logger.error(f"Failed to start realtime monitor: {e}")
+
+        asyncio.create_task(start_realtime_monitor())
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
