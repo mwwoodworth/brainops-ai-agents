@@ -15,7 +15,12 @@ from datetime import datetime
 # Import all AI providers
 from openai import OpenAI
 from anthropic import Anthropic
-import google.generativeai as genai
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    genai = None
+    GEMINI_AVAILABLE = False
 import requests
 
 # Import our configuration
@@ -57,13 +62,17 @@ class UltimateAISystem:
                 logger.error(f"Anthropic init error: {e}")
 
         # Initialize Gemini
-        if GOOGLE_API_KEY:
+        if GOOGLE_API_KEY and GEMINI_AVAILABLE:
             try:
                 genai.configure(api_key=GOOGLE_API_KEY)
                 self.gemini_model = genai.GenerativeModel('gemini-pro')
                 logger.info("✅ Gemini initialized")
             except Exception as e:
                 logger.error(f"Gemini init error: {e}")
+        else:
+            self.gemini_model = None
+            if not GEMINI_AVAILABLE:
+                logger.warning("Gemini not available: google-generativeai not installed")
 
         # Store API keys for other services
         self.perplexity_key = PERPLEXITY_API_KEY
@@ -208,7 +217,7 @@ class UltimateAISystem:
 
     async def _use_gemini(self, prompt: str, max_tokens: int) -> Optional[str]:
         """Use Google Gemini"""
-        if not self.gemini_model:
+        if not self.gemini_model or not GEMINI_AVAILABLE:
             return None
 
         try:

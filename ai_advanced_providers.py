@@ -9,7 +9,12 @@ import json
 import logging
 import requests
 from typing import Dict, List, Optional, Any, Tuple
-import google.generativeai as genai
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    genai = None
+    GEMINI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +24,14 @@ class AdvancedAIProviders:
     def __init__(self):
         # Gemini (Google AI)
         self.gemini_key = os.getenv("GOOGLE_API_KEY")
-        if self.gemini_key:
+        if self.gemini_key and GEMINI_AVAILABLE:
             genai.configure(api_key=self.gemini_key)
             self.gemini_model = genai.GenerativeModel('gemini-pro')
             logger.info("Gemini AI configured")
+        else:
+            self.gemini_model = None
+            if not GEMINI_AVAILABLE:
+                logger.warning("Gemini not available: google-generativeai not installed")
 
         # Perplexity API
         self.perplexity_key = os.getenv("PERPLEXITY_API_KEY")
@@ -33,6 +42,9 @@ class AdvancedAIProviders:
 
     def generate_with_gemini(self, prompt: str, max_tokens: int = 1000) -> Optional[str]:
         """Generate using Google's Gemini AI"""
+        if not self.gemini_model or not GEMINI_AVAILABLE:
+            return None
+
         try:
             # Gemini has excellent reasoning and coding capabilities
             response = self.gemini_model.generate_content(
