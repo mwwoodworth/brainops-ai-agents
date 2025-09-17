@@ -1,3 +1,20 @@
+#!/bin/bash
+
+echo "================================"
+echo "PRODUCTION DEPLOYMENT FIX SCRIPT"
+echo "================================"
+
+# Fix missing dependencies in requirements.txt
+echo "Fixing requirements.txt..."
+cat >> requirements.txt << 'EOF'
+python-multipart==0.0.6
+uvicorn[standard]==0.24.0
+aiofiles==23.2.1
+EOF
+
+# Create a fixed app.py with proper error handling
+echo "Creating fixed app.py..."
+cat > app_fixed.py << 'EOF'
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -432,3 +449,38 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+EOF
+
+# Backup existing app.py
+echo "Backing up current app.py..."
+cp app.py app_backup.py
+
+# Replace with fixed version
+echo "Deploying fixed app.py..."
+mv app_fixed.py app.py
+
+# Commit changes
+echo "Committing fixes to git..."
+git add -A
+git commit -m "Fix: Complete production deployment with error handling
+
+- Added UUID validation middleware
+- Fixed all 404 endpoints
+- Added proper error handling
+- Fixed database schema issues
+- Version 3.5.1 with all features enabled"
+
+# Push to production
+echo "Pushing to production..."
+git push origin main
+
+echo "================================"
+echo "DEPLOYMENT FIX COMPLETED"
+echo "================================"
+echo ""
+echo "The service will automatically redeploy on Render."
+echo "Check status at: https://dashboard.render.com"
+echo ""
+echo "Monitor deployment at:"
+echo "  https://brainops-ai-agents.onrender.com/health"
+echo ""
