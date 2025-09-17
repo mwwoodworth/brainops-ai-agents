@@ -10,12 +10,7 @@ import logging
 import requests
 from typing import Dict, List, Optional, Any, Tuple
 try:
-    try:
     import google.generativeai as genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    genai = None
-    GEMINI_AVAILABLE = False
     GEMINI_AVAILABLE = True
 except ImportError:
     genai = None
