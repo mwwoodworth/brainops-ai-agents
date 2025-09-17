@@ -16,8 +16,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Build timestamp for cache busting
-BUILD_TIME = "2025-09-17T21:54:00Z"  # FORCE NEW BUILD
-logger.info(f"🚀 Starting BrainOps AI v4.0.2 - Build: {BUILD_TIME}")
+BUILD_TIME = "2025-09-17T22:02:00Z"  # NEW BUILD
+logger.info(f"🚀 Starting BrainOps AI v4.0.3 - Build: {BUILD_TIME}")
 
 # Import REAL AI Core with error handling
 try:
@@ -33,9 +33,9 @@ except Exception as e:
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="BrainOps AI Agents - REAL AI FIXED",
-    description="Production AI System with 100% REAL AI - GPT-4 Working",
-    version="4.0.2"  # Fixed model names + timeouts
+    title="BrainOps AI Agents - REAL AI v4.0.3",
+    description="Production AI System with GPT-4 & Claude",
+    version="4.0.3"  # Simplified AI test endpoint
 )
 
 # Add CORS middleware
@@ -143,7 +143,7 @@ async def health():
 
     return {
         "status": "healthy" if AI_AVAILABLE else "degraded",
-        "version": "4.0.2",
+        "version": "4.0.3",
         "build": BUILD_TIME,
         "database": db_status,
         "ai_enabled": AI_AVAILABLE,
@@ -260,6 +260,36 @@ async def ai_status():
         if conn:
             conn.close()
         return {"status": "error", "message": str(e), "ai_available": AI_AVAILABLE}
+
+@app.post("/ai/test")
+async def ai_test(request: Dict[str, Any]):
+    """Simple AI test endpoint - no database"""
+    if not AI_AVAILABLE or not ai_core:
+        return {"error": "AI not available", "configured": AI_AVAILABLE}
+
+    try:
+        # Simple test - no database
+        prompt = request.get('prompt', 'Say hello')
+        logger.info(f"AI test with prompt: {prompt}")
+
+        # Try a simple sync call first
+        result = await ai_core.generate(
+            prompt=prompt,
+            model="gpt-3.5-turbo",
+            max_tokens=20
+        )
+
+        return {
+            "success": True,
+            "result": result,
+            "model": "gpt-3.5-turbo"
+        }
+    except Exception as e:
+        logger.error(f"AI test error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 @app.post("/ai/analyze")
 async def ai_analyze_endpoint(request: Dict[str, Any]):
