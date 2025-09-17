@@ -222,11 +222,31 @@ except ImportError as e:
     ModelType = None
     TrainingStatus = None
 
+# Document Processor
+DOCUMENT_PROCESSOR_AVAILABLE = False
+try:
+    from document_processor import (
+        get_document_processor,
+        DocumentType,
+        ProcessingStatus,
+        DocumentCategory
+    )
+    DOCUMENT_PROCESSOR_AVAILABLE = True
+    logger.info("Document processor module loaded successfully")
+    document_processor = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"Document processor not available: {e}")
+    get_document_processor = None
+    document_processor = None
+    DocumentType = None
+    ProcessingStatus = None
+    DocumentCategory = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.7.0"  # Added AI Training Pipeline
+    version="2.8.0"  # Added Document Processor
 )
 
 # Add CORS middleware
@@ -1315,6 +1335,100 @@ if TRAINING_PIPELINE_AVAILABLE:
         metrics = await training_pipeline.get_training_metrics()
         return metrics
 
+# Document Processor Endpoints
+if DOCUMENT_PROCESSOR_AVAILABLE:
+    from fastapi import UploadFile, File, Form
+
+    @app.post("/documents/upload")
+    async def upload_document(
+        file: UploadFile = File(...),
+        user_id: Optional[str] = Form(None),
+        source: str = Form("manual")
+    ):
+        """Upload and process a document"""
+        global document_processor
+        if not document_processor:
+            document_processor = get_document_processor()
+
+        # Read file content
+        content = await file.read()
+
+        # Upload and process
+        document_id = await document_processor.upload_document(
+            file_content=content,
+            filename=file.filename,
+            user_id=user_id,
+            source=source,
+            metadata={
+                "content_type": file.content_type,
+                "size": len(content)
+            }
+        )
+
+        return {
+            "document_id": document_id,
+            "filename": file.filename,
+            "status": "processing"
+        }
+
+    @app.get("/documents/{document_id}")
+    async def get_document_insights(document_id: str):
+        """Get comprehensive insights for a document"""
+        global document_processor
+        if not document_processor:
+            document_processor = get_document_processor()
+
+        insights = await document_processor.get_document_insights(document_id)
+        return insights
+
+    @app.post("/documents/search")
+    async def search_documents(query: str, filters: Optional[Dict[str, Any]] = None):
+        """Search documents using semantic search"""
+        global document_processor
+        if not document_processor:
+            document_processor = get_document_processor()
+
+        results = await document_processor.search_documents(
+            query=query,
+            filters=filters,
+            limit=10
+        )
+
+        return {
+            "query": query,
+            "count": len(results),
+            "documents": results
+        }
+
+    @app.post("/documents/{document_id}/action")
+    async def trigger_document_action(
+        document_id: str,
+        action_type: str,
+        action_data: Optional[Dict[str, Any]] = None
+    ):
+        """Trigger an action based on document content"""
+        global document_processor
+        if not document_processor:
+            document_processor = get_document_processor()
+
+        result = await document_processor.trigger_document_action(
+            document_id=document_id,
+            action_type=action_type,
+            action_data=action_data or {}
+        )
+
+        return result
+
+    @app.post("/documents/{document_id}/process")
+    async def reprocess_document(document_id: str):
+        """Reprocess a document"""
+        global document_processor
+        if not document_processor:
+            document_processor = get_document_processor()
+
+        result = await document_processor.process_document(document_id)
+        return result
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -1331,6 +1445,7 @@ async def startup_event():
     logger.info(f"Realtime Monitor Available: {REALTIME_MONITOR_AVAILABLE}")
     logger.info(f"Self-Healing Available: {SELF_HEALING_AVAILABLE}")
     logger.info(f"Training Pipeline Available: {TRAINING_PIPELINE_AVAILABLE}")
+    logger.info(f"Document Processor Available: {DOCUMENT_PROCESSOR_AVAILABLE}")
 
     try:
         from scheduled_executor import scheduler
