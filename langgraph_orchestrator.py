@@ -23,8 +23,6 @@ from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_openai import OpenAIEmbeddings
 
 from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolExecutor
-from langgraph.checkpoint.postgres import PostgresSaver
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
