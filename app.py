@@ -44,6 +44,7 @@ LEAD_NURTURING_AVAILABLE = False
 INTELLIGENT_FOLLOWUP_AVAILABLE = False
 CUSTOMER_ONBOARDING_AVAILABLE = False
 AUTOMATED_REPORTING_AVAILABLE = False
+COST_OPTIMIZATION_AVAILABLE = False
 
 # Try to import advanced modules
 try:
@@ -351,7 +352,25 @@ except ImportError as e:
     ReportType = None
     ReportFrequency = None
     ReportDeliveryChannel = None
-    InterventionType = None
+
+# AI Cost Optimization Engine
+try:
+    from ai_cost_optimization_engine import (
+        get_cost_optimization_engine,
+        ResourceType,
+        OptimizationStrategy,
+        CostLevel
+    )
+    COST_OPTIMIZATION_AVAILABLE = True
+    logger.info("Cost optimization engine loaded successfully")
+    cost_optimization_engine = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"Cost optimization engine not available: {e}")
+    get_cost_optimization_engine = None
+    cost_optimization_engine = None
+    ResourceType = None
+    OptimizationStrategy = None
+    CostLevel = None
 
 # Create FastAPI app
 app = FastAPI(
@@ -414,7 +433,7 @@ async def health():
 
         return {
             "status": "healthy",
-            "version": "3.3.0",
+            "version": "3.4.0",
             "database": "connected",
             "features": {
                 "langgraph": LANGGRAPH_AVAILABLE,
@@ -434,7 +453,8 @@ async def health():
                 "lead_nurturing": LEAD_NURTURING_AVAILABLE,
                 "intelligent_followup": INTELLIGENT_FOLLOWUP_AVAILABLE,
                 "customer_onboarding": CUSTOMER_ONBOARDING_AVAILABLE,
-                "automated_reporting": AUTOMATED_REPORTING_AVAILABLE
+                "automated_reporting": AUTOMATED_REPORTING_AVAILABLE,
+                "cost_optimization": COST_OPTIMIZATION_AVAILABLE
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -2094,6 +2114,107 @@ if AUTOMATED_REPORTING_AVAILABLE:
             "executed_at": datetime.now(timezone.utc).isoformat()
         }
 
+# Cost Optimization Endpoints
+if COST_OPTIMIZATION_AVAILABLE:
+    @app.post("/cost/optimize")
+    async def run_cost_optimization():
+        """Run full cost optimization cycle"""
+        global cost_optimization_engine
+        if not cost_optimization_engine:
+            cost_optimization_engine = get_cost_optimization_engine()
+
+        result = await cost_optimization_engine.optimize()
+
+        return {
+            "status": "optimization_complete",
+            "current_monthly_cost": result['current_monthly_cost'],
+            "potential_monthly_savings": result['potential_monthly_savings'],
+            "savings_percentage": result['savings_percentage'],
+            "top_opportunities": result['optimization_opportunities'][:3],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    @app.post("/cost/track")
+    async def track_resource_usage(
+        resource_type: str,
+        amount: float,
+        service: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """Track resource usage"""
+        global cost_optimization_engine
+        if not cost_optimization_engine:
+            cost_optimization_engine = get_cost_optimization_engine()
+
+        result = await cost_optimization_engine.track_resource(
+            ResourceType[resource_type.upper()],
+            amount,
+            service,
+            metadata or {}
+        )
+
+        return result
+
+    @app.post("/cost/budget")
+    async def set_budget(
+        service: str,
+        monthly_limit: float
+    ):
+        """Set budget for a service"""
+        global cost_optimization_engine
+        if not cost_optimization_engine:
+            cost_optimization_engine = get_cost_optimization_engine()
+
+        result = await cost_optimization_engine.set_budget(
+            service,
+            monthly_limit
+        )
+
+        return result
+
+    @app.get("/cost/budget/{service}")
+    async def get_budget_status(service: str):
+        """Get budget status for a service"""
+        global cost_optimization_engine
+        if not cost_optimization_engine:
+            cost_optimization_engine = get_cost_optimization_engine()
+
+        status = await cost_optimization_engine.budget_manager.check_budget_status(service)
+
+        return {
+            "service": service,
+            "budget_status": status[0] if status else None,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    @app.get("/cost/usage")
+    async def get_usage_summary(days: int = 7):
+        """Get resource usage summary"""
+        global cost_optimization_engine
+        if not cost_optimization_engine:
+            cost_optimization_engine = get_cost_optimization_engine()
+
+        summary = await cost_optimization_engine.monitor.get_usage_summary(days)
+
+        return summary
+
+    @app.post("/cost/apply-optimization")
+    async def apply_optimization(
+        strategy: str,
+        parameters: Dict[str, Any]
+    ):
+        """Apply an optimization strategy"""
+        global cost_optimization_engine
+        if not cost_optimization_engine:
+            cost_optimization_engine = get_cost_optimization_engine()
+
+        result = await cost_optimization_engine.apply_optimization({
+            "strategy": strategy,
+            **parameters
+        })
+
+        return result
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -2116,6 +2237,7 @@ async def startup_event():
     logger.info(f"Intelligent Follow-up Available: {INTELLIGENT_FOLLOWUP_AVAILABLE}")
     logger.info(f"Customer Onboarding Available: {CUSTOMER_ONBOARDING_AVAILABLE}")
     logger.info(f"Automated Reporting Available: {AUTOMATED_REPORTING_AVAILABLE}")
+    logger.info(f"Cost Optimization Available: {COST_OPTIMIZATION_AVAILABLE}")
 
     try:
         from scheduled_executor import scheduler
