@@ -16,8 +16,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Build timestamp for cache busting
-BUILD_TIME = "2025-09-17T22:02:00Z"  # NEW BUILD
-logger.info(f"🚀 Starting BrainOps AI v4.0.3 - Build: {BUILD_TIME}")
+BUILD_TIME = "2025-09-17T22:10:00Z"  # SYNC VERSION
+logger.info(f"🚀 Starting BrainOps AI v4.0.4 - Build: {BUILD_TIME}")
 
 # Import REAL AI Core with error handling
 try:
@@ -35,7 +35,7 @@ except Exception as e:
 app = FastAPI(
     title="BrainOps AI Agents - REAL AI v4.0.3",
     description="Production AI System with GPT-4 & Claude",
-    version="4.0.3"  # Simplified AI test endpoint
+    version="4.0.4"  # Synchronous AI for stability
 )
 
 # Add CORS middleware
@@ -143,7 +143,7 @@ async def health():
 
     return {
         "status": "healthy" if AI_AVAILABLE else "degraded",
-        "version": "4.0.3",
+        "version": "4.0.4",
         "build": BUILD_TIME,
         "database": db_status,
         "ai_enabled": AI_AVAILABLE,
@@ -263,17 +263,15 @@ async def ai_status():
 
 @app.post("/ai/test")
 async def ai_test(request: Dict[str, Any]):
-    """Simple AI test endpoint - no database"""
-    if not AI_AVAILABLE or not ai_core:
-        return {"error": "AI not available", "configured": AI_AVAILABLE}
-
+    """Simple AI test endpoint - using sync version"""
     try:
-        # Simple test - no database
+        from ai_core_sync import sync_ai_core
+
         prompt = request.get('prompt', 'Say hello')
         logger.info(f"AI test with prompt: {prompt}")
 
-        # Try a simple sync call first
-        result = await ai_core.generate(
+        # Use synchronous version to avoid async issues
+        result = sync_ai_core.generate(
             prompt=prompt,
             model="gpt-3.5-turbo",
             max_tokens=20
@@ -288,7 +286,8 @@ async def ai_test(request: Dict[str, Any]):
         logger.error(f"AI test error: {e}")
         return {
             "success": False,
-            "error": str(e)
+            "error": str(e),
+            "details": "Using sync version"
         }
 
 @app.post("/ai/analyze")
@@ -318,18 +317,20 @@ async def ai_analyze_endpoint(request: Dict[str, Any]):
         context = request.get('context', {})
         model = request.get('model', 'gpt-4')
 
-        # For roofing-specific requests
-        if 'roofing' in request['prompt'].lower() or 'roof' in request['prompt'].lower():
-            if context.get('job_data'):
-                result = await ai_core.analyze_roofing_job(context['job_data'])
-            else:
-                result = await ai_core.generate(
-                    prompt=request['prompt'],
-                    model=model,
-                    system_prompt="You are an expert roofing industry AI assistant."
-                )
-        else:
-            # General AI analysis
+        # Try synchronous version for stability
+        try:
+            from ai_core_sync import sync_ai_core
+
+            # Use sync version
+            result = sync_ai_core.generate(
+                prompt=request['prompt'],
+                model=model,
+                temperature=request.get('temperature', 0.7),
+                max_tokens=request.get('max_tokens', 2000),
+                system_prompt="You are an expert AI assistant for a roofing business." if 'roof' in request['prompt'].lower() else None
+            )
+        except:
+            # Fallback to async if sync fails
             result = await ai_core.generate(
                 prompt=request['prompt'],
                 model=model,
