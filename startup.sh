@@ -7,6 +7,7 @@ echo "================================================"
 echo "Timestamp: $(date)"
 echo "Environment: Production"
 echo "Python: $(python3 --version)"
+echo "Starting app.py (NOT web_service.py)"
 
 # Export environment variables
 export PYTHONUNBUFFERED=1
@@ -29,8 +30,8 @@ trap cleanup SIGTERM SIGINT
 
 # Start web service
 while true; do
-    echo "Starting AI agent web service..."
-    python3 app.py &
+    echo "Starting AI agent web service via run.py..."
+    python3 run.py &
     MAIN_PID=$!
 
     # Wait for process
