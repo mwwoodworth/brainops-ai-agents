@@ -458,8 +458,35 @@ class OutreachAgent(CustomerAcquisitionAgent):
 
     async def _schedule_outreach(self, target_id: str, touch: Dict, delay_hours: int):
         """Schedule outreach touch"""
-        # Would integrate with email service, LinkedIn API, etc.
-        pass
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+
+            # Schedule the outreach
+            scheduled_time = datetime.now(timezone.utc) + timedelta(hours=delay_hours)
+            cursor.execute("""
+                INSERT INTO ai_scheduled_outreach
+                (id, target_id, channel, message_template, personalization,
+                 scheduled_for, status, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                str(uuid.uuid4()),
+                target_id,
+                touch.get('channel', 'email'),
+                touch.get('template'),
+                json.dumps(touch.get('personalization', {})),
+                scheduled_time,
+                'scheduled',
+                json.dumps(touch.get('metadata', {}))
+            ))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            logger.info(f"Outreach scheduled for {target_id} at {scheduled_time}")
+        except Exception as e:
+            logger.error(f"Failed to schedule outreach: {e}")
 
 class ConversionAgent(CustomerAcquisitionAgent):
     """Agent that optimizes conversion"""
