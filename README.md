@@ -109,4 +109,4 @@ To add more agents, simply:
 3. Push to GitHub
 4. Render auto-deploys
 
-This is the RIGHT architecture for permanent, scalable AI operations.
+This is the RIGHT architecture for permanent, scalable AI operations.# Deploy trigger: Wed Sep 17 02:50:36 PM MDT 2025
