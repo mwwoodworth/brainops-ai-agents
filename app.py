@@ -14,6 +14,9 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime, timezone
 import uvicorn
+from memory_system import memory_system
+from orchestrator import orchestrator
+import asyncio
 
 # Configure logging
 logging.basicConfig(
@@ -294,29 +297,61 @@ async def get_recent_activity():
 async def orchestrate_agents(workflow: Dict[str, Any]):
     """Orchestrate multiple agents for a workflow"""
     try:
-        from agent_executor import executor
+        # Use the new orchestrator
+        result = await orchestrator.execute_workflow(
+            workflow.get('type', 'full_system_check'),
+            workflow
+        )
 
-        workflow_type = workflow.get('type', 'custom')
-        workflow_id = "wf_" + datetime.now().strftime("%Y%m%d%H%M%S")
+        # Store in memory
+        memory_system.update_system_state('workflow', result['workflow_id'], result)
 
-        # Execute with WorkflowEngine
-        workflow_task = {
-            'workflow_type': workflow_type,
-            'workflow_id': workflow_id,
-            **workflow
-        }
-
-        result = await executor.execute('WorkflowEngine', workflow_task)
-
-        return {
-            "workflow_id": workflow_id,
-            "status": result.get('status', 'completed'),
-            "result": result,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
+        return result
     except Exception as e:
         logger.error(f"Error orchestrating workflow: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/memory/context/{key}")
+async def get_memory_context(key: str):
+    """Get context from memory"""
+    context = memory_system.get_context(key)
+    if context:
+        return {"key": key, "value": context}
+    raise HTTPException(status_code=404, detail="Context not found")
+
+@app.post("/memory/context")
+async def store_memory_context(data: Dict[str, Any]):
+    """Store context in memory"""
+    try:
+        context_id = memory_system.store_context(
+            data.get('type', 'general'),
+            data['key'],
+            data['value'],
+            data.get('critical', False)
+        )
+        return {"id": context_id, "status": "stored"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/memory/critical")
+async def get_critical_memory():
+    """Get all critical context"""
+    return memory_system.get_critical_context()
+
+@app.get("/memory/overview")
+async def get_system_overview():
+    """Get complete system overview"""
+    return memory_system.get_system_overview()
+
+@app.post("/memory/search")
+async def search_knowledge(query: Dict[str, Any]):
+    """Search knowledge base"""
+    results = memory_system.search_knowledge(
+        query['query'],
+        query.get('category'),
+        query.get('limit', 10)
+    )
+    return {"results": results, "count": len(results)}
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
