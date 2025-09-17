@@ -180,11 +180,31 @@ except ImportError as e:
     SubscriptionType = None
     RealtimeEvent = None
 
+# Self-healing recovery system
+SELF_HEALING_AVAILABLE = False
+try:
+    from self_healing_recovery import (
+        get_self_healing_recovery,
+        RecoveryStrategy,
+        ErrorSeverity,
+        ComponentHealth
+    )
+    SELF_HEALING_AVAILABLE = True
+    logger.info("Self-healing recovery module loaded successfully")
+    self_healing_recovery = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"Self-healing recovery not available: {e}")
+    get_self_healing_recovery = None
+    self_healing_recovery = None
+    RecoveryStrategy = None
+    ErrorSeverity = None
+    ComponentHealth = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.5.0"  # Added Supabase Realtime
+    version="2.6.0"  # Added Self-Healing Recovery
 )
 
 # Add CORS middleware
@@ -1127,6 +1147,71 @@ if REALTIME_MONITOR_AVAILABLE:
         except Exception as e:
             logger.error(f"Failed to get stats: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+
+# Self-Healing Recovery Endpoints
+if SELF_HEALING_AVAILABLE:
+    @app.post("/recovery/heal")
+    async def trigger_healing(component: str, error_details: Dict[str, Any]):
+        """Trigger self-healing for a component"""
+        global self_healing_recovery
+        if not self_healing_recovery:
+            self_healing_recovery = get_self_healing_recovery()
+
+        result = await self_healing_recovery.handle_error(
+            component=component,
+            error=Exception(error_details.get("message", "Manual healing triggered")),
+            context=error_details
+        )
+        return {"healing_result": result}
+
+    @app.get("/recovery/health/{component}")
+    async def get_component_health(component: str):
+        """Get health status for a component"""
+        global self_healing_recovery
+        if not self_healing_recovery:
+            self_healing_recovery = get_self_healing_recovery()
+
+        health = self_healing_recovery.get_component_health(component)
+        return {
+            "component": component,
+            "health": health.value if health else "unknown",
+            "circuit_breaker": self_healing_recovery.get_circuit_breaker_state(component)
+        }
+
+    @app.get("/recovery/history")
+    async def get_recovery_history(limit: int = 100):
+        """Get recent recovery actions"""
+        global self_healing_recovery
+        if not self_healing_recovery:
+            self_healing_recovery = get_self_healing_recovery()
+
+        history = self_healing_recovery.get_recovery_history(limit=limit)
+        return {"history": history}
+
+    @app.post("/recovery/rules")
+    async def add_healing_rule(rule: Dict[str, Any]):
+        """Add a self-healing rule"""
+        global self_healing_recovery
+        if not self_healing_recovery:
+            self_healing_recovery = get_self_healing_recovery()
+
+        rule_id = self_healing_recovery.add_healing_rule(
+            component=rule.get("component"),
+            error_pattern=rule.get("error_pattern"),
+            fix_action=rule.get("fix_action"),
+            confidence=rule.get("confidence", 0.8)
+        )
+        return {"rule_id": rule_id, "status": "created"}
+
+    @app.get("/recovery/stats")
+    async def get_recovery_stats():
+        """Get recovery system statistics"""
+        global self_healing_recovery
+        if not self_healing_recovery:
+            self_healing_recovery = get_self_healing_recovery()
+
+        stats = self_healing_recovery.get_recovery_stats()
+        return {"stats": stats}
 
 @app.on_event("startup")
 async def startup_event():
