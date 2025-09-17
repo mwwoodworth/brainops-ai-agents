@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Fix production database schema issues"""
 
+import os
 import psycopg2
 import sys
 
 DB_CONFIG = {
-    "host": "aws-0-us-east-2.pooler.supabase.com",
+    "host": os.getenv("DB_HOST"),
     "database": "postgres",
-    "user": "postgres.yomagoqdmxszqtdwuhab",
-    "password": "REDACTED_SUPABASE_DB_PASSWORD",
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
     "port": 5432
 }
 

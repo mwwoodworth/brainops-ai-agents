@@ -20,10 +20,10 @@ logging.basicConfig(
 
 # Database configuration
 DB_CONFIG = {
-    "host": "aws-0-us-east-2.pooler.supabase.com",
+    "host": os.getenv("DB_HOST"),
     "database": "postgres",
-    "user": "postgres.yomagoqdmxszqtdwuhab",
-    "password": "REDACTED_SUPABASE_DB_PASSWORD",
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
     "port": 5432
 }
 
