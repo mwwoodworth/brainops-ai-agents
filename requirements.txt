@@ -10,3 +10,4 @@ numpy==1.24.3
 aiohttp==3.9.0
 httpx==0.25.0
 langchain-core==0.1.0
+websocket-client==1.6.4
