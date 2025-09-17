@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import os
 import asyncio
 import logging
@@ -11,15 +11,21 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import uuid
 
+# Import REAL AI Core
+from ai_core import RealAICore, ai_generate, ai_analyze
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Initialize REAL AI
+ai_core = RealAICore()
+
 # Initialize FastAPI app
 app = FastAPI(
     title="BrainOps AI Agents",
-    description="Production AI System with 100% Operational Capability",
-    version="3.5.1"
+    description="Production AI System with 100% REAL AI - No Fake Responses",
+    version="4.0.0"  # Major version bump for REAL AI
 )
 
 # Add CORS middleware
@@ -231,8 +237,8 @@ async def ai_status():
         return {"status": "error", "message": str(e)}
 
 @app.post("/ai/analyze")
-async def ai_analyze(request: Dict[str, Any]):
-    """AI analysis endpoint"""
+async def ai_analyze_endpoint(request: Dict[str, Any]):
+    """REAL AI analysis endpoint - Uses GPT-4/Claude"""
     # Validate input
     if not request.get('prompt'):
         raise HTTPException(status_code=400, detail="Prompt required")
@@ -242,14 +248,39 @@ async def ai_analyze(request: Dict[str, Any]):
         raise HTTPException(status_code=503, detail="Database unavailable")
 
     try:
-        cursor = conn.cursor()
+        # Get REAL AI analysis
+        context = request.get('context', {})
+        model = request.get('model', 'gpt-4')
 
-        # Store analysis request
+        # For roofing-specific requests
+        if 'roofing' in request['prompt'].lower() or 'roof' in request['prompt'].lower():
+            if context.get('job_data'):
+                result = await ai_core.analyze_roofing_job(context['job_data'])
+            else:
+                result = await ai_core.generate(
+                    prompt=request['prompt'],
+                    model=model,
+                    system_prompt="You are an expert roofing industry AI assistant."
+                )
+        else:
+            # General AI analysis
+            result = await ai_core.generate(
+                prompt=request['prompt'],
+                model=model,
+                temperature=request.get('temperature', 0.7),
+                max_tokens=request.get('max_tokens', 2000)
+            )
+
+        # Store in database
+        cursor = conn.cursor()
         analysis_id = str(uuid.uuid4())
         cursor.execute("""
-            INSERT INTO agent_executions (id, agent_type, prompt, status, created_at)
-            VALUES (%s, %s, %s, %s, NOW())
-        """, (analysis_id, 'analyzer', request['prompt'], 'completed'))
+            INSERT INTO agent_executions (id, agent_type, prompt, response, status, created_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+        """, (analysis_id, 'ai_analyzer', request['prompt'], json.dumps(result) if isinstance(result, dict) else result, 'completed'))
+
+        # Log AI usage
+        ai_core.log_usage(request['prompt'], str(result), model)
 
         conn.commit()
         cursor.close()
@@ -258,15 +289,27 @@ async def ai_analyze(request: Dict[str, Any]):
         return {
             "analysis_id": analysis_id,
             "status": "completed",
-            "result": f"Analysis completed for: {request['prompt'][:100]}",
+            "result": result,  # REAL AI RESPONSE
+            "model": model,
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
         if conn:
             conn.rollback()
             conn.close()
-        logger.error(f"Analysis error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"AI Analysis error: {e}")
+        # Try fallback model if primary fails
+        try:
+            result = await ai_generate(request['prompt'], model='gpt-3.5-turbo')
+            return {
+                "analysis_id": str(uuid.uuid4()),
+                "status": "completed_with_fallback",
+                "result": result,
+                "model": "gpt-3.5-turbo",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except:
+            raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/memory/store")
 async def store_memory(request: Dict[str, Any]):
@@ -403,6 +446,205 @@ async def get_performance_metrics():
         if conn:
             conn.close()
         return {"status": "error", "metrics": {}}
+
+@app.post("/ai/chat")
+async def ai_chat(request: Dict[str, Any]):
+    """REAL AI Chat endpoint - Conversational AI with GPT-4/Claude"""
+    messages = request.get('messages', [])
+    if not messages:
+        raise HTTPException(status_code=400, detail="Messages required")
+
+    try:
+        # Get conversation context
+        context = request.get('context', {})
+        response = await ai_core.chat_with_context(messages, context)
+
+        return {
+            "response": response,
+            "model": "gpt-4-turbo-preview",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ai/generate")
+async def ai_generate_endpoint(request: Dict[str, Any]):
+    """REAL AI Generation - Direct LLM access"""
+    prompt = request.get('prompt')
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt required")
+
+    try:
+        result = await ai_core.generate(
+            prompt=prompt,
+            model=request.get('model', 'gpt-4'),
+            temperature=request.get('temperature', 0.7),
+            max_tokens=request.get('max_tokens', 2000),
+            system_prompt=request.get('system_prompt'),
+            stream=request.get('stream', False)
+        )
+
+        if request.get('stream'):
+            return StreamingResponse(result)
+
+        return {
+            "result": result,
+            "model": request.get('model', 'gpt-4'),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ai/embeddings")
+async def ai_embeddings(request: Dict[str, Any]):
+    """Generate REAL embeddings for vector search"""
+    text = request.get('text')
+    if not text:
+        raise HTTPException(status_code=400, detail="Text required")
+
+    try:
+        embeddings = await ai_core.generate_embeddings(text)
+
+        # Store in vector database
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO ai_persistent_memory (
+                    memory_type, memory_key, memory_value, embedding, created_at
+                ) VALUES ('embedding', %s, %s, %s, NOW())
+            """, (str(uuid.uuid4()), json.dumps({"text": text}), embeddings))
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+        return {
+            "embeddings": embeddings[:10] + ["..."],  # Return sample for verification
+            "dimensions": len(embeddings),
+            "model": "text-embedding-3-small",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Embedding error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ai/score-lead")
+async def ai_score_lead(request: Dict[str, Any]):
+    """REAL AI Lead Scoring"""
+    lead_data = request.get('lead_data')
+    if not lead_data:
+        raise HTTPException(status_code=400, detail="Lead data required")
+
+    try:
+        result = await ai_core.score_lead(lead_data)
+
+        # Store in database
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO lead_scores (
+                    lead_id, score, reasoning, recommendations, created_at
+                ) VALUES (%s, %s, %s, %s, NOW())
+            """, (
+                lead_data.get('id', str(uuid.uuid4())),
+                result.get('score', 0),
+                result.get('reasoning', ''),
+                json.dumps(result.get('recommendations', []))
+            ))
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+        return result
+    except Exception as e:
+        logger.error(f"Lead scoring error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ai/generate-proposal")
+async def ai_generate_proposal(request: Dict[str, Any]):
+    """REAL AI Proposal Generation"""
+    customer_data = request.get('customer_data')
+    job_data = request.get('job_data')
+
+    if not customer_data or not job_data:
+        raise HTTPException(status_code=400, detail="Customer and job data required")
+
+    try:
+        proposal = await ai_core.generate_proposal(customer_data, job_data)
+
+        # Store in database
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            proposal_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO proposals (
+                    id, customer_id, content, status, created_at
+                ) VALUES (%s, %s, %s, 'draft', NOW())
+            """, (
+                proposal_id,
+                customer_data.get('id', str(uuid.uuid4())),
+                proposal
+            ))
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+        return {
+            "proposal_id": proposal_id,
+            "content": proposal,
+            "model": "gpt-4",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Proposal generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ai/optimize-schedule")
+async def ai_optimize_schedule(request: Dict[str, Any]):
+    """REAL AI Schedule Optimization"""
+    jobs = request.get('jobs', [])
+    crews = request.get('crews', [])
+
+    if not jobs:
+        raise HTTPException(status_code=400, detail="Jobs required")
+
+    try:
+        result = await ai_core.optimize_schedule(jobs, crews)
+
+        return {
+            "schedule": result,
+            "optimized": True,
+            "model": "gpt-4",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Schedule optimization error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ai/analyze-image")
+async def ai_analyze_image(request: Dict[str, Any]):
+    """REAL AI Image Analysis with GPT-4 Vision"""
+    image_url = request.get('image_url')
+    prompt = request.get('prompt', "Analyze this image and describe what you see.")
+
+    if not image_url:
+        raise HTTPException(status_code=400, detail="Image URL required")
+
+    try:
+        analysis = await ai_core.analyze_image(image_url, prompt)
+
+        return {
+            "analysis": analysis,
+            "model": "gpt-4-vision-preview",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Image analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/ab-test/experiments")
 async def get_experiments():
