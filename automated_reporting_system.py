@@ -65,6 +65,9 @@ class ReportSchedule(Enum):
     MONTHLY = "monthly"
     ON_DEMAND = "on_demand"
 
+# Alias for backwards compatibility
+ReportFrequency = ReportSchedule
+
 class MetricType(Enum):
     COUNT = "count"
     SUM = "sum"
