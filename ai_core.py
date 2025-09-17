@@ -85,23 +85,31 @@ class RealAICore:
                     messages.append({"role": "system", "content": system_prompt})
                 messages.append({"role": "user", "content": prompt})
 
+                # Use correct model names
+                if "gpt-4" in model.lower():
+                    actual_model = "gpt-4-0125-preview"  # Latest GPT-4 Turbo
+                else:
+                    actual_model = "gpt-3.5-turbo"  # Fast and cheap
+
                 if stream:
                     # Return streaming response
                     response = await self.async_openai.chat.completions.create(
-                        model="gpt-4-turbo-preview" if "gpt-4" in model else "gpt-3.5-turbo",
+                        model=actual_model,
                         messages=messages,
                         temperature=temperature,
                         max_tokens=max_tokens,
-                        stream=True
+                        stream=True,
+                        timeout=30  # Add timeout
                     )
                     return response
                 else:
                     # Regular response
                     response = await self.async_openai.chat.completions.create(
-                        model="gpt-4-turbo-preview" if "gpt-4" in model else "gpt-3.5-turbo",
+                        model=actual_model,
                         messages=messages,
                         temperature=temperature,
-                        max_tokens=max_tokens
+                        max_tokens=max_tokens,
+                        timeout=30  # Add timeout
                     )
                     return response.choices[0].message.content
 
@@ -147,7 +155,7 @@ class RealAICore:
         """REAL image analysis with GPT-4 Vision"""
         try:
             response = await self.async_openai.chat.completions.create(
-                model="gpt-4-vision-preview",
+                model="gpt-4-turbo",  # Updated model name for vision
                 messages=[{
                     "role": "user",
                     "content": [
@@ -355,11 +363,16 @@ class RealAICore:
         full_messages = [{"role": "system", "content": system_prompt}]
         full_messages.extend(messages)
 
+        # Check if client is available
+        if not self.async_openai:
+            return "AI service temporarily unavailable"
+
         response = await self.async_openai.chat.completions.create(
-            model="gpt-4-turbo-preview",
+            model="gpt-4-0125-preview",  # Use correct model name
             messages=full_messages,
             temperature=0.7,
-            max_tokens=1000
+            max_tokens=1000,
+            timeout=30  # Add timeout
         )
 
         return response.choices[0].message.content
