@@ -37,56 +37,46 @@ PRICING_ENGINE_AVAILABLE = False
 
 # Try to import advanced modules
 try:
-    from langgraph_orchestrator import get_langgraph_orchestrator
+    from langgraph_orchestrator import langgraph_orchestrator
     from langchain_core.messages import HumanMessage, SystemMessage
     LANGGRAPH_AVAILABLE = True
     logger.info("LangGraph module loaded successfully")
-    langgraph_orchestrator = None  # Will be initialized lazily
 except ImportError as e:
     logger.warning(f"LangGraph not available: {e}")
-    get_langgraph_orchestrator = None
     langgraph_orchestrator = None
     HumanMessage = None
     SystemMessage = None
 
 try:
-    from vector_memory_system import get_vector_memory
+    from vector_memory_system import vector_memory
     VECTOR_MEMORY_AVAILABLE = True
     logger.info("Vector memory module loaded successfully")
-    vector_memory = None  # Will be initialized lazily
 except ImportError as e:
     logger.warning(f"Vector memory not available: {e}")
-    get_vector_memory = None
     vector_memory = None
 
 try:
-    from revenue_generation_system import get_revenue_system
+    from revenue_generation_system import revenue_system
     REVENUE_SYSTEM_AVAILABLE = True
     logger.info("Revenue system module loaded successfully")
-    revenue_system = None  # Will be initialized lazily
 except ImportError as e:
     logger.warning(f"Revenue system not available: {e}")
-    get_revenue_system = None
     revenue_system = None
 
 try:
-    from customer_acquisition_agents import get_acquisition_orchestrator
+    from customer_acquisition_agents import acquisition_orchestrator
     ACQUISITION_AVAILABLE = True
     logger.info("Acquisition agents module loaded successfully")
-    acquisition_orchestrator = None  # Will be initialized lazily
 except ImportError as e:
     logger.warning(f"Acquisition agents not available: {e}")
-    get_acquisition_orchestrator = None
     acquisition_orchestrator = None
 
 try:
-    from ai_pricing_engine import get_pricing_engine, PricingFactors, CustomerSegment
+    from ai_pricing_engine import pricing_engine, PricingFactors, CustomerSegment
     PRICING_ENGINE_AVAILABLE = True
     logger.info("Pricing engine module loaded successfully")
-    pricing_engine = None  # Will be initialized lazily
 except ImportError as e:
     logger.warning(f"Pricing engine not available: {e}")
-    get_pricing_engine = None
     pricing_engine = None
     PricingFactors = None
     CustomerSegment = None
@@ -216,9 +206,6 @@ if LANGGRAPH_AVAILABLE:
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
 
-            global langgraph_orchestrator
-            if langgraph_orchestrator is None:
-                langgraph_orchestrator = get_langgraph_orchestrator()
             result = await langgraph_orchestrator.run_workflow(messages, metadata)
 
             return {
@@ -236,9 +223,6 @@ if LANGGRAPH_AVAILABLE:
     @app.get("/langgraph/status")
     async def get_langgraph_status():
         """Get LangGraph orchestrator status"""
-        global langgraph_orchestrator
-        if langgraph_orchestrator is None:
-            langgraph_orchestrator = get_langgraph_orchestrator()
         return {
             "status": "operational",
             "components": {
@@ -256,9 +240,6 @@ if VECTOR_MEMORY_AVAILABLE:
     async def store_vector_memory(data: Dict[str, Any]):
         """Store a memory with vector embedding"""
         try:
-            global vector_memory
-            if vector_memory is None:
-                vector_memory = get_vector_memory()
             memory_id = vector_memory.store_memory(
                 content=data['content'],
                 memory_type=data.get('type', 'general'),
@@ -277,9 +258,6 @@ if VECTOR_MEMORY_AVAILABLE:
     async def recall_vector_memories(query: Dict[str, Any]):
         """Recall memories using semantic search"""
         try:
-            global vector_memory
-            if vector_memory is None:
-                vector_memory = get_vector_memory()
             memories = vector_memory.recall_memories(
                 query=query['query'],
                 limit=query.get('limit', 10),
@@ -298,9 +276,6 @@ if VECTOR_MEMORY_AVAILABLE:
     async def get_vector_memory_stats():
         """Get vector memory statistics"""
         try:
-            global vector_memory
-            if vector_memory is None:
-                vector_memory = get_vector_memory()
             stats = vector_memory.get_memory_statistics()
             return stats
         except Exception as e:
@@ -313,9 +288,6 @@ if REVENUE_SYSTEM_AVAILABLE:
     async def identify_revenue_leads(criteria: Dict[str, Any]):
         """Identify new revenue leads"""
         try:
-            global revenue_system
-            if revenue_system is None:
-                revenue_system = get_revenue_system()
             leads = await revenue_system.identify_new_leads(criteria)
             return {"leads_found": len(leads), "lead_ids": leads}
         except Exception as e:
@@ -326,9 +298,6 @@ if REVENUE_SYSTEM_AVAILABLE:
     async def qualify_revenue_lead(lead_id: str):
         """Qualify a lead for revenue potential"""
         try:
-            global revenue_system
-            if revenue_system is None:
-                revenue_system = get_revenue_system()
             score, qualification = await revenue_system.qualify_lead(lead_id)
             return {"lead_id": lead_id, "score": score, "qualification": qualification}
         except Exception as e:
@@ -339,9 +308,6 @@ if REVENUE_SYSTEM_AVAILABLE:
     async def generate_revenue_proposal(lead_id: str, requirements: Dict[str, Any]):
         """Generate AI-powered proposal"""
         try:
-            global revenue_system
-            if revenue_system is None:
-                revenue_system = get_revenue_system()
             proposal = await revenue_system.generate_proposal(lead_id, requirements)
             return proposal
         except Exception as e:
@@ -354,9 +320,6 @@ if ACQUISITION_AVAILABLE:
     async def run_acquisition_pipeline(criteria: Dict[str, Any]):
         """Run customer acquisition pipeline"""
         try:
-            global acquisition_orchestrator
-            if acquisition_orchestrator is None:
-                acquisition_orchestrator = get_acquisition_orchestrator()
             result = await acquisition_orchestrator.run_acquisition_pipeline(criteria)
             return result
         except Exception as e:
@@ -367,9 +330,6 @@ if ACQUISITION_AVAILABLE:
     async def get_acquisition_metrics():
         """Get customer acquisition metrics"""
         try:
-            global acquisition_orchestrator
-            if acquisition_orchestrator is None:
-                acquisition_orchestrator = get_acquisition_orchestrator()
             metrics = await acquisition_orchestrator.get_acquisition_metrics()
             return metrics
         except Exception as e:
@@ -395,9 +355,6 @@ if PRICING_ENGINE_AVAILABLE:
                 historical_data=request.get('historical_data', {})
             )
 
-            global pricing_engine
-            if pricing_engine is None:
-                pricing_engine = get_pricing_engine()
             quote = await pricing_engine.generate_quote(factors, request.get('lead_id'))
 
             if quote:
