@@ -200,11 +200,33 @@ except ImportError as e:
     ErrorSeverity = None
     ComponentHealth = None
 
+# AI Training Pipeline
+TRAINING_PIPELINE_AVAILABLE = False
+try:
+    from ai_training_pipeline import (
+        get_training_pipeline,
+        InteractionType,
+        LearningCategory,
+        ModelType,
+        TrainingStatus
+    )
+    TRAINING_PIPELINE_AVAILABLE = True
+    logger.info("AI training pipeline module loaded successfully")
+    training_pipeline = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"AI training pipeline not available: {e}")
+    get_training_pipeline = None
+    training_pipeline = None
+    InteractionType = None
+    LearningCategory = None
+    ModelType = None
+    TrainingStatus = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.6.0"  # Added Self-Healing Recovery
+    version="2.7.0"  # Added AI Training Pipeline
 )
 
 # Add CORS middleware
@@ -1213,6 +1235,86 @@ if SELF_HEALING_AVAILABLE:
         stats = self_healing_recovery.get_recovery_stats()
         return {"stats": stats}
 
+# AI Training Pipeline Endpoints
+if TRAINING_PIPELINE_AVAILABLE:
+    @app.post("/training/capture-interaction")
+    async def capture_interaction(interaction_data: Dict[str, Any]):
+        """Capture customer interaction for training"""
+        global training_pipeline
+        if not training_pipeline:
+            training_pipeline = get_training_pipeline()
+
+        interaction_id = await training_pipeline.capture_interaction(
+            customer_id=interaction_data.get("customer_id"),
+            interaction_type=InteractionType[interaction_data.get("type", "EMAIL").upper()],
+            content=interaction_data.get("content"),
+            channel=interaction_data.get("channel"),
+            context=interaction_data.get("context", {}),
+            outcome=interaction_data.get("outcome"),
+            value=interaction_data.get("value")
+        )
+
+        return {"interaction_id": interaction_id, "status": "captured"}
+
+    @app.post("/training/train-model")
+    async def train_model(model_type: str, force: bool = False):
+        """Train a specific model"""
+        global training_pipeline
+        if not training_pipeline:
+            training_pipeline = get_training_pipeline()
+
+        result = await training_pipeline.train_model(
+            ModelType[model_type.upper()],
+            force=force
+        )
+
+        return result
+
+    @app.get("/training/insights")
+    async def get_insights():
+        """Generate learning insights"""
+        global training_pipeline
+        if not training_pipeline:
+            training_pipeline = get_training_pipeline()
+
+        insights = await training_pipeline.generate_insights()
+        return {"insights": insights, "count": len(insights)}
+
+    @app.post("/training/apply-insight/{insight_id}")
+    async def apply_insight(insight_id: str):
+        """Apply a specific insight"""
+        global training_pipeline
+        if not training_pipeline:
+            training_pipeline = get_training_pipeline()
+
+        result = await training_pipeline.apply_learning(insight_id)
+        return result
+
+    @app.post("/training/feedback")
+    async def record_feedback(feedback_data: Dict[str, Any]):
+        """Record prediction feedback"""
+        global training_pipeline
+        if not training_pipeline:
+            training_pipeline = get_training_pipeline()
+
+        result = await training_pipeline.feedback_loop(
+            model_id=feedback_data.get("model_id"),
+            prediction=feedback_data.get("prediction"),
+            actual_outcome=feedback_data.get("actual_outcome")
+        )
+
+        return result
+
+    @app.get("/training/metrics")
+    async def get_training_metrics():
+        """Get comprehensive training metrics"""
+        global training_pipeline
+        if not training_pipeline:
+            training_pipeline = get_training_pipeline()
+
+        metrics = await training_pipeline.get_training_metrics()
+        return metrics
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -1227,6 +1329,8 @@ async def startup_event():
     logger.info(f"System State Available: {SYSTEM_STATE_AVAILABLE}")
     logger.info(f"Decision Tree Available: {DECISION_TREE_AVAILABLE}")
     logger.info(f"Realtime Monitor Available: {REALTIME_MONITOR_AVAILABLE}")
+    logger.info(f"Self-Healing Available: {SELF_HEALING_AVAILABLE}")
+    logger.info(f"Training Pipeline Available: {TRAINING_PIPELINE_AVAILABLE}")
 
     try:
         from scheduled_executor import scheduler
