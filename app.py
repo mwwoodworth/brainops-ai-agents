@@ -42,6 +42,7 @@ DECISION_TREE_AVAILABLE = False
 REALTIME_MONITOR_AVAILABLE = False
 LEAD_NURTURING_AVAILABLE = False
 INTELLIGENT_FOLLOWUP_AVAILABLE = False
+CUSTOMER_ONBOARDING_AVAILABLE = False
 
 # Try to import advanced modules
 try:
@@ -312,11 +313,34 @@ except ImportError as e:
     DeliveryChannel = None
     ResponseType = None
 
+# AI Customer Onboarding System
+try:
+    from ai_customer_onboarding import (
+        get_ai_customer_onboarding,
+        OnboardingStage,
+        OnboardingStatus,
+        CustomerSegment,
+        OnboardingAction,
+        InterventionType
+    )
+    CUSTOMER_ONBOARDING_AVAILABLE = True
+    logger.info("AI customer onboarding system loaded successfully")
+    customer_onboarding_system = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"AI customer onboarding system not available: {e}")
+    get_ai_customer_onboarding = None
+    customer_onboarding_system = None
+    OnboardingStage = None
+    OnboardingStatus = None
+    CustomerSegment = None
+    OnboardingAction = None
+    InterventionType = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="3.1.0"  # Added Intelligent Follow-up System
+    version="3.2.0"  # Added AI Customer Onboarding
 )
 
 # Add CORS middleware
@@ -1836,6 +1860,79 @@ if INTELLIGENT_FOLLOWUP_AVAILABLE:
 
         return analytics
 
+# AI Customer Onboarding Endpoints
+if CUSTOMER_ONBOARDING_AVAILABLE:
+    @app.post("/onboarding/journeys")
+    async def create_onboarding_journey(journey_data: Dict[str, Any]):
+        """Create personalized onboarding journey"""
+        global customer_onboarding_system
+        if not customer_onboarding_system:
+            customer_onboarding_system = get_ai_customer_onboarding()
+
+        journey_id = await customer_onboarding_system.create_onboarding_journey(
+            customer_id=journey_data["customer_id"],
+            customer_data=journey_data.get("customer_data", {}),
+            segment=CustomerSegment[journey_data["segment"].upper()],
+            custom_requirements=journey_data.get("custom_requirements")
+        )
+
+        return {"journey_id": journey_id, "status": "created"}
+
+    @app.post("/onboarding/journeys/{journey_id}/track")
+    async def track_onboarding_progress(
+        journey_id: str,
+        event_data: Dict[str, Any]
+    ):
+        """Track progress in onboarding journey"""
+        global customer_onboarding_system
+        if not customer_onboarding_system:
+            customer_onboarding_system = get_ai_customer_onboarding()
+
+        result = await customer_onboarding_system.track_progress(
+            journey_id=journey_id,
+            event_type=event_data["event_type"],
+            event_data=event_data.get("data", {})
+        )
+
+        return result
+
+    @app.post("/onboarding/journeys/{journey_id}/personalize")
+    async def personalize_onboarding(
+        journey_id: str,
+        interaction_data: Dict[str, Any]
+    ):
+        """Personalize onboarding experience"""
+        global customer_onboarding_system
+        if not customer_onboarding_system:
+            customer_onboarding_system = get_ai_customer_onboarding()
+
+        personalization = await customer_onboarding_system.personalize_experience(
+            journey_id=journey_id,
+            interaction_data=interaction_data
+        )
+
+        return personalization
+
+    @app.get("/onboarding/analytics")
+    async def get_onboarding_analytics(
+        segment: Optional[str] = None,
+        days: int = 30
+    ):
+        """Get onboarding analytics"""
+        global customer_onboarding_system
+        if not customer_onboarding_system:
+            customer_onboarding_system = get_ai_customer_onboarding()
+
+        date_from = datetime.now(timezone.utc) - timedelta(days=days)
+
+        analytics = await customer_onboarding_system.get_journey_analytics(
+            segment=CustomerSegment[segment.upper()] if segment else None,
+            date_from=date_from,
+            date_to=datetime.now(timezone.utc)
+        )
+
+        return analytics
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -1856,6 +1953,7 @@ async def startup_event():
     logger.info(f"Context Awareness Available: {CONTEXT_AWARENESS_AVAILABLE}")
     logger.info(f"Lead Nurturing Available: {LEAD_NURTURING_AVAILABLE}")
     logger.info(f"Intelligent Follow-up Available: {INTELLIGENT_FOLLOWUP_AVAILABLE}")
+    logger.info(f"Customer Onboarding Available: {CUSTOMER_ONBOARDING_AVAILABLE}")
 
     try:
         from scheduled_executor import scheduler
