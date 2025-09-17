@@ -10,12 +10,15 @@ from typing import Dict, List, Optional, Any
 import os
 import json
 import logging
+import uuid
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime, timezone
 import uvicorn
 from memory_system import memory_system
 from orchestrator import orchestrator
+from langgraph_orchestrator import langgraph_orchestrator
+from langchain_core.messages import HumanMessage, SystemMessage
 import asyncio
 
 # Configure logging
@@ -353,6 +356,75 @@ async def search_knowledge(query: Dict[str, Any]):
     )
     return {"results": results, "count": len(results)}
 
+@app.post("/langgraph/workflow")
+async def execute_langgraph_workflow(request: Dict[str, Any]):
+    """Execute a LangGraph-based workflow with advanced orchestration"""
+    try:
+        # Convert request to LangChain messages
+        messages = [
+            SystemMessage(content=request.get('system_prompt', 'You are a helpful AI assistant.')),
+            HumanMessage(content=request.get('prompt', ''))
+        ]
+
+        # Add metadata
+        metadata = {
+            "workflow_id": str(uuid.uuid4()),
+            "user_id": request.get('user_id'),
+            "context": request.get('context', {}),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        # Execute workflow
+        result = await langgraph_orchestrator.run_workflow(messages, metadata)
+
+        return {
+            "workflow_id": metadata["workflow_id"],
+            "success": result["success"],
+            "response": result["response"],
+            "agent_used": result["agent_used"],
+            "errors": result["errors"],
+            "execution_time": result["execution_time"]
+        }
+
+    except Exception as e:
+        logger.error(f"LangGraph workflow error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/langgraph/analyze")
+async def analyze_with_langgraph(data: Dict[str, Any]):
+    """Analyze data using LangGraph orchestration"""
+    try:
+        messages = [
+            SystemMessage(content="You are a data analysis expert using advanced AI orchestration."),
+            HumanMessage(content=f"Analyze this data: {json.dumps(data.get('data', {}))}")
+        ]
+
+        result = await langgraph_orchestrator.run_workflow(messages, {"analysis_type": data.get('type', 'general')})
+
+        return {
+            "analysis": result["response"],
+            "agent": result["agent_used"],
+            "success": result["success"]
+        }
+
+    except Exception as e:
+        logger.error(f"LangGraph analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/langgraph/status")
+async def get_langgraph_status():
+    """Get LangGraph orchestrator status"""
+    return {
+        "status": "operational",
+        "components": {
+            "openai_llm": langgraph_orchestrator.openai_llm is not None,
+            "anthropic_llm": langgraph_orchestrator.anthropic_llm is not None,
+            "vector_store": langgraph_orchestrator.vector_store is not None,
+            "workflow_graph": langgraph_orchestrator.workflow is not None
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -362,6 +434,7 @@ async def startup_event():
     asyncio.create_task(scheduler.run_scheduler())
 
     logger.info("Scheduled executor started")
+    logger.info("LangGraph orchestrator initialized")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
