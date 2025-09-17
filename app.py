@@ -16,8 +16,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Build timestamp for cache busting
-BUILD_TIME = "2025-09-17T22:10:00Z"  # SYNC VERSION
-logger.info(f"🚀 Starting BrainOps AI v4.0.4 - Build: {BUILD_TIME}")
+BUILD_TIME = "2025-09-17T22:15:00Z"  # DIAGNOSTIC
+logger.info(f"🚀 Starting BrainOps AI v4.0.5 - Build: {BUILD_TIME}")
 
 # Import REAL AI Core with error handling
 try:
@@ -35,7 +35,7 @@ except Exception as e:
 app = FastAPI(
     title="BrainOps AI Agents - REAL AI v4.0.3",
     description="Production AI System with GPT-4 & Claude",
-    version="4.0.4"  # Synchronous AI for stability
+    version="4.0.5"  # Diagnostic version
 )
 
 # Add CORS middleware
@@ -143,7 +143,7 @@ async def health():
 
     return {
         "status": "healthy" if AI_AVAILABLE else "degraded",
-        "version": "4.0.4",
+        "version": "4.0.5",
         "build": BUILD_TIME,
         "database": db_status,
         "ai_enabled": AI_AVAILABLE,
@@ -260,6 +260,32 @@ async def ai_status():
         if conn:
             conn.close()
         return {"status": "error", "message": str(e), "ai_available": AI_AVAILABLE}
+
+@app.get("/ai/diagnostic")
+async def ai_diagnostic():
+    """Diagnostic endpoint to check AI setup"""
+    import os
+
+    result = {
+        "openai_key_set": bool(os.getenv("OPENAI_API_KEY")),
+        "openai_key_length": len(os.getenv("OPENAI_API_KEY", "")),
+        "anthropic_key_set": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "anthropic_key_length": len(os.getenv("ANTHROPIC_API_KEY", "")),
+        "ai_available": AI_AVAILABLE,
+        "ai_core_exists": ai_core is not None,
+    }
+
+    # Try to import sync version
+    try:
+        from ai_core_sync import sync_ai_core
+        result["sync_import"] = True
+        result["sync_openai_client"] = sync_ai_core.openai_client is not None
+        result["sync_anthropic_client"] = sync_ai_core.anthropic_client is not None
+    except Exception as e:
+        result["sync_import"] = False
+        result["sync_error"] = str(e)[:100]
+
+    return result
 
 @app.post("/ai/test")
 async def ai_test(request: Dict[str, Any]):
