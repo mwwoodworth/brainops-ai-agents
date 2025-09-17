@@ -189,8 +189,7 @@ try:
     from self_healing_recovery import (
         get_self_healing_recovery,
         RecoveryStrategy,
-        ErrorSeverity,
-        ComponentHealth
+        ErrorSeverity
     )
     SELF_HEALING_AVAILABLE = True
     logger.info("Self-healing recovery module loaded successfully")
@@ -273,7 +272,6 @@ try:
         get_lead_nurturing_system,
         NurtureSequenceType,
         LeadSegment,
-        TouchpointType,
         PersonalizationEngine,
         DeliveryManager
     )
@@ -286,7 +284,6 @@ except ImportError as e:
     lead_nurturing_system = None
     NurtureSequenceType = None
     LeadSegment = None
-    TouchpointType = None
     PersonalizationEngine = None
     DeliveryManager = None
 

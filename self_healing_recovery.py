@@ -953,9 +953,12 @@ class SelfHealingRecovery:
 # Singleton instance
 _self_healing = None
 
-def get_self_healing():
+def get_self_healing_recovery():
     """Get or create self-healing instance"""
     global _self_healing
     if _self_healing is None:
         _self_healing = SelfHealingRecovery()
     return _self_healing
+
+# Alias for backward compatibility
+get_self_healing = get_self_healing_recovery

@@ -916,7 +916,7 @@ class DeliveryManager:
 # Singleton instance
 _nurturing_system = None
 
-def get_nurturing_system() -> LeadNurturingSystem:
+def get_lead_nurturing_system():
     """Get or create the nurturing system instance"""
     global _nurturing_system
     if _nurturing_system is None:
