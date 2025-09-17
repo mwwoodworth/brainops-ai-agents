@@ -37,6 +37,7 @@ ACQUISITION_AVAILABLE = False
 PRICING_ENGINE_AVAILABLE = False
 NOTEBOOK_LM_AVAILABLE = False
 CONVERSATION_MEMORY_AVAILABLE = False
+SYSTEM_STATE_AVAILABLE = False
 
 # Try to import advanced modules
 try:
@@ -117,11 +118,33 @@ except ImportError as e:
     conversation_memory = None
     MessageRole = None
 
+try:
+    from system_state_manager import (
+        get_system_state_manager,
+        SystemComponent,
+        ServiceStatus,
+        check_system_health,
+        monitor_component,
+        trigger_system_recovery
+    )
+    SYSTEM_STATE_AVAILABLE = True
+    logger.info("System state management module loaded successfully")
+    system_state_manager = None  # Will be initialized lazily
+except ImportError as e:
+    logger.warning(f"System state management not available: {e}")
+    get_system_state_manager = None
+    system_state_manager = None
+    SystemComponent = None
+    ServiceStatus = None
+    check_system_health = None
+    monitor_component = None
+    trigger_system_recovery = None
+
 # Create FastAPI app
 app = FastAPI(
     title="BrainOps AI Agent Service",
     description="Orchestration service for AI agents",
-    version="2.2.0"  # Added conversation memory persistence
+    version="2.3.0"  # Added system state management
 )
 
 # Add CORS middleware
@@ -710,6 +733,112 @@ if CONVERSATION_MEMORY_AVAILABLE:
             logger.error(f"Search failed: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+# System state management endpoints
+if SYSTEM_STATE_AVAILABLE:
+    @app.get("/system/status")
+    async def get_system_status():
+        """Get comprehensive system status"""
+        try:
+            global system_state_manager
+            if system_state_manager is None:
+                system_state_manager = get_system_state_manager()
+
+            return system_state_manager.get_system_status()
+        except Exception as e:
+            logger.error(f"Failed to get system status: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/system/health-check")
+    async def perform_health_check():
+        """Perform full system health check"""
+        try:
+            snapshot = await check_system_health()
+            return {
+                "snapshot_id": snapshot.snapshot_id,
+                "timestamp": snapshot.timestamp.isoformat(),
+                "overall_status": snapshot.overall_status.value,
+                "health_score": snapshot.health_score,
+                "active_components": snapshot.active_components,
+                "failed_components": snapshot.failed_components,
+                "warning_count": snapshot.warning_count,
+                "pending_tasks": snapshot.pending_tasks,
+                "completed_tasks": snapshot.completed_tasks
+            }
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/system/component/{component_name}")
+    async def get_component_status(component_name: str):
+        """Get status of specific component"""
+        try:
+            component = SystemComponent[component_name.upper()]
+            state = await monitor_component(component)
+
+            return {
+                "component": state.component,
+                "status": state.status.value,
+                "health_score": state.health_score,
+                "last_check": state.last_check.isoformat(),
+                "error_count": state.error_count,
+                "success_rate": state.success_rate,
+                "latency_ms": state.latency_ms,
+                "metadata": state.metadata,
+                "dependencies": state.dependencies
+            }
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Unknown component: {component_name}")
+        except Exception as e:
+            logger.error(f"Component check failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/system/recovery")
+    async def trigger_recovery(component_name: str, error_type: str):
+        """Trigger recovery action for component"""
+        try:
+            component = SystemComponent[component_name.upper()]
+            success = await trigger_system_recovery(component, error_type)
+
+            return {
+                "component": component_name,
+                "error_type": error_type,
+                "recovery_triggered": success,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Unknown component: {component_name}")
+        except Exception as e:
+            logger.error(f"Recovery failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/system/alert")
+    async def create_system_alert(
+        alert_type: str,
+        severity: str,
+        message: str,
+        component: Optional[str] = None,
+        details: Optional[Dict] = None
+    ):
+        """Create system alert"""
+        try:
+            global system_state_manager
+            if system_state_manager is None:
+                system_state_manager = get_system_state_manager()
+
+            system_state_manager.create_alert(
+                alert_type, severity, component, message, details
+            )
+
+            return {
+                "status": "alert_created",
+                "alert_type": alert_type,
+                "severity": severity,
+                "message": message
+            }
+        except Exception as e:
+            logger.error(f"Alert creation failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
@@ -720,6 +849,8 @@ async def startup_event():
     logger.info(f"Acquisition Available: {ACQUISITION_AVAILABLE}")
     logger.info(f"Pricing Engine Available: {PRICING_ENGINE_AVAILABLE}")
     logger.info(f"Notebook LM+ Available: {NOTEBOOK_LM_AVAILABLE}")
+    logger.info(f"Conversation Memory Available: {CONVERSATION_MEMORY_AVAILABLE}")
+    logger.info(f"System State Available: {SYSTEM_STATE_AVAILABLE}")
 
     try:
         from scheduled_executor import scheduler
@@ -727,6 +858,21 @@ async def startup_event():
         logger.info("Scheduled executor started")
     except ImportError:
         logger.warning("Scheduled executor not available")
+
+    # Start system health monitoring
+    if SYSTEM_STATE_AVAILABLE:
+        async def periodic_health_check():
+            """Perform periodic system health checks"""
+            while True:
+                try:
+                    await asyncio.sleep(300)  # Check every 5 minutes
+                    snapshot = await check_system_health()
+                    logger.info(f"System health check: {snapshot.overall_status.value}, score: {snapshot.health_score:.1f}")
+                except Exception as e:
+                    logger.error(f"Periodic health check failed: {e}")
+
+        asyncio.create_task(periodic_health_check())
+        logger.info("System health monitoring started")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
