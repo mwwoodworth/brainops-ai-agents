@@ -832,10 +832,11 @@ async def get_agent_executions(limit: int = 50):
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("""
             SELECT
-                id, agent_id, agent_name, status,
-                started_at, completed_at, result, error_message
+                id, agent_name, task_type, status,
+                input_data, output_data, error_message,
+                execution_time_ms, created_at
             FROM ai_agent_executions
-            ORDER BY started_at DESC
+            ORDER BY created_at DESC
             LIMIT %s
         """, (limit,))
 
@@ -844,9 +845,7 @@ async def get_agent_executions(limit: int = 50):
         # Convert to JSON-serializable format
         for exec in executions:
             exec['id'] = str(exec['id'])
-            exec['agent_id'] = str(exec['agent_id'])
-            exec['started_at'] = exec['started_at'].isoformat() if exec['started_at'] else None
-            exec['completed_at'] = exec['completed_at'].isoformat() if exec['completed_at'] else None
+            exec['created_at'] = exec['created_at'].isoformat() if exec.get('created_at') else None
 
         cursor.close()
         conn.close()

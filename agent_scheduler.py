@@ -14,6 +14,7 @@ import os
 from typing import Dict, List, Optional, Any
 import asyncio
 import uuid
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +51,9 @@ class AgentScheduler:
             execution_id = str(uuid.uuid4())
             cur.execute("""
                 INSERT INTO ai_agent_executions
-                (id, agent_id, agent_name, status, started_at)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (execution_id, agent_id, agent_name, 'running', datetime.utcnow()))
+                (id, agent_name, status)
+                VALUES (%s, %s, %s)
+            """, (execution_id, agent_name, 'running'))
             conn.commit()
 
             # Get agent configuration
@@ -63,23 +64,25 @@ class AgentScheduler:
                 logger.error(f"Agent {agent_id} not found")
                 cur.execute("""
                     UPDATE ai_agent_executions
-                    SET status = %s, completed_at = %s, error_message = %s
+                    SET status = %s, error_message = %s
                     WHERE id = %s
-                """, ('failed', datetime.utcnow(), 'Agent not found', execution_id))
+                """, ('failed', 'Agent not found', execution_id))
                 conn.commit()
                 cur.close()
                 conn.close()
                 return
 
             # Execute based on agent type
+            start_time = datetime.utcnow()
             result = await self._execute_by_type(agent, cur, conn)
+            execution_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
 
             # Record execution completion
             cur.execute("""
                 UPDATE ai_agent_executions
-                SET status = %s, completed_at = %s, result = %s
+                SET status = %s, output_data = %s, execution_time_ms = %s
                 WHERE id = %s
-            """, ('completed', datetime.utcnow(), result, execution_id))
+            """, ('completed', json.dumps(result), execution_time_ms, execution_id))
 
             # Update agent statistics
             cur.execute("""
@@ -114,9 +117,9 @@ class AgentScheduler:
                     cur = conn.cursor()
                     cur.execute("""
                         UPDATE ai_agent_executions
-                        SET status = %s, completed_at = %s, error_message = %s
+                        SET status = %s, error_message = %s
                         WHERE id = %s
-                    """, ('failed', datetime.utcnow(), str(e), execution_id))
+                    """, ('failed', str(e), execution_id))
                     conn.commit()
                     cur.close()
                     conn.close()
