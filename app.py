@@ -15,6 +15,15 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import uuid
 
+# Import agent scheduler
+try:
+    from agent_scheduler import AgentScheduler, create_execution_table
+    SCHEDULER_AVAILABLE = True
+    logger.info("✅ Agent Scheduler module loaded")
+except ImportError as e:
+    SCHEDULER_AVAILABLE = False
+    logger.warning(f"Agent Scheduler not available: {e}")
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,6 +71,20 @@ DB_CONFIG = {
 
 # Log configuration for debugging
 logger.info(f"Database config - Host: {DB_CONFIG['host']}, User: {DB_CONFIG['user'][:10]}..., Port: {DB_CONFIG['port']}")
+
+# Initialize agent scheduler
+agent_scheduler = None
+if SCHEDULER_AVAILABLE:
+    try:
+        # Create execution table
+        create_execution_table(DB_CONFIG)
+
+        # Initialize scheduler
+        agent_scheduler = AgentScheduler(DB_CONFIG)
+        agent_scheduler.start()
+        logger.info("✅ Agent Scheduler started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start agent scheduler: {e}")
 
 def get_db_connection():
     """Get database connection with error handling"""
@@ -779,6 +802,145 @@ async def get_experiments():
         if conn:
             conn.close()
         return {"experiments": [], "status": "error"}
+
+# ============================================================================
+# AGENT SCHEDULER ENDPOINTS
+# ============================================================================
+
+@app.get("/scheduler/status")
+async def get_scheduler_status():
+    """Get agent scheduler status"""
+    if not SCHEDULER_AVAILABLE or not agent_scheduler:
+        return {
+            "available": False,
+            "message": "Scheduler not available"
+        }
+
+    return {
+        "available": True,
+        "status": agent_scheduler.get_status()
+    }
+
+@app.get("/scheduler/executions")
+async def get_agent_executions(limit: int = 50):
+    """Get recent agent executions"""
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT
+                id, agent_id, agent_name, status,
+                started_at, completed_at, result, error_message
+            FROM ai_agent_executions
+            ORDER BY started_at DESC
+            LIMIT %s
+        """, (limit,))
+
+        executions = cursor.fetchall()
+
+        # Convert to JSON-serializable format
+        for exec in executions:
+            exec['id'] = str(exec['id'])
+            exec['agent_id'] = str(exec['agent_id'])
+            exec['started_at'] = exec['started_at'].isoformat() if exec['started_at'] else None
+            exec['completed_at'] = exec['completed_at'].isoformat() if exec['completed_at'] else None
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "total": len(executions),
+            "executions": executions
+        }
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        logger.error(f"Error fetching executions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/scheduler/execute/{agent_id}")
+async def manually_execute_agent(agent_id: str):
+    """Manually trigger an agent execution"""
+    if not SCHEDULER_AVAILABLE or not agent_scheduler:
+        raise HTTPException(status_code=503, detail="Scheduler not available")
+
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT id, name FROM ai_agents WHERE id = %s", (agent_id,))
+        agent = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        # Execute agent asynchronously
+        asyncio.create_task(agent_scheduler.execute_agent(agent['id'], agent['name']))
+
+        return {
+            "status": "triggered",
+            "agent_id": str(agent['id']),
+            "agent_name": agent['name'],
+            "message": "Agent execution started"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.close()
+        logger.error(f"Error triggering agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/scheduler/agents")
+async def get_scheduled_agents():
+    """Get all agents with schedules"""
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT
+                a.id, a.name, a.type, a.status,
+                s.schedule_type, s.frequency_minutes,
+                s.last_execution, s.next_execution, s.enabled
+            FROM ai_agents a
+            LEFT JOIN agent_schedules s ON s.agent_id = a.id
+            WHERE a.is_active = true
+            ORDER BY a.name
+        """)
+
+        agents = cursor.fetchall()
+
+        # Convert to JSON-serializable format
+        for agent in agents:
+            agent['id'] = str(agent['id'])
+            agent['last_execution'] = agent['last_execution'].isoformat() if agent['last_execution'] else None
+            agent['next_execution'] = agent['next_execution'].isoformat() if agent['next_execution'] else None
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "total": len(agents),
+            "agents": agents
+        }
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        logger.error(f"Error fetching agents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
