@@ -941,6 +941,105 @@ async def get_scheduled_agents():
         logger.error(f"Error fetching agents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ============================================================================
+# KNOWLEDGE AGENT ENDPOINTS - Permanent Memory for Claude Code
+# ============================================================================
+
+# Initialize knowledge agent
+knowledge_agent_instance = None
+
+try:
+    from knowledge_agent import get_knowledge_agent
+    knowledge_agent_instance = get_knowledge_agent(DB_CONFIG)
+    KNOWLEDGE_AGENT_AVAILABLE = True
+    logger.info("✅ Knowledge Agent initialized")
+except Exception as e:
+    KNOWLEDGE_AGENT_AVAILABLE = False
+    logger.warning(f"Knowledge Agent not available: {e}")
+
+@app.post("/knowledge/store")
+async def store_knowledge(request: Dict[str, Any]):
+    """Store knowledge with vector embeddings for Claude Code sessions"""
+    if not KNOWLEDGE_AGENT_AVAILABLE or not knowledge_agent_instance:
+        raise HTTPException(status_code=503, detail="Knowledge Agent not available")
+
+    try:
+        result = await knowledge_agent_instance.store_knowledge(request)
+        return {
+            "success": True,
+            "data": result,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Knowledge storage error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/knowledge/query")
+async def query_knowledge(request: Dict[str, Any]):
+    """Semantic search across knowledge base"""
+    if not KNOWLEDGE_AGENT_AVAILABLE or not knowledge_agent_instance:
+        raise HTTPException(status_code=503, detail="Knowledge Agent not available")
+
+    query = request.get('query')
+    if not query:
+        raise HTTPException(status_code=400, detail="Query required")
+
+    try:
+        results = await knowledge_agent_instance.query_knowledge(
+            query,
+            request.get('filters')
+        )
+        return {
+            "success": True,
+            "data": results,
+            "count": len(results),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Knowledge query error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/knowledge/context-summary")
+async def get_context_summary():
+    """Get comprehensive context for Claude Code sessions - CRITICAL FOR CLAUDE"""
+    if not KNOWLEDGE_AGENT_AVAILABLE or not knowledge_agent_instance:
+        raise HTTPException(status_code=503, detail="Knowledge Agent not available")
+
+    try:
+        summary = await knowledge_agent_instance.get_context_summary()
+        return {
+            "success": True,
+            "data": summary,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Context summary error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/knowledge/ask")
+async def ask_knowledge(request: Dict[str, Any]):
+    """AI-powered question answering using knowledge base"""
+    if not KNOWLEDGE_AGENT_AVAILABLE or not knowledge_agent_instance:
+        raise HTTPException(status_code=503, detail="Knowledge Agent not available")
+
+    question = request.get('question')
+    if not question:
+        raise HTTPException(status_code=400, detail="Question required")
+
+    try:
+        answer = await knowledge_agent_instance.ask(
+            question,
+            request.get('context')
+        )
+        return {
+            "success": True,
+            "data": answer,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Knowledge ask error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
