@@ -65,7 +65,7 @@ class UltimateAISystem:
         if GOOGLE_API_KEY and GEMINI_AVAILABLE:
             try:
                 genai.configure(api_key=GOOGLE_API_KEY)
-                self.gemini_model = genai.GenerativeModel('gemini-pro')
+                self.gemini_model = genai.GenerativeModel('gemini-1.5-pro-002')
                 logger.info("✅ Gemini initialized")
             except Exception as e:
                 logger.error(f"Gemini init error: {e}")

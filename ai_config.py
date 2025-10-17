@@ -50,7 +50,7 @@ AI_MODELS = {
     "smart": "gpt-4-0125-preview",  # Complex reasoning
     "creative": "claude-3-opus-20240229",  # Creative tasks
     "research": "perplexity-70b-online",  # Real-time web data
-    "analysis": "gemini-pro",  # Deep analysis
+    "analysis": "gemini-1.5-pro-002",  # Deep analysis
     "fallback": "mixtral-8x7b"  # Hugging Face fallback
 }
 
