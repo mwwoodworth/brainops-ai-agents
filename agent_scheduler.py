@@ -374,21 +374,10 @@ def create_execution_table(db_config: Dict):
         conn = psycopg2.connect(**db_config)
         cur = conn.cursor()
 
+        # Table already exists with different schema - just ensure indexes
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS ai_agent_executions (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                agent_id UUID NOT NULL REFERENCES ai_agents(id),
-                agent_name VARCHAR(100),
-                status VARCHAR(20) NOT NULL,
-                started_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                completed_at TIMESTAMP,
-                result JSONB,
-                error_message TEXT,
-                created_at TIMESTAMP DEFAULT NOW()
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_agent_executions_agent_id ON ai_agent_executions(agent_id);
-            CREATE INDEX IF NOT EXISTS idx_agent_executions_started_at ON ai_agent_executions(started_at);
+            CREATE INDEX IF NOT EXISTS idx_agent_executions_agent ON ai_agent_executions(agent_name);
+            CREATE INDEX IF NOT EXISTS idx_agent_executions_created ON ai_agent_executions(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_agent_executions_status ON ai_agent_executions(status);
         """)
 
