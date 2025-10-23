@@ -2,9 +2,10 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Security, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.security import APIKeyHeader
 import os
 import asyncio
 import logging
@@ -46,17 +47,53 @@ except Exception as e:
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="BrainOps AI Agents - REAL AI v4.0.3",
-    description="Production AI System with GPT-4 & Claude",
-    version="4.0.5"  # Diagnostic version
+    title="BrainOps AI Agents - REAL AI v4.0.5",
+    description="Production AI System with GPT-4, Claude & Gemini - Enhanced Security",
+    version="4.0.5"
 )
 
-# Add CORS middleware
+# API Key authentication configuration
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+# Load API keys from environment (comma-separated for multiple keys)
+VALID_API_KEYS = set(os.getenv("API_KEYS", "").split(",")) if os.getenv("API_KEYS") else set()
+# For backward compatibility, also check AUTH_REQUIRED flag
+AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "false").lower() == "true"
+
+async def verify_api_key(api_key: str = Security(api_key_header)):
+    """Verify API key for protected endpoints"""
+    # If auth not required or no keys configured, allow all requests
+    if not AUTH_REQUIRED or not VALID_API_KEYS:
+        return None
+
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="API key required. Provide X-API-Key header."
+        )
+
+    if api_key not in VALID_API_KEYS:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid API key"
+        )
+
+    return api_key
+
+# Add CORS middleware with more restrictive settings
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://weathercraft-erp.vercel.app",
+        "https://myroofgenius.com",
+        "https://brainops-backend-prod.onrender.com",
+        "http://localhost:3000",  # for local development
+        "http://localhost:8000",  # for local testing
+        "*"  # TODO: Remove wildcard after confirming all origins
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -198,7 +235,7 @@ async def health():
 
 @app.get("/agents")
 async def get_agents():
-    """Get all AI agents"""
+    """Get all AI agents with categories"""
     conn = get_db_connection()
     if not conn:
         raise HTTPException(status_code=503, detail="Database unavailable")
@@ -206,7 +243,7 @@ async def get_agents():
     try:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("""
-            SELECT id, name, type, status, capabilities, created_at
+            SELECT id, name, type, status, capabilities, created_at, metadata
             FROM ai_agents
             WHERE status = 'active'
             ORDER BY created_at DESC
@@ -214,10 +251,17 @@ async def get_agents():
         """)
         agents = cursor.fetchall()
 
-        # Convert to JSON-serializable format
+        # Convert to JSON-serializable format and extract category
         for agent in agents:
             agent['id'] = str(agent['id'])
             agent['created_at'] = agent['created_at'].isoformat() if agent['created_at'] else None
+            # Extract category from metadata
+            if agent.get('metadata') and isinstance(agent['metadata'], dict):
+                agent['category'] = agent['metadata'].get('category')
+            else:
+                agent['category'] = None
+            # Remove metadata from response to keep it clean
+            agent.pop('metadata', None)
 
         cursor.close()
         conn.close()
