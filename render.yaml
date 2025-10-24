@@ -2,11 +2,13 @@ services:
   - type: web
     name: brainops-ai-agents
     runtime: python
-    plan: standard
+    # IMPORTANT: Using free tier to minimize costs during bootstrap
+    plan: free  # Changed from standard to save money!
     repo: https://github.com/mwwoodworth/brainops-ai-agents
     branch: main
     buildCommand: pip install -r requirements.txt
-    startCommand: ./startup.sh
+    # Direct Python execution for the new integrated system
+    startCommand: python main_integration.py
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
@@ -22,7 +24,26 @@ services:
         value: 5432
       - key: SYSTEM_USER_ID
         value: 44491c1c-0e28-4aa1-ad33-552d1386769c
+      - key: TENANT_ID
+        value: "weathercraft"  # Default tenant for Weathercraft
+      - key: PORT
+        value: "10000"  # Render's default port
+      - key: WEB_CONCURRENCY
+        value: "2"  # Optimize for free tier
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: ENVIRONMENT
+        value: "production"
+      # AI API Keys (set in Render dashboard for security)
       - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_AI_API_KEY
         sync: false
       - key: REDIS_URL
         sync: false
+    # Health check for monitoring
+    healthCheckPath: /health
+    # Auto-deploy on git push
+    autoDeploy: true
