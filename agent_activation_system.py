@@ -90,7 +90,7 @@ class Agent:
     triggers: List[BusinessEventType]
     capabilities: List[str]
     priority: int = 5  # 1-10, higher is more important
-    timeout: int = 30  # seconds
+    timeout: int = 120  # seconds (increased from 30)
     retry_count: int = 3
     enabled: bool = True
 
