@@ -73,16 +73,18 @@ class AutonomyRequest(BaseModel):
 
 
 class AgentActivationRequest(BaseModel):
-    agent_name: str
+    agent_name: Optional[str] = None
+    event_type: Optional[str] = None  # Alternative field name
+    data: Optional[Dict[str, Any]] = {}  # Alternative to context
     context: Optional[Dict[str, Any]] = {}
     tenant_id: Optional[str] = "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
 
 
 class ProposalRequest(BaseModel):
-    type: str
+    type: Optional[str] = "STRATEGIC"
     title: str
     description: str
-    impact_analysis: Dict[str, Any]
+    impact_analysis: Optional[Dict[str, Any]] = {}
     urgency: int = 5
 
 
@@ -254,20 +256,59 @@ async def activate_agent(request: AgentActivationRequest, background_tasks: Back
         raise HTTPException(status_code=503, detail="System not initialized")
 
     try:
-        # Run activation in background
-        background_tasks.add_task(
-            activation_system.activate_agent_by_name,
-            request.agent_name,
-            request.context
-        )
-
-        return {
-            "status": "activation_initiated",
-            "agent": request.agent_name,
-            "context": request.context
-        }
+        # Handle both field name styles
+        if request.event_type:
+            # If event_type is provided, trigger by event
+            background_tasks.add_task(
+                activation_system.handle_business_event,
+                BusinessEventType[request.event_type.upper()] if hasattr(BusinessEventType, request.event_type.upper()) else BusinessEventType.GENERAL,
+                request.data or request.context
+            )
+            return {
+                "status": "event_triggered",
+                "event_type": request.event_type,
+                "data": request.data or request.context
+            }
+        elif request.agent_name:
+            # If agent_name is provided, activate specific agent
+            background_tasks.add_task(
+                activation_system.activate_agent_by_name,
+                request.agent_name,
+                request.context or request.data
+            )
+            return {
+                "status": "activation_initiated",
+                "agent": request.agent_name,
+                "context": request.context or request.data
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Either agent_name or event_type must be provided")
     except Exception as e:
         logger.error(f"Failed to activate agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/agents/categories")
+async def get_agent_categories():
+    """Get agent categories and counts"""
+    if not system_initialized:
+        raise HTTPException(status_code=503, detail="System not initialized")
+
+    try:
+        categories = {}
+        for agent_id, agent in activation_system.agents.items():
+            category = agent.category
+            if category not in categories:
+                categories[category] = []
+            categories[category].append(agent.name)
+
+        return {
+            "categories": categories,
+            "counts": {cat: len(agents) for cat, agents in categories.items()},
+            "total_agents": sum(len(agents) for agents in categories.values())
+        }
+    except Exception as e:
+        logger.error(f"Failed to get agent categories: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -349,6 +390,57 @@ async def synthesize_insights():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/memory/store")
+async def store_memory(request: Dict[str, Any]):
+    """Store a memory in the unified system"""
+    if not system_initialized:
+        raise HTTPException(status_code=503, detail="System not initialized")
+
+    try:
+        from unified_memory_manager import Memory, MemoryType
+
+        memory = Memory(
+            memory_type=MemoryType(request.get("memory_type", "episodic")),
+            content=request.get("content", {}),
+            source_system=request.get("source_system", "api"),
+            source_agent=request.get("source_agent", "user"),
+            created_by=request.get("created_by", "api"),
+            importance_score=request.get("importance", 0.5),
+            tags=request.get("tags", []),
+            metadata=request.get("metadata", {}),
+            context_id=request.get("context_id")
+        )
+
+        memory_id = memory_manager.store(memory)
+        return {"success": True, "memory_id": memory_id}
+    except Exception as e:
+        logger.error(f"Memory store failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/memory/recall")
+async def recall_memory(
+    query: Optional[str] = None,
+    context_type: Optional[str] = None,
+    context_id: Optional[str] = None,
+    limit: int = 10
+):
+    """Recall memories from the unified system"""
+    if not system_initialized:
+        raise HTTPException(status_code=503, detail="System not initialized")
+
+    try:
+        memories = memory_manager.recall(
+            query=query if query else {},
+            context=context_id,
+            limit=limit
+        )
+        return {"memories": memories, "count": len(memories)}
+    except Exception as e:
+        logger.error(f"Memory recall failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/aurea/status")
 async def get_aurea_status():
     """Get AUREA orchestrator status"""
@@ -417,6 +509,27 @@ async def get_board_status():
         raise HTTPException(status_code=503, detail="System not initialized")
 
     return ai_board.get_board_status()
+
+
+@app.get("/board/members")
+async def get_board_members():
+    """Get AI board members"""
+    if not system_initialized:
+        raise HTTPException(status_code=503, detail="System not initialized")
+
+    try:
+        # Get board members from AI board
+        members = [
+            {"name": "Magnus", "role": "CEO", "focus": "Strategic Vision"},
+            {"name": "Marcus", "role": "CFO", "focus": "Financial Optimization"},
+            {"name": "Victoria", "role": "COO", "focus": "Operational Excellence"},
+            {"name": "Maxine", "role": "CMO", "focus": "Market Expansion"},
+            {"name": "Elena", "role": "CTO", "focus": "Technical Innovation"}
+        ]
+        return {"members": members, "count": len(members)}
+    except Exception as e:
+        logger.error(f"Failed to get board members: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/board/proposal")
@@ -507,6 +620,12 @@ async def execute_agent_legacy(agent_id: str, request: Dict[str, Any]):
 
 
 # Special endpoints for Weathercraft ERP support
+@app.post("/weathercraft/enhance")
+async def enhance_weathercraft_operation_v1(request: Dict[str, Any]):
+    """Enhance Weathercraft operations (AI assists, doesn't replace) - without /api prefix"""
+    return await enhance_weathercraft_operation(request)
+
+
 @app.post("/api/weathercraft/enhance")
 async def enhance_weathercraft_operation(request: Dict[str, Any]):
     """Enhance Weathercraft operations (AI assists, doesn't replace)"""
@@ -540,6 +659,12 @@ async def enhance_weathercraft_operation(request: Dict[str, Any]):
 
 
 # Special endpoints for MyRoofGenius automation
+@app.post("/myroofgenius/automate")
+async def automate_myroofgenius_operation_v1(request: Dict[str, Any], background_tasks: BackgroundTasks):
+    """Automate MyRoofGenius operations (as autonomous as legally possible) - without /api prefix"""
+    return await automate_myroofgenius_operation(request, background_tasks)
+
+
 @app.post("/api/myroofgenius/automate")
 async def automate_myroofgenius_operation(request: Dict[str, Any], background_tasks: BackgroundTasks):
     """Automate MyRoofGenius operations (as autonomous as legally possible)"""

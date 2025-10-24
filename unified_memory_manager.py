@@ -23,6 +23,17 @@ warnings.filterwarnings('ignore')
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Custom JSON encoder for datetime and Enum types
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, Enum):
+            return obj.value
+        elif hasattr(obj, '__dict__'):
+            return obj.__dict__
+        return super().default(obj)
+
 # Database configuration
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
@@ -117,15 +128,19 @@ class UnifiedMemoryManager:
 
                 search_text = self._generate_search_text(memory)
 
+                # Serialize with custom encoder to handle datetime and Enum
+                content_json = json.dumps(memory.content, cls=CustomJSONEncoder)
+                metadata_json = json.dumps(memory.metadata or {}, cls=CustomJSONEncoder)
+
                 cur.execute(query, (
                     memory.memory_type.value,
-                    Json(memory.content),
+                    content_json,
                     memory.source_system,
                     memory.source_agent,
                     memory.created_by,
                     memory.importance_score,
                     memory.tags or [],
-                    Json(memory.metadata or {}),
+                    metadata_json,
                     memory.context_id,
                     memory.parent_memory_id,
                     [r['id'] for r in related] if related else None,
