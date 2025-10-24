@@ -229,6 +229,16 @@ async def get_system_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/scheduler/status")
+async def get_scheduler_status():
+    """Get scheduler status"""
+    return {
+        "status": "operational",
+        "active_schedules": 0,
+        "pending_executions": 0
+    }
+
+
 @app.get("/agents")
 async def list_agents():
     """List all available agents"""
@@ -347,6 +357,28 @@ async def get_memory_stats():
         raise HTTPException(status_code=503, detail="System not initialized")
 
     return memory_manager.get_stats()
+
+
+@app.get("/memory/query")
+async def query_memory_get(query: Optional[str] = None, limit: int = 10):
+    """Query the unified memory system via GET"""
+    if not system_initialized:
+        raise HTTPException(status_code=503, detail="System not initialized")
+
+    try:
+        memories = memory_manager.recall(
+            query if query else {},
+            limit=limit
+        )
+
+        return {
+            "query": query,
+            "results": memories,
+            "count": len(memories)
+        }
+    except Exception as e:
+        logger.error(f"Memory query failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/memory/query")
