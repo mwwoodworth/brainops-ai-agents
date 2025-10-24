@@ -36,6 +36,7 @@ DB_CONFIG = {
 AGENT_SERVICE_URL = "https://brainops-ai-agents.onrender.com"
 
 
+
 class BusinessEventType(Enum):
     """All business events that can trigger agents"""
     # Customer Events
@@ -80,6 +81,90 @@ class BusinessEventType(Enum):
     SYSTEM_HEALTH_CHECK = "system_health_check"
 
 
+# Default behaviour for category-driven configuration
+CATEGORY_DEFAULT_TRIGGERS: Dict[str, List[BusinessEventType]] = {
+    "Monitoring & Compliance": [
+        BusinessEventType.SYSTEM_HEALTH_CHECK,
+        BusinessEventType.SECURITY_ALERT,
+        BusinessEventType.ERROR_DETECTED
+    ],
+    "Workflow Automation": [
+        BusinessEventType.JOB_CREATED,
+        BusinessEventType.JOB_COMPLETED,
+        BusinessEventType.SCHEDULING_CONFLICT
+    ],
+    "Specialized Operations": [
+        BusinessEventType.ESTIMATE_REQUESTED,
+        BusinessEventType.JOB_SCHEDULED
+    ],
+    "Business Intelligence": [
+        BusinessEventType.DEAL_WON,
+        BusinessEventType.CUSTOMER_CHURN_RISK
+    ],
+    "Financial Operations": [
+        BusinessEventType.INVOICE_CREATED,
+        BusinessEventType.PAYMENT_RECEIVED
+    ],
+    "Optimization": [
+        BusinessEventType.SCHEDULING_CONFLICT,
+        BusinessEventType.RESOURCE_SHORTAGE
+    ],
+    "Communication Interface": [
+        BusinessEventType.NEW_LEAD,
+        BusinessEventType.CUSTOMER_COMPLAINT
+    ],
+    "Content Generation": [
+        BusinessEventType.PROPOSAL_NEEDED,
+        BusinessEventType.DEAL_WON
+    ],
+    "Data Analysis": [
+        BusinessEventType.SYSTEM_HEALTH_CHECK,
+        BusinessEventType.CUSTOMER_UPDATE
+    ],
+    "Universal Operations": [
+        BusinessEventType.SYSTEM_HEALTH_CHECK,
+        BusinessEventType.ERROR_DETECTED
+    ]
+}
+
+CATEGORY_PRIORITY_DEFAULTS: Dict[str, int] = {
+    "Monitoring & Compliance": 9,
+    "Financial Operations": 8,
+    "Business Intelligence": 8,
+    "Workflow Automation": 7,
+    "Optimization": 7,
+    "Specialized Operations": 7,
+    "Communication Interface": 6,
+    "Content Generation": 6,
+    "Data Analysis": 6,
+    "Universal Operations": 7
+}
+
+DEFAULT_AGENT_TIMEOUT = 180  # seconds
+AGENT_TRIGGER_OVERRIDES: Dict[str, List[BusinessEventType]] = {
+    "APIManagementAgent": [
+        BusinessEventType.ERROR_DETECTED,
+        BusinessEventType.SECURITY_ALERT
+    ],
+    "SchedulingAgent": [
+        BusinessEventType.JOB_SCHEDULED,
+        BusinessEventType.SCHEDULING_CONFLICT
+    ],
+    "Scheduler": [
+        BusinessEventType.JOB_CREATED,
+        BusinessEventType.JOB_SCHEDULED
+    ],
+    "MetricsCalculator": [
+        BusinessEventType.PAYMENT_RECEIVED,
+        BusinessEventType.DEAL_WON
+    ],
+    "SystemMonitor": [
+        BusinessEventType.SYSTEM_HEALTH_CHECK,
+        BusinessEventType.ERROR_DETECTED
+    ]
+}
+
+
 @dataclass
 class Agent:
     """Agent definition with complete metadata"""
@@ -95,6 +180,50 @@ class Agent:
     enabled: bool = True
 
 
+def _normalize_capabilities(raw_capabilities: Any) -> List[str]:
+    """Ensure capabilities is an ordered list of human-readable strings."""
+    if raw_capabilities is None:
+        return []
+
+    if isinstance(raw_capabilities, list):
+        return [str(item) for item in raw_capabilities if item]  # filter blanks
+
+    if isinstance(raw_capabilities, dict):
+        return [
+            str(key)
+            for key, value in raw_capabilities.items()
+            if value is None or value is True or str(value).lower() == 'true'
+        ]
+
+    if isinstance(raw_capabilities, str):
+        try:
+            parsed = json.loads(raw_capabilities)
+            return _normalize_capabilities(parsed)
+        except json.JSONDecodeError:
+            return [raw_capabilities]
+
+    return [str(raw_capabilities)]
+
+
+def _category_triggers(category: Optional[str]) -> List[BusinessEventType]:
+    """Map a category name to BusinessEventType triggers."""
+    if not category:
+        return [BusinessEventType.SYSTEM_HEALTH_CHECK]
+
+    triggers = CATEGORY_DEFAULT_TRIGGERS.get(category)
+    if triggers:
+        return triggers
+
+    return [BusinessEventType.SYSTEM_HEALTH_CHECK]
+
+
+def _category_priority(category: Optional[str]) -> int:
+    """Default priority by category."""
+    if not category:
+        return 6
+    return CATEGORY_PRIORITY_DEFAULTS.get(category, 6)
+
+
 class AgentActivationSystem:
     """Complete activation infrastructure for all 59 agents"""
 
@@ -107,9 +236,99 @@ class AgentActivationSystem:
         self._init_database()
 
     def _load_all_agents(self) -> Dict[str, Agent]:
-        """Load all 59 agents with their configurations"""
-        agents = {
-            # Specialized Operations Agents
+        """Load active agents from the production database with static fallback."""
+        agents = self._load_agents_from_db()
+        if agents:
+            logger.info("✅ Loaded %s agents from database", len(agents))
+            return agents
+
+        logger.warning("⚠️ Falling back to static agent catalog (subset only)")
+        return self._load_static_agents()
+
+    def _load_agents_from_db(self) -> Dict[str, Agent]:
+        """Fetch agent definitions from Supabase."""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(
+                """
+                SELECT id, name, metadata, capabilities, config
+                FROM ai_agents
+                WHERE (status = 'active' OR status IS NULL)
+                  AND (is_active = true OR is_active IS NULL)
+                ORDER BY name
+                """
+            )
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+        except Exception as exc:
+            logger.error("❌ Failed to load agents from database: %s", exc)
+            return {}
+
+        if not rows:
+            return {}
+
+        agents: Dict[str, Agent] = {}
+
+        for row in rows:
+            raw_metadata = row.get("metadata") or {}
+            if isinstance(raw_metadata, str):
+                try:
+                    raw_metadata = json.loads(raw_metadata)
+                except json.JSONDecodeError:
+                    raw_metadata = {}
+
+            raw_config = row.get("config") or {}
+            if isinstance(raw_config, str):
+                try:
+                    raw_config = json.loads(raw_config)
+                except json.JSONDecodeError:
+                    raw_config = {}
+
+            category = raw_metadata.get("category") or raw_config.get("category") or "General"
+            description = (
+                raw_metadata.get("description")
+                or raw_metadata.get("summary")
+                or raw_config.get("description")
+                or ""
+            )
+
+            overrides = AGENT_TRIGGER_OVERRIDES.get(row["name"])
+            triggers = overrides or _category_triggers(category)
+
+            priority_raw = raw_metadata.get("priority") or raw_config.get("priority")
+            try:
+                priority = int(priority_raw)
+            except (TypeError, ValueError):
+                priority = _category_priority(category)
+
+            timeout_raw = raw_metadata.get("timeout") or raw_config.get("timeout") or DEFAULT_AGENT_TIMEOUT
+            try:
+                timeout = int(timeout_raw)
+            except (TypeError, ValueError):
+                timeout = DEFAULT_AGENT_TIMEOUT
+
+            capabilities = _normalize_capabilities(row.get("capabilities"))
+
+            agents[str(row["id"])] = Agent(
+                id=str(row["id"]),
+                name=row["name"],
+                category=category,
+                description=description,
+                triggers=triggers,
+                capabilities=capabilities,
+                priority=priority,
+                timeout=timeout,
+                retry_count=int(raw_metadata.get("retry_count") or raw_config.get("retry_count") or 3),
+                enabled=True,
+            )
+
+        return agents
+
+    def _load_static_agents(self) -> Dict[str, Agent]:
+        """Legacy static definition used when database access fails."""
+        return {
             "787f3359-5750-49d5-aef0-0ccf4804a773": Agent(
                 id="787f3359-5750-49d5-aef0-0ccf4804a773",
                 name="Elena",
@@ -119,7 +338,6 @@ class AgentActivationSystem:
                 capabilities=["cost_estimation", "pricing_optimization", "material_calculation"],
                 priority=9
             ),
-
             "648a297e-ea01-401b-bee5-3738dd7d5bd6": Agent(
                 id="648a297e-ea01-401b-bee5-3738dd7d5bd6",
                 name="Scheduler",
@@ -129,7 +347,6 @@ class AgentActivationSystem:
                 capabilities=["schedule_optimization", "conflict_resolution"],
                 priority=8
             ),
-
             "796f68f3-65c4-4856-8865-57d5522c8a3e": Agent(
                 id="796f68f3-65c4-4856-8865-57d5522c8a3e",
                 name="Invoicer",
@@ -139,8 +356,6 @@ class AgentActivationSystem:
                 capabilities=["invoice_generation", "billing", "payment_tracking"],
                 priority=8
             ),
-
-            # Financial Operations
             "eb3996af-1a71-4a4f-9819-5ca61ee293a1": Agent(
                 id="eb3996af-1a71-4a4f-9819-5ca61ee293a1",
                 name="MetricsCalculator",
@@ -150,7 +365,6 @@ class AgentActivationSystem:
                 capabilities=["financial_analysis", "metrics_calculation", "reporting"],
                 priority=7
             ),
-
             "8c647e9d-1a78-4701-a92c-9fb44db9038f": Agent(
                 id="8c647e9d-1a78-4701-a92c-9fb44db9038f",
                 name="TaxCalculator",
@@ -160,8 +374,6 @@ class AgentActivationSystem:
                 capabilities=["tax_calculation", "compliance_checking"],
                 priority=6
             ),
-
-            # Workflow Automation (22 agents total)
             "f52734b3-b4bb-4700-818f-5daad1f795c7": Agent(
                 id="f52734b3-b4bb-4700-818f-5daad1f795c7",
                 name="SchedulingAgent",
@@ -171,7 +383,6 @@ class AgentActivationSystem:
                 capabilities=["advanced_scheduling", "route_optimization", "crew_assignment"],
                 priority=8
             ),
-
             "6662069a-e6d7-4aec-a5ab-60aac93b55d5": Agent(
                 id="6662069a-e6d7-4aec-a5ab-60aac93b55d5",
                 name="DispatchAgent",
@@ -181,7 +392,6 @@ class AgentActivationSystem:
                 capabilities=["dispatch_management", "crew_coordination"],
                 priority=7
             ),
-
             "797a0931-a603-4118-b109-98aa94ac10ae": Agent(
                 id="797a0931-a603-4118-b109-98aa94ac10ae",
                 name="InventoryAgent",
@@ -191,7 +401,6 @@ class AgentActivationSystem:
                 capabilities=["inventory_tracking", "reorder_management", "stock_optimization"],
                 priority=7
             ),
-
             "186aff9f-e214-41c3-a55a-6db3aa401ecb": Agent(
                 id="186aff9f-e214-41c3-a55a-6db3aa401ecb",
                 name="InvoicingAgent",
@@ -201,7 +410,6 @@ class AgentActivationSystem:
                 capabilities=["invoice_automation", "payment_reminders", "collection"],
                 priority=8
             ),
-
             "6a0e9027-b859-4260-b5d2-56c250726a52": Agent(
                 id="6a0e9027-b859-4260-b5d2-56c250726a52",
                 name="CustomerAgent",
@@ -211,8 +419,6 @@ class AgentActivationSystem:
                 capabilities=["customer_service", "retention", "satisfaction_tracking"],
                 priority=8
             ),
-
-            # Business Intelligence
             "2c3d3366-ad2c-4f84-93ad-0130ed0681da": Agent(
                 id="2c3d3366-ad2c-4f84-93ad-0130ed0681da",
                 name="CustomerIntelligence",
@@ -222,7 +428,6 @@ class AgentActivationSystem:
                 capabilities=["churn_prediction", "lifetime_value", "segmentation"],
                 priority=7
             ),
-
             "47a9f25f-f400-4da0-8344-4d436ffd06b2": Agent(
                 id="47a9f25f-f400-4da0-8344-4d436ffd06b2",
                 name="RevenueOptimizer",
@@ -232,8 +437,6 @@ class AgentActivationSystem:
                 capabilities=["pricing_optimization", "upsell_identification", "revenue_forecasting"],
                 priority=8
             ),
-
-            # Monitoring & Compliance (8 agents)
             "18919408-c601-483b-824f-da24428602b7": Agent(
                 id="18919408-c601-483b-824f-da24428602b7",
                 name="SecurityMonitor",
@@ -243,7 +446,6 @@ class AgentActivationSystem:
                 capabilities=["threat_detection", "access_monitoring", "incident_response"],
                 priority=9
             ),
-
             "2d4241fb-6145-46fa-8445-e20edd666cae": Agent(
                 id="2d4241fb-6145-46fa-8445-e20edd666cae",
                 name="PerformanceMonitor",
@@ -253,8 +455,6 @@ class AgentActivationSystem:
                 capabilities=["performance_analysis", "bottleneck_detection", "optimization"],
                 priority=7
             ),
-
-            # Content Generation (4 agents)
             "cca1fd5a-9a07-4fd2-964d-a12f194ee0dd": Agent(
                 id="cca1fd5a-9a07-4fd2-964d-a12f194ee0dd",
                 name="ContractGenerator",
@@ -264,7 +464,6 @@ class AgentActivationSystem:
                 capabilities=["contract_generation", "terms_negotiation", "compliance_checking"],
                 priority=7
             ),
-
             "08434e57-c449-4331-8f58-f3ee7667a386": Agent(
                 id="08434e57-c449-4331-8f58-f3ee7667a386",
                 name="ProposalGenerator",
@@ -274,8 +473,6 @@ class AgentActivationSystem:
                 capabilities=["proposal_creation", "customization", "pricing_inclusion"],
                 priority=8
             ),
-
-            # Communication Interface (4 agents)
             "46c1088b-a68c-4a16-a89f-c88b14891aa8": Agent(
                 id="46c1088b-a68c-4a16-a89f-c88b14891aa8",
                 name="ChatInterface",
@@ -285,8 +482,6 @@ class AgentActivationSystem:
                 capabilities=["chat_support", "query_resolution", "escalation"],
                 priority=6
             ),
-
-            # Optimization (5 agents)
             "9d40635f-b74c-42de-a513-de09eaa776eb": Agent(
                 id="9d40635f-b74c-42de-a513-de09eaa776eb",
                 name="RoutingAgent",
@@ -296,8 +491,6 @@ class AgentActivationSystem:
                 capabilities=["route_planning", "traffic_analysis", "fuel_optimization"],
                 priority=7
             ),
-
-            # Universal Operations (3 agents)
             "ef4082d9-6b61-4c6a-ac51-4fba2a445dd1": Agent(
                 id="ef4082d9-6b61-4c6a-ac51-4fba2a445dd1",
                 name="SystemMonitor",
@@ -308,11 +501,6 @@ class AgentActivationSystem:
                 priority=9
             )
         }
-
-        # Note: This is a subset of the 59 agents. The pattern is established.
-        # In production, all 59 would be defined here with their specific triggers and capabilities.
-
-        return agents
 
     def _init_database(self):
         """Initialize database tables for agent tracking"""

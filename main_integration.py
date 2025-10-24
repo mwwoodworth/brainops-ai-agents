@@ -256,7 +256,12 @@ async def list_agents():
             "capabilities": agent.capabilities
         })
 
-    return {"agents": agents_data, "total": len(agents_data)}
+    total = len(agents_data)
+    return {
+        "agents": agents_data,
+        "total": total,
+        "count": total  # Backwards compatibility with legacy tests
+    }
 
 
 @app.post("/agents/activate")
