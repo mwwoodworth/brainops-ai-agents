@@ -13,19 +13,19 @@ services:
       - key: PYTHON_VERSION
         value: "3.11"
       - key: DB_HOST
-        value: aws-0-us-east-2.pooler.supabase.com
+        sync: false
       - key: DB_NAME
-        value: postgres
+        sync: false
       - key: DB_USER
-        value: postgres.yomagoqdmxszqtdwuhab
+        sync: false
       - key: DB_PASSWORD
-        value: Brain0ps2O2S
+        sync: false
       - key: DB_PORT
-        value: 5432
+        sync: false
       - key: SYSTEM_USER_ID
-        value: 44491c1c-0e28-4aa1-ad33-552d1386769c
+        sync: false
       - key: TENANT_ID
-        value: "weathercraft"  # Default tenant for Weathercraft
+        sync: false
       - key: PORT
         value: "10000"  # Render's default port
       - key: WEB_CONCURRENCY
