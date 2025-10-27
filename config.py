@@ -44,6 +44,13 @@ class SecurityConfig:
         
         api_keys_str = os.getenv('API_KEYS', '')
         self.valid_api_keys = set(api_keys_str.split(',')) if api_keys_str else set()
+
+        if self.auth_required and not self.valid_api_keys:
+            logger.warning(
+                "AUTH_REQUIRED enabled but no API keys configured. "
+                "Falling back to unauthenticated mode."
+            )
+            self.auth_required = False
         
         cors_origins_str = os.getenv('ALLOWED_ORIGINS', '')
         if cors_origins_str:
