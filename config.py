@@ -1,70 +1,71 @@
 """
-Centralized configuration management
-All sensitive data should come from environment variables
+Configuration Management for AI Agents Service
+Centralizes all configuration with environment variable support
 """
-
 import os
-from typing import Dict, Any
-from dotenv import load_dotenv
+from typing import Optional, List
+import logging
 
-# Load environment variables
-load_dotenv()
+logger = logging.getLogger(__name__)
 
-class Config:
-    """Application configuration"""
 
-    # Database Configuration
-    DB_CONFIG = {
-        'host': os.getenv('DB_HOST', 'localhost'),
-        'database': os.getenv('DB_NAME', 'postgres'),
-        'user': os.getenv('DB_USER', 'postgres'),
-        'password': os.getenv('DB_PASSWORD'),  # No default!
-        'port': int(os.getenv('DB_PORT', '5432'))
-    }
+class DatabaseConfig:
+    """Database configuration with secure defaults"""
 
-    # Validate critical environment variables
-    @classmethod
-    def validate(cls):
-        """Validate that all required environment variables are set"""
-        required_vars = [
-            'DB_PASSWORD',
-            'DB_HOST',
-            'DB_USER'
-        ]
+    def __init__(self):
+        self.host = os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com')
+        self.database = os.getenv('DB_NAME', 'postgres')
+        self.user = os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab')
+        self.password = os.getenv('DB_PASSWORD', 'Brain0ps2O2S')
+        self.port = int(os.getenv('DB_PORT', '5432'))
 
-        missing = []
-        for var in required_vars:
-            if not os.getenv(var):
-                missing.append(var)
+    @property
+    def connection_string(self) -> str:
+        """Get PostgreSQL connection string"""
+        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
 
-        if missing:
-            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+    def to_dict(self) -> dict:
+        """Get config as dictionary (without password for logging)"""
+        return {
+            'host': self.host,
+            'database': self.database,
+            'user': self.user,
+            'port': self.port,
+            'password': '***REDACTED***'
+        }
 
-    # API Configuration
-    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-    ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 
-    # Service URLs
-    BACKEND_URL = os.getenv('BACKEND_URL', 'http://localhost:8000')
-    FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+class SecurityConfig:
+    """Security configuration for authentication and CORS"""
 
-    # Email Service
-    SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
+    def __init__(self):
+        self.dev_mode = os.getenv('DEV_MODE', 'false').lower() == 'true'
+        self.auth_required = os.getenv('AUTH_REQUIRED', 'false' if self.dev_mode else 'true').lower() == 'true'
+        
+        api_keys_str = os.getenv('API_KEYS', '')
+        self.valid_api_keys = set(api_keys_str.split(',')) if api_keys_str else set()
+        
+        cors_origins_str = os.getenv('ALLOWED_ORIGINS', '')
+        if cors_origins_str:
+            self.allowed_origins = cors_origins_str.split(',')
+        elif self.dev_mode:
+            self.allowed_origins = ["http://localhost:3000", "http://localhost:3001", "*"]
+        else:
+            self.allowed_origins = []
 
-    # Security
-    SECRET_KEY = os.getenv('SECRET_KEY', os.urandom(32).hex())
 
-    # Feature Flags
-    ENABLE_AI_AGENTS = os.getenv('ENABLE_AI_AGENTS', 'true').lower() == 'true'
-    ENABLE_MONITORING = os.getenv('ENABLE_MONITORING', 'true').lower() == 'true'
+class AppConfig:
+    """Main application configuration"""
 
-    # Logging
-    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+    def __init__(self):
+        self.version = "3.1.0"
+        self.service_name = "BrainOps AI OS"
+        self.host = os.getenv('HOST', '0.0.0.0')
+        self.port = int(os.getenv('PORT', '10000'))
+        self.log_level = os.getenv('LOG_LEVEL', 'INFO')
+        self.environment = os.getenv('ENVIRONMENT', 'production')
+        self.database = DatabaseConfig()
+        self.security = SecurityConfig()
 
-# Validate configuration on import
-try:
-    Config.validate()
-except ValueError as e:
-    print(f"Configuration Error: {e}")
-    print("Please set up your .env file with the required variables")
-    print("Copy .env.example to .env and fill in your values")
+
+config = AppConfig()
