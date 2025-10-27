@@ -1,15 +1,62 @@
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.git
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+.pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+
+# Git
+.git/
 .gitignore
-.env
+
+# Testing
+test_*.py
+tests/
+pytest.ini
+.coverage
+
+# Documentation
 *.md
-.python-version
-render.yaml
-startup.sh
-deploy_agents.py
-fix_production.py
-*.log
+docs/
+README*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Old backups
+*_backup.py
+*_original.py
+app_enhanced.py
+app_original_backup.py
+main_integration.py
+
+# Development
+.env
+.env.*
+render.yaml
+docker-compose.yml
