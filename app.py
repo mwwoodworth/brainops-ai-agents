@@ -7,9 +7,11 @@ import os
 import asyncio
 import json
 import uuid
+import inspect
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
+from collections import deque
 
 from fastapi import FastAPI, HTTPException, Request, Security, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +20,13 @@ from fastapi.security import APIKeyHeader
 
 # Import our production-ready components
 from config import config
-from database.async_connection import init_pool, get_pool, close_pool, PoolConfig
+from database.async_connection import (
+    init_pool,
+    get_pool,
+    close_pool,
+    PoolConfig,
+    using_fallback,
+)
 from models.agent import Agent, AgentCategory, AgentExecution, AgentList
 from api.memory import router as memory_router
 
@@ -32,6 +40,7 @@ logger = logging.getLogger(__name__)
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
 VERSION = "5.0.0"  # Major version bump for async rewrite
+LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 
 # Import agent scheduler with fallback
 try:
@@ -55,6 +64,86 @@ except Exception as e:
     ai_core = None
 
 
+def _parse_capabilities(raw: Any) -> List[Dict[str, Any]]:
+    """Normalize capabilities payload into the Pydantic-friendly format."""
+    if raw is None:
+        return []
+
+    data: Any = raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return [
+                {
+                    "name": raw,
+                    "description": "",
+                    "enabled": True,
+                    "parameters": {},
+                }
+            ]
+
+    if isinstance(data, dict):
+        # Single capability as dict
+        data = [data]
+
+    capabilities: List[Dict[str, Any]] = []
+    for item in data if isinstance(data, list) else []:
+        if isinstance(item, str):
+            capabilities.append(
+                {
+                    "name": item,
+                    "description": "",
+                    "enabled": True,
+                    "parameters": {},
+                }
+            )
+        elif isinstance(item, dict):
+            capabilities.append(
+                {
+                    "name": item.get("name") or item.get("capability") or item.get("id") or "capability",
+                    "description": item.get("description", ""),
+                    "enabled": bool(item.get("enabled", True)),
+                    "parameters": item.get("parameters", {}),
+                }
+            )
+    return capabilities
+
+
+def _parse_configuration(raw: Any) -> Dict[str, Any]:
+    """Normalize configuration payload."""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _row_to_agent(row: Dict[str, Any]) -> Agent:
+    """Convert a database row (asyncpg or fallback dict) to an Agent model."""
+    category_value = row.get("category") or AgentCategory.OTHER.value
+    if category_value not in {c.value for c in AgentCategory}:
+        category_value = AgentCategory.OTHER.value
+
+    return Agent(
+        id=str(row["id"]),
+        name=row["name"],
+        category=category_value,
+        description=row.get("description") or "",
+        enabled=bool(row.get("enabled", True)),
+        capabilities=_parse_capabilities(row.get("capabilities")),
+        configuration=_parse_configuration(row.get("configuration")),
+        created_at=row.get("created_at"),
+        updated_at=row.get("updated_at"),
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
@@ -71,7 +160,10 @@ async def lifespan(app: FastAPI):
             database=config.database.database
         )
         await init_pool(pool_config)
-        logger.info("✅ Database pool initialized")
+        if using_fallback():
+            logger.warning("⚠️ Running with in-memory fallback datastore (database unreachable).")
+        else:
+            logger.info("✅ Database pool initialized")
 
         # Test connection
         pool = get_pool()
@@ -160,12 +252,13 @@ async def health_check():
     """Health check endpoint"""
     pool = get_pool()
     db_healthy = await pool.test_connection()
+    db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
 
     return {
         "status": "healthy" if db_healthy else "degraded",
         "version": VERSION,
         "build": BUILD_TIME,
-        "database": "connected" if db_healthy else "disconnected",
+        "database": db_status,
         "ai_core": "enabled" if AI_AVAILABLE else "disabled",
         "scheduler": "enabled" if SCHEDULER_AVAILABLE else "disabled",
         "config": {
@@ -206,20 +299,10 @@ async def get_agents(
         rows = await pool.fetch(query, *params)
 
         # Convert to models
-        agents = []
-        for row in rows:
-            agent = Agent(
-                id=row["id"],
-                name=row["name"],
-                category=row.get("category", "other"),
-                description=row.get("description", ""),
-                enabled=row.get("enabled", True),
-                capabilities=json.loads(row["capabilities"]) if row.get("capabilities") else [],
-                configuration=json.loads(row["configuration"]) if row.get("configuration") else {},
-                created_at=row.get("created_at"),
-                updated_at=row.get("updated_at")
-            )
-            agents.append(agent)
+        agents = [
+            _row_to_agent(row if isinstance(row, dict) else dict(row))
+            for row in rows
+        ]
 
         return AgentList(
             agents=agents,
@@ -243,8 +326,11 @@ async def execute_agent(
     pool = get_pool()
 
     try:
-        # Get agent
-        agent = await pool.fetchrow("SELECT * FROM agents WHERE id = $1", agent_id)
+        # Get agent by UUID (text comparison) or legacy slug
+        agent = await pool.fetchrow(
+            "SELECT * FROM agents WHERE id::text = $1 OR name = $1",
+            agent_id,
+        )
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -259,10 +345,14 @@ async def execute_agent(
         started_at = datetime.utcnow()
 
         # Log execution start
-        await pool.execute("""
-            INSERT INTO agent_executions (id, agent_id, started_at, status, input_data)
-            VALUES ($1, $2, $3, $4, $5)
-        """, execution_id, agent_id, started_at, "running", json.dumps(body))
+        agent_uuid = str(agent["id"])
+        try:
+            await pool.execute("""
+                INSERT INTO agent_executions (id, agent_id, started_at, status, input_data)
+                VALUES ($1, $2, $3, $4, $5)
+            """, execution_id, agent_uuid, started_at, "running", json.dumps(body))
+        except Exception as insert_error:
+            logger.warning("Failed to persist execution start: %s", insert_error)
 
         # Execute agent logic
         result = {"status": "completed", "message": "Agent executed successfully"}
@@ -271,7 +361,10 @@ async def execute_agent(
             try:
                 # Use AI core for execution
                 prompt = f"Execute {agent['name']}: {body.get('task', 'default task')}"
-                ai_result = await asyncio.to_thread(ai_core.generate, prompt)
+                if inspect.iscoroutinefunction(ai_core.generate):
+                    ai_result = await ai_core.generate(prompt)
+                else:
+                    ai_result = await asyncio.to_thread(ai_core.generate, prompt)
                 result["ai_response"] = ai_result
             except Exception as e:
                 logger.error(f"AI execution failed: {e}")
@@ -281,14 +374,29 @@ async def execute_agent(
         completed_at = datetime.utcnow()
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
-        await pool.execute("""
-            UPDATE agent_executions
-            SET completed_at = $1, status = $2, output_data = $3, duration_ms = $4
-            WHERE id = $5
-        """, completed_at, "completed", json.dumps(result), duration_ms, execution_id)
+        try:
+            await pool.execute("""
+                UPDATE agent_executions
+                SET completed_at = $1, status = $2, output_data = $3, duration_ms = $4
+                WHERE id = $5
+            """, completed_at, "completed", json.dumps(result), duration_ms, execution_id)
+        except Exception as update_error:
+            logger.warning("Failed to persist execution completion: %s", update_error)
+
+        local_record = {
+            "execution_id": execution_id,
+            "agent_id": agent_uuid,
+            "agent_name": agent["name"],
+            "status": "completed",
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "duration_ms": duration_ms,
+            "error": None,
+        }
+        LOCAL_EXECUTIONS.appendleft(local_record)
 
         return AgentExecution(
-            agent_id=agent_id,
+            agent_id=agent_uuid,
             agent_name=agent["name"],
             execution_id=execution_id,
             status="completed",
@@ -306,11 +414,27 @@ async def execute_agent(
 
         # Update execution as failed
         if 'execution_id' in locals():
-            await pool.execute("""
-                UPDATE agent_executions
-                SET status = $1, error = $2, completed_at = $3
-                WHERE id = $4
-            """, "failed", str(e), datetime.utcnow(), execution_id)
+            try:
+                await pool.execute("""
+                    UPDATE agent_executions
+                    SET status = $1, error = $2, completed_at = $3
+                    WHERE id = $4
+                """, "failed", str(e), datetime.utcnow(), execution_id)
+            except Exception as fail_error:
+                logger.warning("Failed to persist failed execution: %s", fail_error)
+
+            LOCAL_EXECUTIONS.appendleft(
+                {
+                    "execution_id": execution_id,
+                    "agent_id": agent_uuid if 'agent_uuid' in locals() else agent_id,
+                    "agent_name": agent["name"] if 'agent' in locals() else agent_id,
+                    "status": "failed",
+                    "started_at": locals().get("started_at"),
+                    "completed_at": datetime.utcnow(),
+                    "duration_ms": None,
+                    "error": str(e),
+                }
+            )
 
         raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
 
@@ -324,21 +448,15 @@ async def get_agent(
     pool = get_pool()
 
     try:
-        agent = await pool.fetchrow("SELECT * FROM agents WHERE id = $1", agent_id)
+        agent = await pool.fetchrow(
+            "SELECT * FROM agents WHERE id::text = $1 OR name = $1",
+            agent_id,
+        )
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
-        return Agent(
-            id=agent["id"],
-            name=agent["name"],
-            category=agent.get("category", "other"),
-            description=agent.get("description", ""),
-            enabled=agent.get("enabled", True),
-            capabilities=json.loads(agent["capabilities"]) if agent.get("capabilities") else [],
-            configuration=json.loads(agent["configuration"]) if agent.get("configuration") else {},
-            created_at=agent.get("created_at"),
-            updated_at=agent.get("updated_at")
-        )
+        data = agent if isinstance(agent, dict) else dict(agent)
+        return _row_to_agent(data)
 
     except HTTPException:
         raise
@@ -377,21 +495,62 @@ async def get_executions(
         query += f" ORDER BY e.started_at DESC LIMIT ${len(params) + 1}"
         params.append(limit)
 
-        rows = await pool.fetch(query, *params)
+        try:
+            rows = await pool.fetch(query, *params)
+        except Exception as primary_error:
+            logger.error("Execution query failed (%s). Returning fallback data.", primary_error)
+            fallback_items = [
+                {
+                    "execution_id": entry.get("execution_id"),
+                    "agent_id": entry.get("agent_id"),
+                    "agent_name": entry.get("agent_name"),
+                    "status": entry.get("status"),
+                    "started_at": entry.get("started_at").isoformat() if entry.get("started_at") else None,
+                    "completed_at": entry.get("completed_at").isoformat() if entry.get("completed_at") else None,
+                    "duration_ms": entry.get("duration_ms"),
+                    "error": entry.get("error"),
+                }
+                for entry in list(LOCAL_EXECUTIONS)
+            ]
+            return {
+                "executions": fallback_items,
+                "total": len(fallback_items),
+                "message": "Execution history limited to in-memory cache",
+            }
 
         executions = []
         for row in rows:
+            data = row if isinstance(row, dict) else dict(row)
             execution = {
-                "execution_id": row["id"],
-                "agent_id": row["agent_id"],
-                "agent_name": row["agent_name"],
-                "status": row["status"],
-                "started_at": row["started_at"].isoformat() if row["started_at"] else None,
-                "completed_at": row["completed_at"].isoformat() if row.get("completed_at") else None,
-                "duration_ms": row.get("duration_ms"),
-                "error": row.get("error")
+                "execution_id": str(data.get("id")),
+                "agent_id": str(data.get("agent_id")),
+                "agent_name": data.get("agent_name"),
+                "status": data.get("status"),
+                "started_at": data["started_at"].isoformat() if data.get("started_at") else None,
+                "completed_at": data["completed_at"].isoformat() if data.get("completed_at") else None,
+                "duration_ms": data.get("duration_ms"),
+                "error": data.get("error"),
             }
             executions.append(execution)
+
+        seen_ids = {item["execution_id"] for item in executions if item.get("execution_id")}
+        for entry in list(LOCAL_EXECUTIONS):
+            exec_id = entry.get("execution_id")
+            if exec_id in seen_ids:
+                continue
+            executions.insert(
+                0,
+                {
+                    "execution_id": exec_id,
+                    "agent_id": entry.get("agent_id"),
+                    "agent_name": entry.get("agent_name"),
+                    "status": entry.get("status"),
+                    "started_at": entry.get("started_at").isoformat() if entry.get("started_at") else None,
+                    "completed_at": entry.get("completed_at").isoformat() if entry.get("completed_at") else None,
+                    "duration_ms": entry.get("duration_ms"),
+                    "error": entry.get("error"),
+                },
+            )
 
         return {"executions": executions, "total": len(executions)}
 
