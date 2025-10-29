@@ -129,7 +129,6 @@ class CustomerSuccessAgent:
                 CREATE TABLE IF NOT EXISTS ai_customer_health (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     customer_id UUID NOT NULL,
-                    customer_name TEXT,
                     health_score FLOAT NOT NULL CHECK (health_score >= 0 AND health_score <= 100),
                     health_category VARCHAR(50),
                     churn_probability FLOAT CHECK (churn_probability >= 0 AND churn_probability <= 1),
@@ -150,7 +149,6 @@ class CustomerSuccessAgent:
                 CREATE TABLE IF NOT EXISTS ai_churn_predictions (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     customer_id UUID NOT NULL,
-                    customer_name TEXT,
                     churn_probability FLOAT NOT NULL,
                     churn_risk VARCHAR(20),
                     primary_risk_factors JSONB DEFAULT '[]'::jsonb,
@@ -454,13 +452,12 @@ class CustomerSuccessAgent:
             for metric in metrics:
                 cur.execute("""
                     INSERT INTO ai_customer_health
-                    (customer_id, customer_name, health_score, health_category, churn_probability,
+                    (customer_id, health_score, health_category, churn_probability,
                      churn_risk, engagement_score, satisfaction_score, lifetime_value,
                      days_since_last_activity, feature_adoption_rate, support_tickets_last_30d)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     metric['customer_id'],
-                    metric['customer_name'],
                     metric['health_score'],
                     metric['health_category'],
                     metric['churn_probability'],
@@ -489,13 +486,12 @@ class CustomerSuccessAgent:
             for pred in predictions:
                 cur.execute("""
                     INSERT INTO ai_churn_predictions
-                    (customer_id, customer_name, churn_probability, churn_risk,
+                    (customer_id, churn_probability, churn_risk,
                      primary_risk_factors, predicted_churn_date, recommended_interventions,
                      estimated_revenue_at_risk, confidence)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     pred['customer_id'],
-                    pred['customer_name'],
                     pred['churn_probability'],
                     pred['churn_risk'],
                     Json(pred['primary_risk_factors']),

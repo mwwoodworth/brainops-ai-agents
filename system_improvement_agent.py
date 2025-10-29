@@ -187,12 +187,12 @@ class SystemImprovementAgent:
             # Check for slow agent executions
             cur.execute("""
                 SELECT
-                    AVG(duration_ms) as avg_duration,
-                    MAX(duration_ms) as max_duration,
+                    AVG(latency_ms) as avg_duration,
+                    MAX(latency_ms) as max_duration,
                     COUNT(*) as total_executions
                 FROM agent_executions
-                WHERE completed_at > NOW() - INTERVAL '24 hours'
-                AND status = 'completed'
+                WHERE completed_at > NOW() - INTERVAL '7 days'
+                AND status = 'success'
             """)
 
             perf_data = cur.fetchone()
@@ -222,10 +222,10 @@ class SystemImprovementAgent:
             cur.execute("""
                 SELECT
                     COUNT(*) as failed_count,
-                    COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM agent_executions WHERE completed_at > NOW() - INTERVAL '24 hours'), 0) as failure_rate
+                    COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM agent_executions WHERE completed_at > NOW() - INTERVAL '7 days'), 0) as failure_rate
                 FROM agent_executions
-                WHERE completed_at > NOW() - INTERVAL '24 hours'
-                AND status = 'failed'
+                WHERE completed_at > NOW() - INTERVAL '7 days'
+                AND status != 'success'
             """)
 
             failure_data = cur.fetchone()
@@ -259,7 +259,7 @@ class SystemImprovementAgent:
             conn = psycopg2.connect(**self.db_config)
             cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            # Check for unused agents
+            # Check for unused agents (using agent_type string match)
             cur.execute("""
                 SELECT
                     COUNT(*) as unused_agents
@@ -267,7 +267,7 @@ class SystemImprovementAgent:
                 WHERE enabled = true
                 AND NOT EXISTS (
                     SELECT 1 FROM agent_executions ae
-                    WHERE ae.agent_id = a.id
+                    WHERE ae.agent_type = a.type
                     AND ae.completed_at > NOW() - INTERVAL '30 days'
                 )
             """)
