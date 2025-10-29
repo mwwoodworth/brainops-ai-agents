@@ -961,6 +961,37 @@ async def execute_scheduled_agents(
         return {"status": "failed", "error": str(e)}
 
 
+@app.get("/scheduler/status")
+async def get_scheduler_status():
+    """Get detailed scheduler status and diagnostics"""
+    if not SCHEDULER_AVAILABLE or not hasattr(app.state, 'scheduler') or not app.state.scheduler:
+        return {
+            "enabled": False,
+            "message": "Scheduler not available"
+        }
+
+    scheduler = app.state.scheduler
+    apscheduler_jobs = scheduler.scheduler.get_jobs()
+
+    return {
+        "enabled": True,
+        "running": scheduler.scheduler.running,
+        "state": scheduler.scheduler.state,
+        "registered_jobs_count": len(scheduler.registered_jobs),
+        "apscheduler_jobs_count": len(apscheduler_jobs),
+        "registered_jobs": list(scheduler.registered_jobs.values()),
+        "apscheduler_jobs": [
+            {
+                "id": job.id,
+                "name": job.name,
+                "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
+                "trigger": str(job.trigger)
+            }
+            for job in apscheduler_jobs
+        ]
+    }
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Global exception handler"""
