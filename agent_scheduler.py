@@ -4,7 +4,7 @@ Schedules and executes AI agents based on configured intervals
 """
 
 import logging
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timedelta
@@ -29,8 +29,10 @@ class AgentScheduler:
             'password': os.getenv('DB_PASSWORD', 'Brain0ps2O2S'),
             'port': int(os.getenv('DB_PORT', 6543))
         }
-        self.scheduler = AsyncIOScheduler()
+        # Use BackgroundScheduler instead of AsyncIOScheduler for FastAPI compatibility
+        self.scheduler = BackgroundScheduler()
         self.registered_jobs = {}
+        logger.info(f"🔧 AgentScheduler initialized with DB: {self.db_config['host']}:{self.db_config['port']}")
 
     def get_db_connection(self):
         """Get database connection"""
@@ -41,14 +43,14 @@ class AgentScheduler:
             logger.error(f"Database connection failed: {e}")
             return None
 
-    async def execute_agent(self, agent_id: str, agent_name: str):
-        """Execute a scheduled agent"""
+    def execute_agent(self, agent_id: str, agent_name: str):
+        """Execute a scheduled agent (SYNCHRONOUS for BackgroundScheduler)"""
         try:
-            logger.info(f"Executing scheduled agent: {agent_name} ({agent_id})")
+            logger.info(f"🚀 Executing scheduled agent: {agent_name} ({agent_id})")
 
             conn = self.get_db_connection()
             if not conn:
-                logger.error("Database connection failed, cannot execute agent")
+                logger.error("❌ Database connection failed, cannot execute agent")
                 return
 
             cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -61,13 +63,14 @@ class AgentScheduler:
                 VALUES (%s, %s, %s)
             """, (execution_id, agent_name, 'running'))
             conn.commit()
+            logger.info(f"📝 Execution {execution_id} recorded as 'running'")
 
             # Get agent configuration
             cur.execute("SELECT * FROM ai_agents WHERE id = %s", (agent_id,))
             agent = cur.fetchone()
 
             if not agent:
-                logger.error(f"Agent {agent_id} not found")
+                logger.error(f"❌ Agent {agent_id} not found in database")
                 cur.execute("""
                     UPDATE ai_agent_executions
                     SET status = %s, error_message = %s
@@ -78,9 +81,9 @@ class AgentScheduler:
                 conn.close()
                 return
 
-            # Execute based on agent type
+            # Execute based on agent type (synchronous)
             start_time = datetime.utcnow()
-            result = await self._execute_by_type(agent, cur, conn)
+            result = self._execute_by_type_sync(agent, cur, conn)
             execution_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
 
             # Record execution completion
@@ -132,35 +135,35 @@ class AgentScheduler:
             except Exception as log_error:
                 logger.error(f"Failed to log error: {log_error}")
 
-    async def _execute_by_type(self, agent: Dict, cur, conn) -> Dict:
-        """Execute agent based on its type"""
+    def _execute_by_type_sync(self, agent: Dict, cur, conn) -> Dict:
+        """Execute agent based on its type (SYNCHRONOUS)"""
         agent_type = agent.get('type', '').lower()
         agent_name = agent.get('name', 'Unknown')
 
-        logger.info(f"Executing {agent_type} agent: {agent_name}")
+        logger.info(f"⚙️ Executing {agent_type} agent: {agent_name}")
 
         # Revenue-generating agents
         if 'revenue' in agent_type or agent_name == 'RevenueOptimizer':
-            return await self._execute_revenue_agent(agent, cur, conn)
+            return self._execute_revenue_agent(agent, cur, conn)
 
         # Lead generation agents
         elif 'lead' in agent_type or agent_name in ['LeadGenerationAgent', 'LeadScorer']:
-            return await self._execute_lead_agent(agent, cur, conn)
+            return self._execute_lead_agent(agent, cur, conn)
 
         # Customer intelligence agents
         elif 'customer' in agent_type or agent_name == 'CustomerIntelligence':
-            return await self._execute_customer_agent(agent, cur, conn)
+            return self._execute_customer_agent(agent, cur, conn)
 
         # Analytics agents
         elif agent_type == 'analytics':
-            return await self._execute_analytics_agent(agent, cur, conn)
+            return self._execute_analytics_agent(agent, cur, conn)
 
         # Default: log and continue
         else:
             logger.info(f"No specific handler for agent type: {agent_type}")
             return {"status": "executed", "type": agent_type}
 
-    async def _execute_revenue_agent(self, agent: Dict, cur, conn) -> Dict:
+    def _execute_revenue_agent(self, agent: Dict, cur, conn) -> Dict:
         """Execute revenue optimization agent"""
         logger.info(f"Running revenue optimization for agent: {agent['name']}")
 
@@ -192,7 +195,7 @@ class AgentScheduler:
             "timestamp": datetime.utcnow().isoformat()
         }
 
-    async def _execute_lead_agent(self, agent: Dict, cur, conn) -> Dict:
+    def _execute_lead_agent(self, agent: Dict, cur, conn) -> Dict:
         """Execute lead generation/scoring agent"""
         logger.info(f"Running lead analysis for agent: {agent['name']}")
 
@@ -213,7 +216,7 @@ class AgentScheduler:
             "timestamp": datetime.utcnow().isoformat()
         }
 
-    async def _execute_customer_agent(self, agent: Dict, cur, conn) -> Dict:
+    def _execute_customer_agent(self, agent: Dict, cur, conn) -> Dict:
         """Execute customer intelligence agent"""
         logger.info(f"Running customer intelligence for agent: {agent['name']}")
 
@@ -239,7 +242,7 @@ class AgentScheduler:
             "timestamp": datetime.utcnow().isoformat()
         }
 
-    async def _execute_analytics_agent(self, agent: Dict, cur, conn) -> Dict:
+    def _execute_analytics_agent(self, agent: Dict, cur, conn) -> Dict:
         """Execute analytics agent"""
         logger.info(f"Running analytics for agent: {agent['name']}")
 
@@ -267,9 +270,10 @@ class AgentScheduler:
     def load_schedules_from_db(self):
         """Load agent schedules from database"""
         try:
+            logger.info("📋 Loading agent schedules from database...")
             conn = self.get_db_connection()
             if not conn:
-                logger.error("Cannot load schedules: DB connection failed")
+                logger.error("❌ Cannot load schedules: DB connection failed")
                 return
 
             cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -283,9 +287,10 @@ class AgentScheduler:
             """)
 
             schedules = cur.fetchall()
-            logger.info(f"Found {len(schedules)} enabled agent schedules")
+            logger.info(f"✅ Found {len(schedules)} enabled agent schedules")
 
             for schedule in schedules:
+                logger.info(f"   • {schedule['agent_name']} - Every {schedule['frequency_minutes']} minutes")
                 self.add_schedule(
                     agent_id=schedule['agent_id'],
                     agent_name=schedule['agent_name'],
@@ -295,9 +300,10 @@ class AgentScheduler:
 
             cur.close()
             conn.close()
+            logger.info(f"✅ Successfully loaded {len(self.registered_jobs)} jobs into scheduler")
 
         except Exception as e:
-            logger.error(f"Error loading schedules: {e}")
+            logger.error(f"❌ Error loading schedules: {e}", exc_info=True)
 
     def add_schedule(self, agent_id: str, agent_name: str, frequency_minutes: int, schedule_id: str = None):
         """Add an agent to the scheduler"""
@@ -321,10 +327,10 @@ class AgentScheduler:
                 "added_at": datetime.utcnow().isoformat()
             }
 
-            logger.info(f"Scheduled agent {agent_name} to run every {frequency_minutes} minutes")
+            logger.info(f"✅ Scheduled agent {agent_name} (ID: {job_id}) to run every {frequency_minutes} minutes")
 
         except Exception as e:
-            logger.error(f"Error adding schedule for {agent_name}: {e}")
+            logger.error(f"❌ Error adding schedule for {agent_name}: {e}", exc_info=True)
 
     def remove_schedule(self, schedule_id: str):
         """Remove an agent from the scheduler"""
