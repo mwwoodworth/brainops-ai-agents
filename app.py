@@ -114,6 +114,68 @@ except ImportError as e:
     logger.warning(f"Learning System not available: {e}")
     NotebookLMPlus = None
 
+# PHASE 2: Import Specialized Agents
+
+# Import System Improvement Agent with fallback
+try:
+    from system_improvement_agent import SystemImprovementAgent
+    SYSTEM_IMPROVEMENT_AVAILABLE = True
+    logger.info("✅ System Improvement Agent loaded")
+except ImportError as e:
+    SYSTEM_IMPROVEMENT_AVAILABLE = False
+    logger.warning(f"System Improvement Agent not available: {e}")
+    SystemImprovementAgent = None
+
+# Import DevOps Optimization Agent with fallback
+try:
+    from devops_optimization_agent import DevOpsOptimizationAgent
+    DEVOPS_AGENT_AVAILABLE = True
+    logger.info("✅ DevOps Optimization Agent loaded")
+except ImportError as e:
+    DEVOPS_AGENT_AVAILABLE = False
+    logger.warning(f"DevOps Agent not available: {e}")
+    DevOpsOptimizationAgent = None
+
+# Import Code Quality Agent with fallback
+try:
+    from code_quality_agent import CodeQualityAgent
+    CODE_QUALITY_AVAILABLE = True
+    logger.info("✅ Code Quality Agent loaded")
+except ImportError as e:
+    CODE_QUALITY_AVAILABLE = False
+    logger.warning(f"Code Quality Agent not available: {e}")
+    CodeQualityAgent = None
+
+# Import Customer Success Agent with fallback
+try:
+    from customer_success_agent import CustomerSuccessAgent
+    CUSTOMER_SUCCESS_AVAILABLE = True
+    logger.info("✅ Customer Success Agent loaded")
+except ImportError as e:
+    CUSTOMER_SUCCESS_AVAILABLE = False
+    logger.warning(f"Customer Success Agent not available: {e}")
+    CustomerSuccessAgent = None
+
+# Import Competitive Intelligence Agent with fallback
+try:
+    from competitive_intelligence_agent import CompetitiveIntelligenceAgent
+    COMPETITIVE_INTEL_AVAILABLE = True
+    logger.info("✅ Competitive Intelligence Agent loaded")
+except ImportError as e:
+    COMPETITIVE_INTEL_AVAILABLE = False
+    logger.warning(f"Competitive Intel Agent not available: {e}")
+    CompetitiveIntelligenceAgent = None
+
+# Import Vision Alignment Agent with fallback
+try:
+    from vision_alignment_agent import VisionAlignmentAgent
+    VISION_ALIGNMENT_AVAILABLE = True
+    logger.info("✅ Vision Alignment Agent loaded")
+except ImportError as e:
+    VISION_ALIGNMENT_AVAILABLE = False
+    logger.warning(f"Vision Alignment Agent not available: {e}")
+    VisionAlignmentAgent = None
+
 
 def _parse_capabilities(raw: Any) -> List[Dict[str, Any]]:
     """Normalize capabilities payload into the Pydantic-friendly format."""
@@ -298,9 +360,84 @@ async def lifespan(app: FastAPI):
     else:
         app.state.learning = None
 
+    # PHASE 2: Initialize Specialized Agents
+
+    # Initialize System Improvement Agent
+    if SYSTEM_IMPROVEMENT_AVAILABLE:
+        try:
+            system_improvement = SystemImprovementAgent()
+            app.state.system_improvement = system_improvement
+            logger.info("🔧 System Improvement Agent initialized")
+        except Exception as e:
+            logger.error(f"❌ System Improvement Agent initialization failed: {e}")
+            app.state.system_improvement = None
+    else:
+        app.state.system_improvement = None
+
+    # Initialize DevOps Optimization Agent
+    if DEVOPS_AGENT_AVAILABLE:
+        try:
+            devops_agent = DevOpsOptimizationAgent()
+            app.state.devops_agent = devops_agent
+            logger.info("⚙️ DevOps Optimization Agent initialized")
+        except Exception as e:
+            logger.error(f"❌ DevOps Agent initialization failed: {e}")
+            app.state.devops_agent = None
+    else:
+        app.state.devops_agent = None
+
+    # Initialize Code Quality Agent
+    if CODE_QUALITY_AVAILABLE:
+        try:
+            code_quality = CodeQualityAgent()
+            app.state.code_quality = code_quality
+            logger.info("📝 Code Quality Agent initialized")
+        except Exception as e:
+            logger.error(f"❌ Code Quality Agent initialization failed: {e}")
+            app.state.code_quality = None
+    else:
+        app.state.code_quality = None
+
+    # Initialize Customer Success Agent
+    if CUSTOMER_SUCCESS_AVAILABLE:
+        try:
+            customer_success = CustomerSuccessAgent()
+            app.state.customer_success = customer_success
+            logger.info("🎯 Customer Success Agent initialized")
+        except Exception as e:
+            logger.error(f"❌ Customer Success Agent initialization failed: {e}")
+            app.state.customer_success = None
+    else:
+        app.state.customer_success = None
+
+    # Initialize Competitive Intelligence Agent
+    if COMPETITIVE_INTEL_AVAILABLE:
+        try:
+            competitive_intel = CompetitiveIntelligenceAgent()
+            app.state.competitive_intel = competitive_intel
+            logger.info("🔍 Competitive Intelligence Agent initialized")
+        except Exception as e:
+            logger.error(f"❌ Competitive Intelligence Agent initialization failed: {e}")
+            app.state.competitive_intel = None
+    else:
+        app.state.competitive_intel = None
+
+    # Initialize Vision Alignment Agent
+    if VISION_ALIGNMENT_AVAILABLE:
+        try:
+            vision_alignment = VisionAlignmentAgent()
+            app.state.vision_alignment = vision_alignment
+            logger.info("🎯 Vision Alignment Agent initialized")
+        except Exception as e:
+            logger.error(f"❌ Vision Alignment Agent initialization failed: {e}")
+            app.state.vision_alignment = None
+    else:
+        app.state.vision_alignment = None
+
     logger.info("=" * 60)
-    logger.info("🚀 BRAINOPS AI AGENTS v6.0.0 - FULLY ACTIVATED")
+    logger.info("🚀 BRAINOPS AI AGENTS v6.0.0 - PHASE 2 COMPLETE")
     logger.info("=" * 60)
+    logger.info("PHASE 1 (Core Systems):")
     logger.info(f"  AUREA Orchestrator: {'✅ ACTIVE' if AUREA_AVAILABLE else '❌ DISABLED'}")
     logger.info(f"  Self-Healing: {'✅ ACTIVE' if SELF_HEALING_AVAILABLE else '❌ DISABLED'}")
     logger.info(f"  Memory Manager: {'✅ ACTIVE' if MEMORY_AVAILABLE else '❌ DISABLED'}")
@@ -308,6 +445,14 @@ async def lifespan(app: FastAPI):
     logger.info(f"  Learning System: {'✅ ACTIVE' if LEARNING_AVAILABLE else '❌ DISABLED'}")
     logger.info(f"  Agent Scheduler: {'✅ ACTIVE' if SCHEDULER_AVAILABLE else '❌ DISABLED'}")
     logger.info(f"  AI Core: {'✅ ACTIVE' if AI_AVAILABLE else '❌ DISABLED'}")
+    logger.info("")
+    logger.info("PHASE 2 (Specialized Agents):")
+    logger.info(f"  System Improvement: {'✅ ACTIVE' if SYSTEM_IMPROVEMENT_AVAILABLE else '❌ DISABLED'}")
+    logger.info(f"  DevOps Optimization: {'✅ ACTIVE' if DEVOPS_AGENT_AVAILABLE else '❌ DISABLED'}")
+    logger.info(f"  Code Quality: {'✅ ACTIVE' if CODE_QUALITY_AVAILABLE else '❌ DISABLED'}")
+    logger.info(f"  Customer Success: {'✅ ACTIVE' if CUSTOMER_SUCCESS_AVAILABLE else '❌ DISABLED'}")
+    logger.info(f"  Competitive Intelligence: {'✅ ACTIVE' if COMPETITIVE_INTEL_AVAILABLE else '❌ DISABLED'}")
+    logger.info(f"  Vision Alignment: {'✅ ACTIVE' if VISION_ALIGNMENT_AVAILABLE else '❌ DISABLED'}")
     logger.info("=" * 60)
 
     yield
@@ -378,7 +523,7 @@ async def health_check():
     db_healthy = await pool.test_connection()
     db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
 
-    # Check active systems
+    # Check active systems - Phase 1
     active_systems = []
     if AUREA_AVAILABLE and hasattr(app.state, 'aurea') and app.state.aurea:
         active_systems.append("AUREA Orchestrator")
@@ -395,6 +540,20 @@ async def health_check():
     if AI_AVAILABLE and ai_core:
         active_systems.append("AI Core")
 
+    # Check Phase 2 specialized agents
+    if SYSTEM_IMPROVEMENT_AVAILABLE and hasattr(app.state, 'system_improvement') and app.state.system_improvement:
+        active_systems.append("System Improvement Agent")
+    if DEVOPS_AGENT_AVAILABLE and hasattr(app.state, 'devops_agent') and app.state.devops_agent:
+        active_systems.append("DevOps Optimization Agent")
+    if CODE_QUALITY_AVAILABLE and hasattr(app.state, 'code_quality') and app.state.code_quality:
+        active_systems.append("Code Quality Agent")
+    if CUSTOMER_SUCCESS_AVAILABLE and hasattr(app.state, 'customer_success') and app.state.customer_success:
+        active_systems.append("Customer Success Agent")
+    if COMPETITIVE_INTEL_AVAILABLE and hasattr(app.state, 'competitive_intel') and app.state.competitive_intel:
+        active_systems.append("Competitive Intelligence Agent")
+    if VISION_ALIGNMENT_AVAILABLE and hasattr(app.state, 'vision_alignment') and app.state.vision_alignment:
+        active_systems.append("Vision Alignment Agent")
+
     return {
         "status": "healthy" if db_healthy else "degraded",
         "version": VERSION,
@@ -403,13 +562,21 @@ async def health_check():
         "active_systems": active_systems,
         "system_count": len(active_systems),
         "capabilities": {
+            # Phase 1
             "aurea_orchestrator": AUREA_AVAILABLE,
             "self_healing": SELF_HEALING_AVAILABLE,
             "memory_manager": MEMORY_AVAILABLE,
             "training_pipeline": TRAINING_AVAILABLE,
             "learning_system": LEARNING_AVAILABLE,
             "agent_scheduler": SCHEDULER_AVAILABLE,
-            "ai_core": AI_AVAILABLE
+            "ai_core": AI_AVAILABLE,
+            # Phase 2
+            "system_improvement": SYSTEM_IMPROVEMENT_AVAILABLE,
+            "devops_optimization": DEVOPS_AGENT_AVAILABLE,
+            "code_quality": CODE_QUALITY_AVAILABLE,
+            "customer_success": CUSTOMER_SUCCESS_AVAILABLE,
+            "competitive_intelligence": COMPETITIVE_INTEL_AVAILABLE,
+            "vision_alignment": VISION_ALIGNMENT_AVAILABLE
         },
         "config": {
             "environment": config.environment,
