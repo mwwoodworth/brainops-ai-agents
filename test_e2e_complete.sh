@@ -48,15 +48,15 @@ test_endpoint "Version Check" "$BASE_URL/health" "6.0.0"
 # Test 4: Database connected
 test_endpoint "Database Connection" "$BASE_URL/health" "connected"
 
-# Test 5: All 7 systems active
+# Test 5: All 13 systems active (7 Phase 1 + 6 Phase 2)
 HEALTH=$(curl -s "$BASE_URL/health")
 SYSTEM_COUNT=$(echo "$HEALTH" | jq -r '.system_count')
-echo -n "Testing: System Count (7/7)... "
-if [ "$SYSTEM_COUNT" = "7" ]; then
-    echo "✅ PASS (7 systems active)"
+echo -n "Testing: System Count (13/13)... "
+if [ "$SYSTEM_COUNT" = "13" ]; then
+    echo "✅ PASS (13 systems active - Phase 1 + Phase 2)"
     ((PASSED++))
 else
-    echo "❌ FAIL (only $SYSTEM_COUNT systems active)"
+    echo "❌ FAIL (only $SYSTEM_COUNT systems active, expected 13)"
     ((FAILED++))
 fi
 
@@ -249,10 +249,13 @@ if [ "$FAILED" = "0" ]; then
     echo "🎉 ALL TESTS PASSED! System is 100% operational"
     echo ""
     echo "✅ Infrastructure: Healthy"
-    echo "✅ All 7 Systems: Active"
+    echo "✅ All 13 Systems: Active (7 Phase 1 + 6 Phase 2)"
     echo "✅ Database: Connected"
     echo "✅ Security: Configured"
     echo "✅ Build: Recent"
+    echo ""
+    echo "Phase 1 Systems: AUREA, Self-Healing, Memory, Training, Learning, Scheduler, AI Core"
+    echo "Phase 2 Agents: System Improvement, DevOps, Code Quality, Customer Success, Competitive Intel, Vision Alignment"
     echo ""
     echo "Grade: A+ (Perfect)"
     exit 0
