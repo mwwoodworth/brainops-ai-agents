@@ -246,12 +246,12 @@ class DevOpsOptimizationAgent:
             # Check for slow response times (agent executions)
             cur.execute("""
                 SELECT
-                    AVG(duration_ms) as avg_response_time,
-                    MAX(duration_ms) as max_response_time,
+                    AVG(latency_ms) as avg_response_time,
+                    MAX(latency_ms) as max_response_time,
                     COUNT(*) as total_requests
                 FROM agent_executions
                 WHERE completed_at > NOW() - INTERVAL '1 hour'
-                AND status = 'completed'
+                AND status = 'success'
             """)
 
             response_data = cur.fetchone()
