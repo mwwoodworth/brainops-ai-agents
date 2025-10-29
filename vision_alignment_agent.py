@@ -253,7 +253,7 @@ class VisionAlignmentAgent:
             # Measure AUTONOMY pillar
             cur.execute("""
                 SELECT
-                    COUNT(*) FILTER (WHERE status = 'completed') * 100.0 / NULLIF(COUNT(*), 0) as success_rate,
+                    COUNT(*) FILTER (WHERE status = 'success') * 100.0 / NULLIF(COUNT(*), 0) as success_rate,
                     COUNT(*) as total_executions
                 FROM agent_executions
                 WHERE completed_at > NOW() - INTERVAL '7 days'
@@ -350,17 +350,17 @@ class VisionAlignmentAgent:
             # Measure EFFICIENCY pillar
             cur.execute("""
                 SELECT
-                    AVG(duration_ms) as avg_execution_time,
+                    AVG(latency_ms) as avg_execution_time,
                     COUNT(*) as total_executions
                 FROM agent_executions
                 WHERE completed_at > NOW() - INTERVAL '7 days'
-                AND status = 'completed'
+                AND status = 'success'
             """)
             efficiency_data = cur.fetchone()
 
             if efficiency_data and efficiency_data['avg_execution_time']:
                 # Score based on execution speed (faster = better)
-                avg_ms = efficiency_data['avg_execution_time']
+                avg_ms = float(efficiency_data['avg_execution_time'])
                 efficiency_score = max(0, min(100, (5000 - avg_ms) / 50))  # 100 if <0s, 0 if >5s
 
                 progress_reports.append({
