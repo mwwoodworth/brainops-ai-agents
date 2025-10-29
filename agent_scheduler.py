@@ -21,8 +21,14 @@ logger = logging.getLogger(__name__)
 class AgentScheduler:
     """Manages automatic execution of AI agents"""
 
-    def __init__(self, db_config: Dict[str, Any]):
-        self.db_config = db_config
+    def __init__(self, db_config: Optional[Dict[str, Any]] = None):
+        self.db_config = db_config or {
+            'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
+            'database': os.getenv('DB_NAME', 'postgres'),
+            'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
+            'password': os.getenv('DB_PASSWORD', 'REDACTED_SUPABASE_DB_PASSWORD'),
+            'port': int(os.getenv('DB_PORT', 6543))
+        }
         self.scheduler = AsyncIOScheduler()
         self.registered_jobs = {}
 
