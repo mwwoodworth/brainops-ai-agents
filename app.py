@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "5.0.0"  # Major version bump for async rewrite
+VERSION = "6.0.0"  # MAJOR: Activate AUREA, Self-Healing, Learning Systems
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 
 # Import agent scheduler with fallback
@@ -62,6 +62,57 @@ except Exception as e:
     logger.error(f"❌ AI Core initialization failed: {e}")
     AI_AVAILABLE = False
     ai_core = None
+
+# Import AUREA Master Orchestrator with fallback
+try:
+    from aurea_orchestrator import AUREA, AutonomyLevel
+    AUREA_AVAILABLE = True
+    logger.info("✅ AUREA Master Orchestrator loaded")
+except ImportError as e:
+    AUREA_AVAILABLE = False
+    logger.warning(f"AUREA not available: {e}")
+    AUREA = None
+    AutonomyLevel = None
+
+# Import Self-Healing Recovery with fallback
+try:
+    from self_healing_recovery import SelfHealingRecovery
+    SELF_HEALING_AVAILABLE = True
+    logger.info("✅ Self-Healing Recovery loaded")
+except ImportError as e:
+    SELF_HEALING_AVAILABLE = False
+    logger.warning(f"Self-Healing not available: {e}")
+    SelfHealingRecovery = None
+
+# Import Unified Memory Manager with fallback
+try:
+    from unified_memory_manager import UnifiedMemoryManager
+    MEMORY_AVAILABLE = True
+    logger.info("✅ Unified Memory Manager loaded")
+except ImportError as e:
+    MEMORY_AVAILABLE = False
+    logger.warning(f"Memory Manager not available: {e}")
+    UnifiedMemoryManager = None
+
+# Import AI Training Pipeline with fallback
+try:
+    from ai_training_pipeline import AITrainingPipeline
+    TRAINING_AVAILABLE = True
+    logger.info("✅ AI Training Pipeline loaded")
+except ImportError as e:
+    TRAINING_AVAILABLE = False
+    logger.warning(f"Training Pipeline not available: {e}")
+    AITrainingPipeline = None
+
+# Import Notebook LM+ Learning with fallback
+try:
+    from notebook_lm_plus import NotebookLMPlus
+    LEARNING_AVAILABLE = True
+    logger.info("✅ Notebook LM+ Learning loaded")
+except ImportError as e:
+    LEARNING_AVAILABLE = False
+    logger.warning(f"Learning System not available: {e}")
+    NotebookLMPlus = None
 
 
 def _parse_capabilities(raw: Any) -> List[Dict[str, Any]]:
@@ -186,6 +237,79 @@ async def lifespan(app: FastAPI):
     else:
         app.state.scheduler = None
 
+    # Initialize AUREA Master Orchestrator
+    if AUREA_AVAILABLE:
+        try:
+            # Start at SEMI_AUTO level (AI decides minor, human decides major)
+            aurea = AUREA(autonomy_level=AutonomyLevel.SEMI_AUTO)
+            app.state.aurea = aurea
+            logger.info("🧠 AUREA Master Orchestrator initialized at SEMI_AUTO level")
+        except Exception as e:
+            logger.error(f"❌ AUREA initialization failed: {e}")
+            app.state.aurea = None
+    else:
+        app.state.aurea = None
+
+    # Initialize Self-Healing Recovery System
+    if SELF_HEALING_AVAILABLE:
+        try:
+            healer = SelfHealingRecovery()
+            app.state.healer = healer
+            logger.info("🏥 Self-Healing Recovery System initialized")
+        except Exception as e:
+            logger.error(f"❌ Self-Healing initialization failed: {e}")
+            app.state.healer = None
+    else:
+        app.state.healer = None
+
+    # Initialize Unified Memory Manager
+    if MEMORY_AVAILABLE:
+        try:
+            memory_manager = UnifiedMemoryManager()
+            app.state.memory = memory_manager
+            logger.info("🧠 Unified Memory Manager initialized")
+        except Exception as e:
+            logger.error(f"❌ Memory Manager initialization failed: {e}")
+            app.state.memory = None
+    else:
+        app.state.memory = None
+
+    # Initialize AI Training Pipeline
+    if TRAINING_AVAILABLE:
+        try:
+            training_pipeline = AITrainingPipeline()
+            app.state.training = training_pipeline
+            logger.info("📚 AI Training Pipeline initialized")
+        except Exception as e:
+            logger.error(f"❌ Training Pipeline initialization failed: {e}")
+            app.state.training = None
+    else:
+        app.state.training = None
+
+    # Initialize Notebook LM+ Learning System
+    if LEARNING_AVAILABLE:
+        try:
+            learning_system = NotebookLMPlus()
+            app.state.learning = learning_system
+            logger.info("🎓 Notebook LM+ Learning System initialized")
+        except Exception as e:
+            logger.error(f"❌ Learning System initialization failed: {e}")
+            app.state.learning = None
+    else:
+        app.state.learning = None
+
+    logger.info("=" * 60)
+    logger.info("🚀 BRAINOPS AI AGENTS v6.0.0 - FULLY ACTIVATED")
+    logger.info("=" * 60)
+    logger.info(f"  AUREA Orchestrator: {'✅ ACTIVE' if AUREA_AVAILABLE else '❌ DISABLED'}")
+    logger.info(f"  Self-Healing: {'✅ ACTIVE' if SELF_HEALING_AVAILABLE else '❌ DISABLED'}")
+    logger.info(f"  Memory Manager: {'✅ ACTIVE' if MEMORY_AVAILABLE else '❌ DISABLED'}")
+    logger.info(f"  Training Pipeline: {'✅ ACTIVE' if TRAINING_AVAILABLE else '❌ DISABLED'}")
+    logger.info(f"  Learning System: {'✅ ACTIVE' if LEARNING_AVAILABLE else '❌ DISABLED'}")
+    logger.info(f"  Agent Scheduler: {'✅ ACTIVE' if SCHEDULER_AVAILABLE else '❌ DISABLED'}")
+    logger.info(f"  AI Core: {'✅ ACTIVE' if AI_AVAILABLE else '❌ DISABLED'}")
+    logger.info("=" * 60)
+
     yield
 
     # Shutdown
@@ -249,18 +373,44 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint with full system status"""
     pool = get_pool()
     db_healthy = await pool.test_connection()
     db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
+
+    # Check active systems
+    active_systems = []
+    if AUREA_AVAILABLE and hasattr(app.state, 'aurea') and app.state.aurea:
+        active_systems.append("AUREA Orchestrator")
+    if SELF_HEALING_AVAILABLE and hasattr(app.state, 'healer') and app.state.healer:
+        active_systems.append("Self-Healing Recovery")
+    if MEMORY_AVAILABLE and hasattr(app.state, 'memory') and app.state.memory:
+        active_systems.append("Memory Manager")
+    if TRAINING_AVAILABLE and hasattr(app.state, 'training') and app.state.training:
+        active_systems.append("Training Pipeline")
+    if LEARNING_AVAILABLE and hasattr(app.state, 'learning') and app.state.learning:
+        active_systems.append("Learning System")
+    if SCHEDULER_AVAILABLE and hasattr(app.state, 'scheduler') and app.state.scheduler:
+        active_systems.append("Agent Scheduler")
+    if AI_AVAILABLE and ai_core:
+        active_systems.append("AI Core")
 
     return {
         "status": "healthy" if db_healthy else "degraded",
         "version": VERSION,
         "build": BUILD_TIME,
         "database": db_status,
-        "ai_core": "enabled" if AI_AVAILABLE else "disabled",
-        "scheduler": "enabled" if SCHEDULER_AVAILABLE else "disabled",
+        "active_systems": active_systems,
+        "system_count": len(active_systems),
+        "capabilities": {
+            "aurea_orchestrator": AUREA_AVAILABLE,
+            "self_healing": SELF_HEALING_AVAILABLE,
+            "memory_manager": MEMORY_AVAILABLE,
+            "training_pipeline": TRAINING_AVAILABLE,
+            "learning_system": LEARNING_AVAILABLE,
+            "agent_scheduler": SCHEDULER_AVAILABLE,
+            "ai_core": AI_AVAILABLE
+        },
         "config": {
             "environment": config.environment,
             "security": {
