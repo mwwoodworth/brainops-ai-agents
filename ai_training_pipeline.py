@@ -30,8 +30,9 @@ DB_CONFIG = {
     "port": int(os.getenv("DB_PORT", 6543))
 }
 
-# OpenAI configuration
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# OpenAI configuration (optional - gracefully handles missing API key)
+openai_api_key = os.getenv("OPENAI_API_KEY")
+openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
 
 class InteractionType(Enum):
     """Types of customer interactions"""
