@@ -29,6 +29,7 @@ from database.async_connection import (
 )
 from models.agent import Agent, AgentCategory, AgentExecution, AgentList
 from api.memory import router as memory_router
+from api.brain import router as brain_router
 
 # Configure logging
 logging.basicConfig(
@@ -500,6 +501,7 @@ async def verify_api_key(api_key: str = Security(api_key_header)) -> bool:
 
 # Include routers
 app.include_router(memory_router)
+app.include_router(brain_router)
 
 
 @app.get("/")
