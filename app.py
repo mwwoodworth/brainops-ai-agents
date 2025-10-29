@@ -292,8 +292,9 @@ async def lifespan(app: FastAPI):
     if SCHEDULER_AVAILABLE:
         try:
             scheduler = AgentScheduler()
+            scheduler.start()  # CRITICAL: Start the scheduler to execute agents
             app.state.scheduler = scheduler
-            logger.info("✅ Agent Scheduler initialized")
+            logger.info("✅ Agent Scheduler initialized and STARTED")
         except Exception as e:
             logger.error(f"❌ Scheduler initialization failed: {e}")
             app.state.scheduler = None
@@ -460,6 +461,15 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("🛑 Shutting down BrainOps AI Agents...")
+
+    # Shutdown scheduler if running
+    if hasattr(app.state, 'scheduler') and app.state.scheduler:
+        try:
+            app.state.scheduler.shutdown()
+            logger.info("✅ Agent Scheduler stopped")
+        except Exception as e:
+            logger.error(f"❌ Scheduler shutdown error: {e}")
+
     await close_pool()
     logger.info("✅ Database pool closed")
 
