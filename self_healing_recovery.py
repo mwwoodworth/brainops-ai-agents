@@ -94,8 +94,8 @@ class SelfHealingRecovery:
             'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
             'database': os.getenv('DB_NAME', 'postgres'),
             'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-            'password': os.getenv("DB_PASSWORD"),
-            'port': os.getenv('DB_PORT', 5432)
+            'password': os.getenv('DB_PASSWORD', 'Brain0ps2O2S'),
+            'port': int(os.getenv('DB_PORT', 6543))
         }
         self.component_states = {}
         self.error_history = deque(maxlen=1000)
