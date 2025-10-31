@@ -179,7 +179,18 @@ class AIIntegrationLayer:
                 await asyncio.sleep(10)  # Back off on error
 
     async def _get_pending_tasks(self, limit=10):
-        """Get pending tasks from database"""
+        """Get pending tasks from database (prefers embedded memory)"""
+        # Try embedded memory first (ultra fast, no SSL issues)
+        if self.embedded_memory:
+            try:
+                tasks = self.embedded_memory.get_pending_tasks(limit=limit)
+                if tasks:
+                    logger.debug(f"✅ Got {len(tasks)} tasks from embedded memory")
+                    return tasks
+            except Exception as e:
+                logger.warning(f"⚠️ Embedded memory fetch failed: {e}")
+
+        # Fallback to Postgres
         try:
             with self._get_cursor() as cur:
                 cur.execute("""
@@ -412,7 +423,23 @@ class AIIntegrationLayer:
         }
 
     async def _update_task_status(self, task_id: str, status: TaskStatus, error_log: str = None):
-        """Update task status in database"""
+        """Update task status (prefers embedded memory with dual-write)"""
+        # Update embedded memory first (instant, no SSL issues)
+        if self.embedded_memory:
+            try:
+                result_str = None  # Not available at this point
+                self.embedded_memory.update_task_status(
+                    task_id=task_id,
+                    status=status.value,
+                    result=result_str,
+                    error_log=error_log
+                )
+                logger.debug(f"✅ Updated task {task_id} in embedded memory")
+                # Continue to also update master Postgres (dual-write)
+            except Exception as e:
+                logger.warning(f"⚠️ Embedded memory update failed: {e}")
+
+        # Update master Postgres
         try:
             with self._get_cursor() as cur:
                 if status == TaskStatus.IN_PROGRESS:
@@ -442,7 +469,7 @@ class AIIntegrationLayer:
 
                 self.conn.commit()
         except Exception as e:
-            logger.error(f"❌ Failed to update task status: {e}")
+            logger.error(f"❌ Failed to update task status in Postgres: {e}")
 
     async def _store_task_result(self, task_id: str, result: Dict):
         """Store task execution result"""
