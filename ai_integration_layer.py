@@ -14,6 +14,15 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
 
+# Import embedded memory system
+try:
+    from embedded_memory_system import get_embedded_memory
+    EMBEDDED_MEMORY_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Embedded memory not available: {e}")
+    EMBEDDED_MEMORY_AVAILABLE = False
+    get_embedded_memory = None
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -66,6 +75,7 @@ class AIIntegrationLayer:
         self.memory_manager = None
         self.aurea = None
         self.self_aware_ai = None
+        self.embedded_memory = None  # NEW: Local embedded memory
         self.agents_registry = {}
         self.active_tasks = {}
         self.execution_queue = asyncio.Queue()
@@ -98,11 +108,21 @@ class AIIntegrationLayer:
         self.aurea = aurea
         self.self_aware_ai = self_aware_ai
 
+        # Initialize embedded memory system (local SQLite with master sync)
+        if EMBEDDED_MEMORY_AVAILABLE:
+            try:
+                self.embedded_memory = await get_embedded_memory()
+                logger.info("✅ Embedded Memory System initialized (local + master sync)")
+            except Exception as e:
+                logger.warning(f"⚠️ Embedded memory initialization failed: {e}")
+                self.embedded_memory = None
+
         logger.info("🧠 AI Integration Layer Initializing...")
         logger.info(f"   LangGraph: {'✅' if langgraph else '❌'}")
         logger.info(f"   Memory Manager: {'✅' if memory_manager else '❌'}")
         logger.info(f"   AUREA: {'✅' if aurea else '❌'}")
         logger.info(f"   Self-Awareness: {'✅' if self_aware_ai else '❌'}")
+        logger.info(f"   Embedded Memory: {'✅' if self.embedded_memory else '❌'}")
 
         # Load agent registry
         await self._load_agent_registry()
@@ -196,18 +216,32 @@ class AIIntegrationLayer:
             # Update status to in_progress
             await self._update_task_status(task_id, TaskStatus.IN_PROGRESS)
 
-            # STEP 1: Load relevant memories
+            # STEP 1: Load relevant memories (ULTRA FAST with embedded memory!)
             relevant_memories = []
-            if self.memory_manager:
+
+            # Try embedded memory first (< 1ms, RAG-powered)
+            if self.embedded_memory:
+                try:
+                    search_text = f"{task_type} {task.get('trigger_condition', '')}"
+                    relevant_memories = self.embedded_memory.search_memories(
+                        query=search_text,
+                        limit=5,
+                        min_importance=0.5
+                    )
+                    logger.info(f"   📚 Found {len(relevant_memories)} relevant memories (embedded RAG)")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Embedded memory search failed: {e}")
+
+            # Fallback to unified memory manager if embedded not available
+            if not relevant_memories and self.memory_manager:
                 try:
                     from unified_memory_manager import Memory, MemoryType
-                    # Search for relevant past experiences
                     search_text = f"{task_type} {task.get('trigger_condition', '')}"
                     relevant_memories = self.memory_manager.search(
                         search_text,
                         limit=5
                     )
-                    logger.info(f"   📚 Found {len(relevant_memories)} relevant memories")
+                    logger.info(f"   📚 Found {len(relevant_memories)} relevant memories (fallback)")
                 except Exception as e:
                     logger.warning(f"   ⚠️ Memory retrieval failed: {e}")
 
