@@ -23,11 +23,15 @@ warnings.filterwarnings('ignore')
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Custom JSON encoder for datetime and Enum types
+# Custom JSON encoder for datetime, Decimal, and Enum types
+from decimal import Decimal
+
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, datetime):
             return obj.isoformat()
+        elif isinstance(obj, Decimal):
+            return float(obj)
         elif isinstance(obj, Enum):
             return obj.value
         elif hasattr(obj, '__dict__'):
