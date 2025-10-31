@@ -19,6 +19,7 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     postgresql-client \
     curl \
+    cron \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -35,7 +36,12 @@ ENV PYTHONUNBUFFERED=1
 ENV PORT=10000
 
 # Create necessary directories
-RUN mkdir -p logs
+RUN mkdir -p logs /var/lib/ai-memory /var/log
+
+# Setup cron for memory sync
+COPY crontab /etc/cron.d/memory-sync
+RUN chmod 0644 /etc/cron.d/memory-sync && \
+    crontab /etc/cron.d/memory-sync
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
@@ -44,5 +50,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Expose port
 EXPOSE 10000
 
-# Start the application
-CMD ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port ${PORT}"]
+# Start cron and application
+CMD service cron start && python -m uvicorn app:app --host 0.0.0.0 --port ${PORT}
