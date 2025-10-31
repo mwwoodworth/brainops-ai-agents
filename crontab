@@ -1,0 +1,2 @@
+# Memory sync cron job - runs every 5 minutes to ensure perfect sync
+*/5 * * * * cd /opt/render/project/src && /usr/local/bin/python3 memory_sync_cron.py >> /var/log/memory_sync.log 2>&1
