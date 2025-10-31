@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "6.0.0"  # MAJOR: Activate AUREA, Self-Healing, Learning Systems
+VERSION = "7.0.0"  # MAJOR: AI SELF-AWARENESS - Revolutionary AI that knows what it doesn't know!
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 
 # Import agent scheduler with fallback
@@ -176,6 +176,17 @@ except ImportError as e:
     VISION_ALIGNMENT_AVAILABLE = False
     logger.warning(f"Vision Alignment Agent not available: {e}")
     VisionAlignmentAgent = None
+
+# Import AI Self-Awareness Module with fallback
+try:
+    from ai_self_awareness import get_self_aware_ai, SelfAwareAI
+    SELF_AWARENESS_AVAILABLE = True
+    logger.info("✅ AI Self-Awareness Module loaded")
+except ImportError as e:
+    SELF_AWARENESS_AVAILABLE = False
+    logger.warning(f"AI Self-Awareness not available: {e}")
+    get_self_aware_ai = None
+    SelfAwareAI = None
 
 
 def _parse_capabilities(raw: Any) -> List[Dict[str, Any]]:
@@ -436,8 +447,21 @@ async def lifespan(app: FastAPI):
     else:
         app.state.vision_alignment = None
 
+    # Initialize AI Self-Awareness Module
+    if SELF_AWARENESS_AVAILABLE:
+        try:
+            self_aware_ai = await get_self_aware_ai()
+            app.state.self_aware_ai = self_aware_ai
+            logger.info("🧠 AI Self-Awareness Module initialized - AI can now assess its own capabilities!")
+        except Exception as e:
+            logger.error(f"❌ AI Self-Awareness initialization failed: {e}")
+            app.state.self_aware_ai = None
+    else:
+        app.state.self_aware_ai = None
+
     logger.info("=" * 60)
-    logger.info("🚀 BRAINOPS AI AGENTS v6.0.0 - PHASE 2 COMPLETE")
+    logger.info("🚀 BRAINOPS AI AGENTS v7.0.0 - PHASE 3 COMPLETE")
+    logger.info("🧠 AI SELF-AWARENESS ACTIVATED - Revolutionary Breakthrough!")
     logger.info("=" * 60)
     logger.info("PHASE 1 (Core Systems):")
     logger.info(f"  AUREA Orchestrator: {'✅ ACTIVE' if AUREA_AVAILABLE else '❌ DISABLED'}")
@@ -455,6 +479,9 @@ async def lifespan(app: FastAPI):
     logger.info(f"  Customer Success: {'✅ ACTIVE' if CUSTOMER_SUCCESS_AVAILABLE else '❌ DISABLED'}")
     logger.info(f"  Competitive Intelligence: {'✅ ACTIVE' if COMPETITIVE_INTEL_AVAILABLE else '❌ DISABLED'}")
     logger.info(f"  Vision Alignment: {'✅ ACTIVE' if VISION_ALIGNMENT_AVAILABLE else '❌ DISABLED'}")
+    logger.info("")
+    logger.info("PHASE 3 (Revolutionary Features):")
+    logger.info(f"  AI Self-Awareness: {'✅ ACTIVE' if SELF_AWARENESS_AVAILABLE else '❌ DISABLED'}")
     logger.info("=" * 60)
 
     yield
@@ -991,6 +1018,232 @@ async def get_scheduler_status():
         ]
     }
 
+
+# ==================== AI SELF-AWARENESS ENDPOINTS ====================
+
+@app.post("/ai/self-assess")
+async def ai_self_assess(
+    request: Request,
+    task_id: str,
+    agent_id: str,
+    task_description: str,
+    task_context: Dict[str, Any] = None
+):
+    """
+    AI assesses its own confidence in completing a task
+
+    Revolutionary feature - AI knows what it doesn't know!
+    """
+    if not SELF_AWARENESS_AVAILABLE or not hasattr(app.state, 'self_aware_ai') or not app.state.self_aware_ai:
+        raise HTTPException(status_code=503, detail="AI Self-Awareness not available")
+
+    try:
+        self_aware_ai = app.state.self_aware_ai
+
+        assessment = await self_aware_ai.assess_confidence(
+            task_id=task_id,
+            agent_id=agent_id,
+            task_description=task_description,
+            task_context=task_context or {}
+        )
+
+        return {
+            "task_id": assessment.task_id,
+            "agent_id": assessment.agent_id,
+            "confidence_score": float(assessment.confidence_score),
+            "confidence_level": assessment.confidence_level.value,
+            "can_complete_alone": assessment.can_complete_alone,
+            "estimated_accuracy": float(assessment.estimated_accuracy),
+            "estimated_time_seconds": assessment.estimated_time_seconds,
+            "limitations": [l.value for l in assessment.limitations],
+            "strengths_applied": assessment.strengths_applied,
+            "weaknesses_identified": assessment.weaknesses_identified,
+            "requires_human_review": assessment.requires_human_review,
+            "human_help_reason": assessment.human_help_reason,
+            "risk_level": assessment.risk_level,
+            "mitigation_strategies": assessment.mitigation_strategies,
+            "timestamp": assessment.timestamp.isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Self-assessment failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Self-assessment failed: {str(e)}")
+
+
+@app.post("/ai/explain-reasoning")
+async def ai_explain_reasoning(
+    request: Request,
+    task_id: str,
+    agent_id: str,
+    decision: str,
+    reasoning_process: Dict[str, Any]
+):
+    """
+    AI explains its reasoning in human-understandable terms
+
+    Transparency builds trust!
+    """
+    if not SELF_AWARENESS_AVAILABLE or not hasattr(app.state, 'self_aware_ai') or not app.state.self_aware_ai:
+        raise HTTPException(status_code=503, detail="AI Self-Awareness not available")
+
+    try:
+        self_aware_ai = app.state.self_aware_ai
+
+        explanation = await self_aware_ai.explain_reasoning(
+            task_id=task_id,
+            agent_id=agent_id,
+            decision=decision,
+            reasoning_process=reasoning_process
+        )
+
+        return {
+            "task_id": explanation.task_id,
+            "agent_id": explanation.agent_id,
+            "decision_made": explanation.decision_made,
+            "reasoning_steps": explanation.reasoning_steps,
+            "evidence_used": explanation.evidence_used,
+            "assumptions_made": explanation.assumptions_made,
+            "alternatives_considered": explanation.alternatives_considered,
+            "why_chosen": explanation.why_chosen,
+            "confidence_in_decision": float(explanation.confidence_in_decision),
+            "potential_errors": explanation.potential_errors,
+            "verification_methods": explanation.verification_methods,
+            "human_review_recommended": explanation.human_review_recommended,
+            "timestamp": explanation.timestamp.isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Reasoning explanation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Reasoning explanation failed: {str(e)}")
+
+
+@app.post("/ai/learn-from-mistake")
+async def ai_learn_from_mistake(
+    request: Request,
+    task_id: str,
+    agent_id: str,
+    expected_outcome: Any,
+    actual_outcome: Any,
+    confidence_before: float
+):
+    """
+    AI analyzes its own mistakes and learns from them
+
+    This is how AI gets smarter over time!
+    """
+    if not SELF_AWARENESS_AVAILABLE or not hasattr(app.state, 'self_aware_ai') or not app.state.self_aware_ai:
+        raise HTTPException(status_code=503, detail="AI Self-Awareness not available")
+
+    try:
+        from decimal import Decimal
+        self_aware_ai = app.state.self_aware_ai
+
+        learning = await self_aware_ai.learn_from_mistake(
+            task_id=task_id,
+            agent_id=agent_id,
+            expected_outcome=expected_outcome,
+            actual_outcome=actual_outcome,
+            confidence_before=Decimal(str(confidence_before))
+        )
+
+        return {
+            "mistake_id": learning.mistake_id,
+            "task_id": learning.task_id,
+            "agent_id": learning.agent_id,
+            "what_went_wrong": learning.what_went_wrong,
+            "root_cause": learning.root_cause,
+            "impact_level": learning.impact_level,
+            "should_have_known": learning.should_have_known,
+            "warning_signs_missed": learning.warning_signs_missed,
+            "what_learned": learning.what_learned,
+            "how_to_prevent": learning.how_to_prevent,
+            "confidence_before": float(learning.confidence_before),
+            "confidence_after": float(learning.confidence_after),
+            "similar_mistakes_count": learning.similar_mistakes_count,
+            "applied_to_agents": learning.applied_to_agents,
+            "timestamp": learning.timestamp.isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Learning from mistake failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Learning from mistake failed: {str(e)}")
+
+
+@app.get("/ai/self-awareness/stats")
+async def get_self_awareness_stats():
+    """Get statistics about AI self-awareness system"""
+    if not SELF_AWARENESS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="AI Self-Awareness not available")
+
+    try:
+        pool = get_pool()
+
+        # Get assessment stats
+        assessment_stats = await pool.fetchrow("""
+            SELECT
+                COUNT(*) as total_assessments,
+                AVG(confidence_score) as avg_confidence,
+                COUNT(CASE WHEN can_complete_alone THEN 1 END) as can_complete_alone_count,
+                COUNT(CASE WHEN requires_human_review THEN 1 END) as requires_review_count
+            FROM ai_self_assessments
+        """)
+
+        # Get mistake learning stats
+        learning_stats = await pool.fetchrow("""
+            SELECT
+                COUNT(*) as total_mistakes,
+                COUNT(CASE WHEN should_have_known THEN 1 END) as should_have_known_count,
+                AVG(confidence_before - confidence_after) as avg_confidence_drop
+            FROM ai_learning_from_mistakes
+        """)
+
+        # Get reasoning explanation stats
+        reasoning_stats = await pool.fetchrow("""
+            SELECT
+                COUNT(*) as total_explanations,
+                AVG(confidence_in_decision) as avg_decision_confidence,
+                COUNT(CASE WHEN human_review_recommended THEN 1 END) as human_review_count
+            FROM ai_reasoning_explanations
+        """)
+
+        return {
+            "self_awareness_enabled": True,
+            "assessments": {
+                "total": assessment_stats["total_assessments"] or 0,
+                "avg_confidence": float(assessment_stats["avg_confidence"] or 0),
+                "can_complete_alone_rate": (
+                    (assessment_stats["can_complete_alone_count"] or 0) /
+                    max(assessment_stats["total_assessments"] or 1, 1) * 100
+                ),
+                "requires_review_rate": (
+                    (assessment_stats["requires_review_count"] or 0) /
+                    max(assessment_stats["total_assessments"] or 1, 1) * 100
+                )
+            },
+            "learning": {
+                "total_mistakes_analyzed": learning_stats["total_mistakes"] or 0,
+                "should_have_known_rate": (
+                    (learning_stats["should_have_known_count"] or 0) /
+                    max(learning_stats["total_mistakes"] or 1, 1) * 100
+                ),
+                "avg_confidence_adjustment": float(learning_stats["avg_confidence_drop"] or 0)
+            },
+            "reasoning": {
+                "total_explanations": reasoning_stats["total_explanations"] or 0,
+                "avg_decision_confidence": float(reasoning_stats["avg_decision_confidence"] or 0),
+                "human_review_rate": (
+                    (reasoning_stats["human_review_count"] or 0) /
+                    max(reasoning_stats["total_explanations"] or 1, 1) * 100
+                )
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get self-awareness stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve stats: {str(e)}")
+
+
+# ==================== END AI SELF-AWARENESS ENDPOINTS ====================
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
