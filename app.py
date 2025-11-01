@@ -30,6 +30,7 @@ from database.async_connection import (
 from models.agent import Agent, AgentCategory, AgentExecution, AgentList
 from api.memory import router as memory_router
 from api.brain import router as brain_router
+from api.memory_coordination import router as memory_coordination_router
 
 # Configure logging
 logging.basicConfig(
@@ -40,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "8.1.3"  # PATCH: Fixed Search + Embedded Memory Integration (RAG now working, dual-write pattern)
+VERSION = "8.2.0"  # MINOR: Perfect E2E Memory Coordination System (UnifiedMemoryCoordinator + SessionContextManager)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 
 # Import agent scheduler with fallback
@@ -632,6 +633,7 @@ async def verify_api_key(api_key: str = Security(api_key_header)) -> bool:
 # Include routers
 app.include_router(memory_router)
 app.include_router(brain_router)
+app.include_router(memory_coordination_router)
 
 
 @app.get("/")
