@@ -154,7 +154,15 @@ class UnifiedMemoryCoordinator:
                 expires_at TIMESTAMPTZ,
                 access_count INT DEFAULT 0,
                 sync_version INT DEFAULT 1,
-                CONSTRAINT memory_context_unique_key UNIQUE(key)
+                dedupe_key TEXT GENERATED ALWAYS AS (
+                    scope || ':' ||
+                    COALESCE(tenant_id, '') || ':' ||
+                    COALESCE(user_id, '') || ':' ||
+                    COALESCE(session_id, '') || ':' ||
+                    COALESCE(agent_id, '') || ':' ||
+                    key
+                ) STORED,
+                CONSTRAINT memory_context_registry_dedupe_key UNIQUE (dedupe_key)
             );
 
             -- Session context tracking
@@ -226,6 +234,53 @@ class UnifiedMemoryCoordinator:
             CREATE INDEX IF NOT EXISTS idx_session_active ON memory_session_context(status, last_activity);
         """)
 
+        # Legacy >5.0 migrations: remove obsolete unique constraint and enforce scoped uniqueness
+        cursor.execute("""
+            ALTER TABLE memory_context_registry
+            DROP CONSTRAINT IF EXISTS memory_context_unique_key;
+        """)
+
+        cursor.execute("""
+            DELETE FROM memory_context_registry mc
+            USING memory_context_registry dup
+            WHERE mc.ctid < dup.ctid
+              AND mc.key = dup.key
+              AND mc.scope = dup.scope
+              AND COALESCE(mc.tenant_id, '') = COALESCE(dup.tenant_id, '')
+              AND COALESCE(mc.user_id, '') = COALESCE(dup.user_id, '')
+              AND COALESCE(mc.session_id, '') = COALESCE(dup.session_id, '')
+              AND COALESCE(mc.agent_id, '') = COALESCE(dup.agent_id, '');
+        """)
+
+        cursor.execute("""
+            ALTER TABLE memory_context_registry
+            ADD COLUMN IF NOT EXISTS dedupe_key TEXT GENERATED ALWAYS AS (
+                scope || ':' ||
+                COALESCE(tenant_id, '') || ':' ||
+                COALESCE(user_id, '') || ':' ||
+                COALESCE(session_id, '') || ':' ||
+                COALESCE(agent_id, '') || ':' ||
+                key
+            ) STORED;
+        """)
+
+        cursor.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM information_schema.table_constraints
+                    WHERE table_name = 'memory_context_registry'
+                      AND constraint_type = 'UNIQUE'
+                      AND constraint_name = 'memory_context_registry_dedupe_key'
+                ) THEN
+                    ALTER TABLE memory_context_registry
+                    ADD CONSTRAINT memory_context_registry_dedupe_key
+                    UNIQUE (dedupe_key);
+                END IF;
+            END $$;
+        """)
+
         conn.commit()
         logger.info("✅ Memory coordination tables ready")
 
@@ -290,10 +345,20 @@ class UnifiedMemoryCoordinator:
             (key, layer, scope, priority, category, source, tenant_id, user_id,
              session_id, agent_id, value, metadata, expires_at, sync_version)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (key)
+            ON CONFLICT (dedupe_key)
             DO UPDATE SET
+                layer = EXCLUDED.layer,
+                scope = EXCLUDED.scope,
+                priority = EXCLUDED.priority,
+                category = EXCLUDED.category,
+                source = EXCLUDED.source,
+                tenant_id = EXCLUDED.tenant_id,
+                user_id = EXCLUDED.user_id,
+                session_id = EXCLUDED.session_id,
+                agent_id = EXCLUDED.agent_id,
                 value = EXCLUDED.value,
                 metadata = EXCLUDED.metadata,
+                expires_at = EXCLUDED.expires_at,
                 updated_at = NOW(),
                 sync_version = memory_context_registry.sync_version + 1,
                 access_count = memory_context_registry.access_count + 1
