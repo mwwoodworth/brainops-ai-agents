@@ -154,7 +154,7 @@ class UnifiedMemoryCoordinator:
                 expires_at TIMESTAMPTZ,
                 access_count INT DEFAULT 0,
                 sync_version INT DEFAULT 1,
-                UNIQUE(key, scope, tenant_id, user_id, session_id, agent_id)
+                CONSTRAINT memory_context_unique_key UNIQUE(key)
             );
 
             -- Session context tracking
@@ -290,8 +290,7 @@ class UnifiedMemoryCoordinator:
             (key, layer, scope, priority, category, source, tenant_id, user_id,
              session_id, agent_id, value, metadata, expires_at, sync_version)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (key, scope, COALESCE(tenant_id, ''), COALESCE(user_id, ''),
-                         COALESCE(session_id, ''), COALESCE(agent_id, ''))
+            ON CONFLICT (key)
             DO UPDATE SET
                 value = EXCLUDED.value,
                 metadata = EXCLUDED.metadata,
