@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, List, Set
 from dataclasses import dataclass, asdict, field
 from enum import Enum
 import hashlib
+from uuid import UUID
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import logging
@@ -725,7 +726,7 @@ class UnifiedMemoryCoordinator:
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (
             event_id, event_type, context_key, source_system,
-            target_systems, priority.value, json.dumps(payload)
+            target_systems, priority.value, json.dumps(payload, default=self._json_serializer)
         ))
         conn.commit()
 
@@ -749,6 +750,24 @@ class UnifiedMemoryCoordinator:
         if entry.expires_at and entry.expires_at < datetime.now(timezone.utc):
             return False
         return True
+
+    @staticmethod
+    def _json_serializer(obj: Any):
+        """Serialize objects not handled by default json encoder"""
+        if isinstance(obj, Enum):
+            return obj.value
+        if isinstance(obj, (datetime, timedelta)):
+            return obj.isoformat() if isinstance(obj, datetime) else obj.total_seconds()
+        if isinstance(obj, (set, tuple)):
+            return list(obj)
+        if isinstance(obj, UUID):
+            return str(obj)
+        if hasattr(obj, 'isoformat'):
+            try:
+                return obj.isoformat()
+            except Exception:
+                return str(obj)
+        return str(obj)
 
     def _log_access(
         self,
