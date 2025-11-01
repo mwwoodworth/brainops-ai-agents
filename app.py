@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "8.1.2"  # PATCH: Embedded Memory System + Critical Bug Fixes (Decimal serialization, SSL stability, lightweight build)
+VERSION = "8.1.3"  # PATCH: Fixed Search + Embedded Memory Integration (RAG now working, dual-write pattern)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 
 # Import agent scheduler with fallback

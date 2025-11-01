@@ -41,12 +41,15 @@ class UnifiedBrain:
     """
     The ONE unified memory system for ALL BrainOps operations
     Replaces 98 fragmented tables with a single coherent interface
+    Now integrated with embedded memory for ultra-fast RAG search
     """
 
     def __init__(self):
         self.conn = None
         self.cursor = None
+        self.embedded_memory = None
         self._ensure_table()
+        self._init_embedded_memory()
 
     def _get_connection(self):
         """Get database connection"""
@@ -81,6 +84,19 @@ class UnifiedBrain:
 
         conn.commit()
 
+    def _init_embedded_memory(self):
+        """Initialize embedded memory system for RAG search"""
+        try:
+            from embedded_memory_system import get_embedded_memory
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self.embedded_memory = loop.run_until_complete(get_embedded_memory())
+            print("✅ Embedded memory integrated with UnifiedBrain")
+        except Exception as e:
+            print(f"⚠️ Embedded memory not available: {e}")
+            self.embedded_memory = None
+
     def store(self, key: str, value: Any, category: str = "general",
               priority: str = "medium", source: str = "manual",
               metadata: Optional[Dict] = None) -> str:
@@ -113,7 +129,31 @@ class UnifiedBrain:
 
         result = cursor.fetchone()
         conn.commit()
-        return str(result['id'])
+        entry_id = str(result['id'])
+
+        # DUAL-WRITE: Also store in embedded memory for fast RAG search
+        if self.embedded_memory:
+            try:
+                # Convert to string for embedded memory
+                content = value if isinstance(value, str) else json.dumps(value)
+                importance = 0.9 if priority == 'critical' else 0.7 if priority == 'high' else 0.5
+
+                self.embedded_memory.store_memory(
+                    content=content,
+                    memory_type=category,
+                    importance_score=importance,
+                    metadata={
+                        **({'source': source} if source else {}),
+                        **(metadata or {}),
+                        'brain_key': key,
+                        'brain_id': entry_id
+                    }
+                )
+                print(f"✅ Dual-write: Stored '{key}' in both Postgres and embedded memory")
+            except Exception as e:
+                print(f"⚠️ Embedded memory store failed: {e} (data still in Postgres)")
+
+        return entry_id
 
     def get(self, key: str) -> Optional[Dict]:
         """Retrieve a piece of context"""
@@ -224,14 +264,52 @@ class UnifiedBrain:
         return context
 
     def search(self, query: str, limit: int = 20) -> List[Dict]:
-        """Search across all context"""
+        """
+        Search across all context using embedded memory RAG if available
+        Falls back to PostgreSQL full-text search if embedded memory unavailable
+        """
+        # Try embedded memory first (ultra-fast RAG search)
+        if self.embedded_memory:
+            try:
+                # Use embedded memory's RAG search
+                results = self.embedded_memory.search_memories(
+                    query=query,
+                    limit=limit,
+                    min_importance=0.0  # Include all results
+                )
+
+                if results:
+                    # Convert embedded memory format to brain format
+                    brain_results = []
+                    for mem in results:
+                        brain_results.append({
+                            'key': mem.get('memory_id', 'unknown'),
+                            'value': mem.get('content', ''),
+                            'category': mem.get('memory_type', 'general'),
+                            'priority': 'high' if mem.get('importance_score', 0) > 0.8 else 'medium',
+                            'last_updated': mem.get('created_at'),
+                            'source': 'embedded_memory',
+                            'metadata': mem.get('metadata', {}),
+                            'similarity_score': mem.get('similarity_score', 0),
+                            'combined_score': mem.get('combined_score', 0)
+                        })
+                    print(f"✅ Embedded RAG search: found {len(brain_results)} results")
+                    return brain_results
+            except Exception as e:
+                print(f"⚠️ Embedded memory search failed: {e}, falling back to Postgres")
+
+        # Fallback to Postgres full-text search
         conn, cursor = self._get_connection()
 
+        # FIXED: Cast JSON values to text properly, handle both string and JSON
         cursor.execute("""
             SELECT key, value, category, priority, last_updated, source, metadata
             FROM unified_brain
             WHERE key ILIKE %s
-               OR value::text ILIKE %s
+               OR (CASE
+                     WHEN jsonb_typeof(value) = 'string' THEN value #>> '{}'
+                     ELSE value::text
+                   END) ILIKE %s
                OR category ILIKE %s
             ORDER BY
                 CASE priority
@@ -244,7 +322,9 @@ class UnifiedBrain:
             LIMIT %s
         """, (f'%{query}%', f'%{query}%', f'%{query}%', limit))
 
-        return [dict(row) for row in cursor.fetchall()]
+        results = [dict(row) for row in cursor.fetchall()]
+        print(f"✅ Postgres search: found {len(results)} results")
+        return results
 
     def consolidate_from_legacy_tables(self):
         """
