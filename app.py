@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "8.0.0"  # MAJOR: AI INTEGRATION LAYER - Complete AI Operating System with Autonomous Task Execution!
+VERSION = "8.1.2"  # PATCH: Embedded Memory System + Critical Bug Fixes (Decimal serialization, SSL stability, lightweight build)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 
 # Import agent scheduler with fallback
@@ -94,6 +94,16 @@ except ImportError as e:
     MEMORY_AVAILABLE = False
     logger.warning(f"Memory Manager not available: {e}")
     UnifiedMemoryManager = None
+
+# Import Embedded Memory System with fallback
+try:
+    from embedded_memory_system import get_embedded_memory
+    EMBEDDED_MEMORY_AVAILABLE = True
+    logger.info("✅ Embedded Memory System loaded")
+except ImportError as e:
+    EMBEDDED_MEMORY_AVAILABLE = False
+    logger.warning(f"Embedded Memory not available: {e}")
+    get_embedded_memory = None
 
 # Import AI Training Pipeline with fallback
 try:
@@ -372,6 +382,18 @@ async def lifespan(app: FastAPI):
     else:
         app.state.memory = None
 
+    # Initialize Embedded Memory System
+    if EMBEDDED_MEMORY_AVAILABLE:
+        try:
+            embedded_memory = await get_embedded_memory()
+            app.state.embedded_memory = embedded_memory
+            logger.info("⚡ Embedded Memory System initialized (ultra-fast local SQLite + RAG)")
+        except Exception as e:
+            logger.error(f"❌ Embedded Memory initialization failed: {e}")
+            app.state.embedded_memory = None
+    else:
+        app.state.embedded_memory = None
+
     # Initialize AI Training Pipeline
     if TRAINING_AVAILABLE:
         try:
@@ -641,6 +663,8 @@ async def health_check():
         active_systems.append("Self-Healing Recovery")
     if MEMORY_AVAILABLE and hasattr(app.state, 'memory') and app.state.memory:
         active_systems.append("Memory Manager")
+    if EMBEDDED_MEMORY_AVAILABLE and hasattr(app.state, 'embedded_memory') and app.state.embedded_memory:
+        active_systems.append("Embedded Memory (RAG)")
     if TRAINING_AVAILABLE and hasattr(app.state, 'training') and app.state.training:
         active_systems.append("Training Pipeline")
     if LEARNING_AVAILABLE and hasattr(app.state, 'learning') and app.state.learning:
@@ -664,6 +688,14 @@ async def health_check():
     if VISION_ALIGNMENT_AVAILABLE and hasattr(app.state, 'vision_alignment') and app.state.vision_alignment:
         active_systems.append("Vision Alignment Agent")
 
+    # Get embedded memory stats if available
+    embedded_memory_stats = None
+    if EMBEDDED_MEMORY_AVAILABLE and hasattr(app.state, 'embedded_memory') and app.state.embedded_memory:
+        try:
+            embedded_memory_stats = app.state.embedded_memory.get_stats()
+        except:
+            pass
+
     return {
         "status": "healthy" if db_healthy else "degraded",
         "version": VERSION,
@@ -671,11 +703,14 @@ async def health_check():
         "database": db_status,
         "active_systems": active_systems,
         "system_count": len(active_systems),
+        "embedded_memory_active": EMBEDDED_MEMORY_AVAILABLE and hasattr(app.state, 'embedded_memory') and app.state.embedded_memory is not None,
+        "embedded_memory_stats": embedded_memory_stats,
         "capabilities": {
             # Phase 1
             "aurea_orchestrator": AUREA_AVAILABLE,
             "self_healing": SELF_HEALING_AVAILABLE,
             "memory_manager": MEMORY_AVAILABLE,
+            "embedded_memory": EMBEDDED_MEMORY_AVAILABLE,
             "training_pipeline": TRAINING_AVAILABLE,
             "learning_system": LEARNING_AVAILABLE,
             "agent_scheduler": SCHEDULER_AVAILABLE,
