@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "8.2.0"  # MINOR: Perfect E2E Memory Coordination System (UnifiedMemoryCoordinator + SessionContextManager)
+VERSION = "8.3.0"  # MINOR: AUREA NLU Natural Language Command Interface - Founder-level AI control via natural language
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 
 # Import agent scheduler with fallback
@@ -221,6 +221,18 @@ except ImportError as e:
     LANGGRAPH_AVAILABLE = False
     logger.warning(f"LangGraph Orchestrator not available: {e}")
     LangGraphOrchestrator = None
+
+# Import AUREA NLU Processor with fallback
+try:
+    from aurea_nlu_processor import AUREANLUProcessor
+    from langchain_openai import ChatOpenAI
+    AUREA_NLU_AVAILABLE = True
+    logger.info("✅ AUREA NLU Processor loaded")
+except ImportError as e:
+    AUREA_NLU_AVAILABLE = False
+    logger.warning(f"AUREA NLU Processor not available: {e}")
+    AUREANLUProcessor = None
+    ChatOpenAI = None
 
 
 def _parse_capabilities(raw: Any) -> List[Dict[str, Any]]:
@@ -541,6 +553,33 @@ async def lifespan(app: FastAPI):
             app.state.integration_layer = None
     else:
         app.state.integration_layer = None
+
+    # Initialize AUREA NLU Processor (Natural Language Command Interface)
+    if AUREA_NLU_AVAILABLE and INTEGRATION_LAYER_AVAILABLE and AUREA_AVAILABLE:
+        try:
+            llm_for_nlu = ChatOpenAI(
+                model="gpt-4-turbo-preview",
+                temperature=0.7,
+                api_key=os.getenv("OPENAI_API_KEY")
+            )
+            aurea_nlu = AUREANLUProcessor(
+                llm_for_nlu,
+                app.state.integration_layer if hasattr(app.state, 'integration_layer') else None,
+                app.state.aurea if hasattr(app.state, 'aurea') else None,
+                None  # AI Board not yet initialized in app.py
+            )
+            app.state.aurea_nlu = aurea_nlu
+            logger.info("🗣️ AUREA NLU Processor initialized - Natural language commands ENABLED!")
+            logger.info("   - Intent recognition: ✅")
+            logger.info("   - Dynamic skill registry: ✅")
+            logger.info("   - 12+ command skills: ✅")
+        except Exception as e:
+            logger.error(f"❌ AUREA NLU initialization failed: {e}")
+            app.state.aurea_nlu = None
+    else:
+        app.state.aurea_nlu = None
+        if not AUREA_NLU_AVAILABLE:
+            logger.warning("⚠️ AUREA NLU not available - natural language commands disabled")
 
     logger.info("=" * 80)
     logger.info("🚀 BRAINOPS AI AGENTS v8.0.0 - COMPLETE AI OPERATING SYSTEM")
@@ -1570,6 +1609,40 @@ async def orchestrate_complex_workflow(
 
     except Exception as e:
         logger.error(f"❌ Orchestration failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/aurea/command/natural_language")
+async def execute_aurea_nl_command(
+    request: Request,
+    command_text: str
+):
+    """
+    Execute a natural language command through AUREA's NLU processor.
+    Founder-level authority for natural language system control.
+
+    Examples:
+    - "Create a high priority task to deploy the new feature"
+    - "Show me all tasks that are in progress"
+    - "Get AUREA status"
+    - "Execute task abc-123"
+    """
+    if not hasattr(app.state, 'aurea_nlu') or not app.state.aurea_nlu:
+        raise HTTPException(status_code=503, detail="AUREA NLU Processor not available")
+
+    try:
+        nlu = app.state.aurea_nlu
+        result = await nlu.execute_natural_language_command(command_text)
+
+        return {
+            "success": True,
+            "command": command_text,
+            "result": result,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Natural language command execution failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
