@@ -12,10 +12,13 @@ sqlalchemy==2.0.23
 openai==1.3.0
 anthropic==0.7.0
 
-# LangChain for AUREA NLU
-langchain==0.1.0
-langchain-openai==0.0.2
-langchain-core==0.1.0
+# LangChain for AUREA NLU (Updated to compatible versions)
+langchain==0.3.27
+langchain-openai==0.3.32
+langchain-core==0.3.75
+langchain-anthropic==0.3.28
+langchain-community==0.3.29
+langchain-text-splitters==0.3.11
 
 # Scheduling (Required for agent scheduler)
 apscheduler==3.10.4
