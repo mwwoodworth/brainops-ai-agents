@@ -442,9 +442,16 @@ class SessionContextManager:
         """Persist session to database"""
         from memory_coordination_system import ContextEntry, MemoryLayer, ContextScope
 
+        # Convert session to dict and handle datetime serialization
+        session_dict = asdict(session)
+        if 'start_time' in session_dict and hasattr(session_dict['start_time'], 'isoformat'):
+            session_dict['start_time'] = session_dict['start_time'].isoformat()
+        if 'last_activity' in session_dict and hasattr(session_dict['last_activity'], 'isoformat'):
+            session_dict['last_activity'] = session_dict['last_activity'].isoformat()
+
         entry = ContextEntry(
             key=f"session_state_{session.session_id}",
-            value=asdict(session),
+            value=session_dict,
             layer=MemoryLayer.SESSION,
             scope=ContextScope.SESSION,
             priority="high",
