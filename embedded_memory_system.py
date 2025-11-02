@@ -519,10 +519,12 @@ class EmbeddedMemorySystem:
                             created_at, last_accessed, synced_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        mem['id'], mem.get('memory_type'), mem.get('source_agent'),
+                        str(mem['id']),  # Convert UUID to string
+                        mem.get('memory_type'), mem.get('source_agent'),
                         mem.get('content'), embedding, mem.get('metadata'),
                         mem.get('importance_score', 0.5), 0,
-                        mem.get('created_at'), mem.get('last_accessed'),
+                        str(mem.get('created_at')) if mem.get('created_at') else None,
+                        str(mem.get('last_accessed')) if mem.get('last_accessed') else None,
                         datetime.now().isoformat()
                     ))
 
@@ -542,11 +544,14 @@ class EmbeddedMemorySystem:
                             completed_at, synced_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        task['id'], task.get('task_type'), task.get('status'),
+                        str(task['id']),  # Convert UUID to string
+                        task.get('task_type'), task.get('status'),
                         task.get('priority'), task.get('trigger_condition'),
                         task.get('result'), task.get('error_log'),
-                        task.get('created_at'), task.get('started_at'),
-                        task.get('completed_at'), datetime.now().isoformat()
+                        str(task.get('created_at')) if task.get('created_at') else None,
+                        str(task.get('started_at')) if task.get('started_at') else None,
+                        str(task.get('completed_at')) if task.get('completed_at') else None,
+                        datetime.now().isoformat()
                     ))
 
                 self.sqlite_conn.commit()
