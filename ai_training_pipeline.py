@@ -30,8 +30,19 @@ DB_CONFIG = {
     "port": int(os.getenv("DB_PORT", 6543))
 }
 
-# OpenAI configuration
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# OpenAI configuration - lazy initialization
+openai_client = None
+
+def get_openai_client():
+    """Lazy initialization of OpenAI client"""
+    global openai_client
+    if openai_client is None:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key:
+            openai_client = OpenAI(api_key=api_key)
+        else:
+            logger.warning("OPENAI_API_KEY not set - AI features disabled")
+    return openai_client
 
 class InteractionType(Enum):
     """Types of customer interactions"""
@@ -292,7 +303,18 @@ class AITrainingPipeline:
             Return JSON format.
             """
 
-            response = openai_client.chat.completions.create(
+            client = get_openai_client()
+            if not client:
+                return {
+                    'sentiment_score': 0,
+                    'intent': 'unknown',
+                    'topics': [],
+                    'emotion': 'neutral',
+                    'urgency': 'normal',
+                    'decision_signals': []
+                }
+
+            response = client.chat.completions.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3
