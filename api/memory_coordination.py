@@ -89,11 +89,27 @@ _session_manager = None
 
 
 async def get_coordinator():
-    """Get memory coordinator instance"""
+    """Get memory coordinator instance with timeout protection"""
     global _coordinator
     if _coordinator is None:
-        from memory_coordination_system import get_memory_coordinator
-        _coordinator = get_memory_coordinator()
+        try:
+            # Try with 5 second timeout to prevent hanging
+            import asyncio
+            from memory_coordination_system import get_memory_coordinator
+            _coordinator = await asyncio.wait_for(
+                asyncio.to_thread(get_memory_coordinator),
+                timeout=5.0
+            )
+            logger.info("✅ Memory coordinator initialized")
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ Memory coordinator initialization timed out, using fallback")
+            # Return a simple fallback coordinator
+            from memory_coordination_system import SimpleFallbackCoordinator
+            _coordinator = SimpleFallbackCoordinator()
+        except Exception as e:
+            logger.error(f"❌ Memory coordinator failed: {e}, using fallback")
+            from memory_coordination_system import SimpleFallbackCoordinator
+            _coordinator = SimpleFallbackCoordinator()
     return _coordinator
 
 
