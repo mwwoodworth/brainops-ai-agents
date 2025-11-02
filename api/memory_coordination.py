@@ -297,14 +297,16 @@ async def start_session(
             "success": True,
             "session_id": session.session_id,
             "status": session.status,
-            "start_time": session.start_time.isoformat(),
+            "start_time": session.start_time.isoformat() if hasattr(session.start_time, 'isoformat') else str(session.start_time),
             "tenant_id": session.tenant_id,
             "user_id": session.user_id
         }
 
     except Exception as e:
         logger.error(f"❌ Start session failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        # Convert any datetime objects in error message
+        error_msg = str(e).replace('<', '').replace('>', '')
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 @router.post("/session/resume/{session_id}")
@@ -325,8 +327,8 @@ async def resume_session(
             "success": True,
             "session_id": session.session_id,
             "status": session.status,
-            "start_time": session.start_time.isoformat(),
-            "last_activity": session.last_activity.isoformat(),
+            "start_time": session.start_time.isoformat() if hasattr(session.start_time, 'isoformat') else str(session.start_time),
+            "last_activity": session.last_activity.isoformat() if hasattr(session.last_activity, 'isoformat') else str(session.last_activity),
             "message_count": len(session.conversation_history),
             "task_count": len(session.pending_tasks) + len(session.completed_tasks),
             "active_agents": session.active_agents
