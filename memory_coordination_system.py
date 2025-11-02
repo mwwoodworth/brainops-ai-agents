@@ -21,6 +21,48 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
+# SIMPLE FALLBACK COORDINATOR (No Database)
+# ============================================================================
+
+class SimpleFallbackCoordinator:
+    """
+    Lightweight in-memory coordinator used when database is unavailable/slow
+    """
+
+    def __init__(self):
+        self.memory_cache: Dict[str, ContextEntry] = {}
+        self.created_at = datetime.now(timezone.utc)
+        logger.info("🔄 Using SimpleFallbackCoordinator (in-memory only)")
+
+    async def store_context(self, entry: ContextEntry) -> str:
+        """Store context in memory only"""
+        cache_key = f"{entry.scope.value}:{entry.key}"
+        self.memory_cache[cache_key] = entry
+        return cache_key
+
+    async def retrieve_context(self, key: str, scope: ContextScope, **kwargs) -> Optional[ContextEntry]:
+        """Retrieve from memory cache"""
+        cache_key = f"{scope.value}:{key}"
+        return self.memory_cache.get(cache_key)
+
+    async def search_context(self, query: str, **kwargs) -> List[ContextEntry]:
+        """Simple search in memory cache"""
+        results = []
+        for entry in self.memory_cache.values():
+            if query.lower() in str(entry.value).lower():
+                results.append(entry)
+        return results[:kwargs.get('limit', 20)]
+
+    async def get_stats(self) -> Dict[str, Any]:
+        """Return memory-only stats"""
+        return {
+            "mode": "fallback",
+            "entries": len(self.memory_cache),
+            "uptime_seconds": (datetime.now(timezone.utc) - self.created_at).total_seconds()
+        }
+
+
+# ============================================================================
 # MEMORY LAYER DEFINITIONS
 # ============================================================================
 
