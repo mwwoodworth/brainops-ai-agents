@@ -11,14 +11,16 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
 
 # Import all our components
-from unified_memory_manager import get_memory_manager, Memory, MemoryType
+from unified_memory_manager import get_memory_manager, Memory, MemoryType, DB_CONFIG
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from agent_activation_system import get_activation_system, BusinessEventType
 from aurea_orchestrator import get_aurea, AutonomyLevel
 from ai_board_governance import get_ai_board, Proposal, ProposalType
@@ -97,6 +99,180 @@ class MemoryQueryRequest(BaseModel):
     query: str
     context: Optional[str] = None
     limit: int = 10
+
+
+class TaskExecutionRequest(BaseModel):
+    task_id: str
+    task_name: str
+    description: Optional[str] = None
+    priority: Optional[str] = "medium"
+    category: Optional[str] = "general"
+
+
+# Helper function for Supabase interaction
+def get_db_connection():
+    return psycopg2.connect(**DB_CONFIG)
+
+async def execute_task_in_background(task_request: TaskExecutionRequest):
+    logger.info(f"Executing task {task_request.task_id}: {task_request.task_name}")
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # 1. Update task status to in_progress
+        update_query = """
+        UPDATE ai_development_tasks
+        SET status = 'in_progress',
+            started_at = NOW()
+        WHERE id = %s
+        """
+        cur.execute(update_query, (task_request.task_id,))
+        conn.commit()
+        logger.info(f"Task {task_request.task_id} status updated to 'in_progress'")
+
+        # 2. Select appropriate agent (simplified for now)
+        # In a real scenario, this would involve more sophisticated logic
+        # For now, let's try to find an agent based on category or a default
+        selected_agent_name = "System Improvement Agent"  # Default agent
+        selected_agent_id = None
+        if activation_system:
+            # Try to find an agent that matches the category
+            for agent_id, agent in activation_system.agents.items():
+                if agent.category.lower() == task_request.category.lower():
+                    # Capture both ID and name when available
+                    try:
+                        selected_agent_name = getattr(agent, 'name', selected_agent_name)
+                        selected_agent_id = getattr(agent, 'id', agent_id)
+                    except Exception:
+                        selected_agent_name = getattr(agent, 'name', selected_agent_name)
+                    break
+            logger.info(f"Selected agent for task {task_request.task_id}: {selected_agent_name}")
+        else:
+            logger.warning("Activation system not initialized, using default agent.")
+
+        # 2b. Create execution tracking row in task_executions
+        try:
+            import uuid
+            from datetime import datetime, timezone
+            execution_id = str(uuid.uuid4())
+            start_time = datetime.now(timezone.utc)
+            insert_exec = """
+            INSERT INTO task_executions (
+                id, task_id, agent_id, agent_name, status, started_at, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """
+            cur.execute(
+                insert_exec,
+                (
+                    execution_id,
+                    task_request.task_id,
+                    selected_agent_id or selected_agent_name or 'unknown',
+                    selected_agent_name,
+                    'running',
+                    start_time,
+                    start_time,
+                ),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to insert task_executions row: {e}")
+
+        # 3. Execute task (placeholder for actual agent execution logic)
+        # This is where the actual agent logic would be called.
+        # For now, simulate work and update status.
+        await asyncio.sleep(5) # Simulate work
+
+        # Store execution as a memory
+        memory_manager.store(Memory(
+            memory_type=MemoryType.AGENT_TASK,
+            content={
+                "task_id": task_request.task_id,
+                "task_name": task_request.task_name,
+                "agent": selected_agent_name,
+                "status": "completed",
+                "result": "Simulated successful execution"
+            },
+            source_system="ai-agents",
+            source_agent=selected_agent_name,
+            created_by="system",
+            importance_score=0.7,
+            tags=["task_execution", task_request.category]
+        ))
+
+        # 4. Update task status to completed
+        update_query = """
+        UPDATE ai_development_tasks
+        SET status = 'completed',
+            completed_at = NOW(),
+            progress_percentage = 100,
+            assigned_agent = %s,
+            session_notes = %s
+        WHERE id = %s
+        """
+        cur.execute(update_query, (selected_agent_name, "Simulated successful execution", task_request.task_id))
+        conn.commit()
+        logger.info(f"Task {task_request.task_id} status updated to 'completed'")
+
+        # 5. Update execution row to completed with latency
+        try:
+            from datetime import datetime, timezone
+            end_time = datetime.now(timezone.utc)
+            latency_ms = None
+            if 'start_time' in locals():
+                latency_ms = int((end_time - start_time).total_seconds() * 1000)
+            update_exec = """
+            UPDATE task_executions
+            SET status = %s,
+                completed_at = %s,
+                latency_ms = %s,
+                error_message = NULL
+            WHERE id = %s
+            """
+            if 'execution_id' in locals():
+                cur.execute(update_exec, ('completed', end_time, latency_ms, execution_id))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to update task_executions row to completed: {e}")
+
+    except Exception as e:
+        logger.error(f"Error executing task {task_request.task_id}: {e}")
+        if conn:
+            conn.rollback()
+        # Update task status to blocked/failed
+        update_query = """
+        UPDATE ai_development_tasks
+        SET status = 'blocked',
+            session_notes = %s
+        WHERE id = %s
+        """
+        cur.execute(update_query, (f"Execution failed: {e}", task_request.task_id))
+        conn.commit()
+        # Also mark execution as failed if created
+        try:
+            from datetime import datetime, timezone
+            end_time = datetime.now(timezone.utc)
+            latency_ms = int((end_time - start_time).total_seconds() * 1000) if 'start_time' in locals() else None
+            update_exec = """
+            UPDATE task_executions
+            SET status = %s,
+                completed_at = %s,
+                latency_ms = %s,
+                error_message = %s
+            WHERE id = %s
+            """
+            if 'execution_id' in locals():
+                cur.execute(update_exec, ('failed', end_time, latency_ms, str(e), execution_id))
+                conn.commit()
+        except Exception as ee:
+            logger.error(f"Failed to update task_executions row to failed: {ee}")
+    finally:
+        if conn:
+            try:
+                cur.close()
+            except Exception:
+                pass
+            conn.close()
 
 
 # Initialize all systems
@@ -353,6 +529,36 @@ async def trigger_business_event(request: BusinessEventRequest, background_tasks
     except Exception as e:
         logger.error(f"Failed to trigger event: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ai/tasks/execute")
+async def execute_task_endpoint(task_request: TaskExecutionRequest, background_tasks: BackgroundTasks, request: Request):
+    """
+    Endpoint to receive and execute tasks from the Command Center.
+    """
+    if not system_initialized:
+        raise HTTPException(status_code=503, detail="System not initialized")
+
+    # Optional API key validation for server-to-server requests
+    try:
+        expected_key = os.getenv("AGENTS_API_KEY")
+        if expected_key:
+            provided_key = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
+            if not provided_key or provided_key.strip() != expected_key.strip():
+                raise HTTPException(status_code=401, detail="Unauthorized")
+    except HTTPException:
+        raise
+    except Exception:
+        # Do not block if headers/env are not available
+        pass
+
+    background_tasks.add_task(execute_task_in_background, task_request)
+
+    return {
+        "status": "task_execution_initiated",
+        "task_id": task_request.task_id,
+        "message": "Task execution started in background."
+    }
 
 
 @app.get("/memory/stats")
