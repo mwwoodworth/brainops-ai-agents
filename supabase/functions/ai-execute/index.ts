@@ -425,9 +425,9 @@ const executeAnalysisTask = async (
       throw new Error(`Failed to fetch customer interactions: ${interactionsResponse.error.message}`)
     }
 
-    const interactions = interactionsResponse.data ?? []
-    const sentiments = interactions.map((record) => safeNumber(record.sentiment_score))
-    const totalSentiment = sentiments.reduce((acc, value) => acc + value, 0)
+    const interactions: InteractionRow[] = interactionsResponse.data ?? []
+    const sentiments = interactions.map((record: InteractionRow) => safeNumber(record.sentiment_score))
+    const totalSentiment = sentiments.reduce((acc: number, value: number) => acc + value, 0)
     const avgSentiment = interactions.length > 0 ? totalSentiment / interactions.length : 0
 
     return {
@@ -450,10 +450,10 @@ const executeAnalysisTask = async (
       throw new Error(`Failed to fetch trained models: ${modelsResponse.error.message}`)
     }
 
-    const models = modelsResponse.data ?? []
-    const accuracyValues = models.map((model) => safeNumber(model.accuracy))
+    const models: ModelRow[] = modelsResponse.data ?? []
+    const accuracyValues = models.map((model: ModelRow) => safeNumber(model.accuracy))
     const avgAccuracy = models.length > 0
-      ? accuracyValues.reduce((acc, value) => acc + value, 0) / models.length
+      ? accuracyValues.reduce((acc: number, value: number) => acc + value, 0) / models.length
       : 0
 
     return {
