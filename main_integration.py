@@ -131,25 +131,37 @@ async def execute_task_in_background(task_request: TaskExecutionRequest):
         conn.commit()
         logger.info(f"Task {task_request.task_id} status updated to 'in_progress'")
 
-        # 2. Select appropriate agent (simplified for now)
-        # In a real scenario, this would involve more sophisticated logic
-        # For now, let's try to find an agent based on category or a default
-        selected_agent_name = "System Improvement Agent"  # Default agent
+        # 2. Select appropriate agent by category mapping
+        selected_agent_name = "System Improvement Agent"
         selected_agent_id = None
+        event_type = BusinessEventType.SYSTEM_HEALTH_CHECK
+        category = (task_request.category or "general").lower()
+        category_event_map = {
+            "operations": BusinessEventType.JOB_CREATED,
+            "jobs": BusinessEventType.JOB_CREATED,
+            "sales": BusinessEventType.NEW_LEAD,
+            "crm": BusinessEventType.NEW_LEAD,
+            "finance": BusinessEventType.INVOICE_CREATED,
+            "alerts": BusinessEventType.SECURITY_ALERT,
+            "support": BusinessEventType.CUSTOMER_COMPLAINT,
+            "automation": BusinessEventType.SCHEDULING_CONFLICT,
+        }
+        event_type = category_event_map.get(category, BusinessEventType.SYSTEM_HEALTH_CHECK)
+
         if activation_system:
-            # Try to find an agent that matches the category
             for agent_id, agent in activation_system.agents.items():
-                if agent.category.lower() == task_request.category.lower():
-                    # Capture both ID and name when available
-                    try:
-                        selected_agent_name = getattr(agent, 'name', selected_agent_name)
-                        selected_agent_id = getattr(agent, 'id', agent_id)
-                    except Exception:
-                        selected_agent_name = getattr(agent, 'name', selected_agent_name)
+                if agent.category.lower() == category:
+                    selected_agent_name = getattr(agent, "name", selected_agent_name)
+                    selected_agent_id = getattr(agent, "id", agent_id)
                     break
-            logger.info(f"Selected agent for task {task_request.task_id}: {selected_agent_name}")
+            logger.info(
+                "Selected agent '%s' for task %s via category '%s'",
+                selected_agent_name,
+                task_request.task_id,
+                category
+            )
         else:
-            logger.warning("Activation system not initialized, using default agent.")
+            logger.warning("Activation system not initialized, tasks will be marked failed.")
 
         # 2b. Create execution tracking row in task_executions
         try:
@@ -178,26 +190,32 @@ async def execute_task_in_background(task_request: TaskExecutionRequest):
         except Exception as e:
             logger.error(f"Failed to insert task_executions row: {e}")
 
-        # 3. Execute task (placeholder for actual agent execution logic)
-        # This is where the actual agent logic would be called.
-        # For now, simulate work and update status.
-        await asyncio.sleep(5) # Simulate work
+        execution_result = None
+        if activation_system:
+            execution_payload = {
+                "task": task_request.model_dump(),
+                "requested_at": datetime.utcnow().isoformat()
+            }
+            execution_result = await activation_system.handle_business_event(event_type, execution_payload)
+        else:
+            execution_result = {"error": "Activation system unavailable"}
 
-        # Store execution as a memory
+        outcome_error = execution_result.get("error") if isinstance(execution_result, dict) else None
+
         memory_manager.store(Memory(
             memory_type=MemoryType.AGENT_TASK,
             content={
                 "task_id": task_request.task_id,
                 "task_name": task_request.task_name,
                 "agent": selected_agent_name,
-                "status": "completed",
-                "result": "Simulated successful execution"
+                "status": "completed" if not outcome_error else "failed",
+                "result": execution_result
             },
             source_system="ai-agents",
             source_agent=selected_agent_name,
             created_by="system",
             importance_score=0.7,
-            tags=["task_execution", task_request.category]
+            tags=["task_execution", task_request.category or "general"]
         ))
 
         # 4. Update task status to completed
@@ -987,3 +1005,27 @@ if __name__ == "__main__":
     """.format(port=port))
 
     uvicorn.run(app, host="0.0.0.0", port=port)
+API_KEY_EXEMPT_PATHS = {
+    "/",
+    "/health",
+    "/docs",
+    "/openapi.json"
+}
+
+API_KEY_VALUE = os.getenv("AGENTS_API_KEY")
+
+
+@app.middleware("http")
+async def enforce_api_key(request: Request, call_next):
+    """Ensure all endpoints (except health/docs) require an API key."""
+    if request.url.path not in API_KEY_EXEMPT_PATHS:
+        if not API_KEY_VALUE:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "AGENTS_API_KEY is not configured"}
+            )
+        provided = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
+        if not provided or provided.strip() != API_KEY_VALUE.strip():
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    response = await call_next(request)
+    return response
