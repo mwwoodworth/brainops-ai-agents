@@ -14,6 +14,10 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
 
+# Configure logging early so it is available to all imports
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Import embedded memory system
 try:
     from embedded_memory_system import get_embedded_memory
@@ -22,10 +26,6 @@ except ImportError as e:
     logger.warning(f"Embedded memory not available: {e}")
     EMBEDDED_MEMORY_AVAILABLE = False
     get_embedded_memory = None
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Database configuration
 DB_CONFIG = {
@@ -605,6 +605,90 @@ class AIIntegrationLayer:
         except Exception as e:
             logger.error(f"❌ Failed to list tasks: {e}")
             return []
+
+    async def get_task_stats(self, limit: int = 1000) -> Dict[str, Any]:
+        """
+        Compute basic statistics about the AI autonomous task system.
+
+        Returns:
+            {
+              "total": int,
+              "by_status": {status: count},
+              "by_priority": {priority: count},
+              "agents_active": int,
+              "execution_queue_size": int
+            }
+        """
+        try:
+            tasks = await self.list_tasks(limit=limit)
+
+            stats: Dict[str, Any] = {
+                "total": len(tasks),
+                "by_status": {},
+                "by_priority": {},
+                "agents_active": len(self.agents_registry),
+                "execution_queue_size": self.execution_queue.qsize(),
+            }
+
+            for task in tasks:
+                status = task.get("status", "unknown")
+                stats["by_status"][status] = stats["by_status"].get(status, 0) + 1
+
+                priority = task.get("priority", "unknown")
+                stats["by_priority"][priority] = stats["by_priority"].get(priority, 0) + 1
+
+            return stats
+        except Exception as e:
+            logger.error(f"❌ Failed to compute task stats: {e}")
+            return {
+                "total": 0,
+                "by_status": {},
+                "by_priority": {},
+                "agents_active": len(self.agents_registry),
+                "execution_queue_size": self.execution_queue.qsize(),
+                "error": str(e),
+            }
+
+    async def orchestrate_complex_workflow(
+        self,
+        task_description: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        High-level entry point for complex, multi-stage workflows using LangGraph.
+
+        This is what AUREA NLU uses when the user issues orchestration commands.
+        It delegates to the LangGraphOrchestrator instance that was provided
+        during initialize(), if available.
+        """
+        if not self.langgraph:
+            raise RuntimeError("LangGraph Orchestrator not available in AIIntegrationLayer")
+
+        ctx = context or {}
+        return await self.langgraph.execute(
+            task_description=task_description,
+            context=ctx,
+        )
+
+    async def execute_ai_task(self, task_id: str) -> Dict[str, Any]:
+        """
+        Public entry point to execute an AI task by ID.
+        This is used by AUREA NLU and the API surface instead of calling
+        the private _execute_task method directly.
+        """
+        task = await self.get_task_status(task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+
+        await self._execute_task(task)
+        # Return the latest status after execution
+        updated = await self.get_task_status(task_id) or {}
+        return {
+            "task_id": task_id,
+            "status": updated.get("status", "unknown"),
+            "result": updated.get("result"),
+            "error_log": updated.get("error_log"),
+        }
 
 
 # Global singleton instance

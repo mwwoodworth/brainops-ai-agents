@@ -48,3 +48,4 @@ credentials/
 # Temporary files
 tmp/
 temp/
+.venv/

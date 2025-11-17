@@ -13,7 +13,7 @@ from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
 from collections import deque
 
-from fastapi import FastAPI, HTTPException, Request, Security, Depends
+from fastapi import FastAPI, HTTPException, Request, Security, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
@@ -28,9 +28,11 @@ from database.async_connection import (
     using_fallback,
 )
 from models.agent import Agent, AgentCategory, AgentExecution, AgentList
+from pydantic import BaseModel
 from api.memory import router as memory_router
 from api.brain import router as brain_router
 from api.memory_coordination import router as memory_coordination_router
+from ai_provider_status import get_provider_status
 
 # Configure logging
 logging.basicConfig(
@@ -780,6 +782,17 @@ async def health_check():
             }
         }
     }
+
+
+@app.get("/ai/providers/status")
+async def providers_status(_: bool = Depends(verify_api_key)):
+    """
+    Report configuration and basic liveness for all AI providers (OpenAI, Anthropic,
+    Gemini, Perplexity, Hugging Face). Does not modify configuration or credentials;
+    it only runs small probe calls to detect misconfiguration like invalid or missing
+    API keys.
+    """
+    return get_provider_status()
 
 
 @app.get("/agents", response_model=AgentList)
@@ -1588,6 +1601,10 @@ async def get_task_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class AureaCommandRequest(BaseModel):
+    command_text: str
+
+
 @app.post("/ai/orchestrate")
 async def orchestrate_complex_workflow(
     request: Request,
@@ -1623,7 +1640,7 @@ async def orchestrate_complex_workflow(
 @app.post("/aurea/command/natural_language")
 async def execute_aurea_nl_command(
     request: Request,
-    command_text: str
+    payload: AureaCommandRequest = Body(...)
 ):
     """
     Execute a natural language command through AUREA's NLU processor.
@@ -1639,6 +1656,7 @@ async def execute_aurea_nl_command(
         raise HTTPException(status_code=503, detail="AUREA NLU Processor not available")
 
     try:
+        command_text = payload.command_text
         nlu = app.state.aurea_nlu
         result = await nlu.execute_natural_language_command(command_text)
 
