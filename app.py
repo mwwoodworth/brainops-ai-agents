@@ -674,6 +674,14 @@ app.include_router(memory_router)
 app.include_router(brain_router)
 app.include_router(memory_coordination_router)
 
+# Import and include analytics router
+try:
+    from analytics_endpoint import router as analytics_router
+    app.include_router(analytics_router)
+    logger.info("✅ Analytics endpoint loaded")
+except ImportError as e:
+    logger.warning(f"Analytics endpoint not available: {e}")
+
 
 @app.get("/")
 async def root():
