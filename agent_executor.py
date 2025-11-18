@@ -28,23 +28,30 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+from config import config
+
 # Database configuration
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD"),
-    "port": int(os.getenv("DB_PORT", 5432))
+    "host": config.database.host,
+    "database": config.database.database,
+    "user": config.database.user,
+    "password": config.database.password,
+    "port": config.database.port,
 }
 
 # API Configuration
-BACKEND_URL = "https://brainops-backend-prod.onrender.com"
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "sk-proj-AplqZefICI0LmD9xavKLUSNZk9RpJNpZs31MbQ93XE01")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "sk-ant-REDACTED")
+BACKEND_URL = os.getenv("BACKEND_URL", "https://brainops-backend-prod.onrender.com")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 # Initialize AI clients
 if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
+
+if ANTHROPIC_API_KEY:
+    anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+else:
+    anthropic_client = None
 
 class AgentExecutor:
     """Executes actual agent tasks"""
