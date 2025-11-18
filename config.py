@@ -13,15 +13,20 @@ class DatabaseConfig:
     """Database configuration with secure defaults"""
 
     def __init__(self):
-        self.host = os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com')
-        self.database = os.getenv('DB_NAME', 'postgres')
-        self.user = os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab')
-        self.password = os.getenv('DB_PASSWORD', 'Brain0ps2O2S')
+        self.host = os.getenv('DB_HOST', '')
+        self.database = os.getenv('DB_NAME', '')
+        self.user = os.getenv('DB_USER', '')
+        self.password = os.getenv('DB_PASSWORD', '')
         self.port = int(os.getenv('DB_PORT', '5432'))
 
     @property
     def connection_string(self) -> str:
         """Get PostgreSQL connection string"""
+        if not all([self.host, self.database, self.user, self.password]):
+            raise RuntimeError(
+                "Database configuration is incomplete. "
+                "Ensure DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD are set."
+            )
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
 
     def to_dict(self) -> dict:
