@@ -33,6 +33,7 @@ from pydantic import BaseModel
 from api.memory import router as memory_router
 from api.brain import router as brain_router
 from api.memory_coordination import router as memory_coordination_router
+from api.customer_intelligence import router as customer_intelligence_router
 from ai_provider_status import get_provider_status
 
 # Configure logging
@@ -676,6 +677,7 @@ async def verify_api_key(api_key: str = Security(api_key_header)) -> bool:
 app.include_router(memory_router)
 app.include_router(brain_router)
 app.include_router(memory_coordination_router)
+app.include_router(customer_intelligence_router)
 
 # Import and include analytics router
 try:
