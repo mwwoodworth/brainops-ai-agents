@@ -14,7 +14,7 @@ anthropic==0.7.0
 
 # LangChain for AUREA NLU
 langchain-openai==0.3.2
-langchain-core==0.3.9
+langchain-core==0.3.31  # Updated to satisfy langchain-openai dependency (requires >=0.3.31)
 
 # Scheduling (Required for agent scheduler)
 apscheduler==3.10.4
