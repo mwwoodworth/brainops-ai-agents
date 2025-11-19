@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "8.3.0"  # MINOR: AUREA NLU Natural Language Command Interface - Founder-level AI control via natural language
+VERSION = "8.3.1"  # PATCH: Force Render redeployment with v1 API bug fixes (SQL qualifiers + date handling)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 
 # Import agent scheduler with fallback
