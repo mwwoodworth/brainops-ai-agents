@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#
+# Simple secret guardrail for brainops-ai-agents.
+# Blocks commits if obvious DB passwords or API keys are present.
+
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+if git diff --cached --name-only | grep -qE '\.py$|\.env$|config\.json$'; then
+  if git diff --cached | grep -E 'REDACTED_SUPABASE_DB_PASSWORD|sk-proj-|sk-live-|sk-ant-REDACTED' >/dev/null; then
+    echo "❌ Refusing to commit: hard-coded secrets detected in staged changes."
+    echo "   Please move credentials to environment variables and retry."
+    exit 1
+  fi
+fi
+
+exit 0
+
