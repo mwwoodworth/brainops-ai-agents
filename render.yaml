@@ -13,19 +13,29 @@ services:
       - key: PYTHON_VERSION
         value: "3.11"
       - key: DB_HOST
-        sync: false
+        value: aws-0-us-east-2.pooler.supabase.com
       - key: DB_NAME
-        sync: false
+        value: postgres
       - key: DB_USER
-        sync: false
+        value: postgres.yomagoqdmxszqtdwuhab
       - key: DB_PASSWORD
-        sync: false
+        value: REDACTED_SUPABASE_DB_PASSWORD
       - key: DB_PORT
-        sync: false
+        value: "5432"
+      - key: API_KEYS
+        value: 11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025
+      - key: AGENTS_API_KEY
+        value: brainops_prod_key_2025
+      - key: BRAINOPS_API_KEY
+        value: 11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c
+      - key: AUTH_REQUIRED
+        value: "true"
+      - key: DEV_MODE
+        value: "false"
       - key: SYSTEM_USER_ID
-        sync: false
+        value: system
       - key: TENANT_ID
-        sync: false
+        value: default
       - key: PORT
         value: "10000"  # Render's default port
       - key: WEB_CONCURRENCY
