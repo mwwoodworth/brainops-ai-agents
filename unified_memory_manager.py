@@ -126,7 +126,7 @@ class UnifiedMemoryManager:
                     context_id, parent_memory_id, related_memories,
                     expires_at, tenant_id, embedding, search_text
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::uuid[], %s, %s, %s, %s
                 ) RETURNING id
                 """
 
