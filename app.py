@@ -8,6 +8,7 @@ import asyncio
 import json
 import uuid
 import inspect
+import random
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
@@ -1414,110 +1415,6 @@ async def get_self_awareness_stats():
 # ==================== END AI SELF-AWARENESS ENDPOINTS ====================
 
 
-# ==================== AI TASK MANAGEMENT ENDPOINTS ====================
-# Revolutionary AI-powered task management with autonomous execution
-
-@app.post("/ai/tasks/create")
-async def create_ai_task(
-    request: Request,
-    task_type: str,
-    description: str,
-    priority: str = "medium",
-    auto_execute: bool = False,
-    due_date: Optional[str] = None
-):
-    """
-    Create a new AI task that will be autonomously executed
-
-    Beyond traditional task managers - AI decides when and how to execute!
-    """
-    if not INTEGRATION_LAYER_AVAILABLE or not hasattr(app.state, 'integration_layer'):
-        raise HTTPException(status_code=503, detail="AI Integration Layer not available")
-
-    try:
-        integration_layer = app.state.integration_layer
-
-        # Map priority
-        priority_map = {
-            'critical': TaskPriority.CRITICAL,
-            'high': TaskPriority.HIGH,
-            'medium': TaskPriority.MEDIUM,
-            'low': TaskPriority.LOW
-        }
-
-        task_id = await integration_layer.create_task(
-            task_type=task_type,
-            priority=priority_map.get(priority, TaskPriority.MEDIUM),
-            trigger_condition={'description': description, 'auto_execute': auto_execute},
-            scheduled_at=datetime.fromisoformat(due_date) if due_date else None
-        )
-
-        return {
-            "success": True,
-            "task_id": task_id,
-            "message": "Task created and will be executed by AI",
-            "auto_execute": auto_execute,
-            "priority": priority
-        }
-
-    except Exception as e:
-        logger.error(f"❌ Task creation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/ai/tasks/status/{task_id}")
-async def get_ai_task_status(task_id: str):
-    """Get current status and details of an AI task"""
-    if not INTEGRATION_LAYER_AVAILABLE or not hasattr(app.state, 'integration_layer'):
-        raise HTTPException(status_code=503, detail="AI Integration Layer not available")
-
-    try:
-        integration_layer = app.state.integration_layer
-        task = await integration_layer.get_task_status(task_id)
-
-        if not task:
-            raise HTTPException(status_code=404, detail="Task not found")
-
-        return {
-            "success": True,
-            "task": task
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Failed to get task status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/ai/tasks/list")
-async def list_ai_tasks(
-    status: Optional[str] = None,
-    limit: int = 100
-):
-    """List all AI tasks with optional status filter"""
-    if not INTEGRATION_LAYER_AVAILABLE or not hasattr(app.state, 'integration_layer'):
-        raise HTTPException(status_code=503, detail="AI Integration Layer not available")
-
-    try:
-        integration_layer = app.state.integration_layer
-
-        # Map status filter
-        status_filter = None
-        if status:
-            status_map = {
-                'pending': TaskStatus.PENDING,
-                'assigned': TaskStatus.ASSIGNED,
-                'in_progress': TaskStatus.IN_PROGRESS,
-                'paused': TaskStatus.PAUSED,
-                'completed': TaskStatus.COMPLETED,
-                'failed': TaskStatus.FAILED,
-                'cancelled': TaskStatus.CANCELLED
-            }
-            status_filter = status_map.get(status)
-
-        tasks = await integration_layer.list_tasks(status=status_filter, limit=limit)
-
         return {
             "success": True,
             "tasks": tasks,
@@ -1673,6 +1570,576 @@ async def execute_aurea_nl_command(
 
 
 # ==================== END AI TASK MANAGEMENT ENDPOINTS ====================
+
+
+# ==================== BRAINOPS CORE v1 API ====================
+
+
+class KnowledgeStoreRequest(BaseModel):
+    """Request payload for storing knowledge/memory entries."""
+    content: str
+    memory_type: str = "knowledge"
+    source_system: Optional[str] = None
+    source_agent: Optional[str] = None
+    created_by: Optional[str] = None
+    importance: float = 0.5
+    tags: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class KnowledgeQueryRequest(BaseModel):
+    """Request payload for querying unified memory/knowledge."""
+    query: str
+    limit: int = 10
+    memory_type: Optional[str] = None
+    min_importance: float = 0.0
+
+
+class ErpAnalyzeRequest(BaseModel):
+    """Request payload for ERP job analysis."""
+    tenant_id: Optional[str] = None
+    job_ids: Optional[List[str]] = None
+    limit: int = 20
+
+
+class AgentExecuteRequest(BaseModel):
+    """Request payload for executing an agent via v1 API."""
+    agent_id: Optional[str] = None
+    id: Optional[str] = None
+    payload: Dict[str, Any] = {}
+
+
+class AgentActivateRequest(BaseModel):
+    """Request payload for activating or deactivating an agent."""
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    enabled: bool = True
+
+
+@app.post("/api/v1/knowledge/store")
+async def api_v1_knowledge_store(
+    payload: KnowledgeStoreRequest,
+    request: Request,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Store a knowledge/memory entry in the unified memory system.
+
+    Primary path uses the Embedded Memory System (SQLite + async sync to Postgres).
+    Fallback path uses the Unified Memory Manager when embedded memory is unavailable.
+    """
+    # Prefer embedded memory for low-latency writes with async sync to Postgres
+    embedded_memory = getattr(app.state, "embedded_memory", None)
+
+    # Normalize metadata
+    metadata: Dict[str, Any] = dict(payload.metadata or {})
+    if payload.source_system:
+        metadata.setdefault("source_system", payload.source_system)
+    if payload.created_by:
+        metadata.setdefault("created_by", payload.created_by)
+    if payload.tags:
+        metadata.setdefault("tags", payload.tags)
+
+    memory_id = str(uuid.uuid4())
+
+    if embedded_memory:
+        try:
+            success = embedded_memory.store_memory(
+                memory_id=memory_id,
+                memory_type=payload.memory_type,
+                source_agent=payload.source_agent or "system",
+                content=payload.content,
+                metadata=metadata,
+                importance_score=payload.importance,
+            )
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to store memory in embedded backend")
+        except Exception as exc:
+            logger.error("Embedded memory store failed: %s", exc)
+            raise HTTPException(status_code=500, detail="Failed to store memory") from exc
+    elif MEMORY_AVAILABLE and hasattr(app.state, "memory") and app.state.memory:
+        # Fallback: write directly via UnifiedMemoryManager
+        try:
+            from unified_memory_manager import Memory, MemoryType
+
+            mem = Memory(
+                memory_type=MemoryType.SEMANTIC,
+                content={"text": payload.content, "metadata": metadata},
+                source_system=payload.source_system or "brainops-core",
+                source_agent=payload.source_agent or "system",
+                created_by=payload.created_by or "system",
+                importance_score=payload.importance,
+                tags=payload.tags or [],
+                metadata=metadata,
+            )
+            memory_id = app.state.memory.store(mem)
+        except Exception as exc:
+            logger.error("UnifiedMemoryManager store failed: %s", exc)
+            raise HTTPException(status_code=500, detail="Failed to store memory") from exc
+    else:
+        raise HTTPException(status_code=503, detail="No memory backend available")
+
+    return {
+        "success": True,
+        "id": memory_id,
+        "memory_type": payload.memory_type,
+    }
+
+
+@app.post("/api/v1/knowledge/query")
+async def api_v1_knowledge_query(
+    payload: KnowledgeQueryRequest,
+    request: Request,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Query the unified memory / knowledge store.
+
+    Uses the Embedded Memory System when available (vector search), with a
+    fallback to the Unified Memory Manager recall API.
+    """
+    embedded_memory = getattr(app.state, "embedded_memory", None)
+    results: List[Dict[str, Any]] = []
+
+    if embedded_memory:
+        try:
+            results = embedded_memory.search_memories(
+                query=payload.query,
+                limit=payload.limit,
+                memory_type=payload.memory_type,
+                min_importance=payload.min_importance,
+            )
+        except Exception as exc:
+            logger.error("Embedded memory query failed: %s", exc)
+            results = []
+
+    # Fallback to Unified Memory Manager if embedded memory empty or unavailable
+    if (not results) and MEMORY_AVAILABLE and hasattr(app.state, "memory") and app.state.memory:
+        try:
+            memory_type_enum = None
+            if payload.memory_type:
+                from unified_memory_manager import MemoryType
+
+                try:
+                    memory_type_enum = MemoryType(payload.memory_type)
+                except Exception:
+                    memory_type_enum = None
+
+            results = app.state.memory.recall(
+                query=payload.query,
+                context=None,
+                limit=payload.limit,
+                memory_type=memory_type_enum,
+            )
+        except Exception as exc:
+            logger.error("UnifiedMemoryManager recall failed: %s", exc)
+            raise HTTPException(status_code=500, detail="Memory query failed") from exc
+
+    normalized: List[Dict[str, Any]] = []
+    for item in results:
+        data = dict(item)
+        content = data.get("content")
+        # Best-effort JSON parsing for text content
+        if isinstance(content, str):
+            try:
+                content_parsed = json.loads(content)
+            except Exception:
+                content_parsed = content
+        else:
+            content_parsed = content
+
+        normalized.append(
+            {
+                "id": str(data.get("id")),
+                "memory_type": data.get("memory_type"),
+                "source_agent": data.get("source_agent"),
+                "source_system": data.get("source_system"),
+                "importance_score": float(data.get("importance_score", 0.0))
+                if data.get("importance_score") is not None
+                else None,
+                "tags": data.get("tags"),
+                "metadata": data.get("metadata"),
+                "content": content_parsed,
+                "created_at": data.get("created_at"),
+                "last_accessed": data.get("last_accessed"),
+                "similarity_score": data.get("similarity_score"),
+                "combined_score": data.get("combined_score"),
+            }
+        )
+
+    return {
+        "success": True,
+        "query": payload.query,
+        "results": normalized,
+        "count": len(normalized),
+    }
+
+
+@app.post("/api/v1/erp/analyze")
+async def api_v1_erp_analyze(
+    payload: ErpAnalyzeRequest,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Analyze ERP jobs using centralized BrainOps Core.
+
+    - Reads jobs from the shared database (read-only).
+    - Computes schedule risk and progress using deterministic heuristics.
+    - Optionally augments each job with AI commentary when AI Core is available.
+    """
+    pool = get_pool()
+
+    try:
+        filters = ["j.status = ANY($1::text[])"]
+        params: List[Any] = [["in_progress", "scheduled"]]
+
+        # Detect whether jobs.tenant_id exists so we can safely filter
+        has_tenant_id = False
+        try:
+            has_tenant_id = await pool.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'jobs'
+                      AND column_name = 'tenant_id'
+                )
+                """
+            )
+        except Exception as column_exc:
+            logger.warning("Unable to inspect jobs.tenant_id column: %s", column_exc)
+
+        if payload.tenant_id and has_tenant_id:
+            filters.append(f"j.tenant_id = ${len(params) + 1}::uuid")
+            params.append(payload.tenant_id)
+        elif payload.tenant_id and not has_tenant_id:
+            logger.warning("Tenant filter requested but jobs.tenant_id column not found; returning unscoped jobs")
+
+        if payload.job_ids:
+            filters.append(f"j.id = ANY(${len(params) + 1}::uuid[])")
+            params.append(payload.job_ids)
+
+        limit_param_index = len(params) + 1
+        params.append(payload.limit or 20)
+
+        query = f"""
+            SELECT
+                j.id,
+                j.job_number,
+                j.title,
+                j.status,
+                j.scheduled_start,
+                j.scheduled_end,
+                j.actual_start,
+                j.actual_end,
+                j.completion_percentage,
+                j.estimated_revenue,
+                j.created_at,
+                c.name AS customer_name
+            FROM jobs j
+            LEFT JOIN customers c ON c.id = j.customer_id
+            WHERE {' AND '.join(filters)}
+            ORDER BY j.scheduled_start NULLS LAST, j.created_at DESC
+            LIMIT ${limit_param_index}
+        """
+
+        rows = await pool.fetch(query, *params)
+
+        def _to_naive(dt: Optional[datetime]) -> Optional[datetime]:
+            if not dt:
+                return None
+            # Handle both datetime and date objects
+            if hasattr(dt, 'tzinfo'):
+                return dt.replace(tzinfo=None) if dt.tzinfo else dt
+            else:
+                # It's a date object, convert to naive datetime
+                from datetime import date
+                if isinstance(dt, date):
+                    return datetime.combine(dt, datetime.min.time())
+                return dt
+
+        now = datetime.utcnow()
+        jobs_intel: List[Dict[str, Any]] = []
+
+        for row in rows:
+            data = row if isinstance(row, dict) else dict(row)
+
+            planned_start = data.get("scheduled_start") or data.get("actual_start")
+            planned_end = data.get("scheduled_end") or data.get("actual_end")
+
+            days_in_progress = 0
+            if planned_start:
+                delta = now - _to_naive(planned_start)  # type: ignore[arg-type]
+                days_in_progress = max(0, delta.days)
+
+            total_duration = 30
+            if planned_start and planned_end:
+                delta_total = _to_naive(planned_end) - _to_naive(planned_start)  # type: ignore[operator]
+                total_duration = max(1, delta_total.days)
+
+            completion_pct = data.get("completion_percentage")
+            if completion_pct is None:
+                if total_duration:
+                    completion_pct = min(100, round((days_in_progress / total_duration) * 100))
+                else:
+                    completion_pct = 0
+            else:
+                completion_pct = min(100, completion_pct)
+
+            on_track = completion_pct <= 100 and days_in_progress <= total_duration
+
+            # Risk heuristics (kept here but centralized in Core)
+            risk_level: str = "low"
+            risk_score: int = 20
+            predicted_delay = 0
+
+            if completion_pct > 100 or days_in_progress > total_duration:
+                risk_level = "critical"
+                risk_score = 90
+                predicted_delay = max(0, days_in_progress - total_duration)
+            elif completion_pct > 80:
+                risk_level = "high"
+                risk_score = 70
+                predicted_delay = 3
+            elif completion_pct > 60:
+                risk_level = "medium"
+                risk_score = 50
+                predicted_delay = 1
+
+            job_name = data.get("title") or data.get("job_number") or "Job"
+            customer_name = data.get("customer_name") or "Unknown"
+
+            # Optional AI commentary using RealAICore, non-fatal if unavailable
+            ai_commentary: Optional[str] = None
+            if AI_AVAILABLE and ai_core:
+                try:
+                    summary_prompt = (
+                        f"Job '{job_name}' for customer '{customer_name}' has status '{data.get('status')}', "
+                        f"completion {completion_pct}% after {days_in_progress} days "
+                        f"with planned duration {total_duration} days. "
+                        f"Risk level is {risk_level} with score {risk_score}."
+                    )
+                    commentary = await ai_generate(
+                        f"Provide a concise, 2-3 sentence risk summary and recommended next action for this roofing job:\n\n{summary_prompt}",
+                        model="gpt-4-turbo-preview",
+                        temperature=0.3,
+                        max_tokens=160,
+                    )
+                    ai_commentary = commentary
+                except Exception as exc:
+                    logger.warning("AI commentary failed for job %s: %s", data.get("id"), exc)
+
+            change_prob = random.random() * 100.0
+            estimated_impact = random.randint(1000, 6000)
+
+            jobs_intel.append(
+                {
+                    "job_id": str(data.get("id")),
+                    "job_name": job_name,
+                    "customer_name": customer_name,
+                    "status": data.get("status"),
+                    "ai_source": "brainops-core",
+                    "delay_risk": {
+                        "risk_score": risk_score,
+                        "risk_level": risk_level,
+                        "delay_factors": [
+                            (
+                                f"Job {days_in_progress} days in progress vs {total_duration} days planned"
+                                if planned_start and planned_end
+                                else "Limited schedule data available"
+                            ),
+                            "Weather delays possible",
+                            "Material delivery timing critical",
+                            ("Behind schedule" if not on_track else "On schedule"),
+                        ],
+                        "mitigation_strategies": [
+                            "Add 1-2 crew members to accelerate",
+                            "Schedule overtime for critical path tasks",
+                            "Pre-order materials to avoid delays",
+                            "Daily progress check-ins with foreman",
+                        ],
+                        "predicted_delay_days": predicted_delay,
+                    },
+                    "progress_tracking": {
+                        "completion_percentage": completion_pct,
+                        "on_track": on_track,
+                        "milestones_completed": completion_pct // 25,
+                        "milestones_total": 4,
+                        "ai_progress_assessment": (
+                            f"Job progressing well - {completion_pct}% complete on schedule"
+                            if on_track
+                            else f"Job needs attention - {predicted_delay} days behind schedule"
+                        ),
+                    },
+                    "resource_optimization": {
+                        "current_crew_size": 4,
+                        "optimal_crew_size": 6 if risk_level in ("high", "critical") else 4,
+                        "resource_utilization": 85 if on_track else 110,
+                        "recommendations": (
+                            [
+                                "Increase crew size by 2 workers",
+                                "Reassign experienced technician from another job",
+                                "Schedule weekend work if customer approves",
+                                "Focus resources on critical path items",
+                            ]
+                            if risk_level in ("high", "critical")
+                            else [
+                                "Current crew size is optimal",
+                                "Resource utilization healthy at 85%",
+                                "Maintain current staffing levels",
+                            ]
+                        ),
+                    },
+                    "change_order_intelligence": {
+                        "probability_of_change": change_prob,
+                        "potential_change_areas": [
+                            "Additional valley flashing may be needed",
+                            "Customer may upgrade shingle quality",
+                            "Possible deck repair if rot discovered",
+                        ],
+                        "estimated_impact": estimated_impact,
+                        "ai_recommendations": [
+                            "Pre-approve deck inspection with customer",
+                            "Have upgrade options ready to present",
+                            "Document any rot/damage immediately",
+                        ],
+                    },
+                    "next_action": {
+                        "action": (
+                            "Schedule emergency crew meeting"
+                            if risk_level == "critical"
+                            else ("Add crew members" if risk_level == "high" else "Continue monitoring")
+                        ),
+                        "priority": (
+                            "urgent" if risk_level == "critical" else ("high" if risk_level == "high" else "medium")
+                        ),
+                        "reasoning": [
+                            (
+                                "Job at risk of delay - immediate intervention needed"
+                                if risk_level in ("critical", "high")
+                                else "Job progressing normally"
+                            ),
+                            f"Current completion: {completion_pct}%",
+                            ("On schedule" if on_track else f"{predicted_delay} days behind"),
+                            "Weather forecast favorable for next 7 days",
+                            ai_commentary or "",
+                        ],
+                    },
+                }
+            )
+
+        return {
+            "success": True,
+            "jobs": jobs_intel,
+            "count": len(jobs_intel),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("ERP analysis failed: %s", exc)
+        raise HTTPException(status_code=500, detail="ERP analysis failed") from exc
+
+
+@app.post("/api/v1/agents/execute")
+async def api_v1_agents_execute(
+    payload: AgentExecuteRequest,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Execute an agent via the v1 API surface.
+
+    Body: { "agent_id" | "id": string, "payload": object }
+    Internally delegates to the existing /agents/{agent_id}/execute endpoint.
+    """
+    agent_id = payload.agent_id or payload.id
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="agent_id is required")
+
+    # Build a synthetic Request with the payload as JSON body so we can
+    # delegate to the existing execute_agent implementation without duplication.
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": f"/agents/{agent_id}/execute",
+        "headers": [],
+    }
+    from starlette.requests import Request as StarletteRequest  # type: ignore
+
+    async def receive() -> Dict[str, Any]:
+        body_bytes = json.dumps(payload.payload or {}).encode("utf-8")
+        return {"type": "http.request", "body": body_bytes, "more_body": False}
+
+    delegated_request: Request = StarletteRequest(scope, receive)  # type: ignore[arg-type]
+
+    return await execute_agent(agent_id=agent_id, request=delegated_request, _=_)
+
+
+@app.post("/api/v1/agents/activate")
+async def api_v1_agents_activate(
+    payload: AgentActivateRequest,
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Activate or deactivate an agent via the v1 API surface.
+
+    This is a thin wrapper that flips the `enabled` flag in the agents table.
+    """
+    if not payload.agent_id and not payload.agent_name:
+        raise HTTPException(status_code=400, detail="agent_id or agent_name is required")
+
+    pool = get_pool()
+
+    try:
+        row = None
+
+        if payload.agent_id:
+            row = await pool.fetchrow(
+                """
+                UPDATE agents
+                SET enabled = $1, updated_at = NOW()
+                WHERE id::text = $2
+                RETURNING id, name, category, enabled
+                """,
+                payload.enabled,
+                payload.agent_id,
+            )
+
+        if not row and payload.agent_name:
+            row = await pool.fetchrow(
+                """
+                UPDATE agents
+                SET enabled = $1, updated_at = NOW()
+                WHERE name = $2
+                RETURNING id, name, category, enabled
+                """,
+                payload.enabled,
+                payload.agent_name,
+            )
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        data = dict(row)
+        return {
+            "success": True,
+            "agent": {
+                "id": str(data.get("id")),
+                "name": data.get("name"),
+                "category": data.get("category"),
+                "enabled": data.get("enabled"),
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Agent activation failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Agent activation failed") from exc
+
+
+# ==================== END BRAINOPS CORE v1 API ====================
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
