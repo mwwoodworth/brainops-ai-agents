@@ -5,6 +5,7 @@ Centralizes all configuration with environment variable support
 import os
 from typing import Optional, List
 import logging
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -13,11 +14,27 @@ class DatabaseConfig:
     """Database configuration with secure defaults"""
 
     def __init__(self):
+        # Try individual vars first
         self.host = os.getenv('DB_HOST', '')
         self.database = os.getenv('DB_NAME', '')
         self.user = os.getenv('DB_USER', '')
         self.password = os.getenv('DB_PASSWORD', '')
         self.port = int(os.getenv('DB_PORT', '5432'))
+
+        # Fallback to DATABASE_URL if individual vars not set (team-level Render env)
+        if not all([self.host, self.database, self.user, self.password]):
+            database_url = os.getenv('DATABASE_URL', '')
+            if database_url:
+                try:
+                    parsed = urlparse(database_url)
+                    self.host = parsed.hostname or ''
+                    self.database = parsed.path.lstrip('/') if parsed.path else ''
+                    self.user = parsed.username or ''
+                    self.password = parsed.password or ''
+                    self.port = parsed.port or 5432
+                    logger.info(f"Parsed DATABASE_URL: host={self.host}, db={self.database}")
+                except Exception as e:
+                    logger.error(f"Failed to parse DATABASE_URL: {e}")
 
     @property
     def connection_string(self) -> str:
