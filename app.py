@@ -62,7 +62,16 @@ except ImportError as e:
 try:
     from ai_core import RealAICore, ai_generate, ai_analyze
     ai_core = RealAICore()
-    AI_AVAILABLE = True
+
+    # Determine whether any real AI providers are configured
+    has_openai = bool(getattr(ai_core, "async_openai", None))
+    has_anthropic = bool(getattr(ai_core, "async_anthropic", None))
+    AI_AVAILABLE = has_openai or has_anthropic
+
+    # In production, it is a hard failure if no real AI provider is available
+    if config.environment == "production" and not AI_AVAILABLE:
+        raise RuntimeError("AI Core initialized but no real AI providers are configured in production.")
+
     logger.info("✅ Real AI Core initialized successfully")
 except Exception as e:
     logger.error(f"❌ AI Core initialization failed: {e}")
@@ -620,6 +629,31 @@ async def lifespan(app: FastAPI):
         logger.info("🌐 LANGGRAPH ORCHESTRATION: Complex workflows supported!")
         logger.info("🔄 SELF-HEALING: Automatic error recovery enabled!")
     logger.info("=" * 80)
+
+    # CRITICAL PRODUCTION CHECK
+    # If we are in production, we CANNOT proceed if core systems are missing
+    # or if we are running on an in-memory fallback database.
+    # "Fallbacks" are for handling runtime errors, not for starting a broken system.
+    if config.environment == "production":
+        missing_critical_systems = []
+        if using_fallback():
+            missing_critical_systems.append("Primary database (using in-memory fallback)")
+        if not AI_AVAILABLE:
+            missing_critical_systems.append("AI Core")
+        if not MEMORY_AVAILABLE:
+            missing_critical_systems.append("Memory Manager")
+        if not AUREA_AVAILABLE:
+            missing_critical_systems.append("AUREA Orchestrator")
+        if not INTEGRATION_LAYER_AVAILABLE:
+            missing_critical_systems.append("AI Integration Layer")
+
+        if missing_critical_systems:
+            error_msg = (
+                "⛔ FATAL STARTUP ERROR: Production environment requires all critical systems. "
+                f"Missing or degraded: {', '.join(missing_critical_systems)}"
+            )
+            logger.critical(error_msg)
+            raise RuntimeError(error_msg)
 
     yield
 
