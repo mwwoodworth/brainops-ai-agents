@@ -693,15 +693,35 @@ app.add_middleware(
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-async def verify_api_key(api_key: str = Security(api_key_header)) -> bool:
+async def verify_api_key(
+    api_key: str = Security(api_key_header),
+    request: Optional[Request] = None,
+) -> bool:
     """Verify API key if authentication is required"""
     if not config.security.auth_required:
         return True
 
-    if not api_key:
+    provided = api_key
+    if not provided and request:
+        auth_header = request.headers.get("authorization")
+        if auth_header:
+            scheme, _, token = auth_header.partition(" ")
+            scheme_lower = scheme.lower()
+            if scheme_lower in ("bearer", "apikey", "api-key"):
+                provided = token.strip()
+
+    if not provided and request and config.security.test_api_key:
+        provided = (
+            request.headers.get("x-test-api-key")
+            or request.headers.get("X-Test-Api-Key")
+            or request.headers.get("x-api-key")
+            or request.headers.get("X-API-Key")
+        )
+
+    if not provided:
         raise HTTPException(status_code=403, detail="API key required")
 
-    if api_key not in config.security.valid_api_keys:
+    if provided not in config.security.valid_api_keys:
         raise HTTPException(status_code=403, detail="Invalid API key")
 
     return True
