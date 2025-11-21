@@ -478,15 +478,26 @@ class UnifiedMemoryManager:
             return cur.fetchall()
 
     def _generate_embedding(self, content: Dict) -> Optional[List[float]]:
-        """Generate embedding for content (placeholder - implement with real embeddings)"""
-        # For now, generate a deterministic fake embedding
-        # In production, use OpenAI/Anthropic embeddings
-        content_str = json.dumps(content, sort_keys=True)
-
-        # Create a deterministic 1536-dimensional vector
-        np.random.seed(hash(content_str) % (2**32))
-        embedding = np.random.randn(1536) * 0.1
-        return embedding.tolist()
+        """Generate real embedding for content using OpenAI"""
+        try:
+            import openai
+            
+            # Extract text content
+            text_content = json.dumps(content, sort_keys=True)
+            
+            # Call OpenAI Embedding API
+            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            response = client.embeddings.create(
+                input=text_content,
+                model="text-embedding-3-small"
+            )
+            
+            return response.data[0].embedding
+            
+        except Exception as e:
+            logger.error(f"❌ Embedding generation failed: {e}")
+            # Fallback to zero vector to prevent crash, but log clearly
+            return [0.0] * 1536
 
     def _generate_search_text(self, memory: Memory) -> str:
         """Generate searchable text from memory"""
