@@ -160,28 +160,29 @@ class EmbeddedMemorySystem:
             self.pg_pool = None
 
     async def _load_embedding_model(self):
-        """Load embedding model for RAG (using simple hash-based for now)"""
-        # Using simple hash-based embeddings to avoid 2GB+ PyTorch dependency
-        # Can upgrade to sentence-transformers later if needed
-        self.embedding_model = "hash_based"  # Simple flag
-        logger.info("✅ Embedding model loaded (hash-based, lightweight)")
+        """Load embedding model configuration"""
+        # We are now using OpenAI API for embeddings
+        self.embedding_model = "openai-text-embedding-3-small"
+        logger.info("✅ Embedding model loaded (OpenAI text-embedding-3-small)")
 
     def _encode_embedding(self, text: str) -> Optional[bytes]:
-        """Convert text to embedding vector (simple hash-based)"""
-        if not self.embedding_model:
-            return None
-
+        """Convert text to embedding vector using OpenAI"""
         try:
-            # Simple hash-based embedding (384 dimensions like MiniLM)
-            # This is lightweight but still allows similarity comparison
-            hash_obj = hashlib.sha384(text.encode('utf-8'))
-            hash_bytes = hash_obj.digest()
-
-            # Convert to normalized float vector
-            hash_ints = np.frombuffer(hash_bytes, dtype=np.uint8)
-            embedding = hash_ints.astype(np.float32) / 255.0
-
-            return embedding.tobytes()
+            import openai
+            
+            # Call OpenAI Embedding API
+            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            response = client.embeddings.create(
+                input=text,
+                model="text-embedding-3-small"
+            )
+            
+            embedding_list = response.data[0].embedding
+            
+            # Convert to numpy array then bytes for SQLite
+            embedding_np = np.array(embedding_list, dtype=np.float32)
+            return embedding_np.tobytes()
+            
         except Exception as e:
             logger.error(f"Embedding encoding failed: {e}")
             return None
