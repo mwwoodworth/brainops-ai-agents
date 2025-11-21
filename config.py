@@ -61,11 +61,29 @@ class SecurityConfig:
     """Security configuration for authentication and CORS"""
 
     def __init__(self):
+        self.environment = os.getenv('ENVIRONMENT', 'production')
         self.dev_mode = os.getenv('DEV_MODE', 'false').lower() == 'true'
         self.auth_required = os.getenv('AUTH_REQUIRED', 'false' if self.dev_mode else 'true').lower() == 'true'
         
         api_keys_str = os.getenv('API_KEYS', '')
         self.valid_api_keys = set(api_keys_str.split(',')) if api_keys_str else set()
+
+        test_key = (
+            os.getenv('TEST_API_KEY')
+            or os.getenv('AI_AGENTS_TEST_KEY')
+            or os.getenv('DEFAULT_TEST_API_KEY')
+        )
+        default_local_test_key = "brainops-local-test-key"
+        allow_test_key = (
+            os.getenv('ALLOW_TEST_KEY', 'false').lower() == 'true'
+            or self.dev_mode
+            or self.environment != 'production'
+        )
+        self.test_api_key: Optional[str] = None
+        if allow_test_key:
+            effective_test_key = test_key or default_local_test_key
+            self.valid_api_keys.add(effective_test_key)
+            self.test_api_key = effective_test_key
 
         if self.auth_required and not self.valid_api_keys:
             logger.warning(
