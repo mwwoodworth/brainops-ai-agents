@@ -858,7 +858,7 @@ async def providers_status(authenticated: bool = Depends(verify_api_key)):
 async def get_agents(
     category: Optional[str] = None,
     enabled: Optional[bool] = True,
-    _: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ) -> AgentList:
     """Get list of available agents"""
     pool = get_pool()
@@ -903,7 +903,7 @@ async def get_agents(
 async def execute_agent(
     agent_id: str,
     request: Request,
-    _: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """Execute an agent"""
     pool = get_pool()
@@ -1025,7 +1025,7 @@ async def execute_agent(
 @app.get("/agents/{agent_id}")
 async def get_agent(
     agent_id: str,
-    _: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ) -> Agent:
     """Get a specific agent"""
     pool = get_pool()
@@ -1053,7 +1053,7 @@ async def get_executions(
     agent_id: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 100,
-    _: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """Get agent executions"""
     pool = get_pool()
@@ -1145,7 +1145,7 @@ async def get_executions(
 @app.post("/execute")
 async def execute_scheduled_agents(
     request: Request,
-    _: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """Execute scheduled agents (called by cron)"""
     if not SCHEDULER_AVAILABLE or not app.state.scheduler:
@@ -1678,7 +1678,7 @@ class AgentActivateRequest(BaseModel):
 async def api_v1_knowledge_store(
     payload: KnowledgeStoreRequest,
     request: Request,
-    _: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """
     Store a knowledge/memory entry in the unified memory system.
@@ -1748,7 +1748,7 @@ async def api_v1_knowledge_store(
 async def api_v1_knowledge_query(
     payload: KnowledgeQueryRequest,
     request: Request,
-    _: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """
     Query the unified memory / knowledge store.
@@ -1836,7 +1836,7 @@ async def api_v1_knowledge_query(
 @app.post("/api/v1/erp/analyze")
 async def api_v1_erp_analyze(
     payload: ErpAnalyzeRequest,
-    _: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """
     Analyze ERP jobs using centralized BrainOps Core.
@@ -2103,7 +2103,7 @@ async def api_v1_erp_analyze(
 @app.post("/api/v1/agents/execute")
 async def api_v1_agents_execute(
     payload: AgentExecuteRequest,
-    _: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """
     Execute an agent via the v1 API surface.
@@ -2137,7 +2137,7 @@ async def api_v1_agents_execute(
 @app.post("/api/v1/agents/activate")
 async def api_v1_agents_activate(
     payload: AgentActivateRequest,
-    _: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """
     Activate or deactivate an agent via the v1 API surface.
