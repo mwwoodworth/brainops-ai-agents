@@ -34,6 +34,7 @@ from api.memory import router as memory_router
 from api.brain import router as brain_router
 from api.memory_coordination import router as memory_coordination_router
 from api.customer_intelligence import router as customer_intelligence_router
+from api.gumroad_webhook import router as gumroad_router
 from ai_provider_status import get_provider_status
 
 # Configure logging
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "8.3.2"  # PATCH: Trigger Render redeploy with environment variables from render.yaml (SQL qualifiers + date handling)
+VERSION = "9.0.0"  # MAJOR: Added Gumroad sales funnel webhook integration with ConvertKit, Stripe, SendGrid
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 
 # Import agent scheduler with fallback
@@ -732,6 +733,7 @@ app.include_router(memory_router)
 app.include_router(brain_router)
 app.include_router(memory_coordination_router)
 app.include_router(customer_intelligence_router)
+app.include_router(gumroad_router)
 
 # Import and include analytics router
 try:
