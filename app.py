@@ -844,7 +844,7 @@ async def health_check():
 
 
 @app.get("/ai/providers/status")
-async def providers_status(_: bool = Depends(verify_api_key)):
+async def providers_status(authenticated: bool = Depends(verify_api_key)):
     """
     Report configuration and basic liveness for all AI providers (OpenAI, Anthropic,
     Gemini, Perplexity, Hugging Face). Does not modify configuration or credentials;
