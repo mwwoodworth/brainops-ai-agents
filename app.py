@@ -37,6 +37,79 @@ from api.customer_intelligence import router as customer_intelligence_router
 from api.gumroad_webhook import router as gumroad_router
 from ai_provider_status import get_provider_status
 
+SCHEMA_BOOTSTRAP_SQL = [
+    # Ensure pgcrypto for gen_random_uuid()
+    "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
+    # Core agents table
+    """
+    CREATE TABLE IF NOT EXISTS ai_agents (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        category TEXT DEFAULT 'general',
+        type TEXT DEFAULT 'generic',
+        capabilities JSONB DEFAULT '[]'::jsonb,
+        status TEXT DEFAULT 'active',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    "ALTER TABLE ai_agents ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'general';",
+    "ALTER TABLE ai_agents ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'generic';",
+    "ALTER TABLE ai_agents ADD COLUMN IF NOT EXISTS capabilities JSONB DEFAULT '[]'::jsonb;",
+    "ALTER TABLE ai_agents ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';",
+    # Scheduler table
+    """
+    CREATE TABLE IF NOT EXISTS agent_schedules (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        agent_id UUID REFERENCES ai_agents(id) ON DELETE CASCADE,
+        frequency_minutes INT DEFAULT 60,
+        enabled BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    "ALTER TABLE agent_schedules ADD COLUMN IF NOT EXISTS frequency_minutes INT DEFAULT 60;",
+    "ALTER TABLE agent_schedules ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT TRUE;",
+    # Autonomous task queue
+    """
+    CREATE TABLE IF NOT EXISTS ai_autonomous_tasks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title TEXT,
+        payload JSONB DEFAULT '{}'::jsonb,
+        priority INT DEFAULT 50,
+        status TEXT DEFAULT 'pending',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    "ALTER TABLE ai_autonomous_tasks ADD COLUMN IF NOT EXISTS priority INT DEFAULT 50;",
+    "ALTER TABLE ai_autonomous_tasks ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';",
+    # Error logging corrections
+    "ALTER TABLE ai_error_logs ADD COLUMN IF NOT EXISTS error_id VARCHAR(255);",
+    "UPDATE ai_error_logs SET error_id = gen_random_uuid() WHERE error_id IS NULL;",
+    "ALTER TABLE ai_error_logs ALTER COLUMN error_id SET DEFAULT gen_random_uuid();",
+    "ALTER TABLE ai_error_logs ALTER COLUMN error_id SET NOT NULL;",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ai_error_logs_error_id_idx ON ai_error_logs(error_id);",
+    "ALTER TABLE ai_error_logs ADD COLUMN IF NOT EXISTS timestamp TIMESTAMPTZ DEFAULT NOW();",
+    "CREATE INDEX IF NOT EXISTS idx_error_logs_timestamp ON ai_error_logs(timestamp DESC);",
+    """
+    CREATE TABLE IF NOT EXISTS ai_recovery_actions_log (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        error_id VARCHAR(255),
+        action_id VARCHAR(255) NOT NULL,
+        strategy VARCHAR(50),
+        success BOOLEAN,
+        recovery_time_ms FLOAT,
+        action_taken TEXT,
+        result_data JSONB,
+        executed_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    "ALTER TABLE ai_recovery_actions_log ADD COLUMN IF NOT EXISTS error_id VARCHAR(255);",
+    # Healing rules priority column
+    "ALTER TABLE ai_healing_rules ADD COLUMN IF NOT EXISTS priority INT DEFAULT 50;",
+    "UPDATE ai_healing_rules SET priority = 50 WHERE priority IS NULL;",
+]
+
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, config.log_level, logging.INFO),
@@ -335,6 +408,19 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info(f"🚀 Starting BrainOps AI Agents v{VERSION} - Build: {BUILD_TIME}")
 
+    tenant_id = (
+        os.getenv("TENANT_ID")
+        or os.getenv("DEFAULT_TENANT_ID")
+        or os.getenv("CENTERPOINT_TENANT_ID")
+        or os.getenv("SYSTEM_TENANT_ID")
+    )
+    if not tenant_id:
+        logger.warning("⚠️ TENANT_ID not set; tenant-scoped orchestrators and agents will be skipped.")
+
+    # Keep handles defined to avoid unbound errors when optional systems are disabled
+    aurea = None
+    memory_manager = None
+
     # Initialize database pool
     try:
         pool_config = PoolConfig(
@@ -356,8 +442,18 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Database connection verified")
         else:
             logger.error("❌ Database connection test failed")
+
+        # Ensure minimum schema for agents/scheduler/self-healing
+        for statement in SCHEMA_BOOTSTRAP_SQL:
+            try:
+                await pool.execute(statement)
+            except Exception as e:
+                logger.warning(f"⚠️ Schema bootstrap statement failed: {e}")
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
+        # In production, never continue without a real database connection
+        if config.environment == "production":
+            raise
 
     # Initialize scheduler if available
     if SCHEDULER_AVAILABLE:
@@ -373,10 +469,10 @@ async def lifespan(app: FastAPI):
         app.state.scheduler = None
 
     # Initialize AUREA Master Orchestrator
-    if AUREA_AVAILABLE:
+    if AUREA_AVAILABLE and tenant_id:
         try:
             # Start at SEMI_AUTO level (AI decides minor, human decides major)
-            aurea = AUREA(autonomy_level=AutonomyLevel.SEMI_AUTO)
+            aurea = AUREA(autonomy_level=AutonomyLevel.SEMI_AUTO, tenant_id=tenant_id)
             app.state.aurea = aurea
             logger.info("🧠 AUREA Master Orchestrator initialized at SEMI_AUTO level")
         except Exception as e:
@@ -384,6 +480,8 @@ async def lifespan(app: FastAPI):
             app.state.aurea = None
     else:
         app.state.aurea = None
+        if AUREA_AVAILABLE and not tenant_id:
+            logger.warning("⚠️ Skipping AUREA initialization (TENANT_ID missing)")
 
     # Initialize Self-Healing Recovery System
     if SELF_HEALING_AVAILABLE:
@@ -448,9 +546,9 @@ async def lifespan(app: FastAPI):
     # PHASE 2: Initialize Specialized Agents
 
     # Initialize System Improvement Agent
-    if SYSTEM_IMPROVEMENT_AVAILABLE:
+    if SYSTEM_IMPROVEMENT_AVAILABLE and tenant_id:
         try:
-            system_improvement = SystemImprovementAgent()
+            system_improvement = SystemImprovementAgent(tenant_id)
             app.state.system_improvement = system_improvement
             logger.info("🔧 System Improvement Agent initialized")
         except Exception as e:
@@ -460,9 +558,9 @@ async def lifespan(app: FastAPI):
         app.state.system_improvement = None
 
     # Initialize DevOps Optimization Agent
-    if DEVOPS_AGENT_AVAILABLE:
+    if DEVOPS_AGENT_AVAILABLE and tenant_id:
         try:
-            devops_agent = DevOpsOptimizationAgent()
+            devops_agent = DevOpsOptimizationAgent(tenant_id)
             app.state.devops_agent = devops_agent
             logger.info("⚙️ DevOps Optimization Agent initialized")
         except Exception as e:
@@ -472,9 +570,9 @@ async def lifespan(app: FastAPI):
         app.state.devops_agent = None
 
     # Initialize Code Quality Agent
-    if CODE_QUALITY_AVAILABLE:
+    if CODE_QUALITY_AVAILABLE and tenant_id:
         try:
-            code_quality = CodeQualityAgent()
+            code_quality = CodeQualityAgent(tenant_id)
             app.state.code_quality = code_quality
             logger.info("📝 Code Quality Agent initialized")
         except Exception as e:
@@ -484,9 +582,9 @@ async def lifespan(app: FastAPI):
         app.state.code_quality = None
 
     # Initialize Customer Success Agent
-    if CUSTOMER_SUCCESS_AVAILABLE:
+    if CUSTOMER_SUCCESS_AVAILABLE and tenant_id:
         try:
-            customer_success = CustomerSuccessAgent()
+            customer_success = CustomerSuccessAgent(tenant_id)
             app.state.customer_success = customer_success
             logger.info("🎯 Customer Success Agent initialized")
         except Exception as e:
@@ -496,9 +594,9 @@ async def lifespan(app: FastAPI):
         app.state.customer_success = None
 
     # Initialize Competitive Intelligence Agent
-    if COMPETITIVE_INTEL_AVAILABLE:
+    if COMPETITIVE_INTEL_AVAILABLE and tenant_id:
         try:
-            competitive_intel = CompetitiveIntelligenceAgent()
+            competitive_intel = CompetitiveIntelligenceAgent(tenant_id)
             app.state.competitive_intel = competitive_intel
             logger.info("🔍 Competitive Intelligence Agent initialized")
         except Exception as e:
@@ -508,9 +606,9 @@ async def lifespan(app: FastAPI):
         app.state.competitive_intel = None
 
     # Initialize Vision Alignment Agent
-    if VISION_ALIGNMENT_AVAILABLE:
+    if VISION_ALIGNMENT_AVAILABLE and tenant_id:
         try:
-            vision_alignment = VisionAlignmentAgent()
+            vision_alignment = VisionAlignmentAgent(tenant_id)
             app.state.vision_alignment = vision_alignment
             logger.info("🎯 Vision Alignment Agent initialized")
         except Exception as e:
@@ -637,6 +735,10 @@ async def lifespan(app: FastAPI):
     # "Fallbacks" are for handling runtime errors, not for starting a broken system.
     if config.environment == "production":
         missing_critical_systems = []
+        if not tenant_id:
+            missing_critical_systems.append("TENANT_ID not provided")
+        if not (os.getenv("DATABASE_URL") or (config.database.host and config.database.password)):
+            missing_critical_systems.append("Database credentials (DATABASE_URL or DB_HOST/DB_USER/DB_PASSWORD)")
         if using_fallback():
             missing_critical_systems.append("Primary database (using in-memory fallback)")
         if not AI_AVAILABLE:

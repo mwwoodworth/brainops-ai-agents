@@ -39,7 +39,8 @@ pytest==8.0.0
 # sentry-sdk==1.39.1
 
 # Additional dependencies for compatibility
-numpy==1.24.3
+# NOTE: 1.24.x does not publish wheels for Python 3.12; bump for compatibility.
+numpy==1.26.4
 
 # Embedded Memory System (RAG) - REMOVED heavy ML deps
 # sentence-transformers==2.2.2  # TOO HEAVY - 2GB+ with PyTorch

@@ -27,7 +27,7 @@ class AgentScheduler:
             'database': os.getenv('DB_NAME', 'postgres'),
             'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
             'password': os.getenv('DB_PASSWORD', 'REDACTED_SUPABASE_DB_PASSWORD'),
-            'port': int(os.getenv('DB_PORT', 6543))
+            'port': int(os.getenv('DB_PORT', 5432))
         }
         # Use BackgroundScheduler instead of AsyncIOScheduler for FastAPI compatibility
         self.scheduler = BackgroundScheduler()
