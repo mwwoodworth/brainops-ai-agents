@@ -44,7 +44,7 @@ DB_CONFIG = {
     'database': os.getenv('DB_NAME', 'postgres'),
     'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
     'password': os.getenv('DB_PASSWORD', 'REDACTED_SUPABASE_DB_PASSWORD'),
-    'port': 6543
+    'port': int(os.getenv('DB_PORT', 5432))
 }
 
 
