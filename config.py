@@ -7,6 +7,13 @@ from typing import Optional, List
 import logging
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
+
+# Always hydrate env from the latest BrainOps.env for local/dev runs.
+# Prefer the Render-exported file in Downloads, fall back to repo-local copy.
+load_dotenv("/home/matt-woodworth/Downloads/BrainOps.env")
+load_dotenv("/home/matt-woodworth/dev/BrainOps.env")
+
 logger = logging.getLogger(__name__)
 
 

@@ -20,6 +20,8 @@ services:
         value: postgres.yomagoqdmxszqtdwuhab
       - key: DB_PASSWORD
         value: Brain0ps2O2S
+      - key: DATABASE_URL
+        value: postgresql://postgres.yomagoqdmxszqtdwuhab:Brain0ps2O2S@aws-0-us-east-2.pooler.supabase.com:5432/postgres
       - key: DB_PORT
         value: "5432"
       - key: API_KEYS
@@ -35,7 +37,7 @@ services:
       - key: SYSTEM_USER_ID
         value: system
       - key: TENANT_ID
-        value: default
+        value: 97f82b360baefdd73400ad342562586
       - key: PORT
         value: "10000"  # Render's default port
       - key: WEB_CONCURRENCY

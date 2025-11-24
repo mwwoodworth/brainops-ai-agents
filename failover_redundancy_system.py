@@ -44,7 +44,7 @@ DB_CONFIG = {
     'database': os.getenv('DB_NAME', 'postgres'),
     'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
     'password': os.getenv("DB_PASSWORD"),
-    'port': 6543
+    'port': int(os.getenv('DB_PORT', 5432))
 }
 
 # Backup database config (for failover)
@@ -53,7 +53,7 @@ BACKUP_DB_CONFIG = {
     'database': os.getenv('BACKUP_DB_NAME', 'postgres'),
     'user': os.getenv('BACKUP_DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
     'password': os.getenv('BACKUP_DB_PASSWORD', 'Brain0ps2O2S'),
-    'port': 6543
+    'port': int(os.getenv('BACKUP_DB_PORT', os.getenv('DB_PORT', 5432)))
 }
 
 
