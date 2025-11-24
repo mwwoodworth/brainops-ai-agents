@@ -72,7 +72,7 @@ class Memory:
     parent_memory_id: Optional[str] = None
     related_memories: List[str] = None
     expires_at: Optional[datetime] = None
-    tenant_id: str = "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+    tenant_id: Optional[str] = None
 
 
 class UnifiedMemoryManager:
@@ -104,6 +104,9 @@ class UnifiedMemoryManager:
 
     def store(self, memory: Memory) -> str:
         """Store a memory with deduplication and linking"""
+        if not memory.tenant_id:
+            raise ValueError("tenant_id is mandatory for memory storage")
+
         try:
             # Check for duplicates
             existing = self._find_duplicate(memory)
@@ -115,7 +118,7 @@ class UnifiedMemoryManager:
             embedding = self._generate_embedding(memory.content)
 
             # Find related memories
-            related = self._find_related_memories(memory.content, limit=5)
+            related = self._find_related_memories(memory.content, memory.tenant_id, limit=5)
 
             # Store the memory
             with self._get_cursor() as cur:
@@ -165,9 +168,12 @@ class UnifiedMemoryManager:
             self.conn.rollback()
             raise
 
-    def recall(self, query: Union[str, Dict], context: Optional[str] = None,
+    def recall(self, query: Union[str, Dict], tenant_id: str, context: Optional[str] = None,
                limit: int = 10, memory_type: Optional[MemoryType] = None) -> List[Dict]:
         """Recall relevant memories with semantic search"""
+        if not tenant_id:
+            raise ValueError("tenant_id is required for memory recall")
+
         try:
             # Generate query embedding
             if isinstance(query, str):
@@ -188,7 +194,7 @@ class UnifiedMemoryManager:
                 WHERE tenant_id = %s
                 """
 
-                params = [query_embedding, self.db_config.get('tenant_id', '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457')]
+                params = [query_embedding, tenant_id]
 
                 # Add filters
                 filters = []
@@ -225,8 +231,11 @@ class UnifiedMemoryManager:
             logger.error(f"❌ Failed to recall memories: {e}")
             return []
 
-    def synthesize(self, time_window: timedelta = timedelta(hours=24)) -> List[Dict]:
+    def synthesize(self, tenant_id: str, time_window: timedelta = timedelta(hours=24)) -> List[Dict]:
         """Synthesize insights from recent memories"""
+        if not tenant_id:
+            raise ValueError("tenant_id is required for synthesis")
+
         try:
             with self._get_cursor() as cur:
                 # Get recent high-importance memories
@@ -242,7 +251,7 @@ class UnifiedMemoryManager:
                 """
 
                 cutoff_time = datetime.now() - time_window
-                cur.execute(query, (cutoff_time, self.db_config.get('tenant_id', '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457')))
+                cur.execute(query, (cutoff_time, tenant_id))
                 memories = cur.fetchall()
 
                 insights = []
@@ -270,7 +279,8 @@ class UnifiedMemoryManager:
                         source_agent='synthesizer',
                         created_by='unified_memory_manager',
                         importance_score=pattern['confidence'],
-                        tags=['insight', 'pattern', 'synthesis']
+                        tags=['insight', 'pattern', 'synthesis'],
+                        tenant_id=tenant_id
                     ))
 
                 logger.info(f"🧠 Synthesized {len(insights)} insights from {len(memories)} memories")
@@ -297,6 +307,7 @@ class UnifiedMemoryManager:
                     JOIN unified_ai_memory m2 ON m1.id < m2.id
                     WHERE m1.memory_type = m2.memory_type
                         AND m1.source_system = m2.source_system
+                        AND m1.tenant_id = m2.tenant_id
                         AND 1 - (m1.embedding <=> m2.embedding) > %s
                 )
                 SELECT * FROM similarity_pairs
@@ -351,8 +362,11 @@ class UnifiedMemoryManager:
             logger.error(f"❌ Failed to consolidate memories: {e}")
             self.conn.rollback()
 
-    def migrate_from_chaos(self, limit: int = 1000):
+    def migrate_from_chaos(self, tenant_id: str, limit: int = 1000):
         """Migrate data from the 53 chaotic memory tables"""
+        if not tenant_id:
+            raise ValueError("tenant_id is required for migration")
+
         tables_to_migrate = [
             'ai_context_memory',
             'ai_persistent_memory',
@@ -367,7 +381,7 @@ class UnifiedMemoryManager:
 
         for table in tables_to_migrate:
             try:
-                migrated = self._migrate_table(table, limit)
+                migrated = self._migrate_table(table, tenant_id, limit)
                 total_migrated += migrated
                 logger.info(f"📦 Migrated {migrated} memories from {table}")
             except Exception as e:
@@ -375,7 +389,7 @@ class UnifiedMemoryManager:
 
         logger.info(f"✅ Total migrated: {total_migrated} memories from chaos to order")
 
-    def _migrate_table(self, table_name: str, limit: int) -> int:
+    def _migrate_table(self, table_name: str, tenant_id: str, limit: int) -> int:
         """Migrate a single table to unified memory"""
         try:
             with self._get_cursor() as cur:
@@ -414,7 +428,8 @@ class UnifiedMemoryManager:
                             importance_score=old_mem.get('importance', 0.5),
                             tags=['migrated', table_name],
                             metadata={'original_id': str(old_mem.get('id', ''))},
-                            created_at=old_mem.get('created_at')
+                            created_at=old_mem.get('created_at'),
+                            tenant_id=tenant_id
                         )
                         self.store(memory)
                         migrated += 1
@@ -439,9 +454,10 @@ class UnifiedMemoryManager:
             WHERE content_hash = %s
                 AND memory_type = %s
                 AND source_system = %s
+                AND tenant_id = %s
             LIMIT 1
             """
-            cur.execute(query, (content_hash, memory.memory_type.value, memory.source_system))
+            cur.execute(query, (content_hash, memory.memory_type.value, memory.source_system, memory.tenant_id))
             return cur.fetchone()
 
     def _reinforce_memory(self, memory_id: str, new_memory: Memory) -> str:
@@ -461,7 +477,7 @@ class UnifiedMemoryManager:
             logger.info(f"💪 Reinforced existing memory {memory_id}")
             return memory_id
 
-    def _find_related_memories(self, content: Dict, limit: int = 5) -> List[Dict]:
+    def _find_related_memories(self, content: Dict, tenant_id: str, limit: int = 5) -> List[Dict]:
         """Find memories related to the given content"""
         embedding = self._generate_embedding(content)
 
@@ -471,10 +487,11 @@ class UnifiedMemoryManager:
                    1 - (embedding <=> %s::vector) as similarity
             FROM unified_ai_memory
             WHERE embedding IS NOT NULL
+                AND tenant_id = %s
             ORDER BY embedding <=> %s::vector
             LIMIT %s
             """
-            cur.execute(query, (embedding, embedding, limit))
+            cur.execute(query, (embedding, tenant_id, embedding, limit))
             return cur.fetchall()
 
     def _generate_embedding(self, content: Dict) -> Optional[List[float]]:
@@ -577,8 +594,11 @@ class UnifiedMemoryManager:
 
         return merged
 
-    def get_stats(self) -> Dict:
+    def get_stats(self, tenant_id: str) -> Dict:
         """Get memory system statistics"""
+        if not tenant_id:
+            raise ValueError("tenant_id is required for stats")
+
         with self._get_cursor() as cur:
             query = """
             SELECT
@@ -591,7 +611,7 @@ class UnifiedMemoryManager:
             FROM unified_ai_memory
             WHERE tenant_id = %s
             """
-            cur.execute(query, (self.db_config.get('tenant_id', '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457'),))
+            cur.execute(query, (tenant_id,))
             return dict(cur.fetchone())
 
 
@@ -609,6 +629,9 @@ def get_memory_manager() -> UnifiedMemoryManager:
 if __name__ == "__main__":
     # Test the memory system
     manager = get_memory_manager()
+    
+    # Test with a dummy tenant ID for local execution
+    TEST_TENANT = "test-tenant-id"
 
     # Store a test memory
     test_memory = Memory(
@@ -618,18 +641,15 @@ if __name__ == "__main__":
         source_agent="initializer",
         created_by="system",
         importance_score=0.9,
-        tags=["test", "initialization"]
+        tags=["test", "initialization"],
+        tenant_id=TEST_TENANT
     )
 
     memory_id = manager.store(test_memory)
     print(f"✅ Stored test memory: {memory_id}")
 
     # Get stats
-    stats = manager.get_stats()
+    stats = manager.get_stats(TEST_TENANT)
     print(f"📊 Memory Stats: {json.dumps(stats, indent=2)}")
-
-    # Migrate from chaos
-    print("🔄 Starting migration from chaotic tables...")
-    manager.migrate_from_chaos(limit=100)
 
     print("✅ Unified Memory Manager operational!")
