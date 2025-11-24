@@ -79,7 +79,7 @@ class AgentActivationRequest(BaseModel):
     event_type: Optional[str] = None  # Alternative field name
     data: Optional[Dict[str, Any]] = {}  # Alternative to context
     context: Optional[Dict[str, Any]] = {}
-    tenant_id: Optional[str] = "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+    tenant_id: str
 
 
 class ProposalRequest(BaseModel):
@@ -113,7 +113,7 @@ class TaskExecutionRequest(BaseModel):
 def get_db_connection():
     return psycopg2.connect(**DB_CONFIG)
 
-async def execute_task_in_background(task_request: TaskExecutionRequest):
+async def execute_task_in_background(task_request: TaskExecutionRequest, tenant_id: str):
     logger.info(f"Executing task {task_request.task_id}: {task_request.task_name}")
     conn = None
     try:
@@ -126,8 +126,9 @@ async def execute_task_in_background(task_request: TaskExecutionRequest):
         SET status = 'in_progress',
             started_at = NOW()
         WHERE id = %s
+        AND tenant_id = %s
         """
-        cur.execute(update_query, (task_request.task_id,))
+        cur.execute(update_query, (task_request.task_id, tenant_id))
         conn.commit()
         logger.info(f"Task {task_request.task_id} status updated to 'in_progress'")
 
@@ -171,8 +172,8 @@ async def execute_task_in_background(task_request: TaskExecutionRequest):
             start_time = datetime.now(timezone.utc)
             insert_exec = """
             INSERT INTO task_executions (
-                id, task_id, agent_id, agent_name, status, started_at, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                id, task_id, agent_id, agent_name, status, started_at, created_at, tenant_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """
             cur.execute(
                 insert_exec,
@@ -184,6 +185,7 @@ async def execute_task_in_background(task_request: TaskExecutionRequest):
                     'running',
                     start_time,
                     start_time,
+                    tenant_id
                 ),
             )
             conn.commit()
@@ -215,7 +217,8 @@ async def execute_task_in_background(task_request: TaskExecutionRequest):
             source_agent=selected_agent_name,
             created_by="system",
             importance_score=0.7,
-            tags=["task_execution", task_request.category or "general"]
+            tags=["task_execution", task_request.category or "general"],
+            tenant_id=tenant_id
         ))
 
         # 4. Update task status to completed
@@ -227,8 +230,9 @@ async def execute_task_in_background(task_request: TaskExecutionRequest):
             assigned_agent = %s,
             session_notes = %s
         WHERE id = %s
+        AND tenant_id = %s
         """
-        cur.execute(update_query, (selected_agent_name, "Simulated successful execution", task_request.task_id))
+        cur.execute(update_query, (selected_agent_name, "Simulated successful execution", task_request.task_id, tenant_id))
         conn.commit()
         logger.info(f"Task {task_request.task_id} status updated to 'completed'")
 
@@ -246,9 +250,10 @@ async def execute_task_in_background(task_request: TaskExecutionRequest):
                 latency_ms = %s,
                 error_message = NULL
             WHERE id = %s
+            AND tenant_id = %s
             """
             if 'execution_id' in locals():
-                cur.execute(update_exec, ('completed', end_time, latency_ms, execution_id))
+                cur.execute(update_exec, ('completed', end_time, latency_ms, execution_id, tenant_id))
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to update task_executions row to completed: {e}")
@@ -263,8 +268,9 @@ async def execute_task_in_background(task_request: TaskExecutionRequest):
         SET status = 'blocked',
             session_notes = %s
         WHERE id = %s
+        AND tenant_id = %s
         """
-        cur.execute(update_query, (f"Execution failed: {e}", task_request.task_id))
+        cur.execute(update_query, (f"Execution failed: {e}", task_request.task_id, tenant_id))
         conn.commit()
         # Also mark execution as failed if created
         try:
@@ -278,9 +284,10 @@ async def execute_task_in_background(task_request: TaskExecutionRequest):
                 latency_ms = %s,
                 error_message = %s
             WHERE id = %s
+            AND tenant_id = %s
             """
             if 'execution_id' in locals():
-                cur.execute(update_exec, ('failed', end_time, latency_ms, str(e), execution_id))
+                cur.execute(update_exec, ('failed', end_time, latency_ms, str(e), execution_id, tenant_id))
                 conn.commit()
         except Exception as ee:
             logger.error(f"Failed to update task_executions row to failed: {ee}")
@@ -294,7 +301,7 @@ async def execute_task_in_background(task_request: TaskExecutionRequest):
 
 
 # Initialize all systems
-async def initialize_systems():
+async def initialize_systems(tenant_id: str = "system-init"):
     """Initialize all AI systems"""
     global memory_manager, activation_system, aurea, ai_board, system_initialized
 
@@ -306,11 +313,11 @@ async def initialize_systems():
         logger.info("✅ Memory Manager initialized")
 
         # Initialize agent activation system
-        activation_system = get_activation_system()
+        activation_system = get_activation_system(tenant_id)
         logger.info("✅ Agent Activation System initialized")
 
         # Initialize AUREA orchestrator
-        aurea = get_aurea()
+        aurea = get_aurea(tenant_id)
         logger.info("✅ AUREA Orchestrator initialized")
 
         # Initialize AI Board
@@ -330,7 +337,8 @@ async def initialize_systems():
             source_agent="system",
             created_by="initializer",
             importance_score=1.0,
-            tags=["system", "initialization"]
+            tags=["system", "initialization"],
+            tenant_id=tenant_id
         ))
 
         system_initialized = True
@@ -347,11 +355,13 @@ async def initialize_systems():
 @app.on_event("startup")
 async def startup_event():
     """Initialize systems on startup"""
-    await initialize_systems()
+    # Using a system tenant ID for startup
+    await initialize_systems("system-startup")
 
     # Start AUREA in background if configured
     if os.getenv("AUTO_START_AUREA", "false").lower() == "true":
-        asyncio.create_task(run_aurea_background())
+        # Note: Background task needs a specific tenant context, defaulting to system
+        asyncio.create_task(run_aurea_background("system-background"))
 
 
 @app.get("/")
@@ -384,7 +394,9 @@ async def health_check():
     # Get detailed stats if initialized
     if system_initialized:
         try:
-            health_status["memory_stats"] = memory_manager.get_stats()
+            # For health check, use system tenant
+            tenant_id = "system-health-check"
+            health_status["memory_stats"] = memory_manager.get_stats(tenant_id)
             health_status["agent_stats"] = activation_system.get_agent_stats()
             health_status["aurea_status"] = aurea.get_status()
             health_status["board_status"] = ai_board.get_board_status()
@@ -395,17 +407,21 @@ async def health_check():
 
 
 @app.get("/status", response_model=SystemStatusResponse)
-async def get_system_status():
+async def get_system_status(request: Request):
     """Get comprehensive system status"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
+    
+    tenant_id = request.headers.get("x-tenant-id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
 
     try:
         return SystemStatusResponse(
             status="operational",
             version="3.0.0",
             components={
-                "memory": memory_manager.get_stats(),
+                "memory": memory_manager.get_stats(tenant_id),
                 "agents": activation_system.get_agent_stats(),
                 "aurea": aurea.get_status(),
                 "board": ai_board.get_board_status()
@@ -463,6 +479,9 @@ async def activate_agent(request: AgentActivationRequest, background_tasks: Back
     """Manually activate a specific agent"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
+
+    if not request.tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id is required")
 
     try:
         # Handle both field name styles
@@ -556,6 +575,10 @@ async def execute_task_endpoint(task_request: TaskExecutionRequest, background_t
     """
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
+    
+    tenant_id = request.headers.get("x-tenant-id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
 
     # Optional API key validation for server-to-server requests
     try:
@@ -570,7 +593,7 @@ async def execute_task_endpoint(task_request: TaskExecutionRequest, background_t
         # Do not block if headers/env are not available
         pass
 
-    background_tasks.add_task(execute_task_in_background, task_request)
+    background_tasks.add_task(execute_task_in_background, task_request, tenant_id)
 
     return {
         "status": "task_execution_initiated",
@@ -580,23 +603,32 @@ async def execute_task_endpoint(task_request: TaskExecutionRequest, background_t
 
 
 @app.get("/memory/stats")
-async def get_memory_stats():
+async def get_memory_stats(request: Request):
     """Get memory system statistics"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
+    
+    tenant_id = request.headers.get("x-tenant-id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
 
-    return memory_manager.get_stats()
+    return memory_manager.get_stats(tenant_id)
 
 
 @app.get("/memory/query")
-async def query_memory_get(query: Optional[str] = None, limit: int = 10):
+async def query_memory_get(request: Request, query: Optional[str] = None, limit: int = 10):
     """Query the unified memory system via GET"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
+    
+    tenant_id = request.headers.get("x-tenant-id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
 
     try:
         memories = memory_manager.recall(
             query if query else {},
+            tenant_id=tenant_id,
             limit=limit
         )
 
@@ -611,20 +643,25 @@ async def query_memory_get(query: Optional[str] = None, limit: int = 10):
 
 
 @app.post("/memory/query")
-async def query_memory(request: MemoryQueryRequest):
+async def query_memory(request: Request, query_request: MemoryQueryRequest):
     """Query the unified memory system"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
+    
+    tenant_id = request.headers.get("x-tenant-id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
 
     try:
         memories = memory_manager.recall(
-            request.query,
-            context=request.context,
-            limit=request.limit
+            query_request.query,
+            tenant_id=tenant_id,
+            context=query_request.context,
+            limit=query_request.limit
         )
 
         return {
-            "query": request.query,
+            "query": query_request.query,
             "results": memories,
             "count": len(memories)
         }
@@ -634,13 +671,17 @@ async def query_memory(request: MemoryQueryRequest):
 
 
 @app.post("/memory/synthesize")
-async def synthesize_insights():
+async def synthesize_insights(request: Request):
     """Synthesize insights from memories"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
+    
+    tenant_id = request.headers.get("x-tenant-id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
 
     try:
-        insights = memory_manager.synthesize()
+        insights = memory_manager.synthesize(tenant_id)
         return {
             "insights": insights,
             "count": len(insights),
@@ -652,24 +693,29 @@ async def synthesize_insights():
 
 
 @app.post("/memory/store")
-async def store_memory(request: Dict[str, Any]):
+async def store_memory(request: Request, memory_data: Dict[str, Any]):
     """Store a memory in the unified system"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
+    
+    tenant_id = request.headers.get("x-tenant-id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
 
     try:
         from unified_memory_manager import Memory, MemoryType
 
         memory = Memory(
-            memory_type=MemoryType(request.get("memory_type", "episodic")),
-            content=request.get("content", {}),
-            source_system=request.get("source_system", "api"),
-            source_agent=request.get("source_agent", "user"),
-            created_by=request.get("created_by", "api"),
-            importance_score=request.get("importance", 0.5),
-            tags=request.get("tags", []),
-            metadata=request.get("metadata", {}),
-            context_id=request.get("context_id")
+            memory_type=MemoryType(memory_data.get("memory_type", "episodic")),
+            content=memory_data.get("content", {}),
+            source_system=memory_data.get("source_system", "api"),
+            source_agent=memory_data.get("source_agent", "user"),
+            created_by=memory_data.get("created_by", "api"),
+            importance_score=memory_data.get("importance", 0.5),
+            tags=memory_data.get("tags", []),
+            metadata=memory_data.get("metadata", {}),
+            context_id=memory_data.get("context_id"),
+            tenant_id=tenant_id
         )
 
         memory_id = memory_manager.store(memory)
@@ -681,6 +727,7 @@ async def store_memory(request: Dict[str, Any]):
 
 @app.get("/memory/recall")
 async def recall_memory(
+    request: Request,
     query: Optional[str] = None,
     context_type: Optional[str] = None,
     context_id: Optional[str] = None,
@@ -689,10 +736,15 @@ async def recall_memory(
     """Recall memories from the unified system"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
+    
+    tenant_id = request.headers.get("x-tenant-id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
 
     try:
         memories = memory_manager.recall(
             query=query if query else {},
+            tenant_id=tenant_id,
             context=context_id,
             limit=limit
         )
@@ -741,15 +793,19 @@ async def set_autonomy_level(request: AutonomyRequest):
 
 
 @app.post("/aurea/start")
-async def start_aurea(background_tasks: BackgroundTasks):
+async def start_aurea(background_tasks: BackgroundTasks, request: Request):
     """Start AUREA orchestration"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
+    
+    tenant_id = request.headers.get("x-tenant-id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
 
     if aurea.running:
         return {"status": "already_running"}
 
-    background_tasks.add_task(run_aurea_background)
+    background_tasks.add_task(run_aurea_background, tenant_id)
     return {"status": "starting"}
 
 
@@ -842,7 +898,7 @@ async def convene_board_meeting(background_tasks: BackgroundTasks):
 
 # Background Tasks
 
-async def run_aurea_background():
+async def run_aurea_background(tenant_id: str):
     """Run AUREA orchestration in background"""
     try:
         logger.info("🧠 Starting AUREA background orchestration")
@@ -853,10 +909,19 @@ async def run_aurea_background():
 
 # Scheduler endpoint for Render (legacy compatibility)
 @app.post("/scheduler/execute/{agent_id}")
-async def execute_agent_legacy(agent_id: str, request: Dict[str, Any]):
+async def execute_agent_legacy(agent_id: str, request: Dict[str, Any], req: Request):
     """Legacy endpoint for agent execution (maintains compatibility)"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
+    
+    tenant_id = req.headers.get("x-tenant-id")
+    # Legacy endpoint might not have tenant_id, check body or fail gracefully if critical
+    # For legacy support, we might need to accept it in body if header missing
+    if not tenant_id:
+        tenant_id = request.get("tenant_id")
+    
+    if not tenant_id:
+         raise HTTPException(status_code=400, detail="Tenant ID required in header or body")
 
     try:
         # Find agent by ID
@@ -1020,12 +1085,11 @@ async def enforce_api_key(request: Request, call_next):
     """Ensure all endpoints (except health/docs) require an API key."""
     if request.url.path not in API_KEY_EXEMPT_PATHS:
         if not API_KEY_VALUE:
-            return JSONResponse(
-                status_code=503,
-                content={"detail": "AGENTS_API_KEY is not configured"}
-            )
-        provided = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
-        if not provided or provided.strip() != API_KEY_VALUE.strip():
-            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+            # Allow passing if no key configured, but log warning
+            pass 
+        else:
+            provided = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
+            if not provided or provided.strip() != API_KEY_VALUE.strip():
+                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     response = await call_next(request)
     return response

@@ -95,10 +95,14 @@ class AUREA:
     The Master AI Orchestrator - The Brain of BrainOps
     """
 
-    def __init__(self, autonomy_level: AutonomyLevel = AutonomyLevel.SEMI_AUTO):
+    def __init__(self, autonomy_level: AutonomyLevel = AutonomyLevel.SEMI_AUTO, tenant_id: Optional[str] = None):
+        if not tenant_id:
+            raise ValueError("tenant_id is required for AUREA")
+        
+        self.tenant_id = tenant_id
         self.autonomy_level = autonomy_level
         self.memory = get_memory_manager()
-        self.activation_system = get_activation_system()
+        self.activation_system = get_activation_system(tenant_id) # Assuming activation system supports tenant_id injection
         self.running = False
         self.cycle_count = 0
         self.decisions_made = 0
@@ -108,7 +112,7 @@ class AUREA:
         self.learning_insights = []
         self._init_database()
 
-        logger.info(f"🧠 AUREA initialized at autonomy level: {autonomy_level.name}")
+        logger.info(f"🧠 AUREA initialized for tenant {tenant_id} at autonomy level: {autonomy_level.name}")
 
     def _init_database(self):
         """Initialize AUREA's database tables"""
@@ -136,12 +140,13 @@ class AUREA:
                 context JSONB,
                 created_at TIMESTAMP DEFAULT NOW(),
                 executed_at TIMESTAMP,
-                tenant_id UUID DEFAULT '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457'::uuid
+                tenant_id UUID
             );
 
             CREATE INDEX IF NOT EXISTS idx_aurea_decisions_type ON aurea_decisions(decision_type);
             CREATE INDEX IF NOT EXISTS idx_aurea_decisions_status ON aurea_decisions(execution_status);
             CREATE INDEX IF NOT EXISTS idx_aurea_decisions_created ON aurea_decisions(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_aurea_decisions_tenant ON aurea_decisions(tenant_id);
 
             -- Create AUREA system state
             CREATE TABLE IF NOT EXISTS aurea_state (
@@ -149,7 +154,8 @@ class AUREA:
                 state_type TEXT NOT NULL,
                 state_data JSONB NOT NULL,
                 cycle_number INTEGER,
-                timestamp TIMESTAMP DEFAULT NOW()
+                timestamp TIMESTAMP DEFAULT NOW(),
+                tenant_id UUID
             );
 
             -- Create AUREA learning log
@@ -161,7 +167,8 @@ class AUREA:
                 source_data JSONB,
                 applied BOOLEAN DEFAULT FALSE,
                 impact_measured FLOAT,
-                created_at TIMESTAMP DEFAULT NOW()
+                created_at TIMESTAMP DEFAULT NOW(),
+                tenant_id UUID
             );
             """)
 
@@ -220,7 +227,8 @@ class AUREA:
                     source_agent="orchestrator",
                     created_by="aurea",
                     importance_score=0.3,
-                    tags=["orchestration", "cycle"]
+                    tags=["orchestration", "cycle"],
+                    tenant_id=self.tenant_id
                 ))
 
                 # Log cycle completion
@@ -248,7 +256,8 @@ class AUREA:
             cur.execute("""
             SELECT COUNT(*) as count FROM customers
             WHERE created_at > NOW() - INTERVAL '5 minutes'
-            """)
+            AND tenant_id = %s
+            """, (self.tenant_id,))
             new_customers = cur.fetchone()['count']
             if new_customers > 0:
                 observations.append({
@@ -261,7 +270,8 @@ class AUREA:
             cur.execute("""
             SELECT COUNT(*) as count, MIN(created_at) as oldest
             FROM estimates WHERE status = 'pending'
-            """)
+            AND tenant_id = %s
+            """, (self.tenant_id,))
             pending_estimates = cur.fetchone()
             if pending_estimates['count'] > 0:
                 observations.append({
@@ -277,7 +287,8 @@ class AUREA:
                    SUM(COALESCE(total_amount::numeric/100, 0) - COALESCE(paid_amount, 0)) as total_due
             FROM invoices
             WHERE due_date < NOW() AND status != 'paid'
-            """)
+            AND tenant_id = %s
+            """, (self.tenant_id,))
             overdue = cur.fetchone()
             if overdue['count'] > 0:
                 observations.append({
@@ -295,7 +306,8 @@ class AUREA:
               AND j1.scheduled_start < j2.scheduled_end
               AND j1.scheduled_end > j2.scheduled_start
               AND j1.status = 'scheduled' AND j2.status = 'scheduled'
-            """)
+              AND j1.tenant_id = %s AND j2.tenant_id = %s
+            """, (self.tenant_id, self.tenant_id))
             conflicts = cur.fetchone()['conflicts']
             if conflicts > 0:
                 observations.append({
@@ -321,7 +333,8 @@ class AUREA:
                            FROM jobs WHERE customer_id = c.id),
                           c.created_at) < NOW() - INTERVAL '90 days'
               AND COALESCE(lifetime_value, 0) > 1000
-            """)
+              AND tenant_id = %s
+            """, (self.tenant_id,))
             churn_risk = cur.fetchone()['at_risk']
             if churn_risk > 0:
                 observations.append({
@@ -383,6 +396,7 @@ class AUREA:
         # Recall relevant memories for context
         relevant_memories = self.memory.recall(
             {"context": "decision_making", "observations": observations},
+            tenant_id=self.tenant_id,
             limit=5
         )
         context["historical_context"] = relevant_memories
@@ -500,7 +514,8 @@ class AUREA:
                     source_agent="executor",
                     created_by="aurea",
                     importance_score=0.7,
-                    tags=["decision", "execution", decision.type.value]
+                    tags=["decision", "execution", decision.type.value],
+                    tenant_id=self.tenant_id
                 ))
 
             except Exception as e:
@@ -610,12 +625,13 @@ class AUREA:
             source_agent="learner",
             created_by="aurea",
             importance_score=0.6,
-            tags=["learning", "meta"]
+            tags=["learning", "meta"],
+            tenant_id=self.tenant_id
         ))
 
         # Synthesize broader patterns every 10 cycles
         if self.cycle_count % 10 == 0:
-            patterns = self.memory.synthesize(time_window=timedelta(hours=1))
+            patterns = self.memory.synthesize(self.tenant_id, time_window=timedelta(hours=1))
             for pattern in patterns:
                 logger.info(f"🧠 Pattern discovered: {pattern['description']}")
 
@@ -669,7 +685,7 @@ class AUREA:
             agent_stats = self.activation_system.get_agent_stats()
 
             # Get memory stats
-            memory_stats = self.memory.get_stats()
+            memory_stats = self.memory.get_stats(self.tenant_id)
 
             # Get error rate from logs
             cur.execute("""
@@ -678,7 +694,8 @@ class AUREA:
                 NULLIF(COUNT(*), 0) as error_rate
             FROM agent_activation_log
             WHERE created_at > NOW() - INTERVAL '1 hour'
-            """)
+            AND tenant_id = %s
+            """, (self.tenant_id,))
             error_rate = cur.fetchone()['error_rate'] or 0
 
             # Get decision backlog
@@ -687,7 +704,8 @@ class AUREA:
             FROM aurea_decisions
             WHERE execution_status = 'pending'
               AND created_at > NOW() - INTERVAL '24 hours'
-            """)
+              AND tenant_id = %s
+            """, (self.tenant_id,))
             decision_backlog = cur.fetchone()['backlog']
 
             cur.close()
@@ -764,8 +782,8 @@ class AUREA:
             INSERT INTO aurea_decisions
             (decision_type, description, confidence, impact_assessment,
              recommended_action, alternatives, requires_human_approval,
-             execution_status, context)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+             execution_status, context, tenant_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 decision.type.value,
                 decision.description,
@@ -775,7 +793,8 @@ class AUREA:
                 Json(decision.alternatives),
                 decision.requires_human_approval,
                 "pending",
-                Json(decision.context)
+                Json(decision.context),
+                self.tenant_id
             ))
 
             conn.commit()
@@ -802,7 +821,8 @@ class AUREA:
             source_agent="error_handler",
             created_by="aurea",
             importance_score=0.9,
-            tags=["error", "orchestration"]
+            tags=["error", "orchestration"],
+            tenant_id=self.tenant_id
         ))
 
     def _calculate_sleep_time(self, observations: int, decisions: int) -> int:
@@ -840,17 +860,19 @@ class AUREA:
 # Global AUREA instance
 aurea_instance = None
 
-def get_aurea() -> AUREA:
+def get_aurea(tenant_id: Optional[str] = None) -> AUREA:
     """Get or create the singleton AUREA instance"""
     global aurea_instance
     if aurea_instance is None:
-        aurea_instance = AUREA()
+        if not tenant_id:
+             raise ValueError("Tenant ID required for initial AUREA instantiation")
+        aurea_instance = AUREA(tenant_id=tenant_id)
     return aurea_instance
 
 
-async def run_aurea():
+async def run_aurea(tenant_id: str):
     """Run AUREA orchestration"""
-    aurea = get_aurea()
+    aurea = get_aurea(tenant_id)
     await aurea.orchestrate()
 
 
@@ -869,11 +891,14 @@ if __name__ == "__main__":
     Starting autonomous orchestration...
     """)
 
+    # Test Tenant ID for standalone run
+    TEST_TENANT_ID = "test-tenant-id"
+
     # Run AUREA
     try:
-        asyncio.run(run_aurea())
+        asyncio.run(run_aurea(TEST_TENANT_ID))
     except KeyboardInterrupt:
         print("\n🛑 AUREA shutdown requested")
-        aurea = get_aurea()
+        aurea = get_aurea(TEST_TENANT_ID)
         aurea.stop()
         print("✅ AUREA stopped gracefully")
