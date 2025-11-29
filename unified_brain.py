@@ -50,6 +50,8 @@ class UnifiedBrain:
         self.cursor = None
         self.embedded_memory = None
         self._initialized = False
+        self._initializing = False  # Reentry guard
+        self._table_checked = False  # Track table existence separately
         self._lazy_init = lazy_init
         # Only initialize immediately if not lazy
         if not lazy_init:
@@ -57,21 +59,26 @@ class UnifiedBrain:
 
     def _do_init(self):
         """Perform actual initialization (called lazily on first use)"""
-        if self._initialized:
+        # Reentry guard to prevent infinite recursion
+        if self._initialized or self._initializing:
             return
+
+        self._initializing = True
         try:
-            self._ensure_table()
-            self._init_embedded_memory()
+            # Note: _ensure_table and _init_embedded_memory will be called
+            # on first actual use, not here, to avoid circular calls
             self._initialized = True
+            print("✅ UnifiedBrain lazy init complete (will setup on first use)")
         except Exception as e:
             print(f"⚠️ UnifiedBrain init deferred: {e}")
-            # Don't fail - let operations try again later
+        finally:
+            self._initializing = False
 
     def _get_connection(self):
         """Get database connection with retry logic"""
-        # Ensure initialization on first use
+        # Mark as initialized to prevent circular calls
         if not self._initialized:
-            self._do_init()
+            self._initialized = True
 
         max_retries = 3
         for attempt in range(max_retries):
@@ -83,12 +90,18 @@ class UnifiedBrain:
                         connect_timeout=10
                     )
                     self.cursor = self.conn.cursor()
+
+                # Ensure table exists on first real connection
+                if not self._table_checked:
+                    self._table_checked = True
+                    self._create_table_if_needed()
+
                 return self.conn, self.cursor
             except psycopg2.OperationalError as e:
                 if attempt < max_retries - 1:
                     print(f"⚠️ DB connection attempt {attempt + 1} failed, retrying...")
                     import time
-                    time.sleep(1)
+                    time.sleep(1 * (attempt + 1))  # Exponential backoff
                     # Close any stale connections
                     try:
                         if self.conn:
@@ -100,44 +113,62 @@ class UnifiedBrain:
                 else:
                     raise
 
+    def _create_table_if_needed(self):
+        """Create table without recursive connection calls"""
+        try:
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS unified_brain (
+                    id SERIAL PRIMARY KEY,
+                    key TEXT UNIQUE NOT NULL,
+                    value JSONB NOT NULL,
+                    category TEXT NOT NULL,
+                    priority TEXT NOT NULL,
+                    last_updated TIMESTAMPTZ DEFAULT NOW(),
+                    source TEXT,
+                    metadata JSONB DEFAULT '{}'::jsonb,
+                    access_count INT DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_unified_brain_key ON unified_brain(key);
+                CREATE INDEX IF NOT EXISTS idx_unified_brain_category ON unified_brain(category);
+                CREATE INDEX IF NOT EXISTS idx_unified_brain_priority ON unified_brain(priority);
+                CREATE INDEX IF NOT EXISTS idx_unified_brain_updated ON unified_brain(last_updated DESC);
+            """)
+            self.conn.commit()
+            print("✅ UnifiedBrain table ensured")
+        except Exception as e:
+            print(f"⚠️ Table creation (may already exist): {e}")
+            try:
+                self.conn.rollback()
+            except:
+                pass
+
     def _ensure_table(self):
-        """Create unified brain table if it doesn't exist"""
-        conn, cursor = self._get_connection()
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS unified_brain (
-                id SERIAL PRIMARY KEY,
-                key TEXT UNIQUE NOT NULL,
-                value JSONB NOT NULL,
-                category TEXT NOT NULL,
-                priority TEXT NOT NULL,
-                last_updated TIMESTAMPTZ DEFAULT NOW(),
-                source TEXT,
-                metadata JSONB DEFAULT '{}'::jsonb,
-                access_count INT DEFAULT 0,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_unified_brain_key ON unified_brain(key);
-            CREATE INDEX IF NOT EXISTS idx_unified_brain_category ON unified_brain(category);
-            CREATE INDEX IF NOT EXISTS idx_unified_brain_priority ON unified_brain(priority);
-            CREATE INDEX IF NOT EXISTS idx_unified_brain_updated ON unified_brain(last_updated DESC);
-        """)
-
-        conn.commit()
+        """Legacy method - now handled in _get_connection via _create_table_if_needed"""
+        # Just calls _get_connection which handles table creation
+        self._get_connection()
 
     def _init_embedded_memory(self):
-        """Initialize embedded memory system for RAG search"""
+        """Initialize embedded memory system for RAG search - LAZY"""
+        # This is now called lazily on first vector search, not at init
+        if self.embedded_memory is not None:
+            return self.embedded_memory
         try:
             from embedded_memory_system import get_embedded_memory
             import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
             self.embedded_memory = loop.run_until_complete(get_embedded_memory())
             print("✅ Embedded memory integrated with UnifiedBrain")
+            return self.embedded_memory
         except Exception as e:
             print(f"⚠️ Embedded memory not available: {e}")
             self.embedded_memory = None
+            return None
 
     def store(self, key: str, value: Any, category: str = "general",
               priority: str = "medium", source: str = "manual",
