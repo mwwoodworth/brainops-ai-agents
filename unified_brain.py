@@ -42,21 +42,63 @@ class UnifiedBrain:
     The ONE unified memory system for ALL BrainOps operations
     Replaces 98 fragmented tables with a single coherent interface
     Now integrated with embedded memory for ultra-fast RAG search
+    Uses lazy initialization to avoid connection pool exhaustion
     """
 
-    def __init__(self):
+    def __init__(self, lazy_init: bool = True):
         self.conn = None
         self.cursor = None
         self.embedded_memory = None
-        self._ensure_table()
-        self._init_embedded_memory()
+        self._initialized = False
+        self._lazy_init = lazy_init
+        # Only initialize immediately if not lazy
+        if not lazy_init:
+            self._do_init()
+
+    def _do_init(self):
+        """Perform actual initialization (called lazily on first use)"""
+        if self._initialized:
+            return
+        try:
+            self._ensure_table()
+            self._init_embedded_memory()
+            self._initialized = True
+        except Exception as e:
+            print(f"⚠️ UnifiedBrain init deferred: {e}")
+            # Don't fail - let operations try again later
 
     def _get_connection(self):
-        """Get database connection"""
-        if not self.conn or self.conn.closed:
-            self.conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
-            self.cursor = self.conn.cursor()
-        return self.conn, self.cursor
+        """Get database connection with retry logic"""
+        # Ensure initialization on first use
+        if not self._initialized:
+            self._do_init()
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if not self.conn or self.conn.closed:
+                    self.conn = psycopg2.connect(
+                        **DB_CONFIG,
+                        cursor_factory=RealDictCursor,
+                        connect_timeout=10
+                    )
+                    self.cursor = self.conn.cursor()
+                return self.conn, self.cursor
+            except psycopg2.OperationalError as e:
+                if attempt < max_retries - 1:
+                    print(f"⚠️ DB connection attempt {attempt + 1} failed, retrying...")
+                    import time
+                    time.sleep(1)
+                    # Close any stale connections
+                    try:
+                        if self.conn:
+                            self.conn.close()
+                    except:
+                        pass
+                    self.conn = None
+                    self.cursor = None
+                else:
+                    raise
 
     def _ensure_table(self):
         """Create unified brain table if it doesn't exist"""
@@ -439,8 +481,13 @@ class UnifiedBrain:
             self.conn.close()
 
 
-# Global instance
-brain = UnifiedBrain()
+# Global instance with lazy initialization (doesn't connect until first use)
+brain = UnifiedBrain(lazy_init=True)
+
+
+def get_brain() -> UnifiedBrain:
+    """Get the global brain instance (lazy-initialized)"""
+    return brain
 
 
 def initialize_brain_with_current_state():
