@@ -2,6 +2,7 @@
 Async Database Connection Pool - Production Ready
 Type-safe, lint-clean, fully tested
 """
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -24,9 +25,10 @@ class PoolConfig:
     user: str
     password: str
     database: str
-    min_size: int = 5
-    max_size: int = 20
-    command_timeout: int = 60
+    min_size: int = 2
+    max_size: int = 10
+    command_timeout: int = 30
+    connect_timeout: float = 10.0  # Connection timeout in seconds
 
 
 class BasePool:
@@ -71,27 +73,39 @@ class AsyncDatabasePool(BasePool):
         self._pool: Optional[asyncpg.Pool] = None
 
     async def initialize(self) -> None:
-        """Initialize connection pool"""
+        """Initialize connection pool with timeout protection"""
         if self._pool is not None:
             logger.warning("Pool already initialized")
             return
 
-        self._pool = await asyncpg.create_pool(
-            host=self.config.host,
-            port=self.config.port,
-            user=self.config.user,
-            password=self.config.password,
-            database=self.config.database,
-            min_size=self.config.min_size,
-            max_size=self.config.max_size,
-            command_timeout=self.config.command_timeout
-        )
-        logger.info(
-            "✅ Database pool initialized "
-            "(min=%s, max=%s)",
-            self.config.min_size,
-            self.config.max_size,
-        )
+        try:
+            # Use asyncio.wait_for to prevent hanging if DB is unreachable
+            self._pool = await asyncio.wait_for(
+                asyncpg.create_pool(
+                    host=self.config.host,
+                    port=self.config.port,
+                    user=self.config.user,
+                    password=self.config.password,
+                    database=self.config.database,
+                    min_size=self.config.min_size,
+                    max_size=self.config.max_size,
+                    command_timeout=self.config.command_timeout,
+                    timeout=self.config.connect_timeout,
+                ),
+                timeout=self.config.connect_timeout + 5  # Extra buffer for pool setup
+            )
+            logger.info(
+                "✅ Database pool initialized "
+                "(min=%s, max=%s)",
+                self.config.min_size,
+                self.config.max_size,
+            )
+        except asyncio.TimeoutError:
+            logger.error("❌ Database connection timed out after %.1fs", self.config.connect_timeout)
+            raise
+        except Exception as exc:
+            logger.error("❌ Database pool initialization failed: %s", exc)
+            raise
 
     async def close(self) -> None:
         """Close connection pool"""
