@@ -1575,17 +1575,6 @@ async def get_self_awareness_stats():
 # ==================== END AI SELF-AWARENESS ENDPOINTS ====================
 
 
-        return {
-            "success": True,
-            "tasks": tasks,
-            "count": len(tasks)
-        }
-
-    except Exception as e:
-        logger.error(f"❌ Failed to list tasks: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.post("/ai/tasks/execute/{task_id}")
 async def execute_ai_task(task_id: str):
     """Manually trigger execution of a specific task"""
