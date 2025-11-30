@@ -2,8 +2,7 @@ services:
   - type: web
     name: brainops-ai-agents
     runtime: docker
-    # IMPORTANT: Using free tier to minimize costs during bootstrap
-    plan: free  # Changed from standard to save money!
+    plan: standard
     repo: https://github.com/mwwoodworth/brainops-ai-agents
     branch: main
     # Docker deployment - pulls pre-built image from Docker Hub
