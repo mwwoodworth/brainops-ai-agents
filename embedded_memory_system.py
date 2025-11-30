@@ -18,6 +18,10 @@ import hashlib
 
 logger = logging.getLogger(__name__)
 
+# Circuit breaker for OpenAI quota errors
+_openai_disabled_until = 0
+_OPENAI_BACKOFF_SECONDS = 3600  # 1 hour backoff on quota errors
+
 class EmbeddedMemorySystem:
     """
     Local SQLite memory cache with RAG capabilities and master Postgres sync
@@ -167,24 +171,39 @@ class EmbeddedMemorySystem:
 
     def _encode_embedding(self, text: str) -> Optional[bytes]:
         """Convert text to embedding vector using OpenAI"""
+        global _openai_disabled_until
+        import time as time_module
+
+        # Circuit breaker check - skip OpenAI if quota exceeded recently
+        if _openai_disabled_until > time_module.time():
+            remaining = int(_openai_disabled_until - time_module.time())
+            logger.debug(f"OpenAI embeddings disabled for {remaining}s more (quota exceeded)")
+            return None
+
         try:
             import openai
-            
+
             # Call OpenAI Embedding API
             client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             response = client.embeddings.create(
                 input=text,
                 model="text-embedding-3-small"
             )
-            
+
             embedding_list = response.data[0].embedding
-            
+
             # Convert to numpy array then bytes for SQLite
             embedding_np = np.array(embedding_list, dtype=np.float32)
             return embedding_np.tobytes()
-            
+
         except Exception as e:
-            logger.error(f"Embedding encoding failed: {e}")
+            error_str = str(e).lower()
+            # Detect quota/rate limit errors and trigger circuit breaker
+            if 'insufficient_quota' in error_str or '429' in error_str or 'rate_limit' in error_str:
+                _openai_disabled_until = time_module.time() + _OPENAI_BACKOFF_SECONDS
+                logger.warning(f"⚠️ OpenAI quota/rate limit hit - disabling embeddings for {_OPENAI_BACKOFF_SECONDS}s")
+            else:
+                logger.error(f"Embedding encoding failed: {e}")
             return None
 
     def _decode_embedding(self, embedding_bytes: bytes) -> Optional[np.ndarray]:
