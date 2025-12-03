@@ -28,25 +28,35 @@ class UnifiedMemoryManager:
         self.pool = None
 
     async def initialize(self):
-        """Initialize database connection pool"""
+        """Initialize database connection pool - USE SHARED POOL"""
         try:
-            self.pool = await asyncpg.create_pool(
-                **self.db_config,
-                min_size=1,
-                max_size=2,  # Reduced to prevent pool exhaustion
-                command_timeout=60,
-                max_inactive_connection_lifetime=60,  # Faster recycling
-                statement_cache_size=0  # Disable statement cache for session mode
-            )
-            logger.info("✅ Unified memory system initialized")
+            # CRITICAL: Use the shared pool from database/async_connection.py
+            # instead of creating our own pool to prevent pool exhaustion
+            from database.async_connection import get_pool, using_fallback
+
+            try:
+                shared_pool = get_pool()
+                if not using_fallback():
+                    self.pool = shared_pool
+                    logger.info("✅ Unified memory using SHARED database pool")
+                else:
+                    logger.warning("⚠️ Shared pool using fallback, unified memory DB disabled")
+                    self.pool = None
+            except RuntimeError:
+                # Pool not yet initialized - this is OK, app.py will initialize it
+                logger.warning("⚠️ Shared pool not initialized yet, unified memory DB disabled")
+                self.pool = None
+
         except Exception as e:
-            logger.error(f"❌ Failed to initialize memory pool: {e}")
-            raise
+            logger.error(f"❌ Failed to initialize unified memory pool: {e}")
+            self.pool = None
 
     async def close(self):
-        """Close connection pool"""
-        if self.pool:
-            await self.pool.close()
+        """Close connection pool - DO NOT close shared pool"""
+        # NOTE: We don't close the pool here since it's a SHARED pool
+        # managed by database/async_connection.py
+        # Only set our reference to None
+        self.pool = None
 
     async def store(
         self,
