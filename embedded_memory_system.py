@@ -146,22 +146,28 @@ class EmbeddedMemorySystem:
         logger.info("✅ Local SQLite database initialized")
 
     async def _connect_master(self):
-        """Connect to master Postgres database"""
+        """Connect to master Postgres database - USE SHARED POOL"""
         try:
-            database_url = os.getenv('DATABASE_URL')
-            if not database_url:
-                logger.warning("⚠️ DATABASE_URL not set, master sync disabled")
+            # CRITICAL: Use the shared pool from database/async_connection.py
+            # instead of creating our own pool to prevent pool exhaustion
+            from database.async_connection import get_pool, using_fallback
+
+            try:
+                shared_pool = get_pool()
+                if not using_fallback():
+                    self.pg_pool = shared_pool
+                    logger.info("✅ Embedded memory using SHARED database pool")
+                    return
+                else:
+                    logger.warning("⚠️ Shared pool using fallback, master sync disabled")
+                    self.pg_pool = None
+                    return
+            except RuntimeError:
+                # Pool not yet initialized - this is OK, app.py will initialize it
+                logger.warning("⚠️ Shared pool not initialized yet, master sync disabled")
+                self.pg_pool = None
                 return
 
-            self.pg_pool = await asyncpg.create_pool(
-                database_url,
-                min_size=1,
-                max_size=2,  # Reduced to prevent pool exhaustion
-                command_timeout=60,
-                max_inactive_connection_lifetime=60,  # Recycle idle connections
-                statement_cache_size=0  # Disable statement cache for session mode
-            )
-            logger.info("✅ Connected to master Postgres")
         except Exception as e:
             logger.error(f"❌ Failed to connect to master Postgres: {e}")
             self.pg_pool = None
