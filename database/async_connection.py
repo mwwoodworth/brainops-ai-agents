@@ -25,10 +25,11 @@ class PoolConfig:
     user: str
     password: str
     database: str
-    min_size: int = 2
-    max_size: int = 10
+    min_size: int = 1  # Reduced to prevent pool exhaustion
+    max_size: int = 3  # Supabase free tier has ~10-20 max connections total
     command_timeout: int = 30
     connect_timeout: float = 10.0  # Connection timeout in seconds
+    max_inactive_connection_lifetime: float = 60.0  # Recycle idle connections after 60s
 
 
 class BasePool:
@@ -91,6 +92,8 @@ class AsyncDatabasePool(BasePool):
                     max_size=self.config.max_size,
                     command_timeout=self.config.command_timeout,
                     timeout=self.config.connect_timeout,
+                    max_inactive_connection_lifetime=self.config.max_inactive_connection_lifetime,
+                    statement_cache_size=0,  # Disable statement cache to avoid session mode issues
                 ),
                 timeout=self.config.connect_timeout + 5  # Extra buffer for pool setup
             )
