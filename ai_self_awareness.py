@@ -146,7 +146,13 @@ class SelfAwareAI:
 
     async def initialize(self):
         """Initialize database connection"""
-        self.db_pool = await asyncpg.create_pool(**DB_CONFIG, statement_cache_size=0)
+        self.db_pool = await asyncpg.create_pool(
+            **DB_CONFIG,
+            min_size=1,
+            max_size=2,  # Reduced to prevent pool exhaustion
+            statement_cache_size=0,
+            max_inactive_connection_lifetime=60  # Recycle idle connections
+        )
         await self._create_tables()
         logger.info("AI Self-Awareness System initialized")
 

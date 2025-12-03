@@ -155,8 +155,10 @@ class EmbeddedMemorySystem:
             self.pg_pool = await asyncpg.create_pool(
                 database_url,
                 min_size=1,
-                max_size=3,
-                command_timeout=60
+                max_size=2,  # Reduced to prevent pool exhaustion
+                command_timeout=60,
+                max_inactive_connection_lifetime=60,  # Recycle idle connections
+                statement_cache_size=0  # Disable statement cache for session mode
             )
             logger.info("✅ Connected to master Postgres")
         except Exception as e:
