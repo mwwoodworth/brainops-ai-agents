@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import numpy as np
@@ -313,10 +314,10 @@ class EmbeddedMemorySystem:
 
     def store_memory(
         self,
-        memory_id: str,
-        memory_type: str,
-        source_agent: str,
         content: str,
+        memory_type: str = "general",
+        memory_id: Optional[str] = None,
+        source_agent: str = "system",
         metadata: Optional[Dict] = None,
         importance_score: float = 0.5
     ) -> bool:
@@ -331,6 +332,10 @@ class EmbeddedMemorySystem:
             return False
 
         try:
+            # Auto-generate memory_id if not provided
+            if memory_id is None:
+                memory_id = str(uuid.uuid4())
+
             # Generate embedding
             embedding = self._encode_embedding(content)
 
