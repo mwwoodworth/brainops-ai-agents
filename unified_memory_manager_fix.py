@@ -33,9 +33,10 @@ class UnifiedMemoryManager:
             self.pool = await asyncpg.create_pool(
                 **self.db_config,
                 min_size=1,
-                max_size=10,
+                max_size=2,  # Reduced to prevent pool exhaustion
                 command_timeout=60,
-                max_inactive_connection_lifetime=300
+                max_inactive_connection_lifetime=60,  # Faster recycling
+                statement_cache_size=0  # Disable statement cache for session mode
             )
             logger.info("✅ Unified memory system initialized")
         except Exception as e:
