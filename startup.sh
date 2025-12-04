@@ -30,8 +30,8 @@ trap cleanup SIGTERM SIGINT
 
 # Start web service
 while true; do
-    echo "Starting AI agent web service via run.py..."
-    python3 main_integration.py &
+    echo "Starting AI agent web service via app.py (v9.0.0 - stable production)..."
+    python3 app.py &
     MAIN_PID=$!
 
     # Wait for process
