@@ -175,11 +175,18 @@ class AsyncDatabasePool(BasePool):
         async with self.pool.acquire() as conn:
             return await conn.executemany(command, args, timeout=timeout)
 
-    async def test_connection(self) -> bool:
-        """Test database connection"""
+    async def test_connection(self, timeout: float = 3.0) -> bool:
+        """Test database connection with timeout protection"""
         try:
-            result = await self.fetchval("SELECT 1")
+            # Add timeout to prevent health checks from hanging
+            result = await asyncio.wait_for(
+                self.fetchval("SELECT 1", timeout=timeout),
+                timeout=timeout + 1.0  # Extra buffer for asyncio overhead
+            )
             return result == 1
+        except asyncio.TimeoutError:
+            logger.error("Connection test timed out after %.1fs", timeout)
+            return False
         except Exception as exc:
             logger.error("Connection test failed: %s", exc)
             return False
