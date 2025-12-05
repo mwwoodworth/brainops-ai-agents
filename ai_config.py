@@ -44,13 +44,13 @@ SUPABASE_SERVICE_KEY = os.getenv(
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlvbWFnb3FkbXhzenF0ZHd1aGFiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0OTgzMzI3NiwiZXhwIjoyMDY1NDA5Mjc2fQ.7C3guJ_0moYGkdyeFmJ9cd2BmduB5NnU00erIIxH3gQ"
 )
 
-# AI Model Preferences
+# AI Model Preferences (Updated December 2025)
 AI_MODELS = {
-    "fast": "gpt-3.5-turbo",  # Quick responses
-    "smart": "gpt-4-0125-preview",  # Complex reasoning
-    "creative": "claude-3-opus-20240229",  # Creative tasks
+    "fast": "gpt-4o-mini",  # Quick responses (Dec 2025)
+    "smart": "gpt-5",  # Complex reasoning (GPT-5 August 2025)
+    "creative": "claude-sonnet-4-5-20250929",  # Creative tasks (Claude Sonnet 4.5)
     "research": "perplexity-70b-online",  # Real-time web data
-    "analysis": "gemini-2.5-flash",  # Deep analysis (updated Oct 2025 - Gemini 1.5 retired)
+    "analysis": "gemini-2.5-flash",  # Deep analysis
     "fallback": "mixtral-8x7b"  # Hugging Face fallback
 }
 
