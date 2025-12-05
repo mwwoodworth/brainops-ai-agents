@@ -44,13 +44,13 @@ SUPABASE_SERVICE_KEY = os.getenv(
     "JWT_REDACTED"
 )
 
-# AI Model Preferences
+# AI Model Preferences (Updated December 2025)
 AI_MODELS = {
-    "fast": "gpt-3.5-turbo",  # Quick responses
-    "smart": "gpt-4-0125-preview",  # Complex reasoning
-    "creative": "claude-3-opus-20240229",  # Creative tasks
+    "fast": "gpt-4o-mini",  # Quick responses (Dec 2025)
+    "smart": "gpt-5",  # Complex reasoning (GPT-5 August 2025)
+    "creative": "claude-sonnet-4-5-20250929",  # Creative tasks (Claude Sonnet 4.5)
     "research": "perplexity-70b-online",  # Real-time web data
-    "analysis": "gemini-2.5-flash",  # Deep analysis (updated Oct 2025 - Gemini 1.5 retired)
+    "analysis": "gemini-2.5-flash",  # Deep analysis
     "fallback": "mixtral-8x7b"  # Hugging Face fallback
 }
 
