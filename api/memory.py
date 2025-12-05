@@ -45,12 +45,16 @@ async def get_memory_status() -> MemoryStatus:
     pool = get_pool()
 
     try:
-        # Check which memory tables exist
+        # Check which memory tables exist with their columns
         existing_tables = await pool.fetch("""
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = 'public'
-            AND table_name IN ('ai_persistent_memory', 'memory_entries', 'memories')
+            SELECT
+                t.table_name,
+                array_agg(c.column_name::text) as columns
+            FROM information_schema.tables t
+            JOIN information_schema.columns c ON t.table_name = c.table_name
+            WHERE t.table_schema = 'public'
+            AND t.table_name IN ('ai_persistent_memory', 'memory_entries', 'memories')
+            GROUP BY t.table_name
         """)
 
         if not existing_tables:
@@ -62,18 +66,54 @@ async def get_memory_status() -> MemoryStatus:
                 avg_importance=0.0
             )
 
-        # Use the first available table
-        table_name = existing_tables[0]["table_name"]
+        # Find a table with user_id column, prefer ai_persistent_memory
+        table_name = None
+        table_columns = []
+        for table in existing_tables:
+            if 'user_id' in table['columns']:
+                table_name = table['table_name']
+                table_columns = table['columns']
+                if table_name == 'ai_persistent_memory':
+                    break  # Prefer this table
 
-        # Get statistics from the available table
-        stats_query = f"""
-            SELECT
-                COUNT(*) as total_memories,
-                COUNT(DISTINCT user_id) as unique_users,
-                COALESCE(AVG(importance::numeric), 0.0) as avg_importance
-            FROM {table_name}
-            WHERE user_id IS NOT NULL
-        """
+        # If no table has user_id, just count rows from first table
+        if not table_name:
+            table_name = existing_tables[0]["table_name"]
+            table_columns = existing_tables[0]["columns"]
+
+            count_query = f"SELECT COUNT(*) as total_memories FROM {table_name}"
+            stats = await pool.fetchrow(count_query)
+
+            return MemoryStatus(
+                status="operational",
+                table_used=table_name,
+                total_memories=stats["total_memories"] or 0,
+                unique_users=0,
+                avg_importance=0.0,
+                message=f"Using table: {table_name} (no user_id column)"
+            )
+
+        # Build query based on available columns
+        has_importance = 'importance' in table_columns
+
+        if has_importance:
+            stats_query = f"""
+                SELECT
+                    COUNT(*) as total_memories,
+                    COUNT(DISTINCT user_id) as unique_users,
+                    COALESCE(AVG(importance::numeric), 0.0) as avg_importance
+                FROM {table_name}
+                WHERE user_id IS NOT NULL
+            """
+        else:
+            stats_query = f"""
+                SELECT
+                    COUNT(*) as total_memories,
+                    COUNT(DISTINCT user_id) as unique_users,
+                    0.0 as avg_importance
+                FROM {table_name}
+                WHERE user_id IS NOT NULL
+            """
 
         stats = await pool.fetchrow(stats_query)
 
