@@ -14,6 +14,7 @@ from enum import Enum
 import hashlib
 from uuid import UUID
 import psycopg2
+from psycopg2 import extensions
 from psycopg2.extras import RealDictCursor
 import logging
 
@@ -177,6 +178,20 @@ class UnifiedMemoryCoordinator:
 
     def _get_connection(self):
         """Get database connection"""
+        try:
+            if self.conn:
+                # Reset unhealthy connections (closed or in error state)
+                if self.conn.closed or self.conn.status != extensions.STATUS_READY:
+                    try:
+                        self.conn.close()
+                    except Exception:
+                        pass
+                    self.conn = None
+                    self.cursor = None
+        except Exception:
+            self.conn = None
+            self.cursor = None
+
         if not self.conn or self.conn.closed:
             self.conn = psycopg2.connect(**self.db_config, cursor_factory=RealDictCursor)
             # Use autocommit to avoid lingering aborted transactions from failed statements
