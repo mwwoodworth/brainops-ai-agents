@@ -42,13 +42,15 @@ async def test_database_connection() -> bool:
         from database.async_connection import AsyncDatabasePool, PoolConfig
         from config import config
 
-        pool_config = PoolConfig(
-            host=config.database.host,
-            port=config.database.port,
-            user=config.database.user,
-            password=config.database.password,
-            database=config.database.database
-        )
+    pool_config = PoolConfig(
+        host=config.database.host,
+        port=config.database.port,
+        user=config.database.user,
+        password=config.database.password,
+        database=config.database.database,
+        ssl=config.database.ssl,
+        ssl_verify=config.database.ssl_verify,
+    )
 
         pool = AsyncDatabasePool(pool_config)
         await pool.initialize()
@@ -122,13 +124,15 @@ async def test_memory_endpoint() -> bool:
         from api.memory import get_memory_status
 
         # Initialize pool
-        pool_config = PoolConfig(
-            host=config.database.host,
-            port=config.database.port,
-            user=config.database.user,
-            password=config.database.password,
-            database=config.database.database
-        )
+    pool_config = PoolConfig(
+        host=config.database.host,
+        port=config.database.port,
+        user=config.database.user,
+        password=config.database.password,
+        database=config.database.database,
+        ssl=config.database.ssl,
+        ssl_verify=config.database.ssl_verify,
+    )
 
         await init_pool(pool_config)
 
@@ -158,13 +162,15 @@ async def test_agent_operations() -> bool:
         from database.async_connection import AsyncDatabasePool, PoolConfig
         from config import config
 
-        pool_config = PoolConfig(
-            host=config.database.host,
-            port=config.database.port,
-            user=config.database.user,
-            password=config.database.password,
-            database=config.database.database
-        )
+    pool_config = PoolConfig(
+        host=config.database.host,
+        port=config.database.port,
+        user=config.database.user,
+        password=config.database.password,
+        database=config.database.database,
+        ssl=config.database.ssl,
+        ssl_verify=config.database.ssl_verify,
+    )
 
         pool = AsyncDatabasePool(pool_config)
         await pool.initialize()
@@ -199,13 +205,15 @@ async def test_memory_tables() -> bool:
         from database.async_connection import AsyncDatabasePool, PoolConfig
         from config import config
 
-        pool_config = PoolConfig(
-            host=config.database.host,
-            port=config.database.port,
-            user=config.database.user,
-            password=config.database.password,
-            database=config.database.database
-        )
+    pool_config = PoolConfig(
+        host=config.database.host,
+        port=config.database.port,
+        user=config.database.user,
+        password=config.database.password,
+        database=config.database.database,
+        ssl=config.database.ssl,
+        ssl_verify=config.database.ssl_verify,
+    )
 
         pool = AsyncDatabasePool(pool_config)
         await pool.initialize()

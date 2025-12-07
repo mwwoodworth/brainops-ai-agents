@@ -5,6 +5,7 @@ Type-safe, lint-clean, fully tested
 import asyncio
 import json
 import logging
+import ssl
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -30,6 +31,8 @@ class PoolConfig:
     command_timeout: int = 30
     connect_timeout: float = 10.0  # Connection timeout in seconds
     max_inactive_connection_lifetime: float = 60.0  # Recycle idle connections after 60s
+    ssl: bool = True  # Supabase requires TLS; allow override for local/dev
+    ssl_verify: bool = False  # Default to disabled verification to avoid self-signed errors in managed DBs
 
 
 class BasePool:
@@ -72,6 +75,14 @@ class AsyncDatabasePool(BasePool):
     def __init__(self, config: PoolConfig) -> None:
         self.config = config
         self._pool: Optional[asyncpg.Pool] = None
+        if config.ssl:
+            ctx = ssl.create_default_context()
+            if not config.ssl_verify:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            self._ssl_context = ctx
+        else:
+            self._ssl_context = None
 
     async def initialize(self) -> None:
         """Initialize connection pool with timeout protection"""
@@ -93,6 +104,7 @@ class AsyncDatabasePool(BasePool):
                     command_timeout=self.config.command_timeout,
                     timeout=self.config.connect_timeout,
                     max_inactive_connection_lifetime=self.config.max_inactive_connection_lifetime,
+                    ssl=self._ssl_context,
                     statement_cache_size=0,  # Disable statement cache to avoid session mode issues
                 ),
                 timeout=self.config.connect_timeout + 5  # Extra buffer for pool setup
@@ -528,20 +540,49 @@ async def init_pool(config: PoolConfig) -> BasePool:
     global _pool, USING_FALLBACK
     if _pool is not None:
         return _pool
+    last_error: Optional[Exception] = None
 
-    try:
-        pool = AsyncDatabasePool(config)
-        await pool.initialize()
-        _pool = pool
-        USING_FALLBACK = False
-    except Exception as exc:
-        logger.error("❌ Failed to initialize primary database pool: %s", exc)
-        logger.warning("Falling back to in-memory store so critical APIs remain available.")
-        fallback = InMemoryDatabasePool()
-        await fallback.initialize()
-        _pool = fallback
-        USING_FALLBACK = True
+    def _with_port(port: int) -> PoolConfig:
+        return PoolConfig(
+            host=config.host,
+            port=port,
+            user=config.user,
+            password=config.password,
+            database=config.database,
+            min_size=config.min_size,
+            max_size=config.max_size,
+            command_timeout=config.command_timeout,
+            connect_timeout=config.connect_timeout,
+            max_inactive_connection_lifetime=config.max_inactive_connection_lifetime,
+            ssl=config.ssl,
+            ssl_verify=config.ssl_verify,
+        )
 
+    # Try primary configuration, then alternate port if Supabase pooler port fails
+    candidate_ports = [config.port]
+    if config.port == 6543:
+        candidate_ports.append(5432)
+    elif config.port == 5432:
+        candidate_ports.append(6543)
+
+    for port in candidate_ports:
+        try:
+            pool = AsyncDatabasePool(_with_port(port))
+            await pool.initialize()
+            _pool = pool
+            USING_FALLBACK = False
+            return _pool
+        except Exception as exc:  # pragma: no cover - defensive logging for prod
+            last_error = exc
+            logger.error("❌ Failed to initialize database pool on port %s: %s", port, exc)
+
+    logger.warning("Falling back to in-memory store so critical APIs remain available.")
+    fallback = InMemoryDatabasePool()
+    await fallback.initialize()
+    _pool = fallback
+    USING_FALLBACK = True
+    if last_error:
+        logger.error("Database pool fallback reason: %s", last_error)
     return _pool
 
 
