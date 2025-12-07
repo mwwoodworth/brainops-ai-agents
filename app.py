@@ -428,7 +428,9 @@ async def lifespan(app: FastAPI):
             port=config.database.port,
             user=config.database.user,
             password=config.database.password,
-            database=config.database.database
+            database=config.database.database,
+            ssl=config.database.ssl,
+            ssl_verify=config.database.ssl_verify,
         )
         await init_pool(pool_config)
         if using_fallback():
