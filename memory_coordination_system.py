@@ -179,6 +179,8 @@ class UnifiedMemoryCoordinator:
         """Get database connection"""
         if not self.conn or self.conn.closed:
             self.conn = psycopg2.connect(**self.db_config, cursor_factory=RealDictCursor)
+            # Use autocommit to avoid lingering aborted transactions from failed statements
+            self.conn.autocommit = True
             self.cursor = self.conn.cursor()
         return self.conn, self.cursor
 
