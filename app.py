@@ -35,6 +35,8 @@ from api.brain import router as brain_router
 from api.memory_coordination import router as memory_coordination_router
 from api.customer_intelligence import router as customer_intelligence_router
 from api.gumroad_webhook import router as gumroad_router
+from api.codebase_graph import router as codebase_graph_router
+from api.state_sync import router as state_sync_router
 from ai_provider_status import get_provider_status
 
 SCHEMA_BOOTSTRAP_SQL = [
@@ -695,6 +697,20 @@ async def lifespan(app: FastAPI):
         if not AUREA_NLU_AVAILABLE:
             logger.warning("⚠️ AUREA NLU not available - natural language commands disabled")
 
+    # Initialize Unified System Integration (wires ALL systems together for ACTIVE use)
+    try:
+        from unified_system_integration import get_unified_integration, initialize_all_systems
+        unified_stats = await initialize_all_systems()
+        app.state.unified_integration = get_unified_integration()
+        available_count = sum(1 for v in unified_stats.get("systems_available", {}).values() if v)
+        logger.info(f"🔗 Unified System Integration ACTIVE - {available_count} systems wired together!")
+    except ImportError:
+        logger.warning("⚠️ Unified System Integration not available")
+        app.state.unified_integration = None
+    except Exception as e:
+        logger.error(f"❌ Unified System Integration failed: {e}")
+        app.state.unified_integration = None
+
     logger.info("=" * 80)
     logger.info("🚀 BRAINOPS AI AGENTS v8.0.0 - COMPLETE AI OPERATING SYSTEM")
     logger.info("🧠 AI INTEGRATION LAYER ACTIVATED - All Systems Connected!")
@@ -840,6 +856,8 @@ app.include_router(brain_router)
 app.include_router(memory_coordination_router)
 app.include_router(customer_intelligence_router)
 app.include_router(gumroad_router)
+app.include_router(codebase_graph_router)
+app.include_router(state_sync_router)  # Real-time state synchronization
 
 # Import and include analytics router
 try:

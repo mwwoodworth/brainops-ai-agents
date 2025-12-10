@@ -10,12 +10,41 @@ import asyncio
 import logging
 import requests
 import psycopg2
+import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import subprocess
 import openai
 import anthropic
+from dataclasses import asdict
 from psycopg2.extras import RealDictCursor
+
+from typing import TypedDict
+
+from ai_self_awareness import SelfAwareAI as SelfAwareness, get_self_aware_ai
+
+# Graph Context Provider for Phase 2 enhancements
+try:
+    from graph_context_provider import (
+        GraphContextProvider,
+        get_graph_context_provider,
+        get_context_for_task
+    )
+    GRAPH_CONTEXT_AVAILABLE = True
+except ImportError:
+    GRAPH_CONTEXT_AVAILABLE = False
+
+# Unified System Integration - wires ALL systems together
+try:
+    from unified_system_integration import (
+        get_unified_integration,
+        ExecutionContext
+    )
+    UNIFIED_INTEGRATION_AVAILABLE = True
+except ImportError:
+    UNIFIED_INTEGRATION_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 # Import REAL AI Core
 try:
@@ -24,9 +53,15 @@ try:
     USE_REAL_AI = True
 except ImportError:
     USE_REAL_AI = False
+    ai_core = None
     logger.warning("AI Core not available - using fallback")
 
-logger = logging.getLogger(__name__)
+# LangGraph (optional)
+try:
+    from langgraph.graph import StateGraph, END
+    LANGGRAPH_AVAILABLE = True
+except ImportError:
+    LANGGRAPH_AVAILABLE = False
 
 from config import config
 
@@ -58,7 +93,235 @@ class AgentExecutor:
 
     def __init__(self):
         self.agents = {}
+        self.workflow_runner = None  # Lazy-initialized LangGraph runner
+        self.self_awareness: Optional[SelfAwareness] = None
+        self.graph_context_provider: Optional[GraphContextProvider] = None
         # Agents will be loaded after class definitions
+
+    async def _get_graph_context_provider(self) -> Optional[GraphContextProvider]:
+        """Lazily initialize graph context provider"""
+        if not GRAPH_CONTEXT_AVAILABLE:
+            return None
+
+        if self.graph_context_provider is None:
+            try:
+                self.graph_context_provider = get_graph_context_provider()
+            except Exception as e:
+                logger.warning(f"Graph context provider unavailable: {e}")
+
+        return self.graph_context_provider
+
+    async def _enrich_task_with_codebase_context(
+        self,
+        task: Dict[str, Any],
+        agent_name: str
+    ) -> Dict[str, Any]:
+        """
+        Enrich task with relevant codebase context from the graph.
+        Phase 2 Enhancement: Agents now receive intelligent codebase context.
+        """
+        if not task.get("use_graph_context", True):
+            return task
+
+        provider = await self._get_graph_context_provider()
+        if not provider:
+            return task
+
+        try:
+            # Extract task description for context search
+            task_description = (
+                task.get("description")
+                or task.get("action")
+                or task.get("prompt")
+                or f"{agent_name} task"
+            )
+
+            # Get relevant repos based on agent type
+            repos = self._get_repos_for_agent(agent_name)
+
+            # Fetch codebase context
+            context = await provider.get_context_for_task(
+                task_description=str(task_description),
+                repos=repos,
+                include_relationships=True
+            )
+
+            # Add context to task if relevant
+            if context.relevance_score > 0.1:
+                task["codebase_context"] = {
+                    "prompt_context": context.to_prompt_context(),
+                    "files": [f["file_path"] for f in context.files[:5]],
+                    "functions": [f["name"] for f in context.functions[:10]],
+                    "endpoints": [e["name"] for e in context.endpoints[:5]],
+                    "relevance_score": context.relevance_score,
+                    "query_time_ms": context.query_time_ms
+                }
+                logger.info(
+                    f"Enriched task with {len(context.functions)} functions, "
+                    f"{len(context.endpoints)} endpoints (relevance: {context.relevance_score:.2f})"
+                )
+
+        except Exception as e:
+            logger.warning(f"Failed to enrich task with codebase context: {e}")
+
+        return task
+
+    def _get_repos_for_agent(self, agent_name: str) -> Optional[List[str]]:
+        """Determine which repos are relevant for a given agent type"""
+        agent_lower = agent_name.lower()
+
+        # Map agent types to relevant repositories
+        if "customer" in agent_lower or "invoice" in agent_lower or "proposal" in agent_lower:
+            return ["weathercraft-erp", "myroofgenius-app"]
+        elif "deploy" in agent_lower or "build" in agent_lower:
+            return ["brainops-ai-agents", "weathercraft-erp", "myroofgenius-app"]
+        elif "database" in agent_lower:
+            return ["brainops-ai-agents"]
+        elif "monitor" in agent_lower or "system" in agent_lower:
+            return None  # Search all repos
+        else:
+            return None  # Default: search all repos
+
+    async def _get_self_awareness(self) -> Optional[SelfAwareness]:
+        """Lazily initialize self-awareness module"""
+        if self.self_awareness:
+            return self.self_awareness
+
+        try:
+            self.self_awareness = await get_self_aware_ai()
+        except Exception as e:
+            logger.warning(f"Self-awareness module unavailable: {e}")
+            self.self_awareness = None
+        return self.self_awareness
+
+    def _is_high_stakes_action(self, agent_name: str, task: Dict[str, Any]) -> bool:
+        """Determine if a task requires confidence gating"""
+        action = str(task.get("action") or "").lower()
+        agent_label = (task.get("agent") or agent_name or "").lower()
+        agent_type = str(task.get("agent_type") or task.get("type") or "").lower()
+
+        high_stakes_agents = (
+            "deployment_agent",
+            "financial_agent",
+            "proposal_agent",
+            "contract_agent",
+        )
+        high_stakes_actions = {"deploy", "spend_money", "delete"}
+
+        agent_matches = any(key.replace("_agent", "") in agent_label for key in high_stakes_agents)
+        type_matches = agent_type in high_stakes_agents
+        action_matches = action in high_stakes_actions
+
+        return agent_matches or type_matches or action_matches
+
+    async def _run_confidence_assessment(
+        self, agent_name: str, task: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Assess confidence before executing high-stakes actions"""
+        assessment = None
+        precheck_block = None
+
+        ai = await self._get_self_awareness()
+        if not ai:
+            return {"assessment": None, "precheck_block": None}
+
+        task_id = str(task.get("id") or task.get("task_id") or uuid.uuid4())
+        task_description = (
+            task.get("description")
+            or task.get("action")
+            or task.get("type")
+            or "high_stakes_action"
+        )
+
+        try:
+            assessment = await ai.assess_confidence(
+                task_id=task_id,
+                agent_id=agent_name,
+                task_description=str(task_description),
+                task_context=task,
+            )
+
+            normalized_confidence = float(assessment.confidence_score) / 100.0
+            await self._store_assessment_audit(agent_name, task, assessment, normalized_confidence)
+
+            if normalized_confidence < 0.6:
+                logger.warning(
+                    "Low self-assessed confidence (%.2f) for %s on task %s",
+                    normalized_confidence,
+                    agent_name,
+                    task_id,
+                )
+                if task.get("require_manual_approval"):
+                    precheck_block = {
+                        "status": "manual_approval_required",
+                        "agent": agent_name,
+                        "reason": "Self-awareness confidence below threshold",
+                        "confidence": normalized_confidence,
+                        "assessment": asdict(assessment),
+                        "task_id": task_id,
+                    }
+
+        except Exception as e:
+            logger.warning(f"Self-awareness assessment failed: {e}")
+
+        return {"assessment": assessment, "precheck_block": precheck_block}
+
+    async def _store_assessment_audit(
+        self,
+        agent_name: str,
+        task: Dict[str, Any],
+        assessment: Any,
+        normalized_confidence: float,
+    ):
+        """Persist self-awareness assessments for auditability"""
+        conn = None
+        try:
+            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            cur = conn.cursor()
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS agent_action_audits (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    agent_name TEXT NOT NULL,
+                    action TEXT,
+                    task JSONB,
+                    confidence_score DOUBLE PRECISION,
+                    confidence_level TEXT,
+                    requires_human BOOLEAN,
+                    assessment JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+
+            cur.execute("""
+                INSERT INTO agent_action_audits (
+                    agent_name,
+                    action,
+                    task,
+                    confidence_score,
+                    confidence_level,
+                    requires_human,
+                    assessment,
+                    created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, NOW())
+            """, (
+                agent_name,
+                task.get("action"),
+                json.dumps(task, default=str),
+                normalized_confidence,
+                getattr(getattr(assessment, "confidence_level", None), "value", None),
+                getattr(assessment, "requires_human_review", False),
+                json.dumps(asdict(assessment), default=str) if assessment else None
+            ))
+
+            conn.commit()
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            logger.warning(f"Failed to store self-awareness audit: {e}")
+        finally:
+            if conn:
+                conn.close()
 
     def _load_agent_implementations(self):
         """Load all agent implementations"""
@@ -85,13 +348,97 @@ class AgentExecutor:
         # Meta Agent
         self.agents['SelfBuilder'] = SelfBuildingAgent()
 
+    def _get_workflow_runner(self):
+        """Lazily initialize LangGraph workflow runner with review loops."""
+        if not LANGGRAPH_AVAILABLE:
+            return None
+
+        if self.workflow_runner is None:
+            self.workflow_runner = LangGraphWorkflowRunner(
+                executor=self,
+                ai_core_instance=ai_core if USE_REAL_AI else None
+            )
+        return self.workflow_runner
+
     async def execute(self, agent_name: str, task: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute task with specific agent"""
-        if agent_name in self.agents:
-            return await self.agents[agent_name].execute(task)
-        else:
-            # Fallback to generic execution
-            return await self._generic_execute(agent_name, task)
+        """Execute task with specific agent - NOW WITH UNIFIED SYSTEM INTEGRATION"""
+        task = task or {}
+        task_type = task.get('action', task.get('type', 'generic'))
+        unified_ctx = None
+
+        # UNIFIED INTEGRATION: Pre-execution hooks - enrich context from ALL systems
+        if UNIFIED_INTEGRATION_AVAILABLE:
+            try:
+                integration = get_unified_integration()
+                unified_ctx = await integration.pre_execution(agent_name, task_type, task)
+                # Add enriched context to task
+                if unified_ctx.graph_context:
+                    task["_unified_graph_context"] = unified_ctx.graph_context
+                if unified_ctx.pricing_recommendations:
+                    task["_pricing_recommendations"] = unified_ctx.pricing_recommendations
+                if unified_ctx.confidence_score < 1.0:
+                    task["_unified_confidence"] = unified_ctx.confidence_score
+            except Exception as e:
+                logger.warning(f"Unified pre-execution failed: {e}")
+
+        # Phase 2: Enrich task with codebase context
+        task = await self._enrich_task_with_codebase_context(task, agent_name)
+
+        assessment_context = None
+        if self._is_high_stakes_action(agent_name, task):
+            assessment_result = await self._run_confidence_assessment(agent_name, task)
+            assessment_context = assessment_result.get("assessment")
+            if assessment_result.get("precheck_block"):
+                return assessment_result["precheck_block"]
+            if assessment_context:
+                task["self_awareness"] = asdict(assessment_context)
+
+        # Optional LangGraph workflow with review/quality loops
+        if LANGGRAPH_AVAILABLE and (
+            task.get("use_langgraph")
+            or task.get("enable_review_loop")
+            or task.get("quality_gate")
+        ):
+            runner = self._get_workflow_runner()
+            if runner:
+                result = await runner.run(agent_name, task)
+                # UNIFIED INTEGRATION: Post-execution hooks
+                if UNIFIED_INTEGRATION_AVAILABLE and unified_ctx:
+                    try:
+                        await get_unified_integration().post_execution(
+                            unified_ctx, result, success=result.get("status") != "failed"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Unified post-execution failed: {e}")
+                return result
+
+        try:
+            if agent_name in self.agents:
+                result = await self.agents[agent_name].execute(task)
+            else:
+                # Fallback to generic execution
+                result = await self._generic_execute(agent_name, task)
+
+            # UNIFIED INTEGRATION: Post-execution hooks for success
+            if UNIFIED_INTEGRATION_AVAILABLE and unified_ctx:
+                try:
+                    await get_unified_integration().post_execution(
+                        unified_ctx, result, success=result.get("status") != "failed"
+                    )
+                except Exception as e:
+                    logger.warning(f"Unified post-execution failed: {e}")
+
+            return result
+
+        except Exception as e:
+            # UNIFIED INTEGRATION: Error handling hooks
+            if UNIFIED_INTEGRATION_AVAILABLE and unified_ctx:
+                try:
+                    error_info = await get_unified_integration().on_error(unified_ctx, e)
+                    logger.error(f"Agent {agent_name} failed with unified error tracking: {error_info}")
+                except Exception as ue:
+                    logger.warning(f"Unified error handler failed: {ue}")
+            raise
 
     async def _generic_execute(self, agent_name: str, task: Dict[str, Any]) -> Dict[str, Any]:
         """Generic execution for agents without specific implementation"""
@@ -147,6 +494,259 @@ class BaseAgent:
             conn.close()
         except Exception as e:
             self.logger.error(f"Failed to log execution: {e}")
+
+
+# ============== LANGGRAPH REVIEW WORKFLOW ==============
+
+class LangGraphWorkflowState(TypedDict):
+    """Shared state for LangGraph-enabled executions with review loops."""
+    task: Dict[str, Any]
+    default_agent: str
+    selected_agent: str
+    attempt: int
+    result: Any
+    review_feedback: List[Dict[str, Any]]
+    quality_report: Dict[str, Any]
+    status: str
+    metadata: Dict[str, Any]
+
+
+class LangGraphWorkflowRunner:
+    """
+    Wraps agent execution with LangGraph to add:
+    - Smart routing using cheap models
+    - Review/feedback loops
+    - Quality gates before final output
+    """
+
+    def __init__(
+        self,
+        executor: "AgentExecutor",
+        ai_core_instance: Optional[Any],
+        max_review_cycles: int = 2,
+        quality_threshold: int = 75
+    ):
+        self.executor = executor
+        self.ai_core = ai_core_instance
+        self.max_review_cycles = max_review_cycles
+        self.quality_threshold = quality_threshold
+        self.workflow = self._build_workflow() if LANGGRAPH_AVAILABLE else None
+
+    def _build_workflow(self):
+        """Compose LangGraph workflow with feedback loops."""
+        workflow = StateGraph(LangGraphWorkflowState)
+
+        workflow.add_node("route", self.route_task)
+        workflow.add_node("execute", self.execute_agent)
+        workflow.add_node("review", self.review_output)
+        workflow.add_node("quality_gate", self.quality_gate)
+
+        workflow.add_edge("route", "execute")
+        workflow.add_edge("execute", "review")
+        workflow.add_conditional_edges(
+            "review",
+            self._review_decision,
+            {
+                "retry": "execute",
+                "approved": "quality_gate",
+                "fail": END
+            }
+        )
+        workflow.add_conditional_edges(
+            "quality_gate",
+            self._quality_decision,
+            {
+                "pass": END,
+                "fix": "execute"
+            }
+        )
+        workflow.set_entry_point("route")
+        return workflow.compile()
+
+    async def route_task(self, state: LangGraphWorkflowState) -> LangGraphWorkflowState:
+        """Use smart model routing to pick the right agent."""
+        state["status"] = "routing"
+        requested_agent = (
+            state["task"].get("agent")
+            or state["task"].get("preferred_agent")
+            or state["selected_agent"]
+            or state["default_agent"]
+        )
+        state["metadata"]["requested_agent"] = requested_agent
+
+        if self.ai_core:
+            try:
+                routing = await self.ai_core.route_agent(
+                    task=state["task"],
+                    candidate_agents=list(self.executor.agents.keys())
+                )
+                state["selected_agent"] = routing.get("agent", requested_agent)
+                state["metadata"]["routing_decision"] = routing
+            except Exception as e:
+                logger.error(f"Routing via AI core failed: {e}")
+                state["selected_agent"] = requested_agent
+        else:
+            state["selected_agent"] = requested_agent
+
+        return state
+
+    async def execute_agent(self, state: LangGraphWorkflowState) -> LangGraphWorkflowState:
+        """Execute the selected agent with any collected feedback."""
+        state["status"] = "executing"
+        state["attempt"] += 1
+
+        # Surface review/quality feedback to the agent
+        if state.get("review_feedback"):
+            state["task"]["review_feedback"] = state["review_feedback"][-1]
+        if state.get("quality_report"):
+            state["task"]["quality_feedback"] = state["quality_report"]
+
+        agent_name = state["selected_agent"] or state["default_agent"]
+        agent = self.executor.agents.get(agent_name)
+
+        if agent:
+            result = await agent.execute(state["task"])
+        else:
+            result = await self.executor._generic_execute(agent_name, state["task"])
+
+        state["result"] = result
+        state["metadata"]["last_run_at"] = datetime.now(timezone.utc).isoformat()
+        return state
+
+    async def review_output(self, state: LangGraphWorkflowState) -> LangGraphWorkflowState:
+        """Run review loop on agent output."""
+        state["status"] = "review"
+        result_payload = state.get("result")
+        if not self.ai_core:
+            state["review_feedback"].append({
+                "approved": True,
+                "issues": [],
+                "summary": "AI core unavailable, review skipped"
+            })
+            return state
+
+        try:
+            criteria = state["task"].get("review_criteria") or [
+                "accuracy",
+                "actionability",
+                "risk awareness"
+            ]
+            review = await self.ai_core.review_and_refine(
+                draft=result_payload,
+                context={"task": state["task"], "agent": state["selected_agent"]},
+                criteria=criteria,
+                max_iterations=1
+            )
+            state["result"] = review.get("content", result_payload)
+            state["review_feedback"].append(review)
+        except Exception as e:
+            logger.error(f"Review loop failed: {e}")
+            state["review_feedback"].append({
+                "approved": False,
+                "issues": [str(e)],
+                "summary": "Review failed"
+            })
+        return state
+
+    def _review_decision(self, state: LangGraphWorkflowState) -> str:
+        """Decide whether to retry execution based on review feedback."""
+        if not state.get("review_feedback"):
+            return "approved"
+
+        last_review = state["review_feedback"][-1]
+        approved = last_review.get("approved", True)
+
+        if approved:
+            return "approved"
+
+        if state["attempt"] >= state["metadata"].get("max_attempts", self.max_review_cycles + 1):
+            state["status"] = "review_failed"
+            return "fail"
+
+        # Retry with feedback attached to the task
+        state["task"]["review_feedback"] = last_review
+        return "retry"
+
+    async def quality_gate(self, state: LangGraphWorkflowState) -> LangGraphWorkflowState:
+        """Run a lightweight quality gate before returning."""
+        state["status"] = "quality_gate"
+
+        if not self.ai_core:
+            state["quality_report"] = {
+                "pass": True,
+                "score": 100,
+                "issues": ["Quality gate skipped: AI core unavailable"],
+                "actions": []
+            }
+            return state
+
+        try:
+            gate = await self.ai_core.quality_gate(
+                output=state.get("result"),
+                criteria=state["task"].get("quality_criteria"),
+                min_score=self.quality_threshold
+            )
+            state["quality_report"] = gate
+        except Exception as e:
+            logger.error(f"Quality gate failed: {e}")
+            state["quality_report"] = {
+                "pass": False,
+                "score": 0,
+                "issues": [str(e)],
+                "actions": []
+            }
+
+        return state
+
+    def _quality_decision(self, state: LangGraphWorkflowState) -> str:
+        """Determine if output clears the gate or needs a fix cycle."""
+        gate = state.get("quality_report") or {}
+        score = gate.get("score", 0)
+        passed = gate.get("pass", False) or score >= self.quality_threshold
+
+        if passed:
+            state["status"] = "completed"
+            return "pass"
+
+        if state["attempt"] >= state["metadata"].get("max_attempts", self.max_review_cycles + 1):
+            state["status"] = "needs_manual_review"
+            return "pass"
+
+        # Route back through execution with gate feedback
+        state["task"]["quality_feedback"] = gate.get("issues", [])
+        return "fix"
+
+    async def run(self, agent_name: str, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Public entrypoint for LangGraph-enhanced execution."""
+        if not self.workflow:
+            return await self.executor._generic_execute(agent_name, task)
+
+        initial_state: LangGraphWorkflowState = {
+            "task": task,
+            "default_agent": agent_name,
+            "selected_agent": task.get("agent", agent_name),
+            "attempt": 0,
+            "result": None,
+            "review_feedback": [],
+            "quality_report": {},
+            "status": "initialized",
+            "metadata": {
+                "max_attempts": task.get("max_attempts", self.max_review_cycles + 1),
+                "started_at": datetime.now(timezone.utc).isoformat()
+            }
+        }
+
+        final_state = await self.workflow.ainvoke(initial_state)
+
+        return {
+            "status": final_state.get("status", "completed"),
+            "agent": final_state.get("selected_agent"),
+            "result": final_state.get("result"),
+            "review_feedback": final_state.get("review_feedback", []),
+            "quality_report": final_state.get("quality_report", {}),
+            "attempts": final_state.get("attempt"),
+            "metadata": final_state.get("metadata", {})
+        }
 
 
 # ============== DEVOPS AGENTS ==============
