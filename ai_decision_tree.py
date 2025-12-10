@@ -116,6 +116,7 @@ class AIDecisionTree:
         self.active_decisions = {}
         self.decision_history = []
         self.learning_buffer = []
+        self._learning_tables_initialized = False
         self._initialize_database()
         self._load_decision_trees()
         self._register_decision_handlers()
@@ -1079,9 +1080,166 @@ class AIDecisionTree:
 
     def _process_learning_buffer(self):
         """Process accumulated learning data"""
-        # This would implement actual learning algorithms
-        # For now, just clear the buffer
-        self.learning_buffer.clear()
+        if not self.learning_buffer:
+            return
+
+        conn = None
+        try:
+            conn = self._get_connection()
+            cur = conn.cursor()
+
+            if not self._learning_tables_initialized:
+                self._ensure_learning_tables(cur)
+                self._learning_tables_initialized = True
+
+            total = len(self.learning_buffer)
+            success_count = sum(1 for item in self.learning_buffer if item.get('success'))
+            failure_count = total - success_count
+            success_rate = success_count / total if total else 0.0
+
+            failure_patterns = self._summarize_failure_patterns(self.learning_buffer)
+
+            cur.execute("""
+                INSERT INTO ai_learning_records (
+                    agent_name,
+                    learning_type,
+                    description,
+                    context,
+                    confidence,
+                    applied,
+                    impact_score,
+                    created_at
+                ) VALUES (%s, %s, %s, %s, %s, false, %s, NOW())
+            """, (
+                "ai_decision_tree",
+                "decision_outcome",
+                "Aggregated learning buffer processing",
+                json.dumps({
+                    'total_samples': total,
+                    'success_count': success_count,
+                    'failure_count': failure_count,
+                    'success_rate': success_rate,
+                    'failure_patterns': failure_patterns,
+                    'examples': self.learning_buffer[:3]
+                }, default=str),
+                success_rate,
+                1.0 - success_rate
+            ))
+
+            self._update_agent_performance(cur, success_rate, total, failure_patterns)
+
+            conn.commit()
+
+            if failure_patterns:
+                logger.warning(f"Learning buffer detected failure patterns: {failure_patterns}")
+
+        except Exception as e:
+            logger.error(f"Error processing learning buffer: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            self.learning_buffer.clear()
+            if conn:
+                conn.close()
+
+    def _ensure_learning_tables(self, cur):
+        """Ensure learning-related tables exist before writes"""
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ai_learning_records (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                agent_name TEXT,
+                learning_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                context JSONB NOT NULL,
+                confidence NUMERIC,
+                applied BOOLEAN,
+                applied_at TIMESTAMPTZ,
+                impact_score NUMERIC,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ai_agent_performance (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project TEXT,
+                agent_name TEXT,
+                success_rate DOUBLE PRECISION,
+                avg_response_time_ms DOUBLE PRECISION,
+                total_interactions INT,
+                performance_data JSONB,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
+    def _summarize_failure_patterns(self, buffer: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Summarize recurring failure reasons for prompt improvements"""
+        failure_counts = defaultdict(int)
+
+        for item in buffer:
+            if item.get('success') is False:
+                outcome = item.get('outcome') or {}
+                if isinstance(outcome, dict):
+                    for key in ['error', 'reason', 'failure_reason', 'message', 'details']:
+                        if outcome.get(key):
+                            failure_counts[str(outcome[key]).strip()] += 1
+                            break
+                    else:
+                        failure_counts[str(outcome)] += 1
+                else:
+                    failure_counts[str(outcome)] += 1
+
+        patterns = [
+            {'reason': reason, 'count': count}
+            for reason, count in failure_counts.items() if reason
+        ]
+
+        return sorted(patterns, key=lambda x: x['count'], reverse=True)[:5]
+
+    def _update_agent_performance(
+        self,
+        cur,
+        success_rate: float,
+        sample_size: int,
+        failure_patterns: List[Dict[str, Any]]
+    ):
+        """Update aggregate agent performance metrics"""
+        performance_payload = json.dumps({
+            'success_rate': success_rate,
+            'sample_size': sample_size,
+            'failure_patterns': failure_patterns,
+            'updated_at': datetime.utcnow().isoformat()
+        }, default=str)
+
+        cur.execute("""
+            UPDATE ai_agent_performance
+            SET success_rate = %s,
+                total_interactions = COALESCE(total_interactions, 0) + %s,
+                performance_data = %s::jsonb,
+                updated_at = NOW()
+            WHERE agent_name = %s
+        """, (
+            success_rate,
+            sample_size,
+            performance_payload,
+            "ai_decision_tree"
+        ))
+
+        if cur.rowcount == 0:
+            cur.execute("""
+                INSERT INTO ai_agent_performance (
+                    agent_name,
+                    success_rate,
+                    total_interactions,
+                    performance_data,
+                    updated_at
+                ) VALUES (%s, %s, %s, %s::jsonb, NOW())
+            """, (
+                "ai_decision_tree",
+                success_rate,
+                sample_size,
+                performance_payload
+            ))
 
     def get_decision_stats(self) -> Dict[str, Any]:
         """Get decision statistics"""
