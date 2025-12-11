@@ -157,7 +157,7 @@ Purpose: AI-powered decision making
 
 ```bash
 # Check agent status
-export PGPASSWORD=Brain0ps2O2S
+export PGPASSWORD=$DB_PASSWORD
 psql -h aws-0-us-east-2.pooler.supabase.com \
   -U postgres.yomagoqdmxszqtdwuhab -d postgres \
   -c "SELECT name, status, total_executions FROM ai_agents ORDER BY total_executions DESC LIMIT 10"
