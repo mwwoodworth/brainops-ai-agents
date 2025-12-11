@@ -9,10 +9,8 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
-# Always hydrate env from the latest BrainOps.env for local/dev runs.
-# Prefer the Render-exported file in Downloads, fall back to repo-local copy.
-load_dotenv("/home/matt-woodworth/Downloads/BrainOps.env")
-load_dotenv("/home/matt-woodworth/dev/BrainOps.env")
+# Hydrate env vars from a local .env in the current working directory when present.
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +72,12 @@ class SecurityConfig:
     def __init__(self):
         self.environment = os.getenv('ENVIRONMENT', 'production')
         self.dev_mode = os.getenv('DEV_MODE', 'false').lower() == 'true'
-        self.auth_required = os.getenv('AUTH_REQUIRED', 'false' if self.dev_mode else 'true').lower() == 'true'
+        auth_required_env = os.getenv('AUTH_REQUIRED')
+        self.auth_required = (
+            auth_required_env.lower() not in ('false', '0', 'no')
+            if auth_required_env is not None
+            else True
+        )
         
         api_keys_str = os.getenv('API_KEYS', '')
         self.valid_api_keys = set(api_keys_str.split(',')) if api_keys_str else set()
@@ -97,11 +100,11 @@ class SecurityConfig:
             self.test_api_key = effective_test_key
 
         if self.auth_required and not self.valid_api_keys:
-            logger.warning(
-                "AUTH_REQUIRED enabled but no API keys configured. "
-                "Falling back to unauthenticated mode."
+            logger.critical(
+                "AUTH_REQUIRED is enabled but no API keys are configured. "
+                "Set API_KEYS or enable a non-production test key via ALLOW_TEST_KEY."
             )
-            self.auth_required = False
+            raise RuntimeError("Authentication required but no API keys provided.")
         
         cors_origins_str = os.getenv('ALLOWED_ORIGINS', '')
         if cors_origins_str:
