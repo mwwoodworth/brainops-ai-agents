@@ -1749,23 +1749,27 @@ async def ai_analyze(
                 "message": f"Analysis completed via orchestrator"
             }
 
-        # Fallback: Use agent executor if available
-        if hasattr(app.state, 'agent_executor') and app.state.agent_executor:
-            result = await app.state.agent_executor.execute_agent(
-                agent_id=agent_name,
-                task={
+        # Fallback: Use module-level agent executor singleton
+        try:
+            from agent_executor import executor as agent_executor_singleton
+            if agent_executor_singleton:
+                result = await agent_executor_singleton.execute(
+                    agent_name=agent_name,
+                    task={
+                        "action": action,
+                        "data": data,
+                        "context": context
+                    }
+                )
+                return {
+                    "success": True,
+                    "agent": agent_name,
                     "action": action,
-                    "data": data,
-                    "context": context
+                    "result": result,
+                    "message": "Analysis completed via agent executor"
                 }
-            )
-            return {
-                "success": True,
-                "agent": agent_name,
-                "action": action,
-                "result": result,
-                "message": "Analysis completed via agent executor"
-            }
+        except (ImportError, Exception) as e:
+            logger.warning(f"Agent executor fallback failed: {e}")
 
         # Final fallback: Return acknowledgment with mock result
         logger.warning(f"No orchestrator/executor available for agent {agent_name}, returning mock response")
