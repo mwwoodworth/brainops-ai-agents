@@ -406,11 +406,15 @@ def create_execution_table(db_config: Dict):
 # Example usage
 if __name__ == "__main__":
     # Configure database
+    db_password = os.getenv('DB_PASSWORD')
+    if not db_password:
+        raise RuntimeError("DB_PASSWORD environment variable is required for agent scheduler startup.")
+
     DB_CONFIG = {
         'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
         'database': os.getenv('DB_NAME', 'postgres'),
         'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-        'password': os.getenv('DB_PASSWORD', 'REDACTED_SUPABASE_DB_PASSWORD'),
+        'password': db_password,
         'port': int(os.getenv('DB_PORT', 5432))
     }
 
