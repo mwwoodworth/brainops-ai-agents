@@ -178,7 +178,7 @@ Password: REDACTED_SUPABASE_DB_PASSWORD
 ### Key Commands
 ```bash
 # Check task status
-PGPASSWORD=REDACTED_SUPABASE_DB_PASSWORD psql -h aws-0-us-east-2.pooler.supabase.com -U postgres.yomagoqdmxszqtdwuhab -d postgres -c "SELECT * FROM ai_development_tasks WHERE status != 'completed' ORDER BY task_number LIMIT 5;"
+PGPASSWORD=$DB_PASSWORD psql -h aws-0-us-east-2.pooler.supabase.com -U postgres.yomagoqdmxszqtdwuhab -d postgres -c "SELECT * FROM ai_development_tasks WHERE status != 'completed' ORDER BY task_number LIMIT 5;"
 
 # Test production endpoints
 curl https://brainops-ai-agents.onrender.com/health
