@@ -151,30 +151,29 @@ async def record_sale_to_database(sale_data: Dict[str, Any]):
     try:
         from database.async_connection import get_pool
 
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO gumroad_sales (
-                    sale_id, email, customer_name, product_code,
-                    product_name, price, currency, sale_timestamp,
-                    convertkit_synced, metadata
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                ON CONFLICT (sale_id) DO UPDATE SET
-                    updated_at = NOW()
-            """,
-                sale_data.get('sale_id'),
-                sale_data.get('email'),
-                sale_data.get('full_name'),
-                sale_data.get('product_code'),
-                sale_data.get('product_name'),
-                Decimal(sale_data.get('price', '0').replace('$', '').replace(',', '')),
-                sale_data.get('currency', 'USD'),
-                datetime.fromisoformat(sale_data.get('sale_timestamp', datetime.utcnow().isoformat())),
-                True,
-                json.dumps(sale_data)
-            )
-            logger.info(f"Recorded sale {sale_data.get('sale_id')} to database")
-            return True
+        pool = get_pool()
+        await pool.execute("""
+            INSERT INTO gumroad_sales (
+                sale_id, email, customer_name, product_code,
+                product_name, price, currency, sale_timestamp,
+                convertkit_synced, metadata
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT (sale_id) DO UPDATE SET
+                updated_at = NOW()
+        """,
+            sale_data.get('sale_id'),
+            sale_data.get('email'),
+            sale_data.get('full_name'),
+            sale_data.get('product_code'),
+            sale_data.get('product_name'),
+            Decimal(sale_data.get('price', '0').replace('$', '').replace(',', '')),
+            sale_data.get('currency', 'USD'),
+            datetime.fromisoformat(sale_data.get('sale_timestamp', datetime.utcnow().isoformat())),
+            True,
+            json.dumps(sale_data)
+        )
+        logger.info(f"Recorded sale {sale_data.get('sale_id')} to database")
+        return True
 
     except Exception as e:
         logger.error(f"Database recording error: {e}")
@@ -302,45 +301,45 @@ async def get_sales_analytics():
     try:
         from database.async_connection import get_pool
 
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            # Get total sales
-            total_sales = await conn.fetchval(
-                "SELECT COUNT(*) FROM gumroad_sales WHERE created_at > NOW() - INTERVAL '30 days'"
-            )
+        pool = get_pool()
 
-            # Get total revenue
-            total_revenue = await conn.fetchval(
-                "SELECT COALESCE(SUM(price), 0) FROM gumroad_sales WHERE created_at > NOW() - INTERVAL '30 days'"
-            )
+        # Get total sales
+        total_sales = await pool.fetchval(
+            "SELECT COUNT(*) FROM gumroad_sales WHERE created_at > NOW() - INTERVAL '30 days'"
+        )
 
-            # Get product breakdown
-            product_stats = await conn.fetch("""
-                SELECT
-                    product_code,
-                    COUNT(*) as units_sold,
-                    SUM(price) as revenue
-                FROM gumroad_sales
-                WHERE created_at > NOW() - INTERVAL '30 days'
-                GROUP BY product_code
-                ORDER BY revenue DESC
-            """)
+        # Get total revenue
+        total_revenue = await pool.fetchval(
+            "SELECT COALESCE(SUM(price), 0) FROM gumroad_sales WHERE created_at > NOW() - INTERVAL '30 days'"
+        )
 
-            # Get recent sales
-            recent_sales = await conn.fetch("""
-                SELECT
-                    sale_id, email, product_name, price, created_at
-                FROM gumroad_sales
-                ORDER BY created_at DESC
-                LIMIT 10
-            """)
+        # Get product breakdown
+        product_stats = await pool.fetch("""
+            SELECT
+                product_code,
+                COUNT(*) as units_sold,
+                SUM(price) as revenue
+            FROM gumroad_sales
+            WHERE created_at > NOW() - INTERVAL '30 days'
+            GROUP BY product_code
+            ORDER BY revenue DESC
+        """)
 
-            return {
-                "total_sales": total_sales,
-                "total_revenue": float(total_revenue) if total_revenue else 0,
-                "product_stats": [dict(row) for row in product_stats],
-                "recent_sales": [dict(row) for row in recent_sales]
-            }
+        # Get recent sales
+        recent_sales = await pool.fetch("""
+            SELECT
+                sale_id, email, product_name, price, created_at
+            FROM gumroad_sales
+            ORDER BY created_at DESC
+            LIMIT 10
+        """)
+
+        return {
+            "total_sales": total_sales or 0,
+            "total_revenue": float(total_revenue) if total_revenue else 0,
+            "product_stats": [dict(row) for row in product_stats],
+            "recent_sales": [dict(row) for row in recent_sales]
+        }
 
     except Exception as e:
         logger.error(f"Analytics error: {e}")
