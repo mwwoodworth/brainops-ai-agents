@@ -6,7 +6,6 @@ Handles actual execution of AI agent tasks
 
 import os
 import json
-import asyncio
 import logging
 import requests
 import psycopg2
@@ -27,8 +26,7 @@ from ai_self_awareness import SelfAwareAI as SelfAwareness, get_self_aware_ai
 try:
     from graph_context_provider import (
         GraphContextProvider,
-        get_graph_context_provider,
-        get_context_for_task
+        get_graph_context_provider
     )
     GRAPH_CONTEXT_AVAILABLE = True
 except ImportError:
@@ -37,8 +35,7 @@ except ImportError:
 # Unified System Integration - wires ALL systems together
 try:
     from unified_system_integration import (
-        get_unified_integration,
-        ExecutionContext
+        get_unified_integration
     )
     UNIFIED_INTEGRATION_AVAILABLE = True
 except ImportError:
@@ -48,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 # Import REAL AI Core
 try:
-    from ai_core import RealAICore, ai_generate, ai_analyze
+    from ai_core import RealAICore
     ai_core = RealAICore()
     USE_REAL_AI = True
 except ImportError:
