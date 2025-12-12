@@ -6,15 +6,16 @@ import logging
 import os
 import asyncio
 import json
+import time
 import uuid
 import inspect
 import random
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from contextlib import asynccontextmanager
 from collections import deque
 
-from fastapi import FastAPI, HTTPException, Request, Security, Depends, Body
+from fastapi import FastAPI, HTTPException, Request, Security, Depends, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
@@ -38,6 +39,7 @@ from api.gumroad_webhook import router as gumroad_router
 from api.codebase_graph import router as codebase_graph_router
 from api.state_sync import router as state_sync_router
 from ai_provider_status import get_provider_status
+from observability import RequestMetrics, TTLCache
 
 SCHEMA_BOOTSTRAP_SQL = [
     # Ensure pgcrypto for gen_random_uuid()
@@ -110,6 +112,10 @@ SCHEMA_BOOTSTRAP_SQL = [
     # Healing rules priority column
     "ALTER TABLE ai_healing_rules ADD COLUMN IF NOT EXISTS priority INT DEFAULT 50;",
     "UPDATE ai_healing_rules SET priority = 50 WHERE priority IS NULL;",
+    # Performance-critical indexes for usage/metrics endpoints
+    "CREATE INDEX IF NOT EXISTS idx_agent_executions_agent_time ON agent_executions(agent_id, started_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_agent_executions_status_time ON agent_executions(status, started_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_agent_schedules_enabled ON agent_schedules(enabled, next_execution DESC);",
 ]
 
 # Configure logging
@@ -123,6 +129,13 @@ logger = logging.getLogger(__name__)
 BUILD_TIME = datetime.utcnow().isoformat()
 VERSION = "9.0.0"  # MAJOR: Added Gumroad sales funnel webhook integration with ConvertKit, Stripe, SendGrid
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
+REQUEST_METRICS = RequestMetrics(window=800)
+RESPONSE_CACHE = TTLCache(max_size=256)
+CACHE_TTLS = {
+    "health": 5.0,
+    "agents": 30.0,
+    "systems_usage": 15.0
+}
 
 # Import agent scheduler with fallback
 try:
@@ -812,6 +825,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Request/latency observability middleware
+@app.middleware("http")
+async def record_request_metrics(request: Request, call_next):
+    """Measure request latency and record lightweight metrics."""
+    start = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    except Exception:
+        # Still record the 500 before bubbling up
+        status_code = 500
+        raise
+    finally:
+        duration_ms = (time.perf_counter() - start) * 1000
+        path = request.url.path.split("?")[0]
+        await REQUEST_METRICS.record(
+            path=path,
+            method=request.method,
+            status=status_code,
+            duration_ms=duration_ms
+        )
+
 # API Key authentication
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -868,6 +905,203 @@ except ImportError as e:
     logger.warning(f"Analytics endpoint not available: {e}")
 
 
+def _collect_active_systems() -> List[str]:
+    """Return a list of systems that are initialized and active."""
+    active = []
+    if AUREA_AVAILABLE and getattr(app.state, "aurea", None):
+        active.append("AUREA Orchestrator")
+    if SELF_HEALING_AVAILABLE and getattr(app.state, "healer", None):
+        active.append("Self-Healing Recovery")
+    if MEMORY_AVAILABLE and getattr(app.state, "memory", None):
+        active.append("Memory Manager")
+    if EMBEDDED_MEMORY_AVAILABLE and getattr(app.state, "embedded_memory", None):
+        active.append("Embedded Memory (RAG)")
+    if TRAINING_AVAILABLE and getattr(app.state, "training", None):
+        active.append("Training Pipeline")
+    if LEARNING_AVAILABLE and getattr(app.state, "learning", None):
+        active.append("Learning System")
+    if SCHEDULER_AVAILABLE and getattr(app.state, "scheduler", None):
+        active.append("Agent Scheduler")
+    if AI_AVAILABLE and ai_core:
+        active.append("AI Core")
+    if SYSTEM_IMPROVEMENT_AVAILABLE and getattr(app.state, "system_improvement", None):
+        active.append("System Improvement Agent")
+    if DEVOPS_AGENT_AVAILABLE and getattr(app.state, "devops_agent", None):
+        active.append("DevOps Optimization Agent")
+    if CODE_QUALITY_AVAILABLE and getattr(app.state, "code_quality", None):
+        active.append("Code Quality Agent")
+    if CUSTOMER_SUCCESS_AVAILABLE and getattr(app.state, "customer_success", None):
+        active.append("Customer Success Agent")
+    if COMPETITIVE_INTEL_AVAILABLE and getattr(app.state, "competitive_intel", None):
+        active.append("Competitive Intelligence Agent")
+    if VISION_ALIGNMENT_AVAILABLE and getattr(app.state, "vision_alignment", None):
+        active.append("Vision Alignment Agent")
+    return active
+
+
+def _scheduler_snapshot() -> Dict[str, Any]:
+    """Return scheduler status with safe defaults."""
+    scheduler = getattr(app.state, "scheduler", None)
+    if not (SCHEDULER_AVAILABLE and scheduler):
+        return {"enabled": False, "message": "Scheduler not available"}
+
+    apscheduler_jobs = scheduler.scheduler.get_jobs()
+    return {
+        "enabled": True,
+        "running": scheduler.scheduler.running,
+        "registered_jobs_count": len(scheduler.registered_jobs),
+        "apscheduler_jobs_count": len(apscheduler_jobs),
+        "next_jobs": [
+            {
+                "id": job.id,
+                "name": job.name,
+                "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
+            }
+            for job in apscheduler_jobs[:5]
+        ]
+    }
+
+
+def _aurea_status() -> Dict[str, Any]:
+    aurea = getattr(app.state, "aurea", None)
+    if not (AUREA_AVAILABLE and aurea):
+        return {"available": False, "running": False}
+    try:
+        return {**aurea.get_status(), "available": True}
+    except Exception as exc:
+        logger.error("Failed to read AUREA status: %s", exc)
+        return {"available": True, "running": False, "error": str(exc)}
+
+
+def _self_healing_status() -> Dict[str, Any]:
+    healer = getattr(app.state, "healer", None)
+    if not (SELF_HEALING_AVAILABLE and healer):
+        return {"available": False}
+    try:
+        if hasattr(healer, "get_health_report"):
+            return {"available": True, "report": healer.get_health_report()}
+        return {"available": True}
+    except Exception as exc:
+        logger.error("Failed to read self-healing status: %s", exc)
+        return {"available": True, "error": str(exc)}
+
+
+async def _memory_stats_snapshot(pool) -> Dict[str, Any]:
+    """
+    Get a fast snapshot of memory/learning health.
+    Reuses logic from /memory/status but keeps output minimal for usage reports.
+    """
+    try:
+        existing_tables = await pool.fetch("""
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+            AND table_name IN ('ai_persistent_memory', 'memory_entries', 'memories')
+        """)
+        if not existing_tables:
+            return {"status": "not_configured"}
+
+        table_names = [t["table_name"] for t in existing_tables]
+        preferred = next((t for t in ("ai_persistent_memory", "memory_entries", "memories") if t in table_names), table_names[0])
+        stats = await pool.fetchrow(f"SELECT COUNT(*) AS total FROM {preferred}")
+        return {
+            "status": "operational",
+            "table": preferred,
+            "total_records": stats["total"] if stats else 0
+        }
+    except Exception as exc:
+        logger.error("Failed to fetch memory stats: %s", exc)
+        return {"status": "error", "error": str(exc)}
+
+
+async def _get_agent_usage(pool) -> Dict[str, Any]:
+    """Fetch recent agent usage, trying both legacy and new table names."""
+    queries: List[Tuple[str, str]] = [
+        ("agents", "agent_executions"),
+        ("ai_agents", "agent_executions"),
+        ("agents", "ai_agent_executions"),
+        ("ai_agents", "ai_agent_executions"),
+    ]
+    errors: List[str] = []
+
+    for agents_table, executions_table in queries:
+        try:
+            rows = await pool.fetch(f"""
+                SELECT
+                    a.id::text AS id,
+                    a.name,
+                    COALESCE(a.category, 'other') AS category,
+                    COALESCE(a.enabled, true) AS enabled,
+                    COUNT(e.id) AS executions_last_30d,
+                    MAX(e.started_at) AS last_execution,
+                    AVG(e.duration_ms) FILTER (WHERE e.duration_ms IS NOT NULL) AS avg_duration_ms
+                FROM {agents_table} a
+                LEFT JOIN {executions_table} e
+                    ON e.agent_id = a.id
+                    AND e.started_at >= NOW() - INTERVAL '30 days'
+                GROUP BY a.id, a.name, a.category, a.enabled
+                ORDER BY executions_last_30d DESC, last_execution DESC NULLS LAST
+                LIMIT 20
+            """)
+            usage = []
+            for row in rows:
+                data = row if isinstance(row, dict) else dict(row)
+                usage.append(
+                    {
+                        "id": str(data.get("id")),
+                        "name": data.get("name"),
+                        "category": data.get("category"),
+                        "enabled": bool(data.get("enabled", True)),
+                        "executions_last_30d": int(data.get("executions_last_30d") or 0),
+                        "last_execution": data.get("last_execution").isoformat() if data.get("last_execution") else None,
+                        "avg_duration_ms": float(data.get("avg_duration_ms") or 0),
+                    }
+                )
+            return {"agents": usage, "table": agents_table, "executions_table": executions_table}
+        except Exception as exc:
+            errors.append(f"{agents_table}/{executions_table}: {exc}")
+            continue
+
+    return {"agents": [], "warning": "No agent usage data available", "errors": errors[:2]}
+
+
+async def _get_schedule_usage(pool) -> Dict[str, Any]:
+    """Fetch scheduler schedule rows with resiliency."""
+    schedules: List[Dict[str, Any]] = []
+    try:
+        rows = await pool.fetch("""
+            SELECT
+                s.id::text AS id,
+                s.agent_id::text AS agent_id,
+                s.enabled,
+                s.frequency_minutes,
+                s.last_execution,
+                s.next_execution,
+                COALESCE(a.name, s.agent_id::text) AS agent_name
+            FROM agent_schedules s
+            LEFT JOIN ai_agents a ON a.id = s.agent_id
+            ORDER BY s.enabled DESC, s.last_execution DESC NULLS LAST
+            LIMIT 50
+        """)
+        for row in rows:
+            data = row if isinstance(row, dict) else dict(row)
+            schedules.append(
+                {
+                    "id": data.get("id"),
+                    "agent_id": data.get("agent_id"),
+                    "agent_name": data.get("agent_name"),
+                    "enabled": bool(data.get("enabled", True)),
+                    "frequency_minutes": data.get("frequency_minutes"),
+                    "last_execution": data.get("last_execution").isoformat() if data.get("last_execution") else None,
+                    "next_execution": data.get("next_execution").isoformat() if data.get("next_execution") else None,
+                }
+            )
+        return {"schedules": schedules, "table": "agent_schedules"}
+    except Exception as exc:
+        logger.error("Failed to load schedule usage: %s", exc)
+        return {"schedules": schedules, "error": str(exc)}
+
+
 @app.get("/")
 async def root():
     """Root endpoint"""
@@ -883,88 +1117,140 @@ async def root():
 
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint with full system status"""
-    pool = get_pool()
-    db_healthy = await pool.test_connection()
-    db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
+async def health_check(force_refresh: bool = Query(False, description="Bypass cache and force live health checks")):
+    """Health check endpoint with full system status and light caching."""
 
-    # Check active systems - Phase 1
-    active_systems = []
-    if AUREA_AVAILABLE and hasattr(app.state, 'aurea') and app.state.aurea:
-        active_systems.append("AUREA Orchestrator")
-    if SELF_HEALING_AVAILABLE and hasattr(app.state, 'healer') and app.state.healer:
-        active_systems.append("Self-Healing Recovery")
-    if MEMORY_AVAILABLE and hasattr(app.state, 'memory') and app.state.memory:
-        active_systems.append("Memory Manager")
-    if EMBEDDED_MEMORY_AVAILABLE and hasattr(app.state, 'embedded_memory') and app.state.embedded_memory:
-        active_systems.append("Embedded Memory (RAG)")
-    if TRAINING_AVAILABLE and hasattr(app.state, 'training') and app.state.training:
-        active_systems.append("Training Pipeline")
-    if LEARNING_AVAILABLE and hasattr(app.state, 'learning') and app.state.learning:
-        active_systems.append("Learning System")
-    if SCHEDULER_AVAILABLE and hasattr(app.state, 'scheduler') and app.state.scheduler:
-        active_systems.append("Agent Scheduler")
-    if AI_AVAILABLE and ai_core:
-        active_systems.append("AI Core")
+    async def _build_health_payload() -> Dict[str, Any]:
+        pool = get_pool()
+        db_healthy = await pool.test_connection()
+        db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
 
-    # Check Phase 2 specialized agents
-    if SYSTEM_IMPROVEMENT_AVAILABLE and hasattr(app.state, 'system_improvement') and app.state.system_improvement:
-        active_systems.append("System Improvement Agent")
-    if DEVOPS_AGENT_AVAILABLE and hasattr(app.state, 'devops_agent') and app.state.devops_agent:
-        active_systems.append("DevOps Optimization Agent")
-    if CODE_QUALITY_AVAILABLE and hasattr(app.state, 'code_quality') and app.state.code_quality:
-        active_systems.append("Code Quality Agent")
-    if CUSTOMER_SUCCESS_AVAILABLE and hasattr(app.state, 'customer_success') and app.state.customer_success:
-        active_systems.append("Customer Success Agent")
-    if COMPETITIVE_INTEL_AVAILABLE and hasattr(app.state, 'competitive_intel') and app.state.competitive_intel:
-        active_systems.append("Competitive Intelligence Agent")
-    if VISION_ALIGNMENT_AVAILABLE and hasattr(app.state, 'vision_alignment') and app.state.vision_alignment:
-        active_systems.append("Vision Alignment Agent")
+        active_systems = _collect_active_systems()
 
-    # Get embedded memory stats if available
-    embedded_memory_stats = None
-    if EMBEDDED_MEMORY_AVAILABLE and hasattr(app.state, 'embedded_memory') and app.state.embedded_memory:
-        try:
-            embedded_memory_stats = app.state.embedded_memory.get_stats()
-        except:
-            pass
+        embedded_memory_stats = None
+        if EMBEDDED_MEMORY_AVAILABLE and getattr(app.state, "embedded_memory", None):
+            try:
+                embedded_memory_stats = app.state.embedded_memory.get_stats()
+            except Exception:
+                embedded_memory_stats = {"status": "error"}
 
-    return {
-        "status": "healthy" if db_healthy else "degraded",
-        "version": VERSION,
-        "build": BUILD_TIME,
-        "database": db_status,
-        "active_systems": active_systems,
-        "system_count": len(active_systems),
-        "embedded_memory_active": EMBEDDED_MEMORY_AVAILABLE and hasattr(app.state, 'embedded_memory') and app.state.embedded_memory is not None,
-        "embedded_memory_stats": embedded_memory_stats,
-        "capabilities": {
-            # Phase 1
-            "aurea_orchestrator": AUREA_AVAILABLE,
-            "self_healing": SELF_HEALING_AVAILABLE,
-            "memory_manager": MEMORY_AVAILABLE,
-            "embedded_memory": EMBEDDED_MEMORY_AVAILABLE,
-            "training_pipeline": TRAINING_AVAILABLE,
-            "learning_system": LEARNING_AVAILABLE,
-            "agent_scheduler": SCHEDULER_AVAILABLE,
-            "ai_core": AI_AVAILABLE,
-            # Phase 2
-            "system_improvement": SYSTEM_IMPROVEMENT_AVAILABLE,
-            "devops_optimization": DEVOPS_AGENT_AVAILABLE,
-            "code_quality": CODE_QUALITY_AVAILABLE,
-            "customer_success": CUSTOMER_SUCCESS_AVAILABLE,
-            "competitive_intelligence": COMPETITIVE_INTEL_AVAILABLE,
-            "vision_alignment": VISION_ALIGNMENT_AVAILABLE
-        },
-        "config": {
-            "environment": config.environment,
-            "security": {
-                "auth_required": config.security.auth_required,
-                "dev_mode": config.security.dev_mode
+        return {
+            "status": "healthy" if db_healthy else "degraded",
+            "version": VERSION,
+            "build": BUILD_TIME,
+            "database": db_status,
+            "active_systems": active_systems,
+            "system_count": len(active_systems),
+            "embedded_memory_active": EMBEDDED_MEMORY_AVAILABLE and hasattr(app.state, 'embedded_memory') and app.state.embedded_memory is not None,
+            "embedded_memory_stats": embedded_memory_stats,
+            "capabilities": {
+                # Phase 1
+                "aurea_orchestrator": AUREA_AVAILABLE,
+                "self_healing": SELF_HEALING_AVAILABLE,
+                "memory_manager": MEMORY_AVAILABLE,
+                "embedded_memory": EMBEDDED_MEMORY_AVAILABLE,
+                "training_pipeline": TRAINING_AVAILABLE,
+                "learning_system": LEARNING_AVAILABLE,
+                "agent_scheduler": SCHEDULER_AVAILABLE,
+                "ai_core": AI_AVAILABLE,
+                # Phase 2
+                "system_improvement": SYSTEM_IMPROVEMENT_AVAILABLE,
+                "devops_optimization": DEVOPS_AGENT_AVAILABLE,
+                "code_quality": CODE_QUALITY_AVAILABLE,
+                "customer_success": CUSTOMER_SUCCESS_AVAILABLE,
+                "competitive_intelligence": COMPETITIVE_INTEL_AVAILABLE,
+                "vision_alignment": VISION_ALIGNMENT_AVAILABLE
+            },
+            "config": {
+                "environment": config.environment,
+                "security": {
+                    "auth_required": config.security.auth_required,
+                    "dev_mode": config.security.dev_mode
+                }
             }
         }
+
+    if force_refresh:
+        return await _build_health_payload()
+
+    payload, from_cache = await RESPONSE_CACHE.get_or_set(
+        "health_status",
+        CACHE_TTLS["health"],
+        _build_health_payload,
+    )
+    return {**payload, "cached": from_cache}
+
+
+@app.get("/observability/metrics")
+async def observability_metrics():
+    """Lightweight monitoring endpoint for request, cache, DB, and orchestrator health."""
+    pool = get_pool()
+    db_probe_ms = None
+    db_error = None
+    start = time.perf_counter()
+    try:
+        await pool.fetchval("SELECT 1")
+        db_probe_ms = (time.perf_counter() - start) * 1000
+    except Exception as exc:
+        db_error = str(exc)
+
+    return {
+        "requests": REQUEST_METRICS.snapshot(),
+        "cache": RESPONSE_CACHE.snapshot(),
+        "database": {
+            "using_fallback": using_fallback(),
+            "probe_latency_ms": db_probe_ms,
+            "error": db_error,
+        },
+        "scheduler": _scheduler_snapshot(),
+        "aurea": _aurea_status(),
+        "self_healing": _self_healing_status(),
     }
+
+
+@app.get("/systems/usage")
+async def systems_usage(authenticated: bool = Depends(verify_api_key)):
+    """Report which AI systems are being used plus scheduler and memory effectiveness."""
+
+    async def _load_usage() -> Dict[str, Any]:
+        pool = get_pool()
+        agent_usage = await _get_agent_usage(pool)
+        schedule_usage = await _get_schedule_usage(pool)
+        memory_usage = await _memory_stats_snapshot(pool)
+
+        customer_success_preview = None
+        if CUSTOMER_SUCCESS_AVAILABLE and getattr(app.state, "customer_success", None):
+            try:
+                customer_success_preview = await app.state.customer_success.generate_onboarding_plan(
+                    customer_id="sample-customer",
+                    plan_type="value-check",
+                )
+            except Exception as exc:
+                customer_success_preview = {"error": str(exc)}
+
+        return {
+            "active_systems": _collect_active_systems(),
+            "agents": agent_usage,
+            "schedules": {**schedule_usage, "scheduler_runtime": _scheduler_snapshot()},
+            "memory": memory_usage,
+            "learning": {
+                "available": LEARNING_AVAILABLE and getattr(app.state, "learning", None) is not None,
+                "notes": "Notebook LM+ initialized" if getattr(app.state, "learning", None) else "Learning system not initialized",
+            },
+            "aurea": _aurea_status(),
+            "self_healing": _self_healing_status(),
+            "customer_success": {
+                "available": CUSTOMER_SUCCESS_AVAILABLE and getattr(app.state, "customer_success", None) is not None,
+                "sample_plan": customer_success_preview,
+            },
+        }
+
+    usage, from_cache = await RESPONSE_CACHE.get_or_set(
+        "systems_usage",
+        CACHE_TTLS["systems_usage"],
+        _load_usage,
+    )
+    return {**usage, "cached": from_cache}
 
 
 @app.get("/ai/providers/status")
@@ -985,42 +1271,48 @@ async def get_agents(
     authenticated: bool = Depends(verify_api_key)
 ) -> AgentList:
     """Get list of available agents"""
-    pool = get_pool()
+    cache_key = f"agents:{category or 'all'}:{enabled}"
 
-    try:
-        # Build query
-        query = "SELECT * FROM agents WHERE 1=1"
-        params = []
+    async def _load_agents() -> AgentList:
+        pool = get_pool()
+        try:
+            # Build query
+            query = "SELECT * FROM agents WHERE 1=1"
+            params = []
 
-        if enabled is not None:
-            query += f" AND enabled = ${len(params) + 1}"
-            params.append(enabled)
+            if enabled is not None:
+                query += f" AND enabled = ${len(params) + 1}"
+                params.append(enabled)
 
-        if category:
-            query += f" AND category = ${len(params) + 1}"
-            params.append(category)
+            if category:
+                query += f" AND category = ${len(params) + 1}"
+                params.append(category)
 
-        query += " ORDER BY category, name"
+            query += " ORDER BY category, name"
 
-        # Execute query
-        rows = await pool.fetch(query, *params)
+            rows = await pool.fetch(query, *params)
 
-        # Convert to models
-        agents = [
-            _row_to_agent(row if isinstance(row, dict) else dict(row))
-            for row in rows
-        ]
+            agents = [
+                _row_to_agent(row if isinstance(row, dict) else dict(row))
+                for row in rows
+            ]
 
-        return AgentList(
-            agents=agents,
-            total=len(agents),
-            page=1,
-            page_size=len(agents)
-        )
+            return AgentList(
+                agents=agents,
+                total=len(agents),
+                page=1,
+                page_size=len(agents)
+            )
+        except Exception as e:
+            logger.error(f"Failed to get agents: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to retrieve agents: {str(e)}")
 
-    except Exception as e:
-        logger.error(f"Failed to get agents: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve agents: {str(e)}")
+    agents_response, _ = await RESPONSE_CACHE.get_or_set(
+        cache_key,
+        CACHE_TTLS["agents"],
+        _load_agents
+    )
+    return agents_response
 
 
 @app.post("/agents/{agent_id}/execute")
