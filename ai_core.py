@@ -23,15 +23,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # REAL API KEYS - From environment variables (already configured in Render)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 # Direct database connection to master DB
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
     'database': os.getenv('DB_NAME', 'postgres'),
     'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('DB_PASSWORD', 'Brain0ps2O2S'),
+    'password': os.getenv('DB_PASSWORD', '<DB_PASSWORD_REDACTED>'),
     'port': int(os.getenv('DB_PORT', 5432))
 }
 

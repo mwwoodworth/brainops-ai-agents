@@ -122,8 +122,8 @@ Out of 46 Python files:
 #### 1. Configure Real LLM API Keys
 ```bash
 # Add to .env file:
-OPENAI_API_KEY=sk-proj-REAL_KEY_HERE
-ANTHROPIC_API_KEY=sk-ant-REDACTED
+OPENAI_API_KEY=<REDACTED>
+ANTHROPIC_API_KEY=<REDACTED>
 ```
 
 #### 2. Replace Fake AI in app.py

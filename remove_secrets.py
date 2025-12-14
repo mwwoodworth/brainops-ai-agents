@@ -18,9 +18,9 @@ def remove_secrets_from_file(filepath):
     # Patterns to replace
     replacements = [
         # Database password
-        (r'"password":\s*"Brain0ps2O2S"', '"password": os.getenv("DB_PASSWORD")'),
-        (r"'password':\s*'Brain0ps2O2S'", "'password': os.getenv('DB_PASSWORD')"),
-        (r'password\s*=\s*["\']Brain0ps2O2S["\']', 'password=os.getenv("DB_PASSWORD")'),
+        (r'"password":\s*"<DB_PASSWORD_REDACTED>"', '"password": os.getenv("DB_PASSWORD")'),
+        (r"'password':\s*'<DB_PASSWORD_REDACTED>'", "'password': os.getenv('DB_PASSWORD')"),
+        (r'password\s*=\s*["\']<DB_PASSWORD_REDACTED>"\']', 'password=os.getenv("DB_PASSWORD")'),
 
         # Database host
         (r'"host":\s*["\']aws-0-us-east-2\.pooler\.supabase\.com["\']', '"host": os.getenv("DB_HOST")'),
@@ -31,7 +31,7 @@ def remove_secrets_from_file(filepath):
         (r"'user':\s*['\"]postgres\.yomagoqdmxszqtdwuhab['\"]", "'user': os.getenv('DB_USER')"),
 
         # Default password in getenv
-        (r'os\.getenv\(["\']DB_PASSWORD["\']\s*,\s*["\']Brain0ps2O2S["\']\)', 'os.getenv("DB_PASSWORD")'),
+        (r'os\.getenv\(["\']DB_PASSWORD["\']\s*,\s*["\']<DB_PASSWORD_REDACTED>"\']\)', 'os.getenv("DB_PASSWORD")'),
 
         # SendGrid API key
         (r'SENDGRID_API_KEY\s*=\s*["\']SG\.[^"\']+["\']', 'SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")'),

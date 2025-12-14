@@ -9,7 +9,7 @@ ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 
 if git diff --cached --name-only | grep -qE '\.py$|\.env$|config\.json$'; then
-  if git diff --cached | grep -E 'Brain0ps2O2S|sk-proj-|sk-live-|sk-ant-REDACTED' >/dev/null; then
+  if git diff --cached | grep -E '<DB_PASSWORD_REDACTED>' >/dev/null; then
     echo "❌ Refusing to commit: hard-coded secrets detected in staged changes."
     echo "   Please move credentials to environment variables and retry."
     exit 1

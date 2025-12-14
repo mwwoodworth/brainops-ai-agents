@@ -52,7 +52,7 @@ BACKUP_DB_CONFIG = {
     'host': os.getenv('BACKUP_DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),  # Same for now
     'database': os.getenv('BACKUP_DB_NAME', 'postgres'),
     'user': os.getenv('BACKUP_DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('BACKUP_DB_PASSWORD', 'Brain0ps2O2S'),
+    'password': os.getenv('BACKUP_DB_PASSWORD', '<DB_PASSWORD_REDACTED>'),
     'port': int(os.getenv('BACKUP_DB_PORT', os.getenv('DB_PORT', 5432)))
 }
 
@@ -234,6 +234,8 @@ class HealthMonitor:
     
     async def _store_health_status(self, health: ServiceHealth):
         """Store health status in database"""
+        conn = None
+        cursor = None
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
@@ -255,11 +257,20 @@ class HealthMonitor:
             ))
             
             conn.commit()
-            cursor.close()
-            conn.close()
             
         except Exception as e:
             logger.error(f"Failed to store health status: {e}")
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
     
     def get_service_status(self, service_name: str) -> Optional[ServiceHealth]:
         """Get current service status"""
@@ -422,6 +433,8 @@ class DataReplicator:
     
     async def _write_to_database(self, batch: List[Dict], config: Dict) -> bool:
         """Write batch to database"""
+        conn = None
+        cursor = None
         try:
             conn = psycopg2.connect(**config)
             cursor = conn.cursor()
@@ -433,13 +446,22 @@ class DataReplicator:
                     cursor.execute(item['query'], item['params'])
             
             conn.commit()
-            cursor.close()
-            conn.close()
             return True
             
         except Exception as e:
             logger.error(f"Database write failed: {e}")
             return False
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
     
     def queue_replication(self, operation_type: str, query: str, params: tuple):
         """Queue data for replication"""
@@ -543,6 +565,8 @@ class FailoverManager:
     
     async def _store_failover_event(self, event: FailoverEvent):
         """Store failover event in database"""
+        conn = None
+        cursor = None
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
@@ -565,11 +589,20 @@ class FailoverManager:
             ))
             
             conn.commit()
-            cursor.close()
-            conn.close()
             
         except Exception as e:
             logger.error(f"Failed to store failover event: {e}")
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
     
     def get_current_endpoint(self, service_name: str) -> Optional[str]:
         """Get current active endpoint for service"""
@@ -626,6 +659,8 @@ class DisasterRecovery:
     
     async def _backup_database(self, service_name: str, backup_path: Path) -> Dict:
         """Backup database state"""
+        conn = None
+        cursor = None
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -651,9 +686,6 @@ class DisasterRecovery:
             with open(backup_file, 'wb') as f:
                 pickle.dump(backup_data, f)
             
-            cursor.close()
-            conn.close()
-            
             return {
                 'tables': len(tables),
                 'size': backup_file.stat().st_size,
@@ -663,6 +695,17 @@ class DisasterRecovery:
         except Exception as e:
             logger.error(f"Database backup failed: {e}")
             return {'error': str(e)}
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
     
     async def _backup_configuration(self, service_name: str, backup_path: Path) -> Dict:
         """Backup service configuration"""

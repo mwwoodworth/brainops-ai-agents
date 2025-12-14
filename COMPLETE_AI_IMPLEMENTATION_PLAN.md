@@ -18,8 +18,8 @@ Time to stop pretending and build REAL AI. This plan will transform every fake i
 □ Hugging Face (Optional, Free) - https://huggingface.co
 
 # Add to Render Environment Variables:
-OPENAI_API_KEY=sk-proj-[REAL_KEY]
-ANTHROPIC_API_KEY=sk-ant-REDACTED[REAL_KEY]
+OPENAI_API_KEY=<REDACTED>
+ANTHROPIC_API_KEY=<REDACTED>
 PINECONE_API_KEY=[REAL_KEY]
 HUGGINGFACE_API_KEY=[OPTIONAL]
 ```

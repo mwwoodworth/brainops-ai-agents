@@ -129,10 +129,10 @@ TrainingAgent, OnboardingAgent
 
 ## CREDENTIALS (PRODUCTION)
 
-- **Database Password**: Brain0ps2O2S
-- **Vercel Token**: vCDh2d4AgYXPAs0089MvQcHs
+- **Database Password**: stored in secret store (`SUPABASE_DB_PASSWORD`)
+- **Vercel Token**: stored in secret store (`VERCEL_TOKEN`)
 - **Supabase URL**: https://yomagoqdmxszqtdwuhab.supabase.co
-- **Supabase Anon Key**: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+- **Supabase Anon Key**: <anon-key>
 
 ## DEPLOYMENT TRACKING
 

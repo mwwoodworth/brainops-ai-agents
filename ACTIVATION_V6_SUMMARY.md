@@ -215,12 +215,12 @@ These systems require database tables. The first time each system runs, it will 
 DB_HOST=aws-0-us-east-2.pooler.supabase.com
 DB_NAME=postgres
 DB_USER=postgres.yomagoqdmxszqtdwuhab
-DB_PASSWORD=Brain0ps2O2S
+DB_PASSWORD=<DB_PASSWORD_REDACTED>
 DB_PORT=6543
 
 # Optional (for full AI capabilities):
-OPENAI_API_KEY=sk-...  # For embeddings and training
-ANTHROPIC_API_KEY=sk-ant-...  # For Claude AI
+OPENAI_API_KEY=<REDACTED>
+ANTHROPIC_API_KEY=<REDACTED>
 ```
 
 ### Autonomy Levels:
