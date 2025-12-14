@@ -244,7 +244,7 @@ class CodebaseCrawler:
                     self.pending_edges.append((file_node, name, 'function', 'contains', {}))
 
             # 3. Imports
-            import_pattern = re.compile(r'import\s+.*?from\s+["'](.+?)["']')
+            import_pattern = re.compile(r"import\s+.*?from\s+[\"'](.+?)[\"']")
             for match in import_pattern.finditer(content):
                 module = match.group(1)
                 self.pending_edges.append((file_node, module, 'file', 'imports', {}))

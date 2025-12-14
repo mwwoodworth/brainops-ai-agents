@@ -1,57 +1,43 @@
 #!/usr/bin/env python3
 """
-Complete AI Configuration with all API keys from production .env
-All keys verified from BrainOps (4).env downloaded from Render
+BrainOps AI Agents - environment-backed configuration.
+
+This module must not embed credentials. It only reads environment variables and
+exposes structured config + simple diagnostics for local ops.
 """
+
+from __future__ import annotations
 
 import os
 
-# OpenAI Configuration
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# AI Provider API Keys (server-side only)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "")
+HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN", "")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 
-# Anthropic Configuration
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+# Supabase / Postgres
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "") or os.getenv("SUPABASE_SERVICE_KEY", "")
 
-# Google Gemini Configuration
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
-# Perplexity Configuration
-PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
-
-# Hugging Face Configuration
-HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
-
-# ElevenLabs Configuration (for voice)
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-
-# Database Configuration
 DATABASE_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD", "Brain0ps2O2S"),
-    "port": os.getenv("DB_PORT", "5432")
+    "host": os.getenv("SUPABASE_DB_HOST", "") or os.getenv("DB_HOST", ""),
+    "database": os.getenv("SUPABASE_DB_NAME", "") or os.getenv("DB_NAME", "postgres"),
+    "user": os.getenv("SUPABASE_DB_USER", "") or os.getenv("DB_USER", ""),
+    "password": os.getenv("SUPABASE_DB_PASSWORD", "") or os.getenv("DB_PASSWORD", ""),
+    "port": os.getenv("SUPABASE_DB_PORT", "") or os.getenv("DB_PORT", "5432"),
 }
 
-# Supabase Configuration
-SUPABASE_URL = os.getenv(
-    "SUPABASE_URL",
-    "https://yomagoqdmxszqtdwuhab.supabase.co"
-)
-
-SUPABASE_SERVICE_KEY = os.getenv(
-    "SUPABASE_SERVICE_KEY",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlvbWFnb3FkbXhzenF0ZHd1aGFiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0OTgzMzI3NiwiZXhwIjoyMDY1NDA5Mjc2fQ.7C3guJ_0moYGkdyeFmJ9cd2BmduB5NnU00erIIxH3gQ"
-)
-
-# AI Model Preferences (Updated December 2025)
+# AI Model Preferences (non-secret)
 AI_MODELS = {
-    "fast": "gpt-4o-mini",  # Quick responses (Dec 2025)
-    "smart": "gpt-5",  # Complex reasoning (GPT-5 August 2025)
-    "creative": "claude-sonnet-4-5-20250929",  # Creative tasks (Claude Sonnet 4.5)
-    "research": "perplexity-70b-online",  # Real-time web data
-    "analysis": "gemini-2.5-flash",  # Deep analysis
-    "fallback": "mixtral-8x7b"  # Hugging Face fallback
+    "fast": os.getenv("BRAINOPS_MODEL_FAST", "gpt-4o-mini"),
+    "smart": os.getenv("BRAINOPS_MODEL_SMART", "gpt-5"),
+    "creative": os.getenv("BRAINOPS_MODEL_CREATIVE", "claude-sonnet-4-5-20250929"),
+    "research": os.getenv("BRAINOPS_MODEL_RESEARCH", "perplexity-70b-online"),
+    "analysis": os.getenv("BRAINOPS_MODEL_ANALYSIS", "gemini-2.5-flash"),
+    "fallback": os.getenv("BRAINOPS_MODEL_FALLBACK", "mixtral-8x7b"),
 }
 
 # Feature Flags
@@ -63,39 +49,34 @@ AI_FEATURES = {
     "huggingface_enabled": bool(HUGGINGFACE_API_TOKEN),
     "voice_enabled": bool(ELEVENLABS_API_KEY),
     "realtime_search": bool(PERPLEXITY_API_KEY),
-    "multi_model_consensus": True,
-    "smart_fallback": True
+    "multi_model_consensus": os.getenv("BRAINOPS_MULTI_MODEL_CONSENSUS", "true").lower() == "true",
+    "smart_fallback": os.getenv("BRAINOPS_SMART_FALLBACK", "true").lower() == "true",
 }
 
-def get_api_status():
-    """Get status of all API keys"""
+
+def get_api_status() -> dict[str, str]:
     return {
-        "openai": "✅ Configured" if OPENAI_API_KEY else "❌ Missing",
-        "anthropic": "✅ Configured" if ANTHROPIC_API_KEY else "❌ Missing",
-        "gemini": "✅ Configured" if GOOGLE_API_KEY else "❌ Missing",
-        "perplexity": "✅ Configured" if PERPLEXITY_API_KEY else "❌ Missing",
-        "huggingface": "✅ Configured" if HUGGINGFACE_API_TOKEN else "❌ Missing",
-        "elevenlabs": "✅ Configured" if ELEVENLABS_API_KEY else "❌ Missing",
-        "database": "✅ Configured" if DATABASE_CONFIG["password"] else "❌ Missing",
-        "supabase": "✅ Configured" if SUPABASE_SERVICE_KEY else "❌ Missing"
+        "openai": "configured" if OPENAI_API_KEY else "missing",
+        "anthropic": "configured" if ANTHROPIC_API_KEY else "missing",
+        "gemini": "configured" if GOOGLE_API_KEY else "missing",
+        "perplexity": "configured" if PERPLEXITY_API_KEY else "missing",
+        "huggingface": "configured" if HUGGINGFACE_API_TOKEN else "missing",
+        "elevenlabs": "configured" if ELEVENLABS_API_KEY else "missing",
+        "database_password": "configured" if DATABASE_CONFIG.get("password") else "missing",
+        "supabase_service_key": "configured" if SUPABASE_SERVICE_KEY else "missing",
     }
 
-def validate_all_keys():
-    """Validate all API keys are present"""
+
+def validate_all_keys(*, require_db: bool = False, require_supabase: bool = False) -> bool:
     status = get_api_status()
-    all_configured = all("✅" in v for v in status.values())
+    required = {"openai", "anthropic"}
+    if require_db:
+        required.add("database_password")
+    if require_supabase:
+        required.add("supabase_service_key")
+    return all(status.get(k) == "configured" for k in required)
 
-    if all_configured:
-        print("🚀 All AI systems configured and ready!")
-    else:
-        print("⚠️ Some API keys missing:")
-        for service, status in status.items():
-            if "❌" in status:
-                print(f"  - {service}: {status}")
 
-    return all_configured
-
-# Export all configuration
 __all__ = [
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
@@ -109,5 +90,5 @@ __all__ = [
     "AI_MODELS",
     "AI_FEATURES",
     "get_api_status",
-    "validate_all_keys"
+    "validate_all_keys",
 ]

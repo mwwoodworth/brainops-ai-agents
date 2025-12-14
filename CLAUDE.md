@@ -7,7 +7,7 @@
 Host: aws-0-us-east-2.pooler.supabase.com
 Database: postgres
 User: postgres.yomagoqdmxszqtdwuhab
-Password: Brain0ps2O2S
+Password: <DB_PASSWORD_REDACTED>
 ```
 
 ### Task Tracking System

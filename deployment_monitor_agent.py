@@ -26,7 +26,7 @@ class DeploymentMonitorAgent:
 
     def __init__(self):
         self.render_api_key = os.getenv("RENDER_API_KEY")
-        self.vercel_token = os.getenv("VERCEL_TOKEN", "vCDh2d4AgYXPAs0089MvQcHs")
+        self.vercel_token = os.getenv("VERCEL_TOKEN")
         self.services = {
             "brainops-ai-agents": {
                 "platform": "render",
@@ -113,6 +113,9 @@ class DeploymentMonitorAgent:
 
     async def fetch_vercel_projects(self) -> List[Dict]:
         """Fetch all Vercel projects"""
+        if not self.vercel_token:
+            return []
+
         async with aiohttp.ClientSession() as session:
             headers = {"Authorization": f"Bearer {self.vercel_token}"}
             async with session.get(

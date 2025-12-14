@@ -24,11 +24,11 @@ services:
       - key: DB_PORT
         sync: false
       - key: API_KEYS
-        value: 11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025
+        sync: false
       - key: AGENTS_API_KEY
-        value: brainops_prod_key_2025
+        sync: false
       - key: BRAINOPS_API_KEY
-        value: 11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c
+        sync: false
       - key: AUTH_REQUIRED
         value: "true"
       - key: DEV_MODE

@@ -26,7 +26,7 @@ class AgentScheduler:
             'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
             'database': os.getenv('DB_NAME', 'postgres'),
             'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-            'password': os.getenv('DB_PASSWORD', 'Brain0ps2O2S'),
+            'password': os.getenv('DB_PASSWORD', '<DB_PASSWORD_REDACTED>'),
             'port': int(os.getenv('DB_PORT', 5432))
         }
         # Use BackgroundScheduler instead of AsyncIOScheduler for FastAPI compatibility
@@ -45,6 +45,10 @@ class AgentScheduler:
 
     def execute_agent(self, agent_id: str, agent_name: str):
         """Execute a scheduled agent (SYNCHRONOUS for BackgroundScheduler)"""
+        conn = None
+        cur = None
+        execution_id = str(uuid.uuid4())
+        
         try:
             logger.info(f"🚀 Executing scheduled agent: {agent_name} ({agent_id})")
 
@@ -56,7 +60,6 @@ class AgentScheduler:
             cur = conn.cursor(cursor_factory=RealDictCursor)
 
             # Record execution start
-            execution_id = str(uuid.uuid4())
             cur.execute("""
                 INSERT INTO ai_agent_executions
                 (id, agent_name, status)
@@ -77,8 +80,6 @@ class AgentScheduler:
                     WHERE id = %s
                 """, ('failed', 'Agent not found', execution_id))
                 conn.commit()
-                cur.close()
-                conn.close()
                 return
 
             # Execute based on agent type (synchronous)
@@ -111,29 +112,32 @@ class AgentScheduler:
             """, (datetime.utcnow(), datetime.utcnow() + timedelta(minutes=agent.get('frequency_minutes', 60)), agent_id))
 
             conn.commit()
-            cur.close()
-            conn.close()
-
             logger.info(f"Agent {agent_name} executed successfully")
 
         except Exception as e:
             logger.error(f"Error executing agent {agent_name}: {e}")
-
-            # Record failure
-            try:
-                conn = self.get_db_connection()
-                if conn:
-                    cur = conn.cursor()
+            if conn and cur:
+                try:
+                    conn.rollback() # Rollback any pending transaction
                     cur.execute("""
                         UPDATE ai_agent_executions
                         SET status = %s, error_message = %s
                         WHERE id = %s
                     """, ('failed', str(e), execution_id))
                     conn.commit()
+                except Exception as log_error:
+                    logger.error(f"Failed to log error: {log_error}")
+        finally:
+            if cur:
+                try:
                     cur.close()
+                except Exception:
+                    pass
+            if conn:
+                try:
                     conn.close()
-            except Exception as log_error:
-                logger.error(f"Failed to log error: {log_error}")
+                except Exception:
+                    pass
 
     def _execute_by_type_sync(self, agent: Dict, cur, conn) -> Dict:
         """Execute agent based on its type (SYNCHRONOUS)"""
@@ -269,6 +273,8 @@ class AgentScheduler:
 
     def load_schedules_from_db(self):
         """Load agent schedules from database"""
+        conn = None
+        cur = None
         try:
             logger.info("📋 Loading agent schedules from database...")
             conn = self.get_db_connection()
@@ -298,12 +304,20 @@ class AgentScheduler:
                     schedule_id=schedule['id']
                 )
 
-            cur.close()
-            conn.close()
-            logger.info(f"✅ Successfully loaded {len(self.registered_jobs)} jobs into scheduler")
-
         except Exception as e:
             logger.error(f"❌ Error loading schedules: {e}", exc_info=True)
+        finally:
+            if cur:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            logger.info(f"✅ Successfully loaded {len(self.registered_jobs)} jobs into scheduler")
 
     def add_schedule(self, agent_id: str, agent_name: str, frequency_minutes: int, schedule_id: str = None):
         """Add an agent to the scheduler"""
@@ -382,6 +396,8 @@ class AgentScheduler:
 # Create execution tracking table if needed
 def create_execution_table(db_config: Dict):
     """Create ai_agent_executions table if it doesn't exist"""
+    conn = None
+    cur = None
     try:
         conn = psycopg2.connect(**db_config)
         cur = conn.cursor()
@@ -394,13 +410,21 @@ def create_execution_table(db_config: Dict):
         """)
 
         conn.commit()
-        cur.close()
-        conn.close()
-
         logger.info("Execution tracking table verified/created")
 
     except Exception as e:
         logger.error(f"Error creating execution table: {e}")
+    finally:
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 # Example usage

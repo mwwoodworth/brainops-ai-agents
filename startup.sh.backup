@@ -14,7 +14,7 @@ export PYTHONUNBUFFERED=1
 export DB_HOST=${DB_HOST:-"aws-0-us-east-2.pooler.supabase.com"}
 export DB_NAME=${DB_NAME:-"postgres"}
 export DB_USER=${DB_USER:-"postgres.yomagoqdmxszqtdwuhab"}
-export DB_PASSWORD=${DB_PASSWORD:-"Brain0ps2O2S"}
+export DB_PASSWORD=${DB_PASSWORD:-"<DB_PASSWORD_REDACTED>"}
 export DB_PORT=${DB_PORT:-5432}
 
 echo "✅ Environment configured"

@@ -12,7 +12,7 @@
 
 1) Hardcoded secrets (HIGH)
 - `api/gumroad_webhook.py`: Default values include real-looking keys (`CONVERTKIT_API_KEY`, `CONVERTKIT_API_SECRET`, `CONVERTKIT_FORM_ID`) and placeholders for Stripe/SendGrid. These load even in production if env vars are absent.
-- `self_healing_recovery.py`: Database defaults embed Supabase host/user and password (`Brain0ps2O2S`).
+- `self_healing_recovery.py`: Database defaults embed Supabase host/user and password (`<DB_PASSWORD_REDACTED>
 - Test artifacts (`test_everything.py`, `remove_secrets.py`) still contain the same database password, increasing leakage risk.
 Recommendation: Remove defaults; require env vars; rotate exposed credentials immediately across ConvertKit/DB/related systems; scrub test artifacts.
 
