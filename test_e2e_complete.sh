@@ -175,7 +175,7 @@ echo ""
 
 # Test 16: Can query agents from database
 echo -n "Testing: Database Query (agents table)... "
-AGENT_COUNT=$(PGPASSWORD=REDACTED_SUPABASE_DB_PASSWORD psql -h aws-0-us-east-2.pooler.supabase.com -U postgres.yomagoqdmxszqtdwuhab -d postgres -t -c "SELECT COUNT(*) FROM agents WHERE enabled = true;" 2>/dev/null | tr -d ' ')
+AGENT_COUNT=$(PGPASSWORD=<DB_PASSWORD_REDACTED> psql -h aws-0-us-east-2.pooler.supabase.com -U postgres.yomagoqdmxszqtdwuhab -d postgres -t -c "SELECT COUNT(*) FROM agents WHERE enabled = true;" 2>/dev/null | tr -d ' ')
 if [ "$AGENT_COUNT" = "59" ]; then
     echo "✅ PASS (59 enabled agents)"
     ((PASSED++))
@@ -186,7 +186,7 @@ fi
 
 # Test 17: Verify database tables exist
 echo -n "Testing: Critical tables exist... "
-TABLE_COUNT=$(PGPASSWORD=REDACTED_SUPABASE_DB_PASSWORD psql -h aws-0-us-east-2.pooler.supabase.com -U postgres.yomagoqdmxszqtdwuhab -d postgres -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_name IN ('agents', 'agent_executions', 'unified_memory');" 2>/dev/null | tr -d ' ')
+TABLE_COUNT=$(PGPASSWORD=<DB_PASSWORD_REDACTED> psql -h aws-0-us-east-2.pooler.supabase.com -U postgres.yomagoqdmxszqtdwuhab -d postgres -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_name IN ('agents', 'agent_executions', 'unified_memory');" 2>/dev/null | tr -d ' ')
 if [ "$TABLE_COUNT" -ge "2" ]; then
     echo "✅ PASS ($TABLE_COUNT critical tables found)"
     ((PASSED++))

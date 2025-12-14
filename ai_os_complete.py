@@ -38,12 +38,12 @@ DB_CONFIG = {
     "host": os.environ.get("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
     "database": os.environ.get("DB_NAME", "postgres"),
     "user": os.environ.get("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.environ.get("DB_PASSWORD", "REDACTED_SUPABASE_DB_PASSWORD"),
+    "password": os.environ.get("DB_PASSWORD", "<DB_PASSWORD_REDACTED>"),
     "port": int(os.environ.get("DB_PORT", "5432"))
 }
 
 SYSTEM_USER_ID = os.environ.get("SYSTEM_USER_ID", "44491c1c-0e28-4aa1-ad33-552d1386769c")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://default:NBUl3B1zlWXPY6MXuMFLAwSrAcNphvnJ@redis-14008.c289.us-west-1-2.ec2.redns.redis-cloud.com:14008")
 
 # Initialize connections

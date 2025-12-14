@@ -17,12 +17,13 @@ import asyncio
 from decimal import Decimal
 
 # Configuration
-CONVERTKIT_API_KEY = os.getenv("CONVERTKIT_API_KEY", "kit_fcbff1cd724ae283842f9e0d431a88c7")
-CONVERTKIT_API_SECRET = os.getenv("CONVERTKIT_API_SECRET", "Z4IgZp7EMxKtjdHwPjoPUev3p0Y2cmEFKOBar8UpFAA")
-CONVERTKIT_FORM_ID = os.getenv("CONVERTKIT_FORM_ID", "8419539")
+CONVERTKIT_API_KEY = os.getenv("CONVERTKIT_API_KEY", "")
+CONVERTKIT_API_SECRET = os.getenv("CONVERTKIT_API_SECRET", "")
+CONVERTKIT_FORM_ID = os.getenv("CONVERTKIT_FORM_ID", "")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 GUMROAD_WEBHOOK_SECRET = os.getenv("GUMROAD_WEBHOOK_SECRET", "")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production").strip().lower()
 
 logger = logging.getLogger(__name__)
 
@@ -232,18 +233,28 @@ async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundT
         # Get raw body for signature verification
         body = await request.body()
 
-        # Verify webhook signature if secret is configured
+        # Webhook signature verification is mandatory in production.
+        signature_required = ENVIRONMENT == "production"
+        if signature_required and not GUMROAD_WEBHOOK_SECRET:
+            logger.critical("GUMROAD_WEBHOOK_SECRET is not set; refusing to process webhooks in production.")
+            raise HTTPException(status_code=503, detail="Webhook not configured")
+
         if GUMROAD_WEBHOOK_SECRET:
             signature = request.headers.get("x-gumroad-signature")
+            if not signature:
+                raise HTTPException(status_code=401, detail="Missing signature")
+
             expected_sig = hmac.new(
                 GUMROAD_WEBHOOK_SECRET.encode(),
                 body,
                 hashlib.sha256
             ).hexdigest()
 
-            if signature != expected_sig:
-                logger.error("Invalid webhook signature")
+            if not hmac.compare_digest(signature, expected_sig):
+                logger.warning("Invalid webhook signature")
                 raise HTTPException(status_code=401, detail="Invalid signature")
+        elif signature_required:
+            raise HTTPException(status_code=503, detail="Webhook not configured")
 
         # Parse webhook data
         data = await request.json()
@@ -262,7 +273,12 @@ async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundT
         first_name = name_parts[0] if name_parts else ""
         last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
 
-        logger.info(f"Processing Gumroad sale: {sale.sale_id} for {sale.email} - Product: {product_code}")
+        redacted_email = (
+            f"{sale.email[:1]}***@{sale.email.split('@')[-1]}"
+            if sale.email and "@" in sale.email
+            else "<missing>"
+        )
+        logger.info(f"Processing Gumroad sale: {sale.sale_id} for {redacted_email} - Product: {product_code}")
 
         # Process sale asynchronously
         background_tasks.add_task(
@@ -275,9 +291,11 @@ async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundT
 
         return {"success": True, "sale_id": sale.sale_id, "message": "Sale processing initiated"}
 
-    except Exception as e:
-        logger.error(f"Webhook processing error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Webhook processing error")
+        raise HTTPException(status_code=500, detail="Internal error")
 
 async def process_sale(sale_data: Dict[str, Any], product_code: str, first_name: str, last_name: str):
     """Process sale through all systems"""

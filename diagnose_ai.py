@@ -12,9 +12,8 @@ print("AI DIAGNOSTICS")
 print("="*60)
 
 # Check environment
-openai_key = os.getenv("OPENAI_API_KEY")
-anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-
+openai_key = os.getenv("OPENAI_API_KEY", "")
+anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
 print("\n1. LOCAL ENVIRONMENT:")
 print(f"   OPENAI_API_KEY: {'✅ Set' if openai_key else '❌ Not set'}")
 print(f"   ANTHROPIC_API_KEY: {'✅ Set' if anthropic_key else '❌ Not set'}")

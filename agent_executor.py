@@ -75,7 +75,6 @@ DB_CONFIG = {
 BACKEND_URL = os.getenv("BACKEND_URL", "https://brainops-backend-prod.onrender.com")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-
 # Initialize AI clients
 if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY

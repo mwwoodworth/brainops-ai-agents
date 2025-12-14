@@ -29,7 +29,7 @@ class PoolConfig:
     min_size: int = 1  # Reduced to prevent pool exhaustion
     max_size: int = 3  # Supabase free tier has ~10-20 max connections total
     command_timeout: int = 30
-    connect_timeout: float = 10.0  # Connection timeout in seconds
+    connect_timeout: float = 30.0  # Increased to prevent timeouts on slow networks
     max_inactive_connection_lifetime: float = 60.0  # Recycle idle connections after 60s
     ssl: bool = True  # Supabase requires TLS; allow override for local/dev
     ssl_verify: bool = False  # Default to disabled verification to avoid self-signed errors in managed DBs
@@ -306,7 +306,7 @@ class InMemoryDatabasePool(BasePool):
     async def fetch(self, query: str, *args: Any, timeout: Optional[float] = None) -> List[DbRecord]:
         sql = query.lower().strip()
 
-        if "from agents" in sql:
+        if "from agents" in sql or "from ai_agents" in sql:
             return self._fetch_agents(sql, list(args))
 
         if "information_schema.tables" in sql:

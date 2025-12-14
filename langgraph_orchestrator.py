@@ -105,7 +105,7 @@ class LangGraphOrchestrator:
                 client=None,  # Will use direct connection
                 table_name="ai_memory_vectors",
                 embedding=self.embeddings,
-                connection_string=f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+                connection_string=f"postgresql://{DB_CONFIG['user']}:<DB_PASSWORD_REDACTED>@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
             )
             return vector_store
         except Exception as e:

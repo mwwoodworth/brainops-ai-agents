@@ -51,7 +51,7 @@ class DatabaseConfig:
                 "Database configuration is incomplete. "
                 "Ensure DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD are set."
             )
-        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+        return f"postgresql://{self.user}:<DB_PASSWORD_REDACTED>@{self.host}:{self.port}/{self.database}"
 
     def to_dict(self) -> dict:
         """Get config as dictionary (without password for logging)"""
