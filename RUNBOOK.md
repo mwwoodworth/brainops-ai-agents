@@ -7,6 +7,25 @@ Production: Render background worker (start command `python main.py`).
 - AI keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` (as features require).
 - Routing/config: `AGENT_CONFIG` or per-agent configs in env/JSON as defined in `ai_config.py`.
 - Optional: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` if writing to Supabase tables.
+- Auth (recommended in production):
+  - `AUTH_REQUIRED=true` (default)
+  - `API_KEYS=key1,key2,...` (required when `AUTH_REQUIRED` is enabled)
+  - Optional non-prod test key: `ALLOW_TEST_KEY=true` + `AI_AGENTS_TEST_KEY=...`
+
+## API Surface
+- `GET /health` – lightweight health check
+- `POST /ai/analyze` – agent invocation for frontends (requires API key when auth enabled)
+- `POST /ai/orchestrate` – LangGraph orchestration (requires API key when auth enabled)
+
+### /ai/analyze payload
+```json
+{
+  "agent": "ContractGenerator",
+  "action": "generate",
+  "data": { "tenant_id": "...", "customer_id": "...", "job_data": {} },
+  "context": { "source": "weathercraft-erp" }
+}
+```
 
 ## Install & Run (local)
 ```bash

@@ -1970,7 +1970,7 @@ class AureaCommandRequest(BaseModel):
     command_text: str
 
 
-@app.post("/ai/orchestrate")
+@app.post("/ai/orchestrate", dependencies=SECURED_DEPENDENCIES)
 async def orchestrate_complex_workflow(
     request: Request,
     task_description: str,
@@ -2010,7 +2010,7 @@ class AIAnalyzeRequest(BaseModel):
     context: Dict[str, Any] = {}
 
 
-@app.post("/ai/analyze")
+@app.post("/ai/analyze", dependencies=SECURED_DEPENDENCIES)
 async def ai_analyze(
     request: Request,
     payload: AIAnalyzeRequest = Body(...)
