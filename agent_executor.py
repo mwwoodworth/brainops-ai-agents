@@ -1785,54 +1785,167 @@ class ContractGeneratorAgent(BaseAgent):
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """Generate contract"""
         contract_type = task.get('type', 'service')
+        tenant_id = task.get('tenant_id') or task.get('tenantId')
         customer_id = task.get('customer_id')
+        customer_data = task.get('customer') or {}
+        job_data = task.get('job_data') or {}
 
-        if not customer_id:
-            return {"status": "error", "message": "customer_id required"}
+        customer = None
 
         try:
-            # Get customer details
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM customers WHERE id = %s", (customer_id,))
-            customer = cursor.fetchone()
-            cursor.close()
-            conn.close()
+            if customer_id:
+                conn = self.get_db_connection()
+                cursor = conn.cursor()
+                if tenant_id:
+                    cursor.execute("SELECT * FROM customers WHERE id = %s AND tenant_id = %s", (customer_id, tenant_id))
+                else:
+                    cursor.execute("SELECT * FROM customers WHERE id = %s", (customer_id,))
+                customer = cursor.fetchone()
+                cursor.close()
+                conn.close()
 
-            if not customer:
-                return {"status": "error", "message": "Customer not found"}
-
-            # Generate contract using AI
-            if OPENAI_API_KEY:
-                prompt = f"""Generate a professional {contract_type} contract for:
-                Customer: {customer['name']}
-                Service: Roofing
-                Include standard terms and conditions."""
-
-                response = openai.chat.completions.create(
-                    model="gpt-4",
-                    messages=[
-                        {"role": "system", "content": "You are a legal contract generator."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=1000
-                )
-
-                contract_text = response.choices[0].message.content
+                if not customer:
+                    return {"status": "error", "message": "Customer not found"}
             else:
-                # Fallback template
+                customer_email = customer_data.get('email') if isinstance(customer_data, dict) else None
+
+                if customer_email and tenant_id:
+                    conn = self.get_db_connection()
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT * FROM customers WHERE lower(email) = lower(%s) AND tenant_id = %s ORDER BY created_at DESC LIMIT 1",
+                        (customer_email, tenant_id),
+                    )
+                    customer = cursor.fetchone()
+                    cursor.close()
+                    conn.close()
+
+                if not customer:
+                    if not isinstance(customer_data, dict) or not customer_data:
+                        return {"status": "error", "message": "customer_id or customer required"}
+
+                    customer = {
+                        "id": None,
+                        "name": customer_data.get('name') or 'Valued Customer',
+                        "email": customer_data.get('email'),
+                        "address": customer_data.get('address'),
+                    }
+
+            customer_name = customer.get('name') or 'Valued Customer'
+            customer_email = customer.get('email')
+            customer_address = customer.get('address')
+
+            project_name = job_data.get('project_name') if isinstance(job_data, dict) else None
+            project_address = job_data.get('address') if isinstance(job_data, dict) else None
+            description = job_data.get('description') if isinstance(job_data, dict) else None
+            amount = job_data.get('amount') if isinstance(job_data, dict) else None
+            currency = job_data.get('currency') if isinstance(job_data, dict) else None
+            due_date = job_data.get('due_date') if isinstance(job_data, dict) else None
+
+            prompt_parts = [
+                f"Generate a professional {contract_type} contract for a roofing/services company.",
+                "Use clear headings, numbered sections, and standard legal terms.",
+                "",
+                f"Customer Name: {customer_name}",
+            ]
+
+            if customer_email:
+                prompt_parts.append(f"Customer Email: {customer_email}")
+            if customer_address:
+                prompt_parts.append(f"Customer/Service Address: {customer_address}")
+
+            if project_name:
+                prompt_parts.append(f"Project Name: {project_name}")
+            if project_address and project_address != customer_address:
+                prompt_parts.append(f"Project Address: {project_address}")
+            if due_date:
+                prompt_parts.append(f"Requested Due Date: {due_date}")
+            if description:
+                prompt_parts.append(f"Scope/Description: {description}")
+            if amount is not None:
+                prompt_parts.append(f"Bid/Estimated Amount: {amount}{(' ' + currency) if currency else ''}")
+
+            prompt_parts.extend([
+                "",
+                "Include: scope, payment terms, change orders, schedule/timeline, warranties, permits, safety, cancellation, dispute resolution, signatures.",
+                "Do not invent specific licensing numbers or guarantees; use placeholders where appropriate.",
+            ])
+
+            prompt = "\n".join(prompt_parts)
+
+            contract_text = None
+            ai_generated = False
+
+            if OPENAI_API_KEY:
+                try:
+                    response = openai.chat.completions.create(
+                        model="gpt-4",
+                        messages=[
+                            {"role": "system", "content": "You are a legal contract generator."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        max_tokens=1200
+                    )
+                    contract_text = (response.choices[0].message.content or '').strip()
+                    ai_generated = True
+                except Exception as e:
+                    logger.error(f"AI contract generation failed, falling back to template: {e}")
+
+            if not contract_text:
                 contract_text = f"""SERVICE CONTRACT
 
-Customer: {customer['name']}
-Type: {contract_type}
+Customer: {customer_name}
+{f"Email: {customer_email}" if customer_email else ""}
+{f"Service Address: {customer_address}" if customer_address else ""}
+
+Contract Type: {contract_type}
 Date: {datetime.now().strftime('%Y-%m-%d')}
 
-Standard terms and conditions apply."""
+1. Scope of Work
+{description or "To be defined based on inspection and approved proposal."}
+
+2. Project Details
+{f"Project Name: {project_name}" if project_name else ""}
+{f"Project Address: {project_address}" if project_address else ""}
+{f"Requested Due Date: {due_date}" if due_date else ""}
+
+3. Price and Payment Terms
+{f"Estimated Amount: {amount}{(' ' + currency) if currency else ''}" if amount is not None else "Pricing to be defined in the approved estimate/proposal."}
+
+4. Change Orders
+Any changes to scope must be documented and approved in writing prior to work.
+
+5. Schedule and Access
+Work schedule is subject to weather, material availability, and site access.
+
+6. Warranties
+Manufacturer and workmanship warranties apply as specified in the final agreement documents.
+
+7. Permits and Compliance
+Contractor will obtain required permits where applicable unless otherwise specified.
+
+8. Safety and Site Conditions
+Owner agrees to provide reasonable access and disclose known hazards.
+
+9. Cancellation
+Cancellation terms apply per applicable laws and signed agreement addenda.
+
+10. Dispute Resolution
+Disputes will be resolved in good faith; venue and process per signed terms.
+
+Signatures:
+
+Customer: __________________________  Date: ____________
+Contractor: _________________________ Date: ____________
+"""
+                ai_generated = False
 
             return {
                 "status": "completed",
                 "contract": contract_text,
-                "customer": customer['name']
+                "customer": customer_name,
+                "customer_id": customer.get('id'),
+                "ai_generated": ai_generated,
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
