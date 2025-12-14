@@ -164,7 +164,7 @@ serve(async (req) => {
           throw new Error(`Failed to fetch customers: ${customerResponse.error.message}`)
         }
 
-        const customers = customerResponse.data ?? []
+        const customers: CustomerRow[] = customerResponse.data ?? []
 
         const interactionsQuery = supabase
           .from<CustomerInteractionRow>('ai_customer_interactions')
@@ -181,15 +181,19 @@ serve(async (req) => {
           throw new Error(`Failed to fetch interactions: ${interactionsResponse.error.message}`)
         }
 
-        const interactions = interactionsResponse.data ?? []
-        const sentimentValues = interactions.map((interaction) => safeNumber(interaction.sentiment_score))
+        const interactions: CustomerInteractionRow[] = interactionsResponse.data ?? []
+        const sentimentValues = interactions.map((interaction: CustomerInteractionRow) =>
+          safeNumber(interaction.sentiment_score)
+        )
         const avgSentiment = average(sentimentValues)
 
         analysis = {
           total_customers: customers.length,
           avg_sentiment: avgSentiment.toFixed(2),
-          top_intents: getTopItems(interactions.map((interaction) => interaction.intent)),
-          interaction_types: getTopItems(interactions.map((interaction) => interaction.interaction_type)),
+          top_intents: getTopItems(interactions.map((interaction: CustomerInteractionRow) => interaction.intent)),
+          interaction_types: getTopItems(
+            interactions.map((interaction: CustomerInteractionRow) => interaction.interaction_type),
+          ),
         }
 
         if (avgSentiment > 0.5) {
@@ -210,8 +214,8 @@ serve(async (req) => {
           throw new Error(`Failed to fetch revenue data: ${revenueResponse.error.message}`)
         }
 
-        const revenueData = revenueResponse.data ?? []
-        const totalRevenue = revenueData.reduce((acc, record) => acc + safeNumber(record.amount), 0)
+        const revenueData: RevenueRow[] = revenueResponse.data ?? []
+        const totalRevenue = revenueData.reduce((acc: number, record: RevenueRow) => acc + safeNumber(record.amount), 0)
         const avgDealSize = revenueData.length > 0 ? totalRevenue / revenueData.length : 0
 
         analysis = {
@@ -241,8 +245,8 @@ serve(async (req) => {
           throw new Error(`Failed to fetch model performance: ${modelResponse.error.message}`)
         }
 
-        const models = modelResponse.data ?? []
-        const accuracyValues = models.map((model) => safeNumber(model.accuracy))
+        const models: ModelRow[] = modelResponse.data ?? []
+        const accuracyValues = models.map((model: ModelRow) => safeNumber(model.accuracy))
         const avgAccuracy = average(accuracyValues)
 
         const bestModel = models.reduce<ModelRow | null>((best, current) => {

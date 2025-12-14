@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": false,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "lib": ["ES2022", "DOM"],
+    "types": [],
+    "typeRoots": ["./types"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["supabase/functions/**/*.ts", "types/**/*.d.ts"]
+}
