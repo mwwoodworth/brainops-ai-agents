@@ -10,6 +10,7 @@ import logging
 import requests
 import psycopg2
 import uuid
+import asyncio
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import subprocess
@@ -409,11 +410,29 @@ class AgentExecutor:
                 return result
 
         try:
-            if agent_name in self.agents:
-                result = await self.agents[agent_name].execute(task)
-            else:
-                # Fallback to generic execution
-                result = await self._generic_execute(agent_name, task)
+            # RETRY LOGIC for Agent Execution
+            RETRY_ATTEMPTS = 3
+            last_exception = None
+            
+            for attempt in range(RETRY_ATTEMPTS):
+                try:
+                    if agent_name in self.agents:
+                        result = await self.agents[agent_name].execute(task)
+                    else:
+                        # Fallback to generic execution
+                        result = await self._generic_execute(agent_name, task)
+                    
+                    # If successful, break the retry loop
+                    break
+                except Exception as e:
+                    last_exception = e
+                    if attempt < RETRY_ATTEMPTS - 1:
+                        wait_time = 2 ** attempt
+                        logger.warning(f"Agent {agent_name} execution failed (attempt {attempt + 1}/{RETRY_ATTEMPTS}). Retrying in {wait_time}s. Error: {e}")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"Agent {agent_name} execution failed after {RETRY_ATTEMPTS} attempts.")
+                        raise last_exception
 
             # UNIFIED INTEGRATION: Post-execution hooks for success
             if UNIFIED_INTEGRATION_AVAILABLE and unified_ctx:
