@@ -19,7 +19,7 @@ DB_CONFIG = {
     'host': 'aws-0-us-east-2.pooler.supabase.com',
     'database': 'postgres',
     'user': 'postgres.yomagoqdmxszqtdwuhab',
-    'password': 'REDACTED_SUPABASE_DB_PASSWORD',
+    'password': '<DB_PASSWORD_REDACTED>',
     'port': 5432
 }
 

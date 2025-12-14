@@ -888,18 +888,23 @@ async def verify_api_key(
 
 
 # Include routers
-app.include_router(memory_router)
-app.include_router(brain_router)
-app.include_router(memory_coordination_router)
-app.include_router(customer_intelligence_router)
+SECURED_DEPENDENCIES = [Depends(verify_api_key)]
+
+app.include_router(memory_router, dependencies=SECURED_DEPENDENCIES)
+app.include_router(brain_router, dependencies=SECURED_DEPENDENCIES)
+app.include_router(memory_coordination_router, dependencies=SECURED_DEPENDENCIES)
+app.include_router(customer_intelligence_router, dependencies=SECURED_DEPENDENCIES)
+
+# External webhook endpoints must NOT require an internal API key; they validate their own webhook secrets/signatures.
 app.include_router(gumroad_router)
-app.include_router(codebase_graph_router)
-app.include_router(state_sync_router)  # Real-time state synchronization
+
+app.include_router(codebase_graph_router, dependencies=SECURED_DEPENDENCIES)
+app.include_router(state_sync_router, dependencies=SECURED_DEPENDENCIES)  # Real-time state synchronization
 
 # Import and include analytics router
 try:
     from analytics_endpoint import router as analytics_router
-    app.include_router(analytics_router)
+    app.include_router(analytics_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("✅ Analytics endpoint loaded")
 except ImportError as e:
     logger.warning(f"Analytics endpoint not available: {e}")
@@ -1478,7 +1483,7 @@ async def get_executions(
         query = """
             SELECT e.*, a.name as agent_name
             FROM agent_executions e
-            JOIN agents a ON e.agent_id = a.id
+            JOIN ai_agents a ON e.agent_id = a.id
             WHERE 1=1
         """
         params = []

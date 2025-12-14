@@ -18,7 +18,7 @@ import subprocess
 os.environ['DB_HOST'] = 'aws-0-us-east-2.pooler.supabase.com'
 os.environ['DB_NAME'] = 'postgres'
 os.environ['DB_USER'] = 'postgres.yomagoqdmxszqtdwuhab'
-os.environ['DB_PASSWORD'] = 'REDACTED_SUPABASE_DB_PASSWORD'
+os.environ['DB_PASSWORD'] = '<DB_PASSWORD_REDACTED>'
 os.environ['DB_PORT'] = '5432'
 
 print("="*80)
@@ -45,7 +45,7 @@ try:
         host='aws-0-us-east-2.pooler.supabase.com',
         database='postgres',
         user='postgres.yomagoqdmxszqtdwuhab',
-        password='REDACTED_SUPABASE_DB_PASSWORD',
+        password='<DB_PASSWORD_REDACTED>',
         port=5432,
         connect_timeout=10
     )
@@ -240,7 +240,7 @@ if results['database'].get('connection'):
             host='aws-0-us-east-2.pooler.supabase.com',
             database='postgres',
             user='postgres.yomagoqdmxszqtdwuhab',
-            password='REDACTED_SUPABASE_DB_PASSWORD',
+            password='<DB_PASSWORD_REDACTED>',
             port=5432
         )
         cursor = conn.cursor(cursor_factory=RealDictCursor)

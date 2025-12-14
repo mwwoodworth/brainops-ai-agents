@@ -29,7 +29,7 @@ Click "Environment" and add these variables:
 DB_HOST=aws-0-us-east-2.pooler.supabase.com
 DB_NAME=postgres
 DB_USER=postgres.yomagoqdmxszqtdwuhab
-DB_PASSWORD=REDACTED_SUPABASE_DB_PASSWORD
+DB_PASSWORD=<DB_PASSWORD_REDACTED>
 DB_PORT=5432
 SYSTEM_USER_ID=44491c1c-0e28-4aa1-ad33-552d1386769c
 ```

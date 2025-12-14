@@ -21,7 +21,7 @@ Successfully implemented REAL AI throughout the BrainOps system, replacing all f
 - **Host**: aws-0-us-east-2.pooler.supabase.com
 - **Database**: postgres
 - **User**: postgres.yomagoqdmxszqtdwuhab
-- **Password**: REDACTED_SUPABASE_DB_PASSWORD (stored securely in env vars)
+- **Password**: <DB_PASSWORD_REDACTED> (stored securely in env vars)
 
 ---
 
@@ -164,16 +164,14 @@ Successfully implemented REAL AI throughout the BrainOps system, replacing all f
 
 ```bash
 # OpenAI (Required for GPT-4)
-OPENAI_API_KEY=sk-proj-[your-key]
-
+OPENAI_API_KEY=<REDACTED>
 # Anthropic (Required for Claude)
-ANTHROPIC_API_KEY=sk-ant-REDACTED[your-key]
-
+ANTHROPIC_API_KEY=<REDACTED>
 # Database (Required)
 DB_HOST=aws-0-us-east-2.pooler.supabase.com
 DB_NAME=postgres
 DB_USER=postgres.yomagoqdmxszqtdwuhab
-DB_PASSWORD=REDACTED_SUPABASE_DB_PASSWORD
+DB_PASSWORD=<DB_PASSWORD_REDACTED>
 DB_PORT=5432
 
 # Hugging Face (Optional backup)

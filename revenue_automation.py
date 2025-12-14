@@ -43,8 +43,7 @@ DB_CONFIG = {
 
 # API Keys from environment
 stripe.api_key = os.getenv("STRIPE_API_KEY")
-SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
-
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 # Payment links (already created in Stripe)
 PAYMENT_LINKS = {
     "basic": "https://buy.stripe.com/7sY4gz3EW5ZnfQPc6S2go04",
