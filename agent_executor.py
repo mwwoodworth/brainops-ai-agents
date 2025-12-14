@@ -359,7 +359,14 @@ class AgentExecutor:
 
     async def execute(self, agent_name: str, task: Dict[str, Any]) -> Dict[str, Any]:
         """Execute task with specific agent - NOW WITH UNIFIED SYSTEM INTEGRATION"""
-        task = task or {}
+        task = dict(task or {})
+        # Support clients (e.g. /ai/analyze) that pass parameters under task["data"].
+        # Flatten missing keys into the top-level task for compatibility with existing agents.
+        task_data = task.get("data")
+        if isinstance(task_data, dict):
+            for key, value in task_data.items():
+                if key not in task:
+                    task[key] = value
         task_type = task.get('action', task.get('type', 'generic'))
         unified_ctx = None
 
