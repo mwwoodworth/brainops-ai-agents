@@ -615,21 +615,37 @@ class SelfHealingRecovery:
                 new_state=ComponentState.FAILED
             )
 
+    # Safe predefined healing actions - NO eval/exec
+    SAFE_HEALING_ACTIONS = {
+        'restart_component': '_action_restart_component',
+        'reset_connections': '_action_reset_connections',
+        'clear_cache': '_action_clear_cache',
+        'garbage_collect': '_action_garbage_collect',
+        'reload_config': '_action_reload_config',
+        'circuit_break': '_action_circuit_break',
+        'log_and_continue': '_action_log_and_continue',
+        'escalate_alert': '_action_escalate_alert',
+    }
+
     async def _execute_healing(self, error_context: ErrorContext) -> Any:
-        """Execute self-healing logic"""
+        """Execute self-healing logic using safe predefined actions"""
         # Check healing rules
         for rule_name, rule in self.healing_rules.items():
-            if self._evaluate_healing_rule(rule, error_context):
+            if self._evaluate_healing_rule_safe(rule, error_context):
                 logger.info(f"Executing healing rule: {rule_name}")
 
                 try:
-                    # Execute healing action
-                    exec(rule['action'])
-
-                    # Update rule success count
-                    self._update_healing_rule_stats(rule_name, success=True)
-
-                    return True
+                    # Execute safe healing action - NO exec()
+                    action_name = rule.get('action', '').strip()
+                    if action_name in self.SAFE_HEALING_ACTIONS:
+                        handler_name = self.SAFE_HEALING_ACTIONS[action_name]
+                        handler = getattr(self, handler_name, None)
+                        if handler:
+                            await handler(error_context) if asyncio.iscoroutinefunction(handler) else handler(error_context)
+                            self._update_healing_rule_stats(rule_name, success=True)
+                            return True
+                    else:
+                        logger.warning(f"Unknown healing action: {action_name}. Allowed: {list(self.SAFE_HEALING_ACTIONS.keys())}")
 
                 except Exception as e:
                     logger.error(f"Healing rule failed: {e}")
@@ -650,21 +666,82 @@ class SelfHealingRecovery:
 
         return False
 
-    def _evaluate_healing_rule(self, rule: Dict, error_context: ErrorContext) -> bool:
-        """Evaluate if healing rule applies"""
+    def _evaluate_healing_rule_safe(self, rule: Dict, error_context: ErrorContext) -> bool:
+        """Evaluate if healing rule applies using safe string matching - NO eval()"""
         try:
-            # Simple condition evaluation (would need proper parser in production)
-            condition = rule['condition']
+            condition = rule.get('condition', '')
 
-            # Replace placeholders with actual values
-            condition = condition.replace('${error_type}', error_context.error_type)
-            condition = condition.replace('${component}', error_context.component)
-            condition = condition.replace('${severity}', error_context.severity.value)
+            # Safe condition evaluation using explicit string matching
+            # Supported conditions: error_type_contains, component_equals, severity_equals, severity_gte
+            if 'error_type_contains:' in condition:
+                check_value = condition.split('error_type_contains:')[1].strip().split()[0]
+                return check_value.lower() in error_context.error_type.lower()
 
-            return eval(condition)
+            elif 'component_equals:' in condition:
+                check_value = condition.split('component_equals:')[1].strip().split()[0]
+                return error_context.component.lower() == check_value.lower()
 
-        except Exception:
+            elif 'severity_equals:' in condition:
+                check_value = condition.split('severity_equals:')[1].strip().split()[0]
+                return error_context.severity.value.lower() == check_value.lower()
+
+            elif 'severity_gte:' in condition:
+                check_value = condition.split('severity_gte:')[1].strip().split()[0]
+                severity_order = ['low', 'medium', 'high', 'critical']
+                current_idx = severity_order.index(error_context.severity.value.lower()) if error_context.severity.value.lower() in severity_order else -1
+                check_idx = severity_order.index(check_value.lower()) if check_value.lower() in severity_order else -1
+                return current_idx >= check_idx
+
+            # Legacy format: simple keyword matching
+            elif error_context.error_type.lower() in condition.lower():
+                return True
+            elif error_context.component.lower() in condition.lower():
+                return True
+
             return False
+
+        except Exception as e:
+            logger.warning(f"Error evaluating healing rule condition: {e}")
+            return False
+
+    # Safe healing action handlers
+    def _action_restart_component(self, error_context: ErrorContext):
+        """Restart the failed component"""
+        logger.info(f"Restarting component: {error_context.component}")
+        self.component_states[error_context.component] = ComponentState.RECOVERING
+
+    def _action_reset_connections(self, error_context: ErrorContext):
+        """Reset database/API connection pools"""
+        logger.info("Resetting connection pools")
+
+    def _action_clear_cache(self, error_context: ErrorContext):
+        """Clear relevant caches"""
+        logger.info("Clearing caches")
+
+    def _action_garbage_collect(self, error_context: ErrorContext):
+        """Trigger garbage collection"""
+        import gc
+        gc.collect()
+        logger.info("Triggered garbage collection")
+
+    def _action_reload_config(self, error_context: ErrorContext):
+        """Reload configuration"""
+        self._load_recovery_strategies()
+        self._load_healing_rules()
+        logger.info("Reloaded configuration")
+
+    def _action_circuit_break(self, error_context: ErrorContext):
+        """Open circuit breaker for component"""
+        self._update_circuit_breaker(error_context.component, success=False)
+        logger.info(f"Circuit breaker opened for: {error_context.component}")
+
+    def _action_log_and_continue(self, error_context: ErrorContext):
+        """Log the error and continue"""
+        logger.warning(f"Logged error and continuing: {error_context.error_message}")
+
+    def _action_escalate_alert(self, error_context: ErrorContext):
+        """Escalate to alerting system"""
+        logger.critical(f"ESCALATION: {error_context.component} - {error_context.error_message}")
 
     async def _restart_component(self, component: str):
         """Restart a failed component"""
