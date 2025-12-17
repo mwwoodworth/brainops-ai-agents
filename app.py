@@ -38,6 +38,7 @@ from api.customer_intelligence import router as customer_intelligence_router
 from api.gumroad_webhook import router as gumroad_router
 from api.codebase_graph import router as codebase_graph_router
 from api.state_sync import router as state_sync_router
+from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
 from observability import RequestMetrics, TTLCache
 
@@ -897,6 +898,7 @@ app.include_router(customer_intelligence_router, dependencies=SECURED_DEPENDENCI
 
 # External webhook endpoints must NOT require an internal API key; they validate their own webhook secrets/signatures.
 app.include_router(gumroad_router)
+app.include_router(erp_event_router)
 
 app.include_router(codebase_graph_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(state_sync_router, dependencies=SECURED_DEPENDENCIES)  # Real-time state synchronization
