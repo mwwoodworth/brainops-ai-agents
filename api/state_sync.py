@@ -19,9 +19,20 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from typing import Optional, List
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 
 router = APIRouter(prefix="/api/state-sync", tags=["state-sync"])
+
+# Environment-aware paths (same pattern as realtime_state_sync.py)
+_IS_PRODUCTION = os.getenv("RENDER") is not None or not Path("/home/matt-woodworth/dev").exists()
+
+if _IS_PRODUCTION:
+    _CHANGE_LOG_PATH = Path("/tmp/AI_CHANGE_LOG.json")
+    _STATE_PATH = Path("/tmp/AI_SYSTEM_STATE.json")
+else:
+    _CHANGE_LOG_PATH = Path("/home/matt-woodworth/dev/AI_CHANGE_LOG.json")
+    _STATE_PATH = Path("/home/matt-woodworth/dev/AI_SYSTEM_STATE.json")
 
 
 # ============== HEALTH & STATUS ==============
@@ -101,13 +112,11 @@ async def get_component(component_name: str):
 @router.get("/changes")
 async def get_change_history(limit: int = 50):
     """Get recent change history"""
-    change_log_path = Path("/home/matt-woodworth/dev/AI_CHANGE_LOG.json")
-
-    if not change_log_path.exists():
+    if not _CHANGE_LOG_PATH.exists():
         return {"changes": [], "message": "No change log found"}
 
     try:
-        with open(change_log_path) as f:
+        with open(_CHANGE_LOG_PATH) as f:
             changes = json.load(f)
 
         # Return most recent first
@@ -123,13 +132,11 @@ async def get_change_history(limit: int = 50):
 @router.get("/changes/by-codebase/{codebase}")
 async def get_changes_by_codebase(codebase: str, limit: int = 20):
     """Get changes for a specific codebase"""
-    change_log_path = Path("/home/matt-woodworth/dev/AI_CHANGE_LOG.json")
-
-    if not change_log_path.exists():
+    if not _CHANGE_LOG_PATH.exists():
         return {"changes": [], "message": "No change log found"}
 
     try:
-        with open(change_log_path) as f:
+        with open(_CHANGE_LOG_PATH) as f:
             all_changes = json.load(f)
 
         filtered = [c for c in all_changes if c.get("codebase") == codebase]
@@ -200,13 +207,11 @@ async def get_ai_context():
 @router.get("/context/raw", response_class=JSONResponse)
 async def get_raw_state():
     """Get raw system state JSON"""
-    state_path = Path("/home/matt-woodworth/dev/AI_SYSTEM_STATE.json")
-
-    if not state_path.exists():
+    if not _STATE_PATH.exists():
         raise HTTPException(status_code=404, detail="State file not found")
 
     try:
-        with open(state_path) as f:
+        with open(_STATE_PATH) as f:
             return json.load(f)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
