@@ -64,12 +64,8 @@ class AdvancedAIProviders:
     def search_with_perplexity(self, query: str, citations: bool = True) -> Optional[Dict]:
         """Search using Perplexity AI (real-time web access)"""
         if not self.perplexity_key:
-            # Fallback to mock response if no key
-            return {
-                "answer": f"Based on current web search for '{query}': The latest information suggests strong market opportunities in this area.",
-                "citations": ["https://example.com/source1", "https://example.com/source2"],
-                "confidence": 0.85
-            }
+            logger.warning("Perplexity API key not configured - search unavailable")
+            return None
 
         try:
             headers = {
