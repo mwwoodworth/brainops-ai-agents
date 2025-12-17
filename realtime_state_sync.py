@@ -82,10 +82,20 @@ class RealTimeStateSync:
     4. Maintain a single source of truth
     """
 
-    STATE_FILE = Path("/home/matt-woodworth/dev/AI_SYSTEM_STATE.json")
-    CHANGE_LOG = Path("/home/matt-woodworth/dev/AI_CHANGE_LOG.json")
+    # Use environment-appropriate paths (production uses /tmp or disables file I/O)
+    _IS_PRODUCTION = os.getenv("RENDER") is not None or not Path("/home/matt-woodworth/dev").exists()
+
+    if _IS_PRODUCTION:
+        # In production: use /tmp for ephemeral state (or None to disable)
+        STATE_FILE = Path("/tmp/AI_SYSTEM_STATE.json")
+        CHANGE_LOG = Path("/tmp/AI_CHANGE_LOG.json")
+    else:
+        # Local development: use standard dev paths
+        STATE_FILE = Path("/home/matt-woodworth/dev/AI_SYSTEM_STATE.json")
+        CHANGE_LOG = Path("/home/matt-woodworth/dev/AI_CHANGE_LOG.json")
 
     def __init__(self):
+        self._file_io_enabled = not self._IS_PRODUCTION  # Disable file spam in production
         self.state = self._load_state()
         self.change_handlers: List[callable] = []
         self._initialized = False
@@ -111,7 +121,9 @@ class RealTimeStateSync:
         return SystemState()
 
     def _save_state(self):
-        """Persist state to disk"""
+        """Persist state to disk (skipped in production to avoid file spam)"""
+        if not self._file_io_enabled:
+            return  # Skip file I/O in production
         try:
             # Convert to dict for JSON serialization
             data = {
@@ -130,7 +142,9 @@ class RealTimeStateSync:
             logger.error(f"Failed to save state: {e}")
 
     def _log_change(self, change: StateChange):
-        """Log change for audit trail"""
+        """Log change for audit trail (skipped in production to avoid file spam)"""
+        if not self._file_io_enabled:
+            return  # Skip file I/O in production
         try:
             changes = []
             if self.CHANGE_LOG.exists():
