@@ -2511,8 +2511,20 @@ async def api_v1_erp_analyze(
                 except Exception as exc:
                     logger.warning("AI commentary failed for job %s: %s", data.get("id"), exc)
 
-            change_prob = random.random() * 100.0
-            estimated_impact = random.randint(1000, 6000)
+            # Calculate change probability based on actual job data instead of random
+            # Higher probability if: early in project, high value job, complex roof type
+            base_change_prob = 25.0  # Base 25% chance
+            if completion_pct < 25:
+                base_change_prob += 15.0  # Early stage = higher change likelihood
+            if data.get("total_amount", 0) > 15000:
+                base_change_prob += 10.0  # High value = more change orders
+            if risk_level in ("high", "critical"):
+                base_change_prob += 15.0  # At-risk jobs have more changes
+            change_prob = min(base_change_prob, 85.0)  # Cap at 85%
+
+            # Estimate impact based on job value (typically 5-20% of job value)
+            job_value = float(data.get("total_amount", 10000) or 10000)
+            estimated_impact = int(job_value * (0.05 + (change_prob / 100) * 0.15))
 
             jobs_intel.append(
                 {
