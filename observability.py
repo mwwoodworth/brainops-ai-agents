@@ -33,9 +33,7 @@ class RequestMetrics:
     def __init__(self, window: int = 500) -> None:
         self._samples: Deque[RequestSample] = deque(maxlen=window)
         self._lock = asyncio.Lock()
-        self._counters = Counter()
-        self._error_count = 0
-        self._total_duration_ms = 0.0
+        # Note: counters computed from samples to avoid memory leaks
 
     async def record(self, path: str, method: str, status: int, duration_ms: float) -> None:
         """Record a request/response observation."""
@@ -48,17 +46,14 @@ class RequestMetrics:
         )
         async with self._lock:
             self._samples.append(sample)
-            self._counters[(method, path)] += 1
-            self._total_duration_ms += duration_ms
-            if status >= 500:
-                self._error_count += 1
 
     def snapshot(self) -> Dict[str, Any]:
         """Return aggregated metrics over the rolling window."""
         samples = list(self._samples)
         durations = [s.duration_ms for s in samples]
         count = len(samples)
-        errors = self._error_count
+        # Compute errors from current window only (fixes memory leak)
+        errors = sum(1 for s in samples if s.status >= 500)
 
         def _quantile(values: list[float], q: float) -> float:
             if not values:
@@ -70,8 +65,12 @@ class RequestMetrics:
             except statistics.StatisticsError:
                 return statistics.mean(values)
 
+        # Compute hot paths from current window (avoids memory leak)
+        path_counter: Counter = Counter()
+        for s in samples:
+            path_counter[(s.method, s.path)] += 1
         top_paths = []
-        for (method, path), hits in self._counters.most_common(5):
+        for (method, path), hits in path_counter.most_common(5):
             top_paths.append({"method": method, "path": path, "hits": hits})
 
         return {
@@ -112,10 +111,19 @@ class TTLCache:
             self._hits += 1
             return payload
 
+    def _prune_expired_locked(self) -> None:
+        """Remove expired entries (call while holding lock)."""
+        now = time.monotonic()
+        expired_keys = [k for k, (_, exp) in self._store.items() if exp < now]
+        for k in expired_keys:
+            self._store.pop(k, None)
+
     async def set(self, key: str, value: Any, ttl_seconds: float) -> None:
         """Set a cache entry with TTL."""
         expires_at = time.monotonic() + ttl_seconds
         async with self._lock:
+            # Prune expired entries first to free space
+            self._prune_expired_locked()
             if len(self._store) >= self._max_size:
                 # Evict oldest by insertion order
                 oldest_key = next(iter(self._store.keys()))
