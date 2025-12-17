@@ -13,9 +13,9 @@ import uuid
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import numpy as np
-# sentence_transformers removed - too heavy for Docker build
-# Using simple hash-based embeddings instead
-import hashlib
+# Using OpenAI text-embedding-3-small for production-quality semantic embeddings
+# Includes circuit breaker pattern for quota/rate limit handling
+import hashlib  # Kept for content hashing (not embeddings)
 
 logger = logging.getLogger(__name__)
 

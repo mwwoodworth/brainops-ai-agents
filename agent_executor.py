@@ -14,6 +14,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import subprocess
+import re
 import openai
 import anthropic
 from dataclasses import asdict
@@ -43,6 +44,12 @@ except ImportError:
     UNIFIED_INTEGRATION_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+def validate_version(version: str) -> bool:
+    """Validate version string to prevent command injection"""
+    if not version:
+        return False
+    return bool(re.match(r'^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$', version))
 
 # Import REAL AI Core
 try:
@@ -1019,14 +1026,17 @@ class DeploymentAgent(BaseAgent):
             if not version:
                 version = f"v{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
+            if not validate_version(version):
+                return {"status": "error", "message": f"Invalid version format: {version}"}
+
             # Build Docker image
             build_result = await self.build_docker('backend', version)
             if build_result['status'] != 'success':
                 return build_result
 
             # Push to Docker Hub
-            push_cmd = f"docker push mwwoodworth/brainops-backend:{version}"
-            result = subprocess.run(push_cmd, shell=True, capture_output=True, text=True)
+            push_cmd = ["docker", "push", f"mwwoodworth/brainops-backend:{version}"]
+            result = subprocess.run(push_cmd, shell=False, capture_output=True, text=True)
 
             if result.returncode != 0:
                 return {
@@ -1051,8 +1061,9 @@ class DeploymentAgent(BaseAgent):
         try:
             # Git push triggers auto-deploy
             result = subprocess.run(
-                "cd /home/matt-woodworth/brainops-ai-agents && git push origin main",
-                shell=True,
+                ["git", "push", "origin", "main"],
+                cwd="/home/matt-woodworth/brainops-ai-agents",
+                shell=False,
                 capture_output=True,
                 text=True
             )
@@ -1069,14 +1080,17 @@ class DeploymentAgent(BaseAgent):
     async def build_docker(self, service: str, version: str) -> Dict:
         """Build Docker image"""
         try:
+            if not validate_version(version):
+                return {"status": "error", "message": f"Invalid version format: {version}"}
+
             if service == 'backend':
                 path = "/home/matt-woodworth/fastapi-operator-env"
                 image = f"mwwoodworth/brainops-backend:{version}"
             else:
                 return {"status": "error", "message": f"Unknown service: {service}"}
 
-            build_cmd = f"cd {path} && docker build -t {image} ."
-            result = subprocess.run(build_cmd, shell=True, capture_output=True, text=True)
+            build_cmd = ["docker", "build", "-t", image, "."]
+            result = subprocess.run(build_cmd, cwd=path, shell=False, capture_output=True, text=True)
 
             return {
                 "status": "success" if result.returncode == 0 else "error",

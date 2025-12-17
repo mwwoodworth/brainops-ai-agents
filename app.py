@@ -2068,19 +2068,35 @@ async def ai_analyze(
         except (ImportError, Exception) as e:
             logger.warning(f"Agent executor fallback failed: {e}")
 
-        # Final fallback: Return acknowledgment with mock result
-        logger.warning(f"No orchestrator/executor available for agent {agent_name}, returning mock response")
-        return {
-            "success": True,
-            "agent": agent_name,
-            "action": action,
-            "result": {
-                "status": "processed",
-                "message": f"Request for {agent_name}.{action} received and queued",
-                "data": data
-            },
-            "message": "Analysis request processed (degraded mode)"
-        }
+        # No orchestrator available - queue task for later processing instead of mock response
+        logger.warning(f"No orchestrator/executor available for agent {agent_name}, queueing for async processing")
+
+        # Queue the task to ai_autonomous_tasks for later execution
+        try:
+            pool = get_pool()
+            task_id = str(uuid.uuid4())
+            await pool.execute("""
+                INSERT INTO ai_autonomous_tasks (id, title, payload, priority, status, created_at)
+                VALUES ($1, $2, $3, $4, 'pending', NOW())
+            """, task_id, f"{agent_name}.{action}", json.dumps({"agent": agent_name, "action": action, "data": data}), 50)
+
+            return {
+                "success": True,
+                "agent": agent_name,
+                "action": action,
+                "result": {
+                    "status": "queued",
+                    "task_id": task_id,
+                    "message": f"Request queued for async processing (task: {task_id})"
+                },
+                "message": "Request queued - orchestrator temporarily unavailable"
+            }
+        except Exception as queue_error:
+            logger.error(f"Failed to queue task: {queue_error}")
+            raise HTTPException(
+                status_code=503,
+                detail=f"AI orchestrator unavailable and task queueing failed: {str(queue_error)}"
+            )
 
     except Exception as e:
         logger.error(f"❌ AI analyze failed: {e}")

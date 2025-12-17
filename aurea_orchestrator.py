@@ -669,11 +669,38 @@ class AUREA:
         if action == "consolidate_memory":
             self.memory.consolidate(aggressive=True)
         elif action == "restart_failed_agents":
-            # In production, would restart failed agents
-            pass
+            # Restart failed agents by resetting their status
+            try:
+                conn = psycopg2.connect(**DB_CONFIG)
+                cur = conn.cursor()
+                cur.execute("""
+                    UPDATE ai_agents SET status = 'active', updated_at = NOW()
+                    WHERE status = 'failed' AND tenant_id = %s
+                """, (self.tenant_id,))
+                restarted = cur.rowcount
+                conn.commit()
+                cur.close()
+                conn.close()
+                logger.info(f"♻️ Restarted {restarted} failed agents")
+            except Exception as e:
+                logger.error(f"Failed to restart agents: {e}")
         elif action == "clear_decision_backlog":
-            # Process backlogged decisions
-            pass
+            # Process backlogged decisions by marking stale ones as expired
+            try:
+                conn = psycopg2.connect(**DB_CONFIG)
+                cur = conn.cursor()
+                cur.execute("""
+                    UPDATE ai_decision_history
+                    SET status = 'expired', updated_at = NOW()
+                    WHERE status = 'pending' AND created_at < NOW() - INTERVAL '24 hours'
+                """)
+                cleared = cur.rowcount
+                conn.commit()
+                cur.close()
+                conn.close()
+                logger.info(f"🧹 Cleared {cleared} stale decisions from backlog")
+            except Exception as e:
+                logger.error(f"Failed to clear decision backlog: {e}")
 
     async def _check_system_health(self) -> SystemHealth:
         """Check overall system health"""

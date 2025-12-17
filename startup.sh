@@ -9,12 +9,12 @@ echo "Environment: Production"
 echo "Python: $(python3 --version)"
 echo "Starting app.py (NOT web_service.py)"
 
-# Export environment variables
+# Export environment variables - ALL credentials must come from environment
 export PYTHONUNBUFFERED=1
-export DB_HOST=${DB_HOST:-"aws-0-us-east-2.pooler.supabase.com"}
+export DB_HOST=${DB_HOST:?"ERROR: DB_HOST environment variable required"}
 export DB_NAME=${DB_NAME:-"postgres"}
-export DB_USER=${DB_USER:-"postgres.yomagoqdmxszqtdwuhab"}
-export DB_PASSWORD=${DB_PASSWORD:-"<DB_PASSWORD_REDACTED>"}
+export DB_USER=${DB_USER:?"ERROR: DB_USER environment variable required"}
+export DB_PASSWORD=${DB_PASSWORD:?"ERROR: DB_PASSWORD environment variable required"}
 export DB_PORT=${DB_PORT:-5432}
 
 echo "✅ Environment configured"

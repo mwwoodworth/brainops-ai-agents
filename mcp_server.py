@@ -11,7 +11,8 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 from datetime import datetime
-from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi import FastAPI, WebSocket, HTTPException, Depends, Request, Security
+from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import psycopg2
@@ -19,10 +20,47 @@ from psycopg2.extras import RealDictCursor
 import subprocess
 import httpx
 from pathlib import Path
+from config import config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# API Key authentication
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def verify_api_key(
+    request: Request,
+    api_key: str = Security(api_key_header),
+) -> bool:
+    """Verify API key if authentication is required"""
+    if not config.security.auth_required:
+        return True
+
+    provided = api_key
+    if not provided:
+        auth_header = request.headers.get("authorization")
+        if auth_header:
+            scheme, _, token = auth_header.partition(" ")
+            scheme_lower = scheme.lower()
+            if scheme_lower in ("bearer", "apikey", "api-key"):
+                provided = token.strip()
+
+    if not provided and config.security.test_api_key:
+        provided = (
+            request.headers.get("x-test-api-key")
+            or request.headers.get("X-Test-Api-Key")
+            or request.headers.get("x-api-key")
+            or request.headers.get("X-API-Key")
+        )
+
+    if not provided:
+        raise HTTPException(status_code=403, detail="API key required")
+
+    if provided not in config.security.valid_api_keys:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+    return True
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -34,7 +72,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.security.allowed_origins if config.security.allowed_origins else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -344,7 +382,7 @@ async def get_status():
     """Get comprehensive system status"""
     return await mcp_server.get_system_status()
 
-@app.post("/execute")
+@app.post("/execute", dependencies=[Depends(verify_api_key)])
 async def execute_tool(request: Dict[str, Any]):
     """Execute an MCP tool"""
     tool = request.get('tool')
@@ -356,18 +394,18 @@ async def execute_tool(request: Dict[str, Any]):
     result = await mcp_server.execute_tool(tool, params)
     return result
 
-@app.get("/files")
+@app.get("/files", dependencies=[Depends(verify_api_key)])
 async def get_files(path: str = "/home/matt-woodworth", depth: int = 2):
     """Get file tree structure"""
     return await mcp_server.get_file_tree(path, depth)
 
-@app.get("/logs/{service}")
+@app.get("/logs/{service}", dependencies=[Depends(verify_api_key)])
 async def get_logs(service: str, lines: int = 100):
     """Get service logs"""
     logs = await mcp_server.monitor_logs(service, lines)
     return {"service": service, "logs": logs}
 
-@app.get("/history")
+@app.get("/history", dependencies=[Depends(verify_api_key)])
 async def get_history(limit: int = 100):
     """Get execution history"""
     return {
@@ -453,7 +491,7 @@ async def get_mcp_tools():
         ]
     }
 
-@app.post("/mcp/execute")
+@app.post("/mcp/execute", dependencies=[Depends(verify_api_key)])
 async def mcp_execute(request: Dict[str, Any]):
     """Execute MCP tool via Vercel adapter"""
     return await execute_tool(request)
