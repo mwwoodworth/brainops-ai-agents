@@ -4,23 +4,27 @@ AI Agent Executor - Real Implementation
 Handles actual execution of AI agent tasks
 """
 
-import os
-import json
-import logging
-import requests
-import psycopg2
-import uuid
+from __future__ import annotations
+
 import asyncio
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
-import subprocess
+import json
+import os
+import logging
 import re
+import subprocess
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict, TypeVar
+
+import httpx
+import psycopg2
 import openai
 import anthropic
 from dataclasses import asdict
 from psycopg2.extras import RealDictCursor
-
-from typing import TypedDict
+from psycopg2.pool import ThreadedConnectionPool
 
 from ai_self_awareness import SelfAwareAI as SelfAwareness, get_self_aware_ai
 
@@ -44,6 +48,84 @@ except ImportError:
     UNIFIED_INTEGRATION_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+_REPO_ROOT = Path(__file__).resolve().parent
+_PSYCOPG2_POOL: Optional[ThreadedConnectionPool] = None
+_PSYCOPG2_POOL_LOCK = threading.Lock()
+
+
+def _get_psycopg2_pool() -> ThreadedConnectionPool:
+    global _PSYCOPG2_POOL
+    if _PSYCOPG2_POOL is not None:
+        return _PSYCOPG2_POOL
+
+    with _PSYCOPG2_POOL_LOCK:
+        if _PSYCOPG2_POOL is not None:
+            return _PSYCOPG2_POOL
+
+        max_size = int(os.getenv("BRAINOPS_PSYCOPG2_POOL_MAX", "3"))
+        connect_timeout = int(os.getenv("BRAINOPS_DB_CONNECT_TIMEOUT_SECONDS", "5"))
+        _PSYCOPG2_POOL = ThreadedConnectionPool(
+            1,
+            max_size,
+            **{**DB_CONFIG, "connect_timeout": connect_timeout},
+        )
+        return _PSYCOPG2_POOL
+
+
+def _run_psycopg2_operation(
+    operation: Callable[[RealDictCursor, psycopg2.extensions.connection], T],
+    *,
+    statement_timeout_ms: int,
+) -> T:
+    pool = _get_psycopg2_pool()
+    conn = pool.getconn()
+    cursor = None
+    try:
+        conn.autocommit = False
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SET statement_timeout TO %s", (statement_timeout_ms,))
+        result = operation(cursor, conn)
+        conn.commit()
+        return result
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        try:
+            conn.autocommit = False
+        except Exception:
+            pass
+        pool.putconn(conn)
+
+
+async def run_db(
+    operation: Callable[[RealDictCursor, psycopg2.extensions.connection], T],
+    *,
+    timeout_seconds: float = 30.0,
+) -> T:
+    """Run a psycopg2 operation in a worker thread with connection pooling."""
+    statement_timeout_ms = max(1, int(timeout_seconds * 1000))
+    return await asyncio.to_thread(
+        _run_psycopg2_operation,
+        operation,
+        statement_timeout_ms=statement_timeout_ms,
+    )
+
+
+async def _http_get(url: str, *, timeout_seconds: float = 5.0) -> httpx.Response:
+    async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+        return await client.get(url)
 
 def validate_version(version: str) -> bool:
     """Validate version string to prevent command injection"""
@@ -96,11 +178,24 @@ class AgentExecutor:
     """Executes actual agent tasks"""
 
     def __init__(self):
-        self.agents = {}
+        self.agents: Dict[str, BaseAgent] = {}
+        self._agents_loaded = False
+        self._agents_lock = asyncio.Lock()
+        self._audit_bootstrapped = False
+        self._audit_lock = asyncio.Lock()
         self.workflow_runner = None  # Lazy-initialized LangGraph runner
         self.self_awareness: Optional[SelfAwareness] = None
         self.graph_context_provider: Optional[GraphContextProvider] = None
-        # Agents will be loaded after class definitions
+        # Agents are loaded lazily on first execute()
+
+    async def _ensure_agents_loaded(self) -> None:
+        if self._agents_loaded:
+            return
+        async with self._agents_lock:
+            if self._agents_loaded:
+                return
+            self._load_agent_implementations()
+            self._agents_loaded = True
 
     async def _get_graph_context_provider(self) -> Optional[GraphContextProvider]:
         """Lazily initialize graph context provider"""
@@ -366,6 +461,7 @@ class AgentExecutor:
 
     async def execute(self, agent_name: str, task: Dict[str, Any]) -> Dict[str, Any]:
         """Execute task with specific agent - NOW WITH UNIFIED SYSTEM INTEGRATION"""
+        await self._ensure_agents_loaded()
         task = dict(task or {})
         # Support clients (e.g. /ai/analyze) that pass parameters under task["data"].
         # Flatten missing keys into the top-level task for compatibility with existing agents.
