@@ -22,13 +22,16 @@ class AgentScheduler:
     """Manages automatic execution of AI agents"""
 
     def __init__(self, db_config: Optional[Dict[str, Any]] = None):
+        # All credentials MUST come from environment variables - no hardcoded defaults
         self.db_config = db_config or {
-            'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
+            'host': os.getenv('DB_HOST'),
             'database': os.getenv('DB_NAME', 'postgres'),
-            'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-            'password': os.getenv('DB_PASSWORD', '<DB_PASSWORD_REDACTED>'),
+            'user': os.getenv('DB_USER'),
+            'password': os.getenv('DB_PASSWORD'),
             'port': int(os.getenv('DB_PORT', 5432))
         }
+        if not all([self.db_config['host'], self.db_config['user'], self.db_config['password']]):
+            raise ValueError("DB_HOST, DB_USER, and DB_PASSWORD environment variables are required")
         # Use BackgroundScheduler instead of AsyncIOScheduler for FastAPI compatibility
         self.scheduler = BackgroundScheduler()
         self.registered_jobs = {}
