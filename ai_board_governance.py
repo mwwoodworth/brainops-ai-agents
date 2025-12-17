@@ -8,12 +8,15 @@ import os
 import json
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
+from ai_core import ai_core
+from ai_advanced_providers import advanced_ai
 from unified_memory_manager import get_memory_manager, Memory, MemoryType
 from agent_activation_system import get_activation_system, BusinessEventType
 import warnings
@@ -107,6 +110,7 @@ class BoardDecision:
     dissenting_opinions: List[str]
     conditions: List[str]
     implementation_plan: Dict[str, Any]
+    debate_transcript: Dict[str, Any]
     follow_up_date: Optional[datetime]
     decided_at: datetime
 
@@ -118,6 +122,33 @@ class AIBoardOfDirectors:
         self.board_members = self._initialize_board()
         self.memory = get_memory_manager()
         self.activation_system = get_activation_system()
+        self.ai_core = ai_core
+        self.advanced_ai = advanced_ai
+        self.debate_rounds = max(1, int(os.getenv("AI_BOARD_DEBATE_ROUNDS", "3")))
+        self.consensus_threshold = float(os.getenv("AI_BOARD_CONSENSUS_THRESHOLD", "0.6"))
+        self.rejection_threshold = float(os.getenv("AI_BOARD_REJECTION_THRESHOLD", "0.25"))
+        self.role_models = {
+            BoardRole.CEO: {
+                "provider": "anthropic",
+                "model": os.getenv("AI_BOARD_MODEL_CEO", "claude-3-opus-20240229"),
+            },
+            BoardRole.CFO: {
+                "provider": "openai",
+                "model": os.getenv("AI_BOARD_MODEL_CFO", "gpt-4-0125-preview"),
+            },
+            BoardRole.COO: {
+                "provider": "gemini",
+                "model": os.getenv("AI_BOARD_MODEL_COO", "gemini-1.5-pro-002"),
+            },
+            BoardRole.CMO: {
+                "provider": "anthropic",
+                "model": os.getenv("AI_BOARD_MODEL_CMO", "claude-3-sonnet-20240229"),
+            },
+            BoardRole.CTO: {
+                "provider": "openai",
+                "model": os.getenv("AI_BOARD_MODEL_CTO", "gpt-4o"),
+            },
+        }
         self.current_proposals = []
         self.decision_history = []
         self.meeting_in_progress = False
@@ -272,6 +303,7 @@ class AIBoardOfDirectors:
                 dissenting_opinions JSONB,
                 conditions JSONB,
                 implementation_plan JSONB,
+                debate_transcript JSONB,
                 follow_up_date TIMESTAMP,
                 decided_at TIMESTAMP DEFAULT NOW()
             );
@@ -292,6 +324,10 @@ class AIBoardOfDirectors:
             CREATE INDEX IF NOT EXISTS idx_proposals_status ON ai_board_proposals(status);
             CREATE INDEX IF NOT EXISTS idx_proposals_urgency ON ai_board_proposals(urgency DESC);
             CREATE INDEX IF NOT EXISTS idx_decisions_date ON ai_board_decisions(decided_at DESC);
+
+            -- Schema migrations (safe to run repeatedly)
+            ALTER TABLE ai_board_decisions
+            ADD COLUMN IF NOT EXISTS debate_transcript JSONB;
             """)
 
             conn.commit()
@@ -399,35 +435,358 @@ class AIBoardOfDirectors:
 
         return proposals
 
+    def _safe_json_from_text(self, text: str) -> Dict[str, Any]:
+        if not text:
+            return {}
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+
+        cleaned = text.strip()
+        cleaned = re.sub(r"^```(?:json)?", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"```$", "", cleaned, flags=re.IGNORECASE).strip()
+        try:
+            return json.loads(cleaned)
+        except Exception:
+            pass
+
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group())
+            except Exception:
+                return {}
+        return {}
+
+    def _parse_vote(self, vote_value: Any) -> VoteOption:
+        if vote_value is None:
+            return VoteOption.ABSTAIN
+
+        if isinstance(vote_value, (int, float)):
+            try:
+                vote_int = int(vote_value)
+                for option in VoteOption:
+                    if option.value == vote_int:
+                        return option
+            except Exception:
+                return VoteOption.ABSTAIN
+
+        if isinstance(vote_value, str):
+            normalized = vote_value.strip().lower()
+            aliases = {
+                "strongly_approve": VoteOption.STRONGLY_APPROVE,
+                "strong approve": VoteOption.STRONGLY_APPROVE,
+                "approve": VoteOption.APPROVE,
+                "approved": VoteOption.APPROVE,
+                "approve_with_conditions": VoteOption.APPROVE,
+                "yes": VoteOption.APPROVE,
+                "abstain": VoteOption.ABSTAIN,
+                "neutral": VoteOption.ABSTAIN,
+                "reject": VoteOption.REJECT,
+                "rejected": VoteOption.REJECT,
+                "no": VoteOption.REJECT,
+                "strongly_reject": VoteOption.STRONGLY_REJECT,
+                "strong reject": VoteOption.STRONGLY_REJECT,
+                "veto": VoteOption.VETO,
+            }
+            if normalized in aliases:
+                return aliases[normalized]
+
+        return VoteOption.ABSTAIN
+
+    def _model_config_for_role(self, role: BoardRole) -> Dict[str, str]:
+        return self.role_models.get(role, {"provider": "openai", "model": "gpt-4-0125-preview"})
+
+    def _provider_ready(self, provider: str) -> bool:
+        provider = (provider or "").lower()
+        if provider == "openai":
+            return self.ai_core.async_openai is not None
+        if provider == "anthropic":
+            return self.ai_core.async_anthropic is not None
+        if provider == "gemini":
+            return bool(getattr(self.advanced_ai, "gemini_model", None))
+        return False
+
+    def _member_system_prompt(self, member: BoardMember) -> str:
+        role_focus = {
+            BoardRole.CEO: "strategic vision, long-term value, and company-wide alignment",
+            BoardRole.CFO: "financial rigor, ROI, risk management, and cost control",
+            BoardRole.COO: "operational efficiency, scalability, process quality, and execution risk",
+            BoardRole.CMO: "customer insights, market positioning, growth, and brand impact",
+            BoardRole.CTO: "technical feasibility, architecture, security, and delivery risk",
+        }.get(member.role, "sound business judgment")
+
+        return (
+            f"You are {member.name}, the {member.role.value}. "
+            f"Your primary focus is {role_focus}. "
+            "Be direct, practical, and avoid inventing facts not present in the proposal."
+        )
+
+    def _proposal_brief(self, proposal: Proposal) -> Dict[str, Any]:
+        return {
+            "id": proposal.id,
+            "type": proposal.type.value,
+            "title": proposal.title,
+            "description": proposal.description,
+            "proposed_by": proposal.proposed_by,
+            "impact_analysis": proposal.impact_analysis,
+            "required_resources": proposal.required_resources,
+            "timeline": proposal.timeline,
+            "alternatives": proposal.alternatives,
+            "supporting_data": proposal.supporting_data,
+            "urgency": proposal.urgency,
+        }
+
+    def _member_prompt(
+        self,
+        member: BoardMember,
+        proposal: Proposal,
+        round_number: int,
+        prior_round: Dict[BoardRole, Dict[str, Any]],
+    ) -> str:
+        proposal_json = json.dumps(self._proposal_brief(proposal), ensure_ascii=False)[:6000]
+
+        other_views: List[Dict[str, Any]] = []
+        if prior_round:
+            for role, parsed in prior_round.items():
+                if role == member.role:
+                    continue
+                other_views.append(
+                    {
+                        "role": role.name,
+                        "member": self.board_members[role].name,
+                        "vote": parsed.get("vote"),
+                        "position": parsed.get("position") or parsed.get("summary"),
+                        "key_reasons": parsed.get("key_reasons") or parsed.get("reasons"),
+                        "risks": parsed.get("risks") or parsed.get("concerns"),
+                        "conditions": parsed.get("conditions"),
+                    }
+                )
+
+        other_views_json = json.dumps(other_views, ensure_ascii=False)[:6000]
+        your_previous = prior_round.get(member.role) if prior_round else None
+        your_previous_json = json.dumps(your_previous, ensure_ascii=False)[:2000] if your_previous else "null"
+
+        instructions = f"""
+You are participating in an AI board debate.
+
+Round: {round_number}
+
+Proposal (JSON):
+{proposal_json}
+
+Other members' prior-round positions (JSON):
+{other_views_json}
+
+Your prior-round position (JSON):
+{your_previous_json}
+
+Task:
+- Provide your current position.
+- Respond to other members' key points (agree/disagree + why).
+- Propose specific amendments/conditions that would increase board approval likelihood.
+- Cast a vote.
+
+Output MUST be valid JSON only (no markdown) with this schema:
+{{
+  "position": "1-3 sentence stance",
+  "vote": "strongly_approve|approve|abstain|reject|strongly_reject|veto",
+  "confidence": 0.0-1.0,
+  "key_reasons": ["..."],
+  "risks": ["..."],
+  "conditions": ["..."],
+  "questions": ["..."],
+  "responses_to_others": [{{"member": "Name", "response": "..."}}]
+}}
+""".strip()
+
+        return instructions
+
+    async def _call_member_model(
+        self,
+        member: BoardMember,
+        prompt: str,
+        system_prompt: str,
+        model: str,
+        provider: str,
+    ) -> str:
+        provider = (provider or "").lower()
+
+        if provider == "gemini":
+            full_prompt = f"{system_prompt}\n\n{prompt}"
+            return await asyncio.to_thread(self.advanced_ai.generate_with_gemini, full_prompt, 1200) or ""
+
+        if provider == "anthropic":
+            return await self.ai_core.generate(
+                prompt=prompt,
+                model=model,
+                temperature=0.4,
+                max_tokens=1200,
+                system_prompt=system_prompt,
+            )
+
+        # Default: OpenAI
+        return await self.ai_core.generate(
+            prompt=prompt,
+            model=model,
+            temperature=0.3,
+            max_tokens=1200,
+            system_prompt=system_prompt,
+        )
+
+    async def _member_statement(
+        self,
+        member: BoardMember,
+        proposal: Proposal,
+        round_number: int,
+        prior_round: Dict[BoardRole, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        config = self._model_config_for_role(member.role)
+        provider = config.get("provider", "openai")
+        model = config.get("model", "gpt-4-0125-preview")
+
+        system_prompt = self._member_system_prompt(member)
+        prompt = self._member_prompt(member, proposal, round_number, prior_round)
+
+        raw_response: str = ""
+        parsed: Dict[str, Any] = {}
+        vote = VoteOption.ABSTAIN
+        error: Optional[str] = None
+
+        try:
+            if not self._provider_ready(provider):
+                raise RuntimeError(f"Provider not available: {provider}")
+
+            raw_response = await self._call_member_model(
+                member=member,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model=model,
+                provider=provider,
+            )
+            parsed = self._safe_json_from_text(raw_response) or {}
+            vote = self._parse_vote(parsed.get("vote"))
+        except Exception as exc:
+            error = str(exc)
+            # Fallback to deterministic stance so the board can still operate.
+            fallback_analysis = await self._analyze_proposal(member, proposal)
+            vote = self._cast_vote(member, proposal, {member.role: fallback_analysis}, [])
+            parsed = {
+                "position": "Fallback (no AI response available).",
+                "vote": vote.name.lower(),
+                "confidence": 0.3,
+                "key_reasons": fallback_analysis.get("opportunities", [])[:3],
+                "risks": fallback_analysis.get("concerns", [])[:3],
+                "conditions": [],
+                "questions": [],
+                "responses_to_others": [],
+            }
+
+        return {
+            "role": member.role.name,
+            "member": member.name,
+            "provider": provider,
+            "model": model,
+            "raw": raw_response,
+            "parsed": parsed,
+            "vote": vote.name,
+            "vote_value": vote.value,
+            "error": error,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    async def _run_debate(self, proposal: Proposal) -> Tuple[Dict[str, Any], Dict[BoardRole, VoteOption], float, str, Dict[BoardRole, Dict[str, Any]]]:
+        """Run multi-round, multi-model debate and return transcript + final votes."""
+        transcript: Dict[str, Any] = {
+            "proposal": self._proposal_brief(proposal),
+            "config": {
+                "rounds": self.debate_rounds,
+                "consensus_threshold": self.consensus_threshold,
+                "rejection_threshold": self.rejection_threshold,
+                "role_models": {r.name: self._model_config_for_role(r) for r in self.board_members.keys()},
+            },
+            "rounds": [],
+            "started_at": datetime.now().isoformat(),
+        }
+
+        prior_round_parsed: Dict[BoardRole, Dict[str, Any]] = {}
+        latest_parsed: Dict[BoardRole, Dict[str, Any]] = {}
+        latest_votes: Dict[BoardRole, VoteOption] = {}
+        consensus: float = 0.0
+        decision_text: str = "deferred"
+
+        for round_number in range(1, self.debate_rounds + 1):
+            tasks = [
+                self._member_statement(member, proposal, round_number, prior_round_parsed)
+                for member in self.board_members.values()
+            ]
+            statements = await asyncio.gather(*tasks, return_exceptions=False)
+
+            round_entry: Dict[str, Any] = {
+                "round": round_number,
+                "statements": statements,
+                "consensus": None,
+                "decision_projection": None,
+            }
+
+            # Update latest parsed/votes from this round
+            latest_parsed = {}
+            latest_votes = {}
+            for st in statements:
+                role = BoardRole[st["role"]]
+                latest_parsed[role] = st.get("parsed") or {}
+                try:
+                    latest_votes[role] = VoteOption[st.get("vote", "ABSTAIN")]
+                except Exception:
+                    latest_votes[role] = self._parse_vote((st.get("parsed") or {}).get("vote"))
+
+            # CEO veto ends debate immediately
+            if latest_votes.get(BoardRole.CEO) == VoteOption.VETO:
+                consensus = -1.0
+                decision_text = "rejected"
+                round_entry["consensus"] = consensus
+                round_entry["decision_projection"] = decision_text
+                transcript["rounds"].append(round_entry)
+                break
+
+            consensus = self._calculate_consensus(latest_votes)
+            decision_projection = self._determine_decision(latest_votes, consensus)
+            round_entry["consensus"] = consensus
+            round_entry["decision_projection"] = decision_projection
+            transcript["rounds"].append(round_entry)
+
+            # Stop early if we reached a decisive outcome
+            if consensus >= self.consensus_threshold or consensus <= self.rejection_threshold:
+                decision_text = decision_projection
+                break
+
+            prior_round_parsed = latest_parsed
+
+        # If debate ended in the middle, use the latest votes/parsed we have
+        if latest_votes:
+            decision_text = self._determine_decision(latest_votes, consensus)
+
+        transcript["ended_at"] = datetime.now().isoformat()
+        transcript["final"] = {
+            "decision": decision_text,
+            "consensus_level": consensus,
+            "votes": {role.name: vote.name for role, vote in latest_votes.items()},
+        }
+
+        return transcript, latest_votes, consensus, decision_text, latest_parsed
+
     async def _deliberate_proposal(self, proposal: Proposal) -> BoardDecision:
         """Board deliberates on a proposal"""
         logger.info(f"📋 Deliberating: {proposal.title}")
 
-        # Each board member analyzes the proposal
-        analyses = {}
-        for role, member in self.board_members.items():
-            analysis = await self._analyze_proposal(member, proposal)
-            analyses[role] = analysis
-
-        # Discussion phase - members share perspectives
-        discussion_points = self._conduct_discussion(analyses)
-
-        # Voting phase
-        votes = {}
-        for role, member in self.board_members.items():
-            vote = self._cast_vote(member, proposal, analyses, discussion_points)
-            votes[role] = vote
-
-        # Calculate consensus
-        consensus = self._calculate_consensus(votes)
-
-        # Determine decision
-        decision_text = self._determine_decision(votes, consensus)
+        # Multi-model, multi-round AI debate (falls back to deterministic per member if needed)
+        debate_transcript, votes, consensus, decision_text, latest_parsed = await self._run_debate(proposal)
 
         # Create implementation plan if approved
         implementation_plan = {}
         if decision_text == "approved":
-            implementation_plan = self._create_implementation_plan(proposal, analyses)
+            implementation_plan = self._create_implementation_plan(proposal, latest_parsed)
 
         # Record decision
         decision = BoardDecision(
@@ -435,9 +794,10 @@ class AIBoardOfDirectors:
             decision=decision_text,
             vote_results=votes,
             consensus_level=consensus,
-            dissenting_opinions=self._extract_dissent(votes, analyses),
-            conditions=self._extract_conditions(analyses),
+            dissenting_opinions=self._extract_dissent(votes, latest_parsed),
+            conditions=self._extract_conditions(latest_parsed),
             implementation_plan=implementation_plan,
+            debate_transcript=debate_transcript,
             follow_up_date=datetime.now() + timedelta(days=7),
             decided_at=datetime.now()
         )
@@ -628,9 +988,12 @@ class AIBoardOfDirectors:
         for role, vote in votes.items():
             if vote.value < 0:  # Negative vote
                 member = self.board_members[role]
-                analysis = analyses[role]
-                if analysis["concerns"]:
-                    dissent.append(f"{member.name}: {analysis['concerns'][0]}")
+                analysis = analyses.get(role, {}) if isinstance(analyses, dict) else {}
+                concerns = analysis.get("concerns") or analysis.get("risks") or []
+                if isinstance(concerns, str):
+                    concerns = [concerns]
+                if concerns:
+                    dissent.append(f"{member.name}: {concerns[0]}")
 
         return dissent
 
@@ -638,11 +1001,28 @@ class AIBoardOfDirectors:
         """Extract conditions for approval"""
         conditions = []
 
+        if not isinstance(analyses, dict):
+            return conditions
+
         for role, analysis in analyses.items():
-            if analysis["concerns"] and analysis["support_level"] > 0:
-                # Positive vote despite concerns = conditions
-                member = self.board_members[role]
-                conditions.append(f"Address {member.name}'s concern: {analysis['concerns'][0]}")
+            member = self.board_members.get(role)
+            if not member:
+                continue
+
+            extracted = analysis.get("conditions") or []
+            if isinstance(extracted, str):
+                extracted = [extracted]
+
+            if extracted:
+                for cond in extracted[:5]:
+                    conditions.append(f"{member.name}: {cond}")
+                continue
+
+            # Backward-compatible fallback for old deterministic analysis shape
+            concerns = analysis.get("concerns") or []
+            support_level = analysis.get("support_level")
+            if concerns and isinstance(support_level, (int, float)) and support_level > 0:
+                conditions.append(f"Address {member.name}'s concern: {concerns[0]}")
 
         return conditions
 
@@ -749,8 +1129,8 @@ class AIBoardOfDirectors:
             cur.execute("""
             INSERT INTO ai_board_decisions
             (proposal_id, decision, vote_results, consensus_level,
-             dissenting_opinions, conditions, implementation_plan, follow_up_date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+             dissenting_opinions, conditions, implementation_plan, debate_transcript, follow_up_date)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 decision.proposal_id,
                 decision.decision,
@@ -759,15 +1139,17 @@ class AIBoardOfDirectors:
                 Json(decision.dissenting_opinions),
                 Json(decision.conditions),
                 Json(decision.implementation_plan),
+                Json(decision.debate_transcript),
                 decision.follow_up_date
             ))
 
             # Update proposal status
+            new_status = 'deferred' if decision.decision == 'deferred' else 'decided'
             cur.execute("""
             UPDATE ai_board_proposals
-            SET status = 'decided'
+            SET status = %s
             WHERE id = %s
-            """, (decision.proposal_id,))
+            """, (new_status, decision.proposal_id))
 
             conn.commit()
             cur.close()

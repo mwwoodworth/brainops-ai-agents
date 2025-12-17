@@ -1,7 +1,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 from datetime import datetime
 import sys
 import os
@@ -23,12 +23,14 @@ client = TestClient(app)
 def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
     # Mock systems
     mock_csa_instance = MagicMock()
+    mock_csa_instance.generate_onboarding_plan = AsyncMock()
     mock_csa.return_value = mock_csa_instance
     
     mock_revenue_instance = MagicMock()
     mock_revenue.return_value = mock_revenue_instance
     
     mock_followup_instance = MagicMock()
+    mock_followup_instance.create_followup_sequence = AsyncMock()
     mock_followup.return_value = mock_followup_instance
 
     # Test NEW_CUSTOMER
@@ -46,10 +48,7 @@ def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
     
     # Verify CustomerSuccessAgent was initialized and called
     mock_csa.assert_called_with("tenant_123")
-    # asyncio.create_task is hard to mock directly without loop, but we can check if it attempted to call the method
-    # Since we are not running async loop in TestClient in this simple way, the task creation might happen but not execution if not awaited.
-    # But for unit test of the route logic, this confirms the path was taken.
-
+    
     # Test JOB_COMPLETED
     payload_job = {
         "id": "evt_456",

@@ -6,7 +6,6 @@ Coordinates all 59 agents to work as one unified intelligence
 """
 
 import os
-import sys
 import json
 import asyncio
 import logging
@@ -14,13 +13,20 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
+import uuid
+import re
+from decimal import Decimal
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
-import aiohttp
 from unified_memory_manager import get_memory_manager, Memory, MemoryType
 from agent_activation_system import (
     get_activation_system, BusinessEventType, AgentActivationSystem
 )
+from ai_core import RealAICore
+from ai_board_governance import get_ai_board, Proposal, ProposalType
+from ai_self_awareness import get_self_aware_ai, SelfAwareAI
+from revenue_generation_system import get_revenue_system, AutonomousRevenueSystem
+from ai_knowledge_graph import get_knowledge_graph, AIKnowledgeGraph
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -57,9 +63,12 @@ class AutonomyLevel(Enum):
     """Levels of autonomous operation"""
     MANUAL = 0        # Human operates, AI observes
     ASSISTED = 25     # AI suggests, human decides
-    SEMI_AUTO = 50    # AI decides minor, human decides major
-    MOSTLY_AUTO = 75  # AI decides most, human approves critical
+    SUPERVISED = 50   # AI acts, human can veto
+    AUTONOMOUS = 75   # AI acts, human monitors
     FULL_AUTO = 100   # AI decides everything autonomously
+    # Backwards-compatible aliases
+    SEMI_AUTO = 50
+    MOSTLY_AUTO = 75
 
 
 @dataclass
@@ -95,14 +104,19 @@ class AUREA:
     The Master AI Orchestrator - The Brain of BrainOps
     """
 
-    def __init__(self, autonomy_level: AutonomyLevel = AutonomyLevel.SEMI_AUTO, tenant_id: Optional[str] = None):
+    def __init__(self, autonomy_level: AutonomyLevel = AutonomyLevel.SUPERVISED, tenant_id: Optional[str] = None):
         if not tenant_id:
             raise ValueError("tenant_id is required for AUREA")
         
         self.tenant_id = tenant_id
         self.autonomy_level = autonomy_level
         self.memory = get_memory_manager()
-        self.activation_system = get_activation_system(tenant_id) # Assuming activation system supports tenant_id injection
+        self.activation_system = get_activation_system(tenant_id)
+        self.ai = RealAICore()
+        self.board_ref: Optional[Any] = None
+        self.safety_ref: Optional[SelfAwareAI] = None
+        self.revenue_ref: Optional[AutonomousRevenueSystem] = None
+        self.knowledge_ref: Optional[AIKnowledgeGraph] = None
         self.running = False
         self.cycle_count = 0
         self.decisions_made = 0
@@ -110,9 +124,188 @@ class AUREA:
         self.system_health = None
         self.decision_queue = asyncio.Queue()
         self.learning_insights = []
+        self.confidence_thresholds = self._default_confidence_thresholds()
+        self._last_observation_bundle: Dict[str, Any] = {}
+        self._last_orientation_bundle: Dict[str, Any] = {}
         self._init_database()
 
         logger.info(f"🧠 AUREA initialized for tenant {tenant_id} at autonomy level: {autonomy_level.name}")
+
+    async def _ensure_integrations(self):
+        """Lazy-init optional integrations (board, safety, revenue, knowledge)."""
+        if self.board_ref is None:
+            try:
+                self.board_ref = get_ai_board()
+            except Exception as e:
+                logger.warning(f"AI Board unavailable: {e}")
+                self.board_ref = None
+
+        if self.safety_ref is None:
+            try:
+                self.safety_ref = await get_self_aware_ai()
+            except Exception as e:
+                logger.warning(f"Self-Awareness unavailable: {e}")
+                self.safety_ref = None
+
+        if self.revenue_ref is None:
+            try:
+                self.revenue_ref = get_revenue_system()
+            except Exception as e:
+                logger.warning(f"Revenue Engine unavailable: {e}")
+                self.revenue_ref = None
+
+        if self.knowledge_ref is None:
+            try:
+                self.knowledge_ref = get_knowledge_graph()
+            except Exception as e:
+                logger.warning(f"Knowledge Graph unavailable: {e}")
+                self.knowledge_ref = None
+
+    def _default_confidence_thresholds(self) -> Dict[int, float]:
+        """Default confidence thresholds (0-100) for autonomous execution."""
+        # MANUAL/ASSISTED are handled by policy (always require approval).
+        return {
+            AutonomyLevel.SUPERVISED.value: 85.0,
+            AutonomyLevel.AUTONOMOUS.value: 75.0,
+            AutonomyLevel.FULL_AUTO.value: 65.0,
+        }
+
+    def _safe_json(self, text: Any) -> Any:
+        if isinstance(text, (dict, list)):
+            return text
+        if text is None:
+            return {}
+        s = str(text).strip()
+        s = re.sub(r"^```(?:json)?\\s*", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\\s*```$", "", s)
+        try:
+            return json.loads(s)
+        except Exception:
+            match = re.search(r"(\\{.*\\}|\\[.*\\])", s, flags=re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(1))
+                except Exception:
+                    return {}
+        return {}
+
+    def _db_connect(self):
+        return psycopg2.connect(**DB_CONFIG)
+
+    def _db_fetchall(self, query: str, params: Tuple[Any, ...] = ()) -> List[Dict[str, Any]]:
+        try:
+            conn = self._db_connect()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.debug(f"DB fetchall failed: {e}")
+            return []
+
+    def _db_fetchone(self, query: str, params: Tuple[Any, ...] = ()) -> Optional[Dict[str, Any]]:
+        try:
+            conn = self._db_connect()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(query, params)
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.debug(f"DB fetchone failed: {e}")
+            return None
+
+    def _db_execute(self, query: str, params: Tuple[Any, ...] = ()) -> bool:
+        try:
+            conn = self._db_connect()
+            cur = conn.cursor()
+            cur.execute(query, params)
+            conn.commit()
+            cur.close()
+            conn.close()
+            return True
+        except Exception as e:
+            logger.debug(f"DB execute failed: {e}")
+            return False
+
+    def _truncate_text(self, value: Any, max_len: int = 800) -> str:
+        s = "" if value is None else str(value)
+        if len(s) <= max_len:
+            return s
+        return s[: max_len - 3] + "..."
+
+    def _compact_rows(
+        self,
+        rows: List[Dict[str, Any]],
+        *,
+        max_rows: int = 30,
+        max_field_len: int = 600
+    ) -> List[Dict[str, Any]]:
+        compacted: List[Dict[str, Any]] = []
+        for row in (rows or [])[:max_rows]:
+            cleaned: Dict[str, Any] = {}
+            for k, v in dict(row).items():
+                if isinstance(v, (datetime,)):
+                    cleaned[k] = v.isoformat()
+                elif isinstance(v, Decimal):
+                    cleaned[k] = float(v)
+                else:
+                    cleaned[k] = self._truncate_text(v, max_len=max_field_len)
+            compacted.append(cleaned)
+        return compacted
+
+    def _coerce_float(self, value: Any) -> Optional[float]:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+    def _extract_keywords(self, signals: List[Dict[str, Any]]) -> List[str]:
+        keywords: List[str] = []
+        for s in signals or []:
+            for key in ("affected_components", "components", "component", "metric_name", "agent_name"):
+                v = s.get(key)
+                if isinstance(v, list):
+                    keywords.extend([str(x) for x in v if x])
+                elif v:
+                    keywords.append(str(v))
+            for key in ("title", "summary"):
+                v = s.get(key)
+                if v:
+                    words = re.findall(r"[A-Za-z0-9_\\-\\.]{3,}", str(v))
+                    keywords.extend(words[:12])
+        # de-dupe while preserving order
+        seen = set()
+        out: List[str] = []
+        for k in keywords:
+            kl = k.strip()
+            if not kl:
+                continue
+            norm = kl.lower()
+            if norm in seen:
+                continue
+            seen.add(norm)
+            out.append(kl)
+        return out[:25]
+
+    def _store_state_snapshot(self, state_type: str, state_data: Dict[str, Any]):
+        """Persist OODA snapshots for audit/debug (best-effort)."""
+        try:
+            self._db_execute(
+                """
+                INSERT INTO aurea_state (state_type, state_data, cycle_number, tenant_id)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (state_type, Json(state_data), self.cycle_count, self.tenant_id),
+            )
+        except Exception:
+            # best-effort only
+            return
 
     def _init_database(self):
         """Initialize AUREA's database tables"""
@@ -185,6 +378,7 @@ class AUREA:
         """Main orchestration loop - the heartbeat of AUREA"""
         self.running = True
         logger.info("🚀 AUREA orchestration started")
+        await self._ensure_integrations()
 
         while self.running:
             try:
@@ -217,9 +411,9 @@ class AUREA:
                     memory_type=MemoryType.PROCEDURAL,
                     content={
                         "cycle": self.cycle_count,
-                        "observations": len(observations),
+                        "signals_observed": len(observations),
                         "decisions": len(decisions),
-                        "actions": len(results),
+                        "actions_executed": len(results),
                         "cycle_time_seconds": cycle_time,
                         "autonomy_level": self.autonomy_level.value
                     },
