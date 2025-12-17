@@ -145,15 +145,26 @@ class AUREANLUProcessor:
 
         return registry
 
+    def _get_serializable_registry(self) -> Dict[str, Dict[str, Any]]:
+        """Get a JSON-serializable version of the skill registry (without action functions)."""
+        return {
+            skill_name: {
+                "description": skill_data.get("description", ""),
+                "parameters": skill_data.get("parameters", {})
+            }
+            for skill_name, skill_data in self.skill_registry.items()
+        }
+
     async def analyze_command_intent(self, command_text: str) -> Dict[str, Any]:
         """Use LLM to analyze natural language command intent and extract parameters."""
         # This prompt needs to be highly sophisticated to handle Founder-level commands
+        serializable_registry = self._get_serializable_registry()
         prompt_template = ChatPromptTemplate.from_messages([
             SystemMessage(content=f"""You are AUREA, the Founder's Executive AI Assistant.
             Your role is to interpret natural language commands for the entire BrainOps AI OS.
             Based on the user's command, identify the primary intent and extract all relevant parameters.
             You have access to the following tools/skills:
-{json.dumps(self.skill_registry, indent=2)}
+{json.dumps(serializable_registry, indent=2)}
 
             If the command is ambiguous or requires more information, ask clarifying questions.
             If the command implies a high-impact action, set 'requires_confirmation' to true.
