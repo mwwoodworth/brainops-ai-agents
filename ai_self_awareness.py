@@ -741,6 +741,10 @@ class SelfAwareAI:
 
     async def _store_assessment(self, assessment: SelfAssessment):
         """Store self-assessment in database"""
+        if not self.db_pool:
+            logger.warning("DB pool not available, skipping assessment storage")
+            return
+
         async with self.db_pool.acquire() as conn:
             await conn.execute("""
                 INSERT INTO ai_self_assessments (
@@ -858,6 +862,10 @@ class SelfAwareAI:
 
     async def _store_explanation(self, explanation: ReasoningExplanation):
         """Store reasoning explanation in database"""
+        if not self.db_pool:
+            logger.warning("DB pool not available, skipping explanation storage")
+            return
+
         async with self.db_pool.acquire() as conn:
             await conn.execute("""
                 INSERT INTO ai_reasoning_explanations (
@@ -954,6 +962,10 @@ class SelfAwareAI:
 
     async def _store_learning(self, learning: LearningFromMistake):
         """Store learning from mistake in database"""
+        if not self.db_pool:
+            logger.warning("DB pool not available, skipping learning storage")
+            return
+
         async with self.db_pool.acquire() as conn:
             await conn.execute("""
                 INSERT INTO ai_learning_from_mistakes (
