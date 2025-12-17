@@ -94,6 +94,7 @@ class TTLCache:
         self._store: Dict[str, Tuple[Any, float]] = {}
         self._max_size = max_size
         self._lock = asyncio.Lock()
+        self._key_locks: Dict[str, asyncio.Lock] = {}
         self._hits = 0
         self._misses = 0
 
@@ -103,10 +104,13 @@ class TTLCache:
         async with self._lock:
             value = self._store.get(key)
             if not value:
+                self._misses += 1
                 return None
             payload, expires_at = value
             if expires_at < now:
                 self._store.pop(key, None)
+                self._key_locks.pop(key, None)
+                self._misses += 1
                 return None
             self._hits += 1
             return payload
@@ -117,6 +121,7 @@ class TTLCache:
         expired_keys = [k for k, (_, exp) in self._store.items() if exp < now]
         for k in expired_keys:
             self._store.pop(k, None)
+            self._key_locks.pop(k, None)
 
     async def set(self, key: str, value: Any, ttl_seconds: float) -> None:
         """Set a cache entry with TTL."""
@@ -128,6 +133,7 @@ class TTLCache:
                 # Evict oldest by insertion order
                 oldest_key = next(iter(self._store.keys()))
                 self._store.pop(oldest_key, None)
+                self._key_locks.pop(oldest_key, None)
             self._store[key] = (value, expires_at)
 
     async def get_or_set(
@@ -141,14 +147,22 @@ class TTLCache:
 
         Returns tuple of (value, from_cache).
         """
-        cached = await self.get(key)
-        if cached is not None:
-            return cached, True
+        async with await self._get_key_lock(key):
+            cached = await self.get(key)
+            if cached is not None:
+                return cached, True
 
-        self._misses += 1
-        value = await loader()
-        await self.set(key, value, ttl_seconds)
-        return value, False
+            value = await loader()
+            await self.set(key, value, ttl_seconds)
+            return value, False
+
+    async def _get_key_lock(self, key: str) -> asyncio.Lock:
+        """Return a per-key lock to avoid thundering-herd cache misses."""
+        lock = self._key_locks.get(key)
+        if lock is not None:
+            return lock
+        async with self._lock:
+            return self._key_locks.setdefault(key, asyncio.Lock())
 
     def snapshot(self) -> Dict[str, Any]:
         """Return cache stats (non-mutating)."""
@@ -163,4 +177,3 @@ class TTLCache:
             "hits": self._hits,
             "misses": self._misses,
         }
-
