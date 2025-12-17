@@ -199,9 +199,70 @@ class WebSearchAgent(CustomerAcquisitionAgent):
             return []
 
     async def _execute_search(self, query: str) -> List[Dict]:
-        """Execute web search (placeholder)"""
-        # Would integrate with search APIs like Google Custom Search, Bing, etc.
-        return []
+        """Execute web search using Perplexity AI for real-time results"""
+        try:
+            from ai_advanced_providers import advanced_ai
+
+            # Use Perplexity for real web search
+            search_prompt = f"""Search for roofing contractors matching this query: {query}
+
+Find companies that:
+1. Are roofing contractors or related businesses
+2. Show signs they need better software/automation
+3. Have contact information available
+
+Return JSON array with up to 5 results, each containing:
+- company_name: string
+- location: string (city, state)
+- website: string (URL if found)
+- contact_info: object with email/phone if available
+- buying_signals: array of strings (e.g., "outdated website", "manual processes mentioned")
+- estimated_size: string (small/medium/large)
+
+Return ONLY valid JSON array, no other text."""
+
+            result = advanced_ai.search_with_perplexity(search_prompt)
+
+            if result and result.get("answer"):
+                try:
+                    # Try to parse JSON from response
+                    answer = result["answer"]
+                    # Find JSON array in response
+                    import re
+                    json_match = re.search(r'\[[\s\S]*\]', answer)
+                    if json_match:
+                        leads = json.loads(json_match.group())
+                        logger.info(f"Found {len(leads)} leads from Perplexity search")
+                        return leads
+                except json.JSONDecodeError:
+                    logger.warning("Could not parse Perplexity response as JSON")
+
+                # Fallback: use AI to extract structured data
+                extraction_prompt = f"""Extract business leads from this search result:
+{result['answer']}
+
+Return JSON array with company_name, location, website, and buying_signals for each."""
+
+                extraction_response = openai.chat.completions.create(
+                    model="gpt-4-turbo-preview",
+                    messages=[
+                        {"role": "system", "content": "Extract structured lead data. Return only valid JSON array."},
+                        {"role": "user", "content": extraction_prompt}
+                    ],
+                    temperature=0.3
+                )
+
+                extracted = json.loads(extraction_response.choices[0].message.content)
+                if isinstance(extracted, list):
+                    logger.info(f"Extracted {len(extracted)} leads from search")
+                    return extracted
+
+            logger.warning(f"No results from search query: {query}")
+            return []
+
+        except Exception as e:
+            logger.error(f"Web search execution failed: {e}")
+            return []
 
     async def _analyze_target(self, target_data: Dict) -> AcquisitionTarget:
         """Analyze target company for fit and intent"""
@@ -333,9 +394,66 @@ class SocialMediaAgent(CustomerAcquisitionAgent):
             return []
 
     async def _search_social_platforms(self, keyword: str) -> List[Dict]:
-        """Search social platforms (placeholder)"""
-        # Would integrate with Twitter API, LinkedIn API, Facebook API, etc.
-        return []
+        """Search social platforms for buying signals using Perplexity AI"""
+        try:
+            from ai_advanced_providers import advanced_ai
+
+            # Use Perplexity to search for social media posts about roofing software needs
+            social_search_prompt = f"""Search social media and forums for people/businesses posting about: {keyword}
+
+Look for:
+1. Twitter/X posts from roofing contractors
+2. LinkedIn posts about roofing business challenges
+3. Reddit discussions in contractor/roofing subreddits
+4. Facebook business group discussions
+
+Find posts showing buying intent for roofing software/CRM/automation.
+
+Return JSON array with up to 5 signals, each containing:
+- platform: string (twitter/linkedin/reddit/facebook)
+- username: string (anonymized if needed)
+- post_summary: string (key content)
+- intent_level: string (high/medium/low)
+- company_hint: string (company name if mentioned)
+- timestamp_hint: string (recent/last_week/last_month)
+
+Return ONLY valid JSON array, no other text."""
+
+            result = advanced_ai.search_with_perplexity(social_search_prompt)
+
+            if result and result.get("answer"):
+                try:
+                    answer = result["answer"]
+                    import re
+                    json_match = re.search(r'\[[\s\S]*\]', answer)
+                    if json_match:
+                        signals = json.loads(json_match.group())
+                        logger.info(f"Found {len(signals)} social signals for '{keyword}'")
+                        return signals
+                except json.JSONDecodeError:
+                    logger.warning("Could not parse social search response as JSON")
+
+                # Fallback: use AI to extract structured data
+                extraction_response = openai.chat.completions.create(
+                    model="gpt-4-turbo-preview",
+                    messages=[
+                        {"role": "system", "content": "Extract social media buying signals. Return only valid JSON array."},
+                        {"role": "user", "content": f"Extract social signals from: {result['answer']}"}
+                    ],
+                    temperature=0.3
+                )
+
+                extracted = json.loads(extraction_response.choices[0].message.content)
+                if isinstance(extracted, list):
+                    logger.info(f"Extracted {len(extracted)} social signals")
+                    return extracted
+
+            logger.info(f"No social signals found for: {keyword}")
+            return []
+
+        except Exception as e:
+            logger.error(f"Social platform search failed: {e}")
+            return []
 
     async def _process_social_signal(self, signal: Dict) -> Optional[Dict]:
         """Process social signal into lead"""
