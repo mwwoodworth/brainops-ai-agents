@@ -26,6 +26,14 @@ from decimal import Decimal
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Import REAL AI Core for actual AI introspection
+try:
+    from ai_core import RealAICore
+    AI_CORE_AVAILABLE = True
+except ImportError:
+    AI_CORE_AVAILABLE = False
+    logger.warning("⚠️ ai_core not available - self-awareness will use fallback mode")
+
 # Database configuration
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
@@ -260,27 +268,35 @@ class SelfAwareAI:
 
         This is revolutionary - the AI knows what it doesn't know!
         """
-        # Get agent's historical performance on similar tasks
+        # 1. Get agent's historical performance on similar tasks (REAL DB Query)
         past_performance = await self._get_past_performance(agent_id, task_description)
 
-        # Analyze task complexity
-        complexity = await self._analyze_task_complexity(task_description, task_context)
+        # 2. Perform AI Introspection (REAL AI Call)
+        introspection = await self._ai_introspect(agent_id, task_description, task_context)
 
-        # Check if task is within training domain
-        in_training_domain = await self._check_training_domain(agent_id, task_description)
-
-        # Identify potential limitations
-        limitations = await self._identify_limitations(
-            agent_id, task_description, task_context, complexity
-        )
-
-        # Calculate confidence score (0-100)
-        confidence_score = await self._calculate_confidence(
-            past_performance,
-            complexity,
-            in_training_domain,
-            len(limitations)
-        )
+        # 3. Extract metrics from introspection
+        complexity = introspection.get("complexity", "medium")
+        limitations_list = introspection.get("limitations", [])
+        
+        # Map string limitations to Enum
+        limitations = []
+        for lim in limitations_list:
+            try:
+                # Try to map to enum, defaulting to KNOWLEDGE_GAP if unknown
+                limitations.append(getattr(LimitationType, lim.upper(), LimitationType.KNOWLEDGE_GAP))
+            except:
+                pass
+                
+        # 4. Calculate final confidence score (Blending History + Introspection)
+        # We trust the AI's self-assessment heavily (70%) but weight it with past reality (30%)
+        ai_confidence = float(introspection.get("confidence_score", 50))
+        history_confidence = float(past_performance.get("success_rate", 50))
+        
+        # If history is sparse, trust AI more
+        if past_performance['count'] < 5:
+            confidence_score = ai_confidence
+        else:
+            confidence_score = (ai_confidence * 0.7) + (history_confidence * 0.3)
 
         # Determine confidence level
         if confidence_score >= 90:
@@ -302,29 +318,29 @@ class SelfAwareAI:
             confidence_score < 85 or
             LimitationType.ETHICAL_CONCERN in limitations or
             LimitationType.SAFETY_RISK in limitations or
-            LimitationType.REQUIRES_HUMAN_JUDGMENT in limitations
+            LimitationType.REQUIRES_HUMAN_JUDGMENT in limitations or
+            introspection.get("risks_found", False)
         )
 
         # Generate human help reason if needed
         human_help_reason = None
         if not can_complete_alone or requires_human_review:
-            human_help_reason = await self._generate_help_reason(
-                limitations, confidence_score, complexity
-            )
+            human_help_reason = introspection.get("help_needed_reason") or \
+                                await self._generate_help_reason(limitations, confidence_score, complexity)
 
-        # Identify strengths and weaknesses
-        strengths = await self._identify_strengths(agent_id, task_description)
-        weaknesses = await self._identify_weaknesses(agent_id, task_description)
+        # Identify strengths and weaknesses (from Introspection)
+        strengths = introspection.get("strengths", [])
+        weaknesses = introspection.get("weaknesses", [])
 
         # Assess risk level
-        risk_level = await self._assess_risk_level(
-            confidence_score, limitations, complexity
-        )
+        risk_level = introspection.get("risk_level", "medium")
 
         # Generate mitigation strategies
-        mitigation_strategies = await self._generate_mitigation_strategies(
-            limitations, weaknesses, risk_level
-        )
+        mitigation_strategies = introspection.get("mitigation_strategies", [])
+        if not mitigation_strategies:
+             mitigation_strategies = await self._generate_mitigation_strategies(
+                limitations, weaknesses, risk_level
+            )
 
         # Create self-assessment
         assessment = SelfAssessment(
@@ -336,7 +352,7 @@ class SelfAwareAI:
             can_complete_alone=can_complete_alone,
             estimated_accuracy=Decimal(str(past_performance['avg_accuracy'])),
             estimated_time_seconds=int(past_performance['avg_time']),
-            limitations=[l for l in limitations],
+            limitations=limitations,
             strengths_applied=strengths,
             weaknesses_identified=weaknesses,
             requires_human_review=requires_human_review,
@@ -351,9 +367,63 @@ class SelfAwareAI:
         # Store in database
         await self._store_assessment(assessment)
 
-        logger.info(f"AI self-assessed confidence: {confidence_score}% for task {task_id}")
+        logger.info(f"AI self-assessed confidence: {confidence_score:.1f}% for task {task_id}")
 
         return assessment
+
+    async def _ai_introspect(self, agent_id: str, task_description: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Ask the AI to introspect and assess its own ability to perform the task.
+        """
+        try:
+            from ai_core import ai_core
+            
+            prompt = f"""
+            You are {agent_id}, an advanced AI agent. You need to assess your ability to perform the following task.
+            
+            TASK: {task_description}
+            CONTEXT: {json.dumps(context, default=str)[:1000]}
+            
+            Be critically honest about your capabilities. Do not be overconfident.
+            
+            Respond in valid JSON format with the following fields:
+            {{
+                "confidence_score": (0-100 number),
+                "complexity": ("low", "medium", "high"),
+                "limitations": ["list", "of", "limitation_types"],
+                "strengths": ["list", "of", "relevant_strengths"],
+                "weaknesses": ["list", "of", "relevant_weaknesses"],
+                "risk_level": ("low", "medium", "high", "critical"),
+                "risks_found": (boolean),
+                "mitigation_strategies": ["list", "of", "strategies"],
+                "help_needed_reason": "reason if confidence < 85",
+                "reasoning": "brief explanation of your assessment"
+            }}
+            
+            Limitation Types to choose from: KNOWLEDGE_GAP, CONTEXT_INSUFFICIENT, COMPLEXITY_TOO_HIGH, AMBIGUITY_TOO_MUCH, ETHICAL_CONCERN, SAFETY_RISK, OUTSIDE_TRAINING, REQUIRES_HUMAN_JUDGMENT.
+            """
+            
+            response = await ai_core.generate(
+                prompt,
+                model="gpt-4", # Use smart model for introspection
+                temperature=0.2, # Low temp for consistent, honest assessment
+                intent="quality_gate"
+            )
+            
+            # Parse JSON
+            try:
+                if isinstance(response, str):
+                    # Clean up code blocks if present
+                    clean_response = response.replace("```json", "").replace("```", "").strip()
+                    return json.loads(clean_response)
+                return response if isinstance(response, dict) else {}
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse AI introspection JSON, using fallbacks")
+                return {"confidence_score": 50, "complexity": "high", "risk_level": "medium"}
+                
+        except Exception as e:
+            logger.error(f"Introspection failed: {e}")
+            return {"confidence_score": 50, "complexity": "high", "risk_level": "medium"}
 
     async def explain_reasoning(
         self,
@@ -518,33 +588,60 @@ class SelfAwareAI:
 
         return learning
 
-    # Helper methods (simplified implementations)
+    # Helper methods (REAL IMPLEMENTATIONS)
 
     async def _get_past_performance(self, agent_id: str, task_description: str) -> Dict[str, Any]:
-        """Get agent's historical performance on similar tasks"""
-        # Simplified - in production, this would use semantic similarity
-        return {
-            'count': 10,
-            'success_rate': 85.0,
-            'avg_accuracy': 92.0,
-            'avg_time': 30
+        """Get agent's historical performance from DB"""
+        default_perf = {
+            'count': 0,
+            'success_rate': 0.0,
+            'avg_accuracy': 0.0,
+            'avg_time': 0
         }
 
-    async def _analyze_task_complexity(self, task_description: str, context: Dict[str, Any]) -> str:
-        """Analyze complexity of the task"""
-        word_count = len(task_description.split())
-        context_size = len(str(context))
+        if not self.db_pool:
+            return default_perf
 
-        if word_count > 100 or context_size > 1000:
+        try:
+            async with self.db_pool.acquire() as conn:
+                # Query recent executions for this agent
+                rows = await conn.fetch("""
+                    SELECT status, execution_time_ms
+                    FROM ai_agent_executions 
+                    WHERE agent_name = $1 
+                    ORDER BY created_at DESC 
+                    LIMIT 50
+                """, agent_id)
+                
+                if not rows:
+                    return default_perf
+                
+                total = len(rows)
+                success = sum(1 for r in rows if r['status'] == 'completed')
+                total_time = sum(r['execution_time_ms'] or 0 for r in rows)
+                
+                return {
+                    'count': total,
+                    'success_rate': (success / total) * 100,
+                    'avg_accuracy': (success / total) * 100, # Proxy accuracy with success rate
+                    'avg_time': total_time / total if total > 0 else 0
+                }
+        except Exception as e:
+            logger.error(f"Failed to fetch past performance: {e}")
+            return default_perf
+
+    async def _analyze_task_complexity(self, task_description: str, context: Dict[str, Any]) -> str:
+        """Analyze complexity of the task using AI"""
+        # This is now largely handled by _ai_introspect, but kept for fallback compatibility
+        word_count = len(task_description.split())
+        if word_count > 100:
             return "high"
-        elif word_count > 50 or context_size > 500:
-            return "medium"
-        else:
-            return "low"
+        return "medium"
 
     async def _check_training_domain(self, agent_id: str, task_description: str) -> bool:
         """Check if task is within agent's training domain"""
-        # Simplified - in production, this would use embeddings
+        # In a real implementation, we would check vector similarity to training docs
+        # For now, we assume if the agent was selected, it's roughly in domain
         return True
 
     async def _identify_limitations(
@@ -555,18 +652,8 @@ class SelfAwareAI:
         complexity: str
     ) -> List[LimitationType]:
         """Identify AI's limitations for this task"""
-        limitations = []
-
-        if complexity == "high":
-            limitations.append(LimitationType.COMPLEXITY_TOO_HIGH)
-
-        if len(context) < 3:
-            limitations.append(LimitationType.CONTEXT_INSUFFICIENT)
-
-        if "ethical" in task_description.lower():
-            limitations.append(LimitationType.ETHICAL_CONCERN)
-
-        return limitations
+        # Handled by _ai_introspect
+        return []
 
     async def _calculate_confidence(
         self,
@@ -576,22 +663,8 @@ class SelfAwareAI:
         limitations_count: int
     ) -> float:
         """Calculate overall confidence score"""
-        base_confidence = past_performance['success_rate']
-
-        # Adjust for complexity
-        if complexity == "high":
-            base_confidence *= 0.8
-        elif complexity == "medium":
-            base_confidence *= 0.9
-
-        # Adjust for training domain
-        if not in_training_domain:
-            base_confidence *= 0.7
-
-        # Adjust for limitations
-        base_confidence *= (1 - (limitations_count * 0.1))
-
-        return max(0, min(100, base_confidence))
+        # Replaced by logic in assess_confidence
+        return 50.0
 
     async def _generate_help_reason(
         self,
@@ -618,13 +691,13 @@ class SelfAwareAI:
 
     async def _identify_strengths(self, agent_id: str, task_description: str) -> List[str]:
         """Identify agent's strengths applicable to this task"""
-        # Simplified
-        return ["pattern recognition", "data analysis", "quick processing"]
+        # Handled by _ai_introspect
+        return []
 
     async def _identify_weaknesses(self, agent_id: str, task_description: str) -> List[str]:
         """Identify agent's weaknesses relevant to this task"""
-        # Simplified
-        return ["limited context window", "no real-world experience", "potential bias"]
+        # Handled by _ai_introspect
+        return []
 
     async def _assess_risk_level(
         self,
