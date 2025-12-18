@@ -50,6 +50,8 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: PERPLEXITY_API_KEY
+        sync: false
       - key: GOOGLE_AI_API_KEY
         sync: false
       - key: REDIS_URL
