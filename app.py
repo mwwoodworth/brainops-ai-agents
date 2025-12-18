@@ -1288,19 +1288,19 @@ async def get_agents(
         pool = get_pool()
         try:
             # Build query with execution statistics
-            # Join with agent_executions to get total_executions and last_active
+            # Join with ai_agent_executions to get total_executions and last_active
             query = """
                 SELECT a.*,
                        COALESCE(e.exec_count, 0) as total_executions,
                        e.last_exec as last_active
                 FROM agents a
                 LEFT JOIN (
-                    SELECT agent_type,
+                    SELECT agent_name,
                            COUNT(*) as exec_count,
                            MAX(created_at) as last_exec
-                    FROM agent_executions
-                    GROUP BY agent_type
-                ) e ON LOWER(a.type) = LOWER(e.agent_type)
+                    FROM ai_agent_executions
+                    GROUP BY agent_name
+                ) e ON a.name = e.agent_name
                 WHERE 1=1
             """
             params = []
@@ -1368,13 +1368,15 @@ async def execute_agent(
         execution_id = str(uuid.uuid4())
         started_at = datetime.utcnow()
 
-        # Log execution start
+        # Log execution start to ai_agent_executions (correct table with proper schema)
         agent_uuid = str(agent["id"])
+        agent_name = agent["name"]
         try:
             await pool.execute("""
-                INSERT INTO agent_executions (id, agent_id, started_at, status, input_data)
+                INSERT INTO ai_agent_executions (id, agent_name, task_type, input_data, status)
                 VALUES ($1, $2, $3, $4, $5)
-            """, execution_id, agent_uuid, started_at, "running", json.dumps(body))
+            """, execution_id, agent_name, "execute", json.dumps(body), "running")
+            logger.info(f"✅ Logged execution start for {agent_name}: {execution_id}")
         except Exception as insert_error:
             logger.warning("Failed to persist execution start: %s", insert_error)
 
@@ -1400,10 +1402,11 @@ async def execute_agent(
 
         try:
             await pool.execute("""
-                UPDATE agent_executions
-                SET completed_at = $1, status = $2, output_data = $3, duration_ms = $4
-                WHERE id = $5
-            """, completed_at, "completed", json.dumps(result), duration_ms, execution_id)
+                UPDATE ai_agent_executions
+                SET status = $1, output_data = $2, execution_time_ms = $3
+                WHERE id = $4
+            """, "completed", json.dumps(result), duration_ms, execution_id)
+            logger.info(f"✅ Logged execution completion for {agent_name}: {execution_id} ({duration_ms}ms)")
         except Exception as update_error:
             logger.warning("Failed to persist execution completion: %s", update_error)
 
@@ -1440,10 +1443,10 @@ async def execute_agent(
         if 'execution_id' in locals():
             try:
                 await pool.execute("""
-                    UPDATE agent_executions
-                    SET status = $1, error = $2, completed_at = $3
-                    WHERE id = $4
-                """, "failed", str(e), datetime.utcnow(), execution_id)
+                    UPDATE ai_agent_executions
+                    SET status = $1, error_message = $2
+                    WHERE id = $3
+                """, "failed", str(e), execution_id)
             except Exception as fail_error:
                 logger.warning("Failed to persist failed execution: %s", fail_error)
 
