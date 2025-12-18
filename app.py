@@ -415,6 +415,11 @@ def _row_to_agent(row: Dict[str, Any]) -> Agent:
         configuration=_parse_configuration(row.get("configuration")),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
+        # Operational fields - map from database
+        status=row.get("status") or ("active" if row.get("enabled", True) else "inactive"),
+        type=row.get("type") or row.get("agent_type"),
+        total_executions=row.get("total_executions") or row.get("execution_count") or 0,
+        last_active=row.get("last_active") or row.get("last_active_at") or row.get("updated_at"),
     )
 
 
@@ -1282,19 +1287,33 @@ async def get_agents(
     async def _load_agents() -> AgentList:
         pool = get_pool()
         try:
-            # Build query
-            query = "SELECT * FROM agents WHERE 1=1"
+            # Build query with execution statistics
+            # Join with agent_executions to get total_executions and last_active
+            query = """
+                SELECT a.*,
+                       COALESCE(e.exec_count, 0) as total_executions,
+                       e.last_exec as last_active
+                FROM agents a
+                LEFT JOIN (
+                    SELECT agent_type,
+                           COUNT(*) as exec_count,
+                           MAX(created_at) as last_exec
+                    FROM agent_executions
+                    GROUP BY agent_type
+                ) e ON LOWER(a.type) = LOWER(e.agent_type)
+                WHERE 1=1
+            """
             params = []
 
             if enabled is not None:
-                query += f" AND enabled = ${len(params) + 1}"
+                query += f" AND a.enabled = ${len(params) + 1}"
                 params.append(enabled)
 
             if category:
-                query += f" AND category = ${len(params) + 1}"
+                query += f" AND a.category = ${len(params) + 1}"
                 params.append(category)
 
-            query += " ORDER BY category, name"
+            query += " ORDER BY a.category, a.name"
 
             rows = await pool.fetch(query, *params)
 

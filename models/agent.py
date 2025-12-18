@@ -42,6 +42,11 @@ class Agent(BaseModel):
     configuration: dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Operational fields
+    status: Optional[str] = Field(default="active", description="Agent status")
+    type: Optional[str] = Field(default=None, description="Agent type")
+    total_executions: Optional[int] = Field(default=0, description="Total executions")
+    last_active: Optional[datetime] = Field(default=None, description="Last active timestamp")
 
     @validator("id")
     def validate_id(cls, v: str) -> str:
