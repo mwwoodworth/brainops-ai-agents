@@ -171,8 +171,9 @@ class AgentScheduler:
             return {"status": "executed", "type": agent_type}
 
     def _execute_revenue_agent(self, agent: Dict, cur, conn) -> Dict:
-        """Execute revenue optimization agent"""
+        """Execute revenue optimization agent - TAKES REAL ACTIONS"""
         logger.info(f"Running revenue optimization for agent: {agent['name']}")
+        actions_taken = []
 
         # Get revenue opportunities
         cur.execute("""
@@ -183,28 +184,92 @@ class AgentScheduler:
         """)
         stats = cur.fetchone()
 
-        # Get pending estimates
+        # Get pending estimates that need follow-up (older than 3 days)
         cur.execute("""
-            SELECT COUNT(*) as pending_estimates,
-                   SUM(total_amount) as potential_revenue
-            FROM estimates
-            WHERE status = 'pending'
+            SELECT e.id, e.customer_id, e.total_amount, c.name as customer_name, c.email
+            FROM estimates e
+            LEFT JOIN customers c ON c.id = e.customer_id
+            WHERE e.status = 'pending'
+            AND e.created_at < NOW() - INTERVAL '3 days'
+            AND NOT EXISTS (
+                SELECT 1 FROM ai_scheduled_outreach o
+                WHERE o.customer_id = e.customer_id
+                AND o.created_at > NOW() - INTERVAL '7 days'
+            )
+            LIMIT 10
         """)
-        estimates = cur.fetchone()
+        stale_estimates = cur.fetchall()
+
+        # Create follow-up tasks for stale estimates
+        for est in stale_estimates:
+            try:
+                cur.execute("""
+                    INSERT INTO ai_scheduled_outreach
+                    (customer_id, outreach_type, priority, scheduled_for, status, meta_data)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                """, (
+                    est['customer_id'],
+                    'estimate_followup',
+                    'high' if float(est['total_amount'] or 0) > 5000 else 'medium',
+                    datetime.utcnow() + timedelta(hours=24),
+                    'pending',
+                    json.dumps({
+                        'estimate_id': str(est['id']),
+                        'amount': float(est['total_amount'] or 0),
+                        'customer_name': est['customer_name'],
+                        'reason': 'Stale estimate - no response in 3+ days'
+                    })
+                ))
+                actions_taken.append({
+                    'action': 'scheduled_followup',
+                    'customer_id': str(est['customer_id']),
+                    'estimate_amount': float(est['total_amount'] or 0)
+                })
+            except Exception as e:
+                logger.warning(f"Could not create followup for estimate {est['id']}: {e}")
+
+        # Record revenue insight if significant opportunities exist
+        potential_revenue = sum(float(e['total_amount'] or 0) for e in stale_estimates)
+        if potential_revenue > 1000:
+            try:
+                cur.execute("""
+                    INSERT INTO ai_business_insights
+                    (insight_type, title, description, priority, status, meta_data)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (
+                    'revenue_opportunity',
+                    f'${potential_revenue:,.0f} in stale estimates need follow-up',
+                    f'{len(stale_estimates)} estimates older than 3 days with no follow-up scheduled',
+                    'high' if potential_revenue > 10000 else 'medium',
+                    'active',
+                    json.dumps({
+                        'potential_revenue': potential_revenue,
+                        'estimate_count': len(stale_estimates),
+                        'agent': agent['name']
+                    })
+                ))
+                actions_taken.append({'action': 'created_insight', 'revenue': potential_revenue})
+            except Exception as e:
+                logger.warning(f"Could not create insight: {e}")
+
+        conn.commit()
 
         return {
             "agent": agent['name'],
             "jobs_analyzed": stats['total_jobs'],
             "pending_jobs": stats['pending_jobs'],
             "active_jobs": stats['active_jobs'],
-            "pending_estimates": estimates['pending_estimates'],
-            "potential_revenue": float(estimates['potential_revenue'] or 0),
+            "stale_estimates_found": len(stale_estimates),
+            "potential_revenue": potential_revenue,
+            "actions_taken": actions_taken,
             "timestamp": datetime.utcnow().isoformat()
         }
 
     def _execute_lead_agent(self, agent: Dict, cur, conn) -> Dict:
-        """Execute lead generation/scoring agent"""
+        """Execute lead generation/scoring agent - TAKES REAL ACTIONS"""
         logger.info(f"Running lead analysis for agent: {agent['name']}")
+        actions_taken = []
 
         # Get lead statistics
         cur.execute("""
@@ -215,17 +280,111 @@ class AgentScheduler:
         """)
         stats = cur.fetchone()
 
+        # Find high-value customers who haven't been contacted recently (potential leads)
+        cur.execute("""
+            SELECT c.id, c.name, c.email, c.phone,
+                   COUNT(j.id) as job_count,
+                   COALESCE(SUM(i.total_amount), 0) as total_spent,
+                   MAX(j.created_at) as last_job_date
+            FROM customers c
+            LEFT JOIN jobs j ON j.customer_id = c.id
+            LEFT JOIN invoices i ON i.job_id = j.id
+            WHERE c.email IS NOT NULL
+            AND c.email NOT LIKE '%%test%%'
+            AND c.email NOT LIKE '%%example%%'
+            GROUP BY c.id, c.name, c.email, c.phone
+            HAVING COUNT(j.id) >= 2
+            AND MAX(j.created_at) < NOW() - INTERVAL '60 days'
+            ORDER BY COALESCE(SUM(i.total_amount), 0) DESC
+            LIMIT 15
+        """)
+        dormant_valuable_customers = cur.fetchall()
+
+        # Calculate and update lead scores
+        for customer in dormant_valuable_customers:
+            total_spent = float(customer['total_spent'] or 0)
+            job_count = customer['job_count'] or 0
+
+            # Score based on historical value and recency
+            score = min(100, int(
+                (total_spent / 1000) * 10 +  # $1k = 10 points
+                job_count * 15 +              # each job = 15 points
+                30                            # base score for returning customer
+            ))
+
+            try:
+                # Update or insert lead score
+                cur.execute("""
+                    INSERT INTO ai_lead_scores
+                    (customer_id, score, score_factors, last_calculated)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (customer_id) DO UPDATE SET
+                        score = EXCLUDED.score,
+                        score_factors = EXCLUDED.score_factors,
+                        last_calculated = NOW()
+                """, (
+                    customer['id'],
+                    score,
+                    json.dumps({
+                        'total_spent': total_spent,
+                        'job_count': job_count,
+                        'days_inactive': 60,
+                        'calculation': 'dormant_valuable_customer'
+                    })
+                ))
+
+                # Schedule re-engagement for high-score leads
+                if score >= 50:
+                    cur.execute("""
+                        INSERT INTO ai_scheduled_outreach
+                        (customer_id, outreach_type, priority, scheduled_for, status, meta_data)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                    """, (
+                        customer['id'],
+                        'reengagement',
+                        'high' if score >= 70 else 'medium',
+                        datetime.utcnow() + timedelta(hours=48),
+                        'pending',
+                        json.dumps({
+                            'lead_score': score,
+                            'customer_name': customer['name'],
+                            'total_spent': total_spent,
+                            'reason': 'High-value dormant customer - re-engagement opportunity'
+                        })
+                    ))
+                    actions_taken.append({
+                        'action': 'scheduled_reengagement',
+                        'customer_id': str(customer['id']),
+                        'lead_score': score
+                    })
+
+                actions_taken.append({
+                    'action': 'updated_lead_score',
+                    'customer_id': str(customer['id']),
+                    'score': score
+                })
+            except Exception as e:
+                logger.warning(f"Could not update lead score for customer {customer['id']}: {e}")
+
+        conn.commit()
+
         return {
             "agent": agent['name'],
             "total_customers": stats['total_customers'],
             "new_this_week": stats['new_this_week'],
             "new_this_month": stats['new_this_month'],
+            "dormant_valuable_found": len(dormant_valuable_customers),
+            "leads_scored": len([a for a in actions_taken if a['action'] == 'updated_lead_score']),
+            "reengagements_scheduled": len([a for a in actions_taken if a['action'] == 'scheduled_reengagement']),
+            "actions_taken": actions_taken,
             "timestamp": datetime.utcnow().isoformat()
         }
 
     def _execute_customer_agent(self, agent: Dict, cur, conn) -> Dict:
-        """Execute customer intelligence agent"""
+        """Execute customer intelligence agent - TAKES REAL ACTIONS"""
         logger.info(f"Running customer intelligence for agent: {agent['name']}")
+        actions_taken = []
 
         # Get customer insights
         cur.execute("""
@@ -240,12 +399,137 @@ class AgentScheduler:
         """)
         stats = cur.fetchone()
 
+        # Identify at-risk customers (high value, no recent activity)
+        cur.execute("""
+            SELECT c.id, c.name, c.email, c.phone,
+                   COALESCE(SUM(i.total_amount), 0) as lifetime_value,
+                   COUNT(DISTINCT j.id) as total_jobs,
+                   MAX(j.created_at) as last_activity,
+                   EXTRACT(days FROM NOW() - MAX(j.created_at)) as days_inactive
+            FROM customers c
+            LEFT JOIN jobs j ON j.customer_id = c.id
+            LEFT JOIN invoices i ON i.job_id = j.id
+            WHERE c.email IS NOT NULL
+            AND c.email NOT LIKE '%%test%%'
+            AND c.email NOT LIKE '%%example%%'
+            GROUP BY c.id, c.name, c.email, c.phone
+            HAVING COALESCE(SUM(i.total_amount), 0) > 2000
+            AND MAX(j.created_at) < NOW() - INTERVAL '90 days'
+            ORDER BY COALESCE(SUM(i.total_amount), 0) DESC
+            LIMIT 10
+        """)
+        at_risk_customers = cur.fetchall()
+
+        # Create customer health records and interventions
+        for customer in at_risk_customers:
+            ltv = float(customer['lifetime_value'] or 0)
+            days_inactive = int(customer['days_inactive'] or 0)
+
+            # Calculate churn risk score (0-100)
+            churn_risk = min(100, int(
+                (days_inactive / 90) * 30 +  # More days = higher risk
+                (ltv / 5000) * 20 +           # Higher LTV = higher concern
+                30                            # Base risk for inactivity
+            ))
+
+            try:
+                # Record customer health status
+                cur.execute("""
+                    INSERT INTO ai_customer_health
+                    (customer_id, health_score, churn_risk, ltv, last_activity, status, meta_data)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (customer_id) DO UPDATE SET
+                        health_score = EXCLUDED.health_score,
+                        churn_risk = EXCLUDED.churn_risk,
+                        ltv = EXCLUDED.ltv,
+                        last_activity = EXCLUDED.last_activity,
+                        status = EXCLUDED.status,
+                        meta_data = EXCLUDED.meta_data,
+                        updated_at = NOW()
+                """, (
+                    customer['id'],
+                    100 - churn_risk,  # Health score is inverse of churn risk
+                    churn_risk,
+                    ltv,
+                    customer['last_activity'],
+                    'at_risk' if churn_risk > 60 else 'declining',
+                    json.dumps({
+                        'days_inactive': days_inactive,
+                        'total_jobs': customer['total_jobs'],
+                        'analysis_type': 'automated_health_check'
+                    })
+                ))
+
+                # Create intervention for high-risk customers
+                if churn_risk > 50:
+                    cur.execute("""
+                        INSERT INTO ai_customer_interventions
+                        (customer_id, intervention_type, priority, status, recommended_action, meta_data)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                    """, (
+                        customer['id'],
+                        'retention',
+                        'critical' if churn_risk > 70 else 'high',
+                        'pending',
+                        f"High-value customer ({customer['name']}) inactive for {days_inactive} days. LTV: ${ltv:,.0f}. Recommend personal outreach.",
+                        json.dumps({
+                            'churn_risk': churn_risk,
+                            'ltv': ltv,
+                            'days_inactive': days_inactive,
+                            'customer_email': customer['email']
+                        })
+                    ))
+                    actions_taken.append({
+                        'action': 'created_intervention',
+                        'customer_id': str(customer['id']),
+                        'churn_risk': churn_risk,
+                        'ltv': ltv
+                    })
+
+                actions_taken.append({
+                    'action': 'updated_health',
+                    'customer_id': str(customer['id']),
+                    'health_score': 100 - churn_risk
+                })
+            except Exception as e:
+                logger.warning(f"Could not process customer {customer['id']}: {e}")
+
+        # Generate aggregate insight if multiple at-risk customers
+        if len(at_risk_customers) >= 3:
+            total_at_risk_value = sum(float(c['lifetime_value'] or 0) for c in at_risk_customers)
+            try:
+                cur.execute("""
+                    INSERT INTO ai_business_insights
+                    (insight_type, title, description, priority, status, meta_data)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (
+                    'customer_health',
+                    f'{len(at_risk_customers)} high-value customers at churn risk',
+                    f'Combined LTV of ${total_at_risk_value:,.0f} at risk. Immediate retention action recommended.',
+                    'critical' if total_at_risk_value > 20000 else 'high',
+                    'active',
+                    json.dumps({
+                        'at_risk_count': len(at_risk_customers),
+                        'total_at_risk_value': total_at_risk_value,
+                        'agent': agent['name']
+                    })
+                ))
+                actions_taken.append({'action': 'created_churn_insight', 'value_at_risk': total_at_risk_value})
+            except Exception as e:
+                logger.warning(f"Could not create insight: {e}")
+
+        conn.commit()
+
         return {
             "agent": agent['name'],
             "total_customers": stats['total_customers'],
             "total_jobs": stats['total_jobs'],
             "total_invoices": stats['total_invoices'],
             "total_revenue": float(stats['total_revenue'] or 0),
+            "at_risk_customers_found": len(at_risk_customers),
+            "interventions_created": len([a for a in actions_taken if a['action'] == 'created_intervention']),
+            "actions_taken": actions_taken,
             "timestamp": datetime.utcnow().isoformat()
         }
 
