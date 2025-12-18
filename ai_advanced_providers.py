@@ -74,7 +74,7 @@ class AdvancedAIProviders:
             }
 
             payload = {
-                "model": "pplx-70b-online",  # Online model with web access
+                "model": "sonar",  # Current Perplexity model (2025)
                 "messages": [
                     {"role": "user", "content": query}
                 ],
