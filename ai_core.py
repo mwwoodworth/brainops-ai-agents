@@ -97,6 +97,13 @@ class RealAICore:
             self.async_anthropic = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
             logger.info("Anthropic client initialized successfully")
 
+        # Initialize Perplexity (reliable fallback)
+        self.perplexity_key = os.getenv("PERPLEXITY_API_KEY")
+        if self.perplexity_key:
+            logger.info("Perplexity API key found - fallback available")
+        else:
+            logger.warning("Perplexity API key not found - fallback unavailable")
+
         # Model router prefers cheaper models for routing/review and stronger models for generation
         self.model_router = ModelRouter(
             openai_available=self.async_openai is not None,
@@ -197,17 +204,43 @@ class RealAICore:
                 )
                 return response.content[0].text
 
-            # No client matched the requested/auto-routed model
+            # No client matched the requested/auto-routed model - try Perplexity fallback
+            if self.perplexity_key:
+                return await self._try_perplexity(prompt, max_tokens)
             raise RuntimeError("AI client not available for requested model")
 
         except Exception as e:
             logger.error(f"AI generation error: {e}")
-            # Try fallback model
-            if "gpt" in selected_model.lower():
-                # Fallback to Claude
-                return await self.generate(prompt, "claude", temperature, max_tokens, system_prompt)
-            else:
-                raise e
+            # Try Perplexity as ultimate fallback
+            if self.perplexity_key:
+                try:
+                    return await self._try_perplexity(prompt, max_tokens)
+                except Exception as perplexity_error:
+                    logger.error(f"Perplexity fallback also failed: {perplexity_error}")
+            raise e
+
+    async def _try_perplexity(self, prompt: str, max_tokens: int = 2000) -> str:
+        """Use Perplexity as fallback AI provider"""
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.perplexity_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "sonar",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": max_tokens,
+                    "temperature": 0.7
+                },
+                timeout=30.0
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
     async def route_agent(self, task: Dict[str, Any], candidate_agents: List[str]) -> Dict[str, Any]:
         """Use a cheap model to route work to the right agent."""
