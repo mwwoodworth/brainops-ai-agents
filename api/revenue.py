@@ -292,13 +292,13 @@ async def generate_proposal(lead_id: str, request: ProposalRequest):
 
         tier_pricing = pricing.get(request.pricing_tier, pricing["standard"])
 
-        # Create opportunity
+        # Create opportunity (using existing schema)
         opp_id = str(uuid.uuid4())
         await pool.execute("""
             INSERT INTO revenue_opportunities (
-                id, lead_id, title, value, probability,
-                expected_close_date, stage, notes, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                id, lead_id, opportunity_name, value, probability,
+                expected_close_date, stage, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
         """,
             uuid.UUID(opp_id),
             uuid.UUID(lead_id),
@@ -306,8 +306,7 @@ async def generate_proposal(lead_id: str, request: ProposalRequest):
             tier_pricing['annual'],
             0.6,
             datetime.utcnow().date() + timedelta(days=30),
-            'proposal_sent',
-            f"Generated proposal for {request.pricing_tier} tier"
+            'proposal_sent'
         )
 
         # Update lead stage
@@ -367,12 +366,12 @@ async def close_deal(lead_id: str, won: bool = True):
         if not result:
             raise HTTPException(status_code=404, detail="Lead not found")
 
-        # Update opportunity
+        # Update opportunity stage
         await pool.execute("""
             UPDATE revenue_opportunities
-            SET stage = $1, closed_at = NOW(), won = $2
-            WHERE lead_id = $3
-        """, stage, won, uuid.UUID(lead_id))
+            SET stage = $1, updated_at = NOW()
+            WHERE lead_id = $2
+        """, stage, uuid.UUID(lead_id))
 
         # Log action
         await pool.execute("""
