@@ -23,6 +23,7 @@ class SmartAISystem:
         self.openai_key = os.getenv("OPENAI_API_KEY")
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
         self.hf_token = os.getenv("HUGGINGFACE_API_TOKEN")
+        self.perplexity_key = os.getenv("PERPLEXITY_API_KEY")
 
         # Initialize clients
         self.openai_client = OpenAI(api_key=self.openai_key) if self.openai_key else None
@@ -32,10 +33,11 @@ class SmartAISystem:
         self.provider_stats = {
             "openai": {"successes": 0, "failures": 0, "avg_time": 0},
             "anthropic": {"successes": 0, "failures": 0, "avg_time": 0},
+            "perplexity": {"successes": 0, "failures": 0, "avg_time": 0},
             "huggingface": {"successes": 0, "failures": 0, "avg_time": 0}
         }
 
-        logger.info(f"Smart AI System initialized - OpenAI: {bool(self.openai_key)}, Anthropic: {bool(self.anthropic_key)}, HF: {bool(self.hf_token)}")
+        logger.info(f"Smart AI System initialized - OpenAI: {bool(self.openai_key)}, Anthropic: {bool(self.anthropic_key)}, Perplexity: {bool(self.perplexity_key)}, HF: {bool(self.hf_token)}")
 
     def _try_openai(self, prompt: str, max_tokens: int = 1000, timeout: int = 3) -> Optional[str]:
         """Try OpenAI with quick timeout"""
@@ -87,6 +89,42 @@ class SmartAISystem:
         except Exception as e:
             self.provider_stats["anthropic"]["failures"] += 1
             logger.debug(f"Anthropic failed in {time.time() - start_time:.2f}s: {e}")
+            return None
+
+    def _try_perplexity(self, prompt: str, max_tokens: int = 1000, timeout: int = 10) -> Optional[str]:
+        """Try Perplexity API - great for general queries"""
+        if not self.perplexity_key:
+            return None
+
+        start_time = time.time()
+        try:
+            response = requests.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.perplexity_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "sonar",  # Current Perplexity model
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": max_tokens,
+                    "temperature": 0.7
+                },
+                timeout=timeout
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if text:
+                    elapsed = time.time() - start_time
+                    self.provider_stats["perplexity"]["successes"] += 1
+                    self.provider_stats["perplexity"]["avg_time"] = (self.provider_stats["perplexity"]["avg_time"] + elapsed) / 2
+                    return text
+
+        except Exception as e:
+            self.provider_stats["perplexity"]["failures"] += 1
+            logger.debug(f"Perplexity failed in {time.time() - start_time:.2f}s: {e}")
             return None
 
     def _try_huggingface(self, prompt: str, max_tokens: int = 200) -> Optional[str]:
@@ -160,6 +198,7 @@ class SmartAISystem:
         providers = [
             ("openai", self._try_openai),
             ("anthropic", self._try_anthropic),
+            ("perplexity", self._try_perplexity),
             ("huggingface", self._try_huggingface)
         ]
 
@@ -219,6 +258,7 @@ class SmartAISystem:
             "providers": {
                 "openai": "active" if self.openai_client else "unavailable",
                 "anthropic": "active" if self.anthropic_client else "unavailable",
+                "perplexity": "active" if self.perplexity_key else "unavailable",
                 "huggingface": "active"  # Always available
             },
             "statistics": self.provider_stats,
