@@ -251,9 +251,9 @@ async def get_analytics_summary():
         stats_query = """
             SELECT
                 (SELECT COUNT(*) FROM agents WHERE enabled = true) as active_agents,
-                (SELECT COUNT(*) FROM agent_executions WHERE started_at > NOW() - INTERVAL '24 hours') as executions_24h,
-                (SELECT COUNT(*) FROM agent_executions WHERE status = 'completed' AND started_at > NOW() - INTERVAL '24 hours') as successful_24h,
-                (SELECT AVG(duration_ms) FROM agent_executions WHERE started_at > NOW() - INTERVAL '24 hours') as avg_duration_24h
+                (SELECT COUNT(*) FROM agent_executions WHERE created_at > NOW() - INTERVAL '24 hours') as executions_24h,
+                (SELECT COUNT(*) FROM agent_executions WHERE status = 'completed' AND created_at > NOW() - INTERVAL '24 hours') as successful_24h,
+                (SELECT AVG(latency_ms) FROM agent_executions WHERE created_at > NOW() - INTERVAL '24 hours') as avg_duration_24h
         """
         stats = await pool.fetchrow(stats_query)
 
