@@ -129,7 +129,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.1.0"  # Added Revenue Generation API endpoints for lead discovery, qualification, and pipeline management
+VERSION = "9.1.1"  # Fixed revenue API schema compatibility with existing database tables
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
