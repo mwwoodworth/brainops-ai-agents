@@ -38,6 +38,7 @@ from api.customer_intelligence import router as customer_intelligence_router
 from api.gumroad_webhook import router as gumroad_router
 from api.codebase_graph import router as codebase_graph_router
 from api.state_sync import router as state_sync_router
+from api.revenue import router as revenue_router
 from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
 from observability import RequestMetrics, TTLCache
@@ -128,7 +129,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.0.0"  # MAJOR: Added Gumroad sales funnel webhook integration with ConvertKit, Stripe, SendGrid
+VERSION = "9.1.0"  # Added Revenue Generation API endpoints for lead discovery, qualification, and pipeline management
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -907,6 +908,7 @@ app.include_router(erp_event_router)
 
 app.include_router(codebase_graph_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(state_sync_router, dependencies=SECURED_DEPENDENCIES)  # Real-time state synchronization
+app.include_router(revenue_router, dependencies=SECURED_DEPENDENCIES)  # Revenue generation system
 
 # Import and include analytics router
 try:
