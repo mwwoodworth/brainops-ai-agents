@@ -10,8 +10,41 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from datetime import datetime
 import inspect
 import asyncio
+import httpx
 
 logger = logging.getLogger(__name__)
+
+# Perplexity fallback for when OpenAI quota is exceeded
+PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
+
+async def _perplexity_fallback(prompt: str, system_prompt: str = "") -> str:
+    """Use Perplexity as fallback when OpenAI fails."""
+    if not PERPLEXITY_API_KEY:
+        raise RuntimeError("PERPLEXITY_API_KEY not configured for fallback")
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.perplexity.ai/chat/completions",
+            headers={
+                "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "sonar",
+                "messages": messages,
+                "max_tokens": 2000,
+                "temperature": 0.7
+            },
+            timeout=30.0
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
 
 class AUREANLUProcessor:
@@ -159,8 +192,7 @@ class AUREANLUProcessor:
         """Use LLM to analyze natural language command intent and extract parameters."""
         # This prompt needs to be highly sophisticated to handle Founder-level commands
         serializable_registry = self._get_serializable_registry()
-        prompt_template = ChatPromptTemplate.from_messages([
-            SystemMessage(content=f"""You are AUREA, the Founder's Executive AI Assistant.
+        system_prompt = f"""You are AUREA, the Founder's Executive AI Assistant.
             Your role is to interpret natural language commands for the entire BrainOps AI OS.
             Based on the user's command, identify the primary intent and extract all relevant parameters.
             You have access to the following tools/skills:
@@ -169,23 +201,56 @@ class AUREANLUProcessor:
             If the command is ambiguous or requires more information, ask clarifying questions.
             If the command implies a high-impact action, set 'requires_confirmation' to true.
             Respond ONLY in JSON format with 'intent', 'parameters', 'confidence', 'requires_confirmation', and 'clarification_needed'.
-            Ensure 'parameters' matches the schema of the identified intent's action. If no clear intent is found, use 'UNKNOWN'.
-"""),
-            HumanMessage(content=f"User command: \"{command_text}\"" )
-        ])
+            Ensure 'parameters' matches the schema of the identified intent's action. If no clear intent is found, use 'UNKNOWN'."""
 
-        response = await self.llm.ainvoke(prompt_template.format_messages())
+        user_prompt = f"User command: \"{command_text}\""
+        response_content = None
+
+        # Try OpenAI first, fallback to Perplexity on error
         try:
-            parsed_response = json.loads(response.content)
+            prompt_template = ChatPromptTemplate.from_messages([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
+            ])
+            response = await self.llm.ainvoke(prompt_template.format_messages())
+            response_content = response.content
+        except Exception as openai_error:
+            logger.warning(f"OpenAI failed for AUREA NLU, trying Perplexity fallback: {openai_error}")
+            try:
+                response_content = await _perplexity_fallback(user_prompt, system_prompt)
+                logger.info("Successfully used Perplexity fallback for AUREA NLU")
+            except Exception as perplexity_error:
+                logger.error(f"Perplexity fallback also failed: {perplexity_error}")
+                return {"intent": "UNKNOWN", "parameters": {}, "confidence": 0.0, "requires_confirmation": False, "clarification_needed": f"AI providers unavailable: {openai_error}"}
+
+        try:
+            # Clean response content - extract JSON from potential markdown code blocks
+            clean_content = response_content.strip()
+            if clean_content.startswith("```"):
+                # Extract JSON from code block
+                lines = clean_content.split('\n')
+                json_lines = []
+                in_block = False
+                for line in lines:
+                    if line.startswith("```") and not in_block:
+                        in_block = True
+                        continue
+                    elif line.startswith("```") and in_block:
+                        break
+                    elif in_block:
+                        json_lines.append(line)
+                clean_content = '\n'.join(json_lines)
+
+            parsed_response = json.loads(clean_content)
             # Basic validation of parsed_response structure
             if not all(k in parsed_response for k in ["intent", "parameters", "confidence"]):
                 raise ValueError("Missing required keys in LLM response")
             return parsed_response
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response as JSON: {response.content}. Error: {e}")
+            logger.error(f"Failed to parse LLM response as JSON: {response_content}. Error: {e}")
             return {"intent": "UNKNOWN", "parameters": {}, "confidence": 0.0, "requires_confirmation": False, "clarification_needed": "Could not parse LLM response as valid JSON."}
         except ValueError as e:
-            logger.error(f"Invalid structure in LLM response: {response.content}. Error: {e}")
+            logger.error(f"Invalid structure in LLM response: {response_content}. Error: {e}")
             return {"intent": "UNKNOWN", "parameters": {}, "confidence": 0.0, "requires_confirmation": False, "clarification_needed": f"Invalid structure in LLM response: {e}"}
 
     async def execute_natural_language_command(self, command_text: str) -> Dict[str, Any]:
