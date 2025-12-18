@@ -24,16 +24,23 @@ async def get_customer_intelligence(customer_id: str):
     Calculates risk, LTV, and behavioral profile.
     """
     pool = get_pool()
-    
+
     try:
+        # Validate UUID format
+        import uuid
+        try:
+            uuid.UUID(customer_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid customer ID format - must be a valid UUID")
+
         # Fetch customer data
         customer = await pool.fetchrow(
-            "SELECT * FROM customers WHERE id = $1", 
+            "SELECT * FROM customers WHERE id = $1",
             customer_id
         )
-        
+
         if not customer:
-            raise HTTPException(status_code=404, detail="Customer not found")
+            raise HTTPException(status_code=404, detail=f"Customer not found: {customer_id}")
             
         # Fetch related data for analysis
         jobs = await pool.fetch(

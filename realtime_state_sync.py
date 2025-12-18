@@ -254,7 +254,14 @@ class RealTimeStateSync:
         components = list(self.state.components.values())
 
         if not components:
-            return {"status": "unknown", "message": "No components registered"}
+            return {
+                "status": "unknown",
+                "message": "No components registered",
+                "total_components": 0,
+                "by_status": {"healthy": 0, "degraded": 0, "error": 0, "unknown": 0},
+                "by_type": {},
+                "last_computed": datetime.now(timezone.utc).isoformat()
+            }
 
         status_counts = {
             "healthy": 0,
