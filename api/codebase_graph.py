@@ -269,45 +269,45 @@ async def get_graph_data(limit: int = 2000):
     Limited to prevent browser crash on massive graphs.
     """
     pool = get_pool()
-    
-    # Fetch nodes
+
+    # Fetch nodes - using correct column names per actual schema
     nodes_rows = await pool.fetch(
-        "SELECT id, name, type, repo_name, file_path, metadata FROM codebase_nodes LIMIT $1",
+        "SELECT node_id, name, node_type, codebase, filepath, metadata FROM codebase_nodes LIMIT $1",
         limit
     )
-    
-    node_ids = [str(row['id']) for row in nodes_rows]
+
+    node_ids = [row['node_id'] for row in nodes_rows]
     if not node_ids:
         return {"nodes": [], "edges": []}
-        
-    # Fetch edges connecting these nodes
+
+    # Fetch edges connecting these nodes - using correct column names
     edges_rows = await pool.fetch(
         """
-        SELECT source_id, target_id, type 
-        FROM codebase_edges 
-        WHERE source_id::text = ANY($1) AND target_id::text = ANY($1)
+        SELECT source_node_id, target_node_id, edge_type
+        FROM codebase_edges
+        WHERE source_node_id = ANY($1) AND target_node_id = ANY($1)
         """,
         node_ids
     )
-    
+
     nodes = []
     for row in nodes_rows:
         nodes.append({
-            "id": str(row['id']),
+            "id": row['node_id'],
             "label": row['name'],
-            "group": row['type'], # file, class, function
-            "repo": row['repo_name'],
-            "path": row['file_path']
+            "group": row['node_type'],  # file, class, function
+            "repo": row['codebase'],
+            "path": row['filepath']
         })
-        
+
     edges = []
     for row in edges_rows:
         edges.append({
-            "from": str(row['source_id']),
-            "to": str(row['target_id']),
-            "type": row['type']
+            "from": row['source_node_id'],
+            "to": row['target_node_id'],
+            "type": row['edge_type']
         })
-        
+
     return {"nodes": nodes, "edges": edges}
 
 @router.get("/visualize", response_class=HTMLResponse)
