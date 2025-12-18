@@ -32,7 +32,7 @@ class PoolConfig:
     connect_timeout: float = 30.0  # Increased to prevent timeouts on slow networks
     max_inactive_connection_lifetime: float = 60.0  # Recycle idle connections after 60s
     ssl: bool = True  # Supabase requires TLS; allow override for local/dev
-    ssl_verify: bool = False  # Default to disabled verification to avoid self-signed errors in managed DBs
+    ssl_verify: bool = True  # Enable SSL verification by default for security; disable only for local dev
 
 
 class BasePool:
