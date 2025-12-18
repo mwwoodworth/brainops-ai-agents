@@ -429,9 +429,9 @@ async def lifespan(app: FastAPI):
         or os.getenv("DEFAULT_TENANT_ID")
         or os.getenv("CENTERPOINT_TENANT_ID")
         or os.getenv("SYSTEM_TENANT_ID")
+        or "brainops-production"  # Default tenant for production AI OS
     )
-    if not tenant_id:
-        logger.warning("⚠️ TENANT_ID not set; tenant-scoped orchestrators and agents will be skipped.")
+    logger.info(f"🔑 Using tenant_id: {tenant_id}")
 
     # Keep handles defined to avoid unbound errors when optional systems are disabled
     aurea = None
@@ -1666,6 +1666,141 @@ async def get_scheduler_status():
             for job in apscheduler_jobs
         ]
     }
+
+
+@app.post("/scheduler/activate-all", dependencies=SECURED_DEPENDENCIES)
+async def activate_all_agents_scheduler():
+    """
+    Schedule ALL agents that don't have active schedules.
+    This activates the full AI OS by ensuring every agent runs on a schedule.
+    """
+    if not SCHEDULER_AVAILABLE or not hasattr(app.state, 'scheduler') or not app.state.scheduler:
+        raise HTTPException(status_code=503, detail="Scheduler not available")
+
+    scheduler = app.state.scheduler
+    pool = get_pool()
+
+    try:
+        # Get all agents
+        agents_result = await pool.fetch("SELECT id, name, type, category FROM ai_agents WHERE status = 'active'")
+
+        # Get existing schedules
+        existing_result = await pool.fetch("SELECT agent_id FROM agent_schedules WHERE enabled = true")
+        existing_agent_ids = {str(row['agent_id']) for row in existing_result}
+
+        scheduled_count = 0
+        already_scheduled = 0
+        errors = []
+
+        for agent in agents_result:
+            agent_id = str(agent['id'])
+            agent_name = agent['name']
+            agent_type = agent.get('type', 'general').lower()
+
+            if agent_id in existing_agent_ids:
+                already_scheduled += 1
+                continue
+
+            # Determine frequency based on agent type
+            if agent_type in ['analytics', 'revenue', 'customer']:
+                frequency = 30  # High-value agents: every 30 min
+            elif agent_type in ['monitor', 'security']:
+                frequency = 15  # Critical agents: every 15 min
+            elif agent_type in ['learning', 'optimization']:
+                frequency = 60  # Learning agents: every hour
+            else:
+                frequency = 60  # Default: every hour
+
+            try:
+                # Insert schedule
+                await pool.execute("""
+                    INSERT INTO agent_schedules (id, agent_id, frequency_minutes, enabled, created_at)
+                    VALUES (gen_random_uuid(), $1, $2, true, NOW())
+                """, agent_id, frequency)
+
+                # Add to scheduler
+                scheduler.add_agent_job(agent_id, agent_name, frequency)
+                scheduled_count += 1
+                logger.info(f"✅ Scheduled agent {agent_name} every {frequency} min")
+
+            except Exception as e:
+                errors.append(f"{agent_name}: {str(e)}")
+                logger.error(f"❌ Failed to schedule {agent_name}: {e}")
+
+        return {
+            "success": True,
+            "message": f"Activated {scheduled_count} new agent schedules",
+            "new_schedules": scheduled_count,
+            "already_scheduled": already_scheduled,
+            "total_agents": len(agents_result),
+            "errors": errors if errors else None
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to activate all agents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/memory/store", dependencies=SECURED_DEPENDENCIES)
+async def store_memory(
+    content: str = Body(...),
+    memory_type: str = Body("operational"),
+    category: str = Body(default=None),
+    metadata: Dict[str, Any] = Body(default=None)
+):
+    """
+    Store a memory in the AI memory system.
+    This enables the AI to remember and learn from experiences.
+    """
+    if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory_manager') or not app.state.memory_manager:
+        raise HTTPException(status_code=503, detail="Memory system not available")
+
+    try:
+        memory_manager = app.state.memory_manager
+        memory_id = await memory_manager.store(
+            content=content,
+            memory_type=memory_type,
+            category=category,
+            metadata=metadata or {}
+        )
+        return {
+            "success": True,
+            "memory_id": memory_id,
+            "message": "Memory stored successfully"
+        }
+    except Exception as e:
+        logger.error(f"Failed to store memory: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/memory/search")
+async def search_memory(
+    query: str = Query(..., description="Search query"),
+    limit: int = Query(10, description="Max results"),
+    memory_type: str = Query(None, description="Filter by type")
+):
+    """
+    Search the AI memory system for relevant memories.
+    """
+    if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory_manager') or not app.state.memory_manager:
+        raise HTTPException(status_code=503, detail="Memory system not available")
+
+    try:
+        memory_manager = app.state.memory_manager
+        memories = await memory_manager.search(
+            query=query,
+            limit=limit,
+            memory_type=memory_type
+        )
+        return {
+            "success": True,
+            "query": query,
+            "count": len(memories),
+            "memories": memories
+        }
+    except Exception as e:
+        logger.error(f"Failed to search memory: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== AI SELF-AWARENESS ENDPOINTS ====================
