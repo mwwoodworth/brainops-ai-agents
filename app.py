@@ -1023,15 +1023,15 @@ async def _memory_stats_snapshot(pool) -> Dict[str, Any]:
 
 async def _get_agent_usage(pool) -> Dict[str, Any]:
     """Fetch recent agent usage, trying both legacy and new table names."""
-    queries: List[Tuple[str, str]] = [
-        ("agents", "agent_executions"),
-        ("ai_agents", "agent_executions"),
-        ("agents", "ai_agent_executions"),
-        ("ai_agents", "ai_agent_executions"),
+    # Table combinations with their JOIN conditions (some use agent_id UUID, some use agent_name text)
+    queries: List[Tuple[str, str, str, str]] = [
+        # (agents_table, executions_table, join_condition, time_column)
+        ("ai_agents", "ai_agent_executions", "e.agent_name = a.name", "e.created_at"),
+        ("agents", "ai_agent_executions", "e.agent_name = a.name", "e.created_at"),
     ]
     errors: List[str] = []
 
-    for agents_table, executions_table in queries:
+    for agents_table, executions_table, join_cond, time_col in queries:
         try:
             rows = await pool.fetch(f"""
                 SELECT
@@ -1040,12 +1040,12 @@ async def _get_agent_usage(pool) -> Dict[str, Any]:
                     COALESCE(a.category, 'other') AS category,
                     COALESCE(a.enabled, true) AS enabled,
                     COUNT(e.id) AS executions_last_30d,
-                    MAX(e.started_at) AS last_execution,
-                    AVG(e.duration_ms) FILTER (WHERE e.duration_ms IS NOT NULL) AS avg_duration_ms
+                    MAX({time_col}) AS last_execution,
+                    AVG(e.execution_time_ms) FILTER (WHERE e.execution_time_ms IS NOT NULL) AS avg_duration_ms
                 FROM {agents_table} a
                 LEFT JOIN {executions_table} e
-                    ON e.agent_id = a.id
-                    AND e.started_at >= NOW() - INTERVAL '30 days'
+                    ON {join_cond}
+                    AND {time_col} >= NOW() - INTERVAL '30 days'
                 GROUP BY a.id, a.name, a.category, a.enabled
                 ORDER BY executions_last_30d DESC, last_execution DESC NULLS LAST
                 LIMIT 20
@@ -1076,18 +1076,18 @@ async def _get_schedule_usage(pool) -> Dict[str, Any]:
     """Fetch scheduler schedule rows with resiliency."""
     schedules: List[Dict[str, Any]] = []
     try:
+        # Note: public.agent_schedules does NOT have last_execution/next_execution columns
         rows = await pool.fetch("""
             SELECT
                 s.id::text AS id,
                 s.agent_id::text AS agent_id,
                 s.enabled,
                 s.frequency_minutes,
-                s.last_execution,
-                s.next_execution,
+                s.created_at,
                 COALESCE(a.name, s.agent_id::text) AS agent_name
-            FROM agent_schedules s
+            FROM public.agent_schedules s
             LEFT JOIN ai_agents a ON a.id = s.agent_id
-            ORDER BY s.enabled DESC, s.last_execution DESC NULLS LAST
+            ORDER BY s.enabled DESC, s.created_at DESC NULLS LAST
             LIMIT 50
         """)
         for row in rows:
@@ -1099,11 +1099,10 @@ async def _get_schedule_usage(pool) -> Dict[str, Any]:
                     "agent_name": data.get("agent_name"),
                     "enabled": bool(data.get("enabled", True)),
                     "frequency_minutes": data.get("frequency_minutes"),
-                    "last_execution": data.get("last_execution").isoformat() if data.get("last_execution") else None,
-                    "next_execution": data.get("next_execution").isoformat() if data.get("next_execution") else None,
+                    "created_at": data.get("created_at").isoformat() if data.get("created_at") else None,
                 }
             )
-        return {"schedules": schedules, "table": "agent_schedules"}
+        return {"schedules": schedules, "table": "public.agent_schedules"}
     except Exception as exc:
         logger.error("Failed to load schedule usage: %s", exc)
         return {"schedules": schedules, "error": str(exc)}
@@ -1899,12 +1898,11 @@ async def get_self_awareness_stats():
 @app.post("/ai/tasks/execute/{task_id}")
 async def execute_ai_task(task_id: str):
     """Manually trigger execution of a specific task"""
-    if not INTEGRATION_LAYER_AVAILABLE or not hasattr(app.state, 'integration_layer'):
-        raise HTTPException(status_code=503, detail="AI Integration Layer not available")
+    integration_layer = getattr(app.state, 'integration_layer', None)
+    if not INTEGRATION_LAYER_AVAILABLE or integration_layer is None:
+        raise HTTPException(status_code=503, detail="AI Integration Layer not available or not initialized")
 
     try:
-        integration_layer = app.state.integration_layer
-
         # Get task
         task = await integration_layer.get_task_status(task_id)
         if not task:
@@ -1929,12 +1927,11 @@ async def execute_ai_task(task_id: str):
 @app.get("/ai/tasks/stats")
 async def get_task_stats():
     """Get AI task system statistics"""
-    if not INTEGRATION_LAYER_AVAILABLE or not hasattr(app.state, 'integration_layer'):
-        raise HTTPException(status_code=503, detail="AI Integration Layer not available")
+    integration_layer = getattr(app.state, 'integration_layer', None)
+    if not INTEGRATION_LAYER_AVAILABLE or integration_layer is None:
+        raise HTTPException(status_code=503, detail="AI Integration Layer not available or not initialized")
 
     try:
-        integration_layer = app.state.integration_layer
-
         # Get all tasks
         all_tasks = await integration_layer.list_tasks(limit=1000)
 
