@@ -205,20 +205,23 @@ class AgentScheduler:
             try:
                 cur.execute("""
                     INSERT INTO ai_scheduled_outreach
-                    (customer_id, outreach_type, priority, scheduled_for, status, meta_data)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT DO NOTHING
+                    (target_id, channel, message_template, personalization, scheduled_for, status, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (
-                    est['customer_id'],
+                    str(est['customer_id']),
+                    'email',
                     'estimate_followup',
-                    'high' if float(est['total_amount'] or 0) > 5000 else 'medium',
+                    json.dumps({
+                        'customer_name': est['customer_name'],
+                        'estimate_amount': float(est['total_amount'] or 0)
+                    }),
                     datetime.utcnow() + timedelta(hours=24),
-                    'pending',
+                    'scheduled',
                     json.dumps({
                         'estimate_id': str(est['id']),
                         'amount': float(est['total_amount'] or 0),
-                        'customer_name': est['customer_name'],
-                        'reason': 'Stale estimate - no response in 3+ days'
+                        'reason': 'Stale estimate - no response in 3+ days',
+                        'priority': 'high' if float(est['total_amount'] or 0) > 5000 else 'medium'
                     })
                 ))
                 actions_taken.append({
@@ -235,19 +238,15 @@ class AgentScheduler:
             try:
                 cur.execute("""
                     INSERT INTO ai_business_insights
-                    (insight_type, title, description, priority, status, meta_data)
+                    (insight_type, category, title, description, impact_score, urgency)
                     VALUES (%s, %s, %s, %s, %s, %s)
                 """, (
                     'revenue_opportunity',
+                    'sales',
                     f'${potential_revenue:,.0f} in stale estimates need follow-up',
-                    f'{len(stale_estimates)} estimates older than 3 days with no follow-up scheduled',
-                    'high' if potential_revenue > 10000 else 'medium',
-                    'active',
-                    json.dumps({
-                        'potential_revenue': potential_revenue,
-                        'estimate_count': len(stale_estimates),
-                        'agent': agent['name']
-                    })
+                    f'{len(stale_estimates)} estimates older than 3 days with no follow-up scheduled. Agent: {agent["name"]}',
+                    min(100, int(potential_revenue / 100)),  # Impact score based on revenue
+                    'high' if potential_revenue > 10000 else 'medium'
                 ))
                 actions_taken.append({'action': 'created_insight', 'revenue': potential_revenue})
             except Exception as e:
@@ -313,44 +312,57 @@ class AgentScheduler:
             ))
 
             try:
+                # Get tenant_id from customer
+                cur.execute("SELECT tenant_id FROM customers WHERE id = %s", (customer['id'],))
+                tenant_row = cur.fetchone()
+                tenant_id = tenant_row['tenant_id'] if tenant_row else '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457'
+
                 # Update or insert lead score
                 cur.execute("""
                     INSERT INTO ai_lead_scores
-                    (customer_id, score, score_factors, last_calculated)
-                    VALUES (%s, %s, %s, NOW())
+                    (customer_id, score, probability_to_close, estimated_value, factors, tenant_id)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (customer_id) DO UPDATE SET
                         score = EXCLUDED.score,
-                        score_factors = EXCLUDED.score_factors,
-                        last_calculated = NOW()
+                        probability_to_close = EXCLUDED.probability_to_close,
+                        estimated_value = EXCLUDED.estimated_value,
+                        factors = EXCLUDED.factors,
+                        updated_at = NOW()
                 """, (
                     customer['id'],
                     score,
+                    min(0.9, score / 100.0),  # Convert score to probability
+                    total_spent * 0.3,  # Estimate 30% of historical value as potential
                     json.dumps({
                         'total_spent': total_spent,
                         'job_count': job_count,
                         'days_inactive': 60,
                         'calculation': 'dormant_valuable_customer'
-                    })
+                    }),
+                    tenant_id
                 ))
 
                 # Schedule re-engagement for high-score leads
                 if score >= 50:
                     cur.execute("""
                         INSERT INTO ai_scheduled_outreach
-                        (customer_id, outreach_type, priority, scheduled_for, status, meta_data)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT DO NOTHING
+                        (target_id, channel, message_template, personalization, scheduled_for, status, metadata)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """, (
-                        customer['id'],
+                        str(customer['id']),
+                        'email',
                         'reengagement',
-                        'high' if score >= 70 else 'medium',
+                        json.dumps({
+                            'customer_name': customer['name'],
+                            'lead_score': score
+                        }),
                         datetime.utcnow() + timedelta(hours=48),
-                        'pending',
+                        'scheduled',
                         json.dumps({
                             'lead_score': score,
-                            'customer_name': customer['name'],
                             'total_spent': total_spent,
-                            'reason': 'High-value dormant customer - re-engagement opportunity'
+                            'reason': 'High-value dormant customer - re-engagement opportunity',
+                            'priority': 'high' if score >= 70 else 'medium'
                         })
                     ))
                     actions_taken.append({
@@ -433,52 +445,49 @@ class AgentScheduler:
             ))
 
             try:
+                # Get tenant_id from customer
+                cur.execute("SELECT tenant_id FROM customers WHERE id = %s", (customer['id'],))
+                tenant_row = cur.fetchone()
+                tenant_id = tenant_row['tenant_id'] if tenant_row else '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457'
+
                 # Record customer health status
                 cur.execute("""
                     INSERT INTO ai_customer_health
-                    (customer_id, health_score, churn_risk, ltv, last_activity, status, meta_data)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (customer_id, health_score, churn_probability, churn_risk, lifetime_value,
+                     days_since_last_activity, health_status, tenant_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (customer_id) DO UPDATE SET
                         health_score = EXCLUDED.health_score,
+                        churn_probability = EXCLUDED.churn_probability,
                         churn_risk = EXCLUDED.churn_risk,
-                        ltv = EXCLUDED.ltv,
-                        last_activity = EXCLUDED.last_activity,
-                        status = EXCLUDED.status,
-                        meta_data = EXCLUDED.meta_data,
+                        lifetime_value = EXCLUDED.lifetime_value,
+                        days_since_last_activity = EXCLUDED.days_since_last_activity,
+                        health_status = EXCLUDED.health_status,
                         updated_at = NOW()
                 """, (
                     customer['id'],
                     100 - churn_risk,  # Health score is inverse of churn risk
-                    churn_risk,
+                    churn_risk / 100.0,  # Convert to probability (0-1)
+                    'high' if churn_risk > 70 else 'medium' if churn_risk > 40 else 'low',
                     ltv,
-                    customer['last_activity'],
+                    days_inactive,
                     'at_risk' if churn_risk > 60 else 'declining',
-                    json.dumps({
-                        'days_inactive': days_inactive,
-                        'total_jobs': customer['total_jobs'],
-                        'analysis_type': 'automated_health_check'
-                    })
+                    tenant_id
                 ))
 
                 # Create intervention for high-risk customers
                 if churn_risk > 50:
                     cur.execute("""
                         INSERT INTO ai_customer_interventions
-                        (customer_id, intervention_type, priority, status, recommended_action, meta_data)
+                        (customer_id, intervention_type, reason, triggered_by, scheduled_date, tenant_id)
                         VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT DO NOTHING
                     """, (
                         customer['id'],
                         'retention',
-                        'critical' if churn_risk > 70 else 'high',
-                        'pending',
-                        f"High-value customer ({customer['name']}) inactive for {days_inactive} days. LTV: ${ltv:,.0f}. Recommend personal outreach.",
-                        json.dumps({
-                            'churn_risk': churn_risk,
-                            'ltv': ltv,
-                            'days_inactive': days_inactive,
-                            'customer_email': customer['email']
-                        })
+                        f"High-value customer ({customer['name']}) inactive for {days_inactive} days. LTV: ${ltv:,.0f}. Churn risk: {churn_risk}%. Email: {customer['email']}",
+                        'CustomerIntelligence Agent',
+                        datetime.utcnow() + timedelta(days=1),
+                        tenant_id
                     ))
                     actions_taken.append({
                         'action': 'created_intervention',
@@ -501,19 +510,15 @@ class AgentScheduler:
             try:
                 cur.execute("""
                     INSERT INTO ai_business_insights
-                    (insight_type, title, description, priority, status, meta_data)
+                    (insight_type, category, title, description, impact_score, urgency)
                     VALUES (%s, %s, %s, %s, %s, %s)
                 """, (
                     'customer_health',
+                    'retention',
                     f'{len(at_risk_customers)} high-value customers at churn risk',
-                    f'Combined LTV of ${total_at_risk_value:,.0f} at risk. Immediate retention action recommended.',
-                    'critical' if total_at_risk_value > 20000 else 'high',
-                    'active',
-                    json.dumps({
-                        'at_risk_count': len(at_risk_customers),
-                        'total_at_risk_value': total_at_risk_value,
-                        'agent': agent['name']
-                    })
+                    f'Combined LTV of ${total_at_risk_value:,.0f} at risk. Immediate retention action recommended. Agent: {agent["name"]}',
+                    min(100, int(total_at_risk_value / 200)),  # Impact score based on value
+                    'critical' if total_at_risk_value > 20000 else 'high'
                 ))
                 actions_taken.append({'action': 'created_churn_insight', 'value_at_risk': total_at_risk_value})
             except Exception as e:
