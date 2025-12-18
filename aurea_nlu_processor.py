@@ -301,7 +301,12 @@ class AUREANLUProcessor:
                         "intent_data": intent_data,
                     }
                 else:
-                    result = await action_func(**filtered_params)
+                    # Handle both sync and async action functions
+                    if asyncio.iscoroutinefunction(action_func):
+                        result = await action_func(**filtered_params)
+                    else:
+                        # Sync function - call directly without await
+                        result = action_func(**filtered_params)
                     return {"status": "success", "result": result, "message": f"Command '{command_text}' executed successfully by AUREA.", "intent_data": intent_data}
             except Exception as e:
                 logger.error(f"Error executing skill '{intent}' with parameters {parameters}: {e}")
