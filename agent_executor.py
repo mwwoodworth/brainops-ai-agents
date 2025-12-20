@@ -1547,18 +1547,37 @@ class CustomerAgent(BaseAgent):
             return {"status": "error", "error": str(e)}
 
     async def customer_outreach(self, task: Dict) -> Dict:
-        """Execute customer outreach campaign"""
+        """Execute customer outreach campaign with AI-generated content"""
         segment = task.get('segment', 'all')
-        message = task.get('message', 'Default outreach message')
-
-        # This would implement actual outreach
-        return {
-            "status": "completed",
-            "action": "outreach",
-            "segment": segment,
-            "message": message,
-            "recipients": 0  # Would be actual count
-        }
+        context = task.get('context', 'general update')
+        
+        try:
+            prompt = f"""
+            Write a professional customer outreach email for a roofing company.
+            Target Segment: {segment}
+            Context/Goal: {context}
+            
+            Return a JSON object with:
+            - subject: Email subject line
+            - body: Email body text (can include placeholders like {{name}})
+            - tone: Description of the tone used
+            """
+            
+            response = await ai_core.generate(prompt, model="gpt-4", temperature=0.7)
+            
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            message_data = json.loads(json_match.group()) if json_match else {"body": response}
+            
+            return {
+                "status": "completed",
+                "action": "outreach",
+                "segment": segment,
+                "message": message_data,
+                "generated_at": datetime.now(timezone.utc).isoformat()
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
 
 class InvoicingAgent(BaseAgent):
@@ -1767,17 +1786,53 @@ class CustomerIntelligenceAgent(BaseAgent):
             return {"status": "error", "error": str(e)}
 
     async def advanced_segmentation(self) -> Dict:
-        """Advanced customer segmentation using AI"""
-        # This would use AI for clustering
-        return {
-            "status": "completed",
-            "segments": {
-                "vip": {"count": 50, "characteristics": ["High value", "Frequent"]},
-                "regular": {"count": 200, "characteristics": ["Medium value", "Seasonal"]},
-                "dormant": {"count": 100, "characteristics": ["No recent activity"]},
-                "prospect": {"count": 500, "characteristics": ["No purchases yet"]}
-            }
-        }
+        """Advanced customer segmentation using Real AI"""
+        try:
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Fetch sample of customers with their metrics
+            cursor.execute("""
+                SELECT c.id, c.name, COUNT(j.id) as jobs, SUM(i.total_amount) as revenue
+                FROM customers c
+                LEFT JOIN jobs j ON c.id = j.customer_id
+                LEFT JOIN invoices i ON j.id = i.job_id
+                GROUP BY c.id, c.name
+                LIMIT 50
+            """)
+            customers = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            if not customers:
+                return {"status": "completed", "segments": {}}
+
+            customers_data = [dict(c) for c in customers]
+            
+            prompt = f"""
+            Analyze these customer profiles and group them into meaningful segments (e.g., VIP, At-Risk, New, Steady).
+            Data: {json.dumps(customers_data, default=str)}
+
+            Return a JSON object where keys are segment names and values are objects containing:
+            - count: number of customers
+            - characteristics: list of defining traits
+            - customer_ids: list of IDs in this segment
+            """
+
+            response = await ai_core.generate(prompt, model="gpt-4", temperature=0.2)
+            
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                return {
+                    "status": "completed", 
+                    "segments": json.loads(json_match.group())
+                }
+            
+            return {"status": "error", "message": "Could not parse AI response"}
+
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
     async def customer_overview(self) -> Dict:
         """General customer overview"""
@@ -1850,16 +1905,39 @@ class PredictiveAnalyzerAgent(BaseAgent):
             return {"status": "error", "error": str(e)}
 
     async def predict_demand(self) -> Dict:
-        """Predict service demand"""
-        # This would use historical data and ML
-        return {
-            "status": "completed",
-            "demand_forecast": {
-                "next_week": {"expected_jobs": 45, "confidence": 0.75},
-                "next_month": {"expected_jobs": 180, "confidence": 0.65},
-                "next_quarter": {"expected_jobs": 550, "confidence": 0.55}
-            }
-        }
+        """Predict service demand using Real AI"""
+        try:
+            # Get some context if available, otherwise ask AI for general market forecast
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days'")
+            recent_jobs = cursor.fetchone()['count']
+            cursor.close()
+            conn.close()
+
+            prompt = f"""
+            Predict roofing service demand for the next quarter based on:
+            - Current monthly job volume: {recent_jobs}
+            - Seasonality: Entering {datetime.now().strftime("%B")}
+            - Market trends: Residential roofing
+
+            Return a JSON object with:
+            - demand_forecast: Object containing 'next_week', 'next_month', 'next_quarter'
+            - confidence: float (0-1)
+            - factors: list of influencing factors
+            """
+
+            response = await ai_core.generate(prompt, model="gpt-4", temperature=0.3)
+            
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+            
+            return {"status": "error", "message": "Could not parse AI response"}
+
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
     async def analyze_seasonality(self) -> Dict:
         """Analyze seasonal patterns"""

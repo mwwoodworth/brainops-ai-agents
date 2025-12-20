@@ -24,11 +24,25 @@ class LeadScorer:
 
         logger.info(f"Scoring {len(leads)} leads for tenant {self.tenant_id}")
         
+        from ai_core import ai_analyze
+
         scored_leads = []
         for lead in leads:
-            # Simulate scoring
-            score = 85  # Mock score
-            enriched_data = {"property_value": 450000, "last_sale": "2020-05-01"}
+            try:
+                # Real AI Scoring
+                analysis = await ai_analyze(lead, analysis_type="lead")
+                score = analysis.get("score", 75)
+                enriched_data = {
+                    "reasoning": analysis.get("reasoning", "AI Analysis"),
+                    "recommendations": analysis.get("recommendations", []),
+                    "estimated_value": analysis.get("estimated_value", 0),
+                    "conversion_probability": analysis.get("conversion_probability", 0)
+                }
+            except Exception as e:
+                logger.error(f"AI scoring failed for lead {lead.get('id', 'unknown')}: {e}")
+                score = 50  # Conservative fallback
+                enriched_data = {"error": str(e)}
+
             lead['score'] = score
             lead['enrichment'] = enriched_data
             scored_leads.append(lead)
