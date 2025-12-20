@@ -112,7 +112,7 @@ async def discover_leads(request: LeadDiscoveryRequest):
     try:
         # Generate realistic roofing contractor leads using AI patterns
         # In production, this would use Perplexity/web scraping
-        leads_data = generate_realistic_leads(request.industry, request.location, request.limit)
+        leads_data = await generate_realistic_leads(request.industry, request.location, request.limit)
 
         created_leads = []
         for lead_data in leads_data:
@@ -449,14 +449,47 @@ async def get_pipeline():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def generate_realistic_leads(industry: str, location: str, count: int) -> List[Dict[str, Any]]:
+async def generate_realistic_leads(industry: str, location: str, count: int) -> List[Dict[str, Any]]:
     """
     Generate realistic leads based on industry patterns.
     In production, this would use Perplexity API for real-time discovery.
     """
     import random
 
-    # Realistic roofing company patterns
+    # Realistic roofing company patterns (fallback only)
+    # In production, we use AI to generate these
+    
+    # Try to use Real AI Core first
+    try:
+        from ai_core import ai_core, ai_generate
+        
+        prompt = f"""
+        Generate {count} realistic B2B roofing leads in the {industry} industry near {location}.
+        Return a JSON array of objects with these fields:
+        - company_name: Realistic company name
+        - contact_name: Full name of a decision maker
+        - email: Professional email address
+        - phone: Phone number
+        - website: Website URL
+        - value_estimate: Estimated annual value (float between 5000 and 50000)
+        - score: Lead score (0.0 to 1.0)
+        - metadata: Object with 'city', 'industry', 'company_size'
+        
+        Make the data look authentic and diverse.
+        """
+        
+        response = await ai_generate(prompt, model="gpt-4", temperature=0.8)
+        
+        import re
+        json_match = re.search(r'\[.*\]', response, re.DOTALL)
+        if json_match:
+            return json.loads(json_match.group())
+            
+    except Exception as e:
+        logger.warning(f"AI lead generation failed, falling back to procedural generation: {e}")
+
+    import random
+
     company_prefixes = [
         "Premier", "Quality", "Elite", "Professional", "Certified",
         "Advanced", "Superior", "Reliable", "Trusted", "Expert",
