@@ -725,15 +725,43 @@ Return ONLY valid JSON array, no other text."""
             return []
 
     async def _calculate_dynamic_pricing(self, requirements: Dict) -> Dict:
-        """Calculate dynamic pricing based on requirements"""
-        # Implement dynamic pricing logic
-        base_price = 5000
-        return {
-            'base': base_price,
-            'total': base_price * 1.2,
-            'discount': 0,
-            'terms': '50% upfront, 50% on completion'
-        }
+        """Calculate dynamic pricing using AI analysis of requirements"""
+        try:
+            prompt = f"""Calculate dynamic pricing for a roofing software project based on these requirements:
+            {json.dumps(requirements)}
+
+            Consider: complexity, scope, market rates (base ~$5000), and value provided.
+
+            Return JSON with:
+            - base: base price (float)
+            - total: total price with adjustments (float)
+            - discount: discount amount if applicable (float)
+            - terms: payment terms string
+            - reasoning: short explanation
+            """
+
+            response = openai.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are a pricing expert."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3
+            )
+            
+            pricing = json.loads(response.choices[0].message.content)
+            return pricing
+        except Exception as e:
+            logger.error(f"AI pricing calculation failed: {e}")
+            # Fallback
+            base_price = 5000
+            return {
+                'base': base_price,
+                'total': base_price * 1.2,
+                'discount': 0,
+                'terms': '50% upfront, 50% on completion',
+                'reasoning': 'Fallback pricing due to AI error'
+            }
 
     async def _schedule_email(self, email_data: Dict):
         """Schedule email for sending"""
@@ -838,9 +866,39 @@ Return ONLY valid JSON array, no other text."""
             logger.error(f"Failed to schedule nurture campaign: {e}")
 
     async def _generate_closing_documents(self, lead_id: str, terms: Dict) -> Dict:
-        """Generate closing documents"""
-        # Generate contracts, invoices, etc.
-        return {}
+        """Generate closing documents using AI"""
+        try:
+            lead = await self._get_lead(lead_id)
+            prompt = f"""Generate the structure for closing documents for:
+            Client: {lead.get('company_name', 'Client')}
+            Terms: {json.dumps(terms)}
+
+            Return JSON with:
+            - contract_id: generated UUID
+            - sections: list of contract sections (Scope, Terms, etc.)
+            - key_clauses: list of important clauses based on terms
+            - signature_block: text for signature area
+            """
+
+            response = openai.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are a legal document assistant."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3
+            )
+            
+            docs = json.loads(response.choices[0].message.content)
+            docs['generated_at'] = datetime.now(timezone.utc).isoformat()
+            return docs
+            
+        except Exception as e:
+            logger.error(f"Document generation failed: {e}")
+            return {
+                "error": str(e),
+                "status": "failed"
+            }
 
     async def _initiate_onboarding(self, lead_id: str):
         """Initiate customer onboarding"""
