@@ -996,8 +996,7 @@ class AIDecisionTree:
                 conn.close()
 
     def _get_historical_success_rate(self, action: ActionType) -> float:
-        """Get historical success rate for action type"""
-        # Simplified - would query database for real rates
+        """Get historical success rate for action type from Real Database"""
         default_rates = {
             ActionType.EXECUTE: 0.75,
             ActionType.DELEGATE: 0.8,
@@ -1008,6 +1007,31 @@ class AIDecisionTree:
             ActionType.CONDITIONAL: 0.68,
             ActionType.RETRY: 0.6
         }
+        
+        try:
+            conn = self._get_connection()
+            cur = conn.cursor()
+            
+            # Query real historical performance
+            cur.execute("""
+                SELECT AVG(CASE WHEN success THEN 1.0 ELSE 0.0 END)
+                FROM ai_decision_history
+                WHERE selected_option->>'action' = %s
+                AND timestamp > NOW() - INTERVAL '30 days'
+            """, (action.value,))
+            
+            result = cur.fetchone()
+            real_rate = result[0] if result and result[0] is not None else None
+            
+            cur.close()
+            conn.close()
+            
+            if real_rate is not None:
+                return float(real_rate)
+                
+        except Exception as e:
+            logger.warning(f"Failed to fetch historical rates for {action}: {e}")
+            
         return default_rates.get(action, 0.7)
 
     # Handler methods for different decision types

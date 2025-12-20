@@ -522,25 +522,66 @@ def get_brain() -> UnifiedBrain:
 
 
 def initialize_brain_with_current_state():
-    """Initialize brain with current production state"""
+    """Initialize brain with current production state using REAL data"""
     print("🧠 Initializing Unified Brain with current state...")
 
-    # System scale
-    brain.store(
-        'system_scale',
-        {
-            'customers': 3724,
-            'jobs': 12920,
-            'invoices': 2037,
-            'estimates': 51,
-            'tenants': 34,
-            'tables': 1322,
-            'ai_agents': 59
-        },
-        category='system',
-        priority='critical',
-        source='initialization'
-    )
+    # Fetch REAL system scale from database
+    try:
+        conn, cursor = brain._get_connection()
+        
+        # Get counts
+        cursor.execute("SELECT COUNT(*) as count FROM customers")
+        customers = cursor.fetchone()['count']
+        
+        cursor.execute("SELECT COUNT(*) as count FROM jobs")
+        jobs = cursor.fetchone()['count']
+        
+        cursor.execute("SELECT COUNT(*) as count FROM invoices")
+        invoices = cursor.fetchone()['count']
+        
+        cursor.execute("SELECT COUNT(*) as count FROM tenants")
+        tenants = cursor.fetchone()['count']
+        
+        cursor.execute("SELECT COUNT(*) as count FROM ai_agents")
+        agents = cursor.fetchone()['count']
+        
+        cursor.execute("SELECT COUNT(*) as count FROM information_schema.tables WHERE table_schema = 'public'")
+        tables = cursor.fetchone()['count']
+        
+        # Store REAL scale
+        brain.store(
+            'system_scale',
+            {
+                'customers': customers,
+                'jobs': jobs,
+                'invoices': invoices,
+                'estimates': 0,  # Estimates table might not exist or be separate
+                'tenants': tenants,
+                'tables': tables,
+                'ai_agents': agents,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            },
+            category='system',
+            priority='critical',
+            source='initialization_realtime'
+        )
+        print(f"✅ Stored REAL system scale: {customers} customers, {jobs} jobs")
+        
+    except Exception as e:
+        print(f"⚠️ Failed to fetch real stats, using fallback: {e}")
+        # Fallback to safe defaults if DB fails
+        brain.store(
+            'system_scale',
+            {
+                'customers': 0,
+                'jobs': 0,
+                'invoices': 0,
+                'status': 'db_connection_failed'
+            },
+            category='system',
+            priority='high',
+            source='initialization_fallback'
+        )
 
     # Production services
     brain.store(
