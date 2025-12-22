@@ -1125,6 +1125,79 @@ async def _get_schedule_usage(pool) -> Dict[str, Any]:
         return {"schedules": schedules, "error": str(exc)}
 
 
+# ==================== LANGGRAPH ENDPOINTS ====================
+
+if LANGGRAPH_AVAILABLE:
+    @app.post("/langgraph/workflow")
+    async def execute_langgraph_workflow(
+        request: Dict[str, Any],
+        authenticated: bool = Depends(verify_api_key)
+    ):
+        """Execute a LangGraph-based workflow"""
+        if not hasattr(app.state, 'langgraph_orchestrator') or not app.state.langgraph_orchestrator:
+            raise HTTPException(status_code=503, detail="LangGraph Orchestrator not available")
+        
+        try:
+            orchestrator = app.state.langgraph_orchestrator
+            
+            # Extract messages and metadata
+            messages_data = request.get("messages", [])
+            metadata = request.get("metadata", {})
+            
+            # Convert raw messages to LangChain messages if needed
+            from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+            
+            messages = []
+            for msg in messages_data:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                
+                if role == "system":
+                    messages.append(SystemMessage(content=content))
+                elif role == "assistant":
+                    messages.append(AIMessage(content=content))
+                else:
+                    messages.append(HumanMessage(content=content))
+            
+            # If no messages provided, use a default prompt
+            if not messages:
+                prompt = request.get("prompt", "")
+                if prompt:
+                    messages.append(HumanMessage(content=prompt))
+                else:
+                    raise HTTPException(status_code=400, detail="No messages or prompt provided")
+            
+            # Run workflow
+            result = await orchestrator.run_workflow(messages, metadata)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"LangGraph workflow error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/langgraph/status")
+    async def get_langgraph_status(authenticated: bool = Depends(verify_api_key)):
+        """Get LangGraph orchestrator status"""
+        if not hasattr(app.state, 'langgraph_orchestrator') or not app.state.langgraph_orchestrator:
+            return {
+                "available": False, 
+                "message": "LangGraph Orchestrator not initialized"
+            }
+            
+        orchestrator = app.state.langgraph_orchestrator
+        
+        return {
+            "available": True,
+            "components": {
+                "openai_llm": hasattr(orchestrator, 'openai_llm') and orchestrator.openai_llm is not None,
+                "anthropic_llm": hasattr(orchestrator, 'anthropic_llm') and orchestrator.anthropic_llm is not None,
+                "vector_store": hasattr(orchestrator, 'vector_store') and orchestrator.vector_store is not None,
+                "workflow_graph": hasattr(orchestrator, 'workflow') and orchestrator.workflow is not None
+            }
+        }
+
+
 @app.get("/")
 async def root():
     """Root endpoint"""
