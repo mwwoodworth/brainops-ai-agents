@@ -1709,12 +1709,13 @@ class InvoicingAgent(BaseAgent):
 
             # Create invoice
             invoice_number = f"INV-{datetime.now().strftime('%Y%m%d')}-{job_id[:8]}"
+            invoice_title = f"Invoice for {job.get('description', 'Roofing Services')[:180]}"
 
             cursor.execute("""
-                INSERT INTO invoices (invoice_number, job_id, customer_id, total_amount, status, notes, created_at)
-                VALUES (%s, %s, %s, %s, 'pending', %s, NOW())
+                INSERT INTO invoices (invoice_number, title, job_id, customer_id, total_amount, status, notes, created_at)
+                VALUES (%s, %s, %s, %s, %s, 'pending', %s, NOW())
                 RETURNING id
-            """, (invoice_number, job_id, job['customer_id'], task.get('amount', 1000), ai_note))
+            """, (invoice_number, invoice_title, job_id, job['customer_id'], task.get('amount', 1000), ai_note))
 
             invoice_id = cursor.fetchone()['id']
 
