@@ -1781,7 +1781,7 @@ async def store_memory(
 
     try:
         memory_manager = app.state.memory_manager
-        memory_id = await memory_manager.store(
+        memory_id = await memory_manager.store_async(
             content=content,
             memory_type=memory_type,
             category=category,
