@@ -125,6 +125,8 @@ class UnifiedMemoryManager:
 
             # Generate embedding if we have content
             embedding = self._generate_embedding(memory.content)
+            if embedding is None:
+                logger.warning(f"Memory will be stored without embedding - semantic search unavailable for this memory")
 
             # Find related memories
             related = self._find_related_memories(memory.content, memory.tenant_id, limit=5)
@@ -220,6 +222,11 @@ class UnifiedMemoryManager:
                 query_content = query
 
             query_embedding = self._generate_embedding(query_content)
+
+            # If embedding generation failed, return empty results
+            if query_embedding is None:
+                logger.warning("Cannot perform semantic search - embedding generation failed")
+                return []
 
             with self._get_cursor() as cur:
                 # Build the query
@@ -571,8 +578,8 @@ class UnifiedMemoryManager:
             
         except Exception as e:
             logger.error(f"❌ Embedding generation failed: {e}")
-            # Fallback to zero vector to prevent crash, but log clearly
-            return [0.0] * 1536
+            # Return None instead of zero vector to avoid polluting vector database
+            return None
 
     def _generate_search_text(self, memory: Memory) -> str:
         """Generate searchable text from memory"""
