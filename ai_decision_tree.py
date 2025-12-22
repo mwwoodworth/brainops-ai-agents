@@ -1297,6 +1297,79 @@ class AIDecisionTree:
             if conn:
                 conn.close()
 
+    async def get_execution_guidance(
+        self,
+        agent_name: str,
+        task_type: str,
+        task_data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get execution guidance for an agent task.
+
+        Args:
+            agent_name: Name of the agent requesting guidance
+            task_type: Type of task being executed
+            task_data: Optional task data
+
+        Returns:
+            Dict with confidence score and execution recommendations
+        """
+        try:
+            # Map task types to decision trees
+            tree_mapping = {
+                'revenue': ['revenue', 'sales', 'pricing', 'lead'],
+                'customer': ['customer', 'support', 'inquiry', 'complaint'],
+                'operational': ['workflow', 'process', 'scheduling', 'resource'],
+                'technical': ['code', 'deploy', 'fix', 'debug', 'monitor'],
+                'emergency': ['alert', 'error', 'critical', 'outage']
+            }
+
+            # Determine appropriate decision tree
+            selected_tree = 'operational'  # default
+            task_type_lower = task_type.lower() if task_type else ''
+
+            for tree_name, keywords in tree_mapping.items():
+                if any(kw in task_type_lower for kw in keywords):
+                    selected_tree = tree_name
+                    break
+
+            # Get historical success rate for this task type
+            historical_success = self._get_historical_success_rate(
+                ActionType.EXECUTE if 'execute' in task_type_lower else ActionType.MONITOR
+            )
+
+            # Base confidence calculation
+            base_confidence = 0.75
+            if self.decision_trees.get(selected_tree):
+                base_confidence += 0.1  # Boost if we have a tree for this
+
+            # Adjust based on historical performance
+            confidence = min(1.0, base_confidence * (0.5 + historical_success * 0.5))
+
+            return {
+                'confidence': round(confidence, 3),
+                'recommended_tree': selected_tree,
+                'agent_name': agent_name,
+                'task_type': task_type,
+                'historical_success_rate': historical_success,
+                'guidance': {
+                    'proceed': confidence > 0.5,
+                    'caution_level': 'low' if confidence > 0.7 else 'medium' if confidence > 0.5 else 'high',
+                    'recommendations': [
+                        f"Use {selected_tree} decision tree for optimal results",
+                        "Monitor execution for early warning signs" if confidence < 0.7 else "Standard monitoring sufficient"
+                    ]
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting execution guidance: {e}")
+            return {
+                'confidence': 0.5,
+                'error': str(e),
+                'guidance': {'proceed': True, 'caution_level': 'medium'}
+            }
+
 # Singleton instance
 _ai_decision_tree = None
 

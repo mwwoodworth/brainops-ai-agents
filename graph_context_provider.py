@@ -175,6 +175,49 @@ class GraphContextProvider:
         context.query_time_ms = (datetime.now() - start_time).total_seconds() * 1000
         return context
 
+    async def get_context_for_agent(
+        self,
+        agent_name: str,
+        task_data: Optional[Dict[str, Any]] = None
+    ) -> CodeContext:
+        """
+        Get relevant codebase context for an AI agent's current task.
+
+        Args:
+            agent_name: Name of the agent requesting context
+            task_data: Optional task data containing action, data, etc.
+
+        Returns:
+            CodeContext with relevant code elements for the agent's task
+        """
+        # Build task description from agent name and task data
+        task_parts = [agent_name]
+
+        if task_data:
+            if "action" in task_data:
+                task_parts.append(task_data["action"])
+            if "description" in task_data:
+                task_parts.append(task_data["description"])
+            if "data" in task_data and isinstance(task_data["data"], dict):
+                # Extract key fields from data
+                for key in ["type", "target", "query", "keyword"]:
+                    if key in task_data["data"]:
+                        task_parts.append(str(task_data["data"][key]))
+
+        task_description = " ".join(task_parts)
+
+        # Determine repos to search based on agent type
+        repos = None
+        agent_lower = agent_name.lower()
+        if "erp" in agent_lower or "weathercraft" in agent_lower:
+            repos = ["weathercraft-erp"]
+        elif "roof" in agent_lower or "mrg" in agent_lower:
+            repos = ["myroofgenius-app"]
+        elif "backend" in agent_lower or "api" in agent_lower:
+            repos = ["brainops-ai-agents", "brainops-backend"]
+
+        return await self.get_context_for_task(task_description, repos=repos)
+
     async def get_context_for_file(
         self,
         file_path: str,
