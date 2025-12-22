@@ -274,7 +274,7 @@ class SchedulingAgent(IntelligentAgent):
                 "start_time": best_slot["start"],
                 "end_time": best_slot["end"],
                 "crew": assigned_crew,
-                "efficiency_score": 100, # Placeholder until metrics implemented
+                "efficiency_score": 100 if duration <= 4 else (90 if duration <= 8 else 80),
                 "weather_suitable": await self._check_weather(best_slot["start"])
             }
 

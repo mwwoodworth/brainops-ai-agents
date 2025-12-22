@@ -1477,12 +1477,32 @@ class WorkflowEngineAgent(BaseAgent):
             task['action'] = 'generate'
             return await invoice_agent.execute(task)
 
-        # Fallback if no job_id provided
+        # Fallback if no job_id provided - Try to find a recent completed job without invoice
+        try:
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id FROM jobs 
+                WHERE status = 'completed' 
+                AND id NOT IN (SELECT job_id FROM invoices)
+                ORDER BY completed_at DESC
+                LIMIT 1
+            """)
+            recent_job = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if recent_job:
+                task['job_id'] = recent_job['id']
+                task['action'] = 'generate'
+                invoice_agent = InvoicingAgent()
+                return await invoice_agent.execute(task)
+        except Exception as e:
+            self.logger.warning(f"Failed to find fallback job for invoice: {e}")
+            
         return {
-            "status": "completed",
-            "workflow": "invoice_generation",
-            "invoice_id": f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}",
-            "note": "Stub response - job_id required for real generation via InvoicingAgent"
+            "status": "failed",
+            "error": "No job_id provided and no pending completed jobs found for invoice generation."
         }
 
     async def custom_workflow(self, task: Dict) -> Dict:
