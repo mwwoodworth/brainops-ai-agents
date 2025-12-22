@@ -13,8 +13,12 @@ openai>=1.58.1,<2.0.0  # Compatible with langchain-openai 0.3.x
 anthropic==0.7.0
 
 # LangChain for AUREA NLU (use latest stable 0.3.x versions)
-langchain-openai>=0.3.32,<0.4.0  # Latest stable 0.3.x
+langchain>=0.3.27,<0.4.0
 langchain-core>=0.3.31,<0.4.0  # Compatible with langchain-openai 0.3.x
+langchain-community>=0.3.29,<0.4.0
+langchain-openai>=0.3.32,<0.4.0  # Latest stable 0.3.x
+langchain-anthropic>=0.3.0,<0.4.0
+langgraph>=0.6.0
 
 # Scheduling (Required for agent scheduler)
 apscheduler==3.10.4

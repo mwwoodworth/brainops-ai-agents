@@ -214,13 +214,47 @@ async def agent_analytics(
             }
 
         elif action == "predict":
-            # Predictive analytics (simplified)
+            # Predictive analytics based on real data
+            
+            # 1. Get current month revenue
+            current_start = datetime(now.year, now.month, 1)
+            revenue_query = """
+                SELECT SUM(CASE WHEN amount IS NOT NULL THEN amount ELSE 0 END) as total
+                FROM invoices
+                WHERE invoice_date >= $1
+            """
+            current_rev_row = await pool.fetchrow(revenue_query, current_start)
+            current_rev = float(current_rev_row["total"] or 0)
+            
+            # 2. Get previous month revenue
+            if now.month == 1:
+                prev_start = datetime(now.year - 1, 12, 1)
+                prev_end = datetime(now.year, 1, 1) - timedelta(seconds=1)
+            else:
+                prev_start = datetime(now.year, now.month - 1, 1)
+                prev_end = datetime(now.year, now.month, 1) - timedelta(seconds=1)
+                
+            prev_rev_row = await pool.fetchrow(
+                "SELECT SUM(CASE WHEN amount IS NOT NULL THEN amount ELSE 0 END) as total FROM invoices WHERE invoice_date >= $1 AND invoice_date <= $2",
+                prev_start, prev_end
+            )
+            prev_rev = float(prev_rev_row["total"] or 0)
+            
+            # 3. Calculate growth and projection
+            growth = 0.0
+            if prev_rev > 0:
+                growth = ((current_rev - prev_rev) / prev_rev) * 100
+                
+            # Simple projection: Apply growth rate to current revenue
+            # Note: This is a basic linear projection.
+            next_month_projection = current_rev * (1 + (growth / 100)) if growth > 0 else current_rev
+            
             response["prediction"] = {
                 "period": period,
                 "forecast": {
-                    "next_month_revenue": 425000.00,  # Placeholder
-                    "expected_growth": 8.2,  # Percentage
-                    "confidence": 0.75
+                    "next_month_revenue": round(next_month_projection, 2),
+                    "expected_growth": round(growth, 2),
+                    "confidence": 0.70 if prev_rev > 0 else 0.3
                 },
                 "status": "predicted"
             }

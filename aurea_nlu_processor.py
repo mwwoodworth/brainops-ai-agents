@@ -261,11 +261,18 @@ class AUREANLUProcessor:
             return {"status": "clarification_needed", "message": intent_data["clarification_needed"], "original_command": command_text}
 
         if intent_data.get("requires_confirmation"):
-            # In a real system, this would trigger a human confirmation step (UI/voice)
             logger.info(f"Human confirmation required for intent: {intent_data['intent']} with params: {intent_data['parameters']}")
-            # For now, auto-confirm for testing purposes
-            # return {"status": "pending_confirmation", "message": "Confirmation required for this action.", "intent_data": intent_data}
-            pass # Proceed as if confirmed for now
+            
+            # Allow bypass via env var for testing/demo
+            if os.getenv("AUREA_AUTO_CONFIRM", "false").lower() == "true":
+                logger.warning("⚠️ Auto-confirming action due to AUREA_AUTO_CONFIRM=true")
+            else:
+                return {
+                    "status": "pending_confirmation",
+                    "message": f"Action '{intent_data.get('intent')}' requires confirmation.",
+                    "intent_data": intent_data,
+                    "confirmation_token": f"confirm_{int(datetime.now().timestamp())}"
+                }
 
         intent = intent_data.get("intent")
         parameters = intent_data.get("parameters", {})

@@ -248,8 +248,22 @@ class ChangePropagator:
                     WHERE file_path = $1
                 """, change.path)
             else:
-                # For created/modified, we'd need to re-parse
-                # This is a placeholder - full implementation would use AST parser
+                # Basic parsing: get size and line count
+                file_stats = os.stat(change.path)
+                line_count = 0
+                try:
+                    with open(change.path, 'r', errors='ignore') as f:
+                        line_count = sum(1 for _ in f)
+                except:
+                    pass
+                
+                metadata_update = {
+                    "timestamp": change.timestamp,
+                    "type": change.change_type,
+                    "size": file_stats.st_size,
+                    "line_count": line_count
+                }
+                
                 await pool.execute("""
                     UPDATE codebase_nodes
                     SET metadata = jsonb_set(
@@ -258,10 +272,7 @@ class ChangePropagator:
                         $1::jsonb
                     )
                     WHERE file_path = $2
-                """, json.dumps({
-                    "timestamp": change.timestamp,
-                    "type": change.change_type
-                }), change.path)
+                """, json.dumps(metadata_update), change.path)
 
         except Exception as e:
             logger.error(f"Failed to update codebase graph: {e}")

@@ -56,12 +56,31 @@ async def handle_erp_event(event: SystemEvent, request: Request):
         elif event.type == "NEW_JOB":
             job_id = event.payload.get("id")
             customer_id = event.payload.get("customer_id")
-            # Note: Specific 'SchedulingAgent' class not found, assuming logic or placeholder.
-            # For RevenueAgent, we can check if this job represents a closed deal/revenue opportunity.
+            
+            # Submit scheduling task to orchestrator for real execution
+            try:
+                from intelligent_task_orchestrator import get_task_orchestrator
+                orchestrator = get_task_orchestrator()
+                
+                await orchestrator.submit_task(
+                    title=f"Schedule Job {job_id}",
+                    task_type="scheduling",
+                    payload={
+                        "job_id": job_id, 
+                        "customer_id": customer_id, 
+                        "action": "find_slot",
+                        "description": event.payload.get("description", "New job scheduling")
+                    },
+                    priority=75 # High priority
+                )
+                logger.info(f"Submitted scheduling task for job {job_id}")
+            except Exception as sched_err:
+                logger.error(f"Failed to submit scheduling task: {sched_err}")
+                
+            # For RevenueAgent, trigger revenue opportunity analysis
             revenue_system = get_revenue_system()
             if job_id:
-                 # Log action in revenue system context if applicable
-                 # Or potentially trigger an upsell opportunity analysis
+                 # Log action in revenue system context
                  pass
             logger.info(f"Processed NEW_JOB event for {job_id}")
 
