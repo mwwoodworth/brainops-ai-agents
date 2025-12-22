@@ -22,6 +22,16 @@ from fastapi.security import APIKeyHeader
 
 # Import our production-ready components
 from config import config
+
+# Import agent executor for actual agent dispatch
+try:
+    from agent_executor import AgentExecutor
+    AGENT_EXECUTOR = AgentExecutor()
+    AGENTS_AVAILABLE = True
+except ImportError as e:
+    AGENT_EXECUTOR = None
+    AGENTS_AVAILABLE = False
+    logging.warning(f"AgentExecutor not available: {e}")
 from database.async_connection import (
     init_pool,
     get_pool,
@@ -1382,18 +1392,31 @@ async def execute_agent(
         except Exception as insert_error:
             logger.warning("Failed to persist execution start: %s", insert_error)
 
-        # Execute agent logic
+        # Execute agent logic using proper agent dispatch
         result = {"status": "completed", "message": "Agent executed successfully"}
+        task = body.get("task", {})
 
-        if AI_AVAILABLE and ai_core:
+        if AGENTS_AVAILABLE and AGENT_EXECUTOR:
             try:
-                # Use AI core for execution
-                prompt = f"Execute {agent['name']}: {body.get('task', 'default task')}"
+                # Use the actual agent executor to run the correct agent class
+                agent_result = await AGENT_EXECUTOR.execute(agent_name, task)
+                result = agent_result if isinstance(agent_result, dict) else {"status": "completed", "result": agent_result}
+                result["agent_executed"] = True
+            except Exception as e:
+                logger.error(f"Agent execution failed: {e}")
+                result["status"] = "error"
+                result["error"] = str(e)
+                result["agent_executed"] = False
+        elif AI_AVAILABLE and ai_core:
+            try:
+                # Fallback to generic AI if agent executor not available
+                prompt = f"Execute {agent['name']}: {task}"
                 if inspect.iscoroutinefunction(ai_core.generate):
                     ai_result = await ai_core.generate(prompt)
                 else:
                     ai_result = await asyncio.to_thread(ai_core.generate, prompt)
                 result["ai_response"] = ai_result
+                result["agent_executed"] = False
             except Exception as e:
                 logger.error(f"AI execution failed: {e}")
                 result["ai_response"] = None
