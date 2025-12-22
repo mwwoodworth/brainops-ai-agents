@@ -225,6 +225,25 @@ class RealTimeStateSync:
         """Get a component by name"""
         return self.state.components.get(name)
 
+    def register_agent(self, agent_name: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Register or update an AI agent in the state tracking system.
+
+        Args:
+            agent_name: Name of the agent
+            metadata: Optional metadata dict (status, task, etc.)
+
+        Returns:
+            True if successful
+        """
+        component = SystemComponent(
+            name=agent_name,
+            component_type="agent",
+            status=metadata.get("status", "healthy") if metadata else "healthy",
+            metadata=metadata or {}
+        )
+        return self.register_component(component)
+
     def get_all_components(self, component_type: Optional[str] = None) -> List[SystemComponent]:
         """Get all components, optionally filtered by type"""
         components = list(self.state.components.values())
