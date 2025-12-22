@@ -566,7 +566,33 @@ class AgentExecutor:
             raise
 
     async def _generic_execute(self, agent_name: str, task: Dict[str, Any]) -> Dict[str, Any]:
-        """Generic execution for agents without specific implementation"""
+        """Generic execution using Real AI when no specific agent exists"""
+        if USE_REAL_AI:
+            try:
+                prompt = f"""
+                You are the '{agent_name}'.
+                Task: {json.dumps(task, default=str)}
+                
+                Execute this task to the best of your ability.
+                Return a JSON object with the results.
+                """
+                response = await ai_core.generate(prompt, model="gpt-4-turbo-preview")
+                
+                # Try to parse as JSON
+                import re
+                json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                result_data = json.loads(json_match.group()) if json_match else {"response": response}
+                
+                return {
+                    "status": "completed",
+                    "agent": agent_name,
+                    "result": result_data,
+                    "ai_generated": True,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            except Exception as e:
+                logger.warning(f"Generic AI execution failed: {e}")
+        
         return {
             "status": "completed",
             "agent": agent_name,
@@ -906,7 +932,7 @@ class MonitorAgent(BaseAgent):
 
         # Check backend
         try:
-            response = requests.get(f"{BACKEND_URL}/api/v1/health", timeout=5)
+            response = await _http_get(f"{BACKEND_URL}/api/v1/health", timeout_seconds=5.0)
             results["checks"]["backend"] = {
                 "status": "healthy" if response.status_code == 200 else "unhealthy",
                 "code": response.status_code,
@@ -942,7 +968,7 @@ class MonitorAgent(BaseAgent):
 
         for name, url in frontends.items():
             try:
-                response = requests.get(url, timeout=5)
+                response = await _http_get(url, timeout_seconds=5.0)
                 results["checks"][name] = {
                     "status": "online" if response.status_code == 200 else "error",
                     "code": response.status_code
@@ -963,7 +989,7 @@ class MonitorAgent(BaseAgent):
     async def check_backend(self) -> Dict[str, Any]:
         """Check backend health"""
         try:
-            response = requests.get(f"{BACKEND_URL}/api/v1/health", timeout=5)
+            response = await _http_get(f"{BACKEND_URL}/api/v1/health", timeout_seconds=5.0)
             return {
                 "status": "healthy" if response.status_code == 200 else "unhealthy",
                 "data": response.json() if response.status_code == 200 else None
@@ -1000,7 +1026,7 @@ class MonitorAgent(BaseAgent):
         results = {}
         for name, url in sites.items():
             try:
-                response = requests.get(url, timeout=5)
+                response = await _http_get(url, timeout_seconds=5.0)
                 results[name] = {
                     "status": "online" if response.status_code in [200, 307] else "error",
                     "code": response.status_code
@@ -1436,11 +1462,19 @@ class WorkflowEngineAgent(BaseAgent):
 
     async def invoice_generation(self, task: Dict) -> Dict:
         """Invoice generation workflow"""
-        # This would implement invoice generation
+        # Use InvoicingAgent for real execution
+        if 'job_id' in task:
+            invoice_agent = InvoicingAgent()
+            # Ensure action is set to generate
+            task['action'] = 'generate'
+            return await invoice_agent.execute(task)
+
+        # Fallback if no job_id provided
         return {
             "status": "completed",
             "workflow": "invoice_generation",
-            "invoice_id": f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            "invoice_id": f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            "note": "Stub response - job_id required for real generation via InvoicingAgent"
         }
 
     async def custom_workflow(self, task: Dict) -> Dict:
@@ -1995,6 +2029,30 @@ class PredictiveAnalyzerAgent(BaseAgent):
                         "month": i,
                         "predicted_revenue": avg_monthly * (growth_rate ** i)
                     })
+                
+                # Enhance with AI insights if available
+                if USE_REAL_AI:
+                    try:
+                        prompt = f"""
+                        Analyze this revenue data and simple projection:
+                        Historical: {json.dumps([dict(h) for h in historical], default=str)}
+                        Simple Projection: {json.dumps(predictions, default=str)}
+                        
+                        Provide a refined revenue forecast for the next 3 months taking into account 
+                        typical seasonality for a service business.
+                        Return JSON with 'refined_predictions' (list of objects with month_index, amount, reasoning).
+                        """
+                        response = await ai_core.generate(prompt, model="gpt-4", temperature=0.3)
+                        
+                        import re
+                        json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                        if json_match:
+                            data = json.loads(json_match.group())
+                            if 'refined_predictions' in data:
+                                predictions = data['refined_predictions']
+                    except Exception as e:
+                        self.logger.warning(f"AI revenue prediction failed: {e}")
+
             else:
                 predictions = []
 
@@ -2173,17 +2231,14 @@ class ContractGeneratorAgent(BaseAgent):
             contract_text = None
             ai_generated = False
 
-            if OPENAI_API_KEY:
+            if USE_REAL_AI:
                 try:
-                    response = openai.chat.completions.create(
+                    contract_text = await ai_core.generate(
+                        prompt,
                         model="gpt-4",
-                        messages=[
-                            {"role": "system", "content": "You are a legal contract generator."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        max_tokens=1200
+                        system_prompt="You are a legal contract generator.",
+                        max_tokens=2000
                     )
-                    contract_text = (response.choices[0].message.content or '').strip()
                     ai_generated = True
                 except Exception as e:
                     logger.error(f"AI contract generation failed, falling back to template: {e}")
@@ -2528,6 +2583,20 @@ class SelfBuildingAgent(BaseAgent):
             for agent in performance:
                 if agent['avg_execution_time'] and agent['avg_execution_time'] > 10:
                     recommendations.append(f"Optimize {agent['name']} - avg time {agent['avg_execution_time']:.2f}s")
+
+            if USE_REAL_AI and performance:
+                try:
+                    prompt = f"""
+                    Analyze this agent performance data and suggest optimizations:
+                    {json.dumps([dict(p) for p in performance], default=str)}
+                    
+                    Focus on latency reduction and resource usage.
+                    Provide 3 specific technical recommendations.
+                    """
+                    ai_recs = await ai_core.generate(prompt, model="gpt-4")
+                    recommendations.append(f"AI Insights: {ai_recs}")
+                except Exception as e:
+                    self.logger.warning(f"AI optimization analysis failed: {e}")
 
             return {
                 "status": "completed",
