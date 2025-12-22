@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Any
 import asyncio
 import uuid
 import json
+from revenue_generation_system import get_revenue_system
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +252,46 @@ class AgentScheduler:
                 actions_taken.append({'action': 'created_insight', 'revenue': potential_revenue})
             except Exception as e:
                 logger.warning(f"Could not create insight: {e}")
+
+        # --- Autonomous Revenue System Integration ---
+        try:
+            logger.info("🔄 Triggering Autonomous Revenue System...")
+            rev_sys = get_revenue_system()
+            
+            async def run_autonomous_tasks():
+                # 1. Identify new leads
+                criteria = {
+                    "location": "United States",
+                    "company_size": "Small to Medium",
+                    "industry": "Roofing"
+                }
+                new_leads = await rev_sys.identify_new_leads(criteria)
+                
+                # 2. Automatically qualify and start workflow for new leads
+                processed = 0
+                for lead_id in new_leads:
+                    if processed >= 3: # Limit to avoid overload per cycle
+                        break
+                    await rev_sys.run_revenue_workflow(lead_id)
+                    processed += 1
+                    
+                return {
+                    "new_leads_identified": len(new_leads),
+                    "workflows_started": processed
+                }
+
+            # Run autonomous tasks
+            auto_stats = asyncio.run(run_autonomous_tasks())
+            actions_taken.append({
+                'action': 'autonomous_revenue_cycle',
+                'stats': auto_stats
+            })
+            logger.info(f"✅ Autonomous revenue cycle completed: {auto_stats}")
+
+        except Exception as e:
+            logger.error(f"❌ Autonomous Revenue System failed: {e}")
+            # Don't fail the whole agent execution, just log it
+        # ---------------------------------------------
 
         conn.commit()
 
