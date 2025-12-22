@@ -447,6 +447,14 @@ class AgentExecutor:
         # Meta Agent
         self.agents['SelfBuilder'] = SelfBuildingAgent()
 
+        # Phase 2 Agents
+        self.agents['SystemImprovement'] = SystemImprovementAgentAdapter()
+        self.agents['DevOpsOptimization'] = DevOpsOptimizationAgentAdapter()
+        self.agents['CodeQuality'] = CodeQualityAgentAdapter()
+        self.agents['CustomerSuccess'] = CustomerSuccessAgentAdapter()
+        self.agents['CompetitiveIntelligence'] = CompetitiveIntelligenceAgentAdapter()
+        self.agents['VisionAlignment'] = VisionAlignmentAgentAdapter()
+
     def _get_workflow_runner(self):
         """Lazily initialize LangGraph workflow runner with review loops."""
         if not LANGGRAPH_AVAILABLE:
@@ -2604,6 +2612,138 @@ class SelfBuildingAgent(BaseAgent):
                 "performance_analysis": [dict(p) for p in performance],
                 "recommendations": recommendations
             }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+
+# ============== PHASE 2 ADAPTERS ==============
+
+class SystemImprovementAgentAdapter(BaseAgent):
+    def __init__(self):
+        super().__init__("SystemImprovement", "system_improvement")
+
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        tenant_id = task.get("tenant_id", "default")
+        try:
+            from system_improvement_agent import SystemImprovementAgent
+            agent = SystemImprovementAgent(tenant_id)
+            action = task.get("action")
+            
+            if action == "suggest_optimizations":
+                return await agent.suggest_optimizations(task.get("component", "system"))
+            elif action == "analyze_error_patterns":
+                return await agent.analyze_error_patterns()
+            else:
+                return await agent.analyze_performance(task.get("metrics", []))
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+class DevOpsOptimizationAgentAdapter(BaseAgent):
+    def __init__(self):
+        super().__init__("DevOpsOptimization", "devops_optimization")
+
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        tenant_id = task.get("tenant_id", "default")
+        try:
+            from devops_optimization_agent import DevOpsOptimizationAgent
+            agent = DevOpsOptimizationAgent(tenant_id)
+            action = task.get("action")
+            
+            if action == "analyze_pipeline":
+                return await agent.analyze_pipeline(task.get("pipeline_id", "unknown"))
+            elif action == "optimize_resources":
+                return await agent.optimize_resources(task.get("cloud_resources", []))
+            elif action == "analyze_deployment_health":
+                return await agent.analyze_deployment_health()
+            else:
+                return await agent.analyze_deployment_health()
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+class CodeQualityAgentAdapter(BaseAgent):
+    def __init__(self):
+        super().__init__("CodeQuality", "code_quality")
+
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        tenant_id = task.get("tenant_id", "default")
+        try:
+            from code_quality_agent import CodeQualityAgent
+            agent = CodeQualityAgent(tenant_id)
+            action = task.get("action")
+            
+            if action == "review_pr":
+                return await agent.review_pr(task.get("pr_details", {}))
+            else:
+                return await agent.analyze_codebase(task.get("repo_path", "."))
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+class CustomerSuccessAgentAdapter(BaseAgent):
+    def __init__(self):
+        super().__init__("CustomerSuccess", "customer_success")
+
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        tenant_id = task.get("tenant_id", "default")
+        try:
+            from customer_success_agent import CustomerSuccessAgent
+            agent = CustomerSuccessAgent(tenant_id)
+            action = task.get("action")
+            
+            if action == "generate_onboarding_plan":
+                return await agent.generate_onboarding_plan(
+                    task.get("customer_id", "unknown"),
+                    task.get("plan_type", "standard")
+                )
+            elif action == "analyze_churn_risk":
+                return await agent.analyze_churn_risk()
+            else:
+                return await agent.analyze_customer_health(task.get("customer_id", "unknown"))
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+class CompetitiveIntelligenceAgentAdapter(BaseAgent):
+    def __init__(self):
+        super().__init__("CompetitiveIntelligence", "competitive_intelligence")
+
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        tenant_id = task.get("tenant_id", "default")
+        try:
+            from competitive_intelligence_agent import CompetitiveIntelligenceAgent
+            agent = CompetitiveIntelligenceAgent(tenant_id)
+            action = task.get("action")
+            
+            if action == "analyze_pricing":
+                return await agent.analyze_pricing(task.get("market_data", {}))
+            elif action == "analyze_market_trends":
+                return await agent.analyze_market_trends(
+                    task.get("industry", "general"),
+                    task.get("timeframe", "quarterly")
+                )
+            else:
+                return await agent.monitor_competitors(task.get("competitors", []))
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+class VisionAlignmentAgentAdapter(BaseAgent):
+    def __init__(self):
+        super().__init__("VisionAlignment", "vision_alignment")
+
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        tenant_id = task.get("tenant_id", "default")
+        try:
+            from vision_alignment_agent import VisionAlignmentAgent
+            agent = VisionAlignmentAgent(tenant_id)
+            action = task.get("action")
+            
+            if action == "check_goal_progress":
+                return await agent.check_goal_progress(task.get("goals", []))
+            elif action == "generate_vision_report":
+                return await agent.generate_vision_report()
+            else:
+                return await agent.analyze_alignment(
+                    task.get("decisions", []),
+                    task.get("vision_doc", "")
+                )
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
