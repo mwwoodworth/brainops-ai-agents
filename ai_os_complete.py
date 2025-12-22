@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BrainOps AI Operating System - COMPLETE IMPLEMENTATION
+BrainOps AI Operating System - Modular Architecture
 Full LangGraph orchestration with 50+ agents for comprehensive business automation
 """
 
@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, TypedDict, Annotated
 from enum import Enum
-import random
+# random removed to ensure deterministic, real logic
 
 # Core dependencies
 import psycopg2
@@ -198,8 +198,9 @@ class IntelligentAgent:
 
     async def _rule_process(self, state: WorkflowState) -> Dict:
         """Process using rule-based logic"""
-        # Implement specific logic per agent type
-        return {"rule_response": f"Processed by {self.agent_type.value}", "processed": True}
+        # Specific agents override this.
+        # If not overridden, we acknowledge correct routing but mark as generic processing.
+        return {"rule_response": f"Processed by {self.agent_type.value} (Generic)", "processed": True}
 
 # ==================== SPECIALIZED AGENT IMPLEMENTATIONS ====================
 
@@ -211,94 +212,16 @@ class EstimationAgent(IntelligentAgent):
 
     async def _rule_process(self, state: WorkflowState) -> Dict:
         """Generate intelligent estimates"""
-        context = state.get("context", {})
+        # If LLM is available, use it (inherited behavior usually, but we call it explicitly if needed)
+        if self.llm:
+            return await self._llm_process(state)
 
-        # Extract parameters
-        property_data = context.get("property", {})
-        customer_data = context.get("customer", {})
-
-        # Intelligent calculation based on multiple factors
-        sqft = property_data.get("sqft", 2000)
-        stories = property_data.get("stories", 1)
-        roof_type = property_data.get("roof_type", "asphalt_shingle")
-        complexity = property_data.get("complexity", "medium")
-
-        # Advanced pricing model
-        base_rates = {
-            "asphalt_shingle": 3.50,
-            "metal": 7.50,
-            "tile": 10.50,
-            "slate": 15.00,
-            "wood_shake": 8.50
+        # WITHOUT LLM, we cannot fake the estimation math honestly.
+        return {
+            "status": "not_implemented",
+            "reason": "Real estimation requires LLM configuration (OPENAI_API_KEY) or specific rule engine integration.",
+            "processed": False
         }
-
-        complexity_factors = {
-            "simple": 1.0,
-            "medium": 1.25,
-            "complex": 1.5,
-            "extreme": 2.0
-        }
-
-        base_rate = base_rates.get(roof_type, 5.00)
-        complexity_factor = complexity_factors.get(complexity, 1.25)
-
-        # Calculate components
-        material_cost = sqft * base_rate * complexity_factor
-        labor_cost = sqft * 2.50 * complexity_factor * (1 + (stories - 1) * 0.15)
-
-        # Add smart factors
-        if property_data.get("historic", False):
-            labor_cost *= 1.3
-
-        if property_data.get("hoa_requirements", False):
-            material_cost *= 1.2
-
-        # Permits and extras
-        permit_cost = 500 + (sqft * 0.10)
-        disposal_cost = sqft * 0.25
-
-        # Calculate totals
-        subtotal = material_cost + labor_cost + permit_cost + disposal_cost
-        overhead = subtotal * 0.15
-        profit = subtotal * 0.20
-        total = subtotal + overhead + profit
-
-        # Generate comprehensive estimate
-        estimate = {
-            "estimate_id": str(uuid.uuid4()),
-            "total": round(total, 2),
-            "breakdown": {
-                "materials": round(material_cost, 2),
-                "labor": round(labor_cost, 2),
-                "permits": round(permit_cost, 2),
-                "disposal": round(disposal_cost, 2),
-                "overhead": round(overhead, 2),
-                "profit": round(profit, 2)
-            },
-            "timeline": f"{max(2, sqft // 500)} days",
-            "warranty": "10 years",
-            "notes": self._generate_notes(property_data)
-        }
-
-        # Store in database
-        await self._store_estimate(estimate, customer_data)
-
-        return estimate
-
-    def _generate_notes(self, property_data: Dict) -> List[str]:
-        """Generate intelligent notes for estimate"""
-        notes = []
-
-        if property_data.get("stories", 1) > 2:
-            notes.append("Multi-story structure requires additional safety equipment")
-
-        if property_data.get("solar_panels", False):
-            notes.append("Solar panel removal and reinstallation required")
-
-        if property_data.get("historic", False):
-            notes.append("Historic property - special materials and techniques required")
-
-        return notes
 
     async def _store_estimate(self, estimate: Dict, customer_data: Dict):
         """Store estimate in database"""
@@ -328,20 +251,21 @@ class SchedulingAgent(IntelligentAgent):
         super().__init__(AgentType.SCHEDULING)
 
     async def _rule_process(self, state: WorkflowState) -> Dict:
-        """Optimize scheduling with AI logic"""
+        """Optimize scheduling with real data"""
         context = state.get("context", {})
 
         # Get job requirements
         job_data = context.get("job", {})
         duration = job_data.get("duration_hours", 8)
-        crew_size = job_data.get("crew_size", 3)
-        skills_required = job_data.get("skills", ["roofing"])
 
-        # Find available crews
-        available_slots = await self._find_optimal_slots(duration, crew_size, skills_required)
+        # Find available slots using DB
+        available_slots = await self._find_optimal_slots(duration)
 
         if available_slots:
             best_slot = available_slots[0]
+            
+            # Assign real or placeholder crew (no random names)
+            assigned_crew = await self._assign_crew(3, [])
 
             # Create schedule
             schedule = {
@@ -349,72 +273,73 @@ class SchedulingAgent(IntelligentAgent):
                 "job_id": job_data.get("job_id"),
                 "start_time": best_slot["start"],
                 "end_time": best_slot["end"],
-                "crew": best_slot["crew"],
-                "efficiency_score": best_slot["score"],
+                "crew": assigned_crew,
+                "efficiency_score": 100, # Placeholder until metrics implemented
                 "weather_suitable": await self._check_weather(best_slot["start"])
             }
 
             await self._store_schedule(schedule)
             return schedule
 
-        return {"error": "No suitable slots available"}
+        return {"error": "No suitable slots available (checked database)"}
 
-    async def _find_optimal_slots(self, duration: int, crew_size: int, skills: List[str]) -> List[Dict]:
-        """Find optimal scheduling slots using intelligent algorithms"""
-        slots = []
+    async def _find_optimal_slots(self, duration: int) -> List[Dict]:
+        """Find optimal scheduling slots using database availability"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            # Get latest schedule end time to append after
+            cursor.execute("SELECT MAX(end_time) FROM schedules")
+            result = cursor.fetchone()
+            last_end = result[0] if result and result[0] else datetime.now()
+            
+            if isinstance(last_end, str):
+                try:
+                    last_end = datetime.fromisoformat(last_end)
+                except ValueError:
+                    last_end = datetime.now()
+            
+            # Schedule for next available work day (skip weekends)
+            next_start = last_end + timedelta(days=1)
+            next_start = next_start.replace(hour=8, minute=0, second=0, microsecond=0)
+            
+            while next_start.weekday() >= 5: # 5=Sat, 6=Sun
+                next_start += timedelta(days=1)
+                
+            return [{
+                "start": next_start.isoformat(),
+                "end": (next_start + timedelta(hours=duration)).isoformat()
+            }]
+            
+        except Exception as e:
+            self.logger.error(f"Error finding slots: {e}")
+            return []
+        finally:
+            self.return_connection(conn)
 
-        # Simulate intelligent slot finding
-        for day_offset in range(1, 15):
-            start = datetime.now() + timedelta(days=day_offset)
-            start = start.replace(hour=8, minute=0, second=0)
+    async def _assign_crew(self, size: int, skills: List[str]) -> List[Dict]:
+        """Assign crew members from database"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            # Attempt to fetch real users
+            try:
+                cursor.execute("SELECT id, name FROM users LIMIT %s", (size,))
+                users = cursor.fetchall()
+                if users:
+                    return [{"id": str(u[0]), "name": u[1], "role": "technician"} for u in users]
+            except Exception:
+                # Table might not exist or schema differs
+                conn.rollback()
+                pass
+            
+            return [{"id": "pending", "name": "To Be Assigned", "role": "technician"}]
+        finally:
+            self.return_connection(conn)
 
-            # Skip weekends
-            if start.weekday() in [5, 6]:
-                continue
-
-            # Calculate efficiency score
-            score = 100
-
-            # Weather factor
-            if random.random() > 0.3:  # 70% good weather
-                score -= 0
-            else:
-                score -= 20
-
-            # Crew availability factor
-            if random.random() > 0.2:  # 80% crew available
-                score -= 0
-            else:
-                score -= 30
-
-            slots.append({
-                "start": start.isoformat(),
-                "end": (start + timedelta(hours=duration)).isoformat(),
-                "crew": self._assign_crew(crew_size, skills),
-                "score": score
-            })
-
-        # Sort by efficiency score
-        return sorted(slots, key=lambda x: x["score"], reverse=True)[:5]
-
-    def _assign_crew(self, size: int, skills: List[str]) -> List[Dict]:
-        """Intelligently assign crew members"""
-        crew = []
-        crew_names = ["John", "Mike", "Sarah", "Tom", "Lisa", "David", "Emma", "Chris"]
-
-        for i in range(size):
-            crew.append({
-                "id": str(uuid.uuid4()),
-                "name": random.choice(crew_names),
-                "role": "lead" if i == 0 else "technician",
-                "skills": skills
-            })
-
-        return crew
-
-    async def _check_weather(self, date: str) -> bool:
-        """Check weather suitability (would integrate with weather API)"""
-        return random.random() > 0.2  # 80% suitable weather
+    async def _check_weather(self, date: str) -> Dict:
+        """Check weather suitability"""
+        return {"status": "skipped", "reason": "Weather API not configured"}
 
     async def _store_schedule(self, schedule: Dict):
         """Store schedule in database"""
@@ -434,6 +359,9 @@ class SchedulingAgent(IntelligentAgent):
                 datetime.now()
             ))
             conn.commit()
+        except Exception as e:
+            self.logger.error(f"Failed to store schedule: {e}")
+            conn.rollback()
         finally:
             self.return_connection(conn)
 
@@ -587,7 +515,7 @@ class AIOperatingSystem:
     async def initialize(self):
         """Initialize all system components"""
         logger.info("=" * 60)
-        logger.info("BRAINOPS AI OPERATING SYSTEM - FULL INITIALIZATION")
+        logger.info("BRAINOPS AI OPERATING SYSTEM - INITIALIZATION")
         logger.info("=" * 60)
 
         # Test database connection
@@ -608,7 +536,7 @@ class AIOperatingSystem:
         asyncio.create_task(self._monitor_agents())
 
         logger.info(f"Initialized {len(self.orchestrator.agents)} agents")
-        logger.info("AI Operating System FULLY OPERATIONAL")
+        logger.info("AI Operating System OPERATIONAL")
 
     async def _register_agents(self):
         """Register all agents in database"""
@@ -702,6 +630,9 @@ class AIOperatingSystem:
                     LIMIT 10
                 """)
 
+                # Note: Assuming customers table structure
+                # Will catch error if fails in loop
+                
                 new_customers = cursor.fetchall()
                 for customer in new_customers:
                     await self.process_business_event("new_lead", {
