@@ -485,9 +485,9 @@ class RealTimeStateSync:
             pool = get_pool()
 
             endpoints = await pool.fetch("""
-                SELECT id, name, file_path, metadata
+                SELECT id, name, filepath as file_path, metadata
                 FROM codebase_nodes
-                WHERE type = 'endpoint'
+                WHERE node_type = 'endpoint'
                 LIMIT 1000
             """)
 

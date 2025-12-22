@@ -304,9 +304,9 @@ class CodebaseCrawler:
         # For "contains" (file -> class), we know exacts.
         
         # Fetch all nodes
-        rows = await pool.fetch("SELECT id, repo_name, file_path, name, type FROM codebase_nodes")
+        rows = await pool.fetch("SELECT id, codebase as repo_name, filepath as file_path, name, node_type as type FROM codebase_nodes")
         node_map = {} # (repo, path, name) -> id  -- Type might be ambiguous for imports? No, usually distinct.
-        
+
         for row in rows:
             node_map[(row['repo_name'], row['file_path'], row['name'])] = row['id']
             # Also map files by (repo, path) for import resolution

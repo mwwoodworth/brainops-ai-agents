@@ -221,7 +221,7 @@ class GraphContextProvider:
     async def get_context_for_file(
         self,
         file_path: str,
-        repo_name: Optional[str] = None
+        codebase: Optional[str] = None
     ) -> CodeContext:
         """Get context for a specific file including its contents and relationships"""
         await self._ensure_pool()
@@ -232,14 +232,14 @@ class GraphContextProvider:
         try:
             # Find the file node
             query = """
-                SELECT * FROM codebase_nodes
-                WHERE file_path ILIKE $1
+                SELECT *, node_type as type, codebase as repo_name, filepath as file_path FROM codebase_nodes
+                WHERE filepath ILIKE $1
             """
             params = [f"%{file_path}%"]
 
-            if repo_name:
-                query += " AND repo_name = $2"
-                params.append(repo_name)
+            if codebase:
+                query += " AND codebase = $2"
+                params.append(codebase)
 
             query += " LIMIT 50"
 
@@ -281,20 +281,20 @@ class GraphContextProvider:
         pool = get_pool()
 
         query = """
-            SELECT * FROM codebase_nodes
+            SELECT *, node_type as type, codebase as repo_name, filepath as file_path FROM codebase_nodes
             WHERE name ILIKE $1
         """
         params = [f"%{name}%"]
         param_idx = 2
 
         if node_type:
-            query += f" AND type = ${param_idx}"
+            query += f" AND node_type = ${param_idx}"
             params.append(node_type)
             param_idx += 1
 
         if repos:
             placeholders = ", ".join(f"${i}" for i in range(param_idx, param_idx + len(repos)))
-            query += f" AND repo_name IN ({placeholders})"
+            query += f" AND codebase IN ({placeholders})"
             params.extend(repos)
 
         query += f" ORDER BY name LIMIT {self.max_results}"
@@ -315,13 +315,13 @@ class GraphContextProvider:
         await self._ensure_pool()
         pool = get_pool()
 
-        query = "SELECT * FROM codebase_nodes WHERE type = 'endpoint'"
+        query = "SELECT *, node_type as type, codebase as repo_name, filepath as file_path FROM codebase_nodes WHERE node_type = 'endpoint'"
         params = []
         param_idx = 1
 
         if repos:
             placeholders = ", ".join(f"${i}" for i in range(param_idx, param_idx + len(repos)))
-            query += f" AND repo_name IN ({placeholders})"
+            query += f" AND codebase IN ({placeholders})"
             params.extend(repos)
             param_idx += len(repos)
 
@@ -338,13 +338,13 @@ class GraphContextProvider:
             logger.error(f"Endpoint query failed: {e}")
             return []
 
-    async def find_callers(self, function_name: str, repo_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def find_callers(self, function_name: str, codebase: Optional[str] = None) -> List[Dict[str, Any]]:
         """Find all callers of a function"""
         await self._ensure_pool()
         pool = get_pool()
 
         query = """
-            SELECT DISTINCT source.*
+            SELECT DISTINCT source.*, source.node_type as type, source.codebase as repo_name, source.filepath as file_path
             FROM codebase_edges e
             JOIN codebase_nodes target ON e.target_id = target.id
             JOIN codebase_nodes source ON e.source_id = source.id
@@ -352,9 +352,9 @@ class GraphContextProvider:
         """
         params = [function_name]
 
-        if repo_name:
-            query += " AND target.repo_name = $2"
-            params.append(repo_name)
+        if codebase:
+            query += " AND target.codebase = $2"
+            params.append(codebase)
 
         query += f" LIMIT {self.max_results}"
 
@@ -365,7 +365,7 @@ class GraphContextProvider:
             logger.error(f"Caller search failed: {e}")
             return []
 
-    async def get_class_hierarchy(self, class_name: str, repo_name: Optional[str] = None) -> Dict[str, Any]:
+    async def get_class_hierarchy(self, class_name: str, codebase: Optional[str] = None) -> Dict[str, Any]:
         """Get inheritance hierarchy for a class"""
         await self._ensure_pool()
         pool = get_pool()
@@ -379,23 +379,23 @@ class GraphContextProvider:
         try:
             # Find parent classes
             parent_query = """
-                SELECT target.*
+                SELECT target.*, target.node_type as type, target.codebase as repo_name, target.filepath as file_path
                 FROM codebase_edges e
                 JOIN codebase_nodes source ON e.source_id = source.id
                 JOIN codebase_nodes target ON e.target_id = target.id
                 WHERE source.name = $1 AND e.type = 'inherits'
             """
             params = [class_name]
-            if repo_name:
-                parent_query += " AND source.repo_name = $2"
-                params.append(repo_name)
+            if codebase:
+                parent_query += " AND source.codebase = $2"
+                params.append(codebase)
 
             parents = await pool.fetch(parent_query, *params)
             hierarchy["parents"] = [dict(p) for p in parents]
 
             # Find child classes
             child_query = """
-                SELECT source.*
+                SELECT source.*, source.node_type as type, source.codebase as repo_name, source.filepath as file_path
                 FROM codebase_edges e
                 JOIN codebase_nodes source ON e.source_id = source.id
                 JOIN codebase_nodes target ON e.target_id = target.id
@@ -419,17 +419,17 @@ class GraphContextProvider:
 
             # Node counts by type
             type_counts = await pool.fetch("""
-                SELECT type, COUNT(*) as count
+                SELECT node_type as type, COUNT(*) as count
                 FROM codebase_nodes
-                GROUP BY type
+                GROUP BY node_type
             """)
             stats["node_counts"] = {r["type"]: r["count"] for r in type_counts}
 
             # Node counts by repo
             repo_counts = await pool.fetch("""
-                SELECT repo_name, COUNT(*) as count
+                SELECT codebase as repo_name, COUNT(*) as count
                 FROM codebase_nodes
-                GROUP BY repo_name
+                GROUP BY codebase
             """)
             stats["repo_counts"] = {r["repo_name"]: r["count"] for r in repo_counts}
 
@@ -530,25 +530,25 @@ class GraphContextProvider:
         # Repo filter
         if repos:
             placeholders = ", ".join(f"${i}" for i in range(param_idx, param_idx + len(repos)))
-            conditions.append(f"repo_name IN ({placeholders})")
+            conditions.append(f"codebase IN ({placeholders})")
             params.extend(repos)
             param_idx += len(repos)
 
         # Type filter
         if focus_types:
             placeholders = ", ".join(f"${i}" for i in range(param_idx, param_idx + len(focus_types)))
-            conditions.append(f"type IN ({placeholders})")
+            conditions.append(f"node_type IN ({placeholders})")
             params.extend(focus_types)
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
         query = f"""
-            SELECT * FROM codebase_nodes
+            SELECT *, node_type as type, codebase as repo_name, filepath as file_path FROM codebase_nodes
             WHERE {where_clause}
             ORDER BY
-                CASE WHEN type = 'endpoint' THEN 1
-                     WHEN type = 'function' THEN 2
-                     WHEN type = 'class' THEN 3
+                CASE WHEN node_type = 'endpoint' THEN 1
+                     WHEN node_type = 'function' THEN 2
+                     WHEN node_type = 'class' THEN 3
                      ELSE 4 END,
                 name
             LIMIT {self.max_results}
@@ -573,9 +573,9 @@ class GraphContextProvider:
             SELECT
                 e.type,
                 source.name as source_name,
-                source.type as source_type,
+                source.node_type as source_type,
                 target.name as target_name,
-                target.type as target_type
+                target.node_type as target_type
             FROM codebase_edges e
             JOIN codebase_nodes source ON e.source_id = source.id
             JOIN codebase_nodes target ON e.target_id = target.id
