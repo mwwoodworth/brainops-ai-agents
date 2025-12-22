@@ -248,7 +248,7 @@ class AIIntegrationLayer:
                 try:
                     from unified_memory_manager import Memory, MemoryType
                     search_text = f"{task_type} {task.get('trigger_condition', '')}"
-                    relevant_memories = self.memory_manager.search(
+                    relevant_memories = await self.memory_manager.search(
                         search_text,
                         limit=5
                     )
