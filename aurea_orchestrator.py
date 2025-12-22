@@ -929,17 +929,9 @@ class AUREA:
             """, (self.tenant_id,))
             decision_backlog = cur.fetchone()['backlog']
 
-            cur.close()
-            conn.close()
-
-            # Calculate overall health score
-            health_components = {
-                "agents": min(100, agent_stats.get("enabled_agents", 0) / 59 * 100),
-                "memory": min(100, (1 - memory_stats.get("total_memories", 0) / 1000000) * 100),
-                "errors": max(0, (1 - error_rate) * 100),
-                "decisions": max(0, (1 - decision_backlog / 100) * 100),
-                "performance": 85  # Placeholder
-            }
+            # Calculate performance score based on error rate and backlog
+            # Performance = 100 - (Error Rate % * 0.5) - (Backlog Penalty)
+            performance_score = max(0, 100 - (error_rate * 100 * 0.5) - (min(decision_backlog, 50) * 0.5))
 
             overall_score = sum(health_components.values()) / len(health_components)
 
@@ -950,7 +942,7 @@ class AUREA:
                 memory_utilization=memory_stats.get("total_memories", 0) / 1000000,
                 decision_backlog=decision_backlog,
                 error_rate=error_rate,
-                performance_score=85,
+                performance_score=performance_score,
                 alerts=[]
             )
 
@@ -971,25 +963,62 @@ class AUREA:
             )
 
     async def _request_human_approval(self, decision: Decision) -> bool:
-        """Request human approval for a decision (placeholder)"""
-        # In production, this would integrate with UI/notification system
+        """Request human approval for a decision"""
         logger.info(f"🤔 Human approval requested for: {decision.description}")
 
-        # For now, auto-approve in test mode
-        if os.getenv("AUREA_TEST_MODE", "true") == "true":
+        # Check for test mode override
+        if os.getenv("AUREA_TEST_MODE", "false").lower() == "true":
+            logger.info("⚠️ Auto-approving decision in TEST MODE")
             return True
 
         # Store pending decision
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
-        cur.execute("""
-        UPDATE aurea_decisions
-        SET execution_status = 'pending'
-        WHERE id = %s
-        """, (decision.id,))
-        conn.commit()
-        cur.close()
-        conn.close()
+        
+        try:
+            # Update decision status
+            cur.execute("""
+            UPDATE aurea_decisions
+            SET execution_status = 'pending'
+            WHERE id = %s
+            """, (decision.id,))
+            
+            # Create notification if table exists
+            # We attempt to insert into task_notifications if it exists, otherwise rely on decision status
+            try:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS task_notifications (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        title TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        type TEXT NOT NULL,
+                        status TEXT DEFAULT 'unread',
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        tenant_id UUID
+                    )
+                """)
+                
+                cur.execute("""
+                    INSERT INTO task_notifications (title, message, type, tenant_id)
+                    VALUES (%s, %s, %s, %s)
+                """, (
+                    f"Approval Required: {decision.type.value}",
+                    f"Decision requires approval: {decision.description}",
+                    "approval_request",
+                    self.tenant_id
+                ))
+            except Exception as notify_err:
+                logger.warning(f"Could not create notification: {notify_err}")
+
+            conn.commit()
+            logger.info(f"Decision {decision.id} queued for approval")
+            
+        except Exception as e:
+            logger.error(f"Failed to queue decision for approval: {e}")
+            return False
+        finally:
+            cur.close()
+            conn.close()
 
         return False
 
