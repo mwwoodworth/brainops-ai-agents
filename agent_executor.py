@@ -1472,7 +1472,7 @@ class CustomerAgent(BaseAgent):
             return await self.analyze_customers()
 
     async def analyze_customers(self) -> Dict:
-        """Analyze customer data"""
+        """Analyze customer data with AI insights"""
         try:
             conn = self.get_db_connection()
             cursor = conn.cursor()
@@ -1498,20 +1498,36 @@ class CustomerAgent(BaseAgent):
                 LIMIT 5
             """)
             top_customers = cursor.fetchall()
+            top_customers_list = [dict(c) for c in top_customers]
 
             cursor.close()
             conn.close()
+            
+            insights = "Insights not available."
+            if USE_REAL_AI:
+                try:
+                    prompt = f"""
+                    Analyze these customer statistics for a roofing business.
+                    Stats: {json.dumps(dict(stats), default=str)}
+                    Top Customers: {json.dumps(top_customers_list, default=str)}
+                    
+                    Provide 3 key strategic insights/recommendations.
+                    """
+                    insights = await ai_core.generate(prompt, model="gpt-4")
+                except Exception as e:
+                    self.logger.warning(f"AI insight generation failed: {e}")
 
             return {
                 "status": "completed",
                 "statistics": dict(stats),
-                "top_customers": [dict(c) for c in top_customers]
+                "top_customers": top_customers_list,
+                "ai_insights": insights
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     async def segment_customers(self) -> Dict:
-        """Segment customers into categories"""
+        """Segment customers into categories with AI recommendations"""
         try:
             conn = self.get_db_connection()
             cursor = conn.cursor()
@@ -1535,13 +1551,33 @@ class CustomerAgent(BaseAgent):
                 GROUP BY segment
             """)
             segments = cursor.fetchall()
+            segments_list = [dict(s) for s in segments]
 
             cursor.close()
             conn.close()
+            
+            recommendations = {}
+            if USE_REAL_AI:
+                try:
+                    prompt = f"""
+                    Suggest a 1-sentence marketing action for each of these customer segments:
+                    {json.dumps(segments_list, default=str)}
+                    
+                    Return JSON where keys are segment names and values are actions.
+                    """
+                    response = await ai_core.generate(prompt, model="gpt-3.5-turbo")
+                    
+                    import re
+                    json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                    if json_match:
+                        recommendations = json.loads(json_match.group())
+                except Exception as e:
+                    self.logger.warning(f"AI recommendation generation failed: {e}")
 
             return {
                 "status": "completed",
-                "segments": [dict(s) for s in segments]
+                "segments": segments_list,
+                "marketing_recommendations": recommendations
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -1600,7 +1636,7 @@ class InvoicingAgent(BaseAgent):
             return {"status": "error", "message": f"Unknown action: {action}"}
 
     async def generate_invoice(self, task: Dict) -> Dict:
-        """Generate invoice"""
+        """Generate invoice with AI-enhanced content"""
         job_id = task.get('job_id')
 
         if not job_id:
@@ -1622,14 +1658,29 @@ class InvoicingAgent(BaseAgent):
             if not job:
                 return {"status": "error", "message": "Job not found"}
 
+            # Generate AI note for invoice
+            ai_note = ""
+            if USE_REAL_AI:
+                try:
+                    prompt = f"""
+                    Write a short, professional 'Thank You' note for an invoice.
+                    Customer: {job['customer_name']}
+                    Job Description: {job.get('description', 'Roofing Services')}
+                    
+                    Keep it warm but professional. Max 2 sentences.
+                    """
+                    ai_note = await ai_core.generate(prompt, model="gpt-3.5-turbo", temperature=0.7)
+                except Exception as e:
+                    self.logger.warning(f"AI note generation failed: {e}")
+
             # Create invoice
             invoice_number = f"INV-{datetime.now().strftime('%Y%m%d')}-{job_id[:8]}"
 
             cursor.execute("""
-                INSERT INTO invoices (invoice_number, job_id, customer_id, total_amount, status, created_at)
-                VALUES (%s, %s, %s, %s, 'pending', NOW())
+                INSERT INTO invoices (invoice_number, job_id, customer_id, total_amount, status, notes, created_at)
+                VALUES (%s, %s, %s, %s, 'pending', %s, NOW())
                 RETURNING id
-            """, (invoice_number, job_id, job['customer_id'], task.get('amount', 1000)))
+            """, (invoice_number, job_id, job['customer_id'], task.get('amount', 1000), ai_note))
 
             invoice_id = cursor.fetchone()['id']
 
@@ -1641,24 +1692,60 @@ class InvoicingAgent(BaseAgent):
                 "status": "completed",
                 "invoice_id": invoice_id,
                 "invoice_number": invoice_number,
-                "customer": job['customer_name']
+                "customer": job['customer_name'],
+                "ai_note": ai_note
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     async def send_invoice(self, task: Dict) -> Dict:
-        """Send invoice to customer"""
+        """Send invoice to customer with AI-generated email"""
         invoice_id = task.get('invoice_id')
+        
+        email_content = None
+        if USE_REAL_AI:
+            try:
+                # Fetch invoice details for context (simplified here)
+                conn = self.get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT i.*, c.name as customer_name, c.email 
+                    FROM invoices i
+                    JOIN customers c ON i.customer_id = c.id
+                    WHERE i.id = %s
+                """, (invoice_id,))
+                invoice = cursor.fetchone()
+                cursor.close()
+                conn.close()
+                
+                if invoice:
+                    prompt = f"""
+                    Write a polite email to send an invoice to a customer.
+                    Customer: {invoice['customer_name']}
+                    Invoice Amount: ${invoice['total_amount']}
+                    Invoice Number: {invoice['invoice_number']}
+                    
+                    Return JSON with 'subject' and 'body'.
+                    """
+                    response = await ai_core.generate(prompt, model="gpt-3.5-turbo")
+                    
+                    import re
+                    json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                    if json_match:
+                        email_content = json.loads(json_match.group())
+            except Exception as e:
+                self.logger.warning(f"AI email generation failed: {e}")
 
         # This would implement email sending
         return {
             "status": "completed",
             "action": "invoice_sent",
-            "invoice_id": invoice_id
+            "invoice_id": invoice_id,
+            "generated_email": email_content
         }
 
     async def invoice_report(self) -> Dict:
-        """Generate invoice report"""
+        """Generate invoice report with AI summary"""
         try:
             conn = self.get_db_connection()
             cursor = conn.cursor()
@@ -1674,13 +1761,28 @@ class InvoicingAgent(BaseAgent):
             """)
 
             report = cursor.fetchone()
+            report_dict = dict(report)
 
             cursor.close()
             conn.close()
+            
+            summary = "Financial summary not available."
+            if USE_REAL_AI:
+                try:
+                    prompt = f"""
+                    Summarize this monthly financial report for a roofing company executive.
+                    Data: {json.dumps(report_dict, default=str)}
+                    
+                    Provide a brief, actionable summary (2-3 sentences).
+                    """
+                    summary = await ai_core.generate(prompt, model="gpt-4")
+                except Exception as e:
+                    self.logger.warning(f"AI summary generation failed: {e}")
 
             return {
                 "status": "completed",
-                "report": dict(report)
+                "report": report_dict,
+                "ai_summary": summary
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -2223,7 +2325,7 @@ class ReportingAgent(BaseAgent):
             return await self.summary_report()
 
     async def executive_report(self) -> Dict:
-        """Generate executive report"""
+        """Generate executive report with AI summary"""
         try:
             conn = self.get_db_connection()
             cursor = conn.cursor()
@@ -2238,16 +2340,31 @@ class ReportingAgent(BaseAgent):
             """)
 
             metrics = cursor.fetchone()
+            metrics_dict = dict(metrics)
 
             cursor.close()
             conn.close()
+            
+            summary_text = ""
+            if USE_REAL_AI:
+                try:
+                    prompt = f"""
+                    Write a concise executive summary paragraph for this business performance data:
+                    {json.dumps(metrics_dict, default=str)}
+                    
+                    Focus on growth and activity.
+                    """
+                    summary_text = await ai_core.generate(prompt, model="gpt-4")
+                except Exception as e:
+                    self.logger.warning(f"AI executive summary failed: {e}")
 
             return {
                 "status": "completed",
                 "report": {
                     "title": "Executive Summary",
                     "date": datetime.now().strftime('%Y-%m-%d'),
-                    "metrics": dict(metrics),
+                    "metrics": metrics_dict,
+                    "summary_text": summary_text,
                     "insights": [
                         f"Total customer base: {metrics['total_customers']}",
                         f"Jobs this month: {metrics['recent_jobs']}",
@@ -2274,16 +2391,31 @@ class ReportingAgent(BaseAgent):
         }
 
     async def financial_report(self) -> Dict:
-        """Generate financial report"""
+        """Generate financial report with AI commentary"""
         invoice_agent = InvoicingAgent()
         invoice_report = await invoice_agent.invoice_report()
+        
+        commentary = ""
+        if USE_REAL_AI:
+            try:
+                data = invoice_report.get('report', {})
+                prompt = f"""
+                Provide financial commentary on this invoice data:
+                {json.dumps(data, default=str)}
+                
+                Highlight collection efficiency and revenue trends.
+                """
+                commentary = await ai_core.generate(prompt, model="gpt-4")
+            except Exception as e:
+                self.logger.warning(f"AI financial commentary failed: {e}")
 
         return {
             "status": "completed",
             "report": {
                 "title": "Financial Report",
                 "date": datetime.now().strftime('%Y-%m-%d'),
-                "invoice_summary": invoice_report.get('report', {})
+                "invoice_summary": invoice_report.get('report', {}),
+                "commentary": commentary
             }
         }
 
