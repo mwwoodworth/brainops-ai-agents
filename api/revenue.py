@@ -451,17 +451,13 @@ async def get_pipeline():
 
 async def generate_realistic_leads(industry: str, location: str, count: int) -> List[Dict[str, Any]]:
     """
-    Generate realistic leads based on industry patterns.
-    In production, this would use Perplexity API for real-time discovery.
+    Generate realistic leads based on industry patterns using AI.
     """
-    import random
-
-    # Realistic roofing company patterns (fallback only)
-    # In production, we use AI to generate these
-    
-    # Try to use Real AI Core first
     try:
-        from ai_core import ai_core, ai_generate
+        # Import AI Core
+        from ai_core import ai_generate
+        import json
+        import re
         
         prompt = f"""
         Generate {count} realistic B2B roofing leads in the {industry} industry near {location}.
@@ -478,71 +474,19 @@ async def generate_realistic_leads(industry: str, location: str, count: int) -> 
         Make the data look authentic and diverse.
         """
         
+        # Call AI with error handling
         response = await ai_generate(prompt, model="gpt-4", temperature=0.8)
         
-        import re
+        # Parse JSON from response
         json_match = re.search(r'\[.*\]', response, re.DOTALL)
         if json_match:
             return json.loads(json_match.group())
+        else:
+            logger.error(f"AI response did not contain valid JSON: {response}")
+            raise ValueError("AI failed to return valid JSON data")
             
     except Exception as e:
-        logger.warning(f"AI lead generation failed, falling back to procedural generation: {e}")
-
-    import random
-
-    company_prefixes = [
-        "Premier", "Quality", "Elite", "Professional", "Certified",
-        "Advanced", "Superior", "Reliable", "Trusted", "Expert",
-        "Metro", "Regional", "Family", "Local", "Community"
-    ]
-
-    company_suffixes = [
-        "Roofing", "Roofing Solutions", "Roofing Services", "Roof Pros",
-        "Roofing Company", "Roofing Contractors", "Roof Masters",
-        "Roofing & Siding", "Roofing Specialists", "Roof Works"
-    ]
-
-    first_names = [
-        "Michael", "David", "James", "Robert", "John", "William",
-        "Jennifer", "Sarah", "Michelle", "Lisa", "Karen", "Nancy"
-    ]
-
-    last_names = [
-        "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
-        "Davis", "Rodriguez", "Martinez", "Anderson", "Taylor", "Thomas"
-    ]
-
-    cities = [
-        "Houston", "Dallas", "Phoenix", "Denver", "Atlanta",
-        "Chicago", "Miami", "Los Angeles", "Seattle", "Portland",
-        "Austin", "San Antonio", "Nashville", "Charlotte", "Tampa"
-    ]
-
-    leads = []
-    for i in range(count):
-        prefix = random.choice(company_prefixes)
-        suffix = random.choice(company_suffixes)
-        city = random.choice(cities)
-        first = random.choice(first_names)
-        last = random.choice(last_names)
-
-        company = f"{prefix} {city} {suffix}"
-        domain = f"{prefix.lower()}{city.lower()}roofing.com".replace(" ", "")
-
-        leads.append({
-            "company_name": company,
-            "contact_name": f"{first} {last}",
-            "email": f"{first.lower()}.{last.lower()}@{domain}",
-            "phone": f"+1-{random.randint(200,999)}-{random.randint(100,999)}-{random.randint(1000,9999)}",
-            "website": f"https://www.{domain}",
-            "score": round(random.uniform(0.4, 0.9), 2),
-            "value_estimate": random.choice([2500, 5000, 7500, 10000, 15000, 25000]),
-            "metadata": {
-                "city": city,
-                "industry": industry,
-                "company_size": random.choice(["small", "medium", "large"]),
-                "discovery_method": "ai_pattern_matching"
-            }
-        })
-
-    return leads
+        logger.error(f"AI lead generation failed: {e}")
+        # Re-raise to be handled by the caller, returning an error to the client
+        # instead of fake data.
+        raise HTTPException(status_code=500, detail=f"AI Lead Generation Failed: {str(e)}")
