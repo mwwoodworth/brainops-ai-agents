@@ -452,41 +452,17 @@ async def get_pipeline():
 async def generate_realistic_leads(industry: str, location: str, count: int) -> List[Dict[str, Any]]:
     """
     Generate realistic leads based on industry patterns using AI.
+    This requires integration with a real lead discovery service (Perplexity, Apollo.io, etc.)
     """
-    try:
-        # Import AI Core
-        from ai_core import ai_generate
-        import json
-        import re
-        
-        prompt = f"""
-        Generate {count} realistic B2B roofing leads in the {industry} industry near {location}.
-        Return a JSON array of objects with these fields:
-        - company_name: Realistic company name
-        - contact_name: Full name of a decision maker
-        - email: Professional email address
-        - phone: Phone number
-        - website: Website URL
-        - value_estimate: Estimated annual value (float between 5000 and 50000)
-        - score: Lead score (0.0 to 1.0)
-        - metadata: Object with 'city', 'industry', 'company_size'
-        
-        Make the data look authentic and diverse.
-        """
-        
-        # Call AI with error handling
-        response = await ai_generate(prompt, model="gpt-4", temperature=0.8)
-        
-        # Parse JSON from response
-        json_match = re.search(r'\[.*\]', response, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group())
-        else:
-            logger.error(f"AI response did not contain valid JSON: {response}")
-            raise ValueError("AI failed to return valid JSON data")
-            
-    except Exception as e:
-        logger.error(f"AI lead generation failed: {e}")
-        # Re-raise to be handled by the caller, returning an error to the client
-        # instead of fake data.
-        raise HTTPException(status_code=500, detail=f"AI Lead Generation Failed: {str(e)}")
+    # TODO: Integrate with real lead discovery service
+    # Options:
+    # 1. Perplexity API for web research
+    # 2. Apollo.io API for B2B contacts
+    # 3. LinkedIn Sales Navigator API
+    # 4. Hunter.io for email discovery
+
+    logger.error(f"Lead discovery not yet implemented - needs real API integration")
+    raise HTTPException(
+        status_code=501,
+        detail="Lead discovery requires integration with a real lead data provider (Apollo.io, Hunter.io, etc.). This feature is not yet implemented."
+    )
