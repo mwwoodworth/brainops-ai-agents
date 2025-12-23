@@ -34,8 +34,12 @@ class EmbeddedMemorySystem:
     - RAG: Local vector similarity search with embeddings
     """
 
-    def __init__(self, local_db_path: str = "/var/lib/ai-memory.db"):
-        self.local_db_path = local_db_path
+    def __init__(self, local_db_path: str = None):
+        # Use environment variable or fallback to project-relative path
+        self.local_db_path = local_db_path or os.getenv(
+            "EMBEDDED_MEMORY_PATH",
+            os.path.join(os.path.dirname(__file__), "data", "ai-memory.db")
+        )
         self.sqlite_conn = None
         self.pg_pool = None
         self.embedding_model = None
