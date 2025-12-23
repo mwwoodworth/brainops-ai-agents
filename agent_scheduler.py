@@ -194,7 +194,7 @@ class AgentScheduler:
             AND e.created_at < NOW() - INTERVAL '3 days'
             AND NOT EXISTS (
                 SELECT 1 FROM ai_scheduled_outreach o
-                WHERE o.customer_id = e.customer_id
+                WHERE o.target_id = e.customer_id::text
                 AND o.created_at > NOW() - INTERVAL '7 days'
             )
             LIMIT 10
