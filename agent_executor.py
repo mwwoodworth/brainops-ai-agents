@@ -1357,8 +1357,8 @@ class DatabaseOptimizerAgent(BaseAgent):
                 try:
                     cursor.execute(cmd['cmd'])
                     optimizations.append(f"Reindexed: {cmd['cmd']}")
-                except:
-                    pass
+                except Exception as reindex_error:
+                    logger.warning(f"Reindex operation failed: {cmd.get('cmd', 'unknown')}: {reindex_error}")
 
             conn.commit()
             cursor.close()
