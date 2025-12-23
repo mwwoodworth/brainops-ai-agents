@@ -27,6 +27,7 @@ from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
 
 from ai_self_awareness import SelfAwareAI as SelfAwareness, get_self_aware_ai
+from unified_brain import UnifiedBrain
 
 # Graph Context Provider for Phase 2 enhancements
 try:
@@ -629,13 +630,15 @@ class BaseAgent:
         return psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
 
     async def log_execution(self, task: Dict, result: Dict):
-        """Log execution to database"""
+        """Log execution to database and Unified Brain"""
+        import uuid
+        exec_id = str(uuid.uuid4())
+
+        # 1. Log to legacy table (keep for backward compatibility)
         try:
-            import uuid
             conn = self.get_db_connection()
             cursor = conn.cursor()
 
-            exec_id = str(uuid.uuid4())
             cursor.execute("""
                 INSERT INTO agent_executions (
                     id, task_execution_id, agent_type, prompt,
@@ -652,7 +655,30 @@ class BaseAgent:
             cursor.close()
             conn.close()
         except Exception as e:
-            self.logger.error(f"Failed to log execution: {e}")
+            self.logger.error(f"Legacy logging failed: {e}")
+
+        # 2. Log to Unified Brain (New System)
+        try:
+            brain = UnifiedBrain(lazy_init=True)
+            brain.store(
+                key=f"exec_{exec_id}",
+                value={
+                    "task": task,
+                    "result": result,
+                    "agent": self.name,
+                    "type": self.type,
+                    "status": result.get('status', 'completed')
+                },
+                category="agent_execution",
+                priority="medium" if result.get('status') == 'completed' else "high",
+                source=f"agent_{self.name}",
+                metadata={
+                    "execution_id": exec_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to store in UnifiedBrain: {e}")
 
 
 # ============== LANGGRAPH REVIEW WORKFLOW ==============
