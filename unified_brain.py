@@ -228,6 +228,41 @@ class UnifiedBrain:
 
         return entry_id
 
+    def store_learning(self, agent_id: str, task_id: str, mistake: str,
+                       lesson: str, root_cause: str, impact: str = "medium") -> bool:
+        """
+        Store a specific learning/insight derived from a mistake or success.
+        
+        Args:
+            agent_id: The agent that learned this
+            task_id: The task where it happened
+            mistake: Description of the mistake/situation
+            lesson: The actionable lesson learned
+            root_cause: Why it happened
+            impact: critical, high, medium, low
+        """
+        # Ensure initialization
+        if not self.embedded_memory:
+            self._init_embedded_memory()
+            
+        if self.embedded_memory:
+            try:
+                import uuid
+                learning_id = str(uuid.uuid4())
+                return self.embedded_memory.store_learning(
+                    learning_id=learning_id,
+                    agent_id=agent_id,
+                    task_id=task_id,
+                    mistake_description=mistake,
+                    root_cause=root_cause,
+                    lesson_learned=lesson,
+                    impact_level=impact
+                )
+            except Exception as e:
+                print(f"⚠️ Failed to store learning: {e}")
+                return False
+        return False
+
     def get(self, key: str) -> Optional[Dict]:
         """Retrieve a piece of context"""
         conn, cursor = self._get_connection()

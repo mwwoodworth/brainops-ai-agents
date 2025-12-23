@@ -541,10 +541,25 @@ class EmbeddedMemorySystem:
                 """)
 
                 cursor = self.sqlite_conn.cursor()
+                generated_count = 0
+                
                 for mem in memories:
-                    # Re-generate embedding locally
-                    embedding = self._encode_embedding(mem['content']) if mem.get('content') else None
-
+                    mem_id = str(mem['id'])
+                    
+                    # Check if we already have a valid embedding locally
+                    cursor.execute("SELECT embedding FROM unified_ai_memory WHERE id = ?", (mem_id,))
+                    row = cursor.fetchone()
+                    
+                    embedding = None
+                    if row and row[0]:
+                        # Reuse existing local embedding
+                        embedding = row[0]
+                    elif mem.get('content') and generated_count < 10:
+                        # Only generate new if missing AND limit not reached
+                        embedding = self._encode_embedding(mem['content'])
+                        if embedding:
+                            generated_count += 1
+                    
                     cursor.execute("""
                         INSERT OR REPLACE INTO unified_ai_memory (
                             id, memory_type, source_agent, content, embedding,
@@ -552,7 +567,7 @@ class EmbeddedMemorySystem:
                             created_at, last_accessed, synced_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        str(mem['id']),  # Convert UUID to string
+                        mem_id,
                         mem.get('memory_type'), mem.get('source_agent'),
                         mem.get('content'), embedding, mem.get('metadata'),
                         mem.get('importance_score', 0.5), 0,
