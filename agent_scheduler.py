@@ -337,8 +337,16 @@ class AgentScheduler:
                     "workflows_started": processed
                 }
 
-            # Run autonomous tasks
-            auto_stats = asyncio.run(run_autonomous_tasks())
+            # Run autonomous tasks (handle nested event loop case)
+            try:
+                loop = asyncio.get_running_loop()
+                # If we're in an async context, schedule and run via the existing loop
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    auto_stats = pool.submit(asyncio.run, run_autonomous_tasks()).result()
+            except RuntimeError:
+                # No running loop, safe to use asyncio.run
+                auto_stats = asyncio.run(run_autonomous_tasks())
             actions_taken.append({
                 'action': 'autonomous_revenue_cycle',
                 'stats': auto_stats
