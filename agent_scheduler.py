@@ -17,6 +17,14 @@ import uuid
 import json
 from revenue_generation_system import get_revenue_system
 
+# Import UnifiedBrain for persistent memory integration
+try:
+    from unified_brain import UnifiedBrain
+    BRAIN_AVAILABLE = True
+except ImportError:
+    BRAIN_AVAILABLE = False
+    UnifiedBrain = None
+
 logger = logging.getLogger(__name__)
 
 class AgentScheduler:
@@ -36,6 +44,17 @@ class AgentScheduler:
         # Use BackgroundScheduler instead of AsyncIOScheduler for FastAPI compatibility
         self.scheduler = BackgroundScheduler()
         self.registered_jobs = {}
+
+        # Initialize UnifiedBrain for persistent memory integration
+        self.brain = None
+        if BRAIN_AVAILABLE:
+            try:
+                self.brain = UnifiedBrain()
+                logger.info("🧠 UnifiedBrain connected for persistent memory")
+            except Exception as e:
+                logger.warning(f"⚠️ UnifiedBrain initialization failed: {e}")
+                self.brain = None
+
         logger.info(f"🔧 AgentScheduler initialized with DB: {self.db_config['host']}:{self.db_config['port']}")
 
     def get_db_connection(self):
@@ -118,6 +137,29 @@ class AgentScheduler:
             conn.commit()
             logger.info(f"Agent {agent_name} executed successfully")
 
+            # Store execution result in persistent memory for learning and context
+            if self.brain:
+                try:
+                    self.brain.store(
+                        key=f"agent_execution_{execution_id}",
+                        value={
+                            "agent_id": agent_id,
+                            "agent_name": agent_name,
+                            "execution_id": execution_id,
+                            "status": "completed",
+                            "execution_time_ms": execution_time_ms,
+                            "result_summary": str(result)[:500] if result else None,
+                            "timestamp": datetime.utcnow().isoformat()
+                        },
+                        category="agent_execution",
+                        priority="medium",
+                        source="agent_scheduler",
+                        metadata={"agent_type": agent.get('type', 'unknown')}
+                    )
+                    logger.debug(f"🧠 Stored execution {execution_id} in persistent memory")
+                except Exception as mem_err:
+                    logger.warning(f"Failed to store in memory: {mem_err}")
+
         except Exception as e:
             logger.error(f"Error executing agent {agent_name}: {e}")
             if conn and cur:
@@ -129,6 +171,21 @@ class AgentScheduler:
                         WHERE id = %s
                     """, ('failed', str(e), execution_id))
                     conn.commit()
+
+                    # Store failure in memory for learning from mistakes
+                    if self.brain:
+                        try:
+                            self.brain.store_learning(
+                                agent_id=agent_id,
+                                task_id=execution_id,
+                                mistake=f"Agent {agent_name} failed during execution",
+                                lesson=f"Error type: {type(e).__name__}. Need to handle: {str(e)[:200]}",
+                                root_cause=str(e)[:500],
+                                impact="medium"
+                            )
+                            logger.debug(f"🧠 Stored failure learning for {agent_name}")
+                        except Exception as learn_err:
+                            logger.warning(f"Failed to store learning: {learn_err}")
                 except Exception as log_error:
                     logger.error(f"Failed to log error: {log_error}")
         finally:
