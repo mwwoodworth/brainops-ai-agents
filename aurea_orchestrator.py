@@ -831,10 +831,54 @@ class AUREA:
 
     async def _apply_learning(self, insight: Dict):
         """Apply learning insights to improve performance"""
-        if insight["type"] == "performance" and insight["data"]["success_rate"] < 0.5:
-            # Reduce confidence threshold to be more conservative
-            logger.info("📚 Learning applied: Adjusting decision confidence thresholds")
-            # In a real implementation, this would adjust internal parameters
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+
+            if insight["type"] == "performance" and insight["data"].get("success_rate", 1.0) < 0.5:
+                # Record the learning insight to the database
+                cur.execute("""
+                    INSERT INTO ai_learning_insights (tenant_id, insight_type, insight_data, applied_at, adjustment_made)
+                    VALUES (%s, %s, %s, NOW(), %s)
+                    ON CONFLICT DO NOTHING
+                """, (
+                    self.tenant_id,
+                    insight["type"],
+                    json.dumps(insight["data"]),
+                    "reduced_confidence_threshold"
+                ))
+
+                # Adjust agent confidence thresholds for poor performers
+                if "agent_name" in insight["data"]:
+                    cur.execute("""
+                        UPDATE ai_agents
+                        SET config = config || '{"confidence_threshold": 0.7}'::jsonb,
+                            updated_at = NOW()
+                        WHERE name = %s AND tenant_id = %s
+                    """, (insight["data"]["agent_name"], self.tenant_id))
+
+                logger.info(f"📚 Learning applied: Adjusted confidence thresholds for low-performing agents")
+
+            elif insight["type"] == "pattern" and insight.get("pattern_confidence", 0) > 0.8:
+                # Store high-confidence patterns for future decision making
+                cur.execute("""
+                    INSERT INTO ai_decision_patterns (tenant_id, pattern_type, pattern_data, confidence, created_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                    ON CONFLICT DO NOTHING
+                """, (
+                    self.tenant_id,
+                    insight.get("pattern_type", "general"),
+                    json.dumps(insight["data"]),
+                    insight.get("pattern_confidence", 0.8)
+                ))
+                logger.info(f"📚 Learning applied: Stored new decision pattern with {insight.get('pattern_confidence', 0.8):.0%} confidence")
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        except Exception as e:
+            logger.warning(f"Could not apply learning insight: {e}")
 
     async def _self_heal(self):
         """Detect and fix system issues"""
@@ -933,7 +977,16 @@ class AUREA:
             # Performance = 100 - (Error Rate % * 0.5) - (Backlog Penalty)
             performance_score = max(0, 100 - (error_rate * 100 * 0.5) - (min(decision_backlog, 50) * 0.5))
 
-            overall_score = sum(health_components.values()) / len(health_components)
+            # Build health_components from gathered metrics
+            health_components = {
+                "agents": min(100, (agent_stats.get("enabled_agents", 0) / max(agent_stats.get("total_agents", 1), 1)) * 100),
+                "memory": min(100, 100 - (memory_stats.get("total_memories", 0) / 1000000) * 100) if memory_stats.get("total_memories", 0) < 1000000 else 10,
+                "errors": max(0, 100 - (error_rate * 100)),
+                "backlog": max(0, 100 - (min(decision_backlog, 100) * 1)),
+                "performance": performance_score
+            }
+
+            overall_score = sum(health_components.values()) / len(health_components) if health_components else 0
 
             self.system_health = SystemHealth(
                 overall_score=overall_score,
