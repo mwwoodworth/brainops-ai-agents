@@ -508,7 +508,9 @@ async def lifespan(app: FastAPI):
             # Start at SEMI_AUTO level (AI decides minor, human decides major)
             aurea = AUREA(autonomy_level=AutonomyLevel.SEMI_AUTO, tenant_id=tenant_id)
             app.state.aurea = aurea
-            logger.info("🧠 AUREA Master Orchestrator initialized at SEMI_AUTO level")
+            # START THE ORCHESTRATION LOOP - This makes the AI actually THINK
+            asyncio.create_task(aurea.orchestrate())
+            logger.info("🧠 AUREA Master Orchestrator STARTED - Observe→Decide→Act loop ACTIVE")
         except Exception as e:
             logger.error(f"❌ AUREA initialization failed: {e}")
             app.state.aurea = None
