@@ -313,7 +313,8 @@ class UltimateAISystem:
                         return result[0].get("generated_text", "")
                     return str(result)
 
-            except:
+            except Exception as provider_error:
+                logger.debug(f"Provider {name} failed: {provider_error}")
                 continue
 
         return None
@@ -361,7 +362,8 @@ class UltimateAISystem:
                 result = await task
                 if result:
                     responses[name] = result
-            except:
+            except Exception as task_error:
+                logger.debug(f"Multi-AI task {name} failed: {task_error}")
                 continue
 
         # Synthesize if requested

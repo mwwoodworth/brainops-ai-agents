@@ -103,7 +103,8 @@ class UnifiedMemoryManager:
         
         try:
             self.conn.cursor().execute("SELECT 1")
-        except:
+        except (psycopg2.Error, psycopg2.OperationalError, AttributeError) as conn_error:
+            logger.debug(f"Connection test failed, reconnecting: {conn_error}")
             self._connect()
         return self.conn.cursor(cursor_factory=RealDictCursor)
 
