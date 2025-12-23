@@ -10,7 +10,7 @@ sqlalchemy==2.0.23
 
 # AI/ML (Required for activated systems)
 openai>=1.58.1,<2.0.0  # Compatible with langchain-openai 0.3.x
-anthropic==0.7.0
+anthropic>=0.39.0,<1.0.0
 
 # LangChain for AUREA NLU (use latest stable 0.3.x versions)
 langchain>=0.3.27,<0.4.0
