@@ -489,7 +489,8 @@ class RealAICore:
                     "model": "gpt-4",
                     "timestamp": datetime.now().isoformat()
                 }
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError) as parse_error:
+            logger.debug(f"JSON parse in market analysis fallback: {parse_error}")
             return {
                 "analysis": response,
                 "status": "completed",
@@ -570,8 +571,8 @@ class RealAICore:
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group())
-        except:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, AttributeError) as parse_error:
+            logger.debug(f"JSON extraction failed in churn analysis: {parse_error}")
 
         # Fallback structure
         return {
