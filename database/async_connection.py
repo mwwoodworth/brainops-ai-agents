@@ -464,11 +464,8 @@ class InMemoryDatabasePool(BasePool):
         timeout: Optional[float] = None
     ) -> Any:
         sql = query.lower()
-        if "select exists" in sql and "ai_persistent_memory" in sql:
-            return True
-
-        if "select 1" in sql:
-            return 1
+        # Removed fake fallback responses - return None instead of fake data
+        # This ensures callers get accurate information about database state
 
         row = await self.fetchrow(query, *args, timeout=timeout)
         if row is None:
