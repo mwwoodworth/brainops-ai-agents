@@ -702,23 +702,47 @@ Return ONLY valid JSON array, no other text."""
                     logger.info(f"Extracted {len(extracted)} leads from discovery")
                     return extracted
 
-            # If Perplexity unavailable, use OpenAI to generate synthetic but realistic leads for testing
-            logger.warning("Perplexity unavailable, generating sample leads for system testing")
-            sample_response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "Generate realistic sample roofing contractor leads for CRM system testing."},
-                    {"role": "user", "content": f"Generate 3 realistic roofing contractor leads in {location} with full contact details. Return JSON array."}
-                ],
-                temperature=0.7
-            )
+            # Perplexity unavailable - check database for existing unprocessed leads instead
+            logger.warning("Perplexity unavailable, checking database for existing leads")
+            try:
+                import psycopg2
+                from psycopg2.extras import RealDictCursor
+                db_config = {
+                    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
+                    "port": int(os.getenv("DB_PORT", "5432")),
+                    "dbname": os.getenv("DB_NAME", "postgres"),
+                    "user": os.getenv("DB_USER"),
+                    "password": os.getenv("DB_PASSWORD")
+                }
+                conn = psycopg2.connect(**db_config)
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            sample_leads = json.loads(sample_response.choices[0].message.content)
-            if isinstance(sample_leads, list):
-                logger.info(f"Generated {len(sample_leads)} sample leads for testing")
-                return sample_leads
+                # Find leads in NEW or CONTACTED status that need attention
+                cur.execute("""
+                    SELECT id, company_name, contact_name, email, phone, location,
+                           source, buying_signals, estimated_value, confidence_score
+                    FROM ai_revenue_leads
+                    WHERE stage IN ('NEW', 'CONTACTED')
+                      AND created_at > NOW() - INTERVAL '30 days'
+                    ORDER BY estimated_value DESC
+                    LIMIT 10
+                """)
 
-            return []
+                existing_leads = cur.fetchall()
+                cur.close()
+                conn.close()
+
+                if existing_leads:
+                    logger.info(f"Found {len(existing_leads)} existing leads in database")
+                    return [dict(lead) for lead in existing_leads]
+
+                logger.info("No existing leads found - real lead discovery requires Perplexity API")
+                return []
+
+            except Exception as db_error:
+                logger.warning(f"Could not query existing leads: {db_error}")
+                # Return empty - no fake data ever
+                return []
 
         except Exception as e:
             logger.error(f"Lead discovery failed: {e}")

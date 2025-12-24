@@ -56,6 +56,7 @@ from api.self_healing import router as self_healing_router
 from api.e2e_verification import router as e2e_verification_router
 from api.revenue_automation import router as revenue_automation_router
 from api.mcp import router as mcp_router  # MCP Bridge Integration - 345 tools
+from api.cicd import router as cicd_router  # Autonomous CI/CD Management - 1-10K systems
 from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
 from observability import RequestMetrics, TTLCache
@@ -937,6 +938,7 @@ app.include_router(self_healing_router, dependencies=SECURED_DEPENDENCIES)  # En
 app.include_router(e2e_verification_router, dependencies=SECURED_DEPENDENCIES)  # E2E System Verification
 app.include_router(revenue_automation_router, dependencies=SECURED_DEPENDENCIES)  # Revenue Automation Engine
 app.include_router(mcp_router, dependencies=SECURED_DEPENDENCIES)  # MCP Bridge - 345 tools (Render, Vercel, Supabase, GitHub, Stripe, Docker)
+app.include_router(cicd_router, dependencies=SECURED_DEPENDENCIES)  # Autonomous CI/CD - manage 1-10K deployments
 
 # Import and include analytics router
 try:
