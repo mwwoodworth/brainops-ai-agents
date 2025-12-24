@@ -380,3 +380,148 @@ async def get_self_healing_dashboard():
             },
             "recent_incidents": []
         }
+
+
+# =============================================================================
+# MCP-POWERED AUTO-HEALING ENDPOINTS
+# =============================================================================
+
+_mcp_healer = None
+
+
+def _get_mcp_healer():
+    """Lazy load the MCP Self-Healing integration"""
+    global _mcp_healer
+    if _mcp_healer is None:
+        try:
+            from mcp_integration import get_self_healing_integration
+            _mcp_healer = get_self_healing_integration()
+        except Exception as e:
+            logger.error(f"Failed to initialize MCP Self-Healing: {e}")
+            return None
+    return _mcp_healer
+
+
+class MCPHealRequest(BaseModel):
+    service_name: str  # brainops-ai-agents, brainops-backend-prod, brainops-mcp-bridge
+    action: str = "auto"  # auto, restart, scale, diagnose
+
+
+@router.post("/mcp/heal")
+async def mcp_heal_service(request: MCPHealRequest):
+    """
+    Trigger MCP-powered self-healing for a Render service
+
+    Actions:
+    - auto: Automatic remediation (restart first, then scale if needed)
+    - restart: Force restart the service
+    - scale: Scale up to 2 instances
+    - diagnose: Get logs and status only
+    """
+    healer = _get_mcp_healer()
+    if not healer:
+        raise HTTPException(status_code=503, detail="MCP Self-Healing not available")
+
+    try:
+        if request.action == "diagnose":
+            result = await healer.get_diagnostic_info(request.service_name)
+            return {"action": "diagnose", "service": request.service_name, "result": result}
+
+        result = await healer.handle_unhealthy_service(request.service_name)
+        return result
+    except Exception as e:
+        logger.error(f"MCP heal error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/mcp/services")
+async def mcp_list_services():
+    """List all Render services with their status via MCP"""
+    healer = _get_mcp_healer()
+    if not healer:
+        raise HTTPException(status_code=503, detail="MCP Self-Healing not available")
+
+    try:
+        result = await healer.mcp.render_list_services()
+        if result.success:
+            return {"success": True, "services": result.result}
+        else:
+            return {"success": False, "error": result.error}
+    except Exception as e:
+        logger.error(f"MCP list services error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/mcp/logs/{service_name}")
+async def mcp_get_service_logs(service_name: str, lines: int = 100):
+    """Get logs from a Render service via MCP"""
+    healer = _get_mcp_healer()
+    if not healer:
+        raise HTTPException(status_code=503, detail="MCP Self-Healing not available")
+
+    service_id = healer.RENDER_SERVICE_IDS.get(service_name)
+    if not service_id:
+        raise HTTPException(status_code=404, detail=f"Unknown service: {service_name}")
+
+    try:
+        result = await healer.mcp.render_get_logs(service_id, lines)
+        return {
+            "success": result.success,
+            "service": service_name,
+            "logs": result.result,
+            "error": result.error
+        }
+    except Exception as e:
+        logger.error(f"MCP get logs error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/mcp/restart/{service_name}")
+async def mcp_restart_service(service_name: str):
+    """Restart a Render service via MCP"""
+    healer = _get_mcp_healer()
+    if not healer:
+        raise HTTPException(status_code=503, detail="MCP Self-Healing not available")
+
+    service_id = healer.RENDER_SERVICE_IDS.get(service_name)
+    if not service_id:
+        raise HTTPException(status_code=404, detail=f"Unknown service: {service_name}")
+
+    try:
+        result = await healer.mcp.render_restart_service(service_id)
+        return {
+            "success": result.success,
+            "service": service_name,
+            "action": "restart",
+            "result": result.result,
+            "error": result.error
+        }
+    except Exception as e:
+        logger.error(f"MCP restart error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/mcp/scale/{service_name}")
+async def mcp_scale_service(service_name: str, instances: int = 2):
+    """Scale a Render service via MCP"""
+    healer = _get_mcp_healer()
+    if not healer:
+        raise HTTPException(status_code=503, detail="MCP Self-Healing not available")
+
+    service_id = healer.RENDER_SERVICE_IDS.get(service_name)
+    if not service_id:
+        raise HTTPException(status_code=404, detail=f"Unknown service: {service_name}")
+
+    try:
+        result = await healer.mcp.render_scale_service(service_id, instances)
+        return {
+            "success": result.success,
+            "service": service_name,
+            "action": "scale",
+            "instances": instances,
+            "result": result.result,
+            "error": result.error
+        }
+    except Exception as e:
+        logger.error(f"MCP scale error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

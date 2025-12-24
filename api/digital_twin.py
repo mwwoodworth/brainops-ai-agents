@@ -399,3 +399,99 @@ async def get_twin_dashboard():
             "error": str(e),
             "system_health": {"status": "error"}
         }
+
+
+# =============================================================================
+# MCP-POWERED DIGITAL TWIN ENDPOINTS
+# =============================================================================
+
+_mcp_twin = None
+
+
+def _get_mcp_twin():
+    """Lazy load the MCP Digital Twin integration"""
+    global _mcp_twin
+    if _mcp_twin is None:
+        try:
+            from mcp_integration import get_digital_twin_integration
+            _mcp_twin = get_digital_twin_integration()
+        except Exception as e:
+            logger.error(f"Failed to initialize MCP Digital Twin: {e}")
+            return None
+    return _mcp_twin
+
+
+@router.post("/twins/{twin_id}/mcp-sync")
+async def mcp_sync_twin(twin_id: str):
+    """
+    Sync a digital twin with real infrastructure via MCP
+
+    Queries Render for actual service state and updates the twin.
+    Detects drift between twin state and reality.
+    """
+    mcp_twin = _get_mcp_twin()
+    if not mcp_twin:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="MCP Digital Twin not available")
+
+    try:
+        result = await mcp_twin.sync_twin_with_reality(twin_id)
+        return result
+    except Exception as e:
+        logger.error(f"MCP twin sync error: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/twins/{twin_id}/mcp-simulate")
+async def mcp_simulate_twin(twin_id: str, scenario: str = "default"):
+    """
+    Run a simulation on a digital twin using real infrastructure data via MCP
+
+    Gathers real metrics and logs for accurate simulation.
+    """
+    mcp_twin = _get_mcp_twin()
+    if not mcp_twin:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="MCP Digital Twin not available")
+
+    try:
+        result = await mcp_twin.run_simulation_on_real_infra(twin_id, scenario)
+        return result
+    except Exception as e:
+        logger.error(f"MCP twin simulation error: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/mcp/infrastructure")
+async def mcp_get_infrastructure_state():
+    """
+    Get real infrastructure state via MCP for all digital twins
+
+    Queries Render for all services and Supabase for twin configurations.
+    """
+    mcp_twin = _get_mcp_twin()
+    if not mcp_twin:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="MCP Digital Twin not available")
+
+    try:
+        # Get all Render services
+        services_result = await mcp_twin.mcp.render_list_services()
+
+        # Get twin count from Supabase
+        twins_result = await mcp_twin.mcp.supabase_query(
+            "SELECT COUNT(*) as count FROM digital_twins"
+        )
+
+        return {
+            "success": True,
+            "render_services": services_result.result if services_result.success else [],
+            "twin_count": twins_result.result if twins_result.success else 0,
+            "mcp_status": "connected"
+        }
+    except Exception as e:
+        logger.error(f"MCP infrastructure state error: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))

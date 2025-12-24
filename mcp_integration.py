@@ -493,10 +493,11 @@ class SelfHealingMCPIntegration:
     - Deployment rollback
     """
 
+    # Real Render service IDs from production
     RENDER_SERVICE_IDS = {
-        "brainops-ai-agents": "srv-xxx-agents",  # Replace with actual IDs
-        "brainops-backend-prod": "srv-xxx-backend",
-        "brainops-mcp-bridge": "srv-xxx-bridge"
+        "brainops-ai-agents": "srv-d413iu75r7bs738btc10",
+        "brainops-backend-prod": "srv-d1tfs4idbo4c73di6k00",
+        "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770"
     }
 
     def __init__(self):
