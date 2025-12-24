@@ -996,12 +996,15 @@ class AUREA:
             logger.error(f"Failed to update decision status: {e}")
 
     async def _execute_decision(self, decision: Decision) -> Dict[str, Any]:
-        """Execute a specific decision"""
+        """Execute a specific decision - now with MCP integration"""
         action_map = {
             "activate_collection_agents": self._activate_collection_agents,
             "activate_scheduling_optimization": self._activate_scheduling_optimization,
             "activate_retention_campaign": self._activate_retention_campaign,
-            "activate_sales_acceleration": self._activate_sales_acceleration
+            "activate_sales_acceleration": self._activate_sales_acceleration,
+            "trigger_frontend_investigation": self._trigger_frontend_investigation,
+            "trigger_deploy": self._trigger_deploy_via_mcp,
+            "restart_service": self._restart_service_via_mcp,
         }
 
         action_func = action_map.get(decision.recommended_action)
@@ -1010,6 +1013,42 @@ class AUREA:
         else:
             # Default: activate relevant agents based on decision type
             return await self._activate_agents_for_decision(decision)
+
+    async def _trigger_frontend_investigation(self, context: Dict) -> Dict:
+        """Investigate frontend issues using MCP tools (Vercel integration)"""
+        try:
+            mcp = self.mcp
+            # Check Vercel deployments for issues
+            result = await mcp.execute_tool(MCPServer.VERCEL, "vercel_list_deployments", {})
+            logger.info(f"🔍 Frontend investigation via MCP: {result}")
+            return {"action": "frontend_investigation", "mcp_result": result, "mode": "active"}
+        except Exception as e:
+            logger.error(f"MCP frontend investigation failed: {e}")
+            return {"action": "frontend_investigation", "error": str(e), "mode": "fallback"}
+
+    async def _trigger_deploy_via_mcp(self, context: Dict) -> Dict:
+        """Trigger deployment using MCP Render integration"""
+        try:
+            mcp = self.mcp
+            service_id = context.get("service_id", "brainops-ai-agents")
+            result = await mcp.execute_tool(MCPServer.RENDER, "render_trigger_deploy", {"service_id": service_id})
+            logger.info(f"🚀 Triggered deploy via MCP: {result}")
+            return {"action": "trigger_deploy", "mcp_result": result, "mode": "active"}
+        except Exception as e:
+            logger.error(f"MCP deploy trigger failed: {e}")
+            return {"action": "trigger_deploy", "error": str(e), "mode": "fallback"}
+
+    async def _restart_service_via_mcp(self, context: Dict) -> Dict:
+        """Restart service using MCP Render integration"""
+        try:
+            mcp = self.mcp
+            service_id = context.get("service_id", "brainops-ai-agents")
+            result = await mcp.execute_tool(MCPServer.RENDER, "render_restart_service", {"service_id": service_id})
+            logger.info(f"🔄 Restarted service via MCP: {result}")
+            return {"action": "restart_service", "mcp_result": result, "mode": "active"}
+        except Exception as e:
+            logger.error(f"MCP service restart failed: {e}")
+            return {"action": "restart_service", "error": str(e), "mode": "fallback"}
 
     async def _activate_collection_agents(self, context: Dict) -> Dict:
         """Activate agents for collections (Active, outreach protected for seeded data)"""
