@@ -26,7 +26,8 @@ class DatabaseConfig:
         self.password = os.getenv('DB_PASSWORD', '')
         self.port = int(os.getenv('DB_PORT', '5432'))
         self.ssl = os.getenv('DB_SSL', 'true').lower() not in ('false', '0', 'no')
-        self.ssl_verify = os.getenv('DB_SSL_VERIFY', 'false').lower() not in ('false', '0', 'no')
+        # SECURITY: SSL verification enabled by default in production
+        self.ssl_verify = os.getenv('DB_SSL_VERIFY', 'true').lower() not in ('false', '0', 'no')
 
         # Fallback to DATABASE_URL if individual vars not set (team-level Render env)
         if not all([self.host, self.database, self.user, self.password]):

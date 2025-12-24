@@ -39,9 +39,20 @@ class TestStatus(Enum):
     ERROR = "error"
 
 class UITesterAgent:
-    """Agent that performs automated UI testing on deployed applications"""
+    """Agent that performs automated UI testing on deployed applications with AUREA integration"""
 
-    def __init__(self):
+    def __init__(self, tenant_id: str = "default"):
+        self.tenant_id = tenant_id
+        self.agent_type = "ui_tester"
+
+        # AUREA Integration for decision recording and learning
+        try:
+            from aurea_integration import AUREAIntegration
+            self.aurea = AUREAIntegration(tenant_id, self.agent_type)
+        except ImportError:
+            logger.warning("AUREA integration not available")
+            self.aurea = None
+
         self.test_urls = {
             "brainops-command-center": {
                 "base_url": "https://brainops-command-center.vercel.app",
