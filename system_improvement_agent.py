@@ -305,3 +305,209 @@ Respond with JSON only:
             logger.warning(f"Failed to save analysis (table may not exist): {e}")
             if conn:
                 conn.close()
+
+    # ==========================================================================
+    # SELF-IMPROVEMENT LOOP - The system uses its own tools to improve itself
+    # ==========================================================================
+
+    async def execute_auto_improvements(self) -> Dict[str, Any]:
+        """
+        FORCE MULTIPLIER: The AI OS uses its own MCP Bridge to implement improvements.
+
+        This creates a feedback loop where:
+        1. System analyzes its own performance
+        2. Identifies actionable improvements
+        3. Executes those improvements via MCP Bridge
+        4. Logs results for next analysis cycle
+        """
+        import aiohttp
+
+        MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
+        MCP_API_KEY = os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+
+        results = {
+            "executed_at": datetime.utcnow().isoformat(),
+            "improvements_identified": 0,
+            "improvements_executed": 0,
+            "improvements_succeeded": 0,
+            "actions": []
+        }
+
+        try:
+            # Step 1: Run performance analysis
+            logger.info("🔍 Step 1: Analyzing system performance...")
+            analysis = await self.analyze_performance([])
+
+            # Step 2: Get recommendations
+            recommendations = analysis.get("recommendations", [])
+            results["improvements_identified"] = len(recommendations)
+            logger.info(f"📊 Found {len(recommendations)} improvement recommendations")
+
+            # Step 3: Map recommendations to MCP actions
+            actionable_improvements = self._map_recommendations_to_mcp_actions(recommendations)
+
+            # Step 4: Execute actionable improvements via MCP Bridge
+            async with aiohttp.ClientSession() as session:
+                for improvement in actionable_improvements:
+                    logger.info(f"🔧 Executing: {improvement['description']}")
+                    results["improvements_executed"] += 1
+
+                    try:
+                        async with session.post(
+                            f"{MCP_BRIDGE_URL}/mcp/execute",
+                            headers={
+                                "X-API-Key": MCP_API_KEY,
+                                "Content-Type": "application/json"
+                            },
+                            json={
+                                "server": improvement["mcp_server"],
+                                "tool": improvement["mcp_tool"],
+                                "params": improvement["params"]
+                            },
+                            timeout=aiohttp.ClientTimeout(total=60)
+                        ) as resp:
+                            if resp.status == 200:
+                                mcp_result = await resp.json()
+                                results["improvements_succeeded"] += 1
+                                results["actions"].append({
+                                    "action": improvement["description"],
+                                    "status": "success",
+                                    "result": mcp_result
+                                })
+                                logger.info(f"✅ Success: {improvement['description']}")
+                            else:
+                                error_text = await resp.text()
+                                results["actions"].append({
+                                    "action": improvement["description"],
+                                    "status": "failed",
+                                    "error": error_text
+                                })
+                                logger.warning(f"❌ Failed: {improvement['description']} - {error_text}")
+                    except Exception as e:
+                        results["actions"].append({
+                            "action": improvement["description"],
+                            "status": "error",
+                            "error": str(e)
+                        })
+                        logger.error(f"Error executing {improvement['description']}: {e}")
+
+            # Step 5: Save results to database
+            await self._save_analysis("auto_improvement_execution", results)
+
+            # Step 6: Log to remediation_history for audit trail
+            self._log_improvement_to_db(results)
+
+            logger.info(f"🎯 Self-improvement complete: {results['improvements_succeeded']}/{results['improvements_executed']} succeeded")
+            return results
+
+        except Exception as e:
+            logger.error(f"Auto-improvement failed: {e}")
+            return {"error": str(e), **results}
+
+    def _map_recommendations_to_mcp_actions(self, recommendations: List[Dict]) -> List[Dict]:
+        """
+        Map AI-generated recommendations to concrete MCP Bridge actions.
+
+        This is the intelligence layer that translates high-level
+        recommendations into actionable infrastructure commands.
+        """
+        actionable = []
+
+        # Mapping rules: recommendation patterns → MCP actions
+        action_mappings = {
+            # Performance recommendations
+            "cache": {
+                "mcp_server": "supabase",
+                "mcp_tool": "execute_sql",
+                "params_template": {"query": "DISCARD ALL; -- Clear session cache"}
+            },
+            "restart": {
+                "mcp_server": "render",
+                "mcp_tool": "restart_service",
+                "params_template": {"service_id": "srv-d0ulv1idbo4c73apd4t0"}
+            },
+            "scale": {
+                "mcp_server": "render",
+                "mcp_tool": "scale_service",
+                "params_template": {"num_instances": 2}
+            },
+            "database": {
+                "mcp_server": "supabase",
+                "mcp_tool": "execute_sql",
+                "params_template": {"query": "ANALYZE;"}  # Update statistics
+            },
+            "index": {
+                "mcp_server": "supabase",
+                "mcp_tool": "execute_sql",
+                "params_template": {"query": "REINDEX DATABASE postgres;"}
+            },
+            "vacuum": {
+                "mcp_server": "supabase",
+                "mcp_tool": "execute_sql",
+                "params_template": {"query": "VACUUM ANALYZE;"}
+            },
+            "connection": {
+                "mcp_server": "supabase",
+                "mcp_tool": "execute_sql",
+                "params_template": {
+                    "query": "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND query_start < NOW() - INTERVAL '10 minutes'"
+                }
+            },
+            # GitHub-related improvements
+            "deploy": {
+                "mcp_server": "github",
+                "mcp_tool": "create_workflow_dispatch",
+                "params_template": {"workflow_file": "deploy.yml"}
+            }
+        }
+
+        for rec in recommendations:
+            action = rec.get("action", "").lower()
+            area = rec.get("area", "").lower()
+            priority = rec.get("priority", "medium")
+
+            # Only auto-execute high/medium priority, low-effort improvements
+            if priority not in ["high", "medium"] or rec.get("effort") == "high":
+                continue
+
+            # Find matching action
+            for keyword, mapping in action_mappings.items():
+                if keyword in action or keyword in area:
+                    actionable.append({
+                        "description": f"{rec.get('area', 'system')}: {action[:50]}",
+                        "mcp_server": mapping["mcp_server"],
+                        "mcp_tool": mapping["mcp_tool"],
+                        "params": mapping["params_template"].copy(),
+                        "priority": priority,
+                        "original_recommendation": rec
+                    })
+                    break  # Only one action per recommendation
+
+        # Limit to 5 actions per cycle to avoid runaway automation
+        return actionable[:5]
+
+    def _log_improvement_to_db(self, results: Dict[str, Any]):
+        """Log improvement execution to database for audit trail"""
+        conn = self._get_db_connection()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            for action in results.get("actions", []):
+                cur.execute("""
+                    INSERT INTO remediation_history
+                    (incident_type, component, action_taken, success, recovery_time_seconds)
+                    VALUES (%s, %s, %s, %s, 0)
+                """, (
+                    "self_improvement",
+                    "system_improvement_agent",
+                    action.get("action", "unknown")[:200],
+                    action.get("status") == "success"
+                ))
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Could not log improvement to DB: {e}")
+            if conn:
+                conn.close()
