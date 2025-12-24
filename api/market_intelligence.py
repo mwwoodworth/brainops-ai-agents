@@ -9,8 +9,21 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 import logging
+from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+
+class MarketSignalTypeEnum(str, Enum):
+    """Types of market signals (API layer)"""
+    TREND = "TREND"
+    COMPETITOR = "COMPETITOR"
+    PRICING = "PRICING"
+    DEMAND = "DEMAND"
+    SENTIMENT = "SENTIMENT"
+    NEWS = "NEWS"
+    REGULATORY = "REGULATORY"
+    TECHNOLOGY = "TECHNOLOGY"
 
 router = APIRouter(prefix="/market-intelligence", tags=["Market Intelligence"])
 
@@ -94,8 +107,18 @@ async def ingest_signal(request: MarketSignalRequest):
     """Ingest a new market signal for analysis"""
     try:
         engine = await _get_engine()
+
+        # Convert string signal_type to engine's enum
+        from predictive_market_intelligence import MarketSignalType
+        signal_type_upper = request.signal_type.upper()
+        try:
+            engine_signal_type = MarketSignalType[signal_type_upper]
+        except KeyError:
+            # Try lowercase match
+            engine_signal_type = MarketSignalType(signal_type_upper.lower())
+
         result = await engine.ingest_signal(
-            signal_type=request.signal_type,
+            signal_type=engine_signal_type,
             source=request.source,
             data=request.data,
             confidence=request.confidence

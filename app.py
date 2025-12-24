@@ -145,7 +145,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.1.5"  # Fixed Digital Twin sync_frequency_seconds parameter
+VERSION = "9.1.6"  # Fixed Market Intelligence signal_type enum conversion
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
