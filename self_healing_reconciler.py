@@ -26,11 +26,43 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Callable, Awaitable
 from dataclasses import dataclass, asdict
 from enum import Enum
+from decimal import Decimal
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+class CustomJSONEncoder(json.JSONEncoder):
+    """JSON encoder that handles datetime, Decimal, and Enum types"""
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, Decimal):
+            return float(obj)
+        elif isinstance(obj, Enum):
+            return obj.value
+        elif hasattr(obj, '__dict__'):
+            return obj.__dict__
+        return super().default(obj)
+
+
+def json_safe_serialize(obj: Any) -> Any:
+    """Recursively convert an object to JSON-safe types"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, Enum):
+        return obj.value
+    elif isinstance(obj, dict):
+        return {k: json_safe_serialize(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [json_safe_serialize(item) for item in obj]
+    elif hasattr(obj, '__dict__'):
+        return json_safe_serialize(obj.__dict__)
+    return obj
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
@@ -599,6 +631,8 @@ class SelfHealingReconciler:
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor()
+            # Use json_safe_serialize to handle datetime and enum types
+            safe_details = json_safe_serialize(result.details)
             cur.execute("""
             INSERT INTO healing_reconciliations
             (cycle_id, components_checked, incidents_detected,
@@ -610,7 +644,7 @@ class SelfHealingReconciler:
                 result.incidents_detected,
                 result.remediations_executed,
                 result.success,
-                Json(result.details),
+                Json(safe_details),
                 result.start_time,
                 result.end_time
             ))
