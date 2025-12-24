@@ -136,6 +136,31 @@ async def list_twins():
                     "drift_detected": twin.drift_detected if hasattr(twin, 'drift_detected') else False
                 })
 
+        # Fallback: query DB directly if in-memory is empty
+        if not twins_list:
+            import os
+            db_url = os.getenv("DATABASE_URL")
+            if db_url:
+                try:
+                    import asyncpg
+                    conn = await asyncpg.connect(db_url)
+                    try:
+                        rows = await conn.fetch("SELECT twin_id, source_system, system_type, maturity_level, health_score, last_sync, drift_detected FROM digital_twins")
+                        for row in rows:
+                            twins_list.append({
+                                "twin_id": row['twin_id'],
+                                "source_system": row['source_system'],
+                                "system_type": row['system_type'],
+                                "maturity_level": row['maturity_level'],
+                                "health_score": row['health_score'] or 100,
+                                "last_sync": row['last_sync'].isoformat() if row['last_sync'] else None,
+                                "drift_detected": row['drift_detected'] or False
+                            })
+                    finally:
+                        await conn.close()
+                except Exception as db_err:
+                    logger.warning(f"DB fallback failed: {db_err}")
+
         return {"twins": twins_list, "total": len(twins_list)}
     except Exception as e:
         logger.error(f"Failed to list twins: {e}")
