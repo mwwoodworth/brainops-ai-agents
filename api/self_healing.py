@@ -295,8 +295,20 @@ async def get_self_healing_dashboard():
     if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
         await engine.initialize()
 
-    active_incidents = await engine.get_active_incidents() if hasattr(engine, 'get_active_incidents') else []
-    metrics = await engine.get_metrics() if hasattr(engine, 'get_metrics') else {}
+    # Try to get active incidents from the module's standalone function
+    active_incidents = []
+    metrics = {}
+    try:
+        from enhanced_self_healing import get_active_incidents as get_incidents_func
+        active_incidents = await get_incidents_func()
+    except Exception as e:
+        logger.warning(f"Could not get active incidents: {e}")
+
+    try:
+        from enhanced_self_healing import get_self_healing_metrics as get_metrics_func
+        metrics = await get_metrics_func()
+    except Exception as e:
+        logger.warning(f"Could not get metrics: {e}")
 
     return {
         "overview": {
