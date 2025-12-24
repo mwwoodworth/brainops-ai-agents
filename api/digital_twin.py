@@ -97,7 +97,7 @@ async def create_twin(request: CreateTwinRequest):
                 source_system=request.source_system,
                 system_type=request.system_type,
                 maturity_level=request.maturity_level,
-                sync_frequency=request.sync_frequency_seconds,
+                sync_frequency_seconds=request.sync_frequency_seconds,
                 initial_state=request.initial_state
             )
             return result
