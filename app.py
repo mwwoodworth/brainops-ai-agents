@@ -3144,6 +3144,38 @@ async def ai_analyze(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/aurea/status")
+async def get_aurea_status():
+    """
+    Get AUREA operational status - simple health check.
+    This is a convenience endpoint that redirects to the full AUREA chat API.
+    """
+    try:
+        # Check if AUREA orchestrator is available
+        aurea_available = hasattr(app.state, 'aurea_orchestrator') and app.state.aurea_orchestrator is not None
+
+        return {
+            "status": "operational" if aurea_available else "initializing",
+            "aurea_available": aurea_available,
+            "timestamp": datetime.utcnow().isoformat(),
+            "endpoints": {
+                "full_status": "/aurea/chat/status",
+                "chat": "/aurea/chat/message",
+                "websocket": "/aurea/chat/ws/{session_id}"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Failed to get AUREA status: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+
+
 @app.post("/aurea/command/natural_language")
 async def execute_aurea_nl_command(
     request: Request,

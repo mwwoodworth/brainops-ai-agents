@@ -707,6 +707,159 @@ class UnifiedMemoryManager:
 
         return merged
 
+    def apply_retention_policy(self, tenant_id: str = None, aggressive: bool = False) -> Dict[str, int]:
+        """
+        Apply importance-based retention policy
+        Returns: statistics about retained/removed memories
+        """
+        tenant_id = tenant_id or self.tenant_id
+        if not tenant_id:
+            raise ValueError("tenant_id is required for retention policy")
+
+        try:
+            with self._get_cursor() as cur:
+                stats = {'retained': 0, 'removed': 0, 'promoted': 0, 'demoted': 0}
+
+                # Calculate retention score: importance * access_frequency * recency
+                cur.execute("""
+                    WITH retention_scores AS (
+                        SELECT
+                            id,
+                            importance_score,
+                            access_count,
+                            EXTRACT(EPOCH FROM (NOW() - created_at)) / 86400 as age_days,
+                            (importance_score *
+                             LOG(GREATEST(access_count, 1) + 1) *
+                             (1.0 / (1.0 + EXTRACT(EPOCH FROM (NOW() - created_at)) / 2592000))) as retention_score
+                        FROM unified_ai_memory
+                        WHERE tenant_id = %s
+                    )
+                    SELECT
+                        id,
+                        retention_score,
+                        importance_score,
+                        access_count,
+                        age_days
+                    FROM retention_scores
+                    ORDER BY retention_score ASC
+                """, (tenant_id,))
+
+                memories = cur.fetchall()
+
+                # Determine thresholds
+                low_threshold = 0.1 if aggressive else 0.05
+                high_threshold = 0.8 if aggressive else 0.9
+
+                for mem in memories:
+                    retention_score = float(mem['retention_score'])
+
+                    # Remove very low value memories
+                    if retention_score < low_threshold and mem['age_days'] > 30:
+                        cur.execute("""
+                            UPDATE unified_ai_memory
+                            SET expires_at = NOW() + INTERVAL '7 days'
+                            WHERE id = %s
+                        """, (mem['id'],))
+                        stats['removed'] += 1
+
+                    # Promote high-value memories
+                    elif retention_score > high_threshold and mem['importance_score'] < 0.9:
+                        cur.execute("""
+                            UPDATE unified_ai_memory
+                            SET importance_score = LEAST(importance_score + 0.1, 1.0)
+                            WHERE id = %s
+                        """, (mem['id'],))
+                        stats['promoted'] += 1
+
+                    # Demote low-access old memories
+                    elif mem['access_count'] < 2 and mem['age_days'] > 60 and mem['importance_score'] > 0.3:
+                        cur.execute("""
+                            UPDATE unified_ai_memory
+                            SET importance_score = GREATEST(importance_score - 0.1, 0.2)
+                            WHERE id = %s
+                        """, (mem['id'],))
+                        stats['demoted'] += 1
+
+                    else:
+                        stats['retained'] += 1
+
+                self.conn.commit()
+                logger.info(f"✅ Retention policy applied: {stats}")
+                return stats
+
+        except Exception as e:
+            logger.error(f"❌ Failed to apply retention policy: {e}")
+            self.conn.rollback()
+            return {'error': str(e)}
+
+    def auto_garbage_collect(self, tenant_id: str = None, dry_run: bool = False) -> Dict[str, int]:
+        """
+        Automatically garbage collect old, low-value memories
+        """
+        tenant_id = tenant_id or self.tenant_id
+        if not tenant_id:
+            raise ValueError("tenant_id is required for garbage collection")
+
+        try:
+            with self._get_cursor() as cur:
+                stats = {'expired': 0, 'low_value': 0, 'total': 0}
+
+                # Remove expired memories
+                if not dry_run:
+                    cur.execute("""
+                        DELETE FROM unified_ai_memory
+                        WHERE tenant_id = %s
+                        AND expires_at IS NOT NULL
+                        AND expires_at < NOW()
+                    """, (tenant_id,))
+                    stats['expired'] = cur.rowcount
+                else:
+                    cur.execute("""
+                        SELECT COUNT(*) as count
+                        FROM unified_ai_memory
+                        WHERE tenant_id = %s
+                        AND expires_at IS NOT NULL
+                        AND expires_at < NOW()
+                    """, (tenant_id,))
+                    stats['expired'] = cur.fetchone()['count']
+
+                # Remove old, low-value memories
+                if not dry_run:
+                    cur.execute("""
+                        DELETE FROM unified_ai_memory
+                        WHERE tenant_id = %s
+                        AND importance_score < 0.3
+                        AND access_count < 3
+                        AND created_at < NOW() - INTERVAL '90 days'
+                    """, (tenant_id,))
+                    stats['low_value'] = cur.rowcount
+                else:
+                    cur.execute("""
+                        SELECT COUNT(*) as count
+                        FROM unified_ai_memory
+                        WHERE tenant_id = %s
+                        AND importance_score < 0.3
+                        AND access_count < 3
+                        AND created_at < NOW() - INTERVAL '90 days'
+                    """, (tenant_id,))
+                    stats['low_value'] = cur.fetchone()['count']
+
+                stats['total'] = stats['expired'] + stats['low_value']
+
+                if not dry_run:
+                    self.conn.commit()
+                    logger.info(f"✅ Garbage collected {stats['total']} memories")
+                else:
+                    logger.info(f"📊 Dry run: would remove {stats['total']} memories")
+
+                return stats
+
+        except Exception as e:
+            logger.error(f"❌ Failed to garbage collect: {e}")
+            if not dry_run:
+                self.conn.rollback()
+            return {'error': str(e)}
+
     def get_stats(self, tenant_id: str = None) -> Dict:
         """Get memory system statistics"""
         tenant_id = tenant_id or self.tenant_id
@@ -721,7 +874,11 @@ class UnifiedMemoryManager:
                 COUNT(DISTINCT source_agent) as unique_agents,
                 AVG(importance_score) as avg_importance,
                 MAX(access_count) as max_access_count,
-                COUNT(DISTINCT context_id) as unique_contexts
+                COUNT(DISTINCT context_id) as unique_contexts,
+                COUNT(*) FILTER (WHERE importance_score >= 0.7) as high_importance,
+                COUNT(*) FILTER (WHERE importance_score < 0.3) as low_importance,
+                COUNT(*) FILTER (WHERE access_count > 10) as frequently_accessed,
+                COUNT(*) FILTER (WHERE expires_at IS NOT NULL) as expiring
             FROM unified_ai_memory
             WHERE tenant_id = %s
             """

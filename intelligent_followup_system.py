@@ -844,6 +844,487 @@ class ResponseAnalyzer:
         }
 
 
+class AutomatedCheckInScheduler:
+    """Automated check-in scheduling based on customer health and activity"""
+
+    def __init__(self):
+        self.conn = None
+
+    def _get_connection(self):
+        """Get database connection"""
+        if not self.conn or self.conn.closed:
+            self.conn = psycopg2.connect(**DB_CONFIG)
+        return self.conn
+
+    async def schedule_checkins(
+        self,
+        customer_id: str,
+        check_in_strategy: str = "proactive"
+    ) -> Dict:
+        """Schedule automated check-ins for a customer"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Get customer activity and health data
+            cursor.execute("""
+                SELECT
+                    c.id,
+                    c.name,
+                    c.created_at,
+                    COUNT(DISTINCT j.id) as total_jobs,
+                    MAX(j.created_at) as last_job_date,
+                    EXTRACT(EPOCH FROM (NOW() - MAX(j.created_at)))/86400 as days_since_last_job
+                FROM customers c
+                LEFT JOIN jobs j ON j.customer_id = c.id
+                WHERE c.id::text = %s
+                GROUP BY c.id, c.name, c.created_at
+            """, (customer_id,))
+
+            customer_data = cursor.fetchone()
+
+            if not customer_data:
+                return {"error": "Customer not found"}
+
+            # Determine check-in schedule based on activity level
+            schedule = self._determine_checkin_schedule(
+                customer_data, check_in_strategy
+            )
+
+            # Create check-in sequence
+            sequence_id = str(uuid.uuid4())
+            for check_in in schedule['check_ins']:
+                await self._schedule_single_checkin(
+                    sequence_id, customer_id, check_in, cursor
+                )
+
+            conn.commit()
+
+            return {
+                "sequence_id": sequence_id,
+                "customer_id": customer_id,
+                "strategy": check_in_strategy,
+                "check_ins_scheduled": len(schedule['check_ins']),
+                "schedule": schedule,
+                "scheduled_at": datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Error scheduling check-ins: {e}")
+            if conn:
+                conn.rollback()
+            return {"error": str(e)}
+
+    def _determine_checkin_schedule(
+        self,
+        customer_data: Dict,
+        strategy: str
+    ) -> Dict:
+        """Determine appropriate check-in schedule"""
+        days_since_last_job = customer_data.get('days_since_last_job', 0) or 0
+        total_jobs = customer_data.get('total_jobs', 0)
+
+        schedule = {"check_ins": [], "frequency": "monthly"}
+
+        if strategy == "proactive":
+            # High-touch for at-risk customers
+            if days_since_last_job > 60 or total_jobs == 0:
+                schedule['frequency'] = "weekly"
+                schedule['check_ins'] = [
+                    {"type": "initial_outreach", "delay_days": 0, "priority": "high"},
+                    {"type": "value_reminder", "delay_days": 7, "priority": "high"},
+                    {"type": "offer_assistance", "delay_days": 14, "priority": "medium"},
+                    {"type": "feedback_request", "delay_days": 21, "priority": "medium"}
+                ]
+            # Medium-touch for active customers
+            elif days_since_last_job <= 30:
+                schedule['frequency'] = "monthly"
+                schedule['check_ins'] = [
+                    {"type": "satisfaction_check", "delay_days": 30, "priority": "medium"},
+                    {"type": "upsell_opportunity", "delay_days": 60, "priority": "low"},
+                    {"type": "quarterly_review", "delay_days": 90, "priority": "medium"}
+                ]
+            # Standard touch for moderate activity
+            else:
+                schedule['frequency'] = "bi_weekly"
+                schedule['check_ins'] = [
+                    {"type": "engagement_prompt", "delay_days": 14, "priority": "medium"},
+                    {"type": "value_share", "delay_days": 28, "priority": "low"},
+                    {"type": "satisfaction_check", "delay_days": 42, "priority": "medium"}
+                ]
+
+        elif strategy == "milestone_based":
+            # Check-ins based on customer milestones
+            schedule['frequency'] = "milestone"
+            schedule['check_ins'] = [
+                {"type": "post_onboarding", "delay_days": 30, "priority": "high"},
+                {"type": "first_renewal", "delay_days": 180, "priority": "high"},
+                {"type": "anniversary", "delay_days": 365, "priority": "medium"}
+            ]
+
+        return schedule
+
+    async def _schedule_single_checkin(
+        self,
+        sequence_id: str,
+        customer_id: str,
+        check_in: Dict,
+        cursor: Any
+    ) -> str:
+        """Schedule a single check-in"""
+        check_in_id = str(uuid.uuid4())
+        scheduled_date = datetime.now(timezone.utc) + timedelta(days=check_in['delay_days'])
+
+        cursor.execute("""
+            INSERT INTO ai_automated_checkins (
+                id, sequence_id, customer_id,
+                checkin_type, scheduled_date, priority,
+                status, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+        """, (
+            check_in_id, sequence_id, customer_id,
+            check_in['type'], scheduled_date,
+            check_in['priority'], 'scheduled'
+        ))
+
+        return check_in_id
+
+    async def execute_due_checkins(self) -> List[Dict]:
+        """Execute all due check-ins"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Get due check-ins
+            cursor.execute("""
+                SELECT * FROM ai_automated_checkins
+                WHERE status = 'scheduled'
+                AND scheduled_date <= NOW()
+                ORDER BY priority DESC, scheduled_date
+                LIMIT 50
+            """)
+
+            due_checkins = cursor.fetchall()
+            results = []
+
+            for checkin in due_checkins:
+                result = await self._execute_checkin(checkin, cursor)
+                results.append(result)
+
+            conn.commit()
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error executing due check-ins: {e}")
+            if conn:
+                conn.rollback()
+            return []
+
+    async def _execute_checkin(self, checkin: Dict, cursor: Any) -> Dict:
+        """Execute a single check-in"""
+        try:
+            # Generate personalized check-in content
+            content = self._generate_checkin_content(checkin['checkin_type'])
+
+            # Update status
+            cursor.execute("""
+                UPDATE ai_automated_checkins
+                SET status = 'completed',
+                    executed_at = NOW(),
+                    content = %s
+                WHERE id = %s
+            """, (json.dumps(content), checkin['id']))
+
+            return {
+                "checkin_id": checkin['id'],
+                "customer_id": checkin['customer_id'],
+                "type": checkin['checkin_type'],
+                "status": "completed",
+                "content": content
+            }
+
+        except Exception as e:
+            logger.error(f"Error executing check-in: {e}")
+            cursor.execute("""
+                UPDATE ai_automated_checkins
+                SET status = 'failed', error_message = %s
+                WHERE id = %s
+            """, (str(e), checkin['id']))
+            return {"checkin_id": checkin['id'], "status": "failed", "error": str(e)}
+
+    def _generate_checkin_content(self, checkin_type: str) -> Dict:
+        """Generate content for check-in based on type"""
+        content_templates = {
+            "satisfaction_check": {
+                "subject": "How are we doing?",
+                "body": "We'd love to hear your feedback on our service...",
+                "action": "Take 2-minute survey"
+            },
+            "engagement_prompt": {
+                "subject": "We'd love to help",
+                "body": "Have you had a chance to try our latest features?",
+                "action": "Schedule a demo"
+            },
+            "value_reminder": {
+                "subject": "Your success matters to us",
+                "body": "Here's how we've helped you save time and money...",
+                "action": "View your impact report"
+            },
+            "post_onboarding": {
+                "subject": "How's your experience so far?",
+                "body": "We want to make sure you're getting the most value...",
+                "action": "Share feedback"
+            }
+        }
+
+        return content_templates.get(checkin_type, {
+            "subject": "Checking in",
+            "body": "We wanted to reach out...",
+            "action": "Reply to this message"
+        })
+
+
+class SupportEscalationManager:
+    """Automated support escalation based on customer issues and urgency"""
+
+    def __init__(self):
+        self.conn = None
+
+    def _get_connection(self):
+        """Get database connection"""
+        if not self.conn or self.conn.closed:
+            self.conn = psycopg2.connect(**DB_CONFIG)
+        return self.conn
+
+    async def analyze_and_escalate(
+        self,
+        customer_id: str,
+        issue_data: Dict,
+        context: Dict
+    ) -> Dict:
+        """Analyze issue and determine if escalation is needed"""
+        try:
+            # Analyze issue severity
+            severity_analysis = self._analyze_severity(issue_data, context)
+
+            # Check escalation criteria
+            should_escalate = self._should_escalate(severity_analysis, context)
+
+            if should_escalate:
+                escalation = await self._create_escalation(
+                    customer_id, issue_data, severity_analysis
+                )
+                return escalation
+            else:
+                return {
+                    "escalated": False,
+                    "severity": severity_analysis['level'],
+                    "recommended_action": "standard_support",
+                    "reason": "Issue within normal support parameters"
+                }
+
+        except Exception as e:
+            logger.error(f"Error analyzing escalation: {e}")
+            return {"error": str(e)}
+
+    def _analyze_severity(self, issue_data: Dict, context: Dict) -> Dict:
+        """Analyze issue severity"""
+        severity_score = 0
+        factors = []
+
+        # Factor 1: Issue type
+        critical_keywords = ["down", "broken", "urgent", "critical", "emergency", "loss"]
+        issue_description = issue_data.get('description', '').lower()
+
+        if any(keyword in issue_description for keyword in critical_keywords):
+            severity_score += 30
+            factors.append("Critical keywords detected")
+
+        # Factor 2: Customer value/tier
+        customer_tier = context.get('customer_tier', 'standard')
+        if customer_tier == 'enterprise':
+            severity_score += 20
+            factors.append("Enterprise customer")
+        elif customer_tier == 'premium':
+            severity_score += 10
+            factors.append("Premium customer")
+
+        # Factor 3: Impact scope
+        impact = issue_data.get('impact', 'individual')
+        if impact == 'organization_wide':
+            severity_score += 25
+            factors.append("Organization-wide impact")
+        elif impact == 'team':
+            severity_score += 15
+            factors.append("Team-level impact")
+
+        # Factor 4: Business impact
+        if issue_data.get('blocks_revenue', False):
+            severity_score += 25
+            factors.append("Blocking revenue")
+
+        # Factor 5: Previous escalations
+        previous_escalations = context.get('recent_escalations', 0)
+        if previous_escalations >= 2:
+            severity_score += 15
+            factors.append("Multiple recent escalations")
+
+        # Determine severity level
+        if severity_score >= 70:
+            level = "critical"
+        elif severity_score >= 50:
+            level = "high"
+        elif severity_score >= 30:
+            level = "medium"
+        else:
+            level = "low"
+
+        return {
+            "score": severity_score,
+            "level": level,
+            "factors": factors
+        }
+
+    def _should_escalate(self, severity: Dict, context: Dict) -> bool:
+        """Determine if issue should be escalated"""
+        # Auto-escalate critical issues
+        if severity['level'] == 'critical':
+            return True
+
+        # Escalate high severity for premium/enterprise
+        if severity['level'] == 'high' and context.get('customer_tier') in ['enterprise', 'premium']:
+            return True
+
+        # Escalate if SLA at risk
+        if context.get('sla_at_risk', False):
+            return True
+
+        # Escalate if repeated issues
+        if context.get('recent_escalations', 0) >= 2:
+            return True
+
+        return False
+
+    async def _create_escalation(
+        self,
+        customer_id: str,
+        issue_data: Dict,
+        severity: Dict
+    ) -> Dict:
+        """Create an escalation record"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            escalation_id = str(uuid.uuid4())
+
+            # Determine escalation tier
+            tier = self._get_escalation_tier(severity['level'])
+
+            # Assign to appropriate team/person
+            assignment = self._get_assignment(severity['level'], issue_data)
+
+            # Create escalation
+            cursor.execute("""
+                INSERT INTO ai_support_escalations (
+                    id, customer_id, issue_data,
+                    severity_level, severity_score,
+                    escalation_tier, assigned_to,
+                    assigned_team, status, priority,
+                    created_at, sla_deadline
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
+            """, (
+                escalation_id, customer_id,
+                json.dumps(issue_data),
+                severity['level'], severity['score'],
+                tier, assignment['person'],
+                assignment['team'], 'escalated',
+                severity['level'],
+                datetime.now(timezone.utc) + timedelta(hours=tier['sla_hours'])
+            ))
+
+            # Send escalation notifications
+            await self._send_escalation_notifications(
+                escalation_id, customer_id, severity, assignment, cursor
+            )
+
+            conn.commit()
+
+            return {
+                "escalated": True,
+                "escalation_id": escalation_id,
+                "severity": severity['level'],
+                "tier": tier['name'],
+                "assigned_to": assignment['person'],
+                "assigned_team": assignment['team'],
+                "sla_hours": tier['sla_hours'],
+                "factors": severity['factors'],
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Error creating escalation: {e}")
+            if conn:
+                conn.rollback()
+            return {"error": str(e)}
+
+    def _get_escalation_tier(self, severity_level: str) -> Dict:
+        """Get escalation tier based on severity"""
+        tiers = {
+            "critical": {"name": "Tier 3", "sla_hours": 2, "level": 3},
+            "high": {"name": "Tier 2", "sla_hours": 8, "level": 2},
+            "medium": {"name": "Tier 1", "sla_hours": 24, "level": 1},
+            "low": {"name": "Standard", "sla_hours": 48, "level": 0}
+        }
+        return tiers.get(severity_level, tiers["low"])
+
+    def _get_assignment(self, severity_level: str, issue_data: Dict) -> Dict:
+        """Determine assignment for escalation"""
+        assignments = {
+            "critical": {
+                "person": "VP Customer Success",
+                "team": "Executive Support"
+            },
+            "high": {
+                "person": "Senior Support Engineer",
+                "team": "Advanced Support"
+            },
+            "medium": {
+                "person": "Support Team Lead",
+                "team": "Support Team"
+            },
+            "low": {
+                "person": "Support Representative",
+                "team": "Support Team"
+            }
+        }
+
+        return assignments.get(severity_level, assignments["low"])
+
+    async def _send_escalation_notifications(
+        self,
+        escalation_id: str,
+        customer_id: str,
+        severity: Dict,
+        assignment: Dict,
+        cursor: Any
+    ) -> None:
+        """Send notifications for escalation"""
+        # Record notification
+        cursor.execute("""
+            INSERT INTO ai_escalation_notifications (
+                id, escalation_id, recipient,
+                notification_type, sent_at
+            ) VALUES (%s, %s, %s, %s, NOW())
+        """, (
+            str(uuid.uuid4()), escalation_id,
+            assignment['person'], 'email'
+        ))
+
+        logger.info(f"Escalation {escalation_id} assigned to {assignment['person']} ({assignment['team']})")
+
+
 class PerformanceTracker:
     """Track and optimize follow-up performance"""
 
@@ -992,5 +1473,7 @@ __all__ = [
     'ChannelSelector',
     'ResponseAnalyzer',
     'PerformanceTracker',
+    'AutomatedCheckInScheduler',
+    'SupportEscalationManager',
     'get_intelligent_followup_system'
 ]

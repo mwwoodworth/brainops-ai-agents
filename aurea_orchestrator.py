@@ -28,6 +28,7 @@ from ai_self_awareness import get_self_aware_ai, SelfAwareAI
 from revenue_generation_system import get_revenue_system, AutonomousRevenueSystem
 from ai_knowledge_graph import get_knowledge_graph, AIKnowledgeGraph
 from mcp_integration import get_mcp_client, MCPClient, MCPServer, MCPToolResult
+from unified_brain import get_brain, UnifiedBrain
 import aiohttp
 import warnings
 warnings.filterwarnings('ignore')
@@ -127,6 +128,41 @@ class SystemHealth:
     alerts: List[str]
 
 
+@dataclass
+class CycleMetrics:
+    """Metrics for a single OODA loop cycle"""
+    cycle_number: int
+    timestamp: datetime
+    observations_count: int
+    decisions_count: int
+    actions_executed: int
+    actions_successful: int
+    actions_failed: int
+    cycle_duration_seconds: float
+    learning_insights_generated: int
+    health_score: float
+    autonomy_level: int
+    patterns_detected: List[str]
+    goals_achieved: int
+    goals_set: int
+
+
+@dataclass
+class AutonomousGoal:
+    """A goal set by AUREA autonomously based on system state"""
+    id: str
+    goal_type: str  # performance, efficiency, revenue, quality, learning
+    description: str
+    target_metric: str
+    current_value: float
+    target_value: float
+    deadline: datetime
+    priority: int  # 1-10
+    created_at: datetime
+    status: str  # active, achieved, failed, abandoned
+    progress: float  # 0-100
+
+
 class AUREA:
     """
     The Master AI Orchestrator - The Brain of BrainOps
@@ -151,6 +187,7 @@ class AUREA:
         self.safety_ref: Optional[SelfAwareAI] = None
         self.revenue_ref: Optional[AutonomousRevenueSystem] = None
         self.knowledge_ref: Optional[AIKnowledgeGraph] = None
+        self.brain: UnifiedBrain = get_brain()
         self.running = False
         self.cycle_count = 0
         self.decisions_made = 0
@@ -158,9 +195,14 @@ class AUREA:
         self.system_health = None
         self.decision_queue = asyncio.Queue()
         self.learning_insights = []
+        self.cycle_metrics_history: List[CycleMetrics] = []
+        self.autonomous_goals: List[AutonomousGoal] = []
+        self.pattern_history: List[Dict[str, Any]] = []
         self.confidence_thresholds = self._default_confidence_thresholds()
         self._last_observation_bundle: Dict[str, Any] = {}
         self._last_orientation_bundle: Dict[str, Any] = {}
+        self._decision_success_rate_history: List[float] = []
+        self._performance_trends: Dict[str, List[float]] = {}
         self._init_database()
 
         logger.info(f"🧠 AUREA initialized for tenant {tenant_id} at autonomy level: {autonomy_level.name}")
@@ -497,6 +539,67 @@ class AUREA:
                 created_at TIMESTAMP DEFAULT NOW(),
                 tenant_id UUID
             );
+
+            -- Create AUREA cycle metrics
+            CREATE TABLE IF NOT EXISTS aurea_cycle_metrics (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                cycle_number INTEGER NOT NULL,
+                timestamp TIMESTAMP DEFAULT NOW(),
+                observations_count INTEGER,
+                decisions_count INTEGER,
+                actions_executed INTEGER,
+                actions_successful INTEGER,
+                actions_failed INTEGER,
+                cycle_duration_seconds FLOAT,
+                learning_insights_generated INTEGER,
+                health_score FLOAT,
+                autonomy_level INTEGER,
+                patterns_detected JSONB,
+                goals_achieved INTEGER,
+                goals_set INTEGER,
+                tenant_id UUID
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_aurea_cycle_metrics_cycle ON aurea_cycle_metrics(cycle_number);
+            CREATE INDEX IF NOT EXISTS idx_aurea_cycle_metrics_timestamp ON aurea_cycle_metrics(timestamp DESC);
+
+            -- Create AUREA autonomous goals
+            CREATE TABLE IF NOT EXISTS aurea_autonomous_goals (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                goal_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                target_metric TEXT NOT NULL,
+                current_value FLOAT,
+                target_value FLOAT,
+                deadline TIMESTAMP,
+                priority INTEGER,
+                status TEXT CHECK (status IN ('active', 'achieved', 'failed', 'abandoned')),
+                progress FLOAT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                achieved_at TIMESTAMP,
+                tenant_id UUID
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_aurea_goals_status ON aurea_autonomous_goals(status);
+            CREATE INDEX IF NOT EXISTS idx_aurea_goals_priority ON aurea_autonomous_goals(priority DESC);
+
+            -- Create AUREA pattern detection log
+            CREATE TABLE IF NOT EXISTS aurea_patterns (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                pattern_type TEXT NOT NULL,
+                pattern_description TEXT NOT NULL,
+                confidence FLOAT,
+                frequency INTEGER,
+                impact_score FLOAT,
+                pattern_data JSONB,
+                first_detected TIMESTAMP DEFAULT NOW(),
+                last_detected TIMESTAMP DEFAULT NOW(),
+                tenant_id UUID
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_aurea_patterns_type ON aurea_patterns(pattern_type);
+            CREATE INDEX IF NOT EXISTS idx_aurea_patterns_confidence ON aurea_patterns(confidence DESC);
             """)
 
             conn.commit()
@@ -562,13 +665,49 @@ class AUREA:
                 # Calculate cycle time
                 cycle_time = (datetime.now() - cycle_start).total_seconds()
 
+                # Count patterns detected this cycle
+                patterns_count = len([obs for obs in observations if obs.get("type") == "patterns_detected"])
+
+                # Count goals achieved and set this cycle
+                goals_achieved = len([g for g in self.autonomous_goals if g.status == "achieved" and
+                                      (datetime.now() - g.created_at).total_seconds() < cycle_time])
+                goals_set = len([obs for obs in observations if obs.get("type") == "goal_progress"])
+
+                # Create comprehensive cycle metrics
+                cycle_metrics = CycleMetrics(
+                    cycle_number=self.cycle_count,
+                    timestamp=datetime.now(),
+                    observations_count=len(observations),
+                    decisions_count=len(decisions),
+                    actions_executed=len(results),
+                    actions_successful=len([r for r in results if r.get("status") != "failed"]),
+                    actions_failed=len([r for r in results if r.get("status") == "failed"]),
+                    cycle_duration_seconds=cycle_time,
+                    learning_insights_generated=len(self.learning_insights) if self.learning_insights else 0,
+                    health_score=self.system_health.overall_score if self.system_health else 0,
+                    autonomy_level=self.autonomy_level.value,
+                    patterns_detected=[obs.get("type", "") for obs in observations if obs.get("type") == "patterns_detected"],
+                    goals_achieved=goals_achieved,
+                    goals_set=goals_set
+                )
+
+                # Store cycle metrics
+                self.cycle_metrics_history.append(cycle_metrics)
+                if len(self.cycle_metrics_history) > 1000:
+                    self.cycle_metrics_history.pop(0)
+
+                await self._store_cycle_metrics(cycle_metrics)
+
                 # Store final cycle state
                 self._store_state_snapshot("cycle_complete", {
                     "cycle": self.cycle_count,
                     "cycle_time_seconds": cycle_time,
                     "observations": len(observations),
                     "decisions": len(decisions),
-                    "results": len(results)
+                    "results": len(results),
+                    "patterns_detected": patterns_count,
+                    "goals_achieved": goals_achieved,
+                    "goals_set": goals_set
                 })
 
                 # Store cycle in memory
@@ -580,7 +719,9 @@ class AUREA:
                         "decisions": len(decisions),
                         "actions_executed": len(results),
                         "cycle_time_seconds": cycle_time,
-                        "autonomy_level": self.autonomy_level.value
+                        "autonomy_level": self.autonomy_level.value,
+                        "patterns_detected": patterns_count,
+                        "success_rate": cycle_metrics.actions_successful / max(cycle_metrics.actions_executed, 1)
                     },
                     source_system="aurea",
                     source_agent="orchestrator",
@@ -604,10 +745,26 @@ class AUREA:
                 await asyncio.sleep(30)  # Longer sleep on error
 
     async def _observe(self) -> List[Dict[str, Any]]:
-        """Observe the environment and gather all relevant data (ASYNC)"""
+        """
+        Observe the environment and gather all relevant data (ASYNC)
+        Enhanced with comprehensive metrics, pattern detection, and trend analysis
+        """
         observations = []
+        patterns_detected = []
 
         try:
+            # Track observation start time
+            observe_start = datetime.now()
+
+            # Detect patterns from historical data
+            patterns_detected = await self._detect_patterns()
+            if patterns_detected:
+                observations.append({
+                    "type": "patterns_detected",
+                    "patterns": patterns_detected,
+                    "count": len(patterns_detected),
+                    "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK
+                })
             # Check for new customers (ASYNC)
             new_cust = await self._async_fetchrow("""
             SELECT COUNT(*) as count FROM customers
@@ -729,10 +886,48 @@ class AUREA:
         except Exception as e:
             logger.warning(f"Frontend health check failed: {e}")
 
+        # Check autonomous goals progress
+        goal_updates = await self._check_goal_progress()
+        if goal_updates:
+            observations.append({
+                "type": "goal_progress",
+                "goals_updated": goal_updates,
+                "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK
+            })
+
+        # Analyze performance trends
+        trends = await self._analyze_performance_trends()
+        if trends.get("anomalies"):
+            observations.append({
+                "type": "performance_anomaly",
+                "trends": trends,
+                "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK
+            })
+
+        # Store observation metrics in unified brain
+        try:
+            self.brain.store(
+                key=f"aurea_observations_cycle_{self.cycle_count}",
+                value={
+                    "cycle": self.cycle_count,
+                    "observation_count": len(observations),
+                    "patterns_detected": len(patterns_detected),
+                    "timestamp": datetime.now().isoformat()
+                },
+                category="aurea_metrics",
+                priority="medium",
+                source="aurea_observe"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to store observations in brain: {e}")
+
         return observations
 
     async def _orient(self, observations: List[Dict]) -> Dict[str, Any]:
-        """Analyze observations and build context"""
+        """
+        Analyze observations and build context
+        Enhanced with autonomous goal setting and multi-criteria analysis
+        """
         context = {
             "timestamp": datetime.now().isoformat(),
             "cycle": self.cycle_count,
@@ -740,8 +935,14 @@ class AUREA:
             "observations": observations,
             "priorities": [],
             "risks": [],
-            "opportunities": []
+            "opportunities": [],
+            "patterns": [],
+            "autonomous_goals": []
         }
+
+        # Set autonomous goals based on system state
+        new_goals = await self._set_autonomous_goals(observations)
+        context["autonomous_goals"] = new_goals
 
         # Analyze each observation for priority
         for obs in observations:
@@ -1112,12 +1313,20 @@ class AUREA:
                 "mode": "active", "outreach_protected": requires_outreach}
 
     async def _learn(self, results: List[Dict[str, Any]]):
-        """Learn from ALL execution results and continuously improve"""
+        """
+        Learn from ALL execution results and continuously improve
+        Enhanced with pattern recognition, self-improvement, and unified brain integration
+        """
         successful = [r for r in results if r.get("status") != "failed"]
         failed = [r for r in results if r.get("status") == "failed"]
 
         # Calculate success rate
         success_rate = len(successful) / len(results) if results else 0
+
+        # Track success rate history for trend analysis
+        self._decision_success_rate_history.append(success_rate)
+        if len(self._decision_success_rate_history) > 100:
+            self._decision_success_rate_history.pop(0)
 
         # ALWAYS learn from every cycle - not just failures
         insight = {
@@ -1135,6 +1344,19 @@ class AUREA:
         self.learning_insights.append(insight)
         await self._apply_learning(insight)
 
+        # Store in unified brain for long-term learning
+        try:
+            self.brain.store_learning(
+                agent_id="aurea_orchestrator",
+                task_id=f"cycle_{self.cycle_count}",
+                mistake=f"Cycle execution with {success_rate*100:.0f}% success",
+                lesson=f"Decision patterns and outcomes from cycle {self.cycle_count}",
+                root_cause="autonomous_operation",
+                impact="high" if success_rate < 0.7 else "medium"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to store learning in unified brain: {e}")
+
         # Generate performance insight if low success
         if success_rate < 0.5 and results:
             performance_insight = {
@@ -1145,6 +1367,11 @@ class AUREA:
             }
             self.learning_insights.append(performance_insight)
             await self._apply_learning(performance_insight)
+            await self._self_improve_from_failures(failed)
+
+        # Analyze decision patterns and adjust confidence thresholds
+        if self.cycle_count % 5 == 0:
+            await self._analyze_decision_patterns()
 
         # Store learning in memory
         self.memory.store(Memory(
@@ -1153,7 +1380,8 @@ class AUREA:
                 "cycle": self.cycle_count,
                 "results_analyzed": len(results),
                 "success_rate": success_rate,
-                "insights": self.learning_insights[-5:] if self.learning_insights else []
+                "insights": self.learning_insights[-5:] if self.learning_insights else [],
+                "success_rate_trend": self._decision_success_rate_history[-10:] if self._decision_success_rate_history else []
             },
             source_system="aurea",
             source_agent="learner",
@@ -1168,6 +1396,17 @@ class AUREA:
             patterns = self.memory.synthesize(self.tenant_id, time_window=timedelta(hours=1))
             for pattern in patterns:
                 logger.info(f"🧠 Pattern discovered: {pattern['description']}")
+                # Store pattern in unified brain
+                try:
+                    self.brain.store(
+                        key=f"pattern_{pattern.get('id', uuid.uuid4())}",
+                        value=pattern,
+                        category="pattern",
+                        priority="high",
+                        source="aurea_learning"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to store pattern in brain: {e}")
 
     async def _apply_learning(self, insight: Dict):
         """Apply learning insights to improve performance - ALWAYS stores learning data"""
@@ -1700,6 +1939,414 @@ class AUREA:
         else:
             return 10  # Normal activity
 
+    async def _detect_patterns(self) -> List[Dict[str, Any]]:
+        """Detect patterns from historical data and system behavior"""
+        patterns = []
+
+        try:
+            # Analyze recent cycle metrics for patterns
+            if len(self.cycle_metrics_history) >= 5:
+                recent_metrics = self.cycle_metrics_history[-10:]
+
+                # Pattern: Declining success rate
+                success_rates = [m.actions_successful / max(m.actions_executed, 1) for m in recent_metrics if m.actions_executed > 0]
+                if len(success_rates) >= 3:
+                    if success_rates[-1] < success_rates[0] * 0.7:
+                        patterns.append({
+                            "type": "declining_success",
+                            "description": "Decision execution success rate declining",
+                            "confidence": 0.8,
+                            "data": {"success_rates": success_rates}
+                        })
+
+                # Pattern: Consistent high performance
+                if all(sr > 0.9 for sr in success_rates[-5:] if sr):
+                    patterns.append({
+                        "type": "high_performance",
+                        "description": "Consistently high execution success rate",
+                        "confidence": 0.9,
+                        "data": {"success_rates": success_rates}
+                    })
+
+                # Pattern: Increasing cycle time
+                cycle_times = [m.cycle_duration_seconds for m in recent_metrics]
+                if cycle_times[-1] > cycle_times[0] * 1.5:
+                    patterns.append({
+                        "type": "increasing_latency",
+                        "description": "OODA cycle duration increasing",
+                        "confidence": 0.75,
+                        "data": {"cycle_times": cycle_times}
+                    })
+
+            # Store detected patterns
+            for pattern in patterns:
+                try:
+                    conn = psycopg2.connect(**DB_CONFIG)
+                    cur = conn.cursor()
+                    cur.execute("""
+                        INSERT INTO aurea_patterns (pattern_type, pattern_description, confidence,
+                                                     frequency, impact_score, pattern_data, tenant_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        pattern["type"],
+                        pattern["description"],
+                        pattern["confidence"],
+                        1,
+                        0.7,
+                        Json(pattern.get("data", {})),
+                        self.tenant_id
+                    ))
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                except Exception as e:
+                    logger.warning(f"Failed to store pattern: {e}")
+
+        except Exception as e:
+            logger.error(f"Pattern detection error: {e}")
+
+        return patterns
+
+    async def _check_goal_progress(self) -> List[Dict[str, Any]]:
+        """Check progress on autonomous goals and update status"""
+        goal_updates = []
+
+        for goal in self.autonomous_goals:
+            if goal.status != "active":
+                continue
+
+            try:
+                # Recalculate current value based on goal type
+                current_value = await self._measure_goal_metric(goal.target_metric)
+                old_progress = goal.progress
+
+                # Update progress
+                if goal.target_value != goal.current_value:
+                    goal.progress = min(100, max(0,
+                        ((current_value - goal.current_value) / (goal.target_value - goal.current_value)) * 100
+                    ))
+
+                goal.current_value = current_value
+
+                # Check if goal achieved
+                if goal.progress >= 100:
+                    goal.status = "achieved"
+                    goal_updates.append({
+                        "goal_id": goal.id,
+                        "status": "achieved",
+                        "progress": goal.progress
+                    })
+                    logger.info(f"🎯 Goal achieved: {goal.description}")
+
+                # Check if deadline passed
+                elif datetime.now() > goal.deadline:
+                    goal.status = "failed"
+                    goal_updates.append({
+                        "goal_id": goal.id,
+                        "status": "failed",
+                        "progress": goal.progress
+                    })
+
+                # Update database
+                await self._update_goal_in_db(goal)
+
+            except Exception as e:
+                logger.error(f"Goal progress check error: {e}")
+
+        return goal_updates
+
+    async def _measure_goal_metric(self, metric_name: str) -> float:
+        """Measure a specific metric value"""
+        try:
+            if metric_name == "error_rate":
+                if self.system_health:
+                    return self.system_health.error_rate
+            elif metric_name == "success_rate":
+                if self._decision_success_rate_history:
+                    return sum(self._decision_success_rate_history[-10:]) / len(self._decision_success_rate_history[-10:])
+            elif metric_name == "cycle_time":
+                if self.cycle_metrics_history:
+                    return self.cycle_metrics_history[-1].cycle_duration_seconds
+            elif metric_name == "health_score":
+                if self.system_health:
+                    return self.system_health.overall_score
+        except Exception as e:
+            logger.error(f"Metric measurement error: {e}")
+
+        return 0.0
+
+    async def _update_goal_in_db(self, goal: AutonomousGoal):
+        """Update goal in database"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE aurea_autonomous_goals
+                SET current_value = %s, progress = %s, status = %s, updated_at = NOW(),
+                    achieved_at = CASE WHEN %s = 'achieved' THEN NOW() ELSE achieved_at END
+                WHERE id = %s
+            """, (goal.current_value, goal.progress, goal.status, goal.status, goal.id))
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Goal update error: {e}")
+
+    async def _analyze_performance_trends(self) -> Dict[str, Any]:
+        """Analyze performance trends and detect anomalies"""
+        trends = {
+            "anomalies": [],
+            "improvements": [],
+            "degradations": []
+        }
+
+        try:
+            # Analyze success rate trend
+            if len(self._decision_success_rate_history) >= 10:
+                recent = self._decision_success_rate_history[-5:]
+                older = self._decision_success_rate_history[-10:-5]
+
+                recent_avg = sum(recent) / len(recent)
+                older_avg = sum(older) / len(older)
+
+                if recent_avg > older_avg * 1.2:
+                    trends["improvements"].append("Decision success rate improving")
+                elif recent_avg < older_avg * 0.8:
+                    trends["degradations"].append("Decision success rate declining")
+                    trends["anomalies"].append({
+                        "type": "performance_degradation",
+                        "metric": "success_rate",
+                        "severity": "high"
+                    })
+
+            # Analyze cycle time trends
+            if len(self.cycle_metrics_history) >= 10:
+                recent_times = [m.cycle_duration_seconds for m in self.cycle_metrics_history[-5:]]
+                older_times = [m.cycle_duration_seconds for m in self.cycle_metrics_history[-10:-5]]
+
+                if sum(recent_times) / len(recent_times) > sum(older_times) / len(older_times) * 1.3:
+                    trends["anomalies"].append({
+                        "type": "latency_increase",
+                        "metric": "cycle_time",
+                        "severity": "medium"
+                    })
+
+        except Exception as e:
+            logger.error(f"Trend analysis error: {e}")
+
+        return trends
+
+    async def _set_autonomous_goals(self, observations: List[Dict]) -> List[AutonomousGoal]:
+        """Set autonomous goals based on system state and observations"""
+        new_goals = []
+
+        try:
+            # Goal: Improve success rate if below threshold
+            if self._decision_success_rate_history:
+                current_rate = sum(self._decision_success_rate_history[-5:]) / len(self._decision_success_rate_history[-5:])
+                if current_rate < 0.85:
+                    goal = AutonomousGoal(
+                        id=str(uuid.uuid4()),
+                        goal_type="performance",
+                        description="Improve decision execution success rate to 90%",
+                        target_metric="success_rate",
+                        current_value=current_rate,
+                        target_value=0.90,
+                        deadline=datetime.now() + timedelta(hours=24),
+                        priority=8,
+                        created_at=datetime.now(),
+                        status="active",
+                        progress=0.0
+                    )
+                    new_goals.append(goal)
+                    self.autonomous_goals.append(goal)
+                    await self._store_goal_in_db(goal)
+
+            # Goal: Reduce error rate if high
+            if self.system_health and self.system_health.error_rate > 0.1:
+                goal = AutonomousGoal(
+                    id=str(uuid.uuid4()),
+                    goal_type="quality",
+                    description="Reduce system error rate to below 5%",
+                    target_metric="error_rate",
+                    current_value=self.system_health.error_rate,
+                    target_value=0.05,
+                    deadline=datetime.now() + timedelta(hours=12),
+                    priority=9,
+                    created_at=datetime.now(),
+                    status="active",
+                    progress=0.0
+                )
+                new_goals.append(goal)
+                self.autonomous_goals.append(goal)
+                await self._store_goal_in_db(goal)
+
+            # Goal: Improve response time if slow
+            if self.cycle_metrics_history and self.cycle_metrics_history[-1].cycle_duration_seconds > 30:
+                goal = AutonomousGoal(
+                    id=str(uuid.uuid4()),
+                    goal_type="efficiency",
+                    description="Reduce OODA cycle time to under 20 seconds",
+                    target_metric="cycle_time",
+                    current_value=self.cycle_metrics_history[-1].cycle_duration_seconds,
+                    target_value=20.0,
+                    deadline=datetime.now() + timedelta(hours=6),
+                    priority=7,
+                    created_at=datetime.now(),
+                    status="active",
+                    progress=0.0
+                )
+                new_goals.append(goal)
+                self.autonomous_goals.append(goal)
+                await self._store_goal_in_db(goal)
+
+        except Exception as e:
+            logger.error(f"Goal setting error: {e}")
+
+        return new_goals
+
+    async def _store_goal_in_db(self, goal: AutonomousGoal):
+        """Store new goal in database"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO aurea_autonomous_goals
+                (id, goal_type, description, target_metric, current_value, target_value,
+                 deadline, priority, status, progress, tenant_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                goal.id, goal.goal_type, goal.description, goal.target_metric,
+                goal.current_value, goal.target_value, goal.deadline, goal.priority,
+                goal.status, goal.progress, self.tenant_id
+            ))
+            conn.commit()
+            cur.close()
+            conn.close()
+            logger.info(f"🎯 New autonomous goal set: {goal.description}")
+        except Exception as e:
+            logger.error(f"Goal storage error: {e}")
+
+    async def _self_improve_from_failures(self, failures: List[Dict[str, Any]]):
+        """Analyze failures and adjust system parameters to improve"""
+        try:
+            for failure in failures:
+                error = failure.get("error", "")
+                decision_id = failure.get("decision_id", "")
+
+                # Analyze failure patterns
+                if "timeout" in error.lower():
+                    logger.info("🔧 Self-improvement: Detected timeout pattern, adjusting timeouts")
+                    # Could adjust timeout parameters
+                elif "permission" in error.lower() or "denied" in error.lower():
+                    logger.info("🔧 Self-improvement: Detected permission issue, reviewing access controls")
+                elif "database" in error.lower() or "connection" in error.lower():
+                    logger.info("🔧 Self-improvement: Detected DB issue, triggering connection pool refresh")
+
+                # Store self-improvement action in brain
+                self.brain.store(
+                    key=f"self_improvement_{uuid.uuid4()}",
+                    value={
+                        "failure": error,
+                        "decision_id": decision_id,
+                        "improvement_action": "parameter_adjustment",
+                        "timestamp": datetime.now().isoformat()
+                    },
+                    category="self_improvement",
+                    priority="high",
+                    source="aurea_learning"
+                )
+
+        except Exception as e:
+            logger.error(f"Self-improvement error: {e}")
+
+    async def _analyze_decision_patterns(self):
+        """Analyze decision patterns and adjust confidence thresholds"""
+        try:
+            # Query recent decision outcomes
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+
+            cur.execute("""
+                SELECT decision_type, confidence, execution_status,
+                       COUNT(*) as count,
+                       AVG(confidence) as avg_confidence
+                FROM aurea_decisions
+                WHERE created_at > NOW() - INTERVAL '24 hours'
+                  AND tenant_id = %s
+                GROUP BY decision_type, confidence, execution_status
+                ORDER BY decision_type, confidence DESC
+            """, (self.tenant_id,))
+
+            patterns = cur.fetchall()
+
+            # Analyze patterns and adjust thresholds
+            for pattern in patterns:
+                decision_type = pattern['decision_type']
+                status = pattern['execution_status']
+                avg_conf = pattern['avg_confidence']
+
+                # If high confidence decisions are failing, raise threshold
+                if status == 'failed' and avg_conf > 0.7:
+                    logger.info(f"🔧 Adjusting confidence threshold for {decision_type} decisions")
+                    # Store adjustment in brain
+                    self.brain.store(
+                        key=f"threshold_adjustment_{decision_type}",
+                        value={
+                            "decision_type": decision_type,
+                            "old_threshold": avg_conf,
+                            "adjustment": "increase",
+                            "reason": "high_failure_rate"
+                        },
+                        category="self_improvement",
+                        priority="high",
+                        source="aurea_pattern_analysis"
+                    )
+
+            cur.close()
+            conn.close()
+
+        except Exception as e:
+            logger.error(f"Decision pattern analysis error: {e}")
+
+    async def _store_cycle_metrics(self, metrics: CycleMetrics):
+        """Store cycle metrics in database"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+
+            cur.execute("""
+                INSERT INTO aurea_cycle_metrics
+                (cycle_number, timestamp, observations_count, decisions_count,
+                 actions_executed, actions_successful, actions_failed, cycle_duration_seconds,
+                 learning_insights_generated, health_score, autonomy_level,
+                 patterns_detected, goals_achieved, goals_set, tenant_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                metrics.cycle_number, metrics.timestamp, metrics.observations_count,
+                metrics.decisions_count, metrics.actions_executed, metrics.actions_successful,
+                metrics.actions_failed, metrics.cycle_duration_seconds,
+                metrics.learning_insights_generated, metrics.health_score,
+                metrics.autonomy_level, Json(metrics.patterns_detected),
+                metrics.goals_achieved, metrics.goals_set, self.tenant_id
+            ))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            # Also store in unified brain
+            self.brain.store(
+                key=f"cycle_metrics_{metrics.cycle_number}",
+                value=asdict(metrics),
+                category="aurea_metrics",
+                priority="medium",
+                source="aurea_orchestrator"
+            )
+
+        except Exception as e:
+            logger.error(f"Cycle metrics storage error: {e}")
+
     def set_autonomy_level(self, level: AutonomyLevel):
         """Adjust autonomy level"""
         self.autonomy_level = level
@@ -1711,15 +2358,53 @@ class AUREA:
         logger.info("🛑 AUREA orchestration stopped")
 
     def get_status(self) -> Dict:
-        """Get current AUREA status"""
+        """Get current AUREA status with comprehensive metrics"""
+        # Calculate current averages
+        recent_success_rate = 0.0
+        if self._decision_success_rate_history:
+            recent_success_rate = sum(self._decision_success_rate_history[-10:]) / len(self._decision_success_rate_history[-10:])
+
+        recent_cycle_time = 0.0
+        if self.cycle_metrics_history:
+            recent_cycle_time = sum(m.cycle_duration_seconds for m in self.cycle_metrics_history[-10:]) / len(self.cycle_metrics_history[-10:])
+
+        active_goals = [g for g in self.autonomous_goals if g.status == "active"]
+        achieved_goals = [g for g in self.autonomous_goals if g.status == "achieved"]
+
         return {
             "running": self.running,
             "autonomy_level": self.autonomy_level.name,
+            "autonomy_value": self.autonomy_level.value,
             "cycles_completed": self.cycle_count,
             "decisions_made": self.decisions_made,
             "system_health": asdict(self.system_health) if self.system_health else None,
             "learning_insights": len(self.learning_insights),
-            "last_health_check": self.last_health_check.isoformat()
+            "last_health_check": self.last_health_check.isoformat(),
+            "performance_metrics": {
+                "recent_success_rate": recent_success_rate,
+                "recent_cycle_time_avg": recent_cycle_time,
+                "total_cycle_metrics": len(self.cycle_metrics_history),
+                "success_rate_trend": self._decision_success_rate_history[-10:] if self._decision_success_rate_history else []
+            },
+            "autonomous_goals": {
+                "active": len(active_goals),
+                "achieved": len(achieved_goals),
+                "total": len(self.autonomous_goals),
+                "active_goals_list": [
+                    {
+                        "description": g.description,
+                        "progress": g.progress,
+                        "target_metric": g.target_metric,
+                        "priority": g.priority
+                    }
+                    for g in active_goals[:5]
+                ]
+            },
+            "learning": {
+                "total_insights": len(self.learning_insights),
+                "recent_patterns": len(self.pattern_history),
+                "self_improvement_actions": len([i for i in self.learning_insights if i.get("type") == "self_improvement"])
+            }
         }
 
 

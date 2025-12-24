@@ -2,6 +2,16 @@
 """
 MCP (Model Context Protocol) Server for BrainOps AI Agents
 Provides complete transparency and control for AI systems
+
+Version: 2.0.0
+
+Enhancements:
+- Tool discovery and registration endpoints
+- Performance metrics tracking
+- Execution history with detailed logging
+- Tool chaining for complex workflows
+- Cache management endpoints
+- Enhanced monitoring and diagnostics
 """
 
 import os
@@ -10,8 +20,8 @@ import json
 import asyncio
 import logging
 from typing import Any, Dict, List, Optional
-from datetime import datetime
-from fastapi import FastAPI, WebSocket, HTTPException, Depends, Request, Security
+from datetime import datetime, timedelta
+from fastapi import FastAPI, WebSocket, HTTPException, Depends, Request, Security, BackgroundTasks
 from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -21,6 +31,7 @@ import subprocess
 import httpx
 from pathlib import Path
 from config import config
+from collections import defaultdict, deque
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -65,8 +76,8 @@ async def verify_api_key(
 # Initialize FastAPI app
 app = FastAPI(
     title="BrainOps MCP Server",
-    description="Model Context Protocol server for complete AI system transparency",
-    version="1.0.0"
+    description="Model Context Protocol server for complete AI system transparency with enhanced features",
+    version="2.0.0"
 )
 
 # Add CORS middleware
@@ -95,13 +106,30 @@ SERVICES = {
 }
 
 class MCPServer:
-    """MCP Server for AI system control and monitoring"""
+    """Enhanced MCP Server for AI system control and monitoring"""
 
     def __init__(self):
         self.connections = []
         self.system_state = {}
         self.active_tools = []
-        self.execution_history = []
+        self.execution_history = deque(maxlen=1000)  # Keep last 1000 executions
+
+        # Enhanced features
+        self._registered_tools: Dict[str, Dict] = {}
+        self._tool_metrics: Dict[str, Dict] = defaultdict(lambda: {
+            "total_calls": 0,
+            "successful_calls": 0,
+            "failed_calls": 0,
+            "total_duration_ms": 0.0,
+            "avg_duration_ms": 0.0,
+            "last_execution": None
+        })
+        self._chain_executions: List[Dict] = []
+        self._cache_stats = {
+            "hits": 0,
+            "misses": 0,
+            "evictions": 0
+        }
 
     async def get_system_status(self) -> Dict[str, Any]:
         """Get comprehensive system status"""
@@ -495,6 +523,367 @@ async def get_mcp_tools():
 async def mcp_execute(request: Dict[str, Any]):
     """Execute MCP tool via Vercel adapter"""
     return await execute_tool(request)
+
+# =============================================================================
+# ENHANCED ENDPOINTS - Tool Discovery, Metrics, and Chaining
+# =============================================================================
+
+@app.get("/mcp/discover")
+async def mcp_discover_tools():
+    """
+    Discover all available MCP tools from connected servers
+
+    Returns a comprehensive catalog of all available tools with their
+    descriptions, parameters, and server information.
+    """
+    try:
+        # Import here to avoid circular dependency
+        from mcp_integration import get_mcp_client
+
+        client = get_mcp_client()
+        discovered = await client.discover_tools(force_refresh=True)
+
+        tools_by_server = {}
+        total_tools = 0
+
+        for server, tools in discovered.items():
+            tools_by_server[server] = {
+                "count": len(tools),
+                "tools": [
+                    {
+                        "name": tool.tool_name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                        "use_count": tool.use_count,
+                        "enabled": tool.enabled
+                    }
+                    for tool in tools
+                ]
+            }
+            total_tools += len(tools)
+
+        return {
+            "total_tools": total_tools,
+            "total_servers": len(discovered),
+            "servers": tools_by_server,
+            "discovery_timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Tool discovery error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/mcp/metrics")
+async def mcp_get_metrics(server: str = None, tool: str = None):
+    """
+    Get performance metrics for MCP tools
+
+    Args:
+        server: Filter by specific server (optional)
+        tool: Filter by specific tool (optional)
+
+    Returns comprehensive performance metrics including:
+    - Call counts (total, successful, failed)
+    - Duration statistics (avg, min, max)
+    - Cache hit rates
+    - Retry and fallback statistics
+    """
+    try:
+        from mcp_integration import get_mcp_client
+
+        client = get_mcp_client()
+        metrics = client.get_metrics(server=server, tool=tool)
+
+        return {
+            "metrics": metrics,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Metrics retrieval error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/mcp/history")
+async def mcp_get_execution_history(limit: int = 100):
+    """
+    Get execution history for MCP tools
+
+    Args:
+        limit: Maximum number of recent executions to return (default: 100)
+
+    Returns detailed execution history including:
+    - Execution IDs and timestamps
+    - Success/failure status
+    - Duration and performance
+    - Cache hits and retries
+    """
+    try:
+        from mcp_integration import get_mcp_client
+
+        client = get_mcp_client()
+        history = client.get_execution_history(limit=limit)
+
+        return {
+            "history": history,
+            "count": len(history),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"History retrieval error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/mcp/chain", dependencies=[Depends(verify_api_key)])
+async def mcp_execute_chain(request: Dict[str, Any]):
+    """
+    Execute a chain of MCP tools in sequence
+
+    Request body:
+    {
+        "chain_name": "deployment_workflow",
+        "steps": [
+            {
+                "server": "github",
+                "tool": "getCommits",
+                "params": {"repo": "myrepo", "branch": "main"}
+            },
+            {
+                "server": "render",
+                "tool": "render_trigger_deploy",
+                "params": {"serviceId": "srv-123"}
+            }
+        ],
+        "fail_fast": true
+    }
+
+    Returns:
+    - Chain execution results
+    - Individual step results
+    - Total duration and success status
+    """
+    try:
+        from mcp_integration import get_mcp_client, MCPServer
+
+        client = get_mcp_client()
+
+        chain_name = request.get("chain_name", "unnamed_chain")
+        steps_data = request.get("steps", [])
+        fail_fast = request.get("fail_fast", True)
+
+        # Convert steps to proper format
+        steps = []
+        for step in steps_data:
+            server_str = step.get("server")
+            tool = step.get("tool")
+            params = step.get("params", {})
+
+            # Try to convert to MCPServer enum
+            try:
+                server = MCPServer(server_str)
+            except ValueError:
+                server = server_str  # Use string if not in enum
+
+            steps.append((server, tool, params))
+
+        result = await client.execute_chain(chain_name, steps, fail_fast)
+
+        # Convert MCPToolResult objects to dicts for JSON serialization
+        if "results" in result:
+            result["results"] = [
+                {
+                    "success": r.success,
+                    "server": r.server,
+                    "tool": r.tool,
+                    "duration_ms": r.duration_ms,
+                    "cached": r.cached,
+                    "retry_count": r.retry_count,
+                    "fallback_used": r.fallback_used,
+                    "error": r.error
+                }
+                for r in result["results"]
+            ]
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Chain execution error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/mcp/chains")
+async def mcp_get_chain_history(limit: int = 10):
+    """
+    Get history of chain executions
+
+    Args:
+        limit: Maximum number of chain executions to return (default: 10)
+
+    Returns recent chain execution history with success rates
+    """
+    try:
+        from mcp_integration import get_mcp_client
+
+        client = get_mcp_client()
+        chains = client.get_chain_history(limit=limit)
+
+        return {
+            "chains": chains,
+            "count": len(chains),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Chain history retrieval error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/mcp/cache/clear", dependencies=[Depends(verify_api_key)])
+async def mcp_clear_cache():
+    """Clear all cached tool results"""
+    try:
+        from mcp_integration import get_mcp_client
+
+        client = get_mcp_client()
+        cache_size = len(client._cache)
+        client.clear_cache()
+
+        return {
+            "cleared": cache_size,
+            "message": f"Cleared {cache_size} cache entries",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Cache clear error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/mcp/cache/toggle", dependencies=[Depends(verify_api_key)])
+async def mcp_toggle_cache(enabled: bool):
+    """
+    Enable or disable caching
+
+    Args:
+        enabled: True to enable caching, False to disable
+    """
+    try:
+        from mcp_integration import get_mcp_client
+
+        client = get_mcp_client()
+        client.set_cache_enabled(enabled)
+
+        return {
+            "cache_enabled": enabled,
+            "message": f"Caching {'enabled' if enabled else 'disabled'}",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Cache toggle error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/mcp/workflows")
+async def mcp_get_workflows():
+    """
+    Get available workflow templates for AUREA integration
+
+    Returns a list of pre-configured workflow templates that can be
+    executed for common operations like deployments, onboarding, etc.
+    """
+    try:
+        from mcp_integration import get_aurea_executor
+
+        executor = get_aurea_executor()
+        workflows = executor.get_available_workflows()
+
+        return {
+            "workflows": workflows,
+            "count": len(workflows),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Workflows retrieval error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/mcp/workflow/execute", dependencies=[Depends(verify_api_key)])
+async def mcp_execute_workflow(request: Dict[str, Any]):
+    """
+    Execute a pre-defined workflow template
+
+    Request body:
+    {
+        "workflow_name": "full_deployment",
+        "params": {
+            "repo": "myrepo",
+            "branch": "main",
+            "service_id": "srv-123"
+        },
+        "fail_fast": true
+    }
+    """
+    try:
+        from mcp_integration import get_aurea_executor
+
+        executor = get_aurea_executor()
+
+        workflow_name = request.get("workflow_name")
+        params = request.get("params", {})
+        fail_fast = request.get("fail_fast", True)
+
+        if not workflow_name:
+            raise HTTPException(status_code=400, detail="workflow_name is required")
+
+        result = await executor.execute_workflow(workflow_name, params, fail_fast)
+
+        # Convert MCPToolResult objects for JSON serialization
+        if "results" in result:
+            result["results"] = [
+                {
+                    "success": r.success,
+                    "server": r.server,
+                    "tool": r.tool,
+                    "duration_ms": r.duration_ms,
+                    "cached": r.cached,
+                    "retry_count": r.retry_count,
+                    "fallback_used": r.fallback_used,
+                    "error": r.error
+                }
+                for r in result["results"]
+            ]
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Workflow execution error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/mcp/performance")
+async def mcp_get_performance():
+    """
+    Get comprehensive performance metrics for the MCP system
+
+    Returns:
+    - Overall system performance
+    - Tool-specific metrics
+    - Cache statistics
+    - Chain execution stats
+    """
+    try:
+        from mcp_integration import get_aurea_executor
+
+        executor = get_aurea_executor()
+        metrics = await executor.get_performance_metrics()
+
+        return {
+            "performance": metrics,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Performance metrics error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn

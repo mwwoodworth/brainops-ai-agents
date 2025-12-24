@@ -86,6 +86,8 @@ class RealtimeMonitor:
         self.listeners = defaultdict(list)
         self.is_running = False
         self.poll_interval = 1  # seconds
+        self._digital_twin_integration_enabled = False
+        self._digital_twin_engine = None
         self._initialize_database()
         self._setup_triggers()
 
@@ -272,6 +274,12 @@ class RealtimeMonitor:
             if conn:
                 conn.close()
 
+    def enable_digital_twin_integration(self, digital_twin_engine):
+        """Enable integration with Digital Twin system"""
+        self._digital_twin_integration_enabled = True
+        self._digital_twin_engine = digital_twin_engine
+        logger.info("Digital Twin integration enabled for RealtimeMonitor")
+
     async def start(self):
         """Start the real-time monitoring service"""
         if self.is_running:
@@ -285,6 +293,10 @@ class RealtimeMonitor:
         asyncio.create_task(self._database_listener())
         asyncio.create_task(self._subscription_manager())
         asyncio.create_task(self._activity_aggregator())
+
+        # Start digital twin monitoring if enabled
+        if self._digital_twin_integration_enabled:
+            asyncio.create_task(self._digital_twin_monitor())
 
         logger.info("Realtime monitoring started")
 
@@ -856,6 +868,93 @@ class RealtimeMonitor:
         finally:
             if conn:
                 conn.close()
+
+    # ============== DIGITAL TWIN INTEGRATION ==============
+
+    async def _digital_twin_monitor(self):
+        """Monitor digital twin health and emit events (INTERNAL ONLY - NO EXTERNAL CALLS)"""
+        while self.is_running:
+            try:
+                if not self._digital_twin_engine:
+                    await asyncio.sleep(30)
+                    continue
+
+                # Get all twins
+                twins = self._digital_twin_engine.list_twins()
+
+                for twin_status in twins:
+                    # Check for critical health scores
+                    if twin_status and twin_status.get("health_score", 100) < 70:
+                        self.emit_event(
+                            event_type=EventType.SYSTEM_ALERT,
+                            source="digital_twin_monitor",
+                            data={
+                                "twin_id": twin_status.get("twin_id"),
+                                "source_system": twin_status.get("source_system"),
+                                "health_score": twin_status.get("health_score"),
+                                "alert_type": "digital_twin_health_degraded",
+                                "severity": "critical" if twin_status.get("health_score", 100) < 50 else "warning",
+                                "message": f"Digital twin {twin_status.get('twin_id')} health degraded to {twin_status.get('health_score'):.1f}"
+                            },
+                            metadata={
+                                "drift_detected": twin_status.get("drift_detected"),
+                                "drift_details": twin_status.get("drift_details"),
+                                "predictions": twin_status.get("active_predictions", 0)
+                            }
+                        )
+
+                    # Check for drift detection
+                    if twin_status and twin_status.get("drift_detected"):
+                        self.emit_event(
+                            event_type=EventType.STATE_CHANGE,
+                            source="digital_twin_monitor",
+                            data={
+                                "twin_id": twin_status.get("twin_id"),
+                                "source_system": twin_status.get("source_system"),
+                                "change_type": "drift_detected",
+                                "drift_details": twin_status.get("drift_details"),
+                                "severity": "warning"
+                            }
+                        )
+
+                await asyncio.sleep(30)  # Check every 30 seconds
+
+            except Exception as e:
+                logger.error(f"Digital twin monitor error: {e}")
+                await asyncio.sleep(60)
+
+    def get_digital_twin_events(self, twin_id: Optional[str] = None, limit: int = 50) -> List[Dict]:
+        """Get events related to digital twins"""
+        try:
+            conn = self._get_connection()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+
+            if twin_id:
+                cur.execute("""
+                    SELECT * FROM ai_realtime_events
+                    WHERE source = 'digital_twin_monitor'
+                    AND data->>'twin_id' = %s
+                    ORDER BY timestamp DESC
+                    LIMIT %s
+                """, (twin_id, limit))
+            else:
+                cur.execute("""
+                    SELECT * FROM ai_realtime_events
+                    WHERE source = 'digital_twin_monitor'
+                    ORDER BY timestamp DESC
+                    LIMIT %s
+                """, (limit,))
+
+            events = cur.fetchall()
+            return [dict(event) for event in events]
+
+        except Exception as e:
+            logger.error(f"Error getting digital twin events: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
 
 # Singleton instance
 _realtime_monitor = None

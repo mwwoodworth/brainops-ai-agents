@@ -17,9 +17,10 @@ import os
 import json
 import asyncio
 import logging
+import uuid
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from enum import Enum
 
 import psycopg2
@@ -69,6 +70,10 @@ class MetaCriticResult:
     adjudication_reason: str
     requires_human_review: bool
     timestamp: datetime
+    # Enhanced fields
+    confidence_score: float = 0.0
+    risk_assessment: Optional[Dict[str, Any]] = None
+    outcome_tracking_id: Optional[str] = None
 
 
 class MetaCriticScorer:
@@ -140,6 +145,32 @@ class MetaCriticScorer:
 
             CREATE INDEX IF NOT EXISTS idx_meta_scores_eval ON meta_critic_scores(evaluation_id);
             CREATE INDEX IF NOT EXISTS idx_meta_evals_type ON meta_critic_evaluations(task_type);
+
+            -- Enhanced tracking tables
+            ALTER TABLE meta_critic_evaluations
+            ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0;
+
+            ALTER TABLE meta_critic_evaluations
+            ADD COLUMN IF NOT EXISTS risk_assessment JSONB;
+
+            CREATE TABLE IF NOT EXISTS meta_critic_outcome_tracking (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                evaluation_id UUID REFERENCES meta_critic_evaluations(id),
+                actual_outcome JSONB,
+                expected_outcome JSONB,
+                success_score FLOAT,
+                lessons_learned TEXT[],
+                recorded_at TIMESTAMP DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS meta_critic_learning_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                dimension VARCHAR(50),
+                weight_adjustment FLOAT,
+                performance_delta FLOAT,
+                reason TEXT,
+                applied_at TIMESTAMP DEFAULT NOW()
+            );
             """)
 
             conn.commit()
@@ -185,6 +216,12 @@ class MetaCriticScorer:
         else:
             winner = self._select_by_weighted_score(scored_candidates)
 
+        # Enhanced: Calculate confidence score
+        confidence_score = self._calculate_confidence(winner, scored_candidates)
+
+        # Enhanced: Perform risk assessment
+        risk_assessment = self._assess_decision_risk(winner, task_context)
+
         # Determine if human review needed
         requires_human = self._check_human_review_needed(winner, scored_candidates, task_context)
 
@@ -195,7 +232,10 @@ class MetaCriticScorer:
             consensus_method=consensus_method,
             adjudication_reason=self._generate_adjudication_reason(winner, scored_candidates),
             requires_human_review=requires_human,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
+            confidence_score=confidence_score,
+            risk_assessment=risk_assessment,
+            outcome_tracking_id=str(uuid.uuid4())
         )
 
         # Store for learning
@@ -464,6 +504,194 @@ class MetaCriticScorer:
         except Exception as e:
             logger.warning(f"Failed to store meta-critic evaluation: {e}")
 
+    def _calculate_confidence(
+        self,
+        winner: CandidateScore,
+        all_candidates: List[CandidateScore]
+    ) -> float:
+        """Calculate confidence in the winning selection"""
+        confidence_factors = []
+
+        # Winner's absolute score
+        confidence_factors.append(winner.weighted_total)
+
+        # Margin of victory (distance to second place)
+        sorted_candidates = sorted(all_candidates, key=lambda c: c.weighted_total, reverse=True)
+        if len(sorted_candidates) >= 2:
+            margin = sorted_candidates[0].weighted_total - sorted_candidates[1].weighted_total
+            confidence_factors.append(min(margin * 2, 1.0))  # Normalize margin
+
+        # Consistency across dimensions (low variance = higher confidence)
+        if winner.scores:
+            score_values = list(winner.scores.values())
+            avg_score = sum(score_values) / len(score_values)
+            variance = sum((s - avg_score)**2 for s in score_values) / len(score_values)
+            consistency = 1.0 - min(variance, 1.0)
+            confidence_factors.append(consistency)
+
+        return sum(confidence_factors) / len(confidence_factors) if confidence_factors else 0.5
+
+    def _assess_decision_risk(
+        self,
+        winner: CandidateScore,
+        task_context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Assess risk of the selected candidate"""
+        risk_assessment = {
+            'overall_risk': 0.0,
+            'risk_categories': {},
+            'risk_factors': []
+        }
+
+        # Inverse of confidence (low confidence = high risk)
+        confidence_risk = 1.0 - winner.scores.get(ScoreDimension.CONFIDENCE.value, 0.5)
+        risk_assessment['risk_categories']['confidence'] = confidence_risk
+
+        # Direct risk score (inverted from dimension)
+        direct_risk = winner.scores.get(ScoreDimension.RISK.value, 0.5)
+        risk_assessment['risk_categories']['direct'] = 1.0 - direct_risk  # Un-invert
+
+        # Business value risk (low value = higher risk)
+        value_risk = 1.0 - winner.scores.get(ScoreDimension.BUSINESS_VALUE.value, 0.5)
+        risk_assessment['risk_categories']['value'] = value_risk
+
+        # Provenance risk (unreliable source = higher risk)
+        provenance_risk = 1.0 - winner.scores.get(ScoreDimension.PROVENANCE.value, 0.5)
+        risk_assessment['risk_categories']['provenance'] = provenance_risk
+
+        # Task type risk
+        task_type = task_context.get('task_type', '')
+        high_risk_tasks = ['payment', 'delete', 'financial', 'legal']
+        if any(rt in task_type.lower() for rt in high_risk_tasks):
+            risk_assessment['risk_categories']['task_type'] = 0.8
+            risk_assessment['risk_factors'].append(f"High-risk task type: {task_type}")
+
+        # Calculate overall risk
+        risk_values = list(risk_assessment['risk_categories'].values())
+        risk_assessment['overall_risk'] = sum(risk_values) / len(risk_values) if risk_values else 0.5
+
+        return risk_assessment
+
+    def record_outcome(
+        self,
+        outcome_tracking_id: str,
+        actual_outcome: Dict[str, Any],
+        expected_outcome: Dict[str, Any],
+        success_score: float
+    ):
+        """Record actual outcome for learning"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+
+            # Find evaluation by outcome tracking ID
+            cur.execute("""
+                SELECT id FROM meta_critic_evaluations
+                WHERE id::text = %s OR id IN (
+                    SELECT evaluation_id FROM meta_critic_scores
+                    WHERE candidate_id = %s
+                )
+                LIMIT 1
+            """, (outcome_tracking_id, outcome_tracking_id))
+
+            row = cur.fetchone()
+            if not row:
+                logger.warning(f"Evaluation not found for tracking ID: {outcome_tracking_id}")
+                return
+
+            evaluation_id = row[0]
+
+            # Extract lessons learned
+            lessons = []
+            if success_score < 0.5:
+                lessons.append("Selected candidate underperformed expectations")
+            if success_score > 0.8:
+                lessons.append("Selected candidate exceeded expectations")
+
+            # Store outcome
+            cur.execute("""
+                INSERT INTO meta_critic_outcome_tracking
+                (evaluation_id, actual_outcome, expected_outcome, success_score, lessons_learned)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                evaluation_id,
+                Json(actual_outcome),
+                Json(expected_outcome),
+                success_score,
+                lessons
+            ))
+
+            conn.commit()
+
+            # Trigger weight optimization if performance is poor
+            if success_score < 0.6:
+                self._optimize_weights_from_outcome(evaluation_id, success_score)
+
+        except Exception as e:
+            logger.error(f"Failed to record outcome: {e}")
+        finally:
+            if conn:
+                cur.close()
+                conn.close()
+
+    def _optimize_weights_from_outcome(self, evaluation_id: str, success_score: float):
+        """Automatically adjust dimension weights based on poor outcomes"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+
+            # Analyze which dimensions were weak in the winning candidate
+            cur.execute("""
+                SELECT dimension_scores FROM meta_critic_scores
+                WHERE evaluation_id = %s AND was_winner = TRUE
+            """, (evaluation_id,))
+
+            row = cur.fetchone()
+            if not row:
+                return
+
+            dimension_scores = row[0]
+
+            # Identify weak dimensions (below 0.5)
+            adjustments = {}
+            for dim, score in dimension_scores.items():
+                if score < 0.5:
+                    # Increase weight for this dimension (it was too weak)
+                    weight_increase = 0.05
+                    adjustments[dim] = weight_increase
+                    self.dimension_weights[dim] = min(
+                        self.dimension_weights.get(dim, 0.1) + weight_increase,
+                        0.5  # Max weight
+                    )
+
+            # Normalize weights to sum to 1.0
+            total = sum(self.dimension_weights.values())
+            for dim in self.dimension_weights:
+                self.dimension_weights[dim] /= total
+
+            # Log adjustments
+            for dim, adjustment in adjustments.items():
+                cur.execute("""
+                    INSERT INTO meta_critic_learning_log
+                    (dimension, weight_adjustment, performance_delta, reason)
+                    VALUES (%s, %s, %s, %s)
+                """, (
+                    dim,
+                    adjustment,
+                    1.0 - success_score,
+                    f"Dimension underperformed in evaluation {evaluation_id}"
+                ))
+
+            conn.commit()
+            logger.info(f"Optimized weights based on outcome: {adjustments}")
+
+        except Exception as e:
+            logger.error(f"Failed to optimize weights: {e}")
+        finally:
+            if conn:
+                cur.close()
+                conn.close()
+
     def update_weights_from_feedback(self, evaluation_id: str, outcome: str, feedback: Dict[str, Any]):
         """Update dimension weights based on human feedback (learning)"""
         try:
@@ -484,6 +712,18 @@ class MetaCriticScorer:
                 SET human_feedback = %s
                 WHERE evaluation_id = %s AND candidate_id = %s
                 """, (Json(feedback), evaluation_id, feedback.get("preferred_candidate")))
+
+                # Log this as a learning event
+                cur.execute("""
+                    INSERT INTO meta_critic_learning_log
+                    (dimension, weight_adjustment, performance_delta, reason)
+                    VALUES (%s, %s, %s, %s)
+                """, (
+                    'overall',
+                    0.0,
+                    1.0,  # Human override indicates complete miss
+                    f"Human override: {feedback.get('reason', 'No reason provided')}"
+                ))
 
             conn.commit()
             cur.close()

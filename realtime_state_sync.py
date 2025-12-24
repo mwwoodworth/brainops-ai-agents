@@ -99,6 +99,8 @@ class RealTimeStateSync:
         self.state = self._load_state()
         self.change_handlers: List[callable] = []
         self._initialized = False
+        self._digital_twin_integration_enabled = False
+        self._digital_twin_engine = None  # Lazy load to avoid circular imports
 
     def _load_state(self) -> SystemState:
         """Load state from persistent storage"""
@@ -164,6 +166,12 @@ class RealTimeStateSync:
 
     # ============== COMPONENT MANAGEMENT ==============
 
+    def enable_digital_twin_integration(self, digital_twin_engine):
+        """Enable integration with Digital Twin system"""
+        self._digital_twin_integration_enabled = True
+        self._digital_twin_engine = digital_twin_engine
+        logger.info("Digital Twin integration enabled for RealTimeStateSync")
+
     def register_component(self, component: SystemComponent) -> bool:
         """Register a new component for tracking"""
         existing = self.state.components.get(component.name)
@@ -190,6 +198,16 @@ class RealTimeStateSync:
         self._log_change(change)
         self._propagate_change(change)
         self._save_state()
+
+        # Sync to digital twin if enabled (NO EXTERNAL CALLS - internal only)
+        if self._digital_twin_integration_enabled and self._digital_twin_engine:
+            try:
+                import asyncio
+                # Convert component to metrics if it's a service
+                if component.component_type in ["service", "api_endpoint", "microservice"]:
+                    asyncio.create_task(self._sync_component_to_twin(component))
+            except Exception as e:
+                logger.error(f"Error syncing component to digital twin: {e}")
 
         return True
 
@@ -531,6 +549,84 @@ class RealTimeStateSync:
         logger.info(f"Full scan complete: {len(self.state.components)} components tracked")
 
         return results
+
+    # ============== DIGITAL TWIN INTEGRATION ==============
+
+    async def _sync_component_to_twin(self, component: SystemComponent):
+        """Sync component state to digital twin (INTERNAL ONLY - NO EXTERNAL CALLS)"""
+        try:
+            if not self._digital_twin_engine:
+                return
+
+            # Convert component metadata to SystemMetrics
+            from digital_twin_system import SystemMetrics, SystemType
+
+            # Extract metrics from metadata
+            metadata = component.metadata or {}
+
+            metrics = SystemMetrics(
+                cpu_usage=metadata.get("cpu_usage", 0.0),
+                memory_usage=metadata.get("memory_usage", 0.0),
+                disk_usage=metadata.get("disk_usage", 0.0),
+                network_io=metadata.get("network_io", 0.0),
+                request_latency_ms=metadata.get("latency_ms", 0.0),
+                error_rate=metadata.get("error_rate", 0.0),
+                throughput_rps=metadata.get("throughput_rps", 0.0),
+                active_connections=metadata.get("active_connections", 0),
+                queue_depth=metadata.get("queue_depth", 0),
+                custom_metrics=metadata.get("custom_metrics", {})
+            )
+
+            # Check if twin exists for this component
+            twin_id = f"twin_{component.name.replace(' ', '_').lower()}"
+
+            # Try to sync with existing twin
+            result = await self._digital_twin_engine.sync_twin(
+                twin_id=twin_id,
+                current_metrics=metrics,
+                source="state_sync"  # Mark as internal source
+            )
+
+            if "error" in result and "not found" in result["error"]:
+                # Create twin if it doesn't exist
+                system_type_map = {
+                    "service": SystemType.MICROSERVICE,
+                    "api_endpoint": SystemType.API_GATEWAY,
+                    "microservice": SystemType.MICROSERVICE,
+                    "database": SystemType.DATABASE,
+                    "agent": SystemType.AI_AGENT,
+                    "infrastructure": SystemType.INFRASTRUCTURE,
+                    "pipeline": SystemType.PIPELINE
+                }
+
+                system_type = system_type_map.get(
+                    component.component_type,
+                    SystemType.MICROSERVICE
+                )
+
+                await self._digital_twin_engine.create_twin(
+                    source_system=component.name,
+                    system_type=system_type,
+                    initial_state=asdict(component),
+                    sync_frequency_seconds=60
+                )
+
+                logger.info(f"Created digital twin for component: {component.name}")
+
+        except Exception as e:
+            logger.error(f"Error syncing component {component.name} to digital twin: {e}")
+
+    def get_twin_status_for_component(self, component_name: str) -> Optional[Dict[str, Any]]:
+        """Get digital twin status for a component"""
+        if not self._digital_twin_integration_enabled or not self._digital_twin_engine:
+            return None
+
+        try:
+            twin_id = f"twin_{component_name.replace(' ', '_').lower()}"
+            return self._digital_twin_engine.get_twin_status(twin_id)
+        except Exception as e:
+            logger.error(f"Error getting twin status for {component_name}: {e}")
+            return None
 
     # ============== CONTEXT EXPORT FOR AI ==============
 

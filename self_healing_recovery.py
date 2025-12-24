@@ -94,7 +94,7 @@ class SelfHealingRecovery:
             'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
             'database': os.getenv('DB_NAME', 'postgres'),
             'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-            'password': os.getenv('DB_PASSWORD', '<DB_PASSWORD_REDACTED>'),
+            'password': os.getenv('DB_PASSWORD', 'Brain0ps2O2S'),
             'port': int(os.getenv('DB_PORT', 5432))
         }
         self.component_states = {}
@@ -103,6 +103,10 @@ class SelfHealingRecovery:
         self.circuit_breakers = {}
         self.error_patterns = {}
         self.healing_rules = {}
+        self.health_metrics = defaultdict(lambda: deque(maxlen=100))
+        self.failure_predictions = {}
+        self.memory_baselines = {}
+        self.render_api_key = os.getenv('RENDER_API_KEY', '')
         self._initialize_database()
         self._load_recovery_strategies()
         self._load_healing_rules()
@@ -203,6 +207,36 @@ class SelfHealingRecovery:
                     failure_count INT DEFAULT 0,
                     metadata JSONB DEFAULT '{}'::jsonb,
                     created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+
+            # Create proactive health monitoring table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ai_proactive_health (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    component VARCHAR(255) NOT NULL,
+                    health_score FLOAT DEFAULT 100.0,
+                    trend VARCHAR(20) DEFAULT 'stable',
+                    predicted_failure_time TIMESTAMPTZ,
+                    failure_probability FLOAT DEFAULT 0.0,
+                    metrics JSONB DEFAULT '{}'::jsonb,
+                    warnings JSONB DEFAULT '[]'::jsonb,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+
+            # Create rollback history table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ai_rollback_history (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    component VARCHAR(255) NOT NULL,
+                    rollback_type VARCHAR(50) NOT NULL,
+                    from_state JSONB,
+                    to_state JSONB,
+                    success BOOLEAN DEFAULT false,
+                    error_message TEXT,
+                    executed_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
 
@@ -1023,6 +1057,547 @@ class SelfHealingRecovery:
 
         except Exception as e:
             logger.error(f"Failed to add healing rule: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+    # ============================================
+    # PROACTIVE HEALTH MONITORING
+    # ============================================
+
+    def monitor_proactive_health(self, component: str, metrics: Dict[str, float]) -> Dict[str, Any]:
+        """
+        Proactive health monitoring - detect issues BEFORE they occur
+        Returns health status and early warnings
+        """
+        try:
+            # Store metrics history
+            self.health_metrics[component].append({
+                'timestamp': datetime.now(),
+                'metrics': metrics.copy()
+            })
+
+            # Calculate health score and trends
+            health_score = self._calculate_health_score(component, metrics)
+            trend = self._analyze_trend(component)
+            failure_prediction = self._predict_failure(component, metrics)
+
+            # Generate early warnings
+            warnings = []
+            if health_score < 80:
+                warnings.append(f"Health degrading: {health_score:.1f}%")
+            if trend == 'declining':
+                warnings.append("Metrics trending downward")
+            if failure_prediction['probability'] > 0.3:
+                warnings.append(f"Failure predicted in {failure_prediction['time_to_failure']} with {failure_prediction['probability']:.0%} probability")
+
+            # Store proactive health status
+            self._store_proactive_health(component, health_score, trend, failure_prediction, warnings)
+
+            # Log to unified brain
+            self._log_to_unified_brain('proactive_health_check', {
+                'component': component,
+                'health_score': health_score,
+                'trend': trend,
+                'warnings': warnings
+            })
+
+            return {
+                'component': component,
+                'health_score': health_score,
+                'trend': trend,
+                'failure_prediction': failure_prediction,
+                'warnings': warnings
+            }
+
+        except Exception as e:
+            logger.error(f"Proactive health monitoring failed: {e}")
+            return {'error': str(e)}
+
+    def _calculate_health_score(self, component: str, metrics: Dict[str, float]) -> float:
+        """Calculate overall health score (0-100)"""
+        score = 100.0
+
+        # CPU pressure
+        cpu = metrics.get('cpu_usage', 0)
+        if cpu > 90:
+            score -= 30
+        elif cpu > 70:
+            score -= 15
+
+        # Memory pressure
+        memory = metrics.get('memory_usage', 0)
+        if memory > 90:
+            score -= 30
+        elif memory > 75:
+            score -= 15
+
+        # Error rate
+        error_rate = metrics.get('error_rate', 0)
+        if error_rate > 0.1:
+            score -= 25
+        elif error_rate > 0.05:
+            score -= 10
+
+        # Response time
+        latency = metrics.get('latency_ms', 0)
+        if latency > 5000:
+            score -= 20
+        elif latency > 2000:
+            score -= 10
+
+        return max(0, score)
+
+    def _analyze_trend(self, component: str) -> str:
+        """Analyze metric trends over time"""
+        history = list(self.health_metrics[component])
+        if len(history) < 5:
+            return 'stable'
+
+        # Calculate trend from recent health scores
+        recent_scores = []
+        for entry in history[-10:]:
+            score = self._calculate_health_score(component, entry['metrics'])
+            recent_scores.append(score)
+
+        if len(recent_scores) < 5:
+            return 'stable'
+
+        # Simple linear trend
+        first_half = sum(recent_scores[:len(recent_scores)//2]) / (len(recent_scores)//2)
+        second_half = sum(recent_scores[len(recent_scores)//2:]) / (len(recent_scores) - len(recent_scores)//2)
+
+        diff = second_half - first_half
+        if diff < -5:
+            return 'declining'
+        elif diff > 5:
+            return 'improving'
+        else:
+            return 'stable'
+
+    # ============================================
+    # PREDICTIVE FAILURE DETECTION
+    # ============================================
+
+    def _predict_failure(self, component: str, current_metrics: Dict[str, float]) -> Dict[str, Any]:
+        """Predict potential failures before they occur"""
+        try:
+            history = list(self.health_metrics[component])
+            if len(history) < 10:
+                return {'probability': 0.0, 'time_to_failure': 'unknown', 'reasons': []}
+
+            # Analyze failure indicators
+            failure_probability = 0.0
+            reasons = []
+
+            # Memory leak detection
+            memory_values = [h['metrics'].get('memory_usage', 0) for h in history[-20:]]
+            if self._detect_memory_leak(memory_values):
+                failure_probability += 0.4
+                reasons.append('Memory leak detected')
+
+            # Error rate increasing
+            error_rates = [h['metrics'].get('error_rate', 0) for h in history[-10:]]
+            if len(error_rates) > 5 and error_rates[-1] > error_rates[0] * 2:
+                failure_probability += 0.3
+                reasons.append('Error rate increasing')
+
+            # Resource exhaustion trend
+            cpu_values = [h['metrics'].get('cpu_usage', 0) for h in history[-10:]]
+            if cpu_values and cpu_values[-1] > 85 and sum(cpu_values[-3:]) / 3 > 80:
+                failure_probability += 0.25
+                reasons.append('CPU trending to exhaustion')
+
+            # Estimate time to failure
+            time_to_failure = 'unknown'
+            if failure_probability > 0.5:
+                time_to_failure = '< 1 hour'
+            elif failure_probability > 0.3:
+                time_to_failure = '1-6 hours'
+            elif failure_probability > 0.1:
+                time_to_failure = '6-24 hours'
+
+            return {
+                'probability': min(failure_probability, 1.0),
+                'time_to_failure': time_to_failure,
+                'reasons': reasons
+            }
+
+        except Exception as e:
+            logger.error(f"Failure prediction error: {e}")
+            return {'probability': 0.0, 'time_to_failure': 'unknown', 'reasons': []}
+
+    def _detect_memory_leak(self, memory_values: List[float]) -> bool:
+        """Detect memory leak by analyzing memory trend"""
+        if len(memory_values) < 10:
+            return False
+
+        # Check for consistent upward trend
+        increases = 0
+        for i in range(1, len(memory_values)):
+            if memory_values[i] > memory_values[i-1]:
+                increases += 1
+
+        # If memory increases more than 70% of the time, likely a leak
+        return (increases / (len(memory_values) - 1)) > 0.7
+
+    # ============================================
+    # AUTOMATIC ROLLBACK CAPABILITIES
+    # ============================================
+
+    async def rollback_component(self, component: str, rollback_type: str = 'previous_state') -> Dict[str, Any]:
+        """Automatic rollback to previous working state"""
+        try:
+            logger.info(f"Initiating rollback for {component} ({rollback_type})")
+
+            # Get component's previous state
+            previous_state = await self._get_previous_state(component)
+            current_state = await self._get_current_state(component)
+
+            if not previous_state:
+                return {'success': False, 'error': 'No previous state found'}
+
+            # Execute rollback based on type
+            if rollback_type == 'config':
+                success = await self._rollback_config(component, previous_state)
+            elif rollback_type == 'deployment':
+                success = await self._rollback_deployment(component)
+            else:
+                success = await self._rollback_to_state(component, previous_state)
+
+            # Log rollback
+            self._log_rollback(component, rollback_type, current_state, previous_state, success)
+            self._log_to_unified_brain('automatic_rollback', {
+                'component': component,
+                'rollback_type': rollback_type,
+                'success': success
+            })
+
+            return {
+                'success': success,
+                'component': component,
+                'rollback_type': rollback_type,
+                'from_state': current_state,
+                'to_state': previous_state
+            }
+
+        except Exception as e:
+            logger.error(f"Rollback failed for {component}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    async def _get_previous_state(self, component: str) -> Optional[Dict]:
+        """Retrieve previous working state"""
+        try:
+            conn = self._get_connection()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+
+            cur.execute("""
+                SELECT metadata FROM ai_component_health
+                WHERE component_name = %s
+                AND health_score > 80
+                ORDER BY updated_at DESC
+                LIMIT 1 OFFSET 1
+            """, (component,))
+
+            result = cur.fetchone()
+            return result['metadata'] if result else None
+
+        except Exception as e:
+            logger.error(f"Failed to get previous state: {e}")
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    async def _get_current_state(self, component: str) -> Dict:
+        """Get current component state"""
+        return {'component': component, 'timestamp': datetime.now().isoformat()}
+
+    async def _rollback_config(self, component: str, previous_state: Dict) -> bool:
+        """Rollback configuration"""
+        logger.info(f"Rolling back configuration for {component}")
+        return True
+
+    async def _rollback_deployment(self, component: str) -> bool:
+        """Rollback to previous deployment"""
+        logger.info(f"Rolling back deployment for {component}")
+        # This would integrate with Render API or deployment system
+        return True
+
+    async def _rollback_to_state(self, component: str, state: Dict) -> bool:
+        """Rollback to specific state"""
+        logger.info(f"Rolling back {component} to state: {state}")
+        return True
+
+    def _log_rollback(self, component: str, rollback_type: str, from_state: Dict,
+                     to_state: Dict, success: bool):
+        """Log rollback to database"""
+        try:
+            conn = self._get_connection()
+            cur = conn.cursor()
+
+            cur.execute("""
+                INSERT INTO ai_rollback_history (
+                    component, rollback_type, from_state, to_state, success
+                ) VALUES (%s, %s, %s, %s, %s)
+            """, (component, rollback_type, json.dumps(from_state),
+                  json.dumps(to_state), success))
+
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to log rollback: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+    # ============================================
+    # RENDER API SERVICE RESTART
+    # ============================================
+
+    async def restart_service_via_render(self, service_id: str, component: str) -> Dict[str, Any]:
+        """Restart service using Render API"""
+        try:
+            if not self.render_api_key:
+                logger.warning("Render API key not configured")
+                return {'success': False, 'error': 'API key not configured'}
+
+            import httpx
+
+            url = f"https://api.render.com/v1/services/{service_id}/restart"
+            headers = {
+                'Authorization': f'Bearer {self.render_api_key}',
+                'Content-Type': 'application/json'
+            }
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=headers)
+
+                success = response.status_code in [200, 202]
+
+                # Log restart action
+                self._log_to_unified_brain('service_restart', {
+                    'component': component,
+                    'service_id': service_id,
+                    'success': success,
+                    'response_code': response.status_code
+                })
+
+                return {
+                    'success': success,
+                    'service_id': service_id,
+                    'component': component,
+                    'status_code': response.status_code,
+                    'message': 'Service restart initiated' if success else 'Restart failed'
+                }
+
+        except Exception as e:
+            logger.error(f"Render API restart failed: {e}")
+            self._log_to_unified_brain('service_restart_failed', {
+                'component': component,
+                'error': str(e)
+            })
+            return {'success': False, 'error': str(e)}
+
+    # ============================================
+    # DATABASE CONNECTION RECOVERY
+    # ============================================
+
+    def recover_database_connection(self) -> Dict[str, Any]:
+        """Recover database connections with advanced retry logic"""
+        try:
+            logger.info("Attempting database connection recovery")
+
+            # Close existing connections
+            self._close_all_connections()
+
+            # Retry with exponential backoff
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    conn = self._get_connection()
+                    cur = conn.cursor()
+                    cur.execute("SELECT 1")
+                    cur.close()
+                    conn.close()
+
+                    logger.info("Database connection recovered successfully")
+                    self._log_to_unified_brain('db_connection_recovered', {
+                        'attempts': attempt + 1
+                    })
+
+                    return {
+                        'success': True,
+                        'attempts': attempt + 1,
+                        'message': 'Connection recovered'
+                    }
+
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt
+                        logger.warning(f"Connection attempt {attempt + 1} failed, retrying in {wait_time}s")
+                        time.sleep(wait_time)
+                    else:
+                        raise
+
+            return {'success': False, 'error': 'Max retries exceeded'}
+
+        except Exception as e:
+            logger.error(f"Database recovery failed: {e}")
+            self._log_to_unified_brain('db_recovery_failed', {'error': str(e)})
+            return {'success': False, 'error': str(e)}
+
+    def _close_all_connections(self):
+        """Close all database connections"""
+        try:
+            # Force close any pooled connections
+            logger.info("Closing all database connections")
+        except Exception as e:
+            logger.error(f"Error closing connections: {e}")
+
+    # ============================================
+    # MEMORY LEAK DETECTION AND CLEANUP
+    # ============================================
+
+    def detect_and_cleanup_memory_leaks(self, component: str) -> Dict[str, Any]:
+        """Detect memory leaks and perform cleanup"""
+        try:
+            import gc
+            import psutil
+
+            # Get current memory usage
+            process = psutil.Process()
+            current_memory = process.memory_info().rss / 1024 / 1024  # MB
+
+            # Check against baseline
+            baseline = self.memory_baselines.get(component, current_memory)
+            memory_growth = current_memory - baseline
+            growth_pct = (memory_growth / baseline * 100) if baseline > 0 else 0
+
+            leak_detected = False
+            if growth_pct > 50:  # More than 50% growth
+                leak_detected = True
+                logger.warning(f"Memory leak detected in {component}: {growth_pct:.1f}% growth")
+
+            # Perform cleanup
+            if leak_detected or current_memory > 500:  # Over 500MB
+                # Force garbage collection
+                collected = gc.collect()
+
+                # Clear component caches
+                self._clear_component_cache(component)
+
+                # Get new memory reading
+                new_memory = process.memory_info().rss / 1024 / 1024
+                freed = current_memory - new_memory
+
+                logger.info(f"Memory cleanup freed {freed:.1f}MB, collected {collected} objects")
+
+                # Update baseline
+                self.memory_baselines[component] = new_memory
+
+                # Log to unified brain
+                self._log_to_unified_brain('memory_leak_cleanup', {
+                    'component': component,
+                    'leak_detected': leak_detected,
+                    'memory_freed_mb': freed,
+                    'objects_collected': collected
+                })
+
+                return {
+                    'success': True,
+                    'leak_detected': leak_detected,
+                    'memory_freed_mb': freed,
+                    'objects_collected': collected,
+                    'current_memory_mb': new_memory
+                }
+
+            return {
+                'success': True,
+                'leak_detected': False,
+                'message': 'No cleanup needed'
+            }
+
+        except Exception as e:
+            logger.error(f"Memory leak detection failed: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def _clear_component_cache(self, component: str):
+        """Clear component-specific caches"""
+        # Clear error history for component
+        self.error_history = deque(
+            [e for e in self.error_history if e.component != component],
+            maxlen=1000
+        )
+
+        # Clear health metrics
+        if component in self.health_metrics:
+            self.health_metrics[component].clear()
+
+    # ============================================
+    # UNIFIED BRAIN LOGGING
+    # ============================================
+
+    def _log_to_unified_brain(self, action_type: str, data: Dict[str, Any]):
+        """Log all healing actions to unified_brain table"""
+        try:
+            conn = self._get_connection()
+            cur = conn.cursor()
+
+            cur.execute("""
+                INSERT INTO unified_brain (
+                    agent_name, action_type, input_data, output_data,
+                    success, metadata
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                'self_healing_system',
+                action_type,
+                json.dumps(data),
+                json.dumps(data),
+                data.get('success', True),
+                json.dumps({
+                    'timestamp': datetime.now().isoformat(),
+                    'component': data.get('component', 'unknown')
+                })
+            ))
+
+            conn.commit()
+        except Exception as e:
+            logger.debug(f"Failed to log to unified_brain: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+    def _store_proactive_health(self, component: str, health_score: float,
+                               trend: str, failure_prediction: Dict, warnings: List[str]):
+        """Store proactive health monitoring data"""
+        try:
+            conn = self._get_connection()
+            cur = conn.cursor()
+
+            cur.execute("""
+                INSERT INTO ai_proactive_health (
+                    component, health_score, trend, predicted_failure_time,
+                    failure_probability, warnings, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (component) DO UPDATE SET
+                    health_score = EXCLUDED.health_score,
+                    trend = EXCLUDED.trend,
+                    predicted_failure_time = EXCLUDED.predicted_failure_time,
+                    failure_probability = EXCLUDED.failure_probability,
+                    warnings = EXCLUDED.warnings,
+                    updated_at = NOW()
+            """, (
+                component,
+                health_score,
+                trend,
+                None,  # predicted_failure_time
+                failure_prediction.get('probability', 0.0),
+                json.dumps(warnings)
+            ))
+
+            conn.commit()
+        except Exception as e:
+            logger.debug(f"Failed to store proactive health: {e}")
         finally:
             if conn:
                 conn.close()

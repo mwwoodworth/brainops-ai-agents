@@ -24,55 +24,83 @@ except ImportError as e:
 
 
 class BrainEntry(BaseModel):
-    """Brain entry model"""
+    """Brain entry model with enhanced features"""
     key: str = Field(..., description="Unique key for this context")
     value: Any = Field(..., description="The actual data")
     category: str = Field("general", description="Category: system, session, architecture, deployment, issue")
     priority: str = Field("medium", description="Priority: critical, high, medium, low")
     source: str = Field("api", description="Source: claude_code, codex, api, manual, automated")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    ttl_hours: Optional[int] = Field(None, description="Time-to-live in hours (for temporary data)")
 
 
 class BrainQuery(BaseModel):
-    """Brain search query"""
+    """Brain search query with semantic options"""
     query: str = Field(..., description="Search query")
     limit: int = Field(20, ge=1, le=100)
+    use_semantic: bool = Field(True, description="Use semantic vector search if available")
 
 
-@router.get("/context", response_model=Dict[str, Any])
+@router.get("/context")
 async def get_full_context():
     """
     Get COMPLETE system context for Claude Code session initialization
     This is THE endpoint that runs at session start
     """
     if not BRAIN_AVAILABLE or not brain:
-        raise HTTPException(
-            status_code=503,
-            detail="Unified Brain not available. System initializing..."
-        )
+        logger.warning("Unified Brain not available for /brain/context")
+        return {
+            "status": "unavailable",
+            "message": "Unified Brain is initializing or not configured",
+            "context": {},
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
     try:
         context = brain.get_full_context()
-        return context
+        return {
+            "status": "ok",
+            "context": context,
+            "timestamp": datetime.utcnow().isoformat()
+        }
     except Exception as e:
-        logger.error(f"Failed to get full context: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to retrieve context: {str(e)}"
-        )
+        logger.error(f"Failed to get full context: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": str(e),
+            "context": {},
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 
-@router.get("/critical", response_model=List[Dict[str, Any]])
+@router.get("/critical")
 async def get_critical_context():
     """Get ALL critical context across all categories"""
     if not BRAIN_AVAILABLE or not brain:
-        raise HTTPException(status_code=503, detail="Unified Brain not available")
+        logger.warning("Unified Brain not available for /brain/critical")
+        return {
+            "status": "unavailable",
+            "message": "Unified Brain is initializing or not configured",
+            "critical_items": [],
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
     try:
-        return brain.get_all_critical()
+        critical_items = brain.get_all_critical()
+        return {
+            "status": "ok",
+            "critical_items": critical_items,
+            "count": len(critical_items),
+            "timestamp": datetime.utcnow().isoformat()
+        }
     except Exception as e:
-        logger.error(f"Failed to get critical context: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to get critical context: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": str(e),
+            "critical_items": [],
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 
 @router.get("/category/{category}", response_model=List[Dict[str, Any]])
@@ -92,13 +120,16 @@ async def get_by_category(
 
 
 @router.get("/get/{key}", response_model=Dict[str, Any])
-async def get_context(key: str):
-    """Retrieve a specific piece of context"""
+async def get_context(
+    key: str,
+    include_related: bool = Query(False, description="Include related entries")
+):
+    """Retrieve a specific piece of context with optional related entries"""
     if not BRAIN_AVAILABLE or not brain:
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        result = brain.get(key)
+        result = brain.get(key, include_related=include_related)
         if not result:
             raise HTTPException(status_code=404, detail=f"Key not found: {key}")
         return result
@@ -111,7 +142,7 @@ async def get_context(key: str):
 
 @router.post("/store", response_model=Dict[str, str])
 async def store_context(entry: BrainEntry):
-    """Store or update a piece of context"""
+    """Store or update a piece of context with enhanced features (embeddings, TTL, etc.)"""
     if not BRAIN_AVAILABLE or not brain:
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
@@ -122,7 +153,8 @@ async def store_context(entry: BrainEntry):
             category=entry.category,
             priority=entry.priority,
             source=entry.source,
-            metadata=entry.metadata
+            metadata=entry.metadata,
+            ttl_hours=entry.ttl_hours
         )
         return {"id": entry_id, "key": entry.key, "status": "stored"}
     except Exception as e:
@@ -132,12 +164,12 @@ async def store_context(entry: BrainEntry):
 
 @router.post("/search", response_model=List[Dict[str, Any]])
 async def search_context(query: BrainQuery):
-    """Search across all context"""
+    """Search across all context using semantic search, tags, and full-text"""
     if not BRAIN_AVAILABLE or not brain:
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        return brain.search(query.query, query.limit)
+        return brain.search(query.query, query.limit, use_semantic=query.use_semantic)
     except Exception as e:
         logger.error(f"Failed to search: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -204,3 +236,93 @@ async def brain_health():
         "brain_available": BRAIN_AVAILABLE,
         "timestamp": datetime.utcnow().isoformat()
     }
+
+
+@router.get("/statistics", response_model=Dict[str, Any])
+async def get_statistics():
+    """Get comprehensive statistics about the brain"""
+    if not BRAIN_AVAILABLE or not brain:
+        raise HTTPException(status_code=503, detail="Unified Brain not available")
+
+    try:
+        stats = brain.get_statistics()
+        return stats
+    except Exception as e:
+        logger.error(f"Failed to get statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/similar/{key}", response_model=List[Dict[str, Any]])
+async def find_similar(
+    key: str,
+    limit: int = Query(10, ge=1, le=50, description="Maximum number of similar entries to return")
+):
+    """Find entries similar to the given key using vector similarity"""
+    if not BRAIN_AVAILABLE or not brain:
+        raise HTTPException(status_code=503, detail="Unified Brain not available")
+
+    try:
+        results = brain.find_similar(key, limit)
+        return results
+    except Exception as e:
+        logger.error(f"Failed to find similar entries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/related/{key}", response_model=List[Dict[str, Any]])
+async def get_related(
+    key: str,
+    max_depth: int = Query(2, ge=1, le=5, description="Maximum depth of relationship traversal")
+):
+    """Get related entries recursively up to max_depth"""
+    if not BRAIN_AVAILABLE or not brain:
+        raise HTTPException(status_code=503, detail="Unified Brain not available")
+
+    try:
+        results = brain.get_related_entries(key, max_depth)
+        return results
+    except Exception as e:
+        logger.error(f"Failed to get related entries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cleanup-expired", response_model=Dict[str, Any])
+async def cleanup_expired():
+    """Remove expired entries and return count of deleted items"""
+    if not BRAIN_AVAILABLE or not brain:
+        raise HTTPException(status_code=503, detail="Unified Brain not available")
+
+    try:
+        count = brain.cleanup_expired()
+        return {
+            "status": "ok",
+            "deleted_count": count,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to cleanup expired entries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/add-reference", response_model=Dict[str, str])
+async def add_reference(
+    from_key: str = Body(...),
+    to_key: str = Body(...),
+    reference_type: str = Body("related", description="Type: related, superseded, depends_on, derived_from"),
+    strength: float = Body(1.0, ge=0.0, le=1.0, description="Strength of relationship (0-1)")
+):
+    """Add a cross-reference between two entries"""
+    if not BRAIN_AVAILABLE or not brain:
+        raise HTTPException(status_code=503, detail="Unified Brain not available")
+
+    try:
+        brain._add_reference(from_key, to_key, reference_type, strength)
+        return {
+            "status": "ok",
+            "from_key": from_key,
+            "to_key": to_key,
+            "reference_type": reference_type
+        }
+    except Exception as e:
+        logger.error(f"Failed to add reference: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

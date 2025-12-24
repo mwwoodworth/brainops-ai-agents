@@ -2,14 +2,25 @@
 """
 BrainOps AI Orchestration System
 Central orchestrator for all AI operations and system coordination
+
+Enhanced with:
+- Event-driven communication
+- Message queuing for async operations
+- Circuit breakers for resilience
+- Load balancing across components
+- Priority-based routing
+- System-wide health aggregation
 """
 
 import os
 import json
 import asyncio
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime, timezone
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from memory_system import memory_system
@@ -18,8 +29,26 @@ import httpx
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+# ============== IMPORT ENHANCED ORCHESTRATION COMPONENTS ==============
+try:
+    from autonomous_system_orchestrator import (
+        EventBus, EventType, SystemEvent, MessageQueue, Task,
+        CircuitBreaker, CircuitState, LoadBalancer, LoadBalancingStrategy,
+        AgentInstance, HealthAggregator
+    )
+    ENHANCED_FEATURES_AVAILABLE = True
+except ImportError:
+    logger.warning("Enhanced orchestration features not available")
+    ENHANCED_FEATURES_AVAILABLE = False
+
 class SystemOrchestrator:
-    """Master orchestrator for all BrainOps systems"""
+    """
+    Master orchestrator for all BrainOps systems
+
+    Enhanced with event-driven architecture, message queuing,
+    circuit breakers, load balancing, and priority routing.
+    """
 
     def __init__(self):
         self.memory = memory_system
@@ -31,6 +60,43 @@ class SystemOrchestrator:
             "password": os.getenv("DB_PASSWORD"),
             "port": 5432
         }
+
+        # Enhanced features (if available)
+        if ENHANCED_FEATURES_AVAILABLE:
+            self.event_bus = EventBus()
+            self.message_queue = MessageQueue(max_workers=15)
+            self.load_balancer = LoadBalancer(strategy=LoadBalancingStrategy.LEAST_LOADED)
+            self.health_aggregator = HealthAggregator()
+            self.circuit_breakers: Dict[str, CircuitBreaker] = {}
+            self._initialize_circuit_breakers()
+            self._initialized_enhanced = False
+        else:
+            self.event_bus = None
+            self.message_queue = None
+            self.load_balancer = None
+            self.health_aggregator = None
+            self.circuit_breakers = {}
+
+        # Priority routes for different workflow types
+        self.priority_routes = {
+            "critical_alert": 1,
+            "full_system_check": 2,
+            "deploy_update": 2,
+            "customer_onboarding": 3,
+            "data_sync": 5,
+            "analytics": 7,
+            "maintenance": 10
+        }
+
+    def _initialize_circuit_breakers(self):
+        """Initialize circuit breakers for all services"""
+        for service_name in self.services.keys():
+            self.circuit_breakers[service_name] = CircuitBreaker(
+                name=f"{service_name}_circuit",
+                failure_threshold=3,
+                success_threshold=2,
+                timeout=30
+            )
 
     def _load_service_config(self) -> Dict:
         """Load service configuration from memory"""
@@ -45,8 +111,60 @@ class SystemOrchestrator:
             self.memory.store_context('system', 'service_endpoints', config, critical=True)
         return config
 
+    async def initialize_enhanced_features(self):
+        """Initialize enhanced orchestration features"""
+        if not ENHANCED_FEATURES_AVAILABLE or self._initialized_enhanced:
+            return
+
+        # Start event bus
+        await self.event_bus.start()
+        logger.info("Event bus started")
+
+        # Start message queue
+        await self.message_queue.start()
+        logger.info("Message queue started")
+
+        # Register agent instances for load balancing
+        agent_types = ["health_check", "deployment", "workflow", "monitoring", "data_sync"]
+        for agent_type in agent_types:
+            for i in range(3):  # 3 instances per type
+                instance = AgentInstance(
+                    instance_id=f"{agent_type}_instance_{i}",
+                    agent_name=agent_type,
+                    max_capacity=5,
+                    weight=1
+                )
+                self.load_balancer.register_instance(instance)
+
+        # Setup event handlers
+        self._setup_event_handlers()
+
+        self._initialized_enhanced = True
+        logger.info("Enhanced orchestration features initialized")
+
+    def _setup_event_handlers(self):
+        """Setup event handlers"""
+        if not self.event_bus:
+            return
+
+        async def handle_health_change(event: SystemEvent):
+            service_name = event.data.get("service_name")
+            if service_name and self.health_aggregator:
+                health_score = event.data.get("health_score", 100.0)
+                self.health_aggregator.update_system_health(service_name, {
+                    "health_score": health_score,
+                    "status": event.data.get("status", "unknown")
+                })
+
+        async def handle_circuit_event(event: SystemEvent):
+            logger.warning(f"Circuit breaker {event.event_type.value}: {event.data}")
+
+        self.event_bus.subscribe(EventType.SYSTEM_HEALTH_CHANGED, handle_health_change)
+        self.event_bus.subscribe(EventType.CIRCUIT_OPENED, handle_circuit_event)
+        self.event_bus.subscribe(EventType.CIRCUIT_CLOSED, handle_circuit_event)
+
     async def health_check_all(self) -> Dict:
-        """Check health of all systems"""
+        """Check health of all systems with circuit breaker protection"""
         results = {
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'services': {},
@@ -54,29 +172,92 @@ class SystemOrchestrator:
             'overall_health': 'healthy'
         }
 
-        # Check services
+        # Check services with circuit breaker protection
         async with httpx.AsyncClient(timeout=10) as client:
             for service_name, url in self.services.items():
+                circuit = self.circuit_breakers.get(service_name)
+
+                # Check circuit breaker
+                if circuit and not circuit.can_execute():
+                    results['services'][service_name] = {
+                        'status': 'circuit_open',
+                        'circuit_state': circuit.state.value,
+                        'message': 'Circuit breaker open, service unavailable'
+                    }
+                    results['overall_health'] = 'degraded'
+                    continue
+
+                success = False
                 try:
                     if service_name in ['backend', 'ai_agents']:
                         response = await client.get(f"{url}/health")
+                        is_healthy = response.status_code == 200
+                        success = is_healthy
+
                         results['services'][service_name] = {
-                            'status': 'healthy' if response.status_code == 200 else 'unhealthy',
+                            'status': 'healthy' if is_healthy else 'unhealthy',
                             'code': response.status_code,
-                            'data': response.json() if response.status_code == 200 else None
+                            'data': response.json() if is_healthy else None,
+                            'circuit_state': circuit.state.value if circuit else 'unknown'
                         }
+
+                        # Update health aggregator
+                        if self.health_aggregator:
+                            health_score = 100.0 if is_healthy else 0.0
+                            self.health_aggregator.update_system_health(service_name, {
+                                "health_score": health_score,
+                                "status": "healthy" if is_healthy else "unhealthy"
+                            })
+
+                            # Publish event
+                            if self.event_bus:
+                                await self.event_bus.publish(SystemEvent(
+                                    event_type=EventType.SYSTEM_HEALTH_CHANGED,
+                                    source=service_name,
+                                    data={
+                                        "service_name": service_name,
+                                        "status": "healthy" if is_healthy else "unhealthy",
+                                        "health_score": health_score
+                                    }
+                                ))
                     else:
                         response = await client.get(url, follow_redirects=True)
+                        is_online = response.status_code == 200
+                        success = is_online
+
                         results['services'][service_name] = {
-                            'status': 'online' if response.status_code == 200 else 'offline',
-                            'code': response.status_code
+                            'status': 'online' if is_online else 'offline',
+                            'code': response.status_code,
+                            'circuit_state': circuit.state.value if circuit else 'unknown'
                         }
+
                 except Exception as e:
                     results['services'][service_name] = {
                         'status': 'error',
-                        'error': str(e)
+                        'error': str(e),
+                        'circuit_state': circuit.state.value if circuit else 'unknown'
                     }
                     results['overall_health'] = 'degraded'
+
+                # Update circuit breaker
+                if circuit:
+                    if success:
+                        circuit.record_success()
+                        if circuit.state == CircuitState.CLOSED and self.event_bus:
+                            await self.event_bus.publish(SystemEvent(
+                                event_type=EventType.CIRCUIT_CLOSED,
+                                source=service_name,
+                                data={"service_name": service_name}
+                            ))
+                    else:
+                        circuit.record_failure()
+                        if circuit.state == CircuitState.OPEN and self.event_bus:
+                            await self.event_bus.publish(SystemEvent(
+                                event_type=EventType.CIRCUIT_OPENED,
+                                source=service_name,
+                                data={"service_name": service_name}
+                            ))
+                        results['overall_health'] = 'degraded'
 
         # Check database
         try:
@@ -108,16 +289,41 @@ class SystemOrchestrator:
         return results
 
     async def execute_workflow(self, workflow_type: str, params: Dict) -> Dict:
-        """Execute a multi-step workflow"""
+        """
+        Execute a multi-step workflow with priority routing and event publishing
+
+        Enhancements:
+        - Priority-based routing
+        - Event publishing for workflow stages
+        - Message queue integration
+        - Load balanced execution
+        """
         workflow_id = f"wf_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        # Determine priority
+        priority = self.priority_routes.get(workflow_type, 5)
 
         # Record workflow start
         self.memory.update_system_state('workflow', workflow_id, {
             'type': workflow_type,
             'status': 'started',
             'params': params,
+            'priority': priority,
             'started_at': datetime.now(timezone.utc).isoformat()
         })
+
+        # Publish workflow started event
+        if self.event_bus:
+            await self.event_bus.publish(SystemEvent(
+                event_type=EventType.AGENT_STARTED,
+                source="orchestrator",
+                data={
+                    "workflow_id": workflow_id,
+                    "workflow_type": workflow_type,
+                    "priority": priority
+                },
+                priority=priority
+            ))
 
         result = {
             'workflow_id': workflow_id,
@@ -378,6 +584,48 @@ class SystemOrchestrator:
         )
         return response.json()
 
+    def get_orchestrator_stats(self) -> Dict[str, Any]:
+        """Get comprehensive orchestrator statistics"""
+        stats = {
+            "services": list(self.services.keys()),
+            "enhanced_features_enabled": ENHANCED_FEATURES_AVAILABLE,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        if ENHANCED_FEATURES_AVAILABLE:
+            # Circuit breaker stats
+            stats["circuit_breakers"] = {
+                name: breaker.get_stats()
+                for name, breaker in self.circuit_breakers.items()
+            }
+
+            # Message queue stats
+            if self.message_queue:
+                stats["message_queue"] = self.message_queue.get_queue_stats()
+
+            # Load balancer stats
+            if self.load_balancer:
+                stats["load_balancer"] = self.load_balancer.get_stats()
+
+            # Health aggregation
+            if self.health_aggregator:
+                stats["health_aggregation"] = self.health_aggregator.get_aggregated_health()
+
+            # Recent events
+            if self.event_bus:
+                stats["recent_events"] = [
+                    {
+                        "event_id": e.event_id,
+                        "type": e.event_type.value,
+                        "source": e.source,
+                        "timestamp": e.timestamp.isoformat(),
+                        "priority": e.priority
+                    }
+                    for e in self.event_bus.get_recent_events(limit=20)
+                ]
+
+        return stats
+
 # Global orchestrator instance
 orchestrator = SystemOrchestrator()
 
@@ -385,9 +633,16 @@ async def main():
     """Test orchestration system"""
     logger.info("Starting BrainOps Orchestrator")
 
+    # Initialize enhanced features
+    await orchestrator.initialize_enhanced_features()
+
     # Run health check
     health = await orchestrator.health_check_all()
     logger.info(f"System Health: {health['overall_health']}")
+
+    # Get orchestrator stats
+    stats = orchestrator.get_orchestrator_stats()
+    logger.info(f"Orchestrator Stats: {stats}")
 
     # Run a workflow
     workflow_result = await orchestrator.execute_workflow('full_system_check', {})

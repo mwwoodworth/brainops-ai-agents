@@ -13,7 +13,7 @@ Features:
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List, AsyncGenerator
 import asyncio
@@ -387,11 +387,48 @@ NOW RESPOND TO: {message}"""
 # API ENDPOINTS
 # =============================================================================
 
+@router.get("/status")
+async def get_aurea_status():
+    """
+    Get AUREA's operational status - simple health check endpoint.
+    This is the main status endpoint for AUREA.
+    """
+    try:
+        state = await state_provider.get_live_state()
+        return {
+            "status": "operational",
+            "active_agents": state.active_agents,
+            "decisions_pending": state.decisions_pending,
+            "success_rate": state.success_rate_last_100,
+            "timestamp": state.timestamp
+        }
+    except Exception as e:
+        logger.error(f"Failed to get AUREA status: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "message": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+
 @router.get("/state")
 async def get_aurea_state():
     """Get AUREA's current operational state (cached 10s)"""
-    state = await state_provider.get_live_state()
-    return asdict(state)
+    try:
+        state = await state_provider.get_live_state()
+        return asdict(state)
+    except Exception as e:
+        logger.error(f"Failed to get AUREA state: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
 
 
 @router.get("/state/refresh")
