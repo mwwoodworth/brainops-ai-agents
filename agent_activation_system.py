@@ -403,6 +403,56 @@ class AgentActivationSystem:
 
         return result
 
+    def get_agent_stats(self) -> Dict[str, Any]:
+        """Get statistics about agents for this tenant"""
+        stats = {
+            "total_agents": 0,
+            "active_agents": 0,
+            "inactive_agents": 0,
+            "recent_activations": 0,
+            "tenant_id": self.tenant_id
+        }
+
+        conn = self._get_db_connection()
+        if not conn:
+            return stats
+
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Get total and active agent counts
+            cur.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    COUNT(CASE WHEN status = 'active' THEN 1 END) as active,
+                    COUNT(CASE WHEN status = 'inactive' THEN 1 END) as inactive
+                FROM ai_agents
+            """)
+            counts = cur.fetchone()
+            if counts:
+                stats["total_agents"] = counts["total"] or 0
+                stats["active_agents"] = counts["active"] or 0
+                stats["inactive_agents"] = counts["inactive"] or 0
+
+            # Get recent activations (last 24h)
+            cur.execute("""
+                SELECT COUNT(*) as recent
+                FROM agent_activation_log
+                WHERE created_at > NOW() - INTERVAL '24 hours'
+            """)
+            recent = cur.fetchone()
+            if recent:
+                stats["recent_activations"] = recent["recent"] or 0
+
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Failed to get agent stats: {e}")
+            if conn:
+                conn.close()
+
+        return stats
+
     async def handle_business_event(
         self,
         event_type: BusinessEventType,
