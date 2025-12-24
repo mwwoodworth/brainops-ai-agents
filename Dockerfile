@@ -60,6 +60,7 @@ COPY --from=builder /root/.local /root/.local
 
 # Ensure Python can find the installed packages
 ENV PATH=/root/.local/bin:$PATH
+ENV PYTHONPATH=/root/.local/lib/python3.11/site-packages:$PYTHONPATH
 ENV PYTHONUNBUFFERED=1
 ENV PORT=10000
 
@@ -88,5 +89,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Expose port
 EXPOSE 10000
 
-# Start cron and application
-CMD service cron start && python -m uvicorn app:app --host 0.0.0.0 --port ${PORT}
+# Start cron and application (use explicit path to ensure packages are found)
+CMD service cron start && /root/.local/bin/python -m uvicorn app:app --host 0.0.0.0 --port ${PORT}

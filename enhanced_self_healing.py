@@ -128,7 +128,7 @@ class EnhancedSelfHealing:
         self.remediation_handlers: Dict[RemediationAction, Callable] = {}
 
         # Configuration
-        self.auto_remediate_threshold = 0.85  # Auto-remediate if confidence > 85%
+        self.auto_remediate_threshold = 0.70  # Auto-remediate if confidence > 70% (lowered for operational effectiveness)
         self.max_auto_actions = 3  # Max actions per incident without human approval
         self.tiered_autonomy_enabled = True
         self.learning_enabled = True
