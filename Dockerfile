@@ -1,26 +1,37 @@
+# syntax=docker/dockerfile:1.4
 # Multi-stage build for optimal size and speed
+# Optimized for faster builds with layer caching
+
 FROM python:3.11-slim AS builder
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Python dependencies
 WORKDIR /app
+
+# Copy requirements first for better layer caching
 COPY requirements.txt .
-RUN pip install --user --no-cache-dir -r requirements.txt
+
+# Use BuildKit cache for pip to speed up rebuilds
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --user -r requirements.txt
 
 # Final stage
 FROM python:3.11-slim
 
-# Install runtime dependencies + Playwright browser deps for UI testing
-RUN apt-get update && apt-get install -y \
+# Build arg to control Playwright installation (set to 0 to skip)
+ARG INSTALL_PLAYWRIGHT=1
+
+# Install runtime dependencies in one layer
+# Playwright deps are always installed (small overhead) but browser download is optional
+RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     curl \
     cron \
-    # Playwright browser dependencies
+    # Playwright browser dependencies (needed for UI testing)
     libnss3 \
     libnspr4 \
     libatk1.0-0 \
@@ -39,23 +50,28 @@ RUN apt-get update && apt-get install -y \
     libcairo2 \
     libasound2 \
     libwayland-client0 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 WORKDIR /app
 
 # Copy installed packages from builder
 COPY --from=builder /root/.local /root/.local
 
-# Install Playwright browser for UI testing
-RUN /root/.local/bin/playwright install chromium --with-deps 2>/dev/null || echo "Playwright browser install skipped"
-
-# Copy application code
-COPY . .
-
 # Ensure Python can find the installed packages
 ENV PATH=/root/.local/bin:$PATH
 ENV PYTHONUNBUFFERED=1
 ENV PORT=10000
+
+# Install Playwright browser conditionally (skip with --build-arg INSTALL_PLAYWRIGHT=0)
+RUN if [ "$INSTALL_PLAYWRIGHT" = "1" ]; then \
+        /root/.local/bin/playwright install chromium 2>/dev/null || echo "Playwright browser install skipped"; \
+    else \
+        echo "Playwright browser install skipped (INSTALL_PLAYWRIGHT=0)"; \
+    fi
+
+# Copy application code LAST for maximum cache benefit
+COPY . .
 
 # Create necessary directories
 RUN mkdir -p logs /var/lib/ai-memory /var/log

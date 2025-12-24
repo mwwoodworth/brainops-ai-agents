@@ -31,6 +31,22 @@ import aiohttp
 import warnings
 warnings.filterwarnings('ignore')
 
+
+def json_safe_serialize(obj: Any) -> Any:
+    """Recursively convert datetime/Decimal objects to JSON-serializable types"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {k: json_safe_serialize(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [json_safe_serialize(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(json_safe_serialize(item) for item in obj)
+    return obj
+
+
 # MCP Bridge Configuration
 MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
 MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "brainops_mcp_2025"
@@ -797,6 +813,9 @@ class AUREA:
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor()
 
+            # Serialize result to ensure all datetime/Decimal objects are converted
+            safe_result = json_safe_serialize(result) if result else None
+
             # Try UUID match first, then fallback to text match
             cur.execute("""
             UPDATE aurea_decisions
@@ -806,7 +825,7 @@ class AUREA:
             WHERE id::text = %s
             """, (
                 status,
-                Json(result) if result else None,
+                Json(safe_result) if safe_result else None,
                 decision_id
             ))
 
