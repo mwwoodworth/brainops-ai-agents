@@ -754,9 +754,13 @@ class AUREA:
                         })
                         continue
 
-                # Execute the decision
+                # Execute the decision (in verification mode - no real outreach)
                 result = await self._execute_decision(decision)
+                result["verification_mode"] = True  # Flag that this was verification only
                 results.append(result)
+
+                # Update decision status in database
+                self._update_decision_status(decision.id, "completed", result)
 
                 # Store execution in memory
                 self.memory.store(Memory(
@@ -776,6 +780,7 @@ class AUREA:
 
             except Exception as e:
                 logger.error(f"Failed to execute decision {decision.id}: {e}")
+                self._update_decision_status(decision.id, "failed", {"error": str(e)})
                 results.append({
                     "decision_id": decision.id,
                     "status": "failed",
@@ -783,6 +788,33 @@ class AUREA:
                 })
 
         return results
+
+    def _update_decision_status(self, decision_id: str, status: str, result: Dict = None):
+        """Update decision execution status in database"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+
+            cur.execute("""
+            UPDATE aurea_decisions
+            SET execution_status = %s,
+                execution_result = %s,
+                executed_at = NOW()
+            WHERE id = %s OR description LIKE %s
+            """, (
+                status,
+                Json(result) if result else None,
+                decision_id,
+                f"%{decision_id}%"  # Fallback match on decision ID in description
+            ))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+            logger.info(f"✅ Updated decision {decision_id} status to {status}")
+
+        except Exception as e:
+            logger.error(f"Failed to update decision status: {e}")
 
     async def _execute_decision(self, decision: Decision) -> Dict[str, Any]:
         """Execute a specific decision"""
@@ -801,39 +833,39 @@ class AUREA:
             return await self._activate_agents_for_decision(decision)
 
     async def _activate_collection_agents(self, context: Dict) -> Dict:
-        """Activate agents for collections"""
+        """Activate agents for collections (VERIFICATION MODE - no real outreach)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.INVOICE_OVERDUE,
-            {"context": context, "aurea_initiated": True}
+            {"context": context, "aurea_initiated": True, "verification_mode": True, "dry_run": True}
         )
-        return {"action": "collection_agents", "result": result}
+        return {"action": "collection_agents", "result": result, "mode": "verification_only"}
 
     async def _activate_scheduling_optimization(self, context: Dict) -> Dict:
-        """Activate scheduling optimization"""
+        """Activate scheduling optimization (VERIFICATION MODE)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.SCHEDULING_CONFLICT,
-            {"context": context, "aurea_initiated": True}
+            {"context": context, "aurea_initiated": True, "verification_mode": True, "dry_run": True}
         )
-        return {"action": "scheduling_optimization", "result": result}
+        return {"action": "scheduling_optimization", "result": result, "mode": "verification_only"}
 
     async def _activate_retention_campaign(self, context: Dict) -> Dict:
-        """Activate customer retention campaign"""
+        """Activate customer retention campaign (VERIFICATION MODE - no real outreach)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.CUSTOMER_CHURN_RISK,
-            {"context": context, "aurea_initiated": True}
+            {"context": context, "aurea_initiated": True, "verification_mode": True, "dry_run": True}
         )
-        return {"action": "retention_campaign", "result": result}
+        return {"action": "retention_campaign", "result": result, "mode": "verification_only"}
 
     async def _activate_sales_acceleration(self, context: Dict) -> Dict:
-        """Activate sales acceleration"""
+        """Activate sales acceleration (VERIFICATION MODE - no real outreach)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.QUOTE_REQUESTED,
-            {"context": context, "aurea_initiated": True}
+            {"context": context, "aurea_initiated": True, "verification_mode": True, "dry_run": True}
         )
-        return {"action": "sales_acceleration", "result": result}
+        return {"action": "sales_acceleration", "result": result, "mode": "verification_only"}
 
     async def _activate_agents_for_decision(self, decision: Decision) -> Dict:
-        """Generic agent activation based on decision type"""
+        """Generic agent activation based on decision type (VERIFICATION MODE)"""
         event_type_map = {
             DecisionType.FINANCIAL: BusinessEventType.PAYMENT_RECEIVED,
             DecisionType.OPERATIONAL: BusinessEventType.JOB_SCHEDULED,
@@ -844,10 +876,10 @@ class AUREA:
         event_type = event_type_map.get(decision.type, BusinessEventType.SYSTEM_HEALTH_CHECK)
         result = await self.activation_system.handle_business_event(
             event_type,
-            {"decision": asdict(decision), "aurea_initiated": True}
+            {"decision": asdict(decision), "aurea_initiated": True, "verification_mode": True, "dry_run": True}
         )
 
-        return {"action": "generic_activation", "event_type": event_type.value, "result": result}
+        return {"action": "generic_activation", "event_type": event_type.value, "result": result, "mode": "verification_only"}
 
     async def _learn(self, results: List[Dict[str, Any]]):
         """Learn from execution results and improve"""
