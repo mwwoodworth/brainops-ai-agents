@@ -883,15 +883,32 @@ class EnhancedSelfHealing:
         """Record a health pattern for machine learning"""
         pattern_id = self._generate_id(f"pattern:{system_id}:{pattern_type}")
 
+        # Convert metrics snapshot to normal_ranges format
+        # For pattern_type 'normal', set these as the expected ranges
+        # For 'degraded' or 'pre_failure', add to anomaly signatures
+        normal_ranges = {}
+        anomaly_signatures = []
+
+        if pattern_type == "normal":
+            # Set ranges with +/- 20% tolerance
+            for metric, value in metrics_snapshot.items():
+                margin = abs(value * 0.2) if value != 0 else 1.0
+                normal_ranges[metric] = (value - margin, value + margin)
+        else:
+            # For non-normal patterns, record as anomaly signature
+            anomaly_signatures.append({
+                "type": pattern_type,
+                "metrics": metrics_snapshot,
+                "recorded_at": datetime.utcnow().isoformat()
+            })
+
         pattern = HealthPattern(
             pattern_id=pattern_id,
             component=system_id,
-            pattern_type=pattern_type,
-            metrics_signature=metrics_snapshot,
-            confidence=0.8,
-            occurrences=1,
-            last_seen=datetime.utcnow().isoformat(),
-            created_at=datetime.utcnow().isoformat()
+            normal_ranges=normal_ranges,
+            anomaly_signatures=anomaly_signatures,
+            learned_from=1,
+            last_updated=datetime.utcnow().isoformat()
         )
 
         self.health_patterns[pattern_id] = pattern
@@ -912,11 +929,11 @@ class EnhancedSelfHealing:
             if pattern.component == system_id:
                 patterns.append({
                     "pattern_id": pattern.pattern_id,
-                    "pattern_type": pattern.pattern_type,
-                    "metrics_signature": pattern.metrics_signature,
-                    "confidence": pattern.confidence,
-                    "occurrences": pattern.occurrences,
-                    "last_seen": pattern.last_seen
+                    "component": pattern.component,
+                    "normal_ranges": pattern.normal_ranges,
+                    "anomaly_signatures": pattern.anomaly_signatures,
+                    "learned_from": pattern.learned_from,
+                    "last_updated": pattern.last_updated
                 })
         return patterns
 
