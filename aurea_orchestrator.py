@@ -353,7 +353,7 @@ class AUREA:
             conn.close()
             return True
         except Exception as e:
-            logger.debug(f"DB execute failed: {e}")
+            logger.warning(f"DB execute failed: {e}")
             return False
 
     def _truncate_text(self, value: Any, max_len: int = 800) -> str:
@@ -419,18 +419,21 @@ class AUREA:
         return out[:25]
 
     def _store_state_snapshot(self, state_type: str, state_data: Dict[str, Any]):
-        """Persist OODA snapshots for audit/debug (best-effort)."""
+        """Persist OODA snapshots for audit/debug."""
         try:
-            self._db_execute(
+            # Sanitize state_data to ensure JSON-serializable
+            sanitized = json_safe_serialize(state_data)
+            success = self._db_execute(
                 """
                 INSERT INTO aurea_state (state_type, state_data, cycle_number, tenant_id)
                 VALUES (%s, %s, %s, %s)
                 """,
-                (state_type, Json(state_data), self.cycle_count, self.tenant_id),
+                (state_type, Json(sanitized), self.cycle_count, self.tenant_id),
             )
-        except Exception:
-            # best-effort only
-            return
+            if not success:
+                logger.warning(f"Failed to store AUREA state snapshot: {state_type}")
+        except Exception as e:
+            logger.error(f"Error storing AUREA state snapshot {state_type}: {e}")
 
     def _init_database(self):
         """Initialize AUREA's database tables"""
