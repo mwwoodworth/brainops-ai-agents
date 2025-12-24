@@ -1901,6 +1901,69 @@ async def trigger_self_healing():
     return results
 
 
+# =============================================================================
+# TRAINING & LEARNING ENDPOINTS - Critical for AI system improvement
+# =============================================================================
+
+@app.post("/training/capture-interaction", dependencies=SECURED_DEPENDENCIES)
+async def capture_interaction(interaction_data: Dict[str, Any] = Body(...)):
+    """
+    Capture customer interaction for AI training.
+
+    This is CRITICAL for the learning system - without captured interactions,
+    the AI cannot learn and improve.
+    """
+    if not TRAINING_AVAILABLE or not hasattr(app.state, 'training') or not app.state.training:
+        raise HTTPException(status_code=503, detail="Training pipeline not available")
+
+    try:
+        from ai_training_pipeline import InteractionType
+
+        training_pipeline = app.state.training
+        interaction_id = await training_pipeline.capture_interaction(
+            customer_id=interaction_data.get("customer_id"),
+            interaction_type=InteractionType[interaction_data.get("type", "EMAIL").upper()],
+            content=interaction_data.get("content"),
+            channel=interaction_data.get("channel"),
+            context=interaction_data.get("context", {}),
+            outcome=interaction_data.get("outcome"),
+            value=interaction_data.get("value")
+        )
+
+        logger.info(f"📝 Captured interaction {interaction_id} for training")
+        return {"interaction_id": interaction_id, "status": "captured"}
+
+    except Exception as e:
+        logger.error(f"Failed to capture interaction: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/training/stats")
+async def get_training_stats():
+    """Get training pipeline statistics"""
+    if not TRAINING_AVAILABLE or not hasattr(app.state, 'training') or not app.state.training:
+        return {"available": False, "message": "Training pipeline not available"}
+
+    try:
+        pool = get_pool()
+        stats = await pool.fetchrow("""
+            SELECT
+                (SELECT COUNT(*) FROM ai_customer_interactions) as total_interactions,
+                (SELECT MAX(created_at) FROM ai_customer_interactions) as last_interaction,
+                (SELECT COUNT(*) FROM ai_training_data) as training_samples,
+                (SELECT COUNT(*) FROM ai_learning_insights) as insights_generated
+        """)
+        return {
+            "available": True,
+            "total_interactions": stats["total_interactions"],
+            "last_interaction": stats["last_interaction"].isoformat() if stats["last_interaction"] else None,
+            "training_samples": stats["training_samples"],
+            "insights_generated": stats["insights_generated"]
+        }
+    except Exception as e:
+        return {"available": True, "error": str(e)}
+
+
 @app.get("/scheduler/status")
 async def get_scheduler_status():
     """Get detailed scheduler status and diagnostics"""
