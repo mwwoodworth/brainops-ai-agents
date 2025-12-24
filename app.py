@@ -168,7 +168,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.5.0"  # FULL POWER MODE - All autonomous operations active
+VERSION = "9.6.0"  # FULL POWER + DB Diagnostics
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -1412,6 +1412,115 @@ async def observability_metrics():
         "aurea": _aurea_status(),
         "self_healing": _self_healing_status(),
     }
+
+
+@app.get("/debug/database")
+async def debug_database(authenticated: bool = Depends(verify_api_key)):
+    """Diagnostic endpoint for database connection issues."""
+    import psycopg2
+
+    results = {
+        "async_pool": {
+            "using_fallback": using_fallback(),
+            "status": "unknown"
+        },
+        "sync_psycopg2": {
+            "status": "unknown"
+        },
+        "config": {
+            "host": config.database.host,
+            "port": config.database.port,
+            "database": config.database.database,
+            "user": config.database.user,
+            "password_set": bool(config.database.password),
+            "ssl": config.database.ssl,
+            "ssl_verify": config.database.ssl_verify,
+        }
+    }
+
+    # Test async pool
+    try:
+        pool = get_pool()
+        start = time.perf_counter()
+        result = await pool.fetchval("SELECT 1")
+        latency = (time.perf_counter() - start) * 1000
+        results["async_pool"]["status"] = "connected" if result == 1 else "query_failed"
+        results["async_pool"]["latency_ms"] = latency
+        results["async_pool"]["test_query"] = result
+    except Exception as e:
+        results["async_pool"]["status"] = "error"
+        results["async_pool"]["error"] = str(e)
+
+    # Test direct psycopg2 connection (what AUREA uses)
+    try:
+        conn = psycopg2.connect(
+            host=config.database.host,
+            port=config.database.port,
+            database=config.database.database,
+            user=config.database.user,
+            password=config.database.password,
+            sslmode='require'
+        )
+        cur = conn.cursor()
+        start = time.perf_counter()
+        cur.execute("SELECT 1")
+        result = cur.fetchone()
+        latency = (time.perf_counter() - start) * 1000
+        cur.close()
+        conn.close()
+        results["sync_psycopg2"]["status"] = "connected"
+        results["sync_psycopg2"]["latency_ms"] = latency
+        results["sync_psycopg2"]["test_query"] = result[0] if result else None
+    except Exception as e:
+        results["sync_psycopg2"]["status"] = "error"
+        results["sync_psycopg2"]["error"] = str(e)
+
+    return results
+
+
+@app.get("/debug/aurea")
+async def debug_aurea(authenticated: bool = Depends(verify_api_key)):
+    """Diagnostic endpoint for AUREA orchestrator status."""
+    aurea = getattr(app.state, "aurea", None)
+    if not aurea:
+        return {"status": "not_initialized", "available": AUREA_AVAILABLE}
+
+    try:
+        status = aurea.get_status()
+        return {
+            "status": "running" if status.get("running") else "stopped",
+            "details": status,
+            "available": True,
+            "cycle_count": getattr(aurea, "cycle_count", 0),
+            "autonomy_level": str(getattr(aurea, "autonomy_level", "unknown")),
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e), "available": True}
+
+
+@app.get("/debug/scheduler")
+async def debug_scheduler(authenticated: bool = Depends(verify_api_key)):
+    """Diagnostic endpoint for agent scheduler status."""
+    scheduler = getattr(app.state, "scheduler", None)
+    if not scheduler:
+        return {"status": "not_initialized", "available": SCHEDULER_AVAILABLE}
+
+    try:
+        jobs = scheduler.scheduler.get_jobs() if hasattr(scheduler, "scheduler") else []
+        return {
+            "status": "running" if scheduler.scheduler.running else "stopped",
+            "total_jobs": len(jobs),
+            "next_10_jobs": [
+                {
+                    "id": str(job.id),
+                    "name": job.name,
+                    "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
+                }
+                for job in sorted(jobs, key=lambda x: x.next_run_time or datetime.max)[:10]
+            ],
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 @app.get("/systems/usage")
