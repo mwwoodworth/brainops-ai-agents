@@ -176,6 +176,66 @@ class AutonomousRevenueSystem:
             CREATE INDEX IF NOT EXISTS idx_revenue_leads_score ON revenue_leads(score DESC);
             CREATE INDEX IF NOT EXISTS idx_revenue_opportunities_value ON revenue_opportunities(value DESC);
             CREATE INDEX IF NOT EXISTS idx_revenue_actions_lead ON revenue_actions(lead_id);
+
+            -- New enhancement tables
+            CREATE TABLE IF NOT EXISTS ai_email_sequences (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                lead_id UUID REFERENCES revenue_leads(id),
+                sequence_type VARCHAR(50),
+                emails JSONB DEFAULT '[]'::jsonb,
+                status VARCHAR(50) DEFAULT 'draft',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                executed_at TIMESTAMPTZ
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_competitor_analysis (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                lead_id UUID REFERENCES revenue_leads(id),
+                competitors JSONB DEFAULT '[]'::jsonb,
+                analysis JSONB DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_churn_predictions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                lead_id UUID REFERENCES revenue_leads(id),
+                churn_probability FLOAT DEFAULT 0.0,
+                risk_level VARCHAR(20),
+                prediction_data JSONB DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_upsell_recommendations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                lead_id UUID REFERENCES revenue_leads(id),
+                recommendations JSONB DEFAULT '[]'::jsonb,
+                total_potential FLOAT DEFAULT 0.0,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_revenue_forecasts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                months_ahead INT,
+                forecast_data JSONB DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS unified_brain_logs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                system VARCHAR(100),
+                action VARCHAR(100),
+                data JSONB DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            -- Create indexes for new tables
+            CREATE INDEX IF NOT EXISTS idx_email_sequences_lead ON ai_email_sequences(lead_id);
+            CREATE INDEX IF NOT EXISTS idx_competitor_analysis_lead ON ai_competitor_analysis(lead_id);
+            CREATE INDEX IF NOT EXISTS idx_churn_predictions_lead ON ai_churn_predictions(lead_id);
+            CREATE INDEX IF NOT EXISTS idx_upsell_recommendations_lead ON ai_upsell_recommendations(lead_id);
+            CREATE INDEX IF NOT EXISTS idx_unified_brain_logs_system ON unified_brain_logs(system);
+            CREATE INDEX IF NOT EXISTS idx_unified_brain_logs_action ON unified_brain_logs(action);
+            CREATE INDEX IF NOT EXISTS idx_unified_brain_logs_created ON unified_brain_logs(created_at DESC);
         """)
 
         conn.commit()
@@ -221,33 +281,52 @@ class AutonomousRevenueSystem:
             return []
 
     async def qualify_lead(self, lead_id: str) -> Tuple[float, Dict]:
-        """Autonomously qualify a lead using AI analysis"""
+        """Autonomously qualify a lead using AI analysis with advanced ML-based scoring"""
         try:
             # Get lead data
             lead = await self._get_lead(lead_id)
             if not lead:
                 return 0.0, {}
 
-            # AI qualification prompt
+            # AI qualification prompt with enhanced scoring
             prompt = f"""Analyze this lead for roofing services potential:
             Company: {lead.get('company_name')}
             Contact: {lead.get('contact_name')}
             Email: {lead.get('email')}
+            Phone: {lead.get('phone')}
+            Website: {lead.get('website')}
+            Source: {lead.get('source')}
             Metadata: {json.dumps(lead.get('metadata', {}))}
 
-            Score from 0-100 based on:
-            1. Likelihood to need roofing services
-            2. Budget availability
-            3. Decision-making authority
-            4. Timeline urgency
-            5. Fit with our services
+            Perform ADVANCED AI LEAD SCORING based on:
+            1. Likelihood to need roofing services (0-25 points)
+            2. Budget availability and financial capacity (0-25 points)
+            3. Decision-making authority and role (0-20 points)
+            4. Timeline urgency and buying signals (0-15 points)
+            5. Fit with our services and company size (0-15 points)
 
-            Return JSON with: score, reasons, recommended_action, estimated_value"""
+            Additional analysis:
+            6. Digital presence quality (website, social media)
+            7. Competitor engagement likelihood
+            8. Churn risk if converted
+            9. Upsell/cross-sell potential
+            10. Customer lifetime value estimate
+
+            Return JSON with:
+            - score: 0-100 total points
+            - reasons: array of key factors
+            - recommended_action: next step
+            - estimated_value: deal size estimate
+            - churn_risk: 0-1 probability
+            - upsell_potential: low/medium/high
+            - lifetime_value: estimated LTV
+            - buying_signals: array of detected signals
+            - competitor_risk: 0-1 probability they're with competitor"""
 
             response = openai.chat.completions.create(
                 model="gpt-4-turbo-preview",
                 messages=[
-                    {"role": "system", "content": "You are a lead qualification expert."},
+                    {"role": "system", "content": "You are an advanced AI lead qualification expert with deep sales intelligence capabilities. Provide detailed, data-driven analysis."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.5
@@ -282,11 +361,24 @@ class AutonomousRevenueSystem:
 
             await self._log_action(lead_id, RevenueAction.QUALIFY_LEAD, qualification)
 
-            logger.info(f"Qualified lead {lead_id} with score {score}")
+            # Log to unified brain
+            await self._log_to_unified_brain(
+                action='lead_qualification',
+                lead_id=lead_id,
+                score=score,
+                qualification=qualification
+            )
+
+            logger.info(f"Qualified lead {lead_id} with score {score} (LTV: ${qualification.get('lifetime_value', 0)}, Churn Risk: {qualification.get('churn_risk', 0):.1%})")
             return score, qualification
 
         except Exception as e:
             logger.error(f"Failed to qualify lead: {e}")
+            await self._log_to_unified_brain(
+                action='lead_qualification_error',
+                lead_id=lead_id,
+                error=str(e)
+            )
             return 0.0, {}
 
     async def create_personalized_outreach(self, lead_id: str) -> Dict:
@@ -1037,6 +1129,430 @@ Return ONLY valid JSON array, no other text."""
             conn.close()
         except Exception as e:
             logger.error(f"Failed to update opportunity: {e}")
+
+    # NEW ENHANCEMENTS
+
+    async def generate_email_sequence(self, lead_id: str, sequence_type: str = "nurture") -> Dict:
+        """Generate automated multi-touch email sequence using AI"""
+        try:
+            lead = await self._get_lead(lead_id)
+            if not lead:
+                return {}
+
+            prompt = f"""Generate a 5-email automated sequence for:
+
+            Lead: {lead.get('company_name')} ({lead.get('contact_name')})
+            Stage: {lead.get('stage')}
+            Score: {lead.get('score')}
+            Value: ${lead.get('value_estimate', 0)}
+            Source: {lead.get('source')}
+            Type: {sequence_type}
+
+            Create emails for days 0, 3, 7, 14, 21 with:
+            1. Day 0: Initial value proposition
+            2. Day 3: Educational content + social proof
+            3. Day 7: Case study + ROI calculator
+            4. Day 14: Personalized demo offer
+            5. Day 21: Urgency-based close attempt
+
+            For each email return JSON:
+            - day: number
+            - subject: compelling subject line
+            - preview_text: email preview
+            - body: full email HTML/text
+            - cta: call to action
+            - goal: email objective
+            - personalization_tokens: fields to customize
+
+            Make highly personalized, benefit-focused, and conversion-optimized."""
+
+            response = openai.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are an expert email marketing copywriter specializing in B2B sales sequences with proven conversion rates."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=2500
+            )
+
+            sequence = json.loads(response.choices[0].message.content)
+
+            # Store sequence in database
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+
+            sequence_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO ai_email_sequences
+                (id, lead_id, sequence_type, emails, created_at, status)
+                VALUES (%s, %s, %s, %s, NOW(), %s)
+            """, (sequence_id, lead_id, sequence_type, json.dumps(sequence), 'active'))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            await self._log_to_unified_brain(
+                action='email_sequence_generated',
+                lead_id=lead_id,
+                sequence_type=sequence_type,
+                emails_count=len(sequence.get('emails', []))
+            )
+
+            logger.info(f"Generated {sequence_type} email sequence for lead {lead_id}")
+            return {'sequence_id': sequence_id, 'emails': sequence}
+
+        except Exception as e:
+            logger.error(f"Failed to generate email sequence: {e}")
+            return {}
+
+    async def analyze_competitor_pricing(self, lead_id: str, competitors: List[str] = None) -> Dict:
+        """Analyze competitor pricing and positioning using AI"""
+        try:
+            lead = await self._get_lead(lead_id)
+
+            prompt = f"""Analyze competitor pricing for roofing software targeting:
+
+            Lead: {lead.get('company_name')}
+            Size: {lead.get('metadata', {}).get('company_size', 'unknown')}
+            Location: {lead.get('location', 'unknown')}
+
+            Main competitors: {', '.join(competitors) if competitors else 'JobNimbus, AccuLynx, CompanyCam, Roofr'}
+
+            Provide competitive intelligence:
+            1. Estimated competitor pricing (monthly/annual)
+            2. Feature comparison vs our offering
+            3. Competitor strengths and weaknesses
+            4. Market positioning gaps
+            5. Recommended pricing strategy
+            6. Differentiation opportunities
+            7. Win/loss factors
+
+            Return JSON with detailed competitive analysis."""
+
+            response = openai.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are a competitive intelligence analyst with deep knowledge of the roofing software market."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.5
+            )
+
+            analysis = json.loads(response.choices[0].message.content)
+
+            # Store analysis
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                INSERT INTO ai_competitor_analysis
+                (id, lead_id, competitors, analysis, created_at)
+                VALUES (%s, %s, %s, %s, NOW())
+            """, (str(uuid.uuid4()), lead_id, json.dumps(competitors or []), json.dumps(analysis)))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            await self._log_to_unified_brain(
+                action='competitor_analysis',
+                lead_id=lead_id,
+                competitors=competitors,
+                analysis=analysis
+            )
+
+            return analysis
+
+        except Exception as e:
+            logger.error(f"Competitor analysis failed: {e}")
+            return {}
+
+    async def predict_churn_risk(self, lead_id: str) -> Dict:
+        """Predict churn risk for a lead/customer using AI"""
+        try:
+            lead = await self._get_lead(lead_id)
+
+            # Get historical data
+            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT * FROM revenue_actions
+                WHERE lead_id = %s
+                ORDER BY created_at DESC
+                LIMIT 50
+            """, (lead_id,))
+
+            actions = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            prompt = f"""Predict churn risk for this lead/customer:
+
+            Company: {lead.get('company_name')}
+            Stage: {lead.get('stage')}
+            Score: {lead.get('score')}
+            Last Contact: {lead.get('last_contact')}
+            Value: ${lead.get('value_estimate', 0)}
+            Recent Actions: {len(actions)} interactions
+
+            Analyze churn indicators:
+            1. Engagement decline
+            2. Support ticket patterns
+            3. Feature adoption
+            4. Payment history
+            5. Competitive signals
+            6. Contract status
+
+            Return JSON:
+            - churn_probability: 0-1 score
+            - risk_level: low/medium/high/critical
+            - key_factors: array of risk indicators
+            - retention_actions: recommended interventions
+            - estimated_impact: revenue at risk
+            - timeline: expected churn window
+            """
+
+            response = openai.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are a customer success AI specializing in churn prediction and retention strategies."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3
+            )
+
+            prediction = json.loads(response.choices[0].message.content)
+
+            # Store prediction
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                INSERT INTO ai_churn_predictions
+                (id, lead_id, churn_probability, risk_level, prediction_data, created_at)
+                VALUES (%s, %s, %s, %s, %s, NOW())
+            """, (
+                str(uuid.uuid4()),
+                lead_id,
+                prediction.get('churn_probability', 0),
+                prediction.get('risk_level', 'unknown'),
+                json.dumps(prediction)
+            ))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            await self._log_to_unified_brain(
+                action='churn_prediction',
+                lead_id=lead_id,
+                churn_risk=prediction.get('churn_probability'),
+                risk_level=prediction.get('risk_level')
+            )
+
+            return prediction
+
+        except Exception as e:
+            logger.error(f"Churn prediction failed: {e}")
+            return {}
+
+    async def generate_upsell_recommendations(self, lead_id: str) -> Dict:
+        """Generate AI-powered upsell and cross-sell recommendations"""
+        try:
+            lead = await self._get_lead(lead_id)
+
+            prompt = f"""Generate upsell/cross-sell recommendations for:
+
+            Customer: {lead.get('company_name')}
+            Current Value: ${lead.get('value_estimate', 0)}
+            Stage: {lead.get('stage')}
+            Metadata: {json.dumps(lead.get('metadata', {}))}
+
+            Analyze opportunities for:
+            1. Feature upgrades
+            2. Additional users/licenses
+            3. Premium support packages
+            4. Training and consulting
+            5. Integration add-ons
+            6. Advanced analytics
+            7. API access
+            8. White-label options
+
+            For each opportunity return:
+            - product_name: what to sell
+            - value_proposition: why they need it
+            - price_range: expected pricing
+            - probability: likelihood to buy (0-1)
+            - timing: when to pitch (immediate/30d/90d)
+            - expected_revenue: additional MRR/ARR
+            - effort_level: sales effort required
+
+            Prioritize by revenue potential and fit."""
+
+            response = openai.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are an expert at identifying upsell and cross-sell opportunities with high conversion rates."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.6
+            )
+
+            recommendations = json.loads(response.choices[0].message.content)
+
+            # Store recommendations
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                INSERT INTO ai_upsell_recommendations
+                (id, lead_id, recommendations, total_potential, created_at)
+                VALUES (%s, %s, %s, %s, NOW())
+            """, (
+                str(uuid.uuid4()),
+                lead_id,
+                json.dumps(recommendations),
+                sum([r.get('expected_revenue', 0) for r in recommendations.get('opportunities', [])])
+            ))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            await self._log_to_unified_brain(
+                action='upsell_recommendations',
+                lead_id=lead_id,
+                opportunities_count=len(recommendations.get('opportunities', [])),
+                total_potential=sum([r.get('expected_revenue', 0) for r in recommendations.get('opportunities', [])])
+            )
+
+            return recommendations
+
+        except Exception as e:
+            logger.error(f"Upsell recommendations failed: {e}")
+            return {}
+
+    async def forecast_revenue(self, months_ahead: int = 6) -> Dict:
+        """Generate AI-powered revenue forecast"""
+        try:
+            # Get historical data
+            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT
+                    DATE_TRUNC('month', created_at) as month,
+                    COUNT(*) as leads,
+                    COUNT(*) FILTER (WHERE stage = 'won') as wins,
+                    SUM(value_estimate) FILTER (WHERE stage = 'won') as revenue,
+                    AVG(value_estimate) as avg_deal_size
+                FROM revenue_leads
+                WHERE created_at > NOW() - INTERVAL '12 months'
+                GROUP BY DATE_TRUNC('month', created_at)
+                ORDER BY month
+            """)
+
+            historical = cursor.fetchall()
+
+            cursor.execute("""
+                SELECT
+                    stage,
+                    COUNT(*) as count,
+                    SUM(value_estimate) as value
+                FROM revenue_leads
+                WHERE stage IN ('qualified', 'proposal_sent', 'negotiating')
+                GROUP BY stage
+            """)
+
+            pipeline = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            prompt = f"""Generate revenue forecast for next {months_ahead} months:
+
+            Historical Performance (last 12 months):
+            {json.dumps([dict(h) for h in historical], default=str)}
+
+            Current Pipeline:
+            {json.dumps([dict(p) for p in pipeline], default=str)}
+
+            Provide month-by-month forecast with:
+            - expected_revenue: forecasted revenue
+            - confidence_interval: (low, high) range
+            - new_leads_needed: acquisition target
+            - conversion_assumptions: expected rates
+            - risk_factors: potential issues
+            - growth_rate: month-over-month %
+            - cumulative_total: running total
+
+            Include best-case, likely-case, and worst-case scenarios."""
+
+            response = openai.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are a revenue forecasting expert with deep statistical modeling capabilities."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.4
+            )
+
+            forecast = json.loads(response.choices[0].message.content)
+
+            # Store forecast
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+
+            forecast_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO ai_revenue_forecasts
+                (id, months_ahead, forecast_data, created_at)
+                VALUES (%s, %s, %s, NOW())
+            """, (forecast_id, months_ahead, json.dumps(forecast)))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            await self._log_to_unified_brain(
+                action='revenue_forecast',
+                months_ahead=months_ahead,
+                forecast_id=forecast_id,
+                total_forecast=sum([m.get('expected_revenue', 0) for m in forecast.get('monthly_forecast', [])])
+            )
+
+            return forecast
+
+        except Exception as e:
+            logger.error(f"Revenue forecasting failed: {e}")
+            return {}
+
+    async def _log_to_unified_brain(self, action: str, **kwargs):
+        """Log all revenue actions to unified brain for centralized monitoring"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                INSERT INTO unified_brain_logs
+                (id, system, action, data, created_at)
+                VALUES (%s, %s, %s, %s, NOW())
+            """, (
+                str(uuid.uuid4()),
+                'revenue_generation_system',
+                action,
+                json.dumps(kwargs)
+            ))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+        except Exception as e:
+            # Non-critical - don't fail on logging errors
+            logger.warning(f"Failed to log to unified brain: {e}")
 
 # Global instance - create lazily
 revenue_system = None

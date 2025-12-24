@@ -224,6 +224,201 @@ Respond with JSON only:
             logger.error(f"Market trend analysis failed: {e}")
             return {"error": str(e)}
 
+    async def benchmark_competitors(
+        self,
+        competitors: List[Dict[str, Any]],
+        metrics: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Comprehensive competitive benchmarking across multiple metrics
+
+        Args:
+            competitors: List of competitor data with metrics
+            metrics: Metrics to benchmark (default: all available)
+
+        Returns:
+            Benchmarking analysis with rankings and gaps
+        """
+        if not metrics:
+            metrics = ["market_share", "pricing", "features", "customer_satisfaction", "growth_rate"]
+
+        try:
+            results = {
+                "benchmarked_at": datetime.utcnow().isoformat(),
+                "competitors_analyzed": len(competitors),
+                "metrics_analyzed": metrics,
+                "benchmarks": {},
+                "rankings": {},
+                "gaps": {},
+                "opportunities": []
+            }
+
+            # Calculate benchmarks for each metric
+            for metric in metrics:
+                metric_values = []
+                competitor_scores = {}
+
+                for comp in competitors:
+                    value = comp.get(metric, 0)
+                    metric_values.append(float(value))
+                    competitor_scores[comp.get("name", "Unknown")] = float(value)
+
+                if metric_values:
+                    results["benchmarks"][metric] = {
+                        "average": float(sum(metric_values) / len(metric_values)),
+                        "max": float(max(metric_values)),
+                        "min": float(min(metric_values)),
+                        "median": float(sorted(metric_values)[len(metric_values) // 2]),
+                        "top_performer": max(competitor_scores, key=competitor_scores.get),
+                        "scores": competitor_scores
+                    }
+
+                    # Calculate rankings
+                    ranked = sorted(competitor_scores.items(), key=lambda x: x[1], reverse=True)
+                    results["rankings"][metric] = [
+                        {"rank": i + 1, "name": name, "value": value}
+                        for i, (name, value) in enumerate(ranked)
+                    ]
+
+            # Identify gaps and opportunities
+            client = get_openai_client()
+            if client:
+                try:
+                    prompt = f"""Analyze this competitive benchmark data and identify:
+1. Key competitive gaps
+2. Market opportunities
+3. Strategic recommendations
+
+Benchmark Data:
+{json.dumps(results["benchmarks"], indent=2)}
+
+Respond with JSON only:
+{{
+    "competitive_gaps": ["gap1", "gap2", "gap3"],
+    "opportunities": [
+        {{"type": "market", "description": "...", "priority": "high/medium/low"}},
+        {{"type": "product", "description": "...", "priority": "high/medium/low"}}
+    ],
+    "strategic_recommendations": ["rec1", "rec2", "rec3"],
+    "overall_competitive_position": "leader/strong/average/weak"
+}}"""
+
+                    response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=1000
+                    )
+                    ai_analysis = json.loads(response.choices[0].message.content)
+                    results.update(ai_analysis)
+
+                except Exception as e:
+                    logger.warning(f"AI benchmarking analysis failed: {e}")
+                    results["opportunities"] = [
+                        {
+                            "type": "analysis",
+                            "description": "Manual analysis required",
+                            "priority": "medium"
+                        }
+                    ]
+
+            await self._save_analysis("competitive_benchmarking", results)
+            return results
+
+        except Exception as e:
+            logger.error(f"Competitive benchmarking failed: {e}")
+            return {"error": str(e)}
+
+    async def calculate_competitive_score(
+        self,
+        our_metrics: Dict[str, float],
+        competitor_metrics: List[Dict[str, float]],
+        weights: Optional[Dict[str, float]] = None
+    ) -> Dict[str, Any]:
+        """
+        Calculate competitive score based on weighted metrics
+
+        Args:
+            our_metrics: Our company metrics
+            competitor_metrics: List of competitor metrics
+            weights: Optional weights for each metric (default: equal weights)
+
+        Returns:
+            Competitive score and analysis
+        """
+        if not weights:
+            # Default equal weights
+            metrics = list(our_metrics.keys())
+            weights = {m: 1.0 / len(metrics) for m in metrics}
+
+        try:
+            # Normalize weights to sum to 1
+            total_weight = sum(weights.values())
+            normalized_weights = {k: v / total_weight for k, v in weights.items()}
+
+            # Calculate our score
+            our_score = 0
+            metric_scores = {}
+
+            for metric, weight in normalized_weights.items():
+                our_value = our_metrics.get(metric, 0)
+
+                # Get competitor values for this metric
+                comp_values = [c.get(metric, 0) for c in competitor_metrics]
+
+                if comp_values:
+                    # Normalize: 0-100 scale based on min-max
+                    all_values = comp_values + [our_value]
+                    min_val = min(all_values)
+                    max_val = max(all_values)
+
+                    if max_val > min_val:
+                        normalized_score = ((our_value - min_val) / (max_val - min_val)) * 100
+                    else:
+                        normalized_score = 50  # Neutral if all equal
+
+                    weighted_score = normalized_score * weight
+                    our_score += weighted_score
+
+                    metric_scores[metric] = {
+                        "our_value": our_value,
+                        "market_min": min_val,
+                        "market_max": max_val,
+                        "market_avg": sum(comp_values) / len(comp_values),
+                        "normalized_score": normalized_score,
+                        "weighted_contribution": weighted_score,
+                        "percentile": sum(1 for v in comp_values if v < our_value) / len(comp_values) * 100
+                    }
+
+            # Determine competitive position
+            if our_score >= 80:
+                position = "market_leader"
+            elif our_score >= 60:
+                position = "strong_competitor"
+            elif our_score >= 40:
+                position = "average_competitor"
+            else:
+                position = "challenger"
+
+            return {
+                "overall_score": round(our_score, 2),
+                "competitive_position": position,
+                "metric_breakdown": metric_scores,
+                "weights_used": normalized_weights,
+                "strengths": [
+                    metric for metric, data in metric_scores.items()
+                    if data["percentile"] >= 75
+                ],
+                "weaknesses": [
+                    metric for metric, data in metric_scores.items()
+                    if data["percentile"] <= 25
+                ],
+                "calculated_at": datetime.utcnow().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Competitive score calculation failed: {e}")
+            return {"error": str(e)}
+
     async def _save_analysis(self, analysis_type: str, results: Dict[str, Any]):
         """Save analysis results to database"""
         conn = self._get_db_connection()

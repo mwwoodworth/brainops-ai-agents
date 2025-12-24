@@ -113,6 +113,12 @@ class BoardDecision:
     debate_transcript: Dict[str, Any]
     follow_up_date: Optional[datetime]
     decided_at: datetime
+    # Enhanced fields
+    confidence_score: float = 0.0  # 0-1 confidence in the decision
+    risk_assessment: Optional[Dict[str, Any]] = None
+    human_escalation_required: bool = False
+    escalation_reason: Optional[str] = None
+    decision_criteria_scores: Optional[Dict[str, float]] = None
 
 
 class AIBoardOfDirectors:
@@ -328,6 +334,21 @@ class AIBoardOfDirectors:
             -- Schema migrations (safe to run repeatedly)
             ALTER TABLE ai_board_decisions
             ADD COLUMN IF NOT EXISTS debate_transcript JSONB;
+
+            ALTER TABLE ai_board_decisions
+            ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0;
+
+            ALTER TABLE ai_board_decisions
+            ADD COLUMN IF NOT EXISTS risk_assessment JSONB;
+
+            ALTER TABLE ai_board_decisions
+            ADD COLUMN IF NOT EXISTS human_escalation_required BOOLEAN DEFAULT FALSE;
+
+            ALTER TABLE ai_board_decisions
+            ADD COLUMN IF NOT EXISTS escalation_reason TEXT;
+
+            ALTER TABLE ai_board_decisions
+            ADD COLUMN IF NOT EXISTS decision_criteria_scores JSONB;
             """)
 
             conn.commit()
@@ -783,6 +804,24 @@ Output MUST be valid JSON only (no markdown) with this schema:
         # Multi-model, multi-round AI debate (falls back to deterministic per member if needed)
         debate_transcript, votes, consensus, decision_text, latest_parsed = await self._run_debate(proposal)
 
+        # Enhanced: Calculate confidence score based on debate quality
+        confidence_score = self._calculate_decision_confidence(
+            votes, consensus, latest_parsed, debate_transcript
+        )
+
+        # Enhanced: Perform comprehensive risk assessment
+        risk_assessment = self._assess_proposal_risk(proposal, votes, latest_parsed)
+
+        # Enhanced: Evaluate multi-criteria decision scores
+        decision_criteria_scores = self._evaluate_decision_criteria(
+            proposal, votes, latest_parsed
+        )
+
+        # Enhanced: Check if human escalation is needed
+        human_escalation, escalation_reason = self._check_board_escalation(
+            proposal, confidence_score, risk_assessment, consensus
+        )
+
         # Create implementation plan if approved
         implementation_plan = {}
         if decision_text == "approved":
@@ -799,7 +838,12 @@ Output MUST be valid JSON only (no markdown) with this schema:
             implementation_plan=implementation_plan,
             debate_transcript=debate_transcript,
             follow_up_date=datetime.now() + timedelta(days=7),
-            decided_at=datetime.now()
+            decided_at=datetime.now(),
+            confidence_score=confidence_score,
+            risk_assessment=risk_assessment,
+            human_escalation_required=human_escalation,
+            escalation_reason=escalation_reason,
+            decision_criteria_scores=decision_criteria_scores
         )
 
         # Store decision
@@ -1118,8 +1162,189 @@ Output MUST be valid JSON only (no markdown) with this schema:
         except Exception as e:
             logger.error(f"Failed to record meeting end: {e}")
 
+    def _calculate_decision_confidence(
+        self,
+        votes: Dict[BoardRole, VoteOption],
+        consensus: float,
+        latest_parsed: Dict[BoardRole, Dict[str, Any]],
+        debate_transcript: Dict[str, Any]
+    ) -> float:
+        """Calculate overall confidence in the board decision"""
+        confidence_factors = []
+
+        # Consensus strength (higher consensus = higher confidence)
+        consensus_confidence = consensus
+        confidence_factors.append(consensus_confidence)
+
+        # Vote distribution (unanimous = higher confidence)
+        vote_values = [v.value for v in votes.values()]
+        vote_std = (sum((v - sum(vote_values)/len(vote_values))**2 for v in vote_values) / len(vote_values))**0.5
+        vote_uniformity = 1.0 - min(vote_std / 2.0, 1.0)  # Lower std = higher uniformity
+        confidence_factors.append(vote_uniformity)
+
+        # Individual member confidence (from parsed responses)
+        member_confidences = []
+        for role, parsed in latest_parsed.items():
+            if isinstance(parsed, dict) and 'confidence' in parsed:
+                try:
+                    member_confidences.append(float(parsed['confidence']))
+                except (ValueError, TypeError):
+                    pass
+
+        if member_confidences:
+            avg_member_confidence = sum(member_confidences) / len(member_confidences)
+            confidence_factors.append(avg_member_confidence)
+
+        # Debate quality (more rounds = more thorough = higher confidence)
+        num_rounds = len(debate_transcript.get('rounds', []))
+        debate_confidence = min(num_rounds / 3.0, 1.0)  # 3+ rounds = max confidence
+        confidence_factors.append(debate_confidence)
+
+        # Calculate weighted average
+        return sum(confidence_factors) / len(confidence_factors) if confidence_factors else 0.5
+
+    def _assess_proposal_risk(
+        self,
+        proposal: Proposal,
+        votes: Dict[BoardRole, VoteOption],
+        latest_parsed: Dict[BoardRole, Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Comprehensive risk assessment of the proposal"""
+        risk_assessment = {
+            'overall_risk': 0.0,
+            'risk_categories': {},
+            'risk_factors': [],
+            'mitigation_strategies': []
+        }
+
+        # Financial risk
+        financial_risk = proposal.impact_analysis.get('cost', 0) / 100000  # Normalize
+        risk_assessment['risk_categories']['financial'] = min(financial_risk, 1.0)
+        if financial_risk > 0.7:
+            risk_assessment['risk_factors'].append(f"High financial commitment: ${proposal.impact_analysis.get('cost', 0)}")
+
+        # Implementation risk (from urgency and complexity)
+        urgency_risk = proposal.urgency / 10.0
+        risk_assessment['risk_categories']['urgency'] = urgency_risk
+        if urgency_risk > 0.7:
+            risk_assessment['risk_factors'].append("High urgency may compromise quality")
+
+        # Strategic risk (from proposal type)
+        strategic_risks = {
+            ProposalType.STRATEGIC: 0.8,
+            ProposalType.FINANCIAL: 0.7,
+            ProposalType.EMERGENCY: 0.9,
+            ProposalType.TECHNICAL: 0.6,
+            ProposalType.OPERATIONAL: 0.4,
+            ProposalType.MARKETING: 0.5,
+            ProposalType.POLICY: 0.6
+        }
+        strategic_risk = strategic_risks.get(proposal.type, 0.5)
+        risk_assessment['risk_categories']['strategic'] = strategic_risk
+
+        # Board concerns (from dissenting votes and member risks)
+        dissent_count = sum(1 for v in votes.values() if v.value < 0)
+        dissent_risk = dissent_count / max(len(votes), 1)
+        risk_assessment['risk_categories']['dissent'] = dissent_risk
+
+        # Member-identified risks
+        all_risks = []
+        for role, parsed in latest_parsed.items():
+            if isinstance(parsed, dict) and 'risks' in parsed:
+                member_risks = parsed['risks']
+                if isinstance(member_risks, list):
+                    all_risks.extend(member_risks)
+
+        if all_risks:
+            risk_assessment['risk_factors'].extend(all_risks[:5])  # Top 5
+            risk_assessment['mitigation_strategies'].append("Address specific member concerns before implementation")
+
+        # Calculate overall risk
+        risk_values = list(risk_assessment['risk_categories'].values())
+        risk_assessment['overall_risk'] = sum(risk_values) / len(risk_values) if risk_values else 0.5
+
+        return risk_assessment
+
+    def _evaluate_decision_criteria(
+        self,
+        proposal: Proposal,
+        votes: Dict[BoardRole, VoteOption],
+        latest_parsed: Dict[BoardRole, Dict[str, Any]]
+    ) -> Dict[str, float]:
+        """Evaluate decision across multiple criteria"""
+        criteria_scores = {}
+
+        # Strategic alignment (CEO weight matters most)
+        ceo_vote = votes.get(BoardRole.CEO, VoteOption.ABSTAIN)
+        criteria_scores['strategic_alignment'] = (ceo_vote.value + 2) / 4  # Normalize to 0-1
+
+        # Financial viability (CFO assessment)
+        cfo_vote = votes.get(BoardRole.CFO, VoteOption.ABSTAIN)
+        criteria_scores['financial_viability'] = (cfo_vote.value + 2) / 4
+
+        # Operational feasibility (COO assessment)
+        coo_vote = votes.get(BoardRole.COO, VoteOption.ABSTAIN)
+        criteria_scores['operational_feasibility'] = (coo_vote.value + 2) / 4
+
+        # Market opportunity (CMO assessment)
+        cmo_vote = votes.get(BoardRole.CMO, VoteOption.ABSTAIN)
+        criteria_scores['market_opportunity'] = (cmo_vote.value + 2) / 4
+
+        # Technical readiness (CTO assessment)
+        cto_vote = votes.get(BoardRole.CTO, VoteOption.ABSTAIN)
+        criteria_scores['technical_readiness'] = (cto_vote.value + 2) / 4
+
+        # Overall board support (average of all votes)
+        avg_vote = sum(v.value for v in votes.values()) / len(votes)
+        criteria_scores['board_support'] = (avg_vote + 2) / 4
+
+        # ROI potential (from proposal data)
+        roi_potential = proposal.impact_analysis.get('revenue_potential', 0) / max(proposal.impact_analysis.get('cost', 1), 1)
+        criteria_scores['roi_potential'] = min(roi_potential / 5.0, 1.0)  # Normalize, 5x ROI = max score
+
+        return criteria_scores
+
+    def _check_board_escalation(
+        self,
+        proposal: Proposal,
+        confidence_score: float,
+        risk_assessment: Dict[str, Any],
+        consensus: float
+    ) -> tuple[bool, Optional[str]]:
+        """Determine if human (owner) escalation is required"""
+        escalation_reasons = []
+
+        # Low confidence decisions
+        if confidence_score < 0.5:
+            escalation_reasons.append(f"Low board confidence: {confidence_score:.1%}")
+
+        # High risk decisions
+        if risk_assessment['overall_risk'] > 0.7:
+            escalation_reasons.append(f"High risk: {risk_assessment['overall_risk']:.1%}")
+
+        # Low consensus (board split)
+        if consensus < 0.4:
+            escalation_reasons.append(f"Low consensus: {consensus:.1%}")
+
+        # High-value financial decisions
+        if proposal.impact_analysis.get('cost', 0) > 100000:
+            escalation_reasons.append(f"High financial commitment: ${proposal.impact_analysis.get('cost', 0)}")
+
+        # Emergency decisions (always escalate for transparency)
+        if proposal.type == ProposalType.EMERGENCY:
+            escalation_reasons.append("Emergency proposal requires owner notification")
+
+        # Strategic decisions with < 60% consensus
+        if proposal.type == ProposalType.STRATEGIC and consensus < 0.6:
+            escalation_reasons.append("Strategic decision without strong consensus")
+
+        human_escalation = len(escalation_reasons) > 0
+        escalation_reason = "; ".join(escalation_reasons) if escalation_reasons else None
+
+        return human_escalation, escalation_reason
+
     def _record_decision(self, decision: BoardDecision):
-        """Record decision in database"""
+        """Record decision in database with enhanced fields"""
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor()
@@ -1129,8 +1354,10 @@ Output MUST be valid JSON only (no markdown) with this schema:
             cur.execute("""
             INSERT INTO ai_board_decisions
             (proposal_id, decision, vote_results, consensus_level,
-             dissenting_opinions, conditions, implementation_plan, debate_transcript, follow_up_date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+             dissenting_opinions, conditions, implementation_plan, debate_transcript, follow_up_date,
+             confidence_score, risk_assessment, human_escalation_required, escalation_reason,
+             decision_criteria_scores)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 decision.proposal_id,
                 decision.decision,
@@ -1140,7 +1367,12 @@ Output MUST be valid JSON only (no markdown) with this schema:
                 Json(decision.conditions),
                 Json(decision.implementation_plan),
                 Json(decision.debate_transcript),
-                decision.follow_up_date
+                decision.follow_up_date,
+                decision.confidence_score,
+                Json(decision.risk_assessment),
+                decision.human_escalation_required,
+                decision.escalation_reason,
+                Json(decision.decision_criteria_scores)
             ))
 
             # Update proposal status

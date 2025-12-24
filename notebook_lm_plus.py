@@ -96,6 +96,9 @@ class NotebookLMPlus:
         self.active_session = None
         self.knowledge_graph = {}
         self.synthesis_threshold = 5  # Min nodes for synthesis
+        self.pattern_recognition_enabled = True
+        self.continuous_learning_enabled = True
+        self.outcome_tracker = {}
 
     def _ensure_tables(self):
         """Create necessary database tables"""
@@ -154,6 +157,37 @@ class NotebookLMPlus:
                 )
             """)
 
+            # Pattern recognition table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS notebook_lm_patterns (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    pattern_type VARCHAR(50) NOT NULL,
+                    pattern_name VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    occurrences INT DEFAULT 1,
+                    confidence FLOAT DEFAULT 0.5,
+                    supporting_nodes JSONB DEFAULT '[]'::jsonb,
+                    metadata JSONB DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    last_seen TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+
+            # Outcome tracking table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS notebook_lm_outcomes (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    knowledge_id UUID REFERENCES notebook_lm_knowledge(id),
+                    action_taken TEXT,
+                    expected_result TEXT,
+                    actual_result TEXT,
+                    success BOOLEAN,
+                    feedback_score FLOAT,
+                    learned_improvement TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+
             # Create indexes
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_knowledge_type
@@ -167,6 +201,15 @@ class NotebookLMPlus:
 
                 CREATE INDEX IF NOT EXISTS idx_insights_impact
                 ON notebook_lm_insights(impact_score DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_patterns_type
+                ON notebook_lm_patterns(pattern_type);
+
+                CREATE INDEX IF NOT EXISTS idx_patterns_confidence
+                ON notebook_lm_patterns(confidence DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_outcomes_success
+                ON notebook_lm_outcomes(success);
             """)
 
             conn.commit()
@@ -571,8 +614,212 @@ class NotebookLMPlus:
             logger.error(f"Failed to get insights: {e}")
             return []
 
+    def recognize_patterns(self, timeframe_days: int = 7) -> List[Dict]:
+        """Recognize patterns across historical data"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            cursor = conn.cursor()
+
+            # Identify recurring knowledge types
+            cursor.execute("""
+                SELECT
+                    knowledge_type,
+                    COUNT(*) as count,
+                    AVG(confidence) as avg_confidence,
+                    ARRAY_AGG(id) as node_ids
+                FROM notebook_lm_knowledge
+                WHERE created_at > NOW() - INTERVAL '%s days'
+                GROUP BY knowledge_type
+                HAVING COUNT(*) >= 3
+                ORDER BY count DESC
+            """, (timeframe_days,))
+
+            type_patterns = cursor.fetchall()
+            patterns = []
+
+            for pattern in type_patterns:
+                # Store pattern
+                cursor.execute("""
+                    INSERT INTO notebook_lm_patterns
+                    (pattern_type, pattern_name, description, occurrences, confidence, supporting_nodes)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (pattern_type, pattern_name)
+                    DO UPDATE SET
+                        occurrences = EXCLUDED.occurrences,
+                        confidence = EXCLUDED.confidence,
+                        last_seen = NOW()
+                    RETURNING id
+                """, (
+                    'knowledge_type_frequency',
+                    f"frequent_{pattern['knowledge_type']}",
+                    f"Frequent occurrence of {pattern['knowledge_type']} knowledge",
+                    pattern['count'],
+                    pattern['avg_confidence'],
+                    json.dumps([str(nid) for nid in pattern['node_ids']])
+                ))
+
+                patterns.append({
+                    "type": "frequency",
+                    "pattern": pattern['knowledge_type'],
+                    "count": pattern['count'],
+                    "confidence": float(pattern['avg_confidence'])
+                })
+
+            # Identify temporal patterns
+            cursor.execute("""
+                SELECT
+                    DATE_TRUNC('hour', created_at) as hour,
+                    knowledge_type,
+                    COUNT(*) as count
+                FROM notebook_lm_knowledge
+                WHERE created_at > NOW() - INTERVAL '%s days'
+                GROUP BY DATE_TRUNC('hour', created_at), knowledge_type
+                HAVING COUNT(*) >= 2
+                ORDER BY hour DESC, count DESC
+            """, (timeframe_days,))
+
+            temporal_patterns = cursor.fetchall()
+            for tpattern in temporal_patterns[:5]:  # Top 5
+                patterns.append({
+                    "type": "temporal",
+                    "pattern": f"{tpattern['knowledge_type']}_at_{tpattern['hour'].hour}h",
+                    "count": tpattern['count'],
+                    "hour": tpattern['hour'].hour
+                })
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            return patterns
+
+        except Exception as e:
+            logger.error(f"Pattern recognition failed: {e}")
+            return []
+
+    def track_outcome(self, knowledge_id: str, action: str, expected: str, actual: str, success: bool) -> None:
+        """Track outcome of applied knowledge for continuous learning"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+
+            # Calculate feedback score
+            feedback_score = 1.0 if success else 0.0
+
+            # Determine learned improvement
+            learned_improvement = ""
+            if not success:
+                learned_improvement = f"Action '{action}' did not produce expected result '{expected}'. Actual: '{actual}'"
+
+            cursor.execute("""
+                INSERT INTO notebook_lm_outcomes
+                (knowledge_id, action_taken, expected_result, actual_result, success, feedback_score, learned_improvement)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (knowledge_id, action, expected, actual, success, feedback_score, learned_improvement))
+
+            # Update knowledge confidence based on outcome
+            if success:
+                cursor.execute("""
+                    UPDATE notebook_lm_knowledge
+                    SET confidence = LEAST(1.0, confidence + 0.05),
+                        importance = LEAST(1.0, importance + 0.03)
+                    WHERE id = %s
+                """, (knowledge_id,))
+            else:
+                cursor.execute("""
+                    UPDATE notebook_lm_knowledge
+                    SET confidence = GREATEST(0.1, confidence - 0.1)
+                    WHERE id = %s
+                """, (knowledge_id,))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            logger.info(f"Tracked outcome for knowledge {knowledge_id}: {'success' if success else 'failure'}")
+
+        except Exception as e:
+            logger.error(f"Failed to track outcome: {e}")
+
+    def generate_recommendations(self) -> List[Dict]:
+        """Generate actionable recommendations from learned knowledge"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            cursor = conn.cursor()
+
+            recommendations = []
+
+            # Recommend based on high-confidence knowledge
+            cursor.execute("""
+                SELECT id, content, knowledge_type, confidence, importance
+                FROM notebook_lm_knowledge
+                WHERE confidence > 0.8 AND importance > 0.7
+                ORDER BY importance DESC, confidence DESC
+                LIMIT 5
+            """)
+
+            high_value = cursor.fetchall()
+            for item in high_value:
+                recommendations.append({
+                    "type": "apply_knowledge",
+                    "priority": "high",
+                    "recommendation": f"Apply high-confidence {item['knowledge_type']}: {item['content'][:100]}",
+                    "confidence": float(item['confidence']),
+                    "knowledge_id": str(item['id'])
+                })
+
+            # Recommend based on successful outcomes
+            cursor.execute("""
+                SELECT k.id, k.content, k.knowledge_type, COUNT(o.id) as success_count
+                FROM notebook_lm_knowledge k
+                JOIN notebook_lm_outcomes o ON o.knowledge_id = k.id
+                WHERE o.success = TRUE
+                GROUP BY k.id, k.content, k.knowledge_type
+                HAVING COUNT(o.id) >= 2
+                ORDER BY success_count DESC
+                LIMIT 3
+            """)
+
+            proven_knowledge = cursor.fetchall()
+            for item in proven_knowledge:
+                recommendations.append({
+                    "type": "proven_strategy",
+                    "priority": "high",
+                    "recommendation": f"Repeat successful {item['knowledge_type']}: {item['content'][:100]}",
+                    "success_count": item['success_count'],
+                    "knowledge_id": str(item['id'])
+                })
+
+            # Recommend pattern-based actions
+            cursor.execute("""
+                SELECT pattern_name, description, confidence, occurrences
+                FROM notebook_lm_patterns
+                WHERE confidence > 0.7
+                ORDER BY occurrences DESC, confidence DESC
+                LIMIT 3
+            """)
+
+            patterns = cursor.fetchall()
+            for pattern in patterns:
+                recommendations.append({
+                    "type": "pattern_based",
+                    "priority": "medium",
+                    "recommendation": f"Leverage pattern: {pattern['description']}",
+                    "confidence": float(pattern['confidence']),
+                    "occurrences": pattern['occurrences']
+                })
+
+            cursor.close()
+            conn.close()
+
+            return recommendations
+
+        except Exception as e:
+            logger.error(f"Failed to generate recommendations: {e}")
+            return []
+
     def end_learning_session(self) -> Dict[str, Any]:
-        """End the current learning session and generate summary"""
+        """End the current learning session and generate summary with patterns"""
         if not self.active_session:
             return {"error": "No active session"}
 
@@ -588,10 +835,17 @@ class NotebookLMPlus:
 
             session = cursor.fetchone()
 
+            # Recognize patterns from this session
+            patterns = self.recognize_patterns(timeframe_days=1)
+
+            # Generate recommendations
+            recommendations = self.generate_recommendations()
+
             # Generate summary
             summary = f"Learning session completed. Created {session['nodes_created']} knowledge nodes, "
             summary += f"made {session['connections_made']} connections, "
-            summary += f"and generated {session['insights_generated']} insights."
+            summary += f"and generated {session['insights_generated']} insights. "
+            summary += f"Recognized {len(patterns)} patterns and generated {len(recommendations)} recommendations."
 
             # Update session
             cursor.execute("""
@@ -608,7 +862,11 @@ class NotebookLMPlus:
 
             self.active_session = None
 
-            return session
+            return {
+                **dict(session),
+                "patterns_recognized": patterns,
+                "recommendations": recommendations
+            }
 
         except Exception as e:
             logger.error(f"Failed to end session: {e}")

@@ -739,15 +739,23 @@ class EnhancedSelfHealing:
                 tool="restart_service" if platform == "render" else "redeploy",
                 params={"service_id": service_id, "component": component}
             )
-            return {
+
+            result = {
                 "success": mcp_result.get("success", False),
                 "action": "restart_service",
                 "component": component,
                 "mcp_result": mcp_result
             }
+
+            # Log to unified brain
+            await self._log_to_unified_brain('service_restart', result)
+
+            return result
         except Exception as e:
             logger.error(f"MCP restart failed: {e}")
-            return {"success": False, "action": "restart_service", "error": str(e)}
+            error_result = {"success": False, "action": "restart_service", "error": str(e), "component": component}
+            await self._log_to_unified_brain('service_restart_failed', error_result)
+            return error_result
 
     async def _handle_scale_up(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle scale up via MCP Bridge - Render/Kubernetes"""
@@ -1006,7 +1014,7 @@ class EnhancedSelfHealing:
                 }
             )
 
-            return {
+            result = {
                 "success": mcp_result.get("success", False),
                 "action": "rollback",
                 "component": component,
@@ -1014,9 +1022,16 @@ class EnhancedSelfHealing:
                 "platform": platform,
                 "mcp_result": mcp_result
             }
+
+            # Log to unified brain
+            await self._log_to_unified_brain('automatic_rollback', result)
+
+            return result
         except Exception as e:
             logger.error(f"Rollback failed: {e}")
-            return {"success": False, "action": "rollback", "error": str(e)}
+            error_result = {"success": False, "action": "rollback", "error": str(e), "component": component}
+            await self._log_to_unified_brain('rollback_failed', error_result)
+            return error_result
 
     async def _handle_flush_connections(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle connection flush via MCP Bridge - Supabase/PostgreSQL"""
@@ -1406,17 +1421,54 @@ class EnhancedSelfHealing:
             incident = self.incidents.get(incident_id)
             if incident:
                 success = await self._execute_remediation_plan(plan, incident)
-                return {
+                result = {
                     "status": "executed" if success else "failed",
                     "approved_by": approver,
-                    "notes": notes
+                    "notes": notes,
+                    "incident_id": incident_id
                 }
+                await self._log_to_unified_brain('remediation_approval', result)
+                return result
         else:
-            return {
+            result = {
                 "status": "rejected",
                 "rejected_by": approver,
-                "notes": notes
+                "notes": notes,
+                "incident_id": incident_id
             }
+            await self._log_to_unified_brain('remediation_rejected', result)
+            return result
+
+    async def _log_to_unified_brain(self, action_type: str, data: Dict[str, Any]):
+        """Log healing actions to unified_brain table"""
+        try:
+            import asyncpg
+            if not self.db_url:
+                return
+
+            conn = await asyncpg.connect(self.db_url)
+            try:
+                await conn.execute("""
+                    INSERT INTO unified_brain (
+                        agent_name, action_type, input_data, output_data,
+                        success, metadata, executed_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                """,
+                    'enhanced_self_healing',
+                    action_type,
+                    json.dumps(data),
+                    json.dumps(data),
+                    data.get('success', True),
+                    json.dumps({
+                        'timestamp': datetime.utcnow().isoformat(),
+                        'component': data.get('component', 'unknown'),
+                        'action': action_type
+                    })
+                )
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.debug(f"Failed to log to unified_brain: {e}")
 
 
 # Singleton instance

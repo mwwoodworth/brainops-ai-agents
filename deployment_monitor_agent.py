@@ -348,6 +348,231 @@ class DeploymentMonitorAgent:
             "all_operational": live == total and healthy == total
         }
 
+    async def calculate_deployment_risk(self, service_name: str, deployment_details: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate deployment risk score based on multiple factors"""
+        try:
+            risk_factors = {
+                "change_size": 0,  # Number of files/lines changed
+                "test_coverage": 0,  # Test pass rate
+                "recent_failures": 0,  # Recent deployment failures
+                "time_of_day": 0,  # Deploying during business hours is riskier
+                "dependencies": 0,  # Number of dependent services
+                "rollback_time": 0,  # Time to rollback if needed
+                "monitoring_coverage": 0,  # Quality of monitoring
+            }
+
+            # Analyze change size
+            files_changed = deployment_details.get("files_changed", [])
+            risk_factors["change_size"] = min(10, len(files_changed) / 2)  # 0-10 scale
+
+            # Check test coverage
+            test_results = deployment_details.get("test_results", {})
+            if test_results:
+                passed = test_results.get("passed", 0)
+                total = test_results.get("total", 1)
+                test_pass_rate = passed / total if total > 0 else 0
+                risk_factors["test_coverage"] = (1 - test_pass_rate) * 10
+
+            # Check recent deployment history
+            service = self.services.get(service_name)
+            if service:
+                # Time of day risk (higher during business hours)
+                current_hour = datetime.utcnow().hour
+                if 9 <= current_hour <= 17:  # Business hours UTC
+                    risk_factors["time_of_day"] = 5
+                elif 6 <= current_hour <= 21:
+                    risk_factors["time_of_day"] = 3
+
+                # Dependency risk
+                risk_factors["dependencies"] = min(10, len(service.get("dependencies", [])) * 2)
+
+            # Calculate total risk score (0-100)
+            total_risk = sum(risk_factors.values())
+            risk_score = min(100, int(total_risk * 1.5))
+
+            # Determine risk level
+            if risk_score >= 70:
+                risk_level = "critical"
+                recommendation = "Deployment not recommended - too many risk factors"
+            elif risk_score >= 50:
+                risk_level = "high"
+                recommendation = "Deploy with caution - consider deploying during low-traffic hours"
+            elif risk_score >= 30:
+                risk_level = "medium"
+                recommendation = "Acceptable risk - ensure monitoring is active"
+            else:
+                risk_level = "low"
+                recommendation = "Low risk deployment - proceed with standard procedures"
+
+            return {
+                "service": service_name,
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "risk_factors": risk_factors,
+                "recommendation": recommendation,
+                "calculated_at": datetime.utcnow().isoformat(),
+                "should_proceed": risk_score < 70,
+                "mitigation_steps": self._generate_mitigation_steps(risk_factors)
+            }
+
+        except Exception as e:
+            logger.error(f"Risk calculation failed: {e}")
+            return {
+                "error": str(e),
+                "risk_score": 100,
+                "risk_level": "unknown",
+                "should_proceed": False
+            }
+
+    def _generate_mitigation_steps(self, risk_factors: Dict[str, float]) -> List[str]:
+        """Generate mitigation steps based on risk factors"""
+        steps = []
+
+        if risk_factors["change_size"] > 5:
+            steps.append("Consider breaking deployment into smaller chunks")
+
+        if risk_factors["test_coverage"] > 5:
+            steps.append("Improve test coverage before deploying")
+
+        if risk_factors["time_of_day"] > 3:
+            steps.append("Consider deploying during off-peak hours")
+
+        if risk_factors["dependencies"] > 5:
+            steps.append("Verify all dependent services are healthy")
+
+        if risk_factors["recent_failures"] > 3:
+            steps.append("Review recent failure patterns before proceeding")
+
+        steps.append("Ensure rollback procedure is documented and tested")
+        steps.append("Have monitoring dashboards ready")
+
+        return steps
+
+    async def auto_rollback_decision(self, service_name: str, deployment_id: str, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """Determine if automatic rollback should be triggered"""
+        try:
+            rollback_triggers = {
+                "error_rate_spike": False,
+                "response_time_degradation": False,
+                "health_check_failures": False,
+                "traffic_drop": False,
+                "cpu_spike": False,
+                "memory_spike": False
+            }
+
+            # Check error rate
+            error_rate = metrics.get("error_rate", 0)
+            baseline_error_rate = metrics.get("baseline_error_rate", 0)
+            if error_rate > baseline_error_rate * 3:  # 3x increase
+                rollback_triggers["error_rate_spike"] = True
+
+            # Check response time
+            response_time = metrics.get("avg_response_time_ms", 0)
+            baseline_response_time = metrics.get("baseline_response_time_ms", 0)
+            if response_time > baseline_response_time * 2:  # 2x slower
+                rollback_triggers["response_time_degradation"] = True
+
+            # Check health status
+            health_failures = metrics.get("health_check_failures", 0)
+            if health_failures >= 3:  # 3 consecutive failures
+                rollback_triggers["health_check_failures"] = True
+
+            # Check traffic
+            current_traffic = metrics.get("requests_per_minute", 0)
+            baseline_traffic = metrics.get("baseline_requests_per_minute", 1)
+            if current_traffic < baseline_traffic * 0.5:  # 50% drop
+                rollback_triggers["traffic_drop"] = True
+
+            # Check CPU
+            cpu_usage = metrics.get("cpu_usage_percent", 0)
+            if cpu_usage > 90:
+                rollback_triggers["cpu_spike"] = True
+
+            # Check memory
+            memory_usage = metrics.get("memory_usage_percent", 0)
+            if memory_usage > 90:
+                rollback_triggers["memory_spike"] = True
+
+            # Determine if rollback should occur
+            triggered_count = sum(1 for v in rollback_triggers.values() if v)
+            should_rollback = triggered_count >= 2  # At least 2 triggers
+
+            severity = "critical" if triggered_count >= 3 else "high" if triggered_count >= 2 else "medium" if triggered_count >= 1 else "low"
+
+            return {
+                "service": service_name,
+                "deployment_id": deployment_id,
+                "should_rollback": should_rollback,
+                "severity": severity,
+                "triggers": rollback_triggers,
+                "triggered_count": triggered_count,
+                "reason": self._generate_rollback_reason(rollback_triggers),
+                "evaluated_at": datetime.utcnow().isoformat(),
+                "metrics": metrics
+            }
+
+        except Exception as e:
+            logger.error(f"Rollback decision failed: {e}")
+            return {
+                "error": str(e),
+                "should_rollback": True,  # Fail-safe: rollback on errors
+                "severity": "critical"
+            }
+
+    def _generate_rollback_reason(self, triggers: Dict[str, bool]) -> str:
+        """Generate human-readable rollback reason"""
+        active_triggers = [k.replace('_', ' ').title() for k, v in triggers.items() if v]
+
+        if not active_triggers:
+            return "No rollback triggers detected"
+
+        if len(active_triggers) == 1:
+            return f"Rollback triggered by: {active_triggers[0]}"
+
+        return f"Multiple issues detected: {', '.join(active_triggers)}"
+
+    async def monitor_deployment_metrics(self, service_name: str, duration_minutes: int = 10) -> Dict[str, Any]:
+        """Monitor deployment metrics for a period after deployment"""
+        try:
+            service = self.services.get(service_name)
+            if not service:
+                return {"error": f"Unknown service: {service_name}"}
+
+            metrics_history = []
+            start_time = datetime.utcnow()
+
+            # In a real implementation, this would poll metrics over time
+            # For now, we'll simulate with a single check
+            health_check = await self.check_service_health(service["url"])
+
+            metrics = {
+                "service": service_name,
+                "monitoring_started": start_time.isoformat(),
+                "duration_minutes": duration_minutes,
+                "health_status": health_check.get("status"),
+                "error_rate": 0,  # Would come from APM/logging
+                "avg_response_time_ms": 0,  # Would come from metrics
+                "requests_per_minute": 0,  # Would come from metrics
+                "cpu_usage_percent": 0,  # Would come from platform API
+                "memory_usage_percent": 0,  # Would come from platform API
+                "baseline_error_rate": 0.5,
+                "baseline_response_time_ms": 200,
+                "baseline_requests_per_minute": 100
+            }
+
+            # Check if rollback is needed
+            rollback_decision = await self.auto_rollback_decision(service_name, "current", metrics)
+
+            return {
+                "metrics": metrics,
+                "rollback_decision": rollback_decision,
+                "status": "healthy" if not rollback_decision["should_rollback"] else "unhealthy"
+            }
+
+        except Exception as e:
+            logger.error(f"Metrics monitoring failed: {e}")
+            return {"error": str(e)}
+
     async def get_error_logs(self, service_name: str, last_n_lines: int = 100) -> str:
         """Get recent error logs for a service"""
         service = self.services.get(service_name)

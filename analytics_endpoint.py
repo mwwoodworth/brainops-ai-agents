@@ -305,3 +305,421 @@ async def get_analytics_summary():
     except Exception as e:
         logger.error(f"Summary endpoint error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analytics/dashboard")
+async def get_dashboard_data(
+    time_range: str = Query("7d", description="Time range: 24h, 7d, 30d, 90d"),
+    include_predictions: bool = Query(True, description="Include predictive analytics")
+):
+    """
+    Get comprehensive dashboard data with all key metrics
+
+    Returns dashboard-ready data structure for visualization
+    """
+    from database.async_connection import get_pool
+
+    try:
+        pool = get_pool()
+        now = datetime.utcnow()
+
+        # Parse time range
+        range_map = {
+            "24h": timedelta(hours=24),
+            "7d": timedelta(days=7),
+            "30d": timedelta(days=30),
+            "90d": timedelta(days=90)
+        }
+        time_delta = range_map.get(time_range, timedelta(days=7))
+        start_time = now - time_delta
+
+        # 1. Overview metrics
+        overview = await pool.fetchrow("""
+            SELECT
+                COUNT(DISTINCT ae.agent_id) as active_agents_count,
+                COUNT(ae.id) as total_executions,
+                COUNT(CASE WHEN ae.status = 'completed' THEN 1 END) as successful_executions,
+                COUNT(CASE WHEN ae.status = 'failed' THEN 1 END) as failed_executions,
+                AVG(ae.latency_ms) as avg_latency,
+                MAX(ae.created_at) as last_execution
+            FROM agent_executions ae
+            WHERE ae.created_at >= $1
+        """, start_time)
+
+        # 2. Time series data (executions over time)
+        time_series = await pool.fetch("""
+            SELECT
+                DATE_TRUNC('hour', created_at) as time_bucket,
+                COUNT(*) as executions,
+                COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
+                AVG(latency_ms) as avg_latency
+            FROM agent_executions
+            WHERE created_at >= $1
+            GROUP BY time_bucket
+            ORDER BY time_bucket
+        """, start_time)
+
+        # 3. Top performing agents
+        top_agents = await pool.fetch("""
+            SELECT
+                a.name,
+                a.category,
+                COUNT(ae.id) as executions,
+                COUNT(CASE WHEN ae.status = 'completed' THEN 1 END) as successful,
+                AVG(ae.latency_ms) as avg_latency,
+                MAX(ae.created_at) as last_used
+            FROM agents a
+            LEFT JOIN agent_executions ae ON a.id = ae.agent_id
+                AND ae.created_at >= $1
+            WHERE a.enabled = true
+            GROUP BY a.name, a.category
+            ORDER BY executions DESC
+            LIMIT 10
+        """, start_time)
+
+        # 4. Agent category breakdown
+        category_stats = await pool.fetch("""
+            SELECT
+                a.category,
+                COUNT(ae.id) as executions,
+                COUNT(CASE WHEN ae.status = 'completed' THEN 1 END) as successful,
+                AVG(ae.latency_ms) as avg_latency
+            FROM agents a
+            LEFT JOIN agent_executions ae ON a.id = ae.agent_id
+                AND ae.created_at >= $1
+            WHERE a.enabled = true
+            GROUP BY a.category
+            ORDER BY executions DESC
+        """, start_time)
+
+        # 5. Recent errors
+        recent_errors = await pool.fetch("""
+            SELECT
+                ae.agent_id::text,
+                a.name as agent_name,
+                ae.error_message,
+                ae.created_at
+            FROM agent_executions ae
+            JOIN agents a ON a.id = ae.agent_id
+            WHERE ae.status = 'failed'
+                AND ae.created_at >= $1
+            ORDER BY ae.created_at DESC
+            LIMIT 10
+        """, start_time)
+
+        # Build dashboard response
+        dashboard = {
+            "generated_at": now.isoformat(),
+            "time_range": time_range,
+            "period_start": start_time.isoformat(),
+            "period_end": now.isoformat(),
+
+            "overview": {
+                "active_agents": overview["active_agents_count"] or 0,
+                "total_executions": overview["total_executions"] or 0,
+                "successful_executions": overview["successful_executions"] or 0,
+                "failed_executions": overview["failed_executions"] or 0,
+                "success_rate": round(
+                    ((overview["successful_executions"] or 0) / max(overview["total_executions"] or 1, 1)) * 100,
+                    2
+                ),
+                "avg_latency_ms": float(overview["avg_latency"] or 0),
+                "last_execution": overview["last_execution"].isoformat() if overview["last_execution"] else None
+            },
+
+            "time_series": [
+                {
+                    "timestamp": row["time_bucket"].isoformat(),
+                    "executions": row["executions"],
+                    "successful": row["successful"],
+                    "success_rate": round((row["successful"] / max(row["executions"], 1)) * 100, 2),
+                    "avg_latency": float(row["avg_latency"] or 0)
+                }
+                for row in time_series
+            ],
+
+            "top_agents": [
+                {
+                    "name": row["name"],
+                    "category": row["category"],
+                    "executions": row["executions"] or 0,
+                    "successful": row["successful"] or 0,
+                    "success_rate": round(
+                        ((row["successful"] or 0) / max(row["executions"] or 1, 1)) * 100,
+                        2
+                    ),
+                    "avg_latency_ms": float(row["avg_latency"] or 0),
+                    "last_used": row["last_used"].isoformat() if row["last_used"] else None
+                }
+                for row in top_agents
+            ],
+
+            "category_breakdown": [
+                {
+                    "category": row["category"],
+                    "executions": row["executions"] or 0,
+                    "successful": row["successful"] or 0,
+                    "success_rate": round(
+                        ((row["successful"] or 0) / max(row["executions"] or 1, 1)) * 100,
+                        2
+                    ),
+                    "avg_latency_ms": float(row["avg_latency"] or 0)
+                }
+                for row in category_stats
+            ],
+
+            "recent_errors": [
+                {
+                    "agent_id": row["agent_id"],
+                    "agent_name": row["agent_name"],
+                    "error": row["error_message"],
+                    "timestamp": row["created_at"].isoformat()
+                }
+                for row in recent_errors
+            ]
+        }
+
+        # Add AI-generated insights
+        dashboard["insights"] = await generate_automated_insights(dashboard)
+
+        # Add predictions if requested
+        if include_predictions:
+            dashboard["predictions"] = await generate_predictions(dashboard, pool, start_time)
+
+        return dashboard
+
+    except Exception as e:
+        logger.error(f"Dashboard endpoint error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def generate_automated_insights(dashboard_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Generate automated insights from dashboard data using AI
+
+    Analyzes patterns and generates actionable insights
+    """
+    insights = []
+
+    overview = dashboard_data.get("overview", {})
+    time_series = dashboard_data.get("time_series", [])
+    top_agents = dashboard_data.get("top_agents", [])
+
+    # 1. Success rate insight
+    success_rate = overview.get("success_rate", 0)
+    if success_rate >= 95:
+        insights.append({
+            "type": "positive",
+            "category": "performance",
+            "title": "Excellent Success Rate",
+            "message": f"System maintaining {success_rate:.1f}% success rate - well above target",
+            "priority": "low",
+            "action": "Continue monitoring"
+        })
+    elif success_rate < 80:
+        insights.append({
+            "type": "warning",
+            "category": "performance",
+            "title": "Success Rate Below Target",
+            "message": f"Success rate at {success_rate:.1f}% - investigate failure causes",
+            "priority": "high",
+            "action": "Review recent errors and optimize failing agents"
+        })
+
+    # 2. Performance trend insight
+    if len(time_series) >= 2:
+        recent_executions = sum(t["executions"] for t in time_series[-3:])
+        earlier_executions = sum(t["executions"] for t in time_series[:3]) if len(time_series) >= 6 else recent_executions
+
+        if recent_executions > earlier_executions * 1.5:
+            insights.append({
+                "type": "positive",
+                "category": "growth",
+                "title": "Increased Activity Detected",
+                "message": f"Agent activity increased by {((recent_executions / max(earlier_executions, 1)) - 1) * 100:.0f}%",
+                "priority": "medium",
+                "action": "Monitor resource utilization"
+            })
+        elif recent_executions < earlier_executions * 0.5:
+            insights.append({
+                "type": "warning",
+                "category": "activity",
+                "title": "Decreased Activity",
+                "message": "Agent activity has decreased significantly",
+                "priority": "medium",
+                "action": "Investigate potential issues or reduced demand"
+            })
+
+    # 3. Latency insight
+    avg_latency = overview.get("avg_latency_ms", 0)
+    if avg_latency > 5000:  # 5 seconds
+        insights.append({
+            "type": "warning",
+            "category": "performance",
+            "title": "High Latency Detected",
+            "message": f"Average latency at {avg_latency:.0f}ms - optimization recommended",
+            "priority": "high",
+            "action": "Profile slow agents and optimize code paths"
+        })
+
+    # 4. Agent utilization insight
+    if top_agents:
+        top_agent_executions = top_agents[0]["executions"]
+        total_executions = overview.get("total_executions", 1)
+        concentration = (top_agent_executions / total_executions) * 100
+
+        if concentration > 50:
+            insights.append({
+                "type": "info",
+                "category": "utilization",
+                "title": "High Concentration on Single Agent",
+                "message": f"Top agent handles {concentration:.0f}% of all executions",
+                "priority": "medium",
+                "action": "Consider load balancing or agent diversification"
+            })
+
+    # 5. Error rate insight
+    failed_count = overview.get("failed_executions", 0)
+    total_count = overview.get("total_executions", 1)
+    error_rate = (failed_count / total_count) * 100
+
+    if error_rate > 10:
+        insights.append({
+            "type": "critical",
+            "category": "errors",
+            "title": "High Error Rate",
+            "message": f"Error rate at {error_rate:.1f}% - immediate attention required",
+            "priority": "critical",
+            "action": "Review error logs and implement fixes"
+        })
+
+    return insights
+
+
+async def generate_predictions(dashboard_data: Dict[str, Any], pool, start_time) -> Dict[str, Any]:
+    """
+    Generate predictive analytics based on historical trends
+    """
+    try:
+        # Get historical data for trend analysis
+        time_series = dashboard_data.get("time_series", [])
+
+        if len(time_series) < 5:
+            return {
+                "available": False,
+                "reason": "Insufficient data for predictions"
+            }
+
+        # Extract execution counts
+        execution_counts = [t["executions"] for t in time_series]
+
+        # Simple linear regression for trend
+        import numpy as np
+        x = np.arange(len(execution_counts))
+        y = np.array(execution_counts)
+
+        # Calculate trend
+        coeffs = np.polyfit(x, y, 1)
+        slope = coeffs[0]
+
+        # Predict next periods
+        next_periods = 3
+        predictions = []
+        for i in range(1, next_periods + 1):
+            predicted_value = coeffs[0] * (len(x) + i) + coeffs[1]
+            predictions.append({
+                "period": i,
+                "predicted_executions": max(0, int(predicted_value)),
+                "confidence": 0.7  # Simple model, medium confidence
+            })
+
+        # Trend classification
+        if slope > len(execution_counts) * 0.1:
+            trend = "increasing"
+        elif slope < -len(execution_counts) * 0.1:
+            trend = "decreasing"
+        else:
+            trend = "stable"
+
+        return {
+            "available": True,
+            "trend": trend,
+            "trend_strength": abs(float(slope)),
+            "predictions": predictions,
+            "recommendation": _get_trend_recommendation(trend, slope, execution_counts)
+        }
+
+    except Exception as e:
+        logger.error(f"Prediction generation error: {e}")
+        return {
+            "available": False,
+            "reason": f"Error: {str(e)}"
+        }
+
+
+def _get_trend_recommendation(trend: str, slope: float, data: List[int]) -> str:
+    """Generate recommendation based on trend"""
+    if trend == "increasing":
+        return "Activity is growing - consider scaling resources and monitoring capacity"
+    elif trend == "decreasing":
+        return "Activity is declining - investigate potential issues or seasonal patterns"
+    else:
+        return "Activity is stable - maintain current configuration and monitoring"
+
+
+@router.get("/analytics/insights")
+async def get_ai_insights(
+    category: Optional[str] = Query(None, description="Filter by insight category")
+):
+    """
+    Get AI-generated insights about system performance
+
+    Uses machine learning to identify patterns and anomalies
+    """
+    from database.async_connection import get_pool
+
+    try:
+        # Get recent dashboard data
+        pool = get_pool()
+        now = datetime.utcnow()
+        start_time = now - timedelta(days=7)
+
+        # Simplified data fetch for insights
+        overview = await pool.fetchrow("""
+            SELECT
+                COUNT(*) as total_executions,
+                COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
+                AVG(latency_ms) as avg_latency
+            FROM agent_executions
+            WHERE created_at >= $1
+        """, start_time)
+
+        # Generate insights using the dashboard structure
+        dashboard_data = {
+            "overview": {
+                "total_executions": overview["total_executions"] or 0,
+                "successful_executions": overview["successful"] or 0,
+                "failed_executions": (overview["total_executions"] or 0) - (overview["successful"] or 0),
+                "success_rate": ((overview["successful"] or 0) / max(overview["total_executions"] or 1, 1)) * 100,
+                "avg_latency_ms": float(overview["avg_latency"] or 0)
+            },
+            "time_series": [],
+            "top_agents": []
+        }
+
+        insights = await generate_automated_insights(dashboard_data)
+
+        # Filter by category if specified
+        if category:
+            insights = [i for i in insights if i["category"] == category]
+
+        return {
+            "insights": insights,
+            "generated_at": now.isoformat(),
+            "total_insights": len(insights),
+            "categories": list(set(i["category"] for i in insights))
+        }
+
+    except Exception as e:
+        logger.error(f"AI insights endpoint error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

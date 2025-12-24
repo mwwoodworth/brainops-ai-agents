@@ -782,6 +782,250 @@ class PredictiveMarketIntelligence:
             "industry": industry
         }
 
+    async def score_opportunity(
+        self,
+        opportunity_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Score a market opportunity using multi-factor analysis
+
+        Scoring Factors:
+        - Market size and growth (30%)
+        - Competitive intensity (20%)
+        - Strategic fit (20%)
+        - Resource requirements (15%)
+        - Time to market (10%)
+        - Risk level (5%)
+
+        Args:
+            opportunity_data: Dictionary containing opportunity metrics
+
+        Returns:
+            Comprehensive opportunity score and recommendation
+        """
+        try:
+            # Extract opportunity metrics
+            market_size = opportunity_data.get("market_size", 0)
+            market_growth = opportunity_data.get("market_growth_rate", 0)
+            competition_level = opportunity_data.get("competition_level", "high")  # low/medium/high
+            strategic_fit = opportunity_data.get("strategic_fit", 5)  # 1-10 scale
+            resource_requirements = opportunity_data.get("resource_requirements", "high")  # low/medium/high
+            time_to_market = opportunity_data.get("time_to_market_months", 12)
+            risk_level = opportunity_data.get("risk_level", "medium")  # low/medium/high
+
+            # Calculate component scores (0-100 scale)
+            scores = {}
+
+            # 1. Market size & growth score (30%)
+            market_score = 0
+            if market_size > 10_000_000:  # $10M+
+                market_score += 50
+            elif market_size > 1_000_000:  # $1M+
+                market_score += 30
+            elif market_size > 100_000:  # $100K+
+                market_score += 10
+
+            if market_growth > 0.20:  # 20%+ growth
+                market_score += 50
+            elif market_growth > 0.10:  # 10%+ growth
+                market_score += 30
+            elif market_growth > 0:  # Positive growth
+                market_score += 10
+
+            scores["market_attractiveness"] = min(100, market_score)
+
+            # 2. Competition score (20%) - inverse scoring
+            competition_map = {"low": 90, "medium": 60, "high": 30}
+            scores["competitive_advantage"] = competition_map.get(competition_level.lower(), 50)
+
+            # 3. Strategic fit score (20%)
+            scores["strategic_fit"] = strategic_fit * 10  # Convert 1-10 to 0-100
+
+            # 4. Resource requirements score (15%) - inverse scoring
+            resource_map = {"low": 90, "medium": 60, "high": 30}
+            scores["resource_feasibility"] = resource_map.get(resource_requirements.lower(), 50)
+
+            # 5. Time to market score (10%) - faster is better
+            if time_to_market <= 3:
+                time_score = 90
+            elif time_to_market <= 6:
+                time_score = 70
+            elif time_to_market <= 12:
+                time_score = 50
+            else:
+                time_score = 30
+            scores["time_to_market"] = time_score
+
+            # 6. Risk score (5%) - inverse scoring
+            risk_map = {"low": 90, "medium": 60, "high": 30}
+            scores["risk_tolerance"] = risk_map.get(risk_level.lower(), 50)
+
+            # Calculate weighted overall score
+            weights = {
+                "market_attractiveness": 0.30,
+                "competitive_advantage": 0.20,
+                "strategic_fit": 0.20,
+                "resource_feasibility": 0.15,
+                "time_to_market": 0.10,
+                "risk_tolerance": 0.05
+            }
+
+            overall_score = sum(scores[k] * weights[k] for k in scores.keys())
+
+            # Determine recommendation
+            if overall_score >= 80:
+                recommendation = "pursue_immediately"
+                priority = "high"
+            elif overall_score >= 60:
+                recommendation = "pursue_with_planning"
+                priority = "medium"
+            elif overall_score >= 40:
+                recommendation = "explore_further"
+                priority = "low"
+            else:
+                recommendation = "deprioritize"
+                priority = "very_low"
+
+            # Identify strengths and weaknesses
+            strengths = [k for k, v in scores.items() if v >= 70]
+            weaknesses = [k for k, v in scores.items() if v <= 40]
+
+            # Calculate expected ROI estimate
+            if overall_score >= 70:
+                roi_estimate = "high"
+                roi_range = "150-300%"
+            elif overall_score >= 50:
+                roi_estimate = "medium"
+                roi_range = "50-150%"
+            else:
+                roi_estimate = "low"
+                roi_range = "0-50%"
+
+            result = {
+                "overall_score": round(overall_score, 2),
+                "recommendation": recommendation,
+                "priority": priority,
+                "component_scores": scores,
+                "weights_applied": weights,
+                "strengths": strengths,
+                "weaknesses": weaknesses,
+                "expected_roi": {
+                    "estimate": roi_estimate,
+                    "range": roi_range
+                },
+                "next_steps": self._generate_opportunity_next_steps(
+                    recommendation, weaknesses, opportunity_data
+                ),
+                "scored_at": datetime.utcnow().isoformat()
+            }
+
+            # Persist the opportunity score
+            await self._persist_opportunity_score(opportunity_data, result)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Opportunity scoring failed: {e}")
+            return {"error": str(e)}
+
+    def _generate_opportunity_next_steps(
+        self,
+        recommendation: str,
+        weaknesses: List[str],
+        opportunity_data: Dict[str, Any]
+    ) -> List[str]:
+        """Generate actionable next steps based on opportunity analysis"""
+        next_steps = []
+
+        if recommendation == "pursue_immediately":
+            next_steps = [
+                "Allocate resources and budget",
+                "Develop detailed execution plan",
+                "Set up success metrics and KPIs",
+                "Begin implementation within 30 days"
+            ]
+        elif recommendation == "pursue_with_planning":
+            next_steps = [
+                "Conduct detailed market research",
+                "Develop business case and ROI model",
+                "Identify and mitigate key risks",
+                "Create phased rollout plan"
+            ]
+
+            # Address weaknesses
+            if "competitive_advantage" in weaknesses:
+                next_steps.append("Develop differentiation strategy")
+            if "resource_feasibility" in weaknesses:
+                next_steps.append("Secure additional resources or partnerships")
+            if "time_to_market" in weaknesses:
+                next_steps.append("Explore ways to accelerate timeline")
+
+        elif recommendation == "explore_further":
+            next_steps = [
+                "Conduct pilot or proof of concept",
+                "Validate market assumptions",
+                "Assess resource availability",
+                "Re-evaluate in 3-6 months"
+            ]
+        else:  # deprioritize
+            next_steps = [
+                "Monitor market conditions",
+                "Reassess if fundamentals change",
+                "Focus resources on higher-priority opportunities"
+            ]
+
+        return next_steps
+
+    async def _persist_opportunity_score(
+        self,
+        opportunity_data: Dict[str, Any],
+        score_result: Dict[str, Any]
+    ):
+        """Persist opportunity score to database"""
+        try:
+            import asyncpg
+            if not self.db_url:
+                return
+
+            conn = await asyncpg.connect(self.db_url)
+            try:
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS market_opportunity_scores (
+                        id SERIAL PRIMARY KEY,
+                        opportunity_name TEXT,
+                        opportunity_data JSONB,
+                        overall_score FLOAT,
+                        recommendation TEXT,
+                        priority TEXT,
+                        component_scores JSONB,
+                        strengths JSONB,
+                        weaknesses JSONB,
+                        next_steps JSONB,
+                        scored_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+
+                await conn.execute("""
+                    INSERT INTO market_opportunity_scores
+                    (opportunity_name, opportunity_data, overall_score, recommendation,
+                     priority, component_scores, strengths, weaknesses, next_steps)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                """,
+                    opportunity_data.get("name", "Unnamed Opportunity"),
+                    json.dumps(opportunity_data),
+                    score_result["overall_score"],
+                    score_result["recommendation"],
+                    score_result["priority"],
+                    json.dumps(score_result["component_scores"]),
+                    json.dumps(score_result["strengths"]),
+                    json.dumps(score_result["weaknesses"]),
+                    json.dumps(score_result["next_steps"])
+                )
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.error(f"Error persisting opportunity score: {e}")
+
 
 # Singleton instance
 market_intelligence = PredictiveMarketIntelligence()
@@ -847,3 +1091,20 @@ async def get_competitor_intelligence() -> List[Dict[str, Any]]:
         }
         for c in market_intelligence.competitors.values()
     ]
+
+
+async def score_market_opportunity(
+    opportunity_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Score a market opportunity based on multiple factors
+
+    Args:
+        opportunity_data: Data about the opportunity including market size,
+                         competition, trends, etc.
+
+    Returns:
+        Opportunity score and detailed analysis
+    """
+    await market_intelligence.initialize()
+    return await market_intelligence.score_opportunity(opportunity_data)

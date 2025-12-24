@@ -719,13 +719,93 @@ class UnifiedMemoryCoordinator:
         logger.info(f"✅ Found {len(results)} context entries for query: {query}")
         return results
 
+    async def unified_search(
+        self,
+        query: str,
+        search_all_systems: bool = True,
+        tenant_id: Optional[str] = None,
+        limit: int = 20
+    ) -> Dict[str, List[Any]]:
+        """
+        Search across ALL memory systems and return unified results
+        Returns results organized by source system
+        """
+        logger.info(f"🔍 Unified search: '{query}' (all_systems={search_all_systems})")
+
+        results = {
+            'master_registry': [],
+            'embedded_memory': [],
+            'vector_memory': [],
+            'unified_brain': [],
+            'total_count': 0
+        }
+
+        # 1. Search master registry
+        try:
+            master_results = await self.search_context(
+                query=query,
+                tenant_id=tenant_id,
+                limit=limit
+            )
+            results['master_registry'] = [asdict(r) for r in master_results]
+        except Exception as e:
+            logger.error(f"Master registry search failed: {e}")
+
+        if not search_all_systems:
+            results['total_count'] = len(results['master_registry'])
+            return results
+
+        # 2. Search embedded memory
+        if self.embedded_memory:
+            try:
+                embedded_results = await self.embedded_memory.search_memories(
+                    query=query,
+                    limit=limit
+                )
+                results['embedded_memory'] = embedded_results
+            except Exception as e:
+                logger.error(f"Embedded memory search failed: {e}")
+
+        # 3. Search vector memory
+        if self.vector_memory:
+            try:
+                vector_results = self.vector_memory.recall_memories(
+                    query=query,
+                    limit=limit
+                )
+                results['vector_memory'] = vector_results
+            except Exception as e:
+                logger.error(f"Vector memory search failed: {e}")
+
+        # 4. Search unified brain
+        if self.unified_brain:
+            try:
+                brain_results = self.unified_brain.search(
+                    query=query,
+                    limit=limit
+                )
+                results['unified_brain'] = brain_results
+            except Exception as e:
+                logger.error(f"Unified brain search failed: {e}")
+
+        # Calculate total
+        results['total_count'] = sum([
+            len(results['master_registry']),
+            len(results['embedded_memory']),
+            len(results['vector_memory']),
+            len(results['unified_brain'])
+        ])
+
+        logger.info(f"✅ Unified search complete: {results['total_count']} total results")
+        return results
+
     # ========================================================================
     # SYNCHRONIZATION
     # ========================================================================
 
     async def _dual_write_to_systems(self, entry: ContextEntry):
         """
-        Write to appropriate specialized memory systems
+        Write to appropriate specialized memory systems with proper sync
         """
         # UnifiedBrain for critical/persistent data
         if self.unified_brain and entry.layer in [MemoryLayer.LONG_TERM, MemoryLayer.PERMANENT]:
@@ -738,16 +818,18 @@ class UnifiedMemoryCoordinator:
                     source=entry.source,
                     metadata=entry.metadata
                 )
+                logger.debug(f"✅ Synced to UnifiedBrain: {entry.key}")
             except Exception as e:
                 logger.error(f"❌ UnifiedBrain write failed: {e}")
 
-        # Embedded memory for fast retrieval
+        # Embedded memory for ALL entries (not just specific layers) for fast retrieval
         if self.embedded_memory:
             try:
                 content = entry.value if isinstance(entry.value, str) else json.dumps(entry.value)
                 importance = 0.9 if entry.priority == 'critical' else 0.7 if entry.priority == 'high' else 0.5
 
-                self.embedded_memory.store_memory(
+                # Await the async store_memory method
+                await self.embedded_memory.store_memory(
                     content=content,
                     memory_type=entry.category,
                     importance_score=importance,
@@ -755,21 +837,30 @@ class UnifiedMemoryCoordinator:
                         **entry.metadata,
                         'context_key': entry.key,
                         'layer': entry.layer.value,
-                        'scope': entry.scope.value
+                        'scope': entry.scope.value,
+                        'tenant_id': entry.tenant_id,
+                        'session_id': entry.session_id,
+                        'sync_version': entry.sync_version
                     }
                 )
+                logger.debug(f"✅ Synced to Embedded Memory: {entry.key}")
             except Exception as e:
                 logger.error(f"❌ Embedded memory write failed: {e}")
 
         # Vector memory for semantic search
-        if self.vector_memory and entry.category in ['knowledge', 'learning', 'insight']:
+        if self.vector_memory and entry.category in ['knowledge', 'learning', 'insight', 'operational']:
             try:
                 await self.vector_memory.store_memory(
                     content=str(entry.value),
                     memory_type=entry.category,
                     importance_score=0.9 if entry.priority == 'critical' else 0.7,
-                    metadata=entry.metadata
+                    metadata={
+                        **entry.metadata,
+                        'context_key': entry.key,
+                        'tenant_id': entry.tenant_id
+                    }
                 )
+                logger.debug(f"✅ Synced to Vector Memory: {entry.key}")
             except Exception as e:
                 logger.error(f"❌ Vector memory write failed: {e}")
 
@@ -874,6 +965,155 @@ class UnifiedMemoryCoordinator:
         logger.info(f"✅ Cleaned up {deleted} expired context entries")
         return deleted
 
+    async def sync_master_to_embedded(self, limit: int = 1000) -> Dict[str, int]:
+        """
+        Sync entries from master registry to embedded memory
+        Returns: dict with sync statistics
+        """
+        logger.info(f"🔄 Starting master→embedded sync (limit={limit})...")
+
+        conn, cursor = self._get_connection()
+
+        # Get entries from master that need syncing
+        cursor.execute("""
+            SELECT *
+            FROM memory_context_registry
+            WHERE (expires_at IS NULL OR expires_at > NOW())
+            ORDER BY importance_score DESC, updated_at DESC
+            LIMIT %s
+        """, (limit,))
+
+        entries = cursor.fetchall()
+
+        synced = 0
+        failed = 0
+
+        if not self.embedded_memory:
+            logger.error("❌ Embedded memory not available for sync")
+            return {'synced': 0, 'failed': 0, 'total': len(entries)}
+
+        for row in entries:
+            try:
+                content = row['value'] if isinstance(row['value'], str) else json.dumps(row['value'])
+
+                # Map priority to importance score
+                importance_map = {'critical': 0.9, 'high': 0.7, 'medium': 0.5, 'low': 0.3}
+                importance = importance_map.get(row['priority'], 0.5)
+
+                await self.embedded_memory.store_memory(
+                    content=content,
+                    memory_type=row['category'],
+                    importance_score=importance,
+                    metadata={
+                        'context_key': row['key'],
+                        'layer': row['layer'],
+                        'scope': row['scope'],
+                        'tenant_id': row['tenant_id'],
+                        'session_id': row['session_id'],
+                        'sync_version': row['sync_version'],
+                        'source': row['source']
+                    }
+                )
+                synced += 1
+
+                if synced % 100 == 0:
+                    logger.info(f"📊 Synced {synced}/{len(entries)} entries...")
+
+            except Exception as e:
+                logger.error(f"❌ Failed to sync entry {row['key']}: {e}")
+                failed += 1
+
+        logger.info(f"✅ Sync complete: {synced} synced, {failed} failed")
+        return {'synced': synced, 'failed': failed, 'total': len(entries)}
+
+    async def deduplicate_memories(self, similarity_threshold: float = 0.95) -> int:
+        """
+        Remove duplicate memories based on content similarity
+        Returns: number of duplicates removed
+        """
+        logger.info(f"🔍 Starting memory deduplication (threshold={similarity_threshold})...")
+
+        conn, cursor = self._get_connection()
+
+        # Find potential duplicates by key and scope
+        cursor.execute("""
+            WITH duplicates AS (
+                SELECT
+                    key, scope, tenant_id, user_id, session_id,
+                    array_agg(id ORDER BY sync_version DESC, updated_at DESC) as ids,
+                    COUNT(*) as dup_count
+                FROM memory_context_registry
+                WHERE expires_at IS NULL OR expires_at > NOW()
+                GROUP BY key, scope,
+                    COALESCE(tenant_id, ''),
+                    COALESCE(user_id, ''),
+                    COALESCE(session_id, '')
+                HAVING COUNT(*) > 1
+            )
+            SELECT * FROM duplicates
+        """)
+
+        duplicates = cursor.fetchall()
+        removed = 0
+
+        for dup in duplicates:
+            ids = dup['ids']
+            # Keep the first one (most recent), delete others
+            ids_to_delete = ids[1:]
+
+            if ids_to_delete:
+                cursor.execute("""
+                    DELETE FROM memory_context_registry
+                    WHERE id = ANY(%s::int[])
+                """, (ids_to_delete,))
+                removed += len(ids_to_delete)
+
+        conn.commit()
+        logger.info(f"✅ Deduplication complete: {removed} duplicates removed")
+        return removed
+
+    async def garbage_collect(self, retention_days: int = 90, min_importance: float = 0.3) -> Dict[str, int]:
+        """
+        Remove old, low-importance memories
+        Returns: dict with GC statistics
+        """
+        logger.info(f"🗑️ Starting garbage collection (>{retention_days} days, importance<{min_importance})...")
+
+        conn, cursor = self._get_connection()
+
+        # Delete expired entries
+        cursor.execute("""
+            DELETE FROM memory_context_registry
+            WHERE expires_at IS NOT NULL AND expires_at < NOW()
+        """)
+        expired = cursor.rowcount
+
+        # Delete old, low-importance, rarely accessed entries
+        cursor.execute("""
+            DELETE FROM memory_context_registry
+            WHERE created_at < NOW() - INTERVAL '%s days'
+            AND (
+                (layer = 'ephemeral' AND created_at < NOW() - INTERVAL '1 day')
+                OR (layer = 'session' AND created_at < NOW() - INTERVAL '7 days')
+                OR (layer = 'short_term' AND created_at < NOW() - INTERVAL '30 days')
+            )
+            AND importance_score < %s
+            AND access_count < 5
+            AND priority NOT IN ('critical', 'high')
+        """, (retention_days, min_importance))
+        old_low_importance = cursor.rowcount
+
+        conn.commit()
+
+        result = {
+            'expired': expired,
+            'old_low_importance': old_low_importance,
+            'total_removed': expired + old_low_importance
+        }
+
+        logger.info(f"✅ GC complete: {result['total_removed']} entries removed")
+        return result
+
     async def get_stats(self) -> Dict[str, Any]:
         """Get memory coordination statistics"""
         conn, cursor = self._get_connection()
@@ -910,7 +1150,143 @@ class UnifiedMemoryCoordinator:
         """)
         stats['pending_syncs'] = cursor.fetchone()['pending_syncs']
 
+        # Subsystem stats
+        if self.embedded_memory:
+            try:
+                embedded_stats = await self.embedded_memory.get_stats()
+                stats['embedded_memory'] = embedded_stats
+            except Exception as e:
+                logger.error(f"Failed to get embedded memory stats: {e}")
+
+        if self.vector_memory:
+            try:
+                vector_stats = self.vector_memory.get_memory_statistics()
+                stats['vector_memory'] = vector_stats
+            except Exception as e:
+                logger.error(f"Failed to get vector memory stats: {e}")
+
         return stats
+
+    async def health_check(self) -> Dict[str, Any]:
+        """
+        Comprehensive health check of all memory systems
+        """
+        logger.info("🏥 Running memory systems health check...")
+
+        health = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'overall_status': 'healthy',
+            'systems': {},
+            'sync_status': {},
+            'issues': []
+        }
+
+        # Check master registry
+        try:
+            conn, cursor = self._get_connection()
+            cursor.execute("SELECT COUNT(*) as count FROM memory_context_registry")
+            master_count = cursor.fetchone()['count']
+            health['systems']['master_registry'] = {
+                'status': 'healthy',
+                'entries': master_count
+            }
+        except Exception as e:
+            health['systems']['master_registry'] = {
+                'status': 'unhealthy',
+                'error': str(e)
+            }
+            health['issues'].append(f"Master registry error: {e}")
+            health['overall_status'] = 'degraded'
+
+        # Check embedded memory
+        if self.embedded_memory:
+            try:
+                embedded_stats = await self.embedded_memory.get_stats()
+                embedded_count = embedded_stats.get('total_memories', 0)
+                health['systems']['embedded_memory'] = {
+                    'status': 'healthy',
+                    'entries': embedded_count
+                }
+
+                # Check sync gap
+                if master_count > 0:
+                    sync_ratio = embedded_count / master_count if master_count > 0 else 0
+                    health['sync_status']['master_to_embedded'] = {
+                        'master': master_count,
+                        'embedded': embedded_count,
+                        'sync_ratio': round(sync_ratio, 2),
+                        'gap': master_count - embedded_count
+                    }
+
+                    if sync_ratio < 0.5:
+                        health['issues'].append(f"Large sync gap: {master_count - embedded_count} entries missing in embedded memory")
+                        health['overall_status'] = 'degraded'
+
+            except Exception as e:
+                health['systems']['embedded_memory'] = {
+                    'status': 'unhealthy',
+                    'error': str(e)
+                }
+                health['issues'].append(f"Embedded memory error: {e}")
+                health['overall_status'] = 'degraded'
+        else:
+            health['systems']['embedded_memory'] = {'status': 'not_initialized'}
+
+        # Check vector memory
+        if self.vector_memory:
+            try:
+                vector_stats = self.vector_memory.get_memory_statistics()
+                health['systems']['vector_memory'] = {
+                    'status': 'healthy',
+                    'stats': vector_stats.get('statistics', {})
+                }
+            except Exception as e:
+                health['systems']['vector_memory'] = {
+                    'status': 'unhealthy',
+                    'error': str(e)
+                }
+                health['issues'].append(f"Vector memory error: {e}")
+        else:
+            health['systems']['vector_memory'] = {'status': 'not_initialized'}
+
+        # Check unified brain
+        if self.unified_brain:
+            try:
+                brain_stats = self.unified_brain.get_stats()
+                health['systems']['unified_brain'] = {
+                    'status': 'healthy',
+                    'stats': brain_stats
+                }
+            except Exception as e:
+                health['systems']['unified_brain'] = {
+                    'status': 'unhealthy',
+                    'error': str(e)
+                }
+                health['issues'].append(f"Unified brain error: {e}")
+        else:
+            health['systems']['unified_brain'] = {'status': 'not_initialized'}
+
+        # Check pending syncs
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) as count, priority
+                FROM memory_sync_events
+                WHERE NOT processed
+                GROUP BY priority
+            """)
+            pending = cursor.fetchall()
+            health['sync_status']['pending_events'] = {row['priority']: row['count'] for row in pending}
+
+            total_pending = sum(row['count'] for row in pending)
+            if total_pending > 100:
+                health['issues'].append(f"High number of pending sync events: {total_pending}")
+                health['overall_status'] = 'degraded'
+
+        except Exception as e:
+            health['issues'].append(f"Sync event check failed: {e}")
+
+        logger.info(f"✅ Health check complete: {health['overall_status']}")
+        return health
 
 
 # ============================================================================
@@ -972,5 +1348,17 @@ if __name__ == "__main__":
         # Stats
         stats = await coordinator.get_stats()
         print(f"✅ Stats: {stats}")
+
+        # Health check
+        health = await coordinator.health_check()
+        print(f"🏥 Health: {health['overall_status']}")
+        if health['issues']:
+            print(f"⚠️ Issues: {health['issues']}")
+
+        # Test sync
+        if health['sync_status'].get('master_to_embedded', {}).get('gap', 0) > 0:
+            print("🔄 Running sync...")
+            sync_result = await coordinator.sync_master_to_embedded(limit=100)
+            print(f"✅ Sync result: {sync_result}")
 
     asyncio.run(test())
