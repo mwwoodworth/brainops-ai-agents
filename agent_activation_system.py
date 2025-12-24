@@ -375,7 +375,7 @@ class AgentActivationSystem:
                     f"{event_type.value}_handler",
                     'high' if event_type in [BusinessEventType.SYSTEM_ALERT, BusinessEventType.SUPPORT_REQUEST] else 'medium',
                     event_type.value,
-                    json.dumps(event_data),
+                    json.dumps(json_safe_serialize(event_data)),
                     agent['id']
                 ))
                 task = cur.fetchone()
