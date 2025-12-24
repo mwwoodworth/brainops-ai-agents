@@ -306,7 +306,7 @@ class AgentActivationSystem:
             "triggered_agents": []
         }
 
-        # Map event types to agent types
+        # Map event types to agent types (includes AUREA orchestration events)
         event_agent_mapping = {
             BusinessEventType.CUSTOMER_INQUIRY: ["customer_success", "support"],
             BusinessEventType.LEAD_CREATED: ["lead_generation", "revenue"],
@@ -316,6 +316,16 @@ class AgentActivationSystem:
             BusinessEventType.SYSTEM_ALERT: ["system_improvement", "devops_optimization"],
             BusinessEventType.SCHEDULED_TASK: ["analytics", "monitoring"],
             BusinessEventType.PERFORMANCE_THRESHOLD: ["system_improvement", "devops_optimization"],
+            # AUREA orchestration events
+            BusinessEventType.NEW_CUSTOMER: ["customer_success", "lead_generation"],
+            BusinessEventType.ESTIMATE_REQUESTED: ["pricing", "revenue"],
+            BusinessEventType.INVOICE_OVERDUE: ["revenue", "customer_success"],
+            BusinessEventType.SCHEDULING_CONFLICT: ["system_improvement", "devops_optimization"],
+            BusinessEventType.SYSTEM_HEALTH_CHECK: ["system_improvement", "devops_optimization"],
+            BusinessEventType.CUSTOMER_CHURN_RISK: ["customer_success", "revenue"],
+            BusinessEventType.QUOTE_REQUESTED: ["pricing", "revenue"],
+            BusinessEventType.PAYMENT_RECEIVED: ["revenue", "customer_success"],
+            BusinessEventType.JOB_SCHEDULED: ["system_improvement", "analytics"],
         }
 
         target_types = event_agent_mapping.get(event_type, [])
@@ -376,3 +386,110 @@ class AgentActivationSystem:
                 conn.close()
 
         return result
+
+    async def handle_business_event(
+        self,
+        event_type: BusinessEventType,
+        event_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Handle business events from AUREA orchestration.
+        This is the main entry point for AUREA decisions to trigger agent activation.
+
+        Supports verification_mode and dry_run flags to prevent real outreach
+        when testing with seeded data.
+        """
+        # Check for verification/dry_run mode
+        verification_mode = event_data.get("verification_mode", False)
+        dry_run = event_data.get("dry_run", False)
+        aurea_initiated = event_data.get("aurea_initiated", False)
+
+        result = {
+            "event_type": event_type.value,
+            "timestamp": datetime.utcnow().isoformat(),
+            "verification_mode": verification_mode,
+            "dry_run": dry_run,
+            "aurea_initiated": aurea_initiated,
+            "actions_taken": [],
+            "success": True
+        }
+
+        if verification_mode or dry_run:
+            # In verification mode, log what WOULD happen but don't execute outreach
+            logger.info(f"🔍 VERIFICATION MODE: Would handle {event_type.value} event")
+            result["message"] = f"Verification mode: {event_type.value} event processed but no real actions taken"
+            result["would_trigger"] = self._get_agent_types_for_event(event_type)
+            return result
+
+        # Full execution - trigger agents for this event
+        try:
+            trigger_result = await self.trigger_agent_by_event(event_type, event_data)
+            result.update(trigger_result)
+            result["actions_taken"] = trigger_result.get("triggered_agents", [])
+
+            # Log to database for observability
+            self._log_business_event(event_type, event_data, result)
+
+        except Exception as e:
+            logger.error(f"Failed to handle business event {event_type.value}: {e}")
+            result["success"] = False
+            result["error"] = str(e)
+
+        return result
+
+    def _get_agent_types_for_event(self, event_type: BusinessEventType) -> List[str]:
+        """Get the agent types that would be triggered for an event"""
+        event_agent_mapping = {
+            BusinessEventType.CUSTOMER_INQUIRY: ["customer_success", "support"],
+            BusinessEventType.LEAD_CREATED: ["lead_generation", "revenue"],
+            BusinessEventType.DEAL_CLOSED: ["revenue", "customer_success"],
+            BusinessEventType.SUPPORT_REQUEST: ["support", "customer_success"],
+            BusinessEventType.REVENUE_OPPORTUNITY: ["revenue", "pricing"],
+            BusinessEventType.SYSTEM_ALERT: ["system_improvement", "devops_optimization"],
+            BusinessEventType.SCHEDULED_TASK: ["analytics", "monitoring"],
+            BusinessEventType.PERFORMANCE_THRESHOLD: ["system_improvement", "devops_optimization"],
+            BusinessEventType.NEW_CUSTOMER: ["customer_success", "lead_generation"],
+            BusinessEventType.ESTIMATE_REQUESTED: ["pricing", "revenue"],
+            BusinessEventType.INVOICE_OVERDUE: ["revenue", "customer_success"],
+            BusinessEventType.SCHEDULING_CONFLICT: ["system_improvement", "devops_optimization"],
+            BusinessEventType.SYSTEM_HEALTH_CHECK: ["system_improvement", "devops_optimization"],
+            BusinessEventType.CUSTOMER_CHURN_RISK: ["customer_success", "revenue"],
+            BusinessEventType.QUOTE_REQUESTED: ["pricing", "revenue"],
+            BusinessEventType.PAYMENT_RECEIVED: ["revenue", "customer_success"],
+            BusinessEventType.JOB_SCHEDULED: ["system_improvement", "analytics"],
+        }
+        return event_agent_mapping.get(event_type, [])
+
+    def _log_business_event(
+        self,
+        event_type: BusinessEventType,
+        event_data: Dict[str, Any],
+        result: Dict[str, Any]
+    ):
+        """Log business event handling to database for observability"""
+        conn = self._get_db_connection()
+        if not conn:
+            return
+
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO agent_activation_log
+                (agent_id, tenant_id, action, timestamp, details)
+                VALUES (%s, %s, %s, NOW(), %s)
+            """, (
+                None,  # No specific agent - event-level log
+                self.tenant_id,
+                f"business_event:{event_type.value}",
+                json.dumps({
+                    "event_data": event_data,
+                    "result": result
+                })
+            ))
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Failed to log business event: {e}")
+            if conn:
+                conn.close()
