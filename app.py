@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from contextlib import asynccontextmanager
 from collections import deque
 
-from fastapi import FastAPI, HTTPException, Request, Security, Depends, Body, Query
+from fastapi import FastAPI, HTTPException, Request, Security, Depends, Body, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
