@@ -106,6 +106,7 @@ class Decision:
     requires_human_approval: bool
     deadline: Optional[datetime]
     context: Dict[str, Any]
+    db_id: Optional[str] = None  # Database UUID after logging
 
 
 @dataclass
@@ -515,15 +516,37 @@ class AUREA:
 
                 # Phase 1: Observe - Check all triggers and gather data
                 observations = await self._observe()
+                self._store_state_snapshot("observe", {
+                    "cycle": self.cycle_count,
+                    "observations_count": len(observations),
+                    "observations": observations[:10]  # Limit for storage
+                })
 
                 # Phase 2: Orient - Analyze situation and context
                 context = await self._orient(observations)
+                self._store_state_snapshot("orient", {
+                    "cycle": self.cycle_count,
+                    "priorities_count": len(context.get("priorities", [])),
+                    "risks_count": len(context.get("risks", [])),
+                    "opportunities_count": len(context.get("opportunities", []))
+                })
 
                 # Phase 3: Decide - Make decisions based on context
                 decisions = await self._decide(context)
+                self._store_state_snapshot("decide", {
+                    "cycle": self.cycle_count,
+                    "decisions_count": len(decisions),
+                    "decision_types": [d.type.value for d in decisions]
+                })
 
                 # Phase 4: Act - Execute decisions through agents
                 results = await self._act(decisions)
+                self._store_state_snapshot("act", {
+                    "cycle": self.cycle_count,
+                    "results_count": len(results),
+                    "success_count": len([r for r in results if r.get("status") != "failed"]),
+                    "failed_count": len([r for r in results if r.get("status") == "failed"])
+                })
 
                 # Phase 5: Learn - Analyze results and improve
                 await self._learn(results)
@@ -533,6 +556,15 @@ class AUREA:
 
                 # Calculate cycle time
                 cycle_time = (datetime.now() - cycle_start).total_seconds()
+
+                # Store final cycle state
+                self._store_state_snapshot("cycle_complete", {
+                    "cycle": self.cycle_count,
+                    "cycle_time_seconds": cycle_time,
+                    "observations": len(observations),
+                    "decisions": len(decisions),
+                    "results": len(results)
+                })
 
                 # Store cycle in memory
                 self.memory.store(Memory(
@@ -843,9 +875,14 @@ class AUREA:
                 )
                 decisions.append(decision)
 
-        # Log decisions
+        # Log decisions and capture their database IDs
         for decision in decisions:
-            self._log_decision(decision)
+            db_id = self._log_decision(decision)
+            if db_id:
+                decision.db_id = db_id
+                logger.info(f"📝 Decision {decision.id} logged with db_id={db_id}")
+            else:
+                logger.error(f"❌ Failed to log decision {decision.id} - execution may fail")
 
         return decisions
 
@@ -866,6 +903,16 @@ class AUREA:
                         })
                         continue
 
+                # Check if decision was logged to database
+                if not decision.db_id:
+                    logger.warning(f"⚠️ Decision {decision.id} has no db_id - skipping execution")
+                    results.append({
+                        "decision_id": decision.id,
+                        "status": "skipped",
+                        "reason": "Decision not logged to database"
+                    })
+                    continue
+
                 # Execute the decision (ACTIVE mode for internal operations)
                 # Outreach to seeded contacts remains protected via dry_run flag
                 result = await self._execute_decision(decision)
@@ -873,9 +920,9 @@ class AUREA:
                 result["outreach_protected"] = True  # Seeded contacts protected
                 results.append(result)
 
-                # Update decision status in database (use db_id if available, else fallback)
-                decision_db_id = getattr(decision, 'db_id', None) or decision.id
-                await self._update_decision_status(decision_db_id, "completed", result)
+                # Update decision status in database using the actual database UUID
+                await self._update_decision_status(decision.db_id, "completed", result)
+                logger.info(f"✅ Decision {decision.db_id} executed and marked completed")
 
                 # Store execution in memory
                 self.memory.store(Memory(
@@ -895,10 +942,12 @@ class AUREA:
 
             except Exception as e:
                 logger.error(f"Failed to execute decision {decision.id}: {e}")
-                decision_db_id = getattr(decision, 'db_id', None) or decision.id
-                await self._update_decision_status(decision_db_id, "failed", {"error": str(e)})
+                # Only update database if we have a valid db_id
+                if decision.db_id:
+                    await self._update_decision_status(decision.db_id, "failed", {"error": str(e)})
                 results.append({
                     "decision_id": decision.id,
+                    "db_id": decision.db_id,
                     "status": "failed",
                     "error": str(e)
                 })
