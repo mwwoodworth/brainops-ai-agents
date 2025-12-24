@@ -874,6 +874,144 @@ class EnhancedSelfHealing:
             "auto_remediate_threshold": self.auto_remediate_threshold
         }
 
+    async def record_pattern(
+        self,
+        system_id: str,
+        pattern_type: str,
+        metrics_snapshot: Dict[str, float]
+    ) -> Dict[str, Any]:
+        """Record a health pattern for machine learning"""
+        pattern_id = self._generate_id(f"pattern:{system_id}:{pattern_type}")
+
+        pattern = HealthPattern(
+            pattern_id=pattern_id,
+            component=system_id,
+            pattern_type=pattern_type,
+            metrics_signature=metrics_snapshot,
+            confidence=0.8,
+            occurrences=1,
+            last_seen=datetime.utcnow().isoformat(),
+            created_at=datetime.utcnow().isoformat()
+        )
+
+        self.health_patterns[pattern_id] = pattern
+        await self._persist_pattern(pattern)
+
+        return {
+            "status": "recorded",
+            "pattern_id": pattern_id,
+            "system_id": system_id,
+            "pattern_type": pattern_type,
+            "message": f"Health pattern recorded for {system_id}"
+        }
+
+    async def get_patterns(self, system_id: str) -> List[Dict[str, Any]]:
+        """Get all patterns for a system"""
+        patterns = []
+        for pattern_id, pattern in self.health_patterns.items():
+            if pattern.component == system_id:
+                patterns.append({
+                    "pattern_id": pattern.pattern_id,
+                    "pattern_type": pattern.pattern_type,
+                    "metrics_signature": pattern.metrics_signature,
+                    "confidence": pattern.confidence,
+                    "occurrences": pattern.occurrences,
+                    "last_seen": pattern.last_seen
+                })
+        return patterns
+
+    async def get_incidents(
+        self,
+        status: str = None,
+        severity: str = None,
+        system_id: str = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """Get incidents with optional filtering"""
+        incidents = []
+        for incident in list(self.incidents.values())[:limit]:
+            # Filter by status
+            if status and incident.status.value != status:
+                continue
+            # Filter by severity
+            if severity and incident.severity.value != severity:
+                continue
+            # Filter by system_id
+            if system_id and incident.component != system_id:
+                continue
+
+            incidents.append({
+                "incident_id": incident.incident_id,
+                "component": incident.component,
+                "severity": incident.severity.value,
+                "status": incident.status.value,
+                "detected_at": incident.detected_at,
+                "root_cause": incident.root_cause
+            })
+        return incidents
+
+    async def get_active_incidents(self) -> List[Dict[str, Any]]:
+        """Get all unresolved incidents"""
+        return await self.get_incidents(status=None)
+
+    async def get_incident(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific incident by ID"""
+        incident = self.incidents.get(incident_id)
+        if not incident:
+            return None
+        return {
+            "incident_id": incident.incident_id,
+            "component": incident.component,
+            "severity": incident.severity.value,
+            "status": incident.status.value,
+            "detected_at": incident.detected_at,
+            "root_cause": incident.root_cause,
+            "remediation_steps": incident.remediation_steps,
+            "metrics_at_detection": incident.metrics_at_detection
+        }
+
+    async def get_remediation_plan(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        """Get remediation plan for an incident"""
+        plan = self.remediation_plans.get(incident_id)
+        if not plan:
+            return None
+        return {
+            "plan_id": plan.plan_id,
+            "incident_id": plan.incident_id,
+            "actions": plan.actions,
+            "estimated_recovery_time": plan.estimated_recovery_time,
+            "risk_level": plan.risk_level.value if hasattr(plan.risk_level, 'value') else plan.risk_level,
+            "requires_approval": plan.requires_approval
+        }
+
+    async def process_approval(
+        self,
+        incident_id: str,
+        approved: bool,
+        approver: str,
+        notes: str = None
+    ) -> Dict[str, Any]:
+        """Process approval/rejection of a remediation plan"""
+        plan = self.remediation_plans.get(incident_id)
+        if not plan:
+            return {"status": "error", "message": f"No remediation plan for incident {incident_id}"}
+
+        if approved:
+            incident = self.incidents.get(incident_id)
+            if incident:
+                success = await self._execute_remediation_plan(plan, incident)
+                return {
+                    "status": "executed" if success else "failed",
+                    "approved_by": approver,
+                    "notes": notes
+                }
+        else:
+            return {
+                "status": "rejected",
+                "rejected_by": approver,
+                "notes": notes
+            }
+
 
 # Singleton instance
 enhanced_self_healing = EnhancedSelfHealing()
