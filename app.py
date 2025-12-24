@@ -55,6 +55,7 @@ from api.system_orchestrator import router as system_orchestrator_router
 from api.self_healing import router as self_healing_router
 from api.e2e_verification import router as e2e_verification_router
 from api.revenue_automation import router as revenue_automation_router
+from api.mcp import router as mcp_router  # MCP Bridge Integration - 345 tools
 from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
 from observability import RequestMetrics, TTLCache
@@ -145,7 +146,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.2.1"  # Hardcoded DB fallback URL for Digital Twin and Orchestrator
+VERSION = "9.3.0"  # MCP Bridge Integration - 345 tools connected to AI Agents
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -935,6 +936,7 @@ app.include_router(system_orchestrator_router, dependencies=SECURED_DEPENDENCIES
 app.include_router(self_healing_router, dependencies=SECURED_DEPENDENCIES)  # Enhanced self-healing AI infrastructure
 app.include_router(e2e_verification_router, dependencies=SECURED_DEPENDENCIES)  # E2E System Verification
 app.include_router(revenue_automation_router, dependencies=SECURED_DEPENDENCIES)  # Revenue Automation Engine
+app.include_router(mcp_router, dependencies=SECURED_DEPENDENCIES)  # MCP Bridge - 345 tools (Render, Vercel, Supabase, GitHub, Stripe, Docker)
 
 # Import and include analytics router
 try:
