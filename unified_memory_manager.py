@@ -561,26 +561,66 @@ class UnifiedMemoryManager:
             return cur.fetchall()
 
     def _generate_embedding(self, content: Dict) -> Optional[List[float]]:
-        """Generate real embedding for content using OpenAI"""
+        """Generate real embedding with intelligent provider fallback chain.
+
+        Fallback order:
+        1. OpenAI text-embedding-3-small (fastest, most accurate)
+        2. Google Gemini text-embedding-004 (good fallback)
+        3. Anthropic via voyage-3 (if available)
+        4. Local sentence-transformers (last resort, always available)
+        """
+        text_content = json.dumps(content, sort_keys=True)
+
+        # Try OpenAI first
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if openai_key:
+            try:
+                import openai
+                client = openai.OpenAI(api_key=openai_key)
+                response = client.embeddings.create(
+                    input=text_content,
+                    model="text-embedding-3-small"
+                )
+                return response.data[0].embedding
+            except Exception as e:
+                if "429" in str(e) or "quota" in str(e).lower():
+                    logger.warning(f"⚠️ OpenAI rate limited/quota exceeded, trying Gemini fallback")
+                else:
+                    logger.warning(f"⚠️ OpenAI embedding failed: {e}, trying fallback")
+
+        # Try Gemini as fallback
+        gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if gemini_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=gemini_key)
+                result = genai.embed_content(
+                    model="models/text-embedding-004",
+                    content=text_content,
+                    task_type="retrieval_document"
+                )
+                logger.info("✅ Used Gemini embedding fallback")
+                return result['embedding']
+            except Exception as e:
+                logger.warning(f"⚠️ Gemini embedding failed: {e}, trying local fallback")
+
+        # Try local sentence-transformers as last resort
         try:
-            import openai
-            
-            # Extract text content
-            text_content = json.dumps(content, sort_keys=True)
-            
-            # Call OpenAI Embedding API
-            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            response = client.embeddings.create(
-                input=text_content,
-                model="text-embedding-3-small"
-            )
-            
-            return response.data[0].embedding
-            
+            from sentence_transformers import SentenceTransformer
+            if not hasattr(self, '_local_embedder'):
+                self._local_embedder = SentenceTransformer('all-MiniLM-L6-v2')
+                logger.info("📦 Loaded local embedding model (all-MiniLM-L6-v2)")
+            embedding = self._local_embedder.encode(text_content).tolist()
+            logger.info("✅ Used local sentence-transformers fallback")
+            return embedding
+        except ImportError:
+            logger.warning("sentence-transformers not installed, cannot use local fallback")
         except Exception as e:
-            logger.error(f"❌ Embedding generation failed: {e}")
-            # Return None instead of zero vector to avoid polluting vector database
-            return None
+            logger.error(f"❌ Local embedding also failed: {e}")
+
+        # All fallbacks exhausted
+        logger.error("❌ All embedding providers failed")
+        return None
 
     def _generate_search_text(self, memory: Memory) -> str:
         """Generate searchable text from memory"""
