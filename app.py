@@ -57,6 +57,7 @@ from api.e2e_verification import router as e2e_verification_router
 from api.revenue_automation import router as revenue_automation_router
 from api.mcp import router as mcp_router  # MCP Bridge Integration - 345 tools
 from api.cicd import router as cicd_router  # Autonomous CI/CD Management - 1-10K systems
+from api.a2ui import router as a2ui_router  # Google A2UI Protocol - Agent-to-User Interface
 from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
 from observability import RequestMetrics, TTLCache
@@ -939,6 +940,7 @@ app.include_router(e2e_verification_router, dependencies=SECURED_DEPENDENCIES)  
 app.include_router(revenue_automation_router, dependencies=SECURED_DEPENDENCIES)  # Revenue Automation Engine
 app.include_router(mcp_router, dependencies=SECURED_DEPENDENCIES)  # MCP Bridge - 345 tools (Render, Vercel, Supabase, GitHub, Stripe, Docker)
 app.include_router(cicd_router, dependencies=SECURED_DEPENDENCIES)  # Autonomous CI/CD - manage 1-10K deployments
+app.include_router(a2ui_router, dependencies=SECURED_DEPENDENCIES)  # Google A2UI Protocol - Agent-generated UIs
 
 # Import and include analytics router
 try:
