@@ -391,6 +391,108 @@ async def get_ui_test_status():
         }
 
 
+@router.get("/ui/visual-ai/{app_name}")
+async def run_visual_ai_analysis(app_name: str):
+    """
+    Run Gemini Vision-powered visual analysis on a specific app.
+
+    This uses AI to analyze:
+    - Visual design quality
+    - UX best practices
+    - Accessibility issues
+    - Brand consistency
+    - Content quality
+    - Performance indicators
+
+    Returns detailed scores, issues, and recommendations.
+    """
+    valid_apps = ["weathercraft-erp", "myroofgenius", "brainops-command-center"]
+    if app_name not in valid_apps:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid app. Valid options: {valid_apps}"
+        )
+
+    try:
+        from ui_tester_agent import UITesterAgent, PLAYWRIGHT_AVAILABLE, GEMINI_VISION_AVAILABLE
+
+        if not PLAYWRIGHT_AVAILABLE:
+            return {"status": "error", "error": "Playwright not available"}
+
+        if not GEMINI_VISION_AVAILABLE:
+            return {
+                "status": "error",
+                "error": "Gemini Vision not available (GOOGLE_API_KEY not set)",
+                "recommendation": "Set GOOGLE_API_KEY environment variable"
+            }
+
+        tester = UITesterAgent()
+        await tester.setup_browser(headless=True)
+
+        app_url = tester.test_urls[app_name]["base_url"]
+        result = await tester.test_visual_ai_analysis(app_url, app_name)
+
+        await tester.teardown_browser()
+
+        return {
+            "test_type": "visual_ai_analysis",
+            "application": app_name,
+            "powered_by": "gemini-1.5-pro-002",
+            "results": result
+        }
+    except Exception as e:
+        logger.error(f"Visual AI analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ui/visual-ai-all")
+async def run_all_visual_ai_analysis():
+    """
+    Run Gemini Vision analysis on ALL configured applications.
+    Returns comprehensive AI insights for the entire frontend ecosystem.
+    """
+    try:
+        from ui_tester_agent import UITesterAgent, PLAYWRIGHT_AVAILABLE, GEMINI_VISION_AVAILABLE
+
+        if not PLAYWRIGHT_AVAILABLE or not GEMINI_VISION_AVAILABLE:
+            return {
+                "status": "error",
+                "playwright_available": PLAYWRIGHT_AVAILABLE,
+                "gemini_vision_available": GEMINI_VISION_AVAILABLE
+            }
+
+        tester = UITesterAgent()
+        await tester.setup_browser(headless=True)
+
+        all_results = {}
+        overall_scores = []
+
+        for app_name, config in tester.test_urls.items():
+            try:
+                result = await tester.test_visual_ai_analysis(config["base_url"], app_name)
+                all_results[app_name] = result
+                if result.get("overall_score"):
+                    overall_scores.append(result["overall_score"])
+            except Exception as e:
+                all_results[app_name] = {"error": str(e)}
+
+        await tester.teardown_browser()
+
+        return {
+            "test_type": "visual_ai_analysis_full",
+            "powered_by": "gemini-1.5-pro-002",
+            "results": all_results,
+            "ecosystem_health": {
+                "average_score": sum(overall_scores) / len(overall_scores) if overall_scores else 0,
+                "apps_analyzed": len(all_results),
+                "apps_passing": sum(1 for r in all_results.values() if r.get("status") == "pass")
+            }
+        }
+    except Exception as e:
+        logger.error(f"All visual AI analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/complete-verification")
 async def complete_verification():
     """
