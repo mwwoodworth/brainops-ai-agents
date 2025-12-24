@@ -59,10 +59,10 @@ class EmbeddedMemorySystem:
         # 3. Load embedding model for RAG
         await self._load_embedding_model()
 
-        # 4. Initial sync from master
+        # 4. Initial sync from master (will retry if pool not ready)
         await self.sync_from_master()
 
-        # 5. Start background sync task
+        # 5. Start background sync task (includes retry logic)
         self.sync_task = asyncio.create_task(self._background_sync())
 
         logger.info("✅ Embedded Memory System initialized")
@@ -167,14 +167,37 @@ class EmbeddedMemorySystem:
                     self.pg_pool = None
                     return
             except RuntimeError:
-                # Pool not yet initialized - this is OK, app.py will initialize it
-                logger.warning("⚠️ Shared pool not initialized yet, master sync disabled")
+                # Pool not yet initialized - this is OK, will retry in background
+                logger.warning("⚠️ Shared pool not initialized yet, will retry sync later")
                 self.pg_pool = None
                 return
 
         except Exception as e:
             logger.error(f"❌ Failed to connect to master Postgres: {e}")
             self.pg_pool = None
+
+    async def _ensure_pool_connection(self) -> bool:
+        """Ensure we have a pool connection, retry if needed"""
+        if self.pg_pool is not None:
+            return True
+
+        # Try to get the pool again
+        try:
+            from database.async_connection import get_pool, using_fallback
+
+            shared_pool = get_pool()
+            if not using_fallback():
+                self.pg_pool = shared_pool
+                logger.info("✅ Embedded memory connected to database pool")
+                return True
+            else:
+                return False
+        except RuntimeError:
+            # Pool still not ready
+            return False
+        except Exception as e:
+            logger.error(f"❌ Failed to get pool: {e}")
+            return False
 
     async def _load_embedding_model(self):
         """Load embedding model configuration"""
@@ -229,6 +252,15 @@ class EmbeddedMemorySystem:
 
     # ========== RAG: Retrieval Augmented Generation ==========
 
+    async def _auto_sync_if_empty(self):
+        """Auto-sync from master if local DB is empty (lazy loading)"""
+        cursor = self.sqlite_conn.cursor()
+        local_count = cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0]
+
+        if local_count == 0 and not self.last_sync:
+            logger.info("🔄 Local DB empty on first access, triggering sync...")
+            await self.sync_from_master(force=True)
+
     def search_memories(
         self,
         query: str,
@@ -247,7 +279,11 @@ class EmbeddedMemorySystem:
         if not self.sqlite_conn:
             return []
 
+        # Auto-sync if empty (run in background to not block)
         cursor = self.sqlite_conn.cursor()
+        local_count = cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0]
+        if local_count == 0 and not self.last_sync:
+            asyncio.create_task(self._auto_sync_if_empty())
 
         # Get query embedding
         query_embedding = self._encode_embedding(query)
@@ -527,13 +563,27 @@ class EmbeddedMemorySystem:
 
     # ========== Bidirectional Sync ==========
 
-    async def sync_from_master(self):
-        """Pull latest data from master to local"""
-        if not self.pg_pool:
-            logger.warning("⚠️ Master sync skipped (no connection)")
+    async def sync_from_master(self, force: bool = False):
+        """Pull latest data from master to local
+
+        Args:
+            force: If True, force sync even if local DB has data
+        """
+        # Try to ensure pool connection (retry if it wasn't ready before)
+        if not await self._ensure_pool_connection():
+            logger.warning("⚠️ Master sync skipped (no pool connection available)")
             return
 
-        logger.info("🔄 Syncing from master Postgres...")
+        # Check if local DB is empty and needs initial sync
+        cursor = self.sqlite_conn.cursor()
+        local_count = cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0]
+
+        if not force and local_count > 0 and self.last_sync:
+            # Only sync if forced, or if DB is empty, or never synced
+            logger.debug(f"📊 Local DB has {local_count} entries, skipping non-forced sync")
+            return
+
+        logger.info(f"🔄 Syncing from master Postgres (local_count={local_count}, force={force})...")
 
         try:
             async with self.pg_pool.acquire() as conn:
@@ -628,11 +678,34 @@ class EmbeddedMemorySystem:
             logger.error(f"❌ Sync from master failed: {e}")
 
     async def _background_sync(self):
-        """Background task for periodic sync (every 5 minutes)"""
+        """Background task for periodic sync with retry logic
+
+        - First 5 attempts: Every 30 seconds (for initial pool connection)
+        - After that: Every 5 minutes (normal periodic sync)
+        """
+        retry_count = 0
+        max_fast_retries = 5
+
         while True:
             try:
-                await asyncio.sleep(300)  # 5 minutes
-                await self.sync_from_master()
+                # Use shorter interval for first few attempts (pool might not be ready yet)
+                if retry_count < max_fast_retries:
+                    await asyncio.sleep(30)  # 30 seconds
+                    retry_count += 1
+                else:
+                    await asyncio.sleep(300)  # 5 minutes
+
+                # Check if local DB is empty and force sync if needed
+                cursor = self.sqlite_conn.cursor()
+                local_count = cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0]
+
+                if local_count == 0:
+                    logger.info("🔄 Local DB empty, attempting force sync...")
+                    await self.sync_from_master(force=True)
+                else:
+                    # Normal periodic sync
+                    await self.sync_from_master(force=False)
+
             except asyncio.CancelledError:
                 break
             except Exception as e:

@@ -63,6 +63,14 @@ from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
 from observability import RequestMetrics, TTLCache
 
+# Agent Health Monitoring
+try:
+    from agent_health_monitor import get_health_monitor
+    HEALTH_MONITOR_AVAILABLE = True
+except ImportError:
+    HEALTH_MONITOR_AVAILABLE = False
+    logger.warning("Agent Health Monitor not available")
+
 SCHEMA_BOOTSTRAP_SQL = [
     # Ensure pgcrypto for gen_random_uuid()
     "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
@@ -1654,62 +1662,68 @@ async def get_agents(
     authenticated: bool = Depends(verify_api_key)
 ) -> AgentList:
     """Get list of available agents"""
-    cache_key = f"agents:{category or 'all'}:{enabled}"
+    try:
+        cache_key = f"agents:{category or 'all'}:{enabled}"
 
-    async def _load_agents() -> AgentList:
-        pool = get_pool()
-        try:
-            # Build query with execution statistics
-            # Join with ai_agent_executions to get total_executions and last_active
-            query = """
-                SELECT a.*,
-                       COALESCE(e.exec_count, 0) as total_executions,
-                       e.last_exec as last_active
-                FROM agents a
-                LEFT JOIN (
-                    SELECT agent_name,
-                           COUNT(*) as exec_count,
-                           MAX(created_at) as last_exec
-                    FROM ai_agent_executions
-                    GROUP BY agent_name
-                ) e ON a.name = e.agent_name
-                WHERE 1=1
-            """
-            params = []
+        async def _load_agents() -> AgentList:
+            pool = get_pool()
+            try:
+                # Build query with execution statistics
+                # Join with ai_agent_executions to get total_executions and last_active
+                query = """
+                    SELECT a.*,
+                           COALESCE(e.exec_count, 0) as total_executions,
+                           e.last_exec as last_active
+                    FROM agents a
+                    LEFT JOIN (
+                        SELECT agent_name,
+                               COUNT(*) as exec_count,
+                               MAX(created_at) as last_exec
+                        FROM ai_agent_executions
+                        GROUP BY agent_name
+                    ) e ON a.name = e.agent_name
+                    WHERE 1=1
+                """
+                params = []
 
-            if enabled is not None:
-                query += f" AND a.enabled = ${len(params) + 1}"
-                params.append(enabled)
+                if enabled is not None:
+                    query += f" AND a.enabled = ${len(params) + 1}"
+                    params.append(enabled)
 
-            if category:
-                query += f" AND a.category = ${len(params) + 1}"
-                params.append(category)
+                if category:
+                    query += f" AND a.category = ${len(params) + 1}"
+                    params.append(category)
 
-            query += " ORDER BY a.category, a.name"
+                query += " ORDER BY a.category, a.name"
 
-            rows = await pool.fetch(query, *params)
+                rows = await pool.fetch(query, *params)
 
-            agents = [
-                _row_to_agent(row if isinstance(row, dict) else dict(row))
-                for row in rows
-            ]
+                agents = [
+                    _row_to_agent(row if isinstance(row, dict) else dict(row))
+                    for row in rows
+                ]
 
-            return AgentList(
-                agents=agents,
-                total=len(agents),
-                page=1,
-                page_size=len(agents)
-            )
-        except Exception as e:
-            logger.error(f"Failed to get agents: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to retrieve agents: {str(e)}")
+                return AgentList(
+                    agents=agents,
+                    total=len(agents),
+                    page=1,
+                    page_size=len(agents)
+                )
+            except Exception as e:
+                logger.error(f"Failed to get agents from database: {e}", exc_info=True)
+                # Return empty list on error to ensure valid JSON
+                return AgentList(agents=[], total=0, page=1, page_size=0)
 
-    agents_response, _ = await RESPONSE_CACHE.get_or_set(
-        cache_key,
-        CACHE_TTLS["agents"],
-        _load_agents
-    )
-    return agents_response
+        agents_response, _ = await RESPONSE_CACHE.get_or_set(
+            cache_key,
+            CACHE_TTLS["agents"],
+            _load_agents
+        )
+        return agents_response
+    except Exception as e:
+        logger.error(f"Failed to get agents (outer): {e}", exc_info=True)
+        # Final fallback - return empty list to ensure valid JSON response
+        return AgentList(agents=[], total=0, page=1, page_size=0)
 
 
 @app.post("/agents/{agent_id}/execute")
@@ -2224,32 +2238,176 @@ async def get_training_stats():
 @app.get("/scheduler/status")
 async def get_scheduler_status():
     """Get detailed scheduler status and diagnostics"""
-    if not SCHEDULER_AVAILABLE or not hasattr(app.state, 'scheduler') or not app.state.scheduler:
-        return {
-            "enabled": False,
-            "message": "Scheduler not available"
-        }
-
-    scheduler = app.state.scheduler
-    apscheduler_jobs = scheduler.scheduler.get_jobs()
-
-    return {
-        "enabled": True,
-        "running": scheduler.scheduler.running,
-        "state": scheduler.scheduler.state,
-        "registered_jobs_count": len(scheduler.registered_jobs),
-        "apscheduler_jobs_count": len(apscheduler_jobs),
-        "registered_jobs": list(scheduler.registered_jobs.values()),
-        "apscheduler_jobs": [
-            {
-                "id": job.id,
-                "name": job.name,
-                "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
-                "trigger": str(job.trigger)
+    try:
+        if not SCHEDULER_AVAILABLE or not hasattr(app.state, 'scheduler') or not app.state.scheduler:
+            return {
+                "enabled": False,
+                "message": "Scheduler not available",
+                "timestamp": datetime.utcnow().isoformat()
             }
-            for job in apscheduler_jobs
-        ]
-    }
+
+        scheduler = app.state.scheduler
+        apscheduler_jobs = scheduler.scheduler.get_jobs()
+
+        return {
+            "enabled": True,
+            "running": scheduler.scheduler.running,
+            "state": scheduler.scheduler.state,
+            "registered_jobs_count": len(scheduler.registered_jobs),
+            "apscheduler_jobs_count": len(apscheduler_jobs),
+            "registered_jobs": list(scheduler.registered_jobs.values()),
+            "apscheduler_jobs": [
+                {
+                    "id": job.id,
+                    "name": job.name,
+                    "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
+                    "trigger": str(job.trigger)
+                }
+                for job in apscheduler_jobs
+            ],
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting scheduler status: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "enabled": False,
+                "error": str(e),
+                "message": "Failed to retrieve scheduler status",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+
+
+@app.get("/agents/status")
+async def get_all_agents_status(authenticated: bool = Depends(verify_api_key)):
+    """
+    Get comprehensive status of all 61 agents including health metrics,
+    execution statistics, and current state
+    """
+    if not HEALTH_MONITOR_AVAILABLE:
+        # Fallback to basic agent list
+        pool = get_pool()
+        try:
+            result = await pool.fetch("""
+                SELECT
+                    a.id,
+                    a.name,
+                    a.type,
+                    a.status,
+                    a.last_active,
+                    a.total_executions,
+                    s.enabled as scheduled,
+                    s.frequency_minutes,
+                    s.last_execution,
+                    s.next_execution
+                FROM ai_agents a
+                LEFT JOIN agent_schedules s ON s.agent_id = a.id
+                ORDER BY a.name
+            """)
+
+            agents = [dict(row) for row in result]
+            return {
+                "total_agents": len(agents),
+                "agents": agents,
+                "health_monitoring": False,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # Full health monitoring available
+    try:
+        health_monitor = get_health_monitor()
+
+        # Run health check for all agents
+        health_summary = health_monitor.check_all_agents_health()
+
+        # Get detailed health summary
+        detailed_summary = health_monitor.get_agent_health_summary()
+
+        return {
+            "total_agents": health_summary.get("total_agents", 0),
+            "health_summary": {
+                "healthy": health_summary.get("healthy", 0),
+                "degraded": health_summary.get("degraded", 0),
+                "critical": health_summary.get("critical", 0),
+                "unknown": health_summary.get("unknown", 0)
+            },
+            "agents": health_summary.get("agents", []),
+            "critical_agents": detailed_summary.get("critical_agents", []),
+            "active_alerts": detailed_summary.get("active_alerts", []),
+            "recent_restarts": detailed_summary.get("recent_restarts", []),
+            "health_monitoring": True,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting agent status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/agents/health/check", dependencies=SECURED_DEPENDENCIES)
+async def check_agents_health():
+    """
+    Manually trigger health check for all agents
+    """
+    if not HEALTH_MONITOR_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Health monitoring not available")
+
+    try:
+        health_monitor = get_health_monitor()
+        result = health_monitor.check_all_agents_health()
+        return result
+    except Exception as e:
+        logger.error(f"Health check failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/agents/{agent_id}/restart", dependencies=SECURED_DEPENDENCIES)
+async def restart_agent(agent_id: str):
+    """
+    Manually restart a specific agent
+    """
+    if not HEALTH_MONITOR_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Health monitoring not available")
+
+    pool = get_pool()
+    try:
+        # Get agent name
+        agent = await pool.fetchrow("SELECT name FROM ai_agents WHERE id::text = $1", agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+        health_monitor = get_health_monitor()
+        result = health_monitor.restart_failed_agent(agent_id, agent['name'])
+
+        if not result.get('success'):
+            raise HTTPException(status_code=500, detail=result.get('error', 'Restart failed'))
+
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to restart agent: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/agents/health/auto-restart", dependencies=SECURED_DEPENDENCIES)
+async def auto_restart_critical_agents():
+    """
+    Automatically restart all agents in critical state
+    """
+    if not HEALTH_MONITOR_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Health monitoring not available")
+
+    try:
+        health_monitor = get_health_monitor()
+        result = health_monitor.auto_restart_critical_agents()
+        return result
+    except Exception as e:
+        logger.error(f"Auto-restart failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/scheduler/activate-all", dependencies=SECURED_DEPENDENCIES)
@@ -2463,6 +2621,92 @@ async def backfill_embeddings(
         raise
     except Exception as e:
         logger.error(f"Embedding backfill failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/memory/force-sync", dependencies=SECURED_DEPENDENCIES)
+async def force_sync_embedded_memory():
+    """
+    Force sync embedded memory system from master Postgres.
+    Useful when local SQLite cache is empty or out of sync.
+    """
+    embedded_memory = getattr(app.state, "embedded_memory", None)
+
+    if not embedded_memory:
+        raise HTTPException(
+            status_code=503,
+            detail="Embedded memory system not available"
+        )
+
+    try:
+        # Get stats before sync
+        cursor = embedded_memory.sqlite_conn.cursor()
+        before_count = cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0]
+
+        # Force sync from master
+        await embedded_memory.sync_from_master(force=True)
+
+        # Get stats after sync
+        after_count = cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0]
+
+        return {
+            "success": True,
+            "before_count": before_count,
+            "after_count": after_count,
+            "synced_count": after_count - before_count,
+            "last_sync": embedded_memory.last_sync.isoformat() if embedded_memory.last_sync else None,
+            "pool_connected": embedded_memory.pg_pool is not None
+        }
+
+    except Exception as e:
+        logger.error(f"Force sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/memory/stats")
+async def get_memory_stats():
+    """
+    Get statistics about the embedded memory system.
+    Shows local cache status and sync information.
+    """
+    embedded_memory = getattr(app.state, "embedded_memory", None)
+
+    if not embedded_memory:
+        return {
+            "enabled": False,
+            "message": "Embedded memory system not available"
+        }
+
+    try:
+        cursor = embedded_memory.sqlite_conn.cursor()
+
+        # Get counts
+        total_memories = cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0]
+        total_tasks = cursor.execute("SELECT COUNT(*) FROM ai_autonomous_tasks").fetchone()[0]
+        pending_tasks = cursor.execute("SELECT COUNT(*) FROM ai_autonomous_tasks WHERE status = 'pending'").fetchone()[0]
+
+        # Get sync metadata
+        cursor.execute("SELECT * FROM sync_metadata WHERE table_name = 'unified_ai_memory'")
+        sync_meta = cursor.fetchone()
+
+        return {
+            "enabled": True,
+            "pool_connected": embedded_memory.pg_pool is not None,
+            "local_db_path": embedded_memory.local_db_path,
+            "total_memories": total_memories,
+            "total_tasks": total_tasks,
+            "pending_tasks": pending_tasks,
+            "last_sync": embedded_memory.last_sync.isoformat() if embedded_memory.last_sync else None,
+            "sync_metadata": {
+                "last_sync_time": sync_meta[1] if sync_meta else None,
+                "last_sync_count": sync_meta[2] if sync_meta else None,
+                "total_records": sync_meta[3] if sync_meta else None
+            } if sync_meta else None,
+            "embedding_model": embedded_memory.embedding_model
+        }
+
+    except Exception as e:
+        logger.error(f"Get memory stats failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
