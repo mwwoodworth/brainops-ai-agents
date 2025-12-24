@@ -726,57 +726,103 @@ class EnhancedSelfHealing:
 
     # Remediation handlers
     async def _handle_restart_service(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle service restart via MCP Bridge"""
+        """Handle service restart via MCP Bridge - REAL IMPLEMENTATION"""
         component = params.get("component", "unknown")
         service_id = params.get("service_id")
         platform = params.get("platform", "render")
-        logger.info(f"Restarting service: {component} on {platform}")
+        logger.info(f"🔄 SELF-HEALING: Restarting service: {component} (ID: {service_id}) on {platform}")
 
-        # Use MCP Bridge for real restart
+        # Map components to their actual Render service IDs
+        SERVICE_ID_MAP = {
+            "brainops-ai-agents": "srv-ctmkl0lds78s73a1hpmg",
+            "brainops-backend": "srv-cpv5l08gph6c73a5nrbg",
+            "brainops-mcp-bridge": "srv-cte7hgpu0jms73fjl8fg",
+            "api-gateway": "srv-ctmkl0lds78s73a1hpmg",
+            "backend": "srv-cpv5l08gph6c73a5nrbg",
+            "mcp-bridge": "srv-cte7hgpu0jms73fjl8fg",
+        }
+
+        # Resolve service ID if not provided
+        if not service_id:
+            service_id = SERVICE_ID_MAP.get(component)
+            if not service_id:
+                logger.error(f"No service_id for component {component}")
+                return {"success": False, "action": "restart_service", "error": f"Unknown component: {component}"}
+
+        # Use MCP Bridge for real restart - CORRECT TOOL NAME
         try:
-            mcp_result = await self._execute_mcp_tool(
-                platform=platform,
-                tool="restart_service" if platform == "render" else "redeploy",
-                params={"service_id": service_id, "component": component}
-            )
+            if platform == "render":
+                mcp_result = await self._execute_mcp_tool(
+                    platform="render",
+                    tool="render_restart_service",  # CORRECT TOOL NAME
+                    params={"serviceId": service_id}
+                )
+            elif platform == "vercel":
+                mcp_result = await self._execute_mcp_tool(
+                    platform="vercel",
+                    tool="vercel_redeploy",
+                    params={"projectId": service_id}
+                )
+            else:
+                mcp_result = {"success": False, "error": f"Unsupported platform: {platform}"}
+
+            success = mcp_result.get("success", False)
+            if success:
+                logger.info(f"✅ SELF-HEALING SUCCESS: Restarted {component}")
+            else:
+                logger.error(f"❌ SELF-HEALING FAILED: {mcp_result.get('error')}")
+
             return {
-                "success": mcp_result.get("success", False),
+                "success": success,
                 "action": "restart_service",
                 "component": component,
+                "service_id": service_id,
                 "mcp_result": mcp_result
             }
         except Exception as e:
-            logger.error(f"MCP restart failed: {e}")
+            logger.error(f"❌ MCP restart exception: {e}")
             return {"success": False, "action": "restart_service", "error": str(e)}
 
     async def _handle_scale_up(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle scale up via MCP Bridge - Render/Kubernetes"""
+        """Handle scale up via MCP Bridge - Render/Kubernetes - REAL IMPLEMENTATION"""
         component = params.get("component", "unknown")
-        amount = params.get("amount", 1)
+        amount = params.get("amount", 2)  # Default to 2 instances
         platform = params.get("platform", "render")
         service_id = params.get("service_id")
-        logger.info(f"Scaling up {component} by {amount} on {platform}")
+        current_instances = params.get("current_instances", 1)
+
+        # Service ID mapping
+        SERVICE_ID_MAP = {
+            "brainops-ai-agents": "srv-ctmkl0lds78s73a1hpmg",
+            "brainops-backend": "srv-cpv5l08gph6c73a5nrbg",
+            "brainops-mcp-bridge": "srv-cte7hgpu0jms73fjl8fg",
+        }
+
+        if not service_id:
+            service_id = SERVICE_ID_MAP.get(component)
+
+        new_count = current_instances + amount
+        logger.info(f"📈 SELF-HEALING: Scaling UP {component} from {current_instances} to {new_count} on {platform}")
 
         try:
             if platform == "render":
-                # Render: Scale by updating instance count
+                # Render: Scale by updating instance count - CORRECT TOOL NAME
                 mcp_result = await self._execute_mcp_tool(
                     platform="render",
-                    tool="scale_service",
+                    tool="render_scale_service",  # CORRECT TOOL NAME
                     params={
-                        "service_id": service_id,
-                        "num_instances": amount,
-                        "component": component
+                        "serviceId": service_id,
+                        "numInstances": new_count
                     }
                 )
             elif platform == "kubernetes":
                 # K8s: Scale deployment replicas
                 mcp_result = await self._execute_mcp_tool(
                     platform="kubernetes",
-                    tool="scale_deployment",
+                    tool="kubectl_scale",
                     params={
                         "deployment": component,
-                        "replicas": amount
+                        "replicas": new_count
                     }
                 )
             else:
@@ -799,31 +845,40 @@ class EnhancedSelfHealing:
             return {"success": False, "action": "scale_up", "error": str(e)}
 
     async def _handle_scale_down(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle scale down via MCP Bridge"""
+        """Handle scale down via MCP Bridge - REAL IMPLEMENTATION"""
         component = params.get("component", "unknown")
         amount = params.get("amount", 1)
         platform = params.get("platform", "render")
         service_id = params.get("service_id")
         current_instances = params.get("current_instances", 2)
-        logger.info(f"Scaling down {component} by {amount} on {platform}")
+
+        # Service ID mapping
+        SERVICE_ID_MAP = {
+            "brainops-ai-agents": "srv-ctmkl0lds78s73a1hpmg",
+            "brainops-backend": "srv-cpv5l08gph6c73a5nrbg",
+            "brainops-mcp-bridge": "srv-cte7hgpu0jms73fjl8fg",
+        }
+
+        if not service_id:
+            service_id = SERVICE_ID_MAP.get(component)
+
+        new_count = max(1, current_instances - amount)  # Never scale to 0
+        logger.info(f"📉 SELF-HEALING: Scaling DOWN {component} from {current_instances} to {new_count} on {platform}")
 
         try:
-            new_count = max(1, current_instances - amount)  # Never scale to 0
-
             if platform == "render":
                 mcp_result = await self._execute_mcp_tool(
                     platform="render",
-                    tool="scale_service",
+                    tool="render_scale_service",  # CORRECT TOOL NAME
                     params={
-                        "service_id": service_id,
-                        "num_instances": new_count,
-                        "component": component
+                        "serviceId": service_id,
+                        "numInstances": new_count
                     }
                 )
             elif platform == "kubernetes":
                 mcp_result = await self._execute_mcp_tool(
                     platform="kubernetes",
-                    tool="scale_deployment",
+                    tool="kubectl_scale",
                     params={
                         "deployment": component,
                         "replicas": new_count
