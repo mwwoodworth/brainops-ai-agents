@@ -39,13 +39,21 @@ DB_CONFIG = {
 }
 
 class SystemImprovementAgent:
-    """AI-powered system improvement analysis agent"""
+    """AI-powered system improvement analysis agent with AUREA integration"""
 
     def __init__(self, tenant_id: str):
         if not tenant_id:
             raise ValueError("tenant_id is required for SystemImprovementAgent")
         self.tenant_id = tenant_id
         self.agent_type = "system_improvement"
+
+        # AUREA Integration for decision recording and learning
+        try:
+            from aurea_integration import AUREAIntegration
+            self.aurea = AUREAIntegration(tenant_id, self.agent_type)
+        except ImportError:
+            logger.warning("AUREA integration not available")
+            self.aurea = None
 
     def _get_db_connection(self):
         """Get database connection"""
@@ -310,28 +318,49 @@ Respond with JSON only:
     # SELF-IMPROVEMENT LOOP - The system uses its own tools to improve itself
     # ==========================================================================
 
-    async def execute_auto_improvements(self) -> Dict[str, Any]:
+    async def execute_auto_improvements(
+        self,
+        dry_run: bool = True,
+        require_approval: bool = True,
+        approved_actions: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """
         FORCE MULTIPLIER: The AI OS uses its own MCP Bridge to implement improvements.
+
+        SECURITY: By default runs in dry_run mode and requires explicit approval.
+
+        Args:
+            dry_run: If True, only simulates actions without executing (default: True)
+            require_approval: If True, only executes pre-approved actions (default: True)
+            approved_actions: List of action descriptions that are pre-approved to execute
 
         This creates a feedback loop where:
         1. System analyzes its own performance
         2. Identifies actionable improvements
-        3. Executes those improvements via MCP Bridge
+        3. Executes those improvements via MCP Bridge (if approved and not dry_run)
         4. Logs results for next analysis cycle
         """
         import aiohttp
 
         MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
-        MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "brainops_mcp_2025"
+        MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY")
+
+        if not MCP_API_KEY:
+            logger.error("MCP_API_KEY not configured - cannot execute improvements")
+            return {"error": "MCP_API_KEY not configured", "dry_run": dry_run}
 
         results = {
             "executed_at": datetime.utcnow().isoformat(),
+            "dry_run": dry_run,
+            "require_approval": require_approval,
             "improvements_identified": 0,
             "improvements_executed": 0,
             "improvements_succeeded": 0,
+            "improvements_skipped": 0,
             "actions": []
         }
+
+        approved_actions = approved_actions or []
 
         try:
             # Step 1: Run performance analysis
@@ -346,10 +375,37 @@ Respond with JSON only:
             # Step 3: Map recommendations to MCP actions
             actionable_improvements = self._map_recommendations_to_mcp_actions(recommendations)
 
-            # Step 4: Execute actionable improvements via MCP Bridge
+            # Step 4: Execute actionable improvements via MCP Bridge (with safety checks)
             async with aiohttp.ClientSession() as session:
                 for improvement in actionable_improvements:
-                    logger.info(f"🔧 Executing: {improvement['description']}")
+                    action_desc = improvement['description']
+
+                    # SECURITY: Check if action is approved when require_approval=True
+                    if require_approval and action_desc not in approved_actions:
+                        logger.info(f"⏭️ Skipping (not approved): {action_desc}")
+                        results["improvements_skipped"] += 1
+                        results["actions"].append({
+                            "action": action_desc,
+                            "status": "skipped",
+                            "reason": "not_approved"
+                        })
+                        continue
+
+                    # SECURITY: In dry_run mode, only log what would happen
+                    if dry_run:
+                        logger.info(f"🔍 DRY RUN - Would execute: {action_desc}")
+                        results["actions"].append({
+                            "action": action_desc,
+                            "status": "dry_run",
+                            "would_execute": {
+                                "server": improvement["mcp_server"],
+                                "tool": improvement["mcp_tool"],
+                                "params": improvement["params"]
+                            }
+                        })
+                        continue
+
+                    logger.info(f"🔧 Executing: {action_desc}")
                     results["improvements_executed"] += 1
 
                     try:

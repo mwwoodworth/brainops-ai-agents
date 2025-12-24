@@ -28,12 +28,22 @@ except:
 logger = logging.getLogger(__name__)
 
 class KnowledgeAgent:
-    """Permanent knowledge and context manager for Claude Code sessions"""
+    """Permanent knowledge and context manager for Claude Code sessions with AUREA integration"""
 
-    def __init__(self, db_config: Dict[str, Any]):
+    def __init__(self, db_config: Dict[str, Any], tenant_id: str = "default"):
         self.db_config = db_config
+        self.tenant_id = tenant_id
+        self.agent_type = "knowledge"
         self.openai_client = None
         self.gemini_model = None
+
+        # AUREA Integration for decision recording and learning
+        try:
+            from aurea_integration import AUREAIntegration
+            self.aurea = AUREAIntegration(tenant_id, self.agent_type)
+        except ImportError:
+            logger.warning("AUREA integration not available")
+            self.aurea = None
 
         # Initialize AI clients
         if OPENAI_AVAILABLE and os.getenv("OPENAI_API_KEY"):
