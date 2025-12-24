@@ -26,6 +26,7 @@ DB_CONFIG = {
 
 class BusinessEventType(Enum):
     """Types of business events that can trigger agent activation"""
+    # Original events
     CUSTOMER_INQUIRY = "customer_inquiry"
     LEAD_CREATED = "lead_created"
     DEAL_CLOSED = "deal_closed"
@@ -36,6 +37,16 @@ class BusinessEventType(Enum):
     USER_ACTION = "user_action"
     INTEGRATION_EVENT = "integration_event"
     PERFORMANCE_THRESHOLD = "performance_threshold"
+    # AUREA orchestration events
+    NEW_CUSTOMER = "new_customer"
+    ESTIMATE_REQUESTED = "estimate_requested"
+    INVOICE_OVERDUE = "invoice_overdue"
+    SCHEDULING_CONFLICT = "scheduling_conflict"
+    SYSTEM_HEALTH_CHECK = "system_health_check"
+    CUSTOMER_CHURN_RISK = "customer_churn_risk"
+    QUOTE_REQUESTED = "quote_requested"
+    PAYMENT_RECEIVED = "payment_received"
+    JOB_SCHEDULED = "job_scheduled"
 
 
 # Singleton instances per tenant
