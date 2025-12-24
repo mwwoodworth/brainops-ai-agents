@@ -40,13 +40,21 @@ DB_CONFIG = {
 }
 
 class CodeQualityAgent:
-    """AI-powered code quality analysis agent"""
+    """AI-powered code quality analysis agent with AUREA integration"""
 
     def __init__(self, tenant_id: str):
         if not tenant_id:
             raise ValueError("tenant_id is required for CodeQualityAgent")
         self.tenant_id = tenant_id
         self.agent_type = "code_quality"
+
+        # AUREA Integration for decision recording and learning
+        try:
+            from aurea_integration import AUREAIntegration
+            self.aurea = AUREAIntegration(tenant_id, self.agent_type)
+        except ImportError:
+            logger.warning("AUREA integration not available")
+            self.aurea = None
 
     def _get_db_connection(self):
         """Get database connection"""

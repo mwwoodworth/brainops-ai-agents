@@ -39,13 +39,21 @@ DB_CONFIG = {
 }
 
 class CompetitiveIntelligenceAgent:
-    """AI-powered competitive intelligence analysis agent"""
+    """AI-powered competitive intelligence analysis agent with AUREA integration"""
 
     def __init__(self, tenant_id: str):
         if not tenant_id:
             raise ValueError("tenant_id is required for CompetitiveIntelligenceAgent")
         self.tenant_id = tenant_id
         self.agent_type = "competitive_intelligence"
+
+        # AUREA Integration for decision recording and learning
+        try:
+            from aurea_integration import AUREAIntegration
+            self.aurea = AUREAIntegration(tenant_id, self.agent_type)
+        except ImportError:
+            logger.warning("AUREA integration not available")
+            self.aurea = None
 
     def _get_db_connection(self):
         """Get database connection"""

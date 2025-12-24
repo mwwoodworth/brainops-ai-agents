@@ -21,10 +21,26 @@ class DeploymentStatus(Enum):
     FAILED = "failed"
     ROLLED_BACK = "rolled_back"
 
-class DeploymentMonitorAgent:
-    """Agent that monitors deployments across Render and Vercel"""
+import logging
 
-    def __init__(self):
+logger = logging.getLogger(__name__)
+
+
+class DeploymentMonitorAgent:
+    """Agent that monitors deployments across Render and Vercel with AUREA integration"""
+
+    def __init__(self, tenant_id: str = "default"):
+        self.tenant_id = tenant_id
+        self.agent_type = "deployment_monitor"
+
+        # AUREA Integration for decision recording and learning
+        try:
+            from aurea_integration import AUREAIntegration
+            self.aurea = AUREAIntegration(tenant_id, self.agent_type)
+        except ImportError:
+            logger.warning("AUREA integration not available")
+            self.aurea = None
+
         self.render_api_key = os.getenv("RENDER_API_KEY")
         self.vercel_token = os.getenv("VERCEL_TOKEN")
         self.services = {
