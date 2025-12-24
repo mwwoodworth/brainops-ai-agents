@@ -1953,6 +1953,85 @@ async def search_memory(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/memory/backfill-embeddings", dependencies=SECURED_DEPENDENCIES)
+async def backfill_embeddings(
+    batch_size: int = Query(100, description="Batch size per run"),
+    background_tasks: BackgroundTasks = None
+):
+    """
+    Backfill missing embeddings in unified_ai_memory using the fallback chain.
+    Uses local sentence-transformers when cloud APIs unavailable.
+    """
+    try:
+        # Get memories without embeddings
+        conn = psycopg2.connect(**DB_CONFIG)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        cur.execute("""
+        SELECT id, content, memory_type
+        FROM unified_ai_memory
+        WHERE embedding IS NULL
+        LIMIT %s
+        """, (batch_size,))
+
+        memories = cur.fetchall()
+        if not memories:
+            cur.close()
+            conn.close()
+            return {"success": True, "message": "No memories need embedding backfill", "processed": 0}
+
+        # Try local embedding model (always available)
+        try:
+            from sentence_transformers import SentenceTransformer
+            embedder = SentenceTransformer('all-MiniLM-L6-v2')
+            embedding_model = "local:all-MiniLM-L6-v2"
+        except ImportError:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=503, detail="sentence-transformers not available for backfill")
+
+        processed = 0
+        for mem in memories:
+            try:
+                content_str = json.dumps(mem['content']) if isinstance(mem['content'], dict) else str(mem['content'])
+                embedding = embedder.encode(content_str).tolist()
+
+                cur.execute("""
+                UPDATE unified_ai_memory
+                SET embedding = %s
+                WHERE id = %s
+                """, (embedding, mem['id']))
+                processed += 1
+            except Exception as e:
+                logger.warning(f"Failed to embed memory {mem['id']}: {e}")
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        # Get remaining count
+        conn2 = psycopg2.connect(**DB_CONFIG)
+        cur2 = conn2.cursor()
+        cur2.execute("SELECT COUNT(*) FROM unified_ai_memory WHERE embedding IS NULL")
+        remaining = cur2.fetchone()[0]
+        cur2.close()
+        conn2.close()
+
+        return {
+            "success": True,
+            "processed": processed,
+            "remaining": remaining,
+            "model_used": embedding_model,
+            "message": f"Backfilled {processed} embeddings, {remaining} remaining"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Embedding backfill failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== AI SELF-AWARENESS ENDPOINTS ====================
 
 @app.post("/ai/self-assess")
