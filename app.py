@@ -168,7 +168,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.6.0"  # FULL POWER + DB Diagnostics
+VERSION = "9.7.0"  # Self-Healing Reconciliation Loop + Enhanced Systems
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -228,6 +228,17 @@ except ImportError as e:
     SELF_HEALING_AVAILABLE = False
     logger.warning(f"Self-Healing not available: {e}")
     SelfHealingRecovery = None
+
+# Import Self-Healing Reconciler (continuous healing loop)
+try:
+    from self_healing_reconciler import get_reconciler, start_healing_loop
+    RECONCILER_AVAILABLE = True
+    logger.info("✅ Self-Healing Reconciler loaded")
+except ImportError as e:
+    RECONCILER_AVAILABLE = False
+    logger.warning(f"Self-Healing Reconciler not available: {e}")
+    get_reconciler = None
+    start_healing_loop = None
 
 # Import Unified Memory Manager with fallback
 try:
@@ -560,6 +571,20 @@ async def lifespan(app: FastAPI):
             app.state.healer = None
     else:
         app.state.healer = None
+
+    # Start Self-Healing Reconciliation Loop (continuous infrastructure healing)
+    if RECONCILER_AVAILABLE:
+        try:
+            reconciler = get_reconciler()
+            app.state.reconciler = reconciler
+            # Start the continuous reconciliation loop in background
+            asyncio.create_task(start_healing_loop())
+            logger.info("🔄 Self-Healing Reconciliation Loop STARTED - Autonomous healing ACTIVE")
+        except Exception as e:
+            logger.error(f"❌ Reconciler initialization failed: {e}")
+            app.state.reconciler = None
+    else:
+        app.state.reconciler = None
 
     # Initialize Unified Memory Manager
     if MEMORY_AVAILABLE:
@@ -914,6 +939,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ Scheduler shutdown error: {e}")
 
+    # Stop reconciliation loop if running
+    if hasattr(app.state, 'reconciler') and app.state.reconciler:
+        try:
+            app.state.reconciler.stop()
+            logger.info("✅ Self-Healing Reconciler stopped")
+        except Exception as e:
+            logger.error(f"❌ Reconciler shutdown error: {e}")
+
     await close_pool()
     logger.info("✅ Database pool closed")
 
@@ -1065,6 +1098,8 @@ def _collect_active_systems() -> List[str]:
         active.append("Competitive Intelligence Agent")
     if VISION_ALIGNMENT_AVAILABLE and getattr(app.state, "vision_alignment", None):
         active.append("Vision Alignment Agent")
+    if RECONCILER_AVAILABLE and getattr(app.state, "reconciler", None):
+        active.append("Self-Healing Reconciler")
     return active
 
 
@@ -1365,7 +1400,8 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
                 "digital_twin": True,
                 "market_intelligence": True,
                 "system_orchestrator": True,
-                "enhanced_self_healing": True
+                "enhanced_self_healing": True,
+                "reconciliation_loop": RECONCILER_AVAILABLE
             },
             "config": {
                 "environment": config.environment,
