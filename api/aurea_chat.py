@@ -305,42 +305,78 @@ NOW RESPOND TO: {message}"""
 
     try:
         ai = RealAICore()
+        aurea_system = "You are AUREA, an AI operations assistant for BrainOps."
 
         if stream:
-            # Streaming response
+            # Streaming response - try providers in order with fallback
+            response_stream = None
+
+            # Try Anthropic first (best for conversation)
             if ai.async_anthropic:
-                async with ai.async_anthropic.messages.stream(
-                    model="claude-3-5-sonnet-20241022",
-                    max_tokens=1024,
-                    messages=[{"role": "user", "content": system_prompt}]
-                ) as stream_response:
-                    async for text in stream_response.text_stream:
-                        yield text
-            elif ai.async_openai:
-                response = await ai.async_openai.chat.completions.create(
-                    model="gpt-4-turbo-preview",
-                    messages=[
-                        {"role": "system", "content": "You are AUREA, an AI operations assistant."},
-                        {"role": "user", "content": system_prompt}
-                    ],
-                    stream=True
-                )
-                async for chunk in response:
-                    if chunk.choices[0].delta.content:
-                        yield chunk.choices[0].delta.content
-            else:
-                yield "AUREA AI core not available. API keys may not be configured."
+                try:
+                    async with ai.async_anthropic.messages.stream(
+                        model="claude-3-5-sonnet-20241022",
+                        max_tokens=1024,
+                        messages=[{"role": "user", "content": system_prompt}]
+                    ) as stream_response:
+                        async for text in stream_response.text_stream:
+                            yield text
+                        return
+                except Exception as e:
+                    if "429" in str(e) or "credit" in str(e).lower() or "quota" in str(e).lower():
+                        logger.warning(f"Anthropic rate limited/no credits, trying fallback: {e}")
+                    else:
+                        raise
+
+            # Fallback to OpenAI
+            if ai.async_openai:
+                try:
+                    response = await ai.async_openai.chat.completions.create(
+                        model="gpt-4-turbo-preview",
+                        messages=[
+                            {"role": "system", "content": aurea_system},
+                            {"role": "user", "content": system_prompt}
+                        ],
+                        stream=True
+                    )
+                    async for chunk in response:
+                        if chunk.choices[0].delta.content:
+                            yield chunk.choices[0].delta.content
+                    return
+                except Exception as e:
+                    if "429" in str(e) or "quota" in str(e).lower():
+                        logger.warning(f"OpenAI rate limited, trying Gemini: {e}")
+                    else:
+                        raise
+
+            # Fallback to Gemini (non-streaming)
+            if ai.gemini_model:
+                try:
+                    import asyncio
+                    full_prompt = f"{aurea_system}\n\n{system_prompt}"
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(
+                        None,
+                        lambda: ai.gemini_model.generate_content(full_prompt)
+                    )
+                    yield response.text
+                    return
+                except Exception as e:
+                    logger.warning(f"Gemini failed: {e}")
+
+            yield "All AI providers unavailable. Please check API keys and billing."
         else:
-            # Non-streaming
-            if ai.anthropic_client:
-                response = ai.anthropic_client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
-                    max_tokens=1024,
-                    messages=[{"role": "user", "content": system_prompt}]
+            # Non-streaming - use ai_core.generate() with full fallback chain
+            try:
+                response = await ai.generate(
+                    prompt=system_prompt,
+                    system_prompt=aurea_system,
+                    max_tokens=1024
                 )
-                yield response.content[0].text
-            else:
-                yield "AUREA AI core not available."
+                yield response
+            except Exception as e:
+                logger.error(f"All AI providers failed: {e}")
+                yield f"AI generation failed: {str(e)}"
 
     except Exception as e:
         logger.error(f"AUREA response generation failed: {e}")
