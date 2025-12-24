@@ -104,6 +104,20 @@ class RealAICore:
         else:
             logger.warning("Perplexity API key not found - fallback unavailable")
 
+        # Initialize Gemini (powerful fallback when OpenAI/Claude rate limited)
+        self.gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        self.gemini_model = None
+        if self.gemini_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=self.gemini_key)
+                self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+                logger.info("Gemini AI initialized - powerful fallback available")
+            except Exception as e:
+                logger.warning(f"Gemini initialization failed: {e}")
+        else:
+            logger.warning("Gemini API key not found - fallback unavailable")
+
         # Model router prefers cheaper models for routing/review and stronger models for generation
         self.model_router = ModelRouter(
             openai_available=self.async_openai is not None,
@@ -157,22 +171,24 @@ class RealAICore:
         prefer_anthropic: bool = False,
         allow_expensive: bool = True
     ) -> Any:
-        """Generate REAL AI response - NO TEMPLATES"""
+        """Generate REAL AI response with intelligent fallback chain.
+
+        Fallback order: OpenAI → Anthropic → Gemini → Perplexity
+        """
+        # Determine model before try block so it's accessible in except
+        selected_model = model or "gpt-4-0125-preview"
+        if use_model_routing or intent:
+            selected_model = self.model_router.route(
+                intent=intent or "general",
+                complexity="routing" if not allow_expensive else "standard",
+                prefer_anthropic=prefer_anthropic,
+                allow_expensive=allow_expensive
+            )
+        selected_model = self._normalize_model_name(selected_model)
+        is_openai_model = selected_model.startswith("gpt") or selected_model == "openai"
+        is_anthropic_model = selected_model.startswith("claude") or selected_model == "anthropic"
 
         try:
-            selected_model = model or "gpt-4-0125-preview"
-            if use_model_routing or intent:
-                selected_model = self.model_router.route(
-                    intent=intent or "general",
-                    complexity="routing" if not allow_expensive else "standard",
-                    prefer_anthropic=prefer_anthropic,
-                    allow_expensive=allow_expensive
-                )
-            selected_model = self._normalize_model_name(selected_model)
-
-            is_openai_model = selected_model.startswith("gpt") or selected_model == "openai"
-            is_anthropic_model = selected_model.startswith("claude") or selected_model == "anthropic"
-
             if is_openai_model and self.async_openai:
                 messages = []
                 if system_prompt:
@@ -204,20 +220,73 @@ class RealAICore:
                 )
                 return response.content[0].text
 
-            # No client matched the requested/auto-routed model - try Perplexity fallback
+            # No client matched the requested/auto-routed model - try fallbacks
+            if self.gemini_model:
+                return await self._try_gemini(prompt, system_prompt, max_tokens)
             if self.perplexity_key:
                 return await self._try_perplexity(prompt, max_tokens)
             raise RuntimeError("AI client not available for requested model")
 
         except Exception as e:
-            logger.error(f"AI generation error: {e}")
-            # Try Perplexity as ultimate fallback
+            error_str = str(e).lower()
+            is_rate_limit = "429" in str(e) or "rate" in error_str or "quota" in error_str
+
+            if is_rate_limit:
+                logger.warning(f"⚠️ Rate limit hit, trying fallback chain: {e}")
+            else:
+                logger.error(f"AI generation error: {e}")
+
+            # Intelligent fallback chain: Gemini → Anthropic → Perplexity
+            if self.gemini_model:
+                try:
+                    logger.info("🔄 Trying Gemini fallback...")
+                    return await self._try_gemini(prompt, system_prompt, max_tokens)
+                except Exception as gemini_error:
+                    logger.warning(f"Gemini fallback failed: {gemini_error}")
+
+            # If original was OpenAI and failed, try Anthropic
+            if is_openai_model and self.async_anthropic:
+                try:
+                    logger.info("🔄 Trying Anthropic fallback...")
+                    system = system_prompt or "You are a helpful AI assistant."
+                    response = await self.async_anthropic.messages.create(
+                        model="claude-3-haiku-20240307",
+                        system=system,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=max_tokens,
+                        temperature=temperature
+                    )
+                    return response.content[0].text
+                except Exception as anthropic_error:
+                    logger.warning(f"Anthropic fallback failed: {anthropic_error}")
+
+            # Last resort: Perplexity
             if self.perplexity_key:
                 try:
+                    logger.info("🔄 Trying Perplexity fallback...")
                     return await self._try_perplexity(prompt, max_tokens)
                 except Exception as perplexity_error:
                     logger.error(f"Perplexity fallback also failed: {perplexity_error}")
+
             raise e
+
+    async def _try_gemini(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 2000) -> str:
+        """Use Gemini as fallback AI provider"""
+        if not self.gemini_model:
+            raise RuntimeError("Gemini not configured")
+
+        full_prompt = prompt
+        if system_prompt:
+            full_prompt = f"{system_prompt}\n\n{prompt}"
+
+        # Run synchronous Gemini call in executor
+        import asyncio
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.gemini_model.generate_content(full_prompt)
+        )
+        return response.text
 
     async def _try_perplexity(self, prompt: str, max_tokens: int = 2000) -> str:
         """Use Perplexity as fallback AI provider"""
