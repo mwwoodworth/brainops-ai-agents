@@ -73,6 +73,22 @@ async def get_orchestrator_status():
         engine = await _get_engine()
         managed_count = len(engine.managed_systems) if hasattr(engine, 'managed_systems') else 0
 
+        # Fallback: check DB if in-memory is empty
+        if managed_count == 0:
+            import os
+            db_url = os.getenv("DATABASE_URL")
+            if db_url:
+                try:
+                    import asyncpg
+                    conn = await asyncpg.connect(db_url)
+                    try:
+                        result = await conn.fetchval("SELECT COUNT(*) FROM managed_systems")
+                        managed_count = result or 0
+                    finally:
+                        await conn.close()
+                except Exception:
+                    pass  # Fallback silently
+
         return {
             "system": "autonomous_system_orchestrator",
             "status": "operational",
@@ -167,6 +183,36 @@ async def list_systems(
                     "status": system.status.value if hasattr(system, 'status') and hasattr(system.status, 'value') else str(system.status) if hasattr(system, 'status') else "unknown",
                     "health_score": system.health_score if hasattr(system, 'health_score') else 100
                 })
+
+        # Fallback: query DB directly if in-memory is empty
+        if not systems:
+            import os
+            db_url = os.getenv("DATABASE_URL")
+            if db_url:
+                try:
+                    import asyncpg
+                    conn = await asyncpg.connect(db_url)
+                    try:
+                        rows = await conn.fetch("SELECT system_id, name, type, url, provider, status, health_score FROM managed_systems")
+                        for row in rows:
+                            # Apply filters
+                            if provider and row['provider'] and row['provider'].lower() != provider.lower():
+                                continue
+                            if system_type and row['type'] and row['type'].lower() != system_type.lower():
+                                continue
+                            systems.append({
+                                "system_id": row['system_id'],
+                                "name": row['name'],
+                                "system_type": row['type'],
+                                "provider": row['provider'],
+                                "endpoint": row['url'],
+                                "status": row['status'] or 'unknown',
+                                "health_score": row['health_score'] or 100
+                            })
+                    finally:
+                        await conn.close()
+                except Exception as db_err:
+                    logger.warning(f"DB fallback failed: {db_err}")
 
         return {"systems": systems, "total": len(systems)}
     except Exception as e:

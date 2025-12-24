@@ -145,7 +145,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.1.9"  # Fixed Self-Healing HealthPattern schema compatibility
+VERSION = "9.2.0"  # Added DB fallback for Digital Twin and Orchestrator APIs
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
