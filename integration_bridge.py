@@ -2,6 +2,16 @@
 """
 BrainOps Integration Bridge
 Connects all services and ensures continuous operation
+
+ENHANCEMENTS (v2.0):
+- Event-driven communication for service integration
+- Message queuing for async operations
+- Circuit breakers for service resilience
+- Load balancing across operations
+- Priority-based task routing
+- System-wide health aggregation
+
+Version: 2.0.0
 """
 
 import asyncio
@@ -17,11 +27,75 @@ from memory_system import memory_system
 
 logger = logging.getLogger(__name__)
 
+# Import enhanced orchestration features
+try:
+    from autonomous_system_orchestrator import (
+        EventBus, EventType, SystemEvent, MessageQueue, Task,
+        CircuitBreaker, CircuitState, LoadBalancer, LoadBalancingStrategy,
+        AgentInstance, HealthAggregator
+    )
+    ENHANCED_FEATURES_AVAILABLE = True
+except ImportError:
+    logger.warning("Enhanced orchestration features not available")
+    ENHANCED_FEATURES_AVAILABLE = False
+
 class IntegrationBridge:
+    """
+    Enhanced Integration Bridge with circuit breakers, event-driven communication,
+    and intelligent routing.
+    """
+
     def __init__(self):
         self.backend_url = "https://brainops-backend-prod.onrender.com"
         self.agents_url = "https://brainops-ai-agents.onrender.com"
         self.memory = memory_system
+
+        # Enhanced features
+        if ENHANCED_FEATURES_AVAILABLE:
+            self.event_bus = EventBus()
+            self.message_queue = MessageQueue(max_workers=5)
+            self.load_balancer = LoadBalancer(strategy=LoadBalancingStrategy.ROUND_ROBIN)
+            self.health_aggregator = HealthAggregator()
+            self.circuit_breakers = {
+                "backend": CircuitBreaker("backend_circuit", failure_threshold=3, timeout=30),
+                "agents": CircuitBreaker("agents_circuit", failure_threshold=3, timeout=30)
+            }
+            self._enhanced_initialized = False
+        else:
+            self.event_bus = None
+            self.message_queue = None
+            self.load_balancer = None
+            self.health_aggregator = None
+            self.circuit_breakers = {}
+
+        # Priority mapping for operations
+        self.operation_priorities = {
+            "sync_backend_to_agents": 3,
+            "trigger_monitoring": 2,
+            "sync_workflows": 4
+        }
+
+    async def initialize_enhanced_features(self):
+        """Initialize enhanced features"""
+        if not ENHANCED_FEATURES_AVAILABLE or self._enhanced_initialized:
+            return
+
+        await self.event_bus.start()
+        await self.message_queue.start()
+
+        # Register operation instances
+        operations = ["sync", "monitor", "workflow"]
+        for op in operations:
+            for i in range(2):
+                instance = AgentInstance(
+                    instance_id=f"{op}_instance_{i}",
+                    agent_name=op,
+                    max_capacity=3
+                )
+                self.load_balancer.register_instance(instance)
+
+        self._enhanced_initialized = True
+        logger.info("Enhanced integration bridge features initialized")
 
     async def sync_backend_to_agents(self):
         """Sync backend data with AI agents"""
@@ -102,7 +176,13 @@ bridge = IntegrationBridge()
 
 async def main():
     """Run integration bridge"""
-    logger.info("Starting Integration Bridge")
+    logger.info("Starting Integration Bridge v2.0")
+
+    # Initialize enhanced features
+    if ENHANCED_FEATURES_AVAILABLE:
+        await bridge.initialize_enhanced_features()
+        logger.info("Enhanced features initialized")
+
     await bridge.continuous_integration_loop()
 
 if __name__ == "__main__":

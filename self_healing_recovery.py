@@ -1543,21 +1543,30 @@ class SelfHealingRecovery:
             conn = self._get_connection()
             cur = conn.cursor()
 
+            # Use correct unified_brain schema: key, value, category, priority
+            key = f"self_healing_{action_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            value = {
+                'action_type': action_type,
+                'data': data,
+                'success': data.get('success', True),
+                'timestamp': datetime.now().isoformat(),
+                'component': data.get('component', 'unknown')
+            }
+
             cur.execute("""
                 INSERT INTO unified_brain (
-                    agent_name, action_type, input_data, output_data,
-                    success, metadata
+                    key, value, category, priority, source, metadata
                 ) VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (key) DO UPDATE SET
+                    value = EXCLUDED.value,
+                    last_updated = NOW()
             """, (
+                key,
+                json.dumps(value),
+                'self_healing',
+                'high' if action_type in ['service_restart', 'db_recovery_failed', 'automatic_rollback'] else 'medium',
                 'self_healing_system',
-                action_type,
-                json.dumps(data),
-                json.dumps(data),
-                data.get('success', True),
-                json.dumps({
-                    'timestamp': datetime.now().isoformat(),
-                    'component': data.get('component', 'unknown')
-                })
+                json.dumps({'component': data.get('component', 'unknown')})
             ))
 
             conn.commit()
