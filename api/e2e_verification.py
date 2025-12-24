@@ -251,3 +251,210 @@ async def debug_api_key():
         "brainops_api_key_env": brainops_key_env[:10] + "..." if len(brainops_key_env) > 10 else brainops_key_env,
         "source": "API_KEYS" if _api_keys_list else "BRAINOPS_API_KEY or default"
     }
+
+
+# =============================================================================
+# UI Testing with Playwright (True Browser-Based Testing)
+# =============================================================================
+
+@router.get("/ui/test/{app_name}")
+async def run_ui_test(
+    app_name: str,
+    background_tasks: BackgroundTasks
+):
+    """
+    Run Playwright-based UI tests for a specific application.
+
+    Available apps: weathercraft-erp, myroofgenius, brainops-command-center
+
+    Tests what USERS actually see in their browser:
+    - Page load success
+    - Critical element presence
+    - Performance metrics
+    - Accessibility checks
+    - Responsive design
+    - API integration monitoring
+    """
+    valid_apps = ["weathercraft-erp", "myroofgenius", "brainops-command-center"]
+    if app_name not in valid_apps:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid app. Valid options: {valid_apps}"
+        )
+
+    try:
+        from ui_tester_agent import UITesterAgent, PLAYWRIGHT_AVAILABLE
+
+        if not PLAYWRIGHT_AVAILABLE:
+            return {
+                "status": "error",
+                "error": "Playwright not installed. Browser testing unavailable.",
+                "recommendation": "Use /e2e/verify for API-level testing instead"
+            }
+
+        tester = UITesterAgent()
+        results = await tester.run_full_test_suite(app_name)
+
+        return {
+            "test_type": "ui_browser",
+            "application": app_name,
+            "is_operational": results["summary"]["failed"] == 0 and results["summary"]["errors"] == 0,
+            "results": results
+        }
+    except Exception as e:
+        logger.error(f"UI test failed for {app_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ui/test-all")
+async def run_all_ui_tests():
+    """
+    Run UI tests for ALL configured applications.
+
+    Tests: weathercraft-erp, myroofgenius, brainops-command-center
+    """
+    try:
+        from ui_tester_agent import UITesterAgent, PLAYWRIGHT_AVAILABLE
+
+        if not PLAYWRIGHT_AVAILABLE:
+            return {
+                "status": "error",
+                "error": "Playwright not available",
+                "recommendation": "Install with: pip install playwright && playwright install chromium"
+            }
+
+        tester = UITesterAgent()
+        all_results = {}
+        overall_pass = True
+
+        for app_name in tester.test_urls.keys():
+            try:
+                results = await tester.run_full_test_suite(app_name)
+                all_results[app_name] = results
+                if results["summary"]["failed"] > 0 or results["summary"]["errors"] > 0:
+                    overall_pass = False
+            except Exception as e:
+                all_results[app_name] = {"error": str(e)}
+                overall_pass = False
+
+        return {
+            "test_type": "ui_browser_full",
+            "all_apps_pass": overall_pass,
+            "results": all_results,
+            "summary": {
+                "total_apps": len(all_results),
+                "apps_passed": sum(1 for r in all_results.values() if r.get("summary", {}).get("failed", 1) == 0),
+                "apps_failed": sum(1 for r in all_results.values() if r.get("summary", {}).get("failed", 0) > 0 or "error" in r)
+            }
+        }
+    except Exception as e:
+        logger.error(f"All UI tests failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ui/status")
+async def get_ui_test_status():
+    """Check if UI testing (Playwright) is available"""
+    try:
+        from ui_tester_agent import UITesterAgent, PLAYWRIGHT_AVAILABLE
+
+        if not PLAYWRIGHT_AVAILABLE:
+            return {
+                "ui_testing_available": False,
+                "reason": "Playwright not installed",
+                "install_command": "pip install playwright && playwright install chromium"
+            }
+
+        tester = UITesterAgent()
+        return {
+            "ui_testing_available": True,
+            "configured_apps": list(tester.test_urls.keys()),
+            "test_types": [
+                "page_load",
+                "element_presence",
+                "interaction",
+                "responsive_design",
+                "performance",
+                "accessibility",
+                "api_integration"
+            ],
+            "endpoints": {
+                "test_single": "/e2e/ui/test/{app_name}",
+                "test_all": "/e2e/ui/test-all"
+            }
+        }
+    except Exception as e:
+        logger.error(f"UI status check failed: {e}")
+        return {
+            "ui_testing_available": False,
+            "error": str(e)
+        }
+
+
+@router.get("/complete-verification")
+async def complete_verification():
+    """
+    Run COMPLETE verification: API + UI tests combined.
+
+    This is the ultimate 100% operational check:
+    1. API endpoint verification (all backend services)
+    2. UI browser testing (what users actually see)
+    """
+    results = {
+        "verification_type": "complete",
+        "api_verification": None,
+        "ui_verification": None,
+        "is_100_percent_operational": False
+    }
+
+    # Run API verification
+    try:
+        from e2e_system_verification import run_full_e2e_verification
+        results["api_verification"] = await run_full_e2e_verification()
+    except Exception as e:
+        results["api_verification"] = {"error": str(e), "is_100_percent_operational": False}
+
+    # Run UI verification
+    try:
+        from ui_tester_agent import UITesterAgent, PLAYWRIGHT_AVAILABLE
+
+        if PLAYWRIGHT_AVAILABLE:
+            tester = UITesterAgent()
+            ui_results = {}
+            ui_pass = True
+
+            for app_name in tester.test_urls.keys():
+                try:
+                    app_results = await tester.run_full_test_suite(app_name)
+                    ui_results[app_name] = app_results["summary"]
+                    if app_results["summary"]["failed"] > 0 or app_results["summary"]["errors"] > 0:
+                        ui_pass = False
+                except Exception as e:
+                    ui_results[app_name] = {"error": str(e)}
+                    ui_pass = False
+
+            results["ui_verification"] = {
+                "available": True,
+                "all_pass": ui_pass,
+                "apps": ui_results
+            }
+        else:
+            results["ui_verification"] = {
+                "available": False,
+                "reason": "Playwright not installed"
+            }
+    except Exception as e:
+        results["ui_verification"] = {"error": str(e), "available": False}
+
+    # Determine overall status
+    api_ok = results["api_verification"].get("is_100_percent_operational", False) if isinstance(results["api_verification"], dict) else False
+    ui_ok = results["ui_verification"].get("all_pass", False) if isinstance(results["ui_verification"], dict) else False
+
+    results["is_100_percent_operational"] = api_ok and ui_ok
+    results["summary"] = {
+        "api_ok": api_ok,
+        "ui_ok": ui_ok,
+        "recommendation": "System fully operational" if results["is_100_percent_operational"] else "Check failed tests for issues"
+    }
+
+    return results
