@@ -863,9 +863,11 @@ class AUREA:
                         })
                         continue
 
-                # Execute the decision (in verification mode - no real outreach)
+                # Execute the decision (ACTIVE mode for internal operations)
+                # Outreach to seeded contacts remains protected via dry_run flag
                 result = await self._execute_decision(decision)
-                result["verification_mode"] = True  # Flag that this was verification only
+                result["execution_mode"] = "active"  # System is now operational
+                result["outreach_protected"] = True  # Seeded contacts protected
                 results.append(result)
 
                 # Update decision status in database (use db_id if available, else fallback)
@@ -958,39 +960,39 @@ class AUREA:
             return await self._activate_agents_for_decision(decision)
 
     async def _activate_collection_agents(self, context: Dict) -> Dict:
-        """Activate agents for collections (VERIFICATION MODE - no real outreach)"""
+        """Activate agents for collections (Active, outreach protected for seeded data)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.INVOICE_OVERDUE,
-            {"context": context, "aurea_initiated": True, "verification_mode": True, "dry_run": True}
+            {"context": context, "aurea_initiated": True, "execution_active": True, "dry_run_outreach": True}
         )
-        return {"action": "collection_agents", "result": result, "mode": "verification_only"}
+        return {"action": "collection_agents", "result": result, "mode": "active", "outreach_protected": True}
 
     async def _activate_scheduling_optimization(self, context: Dict) -> Dict:
-        """Activate scheduling optimization (VERIFICATION MODE)"""
+        """Activate scheduling optimization (Fully active - internal operation)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.SCHEDULING_CONFLICT,
-            {"context": context, "aurea_initiated": True, "verification_mode": True, "dry_run": True}
+            {"context": context, "aurea_initiated": True, "execution_active": True}
         )
-        return {"action": "scheduling_optimization", "result": result, "mode": "verification_only"}
+        return {"action": "scheduling_optimization", "result": result, "mode": "active"}
 
     async def _activate_retention_campaign(self, context: Dict) -> Dict:
-        """Activate customer retention campaign (VERIFICATION MODE - no real outreach)"""
+        """Activate customer retention campaign (Active, outreach protected for seeded data)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.CUSTOMER_CHURN_RISK,
-            {"context": context, "aurea_initiated": True, "verification_mode": True, "dry_run": True}
+            {"context": context, "aurea_initiated": True, "execution_active": True, "dry_run_outreach": True}
         )
-        return {"action": "retention_campaign", "result": result, "mode": "verification_only"}
+        return {"action": "retention_campaign", "result": result, "mode": "active", "outreach_protected": True}
 
     async def _activate_sales_acceleration(self, context: Dict) -> Dict:
-        """Activate sales acceleration (VERIFICATION MODE - no real outreach)"""
+        """Activate sales acceleration (Active, outreach protected for seeded data)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.QUOTE_REQUESTED,
-            {"context": context, "aurea_initiated": True, "verification_mode": True, "dry_run": True}
+            {"context": context, "aurea_initiated": True, "execution_active": True, "dry_run_outreach": True}
         )
-        return {"action": "sales_acceleration", "result": result, "mode": "verification_only"}
+        return {"action": "sales_acceleration", "result": result, "mode": "active", "outreach_protected": True}
 
     async def _activate_agents_for_decision(self, decision: Decision) -> Dict:
-        """Generic agent activation based on decision type (VERIFICATION MODE)"""
+        """Generic agent activation based on decision type (ACTIVE mode)"""
         event_type_map = {
             DecisionType.FINANCIAL: BusinessEventType.PAYMENT_RECEIVED,
             DecisionType.OPERATIONAL: BusinessEventType.JOB_SCHEDULED,
@@ -1001,31 +1003,52 @@ class AUREA:
         event_type = event_type_map.get(decision.type, BusinessEventType.SYSTEM_HEALTH_CHECK)
         # Serialize decision to ensure datetime/Decimal objects are JSON-safe
         decision_dict = json_safe_serialize(asdict(decision))
+
+        # Outreach to seeded contacts protected, internal operations fully active
+        requires_outreach = decision.type in [DecisionType.CUSTOMER]
         result = await self.activation_system.handle_business_event(
             event_type,
-            {"decision": decision_dict, "aurea_initiated": True, "verification_mode": True, "dry_run": True}
+            {"decision": decision_dict, "aurea_initiated": True, "execution_active": True,
+             "dry_run_outreach": requires_outreach}
         )
 
-        return {"action": "generic_activation", "event_type": event_type.value, "result": result, "mode": "verification_only"}
+        return {"action": "generic_activation", "event_type": event_type.value, "result": result,
+                "mode": "active", "outreach_protected": requires_outreach}
 
     async def _learn(self, results: List[Dict[str, Any]]):
-        """Learn from execution results and improve"""
+        """Learn from ALL execution results and continuously improve"""
         successful = [r for r in results if r.get("status") != "failed"]
         failed = [r for r in results if r.get("status") == "failed"]
 
         # Calculate success rate
         success_rate = len(successful) / len(results) if results else 0
 
-        # Generate insights
-        if success_rate < 0.5:
-            insight = {
+        # ALWAYS learn from every cycle - not just failures
+        insight = {
+            "type": "execution_cycle",
+            "insight": f"Cycle {self.cycle_count} completed with {success_rate*100:.0f}% success",
+            "data": {
+                "cycle": self.cycle_count,
+                "success_rate": success_rate,
+                "total_decisions": len(results),
+                "successful": len(successful),
+                "failed": len(failed),
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+        self.learning_insights.append(insight)
+        await self._apply_learning(insight)
+
+        # Generate performance insight if low success
+        if success_rate < 0.5 and results:
+            performance_insight = {
                 "type": "performance",
                 "insight": "Low success rate in decision execution",
                 "recommendation": "Review decision confidence thresholds",
                 "data": {"success_rate": success_rate, "failures": failed}
             }
-            self.learning_insights.append(insight)
-            await self._apply_learning(insight)
+            self.learning_insights.append(performance_insight)
+            await self._apply_learning(performance_insight)
 
         # Store learning in memory
         self.memory.store(Memory(
@@ -1051,24 +1074,31 @@ class AUREA:
                 logger.info(f"🧠 Pattern discovered: {pattern['description']}")
 
     async def _apply_learning(self, insight: Dict):
-        """Apply learning insights to improve performance"""
+        """Apply learning insights to improve performance - ALWAYS stores learning data"""
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor()
 
+            # ALWAYS store the learning insight to the database
+            adjustment = "none"
             if insight["type"] == "performance" and insight["data"].get("success_rate", 1.0) < 0.5:
-                # Record the learning insight to the database
-                cur.execute("""
-                    INSERT INTO ai_learning_insights (tenant_id, insight_type, insight_data, applied_at, adjustment_made)
-                    VALUES (%s, %s, %s, NOW(), %s)
-                    ON CONFLICT DO NOTHING
-                """, (
-                    self.tenant_id,
-                    insight["type"],
-                    json.dumps(insight["data"]),
-                    "reduced_confidence_threshold"
-                ))
+                adjustment = "reduced_confidence_threshold"
+            elif insight["type"] == "execution_cycle":
+                adjustment = "cycle_recorded"
 
+            cur.execute("""
+                INSERT INTO ai_learning_insights (tenant_id, insight_type, insight_data, applied_at, adjustment_made)
+                VALUES (%s, %s, %s, NOW(), %s)
+            """, (
+                self.tenant_id,
+                insight["type"],
+                json.dumps(insight.get("data", {})),
+                adjustment
+            ))
+            conn.commit()
+            logger.info(f"📚 Learning recorded: {insight['type']} - {adjustment}")
+
+            if insight["type"] == "performance" and insight["data"].get("success_rate", 1.0) < 0.5:
                 # Adjust agent confidence thresholds for poor performers
                 if "agent_name" in insight["data"]:
                     cur.execute("""
@@ -1107,7 +1137,12 @@ class AUREA:
 
         This is a KEY force multiplier - the system uses its own infrastructure
         tools (MCP Bridge) to heal itself, creating autonomous operations.
+
+        FULL POWER MODE: Self-healing is now ACTIVE and will execute remediation.
         """
+        # Force health check if not yet populated
+        if not self.system_health:
+            self.system_health = await self._check_system_health()
         if not self.system_health:
             return
 
