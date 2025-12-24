@@ -138,6 +138,25 @@ SCHEMA_BOOTSTRAP_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_agent_executions_agent_time ON agent_executions(agent_id, started_at DESC);",
     "CREATE INDEX IF NOT EXISTS idx_agent_executions_status_time ON agent_executions(status, started_at DESC);",
     "CREATE INDEX IF NOT EXISTS idx_agent_schedules_enabled ON agent_schedules(enabled, next_execution DESC);",
+    # Knowledge graph for learning system
+    """
+    CREATE TABLE IF NOT EXISTS ai_knowledge_graph (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        node_type TEXT NOT NULL,
+        node_label TEXT NOT NULL,
+        content TEXT,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        connections JSONB DEFAULT '[]'::jsonb,
+        embedding vector(1536),
+        confidence FLOAT DEFAULT 0.5,
+        source TEXT,
+        tenant_id UUID,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_knowledge_graph_type ON ai_knowledge_graph(node_type);",
+    "CREATE INDEX IF NOT EXISTS idx_knowledge_graph_tenant ON ai_knowledge_graph(tenant_id);",
 ]
 
 # Configure logging
@@ -820,6 +839,67 @@ async def lifespan(app: FastAPI):
         app.state.degraded = False
         app.state.missing_systems = []
         logger.info("✅ All critical systems operational")
+
+    # Start background health monitoring loop (triggers self-healing)
+    async def health_monitoring_loop():
+        """Continuously monitor system health and trigger healing when needed"""
+        while True:
+            try:
+                # Check if self-healing is available
+                if hasattr(app.state, 'healer') and app.state.healer:
+                    # Collect basic system metrics
+                    metrics = {
+                        "memory_percent": 50.0,  # Default value
+                        "error_rate": 0.0,
+                        "response_time_ms": 100
+                    }
+
+                    # Try to get real metrics
+                    try:
+                        import psutil
+                        metrics["memory_percent"] = psutil.virtual_memory().percent
+                    except ImportError:
+                        pass
+
+                    # Check for anomalies and trigger healing if needed
+                    if metrics.get("memory_percent", 0) > 85:
+                        logger.warning(f"⚠️ High memory usage: {metrics['memory_percent']}%")
+                        # Trigger self-healing
+                        try:
+                            await app.state.healer.detect_anomaly("system", metrics)
+                        except Exception as heal_error:
+                            logger.error(f"Self-healing detection failed: {heal_error}")
+
+                await asyncio.sleep(60)  # Check every minute
+            except Exception as e:
+                logger.error(f"Health monitoring error: {e}")
+                await asyncio.sleep(30)
+
+    asyncio.create_task(health_monitoring_loop())
+    logger.info("💓 Health monitoring loop STARTED")
+
+    # Start learning pipeline loop (generates insights periodically)
+    async def learning_pipeline_loop():
+        """Periodically generate learning insights from accumulated data"""
+        while True:
+            try:
+                await asyncio.sleep(3600)  # Run every hour
+
+                # Generate insights if training pipeline is available
+                if hasattr(app.state, 'training') and app.state.training:
+                    try:
+                        insights = await app.state.training.generate_insights()
+                        if insights:
+                            logger.info(f"📊 Generated {len(insights)} learning insights")
+                    except Exception as learn_error:
+                        logger.error(f"Learning pipeline error: {learn_error}")
+
+            except Exception as e:
+                logger.error(f"Learning loop error: {e}")
+                await asyncio.sleep(300)
+
+    asyncio.create_task(learning_pipeline_loop())
+    logger.info("📚 Learning pipeline loop STARTED")
 
     yield
 
