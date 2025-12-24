@@ -3,13 +3,18 @@
 """
 BrainOps UI Tester Agent
 Automated UI testing using Playwright for real browser testing
+Enhanced with Gemini Vision for AI-powered visual analysis
 """
 
 import asyncio
 import os
+import base64
+import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 try:
     from playwright.async_api import async_playwright, Browser, Page, BrowserContext
@@ -17,6 +22,15 @@ try:
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
     print("⚠️ Playwright not installed. Install with: pip install playwright && playwright install")
+
+# Gemini Vision for AI-powered visual analysis
+try:
+    import google.generativeai as genai
+    GEMINI_VISION_AVAILABLE = bool(os.getenv("GOOGLE_API_KEY"))
+    if GEMINI_VISION_AVAILABLE:
+        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+except ImportError:
+    GEMINI_VISION_AVAILABLE = False
 
 class TestStatus(Enum):
     PASS = "pass"
@@ -410,6 +424,232 @@ class UITesterAgent:
 
         return result
 
+    async def test_visual_ai_analysis(self, url: str, app_name: str = "unknown") -> Dict[str, Any]:
+        """
+        AI-powered visual analysis using Gemini Vision.
+        Analyzes screenshots for:
+        - Visual consistency and design quality
+        - UX/UI best practices
+        - Accessibility issues
+        - Brand consistency
+        - Layout problems
+        - Content quality
+        """
+        result = {
+            "url": url,
+            "test": "visual_ai_analysis",
+            "status": TestStatus.PASS.value,
+            "ai_analysis": None,
+            "scores": {},
+            "issues": [],
+            "recommendations": []
+        }
+
+        if not GEMINI_VISION_AVAILABLE:
+            result["status"] = TestStatus.SKIP.value
+            result["error"] = "Gemini Vision not available (GOOGLE_API_KEY not set)"
+            return result
+
+        try:
+            page = await self.context.new_page()
+            await page.goto(url, wait_until='networkidle')
+
+            # Take full-page screenshot
+            screenshot_bytes = await page.screenshot(full_page=True)
+            screenshot_b64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+
+            # Initialize Gemini Vision model
+            model = genai.GenerativeModel('gemini-1.5-pro-002')
+
+            # Comprehensive visual analysis prompt
+            analysis_prompt = f"""You are an expert UI/UX analyst. Analyze this screenshot of {app_name} ({url}) and provide a comprehensive assessment.
+
+Evaluate the following aspects on a scale of 1-10 and provide specific observations:
+
+1. **Visual Design Quality**: Layout, color scheme, typography, whitespace usage
+2. **UX Best Practices**: Navigation clarity, call-to-action visibility, user flow
+3. **Accessibility**: Color contrast, text readability, interactive element sizing
+4. **Brand Consistency**: Professional appearance, cohesive styling
+5. **Mobile Readiness**: Responsive design indicators, touch-friendly elements
+6. **Content Quality**: Text clarity, image quality, information hierarchy
+7. **Performance Indicators**: Loading states, skeleton screens, lazy loading
+
+For each issue found, categorize as:
+- CRITICAL: Blocks user functionality
+- WARNING: Degrades user experience
+- INFO: Improvement opportunity
+
+Return your analysis in this exact JSON format:
+{{
+    "overall_score": <1-10>,
+    "scores": {{
+        "visual_design": <1-10>,
+        "ux_practices": <1-10>,
+        "accessibility": <1-10>,
+        "brand_consistency": <1-10>,
+        "mobile_readiness": <1-10>,
+        "content_quality": <1-10>,
+        "performance": <1-10>
+    }},
+    "issues": [
+        {{"severity": "CRITICAL|WARNING|INFO", "category": "<category>", "description": "<specific issue>"}}
+    ],
+    "recommendations": [
+        "<actionable recommendation>"
+    ],
+    "summary": "<2-3 sentence overall assessment>"
+}}"""
+
+            # Send to Gemini Vision
+            import asyncio
+            response = await asyncio.to_thread(
+                model.generate_content,
+                [analysis_prompt, {"mime_type": "image/png", "data": screenshot_b64}],
+                generation_config={"temperature": 0.1}
+            )
+
+            # Parse JSON response
+            response_text = response.text.strip()
+            # Extract JSON from markdown code blocks if present
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+
+            import json
+            ai_result = json.loads(response_text)
+
+            result["ai_analysis"] = ai_result
+            result["scores"] = ai_result.get("scores", {})
+            result["issues"] = ai_result.get("issues", [])
+            result["recommendations"] = ai_result.get("recommendations", [])
+            result["overall_score"] = ai_result.get("overall_score", 0)
+            result["summary"] = ai_result.get("summary", "")
+
+            # Determine pass/fail based on score and critical issues
+            critical_issues = [i for i in result["issues"] if i.get("severity") == "CRITICAL"]
+            if critical_issues or result.get("overall_score", 10) < 5:
+                result["status"] = TestStatus.FAIL.value
+            elif result.get("overall_score", 10) < 7:
+                result["status"] = "warning"
+
+            await page.close()
+
+        except json.JSONDecodeError as e:
+            result["status"] = TestStatus.ERROR.value
+            result["error"] = f"Failed to parse AI response: {e}"
+            result["raw_response"] = response_text if 'response_text' in locals() else None
+        except Exception as e:
+            result["status"] = TestStatus.ERROR.value
+            result["error"] = str(e)
+            logger.error(f"Visual AI analysis failed: {e}")
+
+        return result
+
+    async def test_visual_regression(self, url: str, baseline_path: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Visual regression testing - compare current screenshot to baseline.
+        Uses Gemini Vision to detect meaningful visual changes.
+        """
+        result = {
+            "url": url,
+            "test": "visual_regression",
+            "status": TestStatus.PASS.value,
+            "changes_detected": [],
+            "severity": "none"
+        }
+
+        if not GEMINI_VISION_AVAILABLE:
+            result["status"] = TestStatus.SKIP.value
+            result["error"] = "Gemini Vision not available"
+            return result
+
+        try:
+            page = await self.context.new_page()
+            await page.goto(url, wait_until='networkidle')
+
+            # Take current screenshot
+            current_bytes = await page.screenshot(full_page=True)
+            current_b64 = base64.b64encode(current_bytes).decode('utf-8')
+
+            # If no baseline, just store current
+            if not baseline_path:
+                result["status"] = TestStatus.SKIP.value
+                result["message"] = "No baseline provided - screenshot captured for future comparison"
+                result["screenshot_b64"] = current_b64[:100] + "..."  # Truncate for response
+                await page.close()
+                return result
+
+            # Load baseline
+            with open(baseline_path, 'rb') as f:
+                baseline_bytes = f.read()
+            baseline_b64 = base64.b64encode(baseline_bytes).decode('utf-8')
+
+            # Use Gemini to compare
+            model = genai.GenerativeModel('gemini-1.5-pro-002')
+
+            comparison_prompt = """Compare these two screenshots (baseline vs current).
+Identify any meaningful visual changes that could affect user experience.
+
+Ignore minor differences like:
+- Timestamps or dates
+- Dynamic content that naturally changes
+- Minor text variations
+
+Focus on detecting:
+- Layout changes
+- Missing or new elements
+- Color/styling changes
+- Broken layouts
+- Missing images or icons
+
+Return JSON:
+{
+    "has_significant_changes": true/false,
+    "severity": "none|minor|major|critical",
+    "changes": [
+        {"type": "<change type>", "description": "<specific description>", "impact": "low|medium|high"}
+    ],
+    "summary": "<brief summary>"
+}"""
+
+            import asyncio
+            response = await asyncio.to_thread(
+                model.generate_content,
+                [
+                    comparison_prompt,
+                    "BASELINE IMAGE:",
+                    {"mime_type": "image/png", "data": baseline_b64},
+                    "CURRENT IMAGE:",
+                    {"mime_type": "image/png", "data": current_b64}
+                ],
+                generation_config={"temperature": 0.1}
+            )
+
+            import json
+            response_text = response.text.strip()
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+
+            comparison_result = json.loads(response_text)
+
+            result["changes_detected"] = comparison_result.get("changes", [])
+            result["severity"] = comparison_result.get("severity", "none")
+            result["summary"] = comparison_result.get("summary", "")
+
+            if comparison_result.get("severity") in ["major", "critical"]:
+                result["status"] = TestStatus.FAIL.value
+            elif comparison_result.get("severity") == "minor":
+                result["status"] = "warning"
+
+            await page.close()
+
+        except Exception as e:
+            result["status"] = TestStatus.ERROR.value
+            result["error"] = str(e)
+
+        return result
+
     async def run_full_test_suite(self, app_name: str) -> Dict[str, Any]:
         """Run complete test suite for an application"""
         if app_name not in self.test_urls:
@@ -472,6 +712,21 @@ class UITesterAgent:
             # Responsive design test
             responsive_result = await self.test_responsive_design(home_url)
             test_results["tests"].append(responsive_result)
+
+            # AI Visual Analysis (Gemini Vision) - The Ultimate UI/UX Check
+            if GEMINI_VISION_AVAILABLE:
+                visual_ai_result = await self.test_visual_ai_analysis(home_url, app_name)
+                test_results["tests"].append(visual_ai_result)
+
+                # Store AI insights separately for easy access
+                if visual_ai_result.get("status") != TestStatus.ERROR.value:
+                    test_results["ai_visual_insights"] = {
+                        "overall_score": visual_ai_result.get("overall_score"),
+                        "scores": visual_ai_result.get("scores", {}),
+                        "issues": visual_ai_result.get("issues", []),
+                        "recommendations": visual_ai_result.get("recommendations", []),
+                        "summary": visual_ai_result.get("summary", "")
+                    }
 
             await self.teardown_browser()
 
