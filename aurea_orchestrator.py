@@ -548,6 +548,39 @@ class AUREA:
         except Exception as e:
             logger.error(f"Observation error: {e}")
 
+        # Check UI/Frontend health (async HTTP check)
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Quick health check of frontends
+                frontend_health = {"status": "checking", "apps": {}}
+                for app_name, app_url in [
+                    ("weathercraft-erp", "https://weathercraft-erp.vercel.app"),
+                    ("myroofgenius", "https://myroofgenius.com"),
+                    ("command-center", "https://brainops-command-center.vercel.app")
+                ]:
+                    try:
+                        async with session.get(app_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                            frontend_health["apps"][app_name] = {
+                                "status": "healthy" if resp.status == 200 else "degraded",
+                                "status_code": resp.status
+                            }
+                    except Exception as e:
+                        frontend_health["apps"][app_name] = {"status": "down", "error": str(e)}
+
+                # Check if any frontends are down
+                unhealthy_apps = [app for app, data in frontend_health["apps"].items() if data["status"] != "healthy"]
+                if unhealthy_apps:
+                    observations.append({
+                        "type": "frontend_health_issue",
+                        "unhealthy_apps": unhealthy_apps,
+                        "details": frontend_health["apps"],
+                        "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK
+                    })
+                else:
+                    frontend_health["status"] = "all_healthy"
+        except Exception as e:
+            logger.warning(f"Frontend health check failed: {e}")
+
         return observations
 
     async def _orient(self, observations: List[Dict]) -> Dict[str, Any]:
@@ -590,6 +623,14 @@ class AUREA:
                     "type": "revenue",
                     "description": f"Convert {obs['count']} pending estimates",
                     "potential_value": obs['count'] * 5000  # Assume $5k average
+                })
+
+            elif obs["type"] == "frontend_health_issue":
+                context["priorities"].append({
+                    "type": "technical",
+                    "description": f"Frontend apps unhealthy: {', '.join(obs['unhealthy_apps'])}",
+                    "urgency": "critical",
+                    "details": obs.get("details", {})
                 })
 
         # Recall relevant memories for context
@@ -636,6 +677,23 @@ class AUREA:
                     alternatives=["manual_rescheduling", "crew_reallocation"],
                     requires_human_approval=self.autonomy_level.value < 50,
                     deadline=datetime.now() + timedelta(hours=2),
+                    context={"priority": priority}
+                )
+                decisions.append(decision)
+
+        # Technical/Frontend decisions
+        for priority in context.get("priorities", []):
+            if priority["type"] == "technical" and priority.get("urgency") == "critical":
+                decision = Decision(
+                    id=f"dec-{self.cycle_count}-{len(decisions)}",
+                    type=DecisionType.TECHNICAL,
+                    description=f"Investigate frontend issue: {priority['description']}",
+                    confidence=0.95,
+                    impact_assessment="User-facing applications affected - immediate investigation needed",
+                    recommended_action="trigger_frontend_investigation",
+                    alternatives=["check_vercel_logs", "redeploy_frontend", "notify_devops"],
+                    requires_human_approval=False,  # Auto-investigate technical issues
+                    deadline=datetime.now() + timedelta(minutes=30),
                     context={"priority": priority}
                 )
                 decisions.append(decision)
