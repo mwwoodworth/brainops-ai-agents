@@ -232,3 +232,22 @@ async def list_verified_systems():
     except Exception as e:
         logger.error(f"Could not list systems: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/debug/api-key")
+async def debug_api_key():
+    """Debug endpoint to check which API key the E2E module is using"""
+    import os
+    from e2e_system_verification import API_KEY, _api_keys_list
+
+    api_keys_env = os.getenv("API_KEYS", "NOT SET")
+    brainops_key_env = os.getenv("BRAINOPS_API_KEY", "NOT SET")
+
+    return {
+        "e2e_api_key_used": API_KEY[:10] + "..." if len(API_KEY) > 10 else API_KEY,
+        "api_key_full_length": len(API_KEY),
+        "api_keys_from_env": api_keys_env[:15] + "..." if len(api_keys_env) > 15 else api_keys_env,
+        "api_keys_parsed_count": len(_api_keys_list),
+        "brainops_api_key_env": brainops_key_env[:10] + "..." if len(brainops_key_env) > 10 else brainops_key_env,
+        "source": "API_KEYS" if _api_keys_list else "BRAINOPS_API_KEY or default"
+    }
