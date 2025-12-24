@@ -323,7 +323,7 @@ Respond with JSON only:
         import aiohttp
 
         MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
-        MCP_API_KEY = os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+        MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "brainops_mcp_2025"
 
         results = {
             "executed_at": datetime.utcnow().isoformat(),
