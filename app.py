@@ -1787,6 +1787,120 @@ async def execute_scheduled_agents(
         return {"status": "failed", "error": str(e)}
 
 
+@app.post("/self-heal/trigger", dependencies=SECURED_DEPENDENCIES)
+async def trigger_self_healing():
+    """
+    Trigger self-healing check and remediation.
+
+    This endpoint can be called by cron jobs to proactively check for issues
+    and trigger healing actions, bypassing the need for AUREA's main loop.
+    """
+    results = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "issues_detected": [],
+        "actions_taken": [],
+        "status": "completed"
+    }
+
+    try:
+        pool = get_pool()
+
+        # 1. Check for failed AUREA decisions and retry
+        failed_decisions = await pool.fetch("""
+            SELECT id, decision_type, context
+            FROM aurea_decisions
+            WHERE execution_status = 'failed'
+            AND created_at > NOW() - INTERVAL '24 hours'
+            LIMIT 10
+        """)
+
+        for decision in failed_decisions:
+            results["issues_detected"].append({
+                "type": "failed_decision",
+                "id": str(decision["id"]),
+                "decision_type": decision["decision_type"]
+            })
+            # Reset for retry
+            await pool.execute("""
+                UPDATE aurea_decisions
+                SET execution_status = 'pending',
+                    execution_result = NULL
+                WHERE id = $1
+            """, decision["id"])
+            results["actions_taken"].append({
+                "action": "reset_for_retry",
+                "target": str(decision["id"])
+            })
+
+        # 2. Check healing rules and match against recent errors
+        recent_errors = await pool.fetch("""
+            SELECT DISTINCT error_type, error_message, component
+            FROM ai_error_logs
+            WHERE timestamp > NOW() - INTERVAL '1 hour'
+            LIMIT 20
+        """) if await pool.fetchval("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'ai_error_logs')") else []
+
+        healing_rules = await pool.fetch("""
+            SELECT id, component, error_pattern, fix_action, confidence
+            FROM ai_healing_rules
+            WHERE enabled = true
+        """)
+
+        for error in recent_errors:
+            for rule in healing_rules:
+                if rule["error_pattern"] in str(error.get("error_message", "")) or \
+                   rule["error_pattern"] in str(error.get("error_type", "")):
+                    results["issues_detected"].append({
+                        "type": "matched_error",
+                        "error_type": error.get("error_type"),
+                        "matched_rule": str(rule["id"])
+                    })
+                    results["actions_taken"].append({
+                        "action": rule["fix_action"],
+                        "component": rule["component"],
+                        "confidence": float(rule["confidence"])
+                    })
+                    # Update rule usage
+                    await pool.execute("""
+                        UPDATE ai_healing_rules
+                        SET success_count = success_count + 1, updated_at = NOW()
+                        WHERE id = $1
+                    """, rule["id"])
+
+        # 3. Check for stalled agents
+        stalled_agents = await pool.fetch("""
+            SELECT id, name, agent_type
+            FROM ai_agents
+            WHERE enabled = true
+            AND last_execution_at < NOW() - INTERVAL '2 hours'
+        """) if await pool.fetchval("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'ai_agents' AND column_name = 'last_execution_at')") else []
+
+        for agent in stalled_agents:
+            results["issues_detected"].append({
+                "type": "stalled_agent",
+                "agent_id": str(agent["id"]),
+                "agent_name": agent["name"]
+            })
+
+        # 4. Log healing run
+        await pool.execute("""
+            INSERT INTO remediation_history (action_type, target_component, result, success, metadata, created_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+        """, "self_heal_trigger", "system", json.dumps(results), True, json.dumps({
+            "issues_count": len(results["issues_detected"]),
+            "actions_count": len(results["actions_taken"])
+        })) if await pool.fetchval("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'remediation_history')") else None
+
+        logger.info(f"🏥 Self-healing check complete: {len(results['issues_detected'])} issues, {len(results['actions_taken'])} actions")
+
+    except Exception as e:
+        logger.error(f"Self-healing trigger failed: {e}")
+        results["status"] = "error"
+        results["error"] = str(e)
+
+    return results
+
+
 @app.get("/scheduler/status")
 async def get_scheduler_status():
     """Get detailed scheduler status and diagnostics"""
