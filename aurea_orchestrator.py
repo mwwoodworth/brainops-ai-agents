@@ -759,8 +759,9 @@ class AUREA:
                 result["verification_mode"] = True  # Flag that this was verification only
                 results.append(result)
 
-                # Update decision status in database
-                self._update_decision_status(decision.id, "completed", result)
+                # Update decision status in database (use db_id if available, else fallback)
+                decision_db_id = getattr(decision, 'db_id', None) or decision.id
+                self._update_decision_status(decision_db_id, "completed", result)
 
                 # Store execution in memory
                 self.memory.store(Memory(
@@ -780,7 +781,8 @@ class AUREA:
 
             except Exception as e:
                 logger.error(f"Failed to execute decision {decision.id}: {e}")
-                self._update_decision_status(decision.id, "failed", {"error": str(e)})
+                decision_db_id = getattr(decision, 'db_id', None) or decision.id
+                self._update_decision_status(decision_db_id, "failed", {"error": str(e)})
                 results.append({
                     "decision_id": decision.id,
                     "status": "failed",
@@ -795,23 +797,28 @@ class AUREA:
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor()
 
+            # Try UUID match first, then fallback to text match
             cur.execute("""
             UPDATE aurea_decisions
             SET execution_status = %s,
                 execution_result = %s,
                 executed_at = NOW()
-            WHERE id = %s OR description LIKE %s
+            WHERE id::text = %s
             """, (
                 status,
                 Json(result) if result else None,
-                decision_id,
-                f"%{decision_id}%"  # Fallback match on decision ID in description
+                decision_id
             ))
 
+            rows_updated = cur.rowcount
             conn.commit()
             cur.close()
             conn.close()
-            logger.info(f"✅ Updated decision {decision_id} status to {status}")
+
+            if rows_updated > 0:
+                logger.info(f"✅ Updated decision {decision_id} status to {status}")
+            else:
+                logger.warning(f"⚠️ No decision found with id {decision_id} to update")
 
         except Exception as e:
             logger.error(f"Failed to update decision status: {e}")
@@ -1346,8 +1353,8 @@ class AUREA:
 
         return False
 
-    def _log_decision(self, decision: Decision):
-        """Log decision to database"""
+    def _log_decision(self, decision: Decision) -> Optional[str]:
+        """Log decision to database and return the database UUID"""
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor()
@@ -1358,6 +1365,7 @@ class AUREA:
              recommended_action, alternatives, requires_human_approval,
              execution_status, context, tenant_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
             """, (
                 decision.type.value,
                 decision.description,
@@ -1371,12 +1379,21 @@ class AUREA:
                 self.tenant_id
             ))
 
+            result = cur.fetchone()
+            db_id = str(result[0]) if result else None
+
+            # Store the database ID on the decision for later use
+            decision.db_id = db_id
+
             conn.commit()
             cur.close()
             conn.close()
 
+            return db_id
+
         except Exception as e:
             logger.error(f"Failed to log decision: {e}")
+            return None
 
     async def _handle_orchestration_error(self, error: Exception):
         """Handle errors in orchestration loop"""
