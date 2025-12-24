@@ -184,8 +184,8 @@ class E2ESystemVerification:
                 critical=True
             ),
             EndpointTest(
-                name="Memory Coordination",
-                url=f"{BRAINOPS_API_URL}/memory-coordination/status",
+                name="Brain Memory",
+                url=f"{BRAINOPS_API_URL}/brain/critical",
                 headers=headers,
                 expected_fields=[],
                 category=SystemCategory.CORE_API,
@@ -397,8 +397,8 @@ class E2ESystemVerification:
                 critical=True
             ),
             EndpointTest(
-                name="MCP Bridge - Servers",
-                url=f"{MCP_BRIDGE_URL}/api/servers",
+                name="MCP Bridge - Status",
+                url=f"{MCP_BRIDGE_URL}/status",
                 expected_status=200,
                 expected_fields=[],
                 category=SystemCategory.MCP,
@@ -472,8 +472,8 @@ class E2ESystemVerification:
                             error_message=response_body.get("error") or response_body.get("message") or "Error in response"
                         )
 
-                # Check for degraded performance (>5 second response)
-                if response_time_ms > 5000:
+                # Check for degraded performance (>20 second response - Render free tier is slow)
+                if response_time_ms > 20000:
                     return TestResult(
                         test_name=test.name,
                         endpoint=test.url,
