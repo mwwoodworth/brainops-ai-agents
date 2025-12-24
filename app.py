@@ -157,6 +157,38 @@ SCHEMA_BOOTSTRAP_SQL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_knowledge_graph_type ON ai_knowledge_graph(node_type);",
     "CREATE INDEX IF NOT EXISTS idx_knowledge_graph_tenant ON ai_knowledge_graph(tenant_id);",
+    # AUREA state table - add missing tenant_id column
+    """
+    CREATE TABLE IF NOT EXISTS aurea_state (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        state_type TEXT NOT NULL,
+        state_data JSONB DEFAULT '{}'::jsonb,
+        cycle_number INT DEFAULT 0,
+        tenant_id UUID,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    "ALTER TABLE aurea_state ADD COLUMN IF NOT EXISTS tenant_id UUID;",
+    "CREATE INDEX IF NOT EXISTS idx_aurea_state_tenant ON aurea_state(tenant_id);",
+    "CREATE INDEX IF NOT EXISTS idx_aurea_state_type ON aurea_state(state_type, created_at DESC);",
+    # Agent activation log - add missing action column
+    """
+    CREATE TABLE IF NOT EXISTS agent_activation_log (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        agent_id UUID,
+        tenant_id UUID,
+        action TEXT,
+        timestamp TIMESTAMPTZ DEFAULT NOW(),
+        details JSONB DEFAULT '{}'::jsonb,
+        event_type TEXT,
+        success BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    "ALTER TABLE agent_activation_log ADD COLUMN IF NOT EXISTS action TEXT;",
+    "ALTER TABLE agent_activation_log ADD COLUMN IF NOT EXISTS event_type TEXT;",
+    "ALTER TABLE agent_activation_log ADD COLUMN IF NOT EXISTS success BOOLEAN DEFAULT TRUE;",
+    "CREATE INDEX IF NOT EXISTS idx_activation_log_agent ON agent_activation_log(agent_id, timestamp DESC);",
 ]
 
 # Configure logging
@@ -168,7 +200,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.7.0"  # Self-Healing Reconciliation Loop + Enhanced Systems
+VERSION = "9.8.0"  # Vector Dimension Fix + JSON Serialization + Schema Updates
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
