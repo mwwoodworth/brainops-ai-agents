@@ -14,6 +14,7 @@ Features:
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from typing import Dict, Any, Optional, List, AsyncGenerator
 import asyncio
 import json
@@ -364,19 +365,24 @@ async def refresh_aurea_state():
     return asdict(state)
 
 
+class ChatMessage(BaseModel):
+    """Chat message request"""
+    message: str
+    session_id: Optional[str] = None
+    stream: bool = True
+
+
 @router.post("/message")
-async def send_message(
-    message: str,
-    session_id: Optional[str] = None,
-    stream: bool = Query(True, description="Stream response token by token")
-):
+async def send_message(payload: ChatMessage):
     """
     Send a message to AUREA and get a response.
 
     This is the core conversational interface - AUREA will respond with
     REAL operational context, not generic AI fluff.
     """
-    session = get_or_create_session(session_id)
+    message = payload.message
+    stream = payload.stream
+    session = get_or_create_session(payload.session_id)
     session.add_message("user", message)
 
     if stream:
