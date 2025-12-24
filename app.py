@@ -146,7 +146,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.3.0"  # MCP Bridge Integration - 345 tools connected to AI Agents
+VERSION = "9.3.1"  # MCP Bridge Integration - enum fix
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)

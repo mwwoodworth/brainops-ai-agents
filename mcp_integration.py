@@ -115,12 +115,14 @@ class MCPClient:
             ) as response:
                 duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
 
+                server_str = server.value if isinstance(server, MCPServer) else server
+
                 if response.status == 200:
                     data = await response.json()
-                    logger.info(f"MCP Tool executed: {server.value}/{tool} in {duration_ms:.0f}ms")
+                    logger.info(f"MCP Tool executed: {server_str}/{tool} in {duration_ms:.0f}ms")
                     return MCPToolResult(
                         success=True,
-                        server=server.value if isinstance(server, MCPServer) else server,
+                        server=server_str,
                         tool=tool,
                         result=data.get("result", data),
                         duration_ms=duration_ms,
@@ -128,10 +130,10 @@ class MCPClient:
                     )
                 else:
                     error_text = await response.text()
-                    logger.error(f"MCP Tool failed: {server.value}/{tool} - {error_text}")
+                    logger.error(f"MCP Tool failed: {server_str}/{tool} - {error_text}")
                     return MCPToolResult(
                         success=False,
-                        server=server.value if isinstance(server, MCPServer) else server,
+                        server=server_str,
                         tool=tool,
                         result=None,
                         duration_ms=duration_ms,
@@ -139,10 +141,11 @@ class MCPClient:
                     )
         except Exception as e:
             duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
-            logger.error(f"MCP Tool exception: {server}/{tool} - {e}")
+            server_str = server.value if isinstance(server, MCPServer) else server
+            logger.error(f"MCP Tool exception: {server_str}/{tool} - {e}")
             return MCPToolResult(
                 success=False,
-                server=server.value if isinstance(server, MCPServer) else server,
+                server=server_str,
                 tool=tool,
                 result=None,
                 duration_ms=duration_ms,
