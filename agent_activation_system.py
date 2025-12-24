@@ -9,11 +9,27 @@ import json
 import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 from enum import Enum
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
+
+
+def json_safe_serialize(obj: Any) -> Any:
+    """Recursively convert datetime/Decimal objects to JSON-serializable types"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {k: json_safe_serialize(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [json_safe_serialize(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(json_safe_serialize(item) for item in obj)
+    return obj
 
 DB_CONFIG = {
     'host': os.getenv('DB_HOST'),
@@ -473,6 +489,11 @@ class AgentActivationSystem:
 
         try:
             cur = conn.cursor()
+            # Serialize to ensure all datetime/Decimal objects are converted
+            safe_data = json_safe_serialize({
+                "event_data": event_data,
+                "result": result
+            })
             cur.execute("""
                 INSERT INTO agent_activation_log
                 (agent_id, tenant_id, action, timestamp, details)
@@ -481,10 +502,7 @@ class AgentActivationSystem:
                 None,  # No specific agent - event-level log
                 self.tenant_id,
                 f"business_event:{event_type.value}",
-                json.dumps({
-                    "event_data": event_data,
-                    "result": result
-                })
+                json.dumps(safe_data)
             ))
             conn.commit()
             cur.close()
