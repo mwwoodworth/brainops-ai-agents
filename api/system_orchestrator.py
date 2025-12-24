@@ -105,15 +105,19 @@ async def register_system(request: RegisterSystemRequest):
         engine = await _get_engine()
 
         if hasattr(engine, 'register_system'):
+            # Map API fields to engine's expected parameters
+            metadata = request.metadata or {}
+            if request.health_endpoint:
+                metadata['health_endpoint'] = request.health_endpoint
+            metadata['auto_scaling'] = request.auto_scaling
+            metadata['auto_remediation'] = request.auto_remediation
+
             result = await engine.register_system(
-                system_name=request.system_name,
+                name=request.system_name,
                 system_type=request.system_type,
+                url=request.endpoint,
                 provider=request.provider,
-                endpoint=request.endpoint,
-                health_endpoint=request.health_endpoint,
-                metadata=request.metadata or {},
-                auto_scaling=request.auto_scaling,
-                auto_remediation=request.auto_remediation
+                metadata=metadata
             )
             return result
 
