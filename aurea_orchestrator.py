@@ -480,10 +480,10 @@ class AUREA:
                     "trigger": BusinessEventType.ESTIMATE_REQUESTED
                 })
 
-            # Check for overdue invoices (using computed amount_due)
+            # Check for overdue invoices (using balance_cents - the ACTUAL column with data)
             cur.execute("""
             SELECT COUNT(*) as count,
-                   SUM(COALESCE(total_amount::numeric/100, 0) - COALESCE(paid_amount, 0)) as total_due
+                   SUM(COALESCE(balance_cents::numeric/100, 0)) as total_due
             FROM invoices
             WHERE due_date < NOW() AND status != 'paid'
             AND tenant_id = %s
@@ -524,14 +524,13 @@ class AUREA:
                     "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK
                 })
 
-            # Check for customer churn risks (with fallback for missing column)
+            # Check for customer churn risks - customers with past jobs but no activity in 90 days
             cur.execute("""
             SELECT COUNT(*) as at_risk FROM customers c
-            WHERE COALESCE(c.last_job_date,
-                          (SELECT MAX(scheduled_start)
-                           FROM jobs WHERE customer_id = c.id),
+            WHERE EXISTS (SELECT 1 FROM jobs j WHERE j.customer_id = c.id)
+              AND COALESCE(c.last_job_date,
+                          (SELECT MAX(scheduled_start) FROM jobs WHERE customer_id = c.id),
                           c.created_at) < NOW() - INTERVAL '90 days'
-              AND COALESCE(lifetime_value, 0) > 1000
               AND tenant_id = %s
             """, (self.tenant_id,))
             churn_risk = cur.fetchone()['at_risk']
