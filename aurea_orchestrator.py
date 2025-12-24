@@ -1087,13 +1087,19 @@ class AUREA:
                 adjustment = "cycle_recorded"
 
             cur.execute("""
-                INSERT INTO ai_learning_insights (tenant_id, insight_type, insight_data, applied_at, adjustment_made)
-                VALUES (%s, %s, %s, NOW(), %s)
+                INSERT INTO ai_learning_insights
+                (tenant_id, insight_type, category, insight, confidence, impact_score, recommendations, applied, metadata, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             """, (
                 self.tenant_id,
                 insight["type"],
-                json.dumps(insight.get("data", {})),
-                adjustment
+                "aurea_ooda",  # category
+                insight.get("insight", f"Cycle insight: {insight['type']}"),
+                insight.get("data", {}).get("success_rate", 0.8),  # confidence
+                0.5,  # impact_score
+                json.dumps([adjustment]),  # recommendations as array
+                adjustment != "none",  # applied boolean
+                json.dumps(insight.get("data", {}))  # metadata
             ))
             conn.commit()
             logger.info(f"📚 Learning recorded: {insight['type']} - {adjustment}")
