@@ -588,7 +588,7 @@ class UnifiedMemoryManager:
                 else:
                     logger.warning(f"⚠️ OpenAI embedding failed: {e}, trying fallback")
 
-        # Try Gemini as fallback
+        # Try Gemini as fallback - MUST zero-pad to match OpenAI 1536 dimensions
         gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if gemini_key:
             try:
@@ -599,19 +599,26 @@ class UnifiedMemoryManager:
                     content=text_content,
                     task_type="retrieval_document"
                 )
-                logger.info("✅ Used Gemini embedding fallback")
-                return result['embedding']
+                embedding = result['embedding']
+                # Zero-pad to 1536 dimensions to match OpenAI embeddings in database
+                if len(embedding) < 1536:
+                    embedding = embedding + [0.0] * (1536 - len(embedding))
+                logger.info("✅ Used Gemini embedding fallback (padded to 1536d)")
+                return embedding
             except Exception as e:
                 logger.warning(f"⚠️ Gemini embedding failed: {e}, trying local fallback")
 
-        # Try local sentence-transformers as last resort
+        # Try local sentence-transformers as last resort - zero-pad to 1536d
         try:
             from sentence_transformers import SentenceTransformer
             if not hasattr(self, '_local_embedder'):
                 self._local_embedder = SentenceTransformer('all-MiniLM-L6-v2')
                 logger.info("📦 Loaded local embedding model (all-MiniLM-L6-v2)")
             embedding = self._local_embedder.encode(text_content).tolist()
-            logger.info("✅ Used local sentence-transformers fallback")
+            # Zero-pad to 1536 dimensions to match OpenAI embeddings in database
+            if len(embedding) < 1536:
+                embedding = embedding + [0.0] * (1536 - len(embedding))
+            logger.info("✅ Used local sentence-transformers fallback (padded to 1536d)")
             return embedding
         except ImportError:
             logger.warning("sentence-transformers not installed, cannot use local fallback")
