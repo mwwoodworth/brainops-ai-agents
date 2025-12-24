@@ -54,6 +54,7 @@ from api.market_intelligence import router as market_intelligence_router
 from api.system_orchestrator import router as system_orchestrator_router
 from api.self_healing import router as self_healing_router
 from api.e2e_verification import router as e2e_verification_router
+from api.revenue_automation import router as revenue_automation_router
 from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
 from observability import RequestMetrics, TTLCache
@@ -933,6 +934,7 @@ app.include_router(market_intelligence_router, dependencies=SECURED_DEPENDENCIES
 app.include_router(system_orchestrator_router, dependencies=SECURED_DEPENDENCIES)  # Autonomous system orchestration (1-10K systems)
 app.include_router(self_healing_router, dependencies=SECURED_DEPENDENCIES)  # Enhanced self-healing AI infrastructure
 app.include_router(e2e_verification_router, dependencies=SECURED_DEPENDENCIES)  # E2E System Verification
+app.include_router(revenue_automation_router, dependencies=SECURED_DEPENDENCIES)  # Revenue Automation Engine
 
 # Import and include analytics router
 try:
