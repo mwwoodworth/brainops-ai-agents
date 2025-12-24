@@ -149,7 +149,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.4.0"  # Full MCP integration - Self-Healing, Digital Twin wired to MCP
+VERSION = "9.5.0"  # FULL POWER MODE - All autonomous operations active
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
