@@ -518,8 +518,9 @@ async def lifespan(app: FastAPI):
     # Initialize AUREA Master Orchestrator
     if AUREA_AVAILABLE and tenant_id:
         try:
-            # Start at SEMI_AUTO level (AI decides minor, human decides major)
-            aurea = AUREA(autonomy_level=AutonomyLevel.SEMI_AUTO, tenant_id=tenant_id)
+            # FULL_AUTO level - AUREA makes all decisions autonomously
+            # This enables the true AI twin capability with autonomous execution
+            aurea = AUREA(autonomy_level=AutonomyLevel.FULL_AUTO, tenant_id=tenant_id)
             app.state.aurea = aurea
             # START THE ORCHESTRATION LOOP - This makes the AI actually THINK
             asyncio.create_task(aurea.orchestrate())
