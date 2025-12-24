@@ -17,15 +17,457 @@ import asyncio
 import json
 import hashlib
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set, Callable
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import os
 import logging
 import aiohttp
-from collections import defaultdict
+from collections import defaultdict, deque
+import random
+from asyncio import Queue, PriorityQueue
 
 logger = logging.getLogger(__name__)
+
+
+# ============== EVENT-DRIVEN COMMUNICATION ==============
+
+class EventType(Enum):
+    """System event types"""
+    AGENT_STARTED = "agent_started"
+    AGENT_COMPLETED = "agent_completed"
+    AGENT_FAILED = "agent_failed"
+    SYSTEM_HEALTH_CHANGED = "system_health_changed"
+    DEPLOYMENT_STARTED = "deployment_started"
+    DEPLOYMENT_COMPLETED = "deployment_completed"
+    RESOURCE_SCALED = "resource_scaled"
+    ALERT_RAISED = "alert_raised"
+    ALERT_RESOLVED = "alert_resolved"
+    CIRCUIT_OPENED = "circuit_opened"
+    CIRCUIT_CLOSED = "circuit_closed"
+
+
+@dataclass
+class SystemEvent:
+    """Event data structure"""
+    event_type: EventType
+    source: str
+    data: Dict[str, Any]
+    timestamp: datetime = field(default_factory=lambda: datetime.utcnow())
+    priority: int = 5  # 1=highest, 10=lowest
+    event_id: str = field(default_factory=lambda: hashlib.sha256(str(datetime.utcnow().timestamp()).encode()).hexdigest()[:12])
+
+
+class EventBus:
+    """Central event bus for pub/sub communication"""
+
+    def __init__(self):
+        self._subscribers: Dict[EventType, List[Callable]] = defaultdict(list)
+        self._event_queue: Queue = Queue()
+        self._event_history: deque = deque(maxlen=1000)
+        self._running = False
+
+    def subscribe(self, event_type: EventType, handler: Callable):
+        """Subscribe to an event type"""
+        self._subscribers[event_type].append(handler)
+        logger.info(f"Subscribed handler to {event_type.value}")
+
+    def unsubscribe(self, event_type: EventType, handler: Callable):
+        """Unsubscribe from an event type"""
+        if handler in self._subscribers[event_type]:
+            self._subscribers[event_type].remove(handler)
+
+    async def publish(self, event: SystemEvent):
+        """Publish an event to all subscribers"""
+        await self._event_queue.put(event)
+        self._event_history.append(event)
+
+    async def _process_events(self):
+        """Background task to process events"""
+        while self._running:
+            try:
+                event = await asyncio.wait_for(self._event_queue.get(), timeout=1.0)
+                handlers = self._subscribers.get(event.event_type, [])
+
+                for handler in handlers:
+                    try:
+                        if asyncio.iscoroutinefunction(handler):
+                            await handler(event)
+                        else:
+                            handler(event)
+                    except Exception as e:
+                        logger.error(f"Event handler error: {e}")
+
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"Event processing error: {e}")
+
+    async def start(self):
+        """Start event processing"""
+        self._running = True
+        asyncio.create_task(self._process_events())
+
+    async def stop(self):
+        """Stop event processing"""
+        self._running = False
+
+    def get_recent_events(self, event_type: Optional[EventType] = None, limit: int = 100) -> List[SystemEvent]:
+        """Get recent events"""
+        events = list(self._event_history)
+        if event_type:
+            events = [e for e in events if e.event_type == event_type]
+        return events[-limit:]
+
+
+# ============== MESSAGE QUEUE FOR ASYNC OPERATIONS ==============
+
+@dataclass
+class Task:
+    """Task data structure for message queue"""
+    task_id: str
+    task_type: str
+    agent_name: str
+    data: Dict[str, Any]
+    priority: int = 5
+    created_at: datetime = field(default_factory=lambda: datetime.utcnow())
+    retries: int = 0
+    max_retries: int = 3
+
+    def __lt__(self, other):
+        """For priority queue ordering"""
+        return self.priority < other.priority
+
+
+class MessageQueue:
+    """Priority-based message queue for async task processing"""
+
+    def __init__(self, max_workers: int = 10):
+        self._queue: PriorityQueue = PriorityQueue()
+        self._workers: List[asyncio.Task] = []
+        self._max_workers = max_workers
+        self._running = False
+        self._task_history: deque = deque(maxlen=1000)
+        self._active_tasks: Dict[str, Task] = {}
+
+    async def enqueue(self, task: Task):
+        """Add task to queue"""
+        await self._queue.put((task.priority, task))
+        logger.info(f"Enqueued task {task.task_id} with priority {task.priority}")
+
+    async def _worker(self, worker_id: int):
+        """Worker coroutine to process tasks"""
+        while self._running:
+            try:
+                priority, task = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+                self._active_tasks[task.task_id] = task
+
+                logger.info(f"Worker {worker_id} processing task {task.task_id}")
+
+                # Task will be processed by orchestrator
+                # This is just the queue mechanism
+
+                self._task_history.append(task)
+                del self._active_tasks[task.task_id]
+
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"Worker {worker_id} error: {e}")
+
+    async def start(self):
+        """Start worker pool"""
+        self._running = True
+        for i in range(self._max_workers):
+            worker = asyncio.create_task(self._worker(i))
+            self._workers.append(worker)
+        logger.info(f"Started {self._max_workers} workers")
+
+    async def stop(self):
+        """Stop worker pool"""
+        self._running = False
+        for worker in self._workers:
+            worker.cancel()
+        self._workers.clear()
+
+    def get_queue_stats(self) -> Dict[str, Any]:
+        """Get queue statistics"""
+        return {
+            "queue_size": self._queue.qsize(),
+            "active_tasks": len(self._active_tasks),
+            "completed_tasks": len(self._task_history),
+            "workers": self._max_workers
+        }
+
+
+# ============== CIRCUIT BREAKER ==============
+
+class CircuitState(Enum):
+    """Circuit breaker states"""
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"      # Failing, reject requests
+    HALF_OPEN = "half_open"  # Testing if service recovered
+
+
+@dataclass
+class CircuitBreaker:
+    """Circuit breaker for failing components"""
+    name: str
+    failure_threshold: int = 5
+    success_threshold: int = 2
+    timeout: int = 60  # seconds
+
+    def __post_init__(self):
+        self.state = CircuitState.CLOSED
+        self.failure_count = 0
+        self.success_count = 0
+        self.last_failure_time: Optional[datetime] = None
+        self.total_calls = 0
+        self.total_failures = 0
+
+    def record_success(self):
+        """Record successful call"""
+        self.total_calls += 1
+
+        if self.state == CircuitState.HALF_OPEN:
+            self.success_count += 1
+            if self.success_count >= self.success_threshold:
+                self._close_circuit()
+        elif self.state == CircuitState.CLOSED:
+            self.failure_count = 0
+
+    def record_failure(self):
+        """Record failed call"""
+        self.total_calls += 1
+        self.total_failures += 1
+        self.last_failure_time = datetime.utcnow()
+
+        if self.state == CircuitState.HALF_OPEN:
+            self._open_circuit()
+        elif self.state == CircuitState.CLOSED:
+            self.failure_count += 1
+            if self.failure_count >= self.failure_threshold:
+                self._open_circuit()
+
+    def _open_circuit(self):
+        """Open the circuit"""
+        self.state = CircuitState.OPEN
+        self.failure_count = 0
+        self.success_count = 0
+        logger.warning(f"Circuit breaker {self.name} OPENED")
+
+    def _close_circuit(self):
+        """Close the circuit"""
+        self.state = CircuitState.CLOSED
+        self.failure_count = 0
+        self.success_count = 0
+        logger.info(f"Circuit breaker {self.name} CLOSED")
+
+    def can_execute(self) -> bool:
+        """Check if execution is allowed"""
+        if self.state == CircuitState.CLOSED:
+            return True
+        elif self.state == CircuitState.OPEN:
+            # Check if timeout has passed
+            if self.last_failure_time and \
+               (datetime.utcnow() - self.last_failure_time).total_seconds() >= self.timeout:
+                self.state = CircuitState.HALF_OPEN
+                self.success_count = 0
+                logger.info(f"Circuit breaker {self.name} entering HALF_OPEN")
+                return True
+            return False
+        else:  # HALF_OPEN
+            return True
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get circuit breaker statistics"""
+        return {
+            "name": self.name,
+            "state": self.state.value,
+            "total_calls": self.total_calls,
+            "total_failures": self.total_failures,
+            "failure_rate": (self.total_failures / self.total_calls * 100) if self.total_calls > 0 else 0,
+            "last_failure": self.last_failure_time.isoformat() if self.last_failure_time else None
+        }
+
+
+# ============== LOAD BALANCER ==============
+
+class LoadBalancingStrategy(Enum):
+    """Load balancing strategies"""
+    ROUND_ROBIN = "round_robin"
+    LEAST_LOADED = "least_loaded"
+    RANDOM = "random"
+    WEIGHTED = "weighted"
+
+
+@dataclass
+class AgentInstance:
+    """Agent instance for load balancing"""
+    instance_id: str
+    agent_name: str
+    current_load: int = 0
+    max_capacity: int = 10
+    weight: int = 1
+    healthy: bool = True
+    last_health_check: datetime = field(default_factory=lambda: datetime.utcnow())
+
+    def can_accept_task(self) -> bool:
+        """Check if instance can accept more tasks"""
+        return self.healthy and self.current_load < self.max_capacity
+
+
+class LoadBalancer:
+    """Load balancer for distributing tasks across agent instances"""
+
+    def __init__(self, strategy: LoadBalancingStrategy = LoadBalancingStrategy.LEAST_LOADED):
+        self.strategy = strategy
+        self._instances: Dict[str, List[AgentInstance]] = defaultdict(list)
+        self._round_robin_index: Dict[str, int] = defaultdict(int)
+
+    def register_instance(self, instance: AgentInstance):
+        """Register an agent instance"""
+        self._instances[instance.agent_name].append(instance)
+        logger.info(f"Registered instance {instance.instance_id} for {instance.agent_name}")
+
+    def select_instance(self, agent_name: str) -> Optional[AgentInstance]:
+        """Select an instance based on load balancing strategy"""
+        instances = self._instances.get(agent_name, [])
+        available = [i for i in instances if i.can_accept_task()]
+
+        if not available:
+            logger.warning(f"No available instances for {agent_name}")
+            return None
+
+        if self.strategy == LoadBalancingStrategy.ROUND_ROBIN:
+            idx = self._round_robin_index[agent_name] % len(available)
+            self._round_robin_index[agent_name] += 1
+            return available[idx]
+
+        elif self.strategy == LoadBalancingStrategy.LEAST_LOADED:
+            return min(available, key=lambda i: i.current_load)
+
+        elif self.strategy == LoadBalancingStrategy.RANDOM:
+            return random.choice(available)
+
+        elif self.strategy == LoadBalancingStrategy.WEIGHTED:
+            total_weight = sum(i.weight for i in available)
+            r = random.uniform(0, total_weight)
+            cumulative = 0
+            for instance in available:
+                cumulative += instance.weight
+                if r <= cumulative:
+                    return instance
+
+        return available[0]
+
+    def update_load(self, instance_id: str, load_delta: int):
+        """Update instance load"""
+        for instances in self._instances.values():
+            for instance in instances:
+                if instance.instance_id == instance_id:
+                    instance.current_load = max(0, instance.current_load + load_delta)
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get load balancer statistics"""
+        stats = {}
+        for agent_name, instances in self._instances.items():
+            stats[agent_name] = {
+                "total_instances": len(instances),
+                "healthy_instances": len([i for i in instances if i.healthy]),
+                "total_capacity": sum(i.max_capacity for i in instances),
+                "current_load": sum(i.current_load for i in instances),
+                "utilization": (sum(i.current_load for i in instances) / sum(i.max_capacity for i in instances) * 100) if instances else 0
+            }
+        return stats
+
+
+# ============== HEALTH AGGREGATOR ==============
+
+class HealthAggregator:
+    """Aggregates health across all systems and modules"""
+
+    def __init__(self):
+        self._health_data: Dict[str, Dict[str, Any]] = {}
+        self._module_health: Dict[str, float] = {}
+
+    def update_system_health(self, system_id: str, health_data: Dict[str, Any]):
+        """Update health data for a system"""
+        self._health_data[system_id] = {
+            **health_data,
+            "last_updated": datetime.utcnow().isoformat()
+        }
+
+    def update_module_health(self, module_name: str, health_score: float):
+        """Update health score for a module"""
+        self._module_health[module_name] = health_score
+
+    def get_aggregated_health(self) -> Dict[str, Any]:
+        """Get aggregated health across all systems"""
+        if not self._health_data:
+            return {
+                "overall_health": 100.0,
+                "status": "healthy",
+                "systems_count": 0,
+                "modules_count": 0
+            }
+
+        # Calculate system health
+        system_scores = [data.get("health_score", 100.0) for data in self._health_data.values()]
+        avg_system_health = sum(system_scores) / len(system_scores) if system_scores else 100.0
+
+        # Calculate module health
+        module_scores = list(self._module_health.values())
+        avg_module_health = sum(module_scores) / len(module_scores) if module_scores else 100.0
+
+        # Overall health (weighted average)
+        overall_health = (avg_system_health * 0.6 + avg_module_health * 0.4)
+
+        # Determine status
+        if overall_health >= 90:
+            status = "healthy"
+        elif overall_health >= 70:
+            status = "degraded"
+        elif overall_health >= 50:
+            status = "critical"
+        else:
+            status = "emergency"
+
+        # Count by status
+        healthy = len([s for s in system_scores if s >= 90])
+        degraded = len([s for s in system_scores if 70 <= s < 90])
+        critical = len([s for s in system_scores if 50 <= s < 70])
+        offline = len([s for s in system_scores if s < 50])
+
+        return {
+            "overall_health": round(overall_health, 2),
+            "status": status,
+            "systems_count": len(self._health_data),
+            "modules_count": len(self._module_health),
+            "avg_system_health": round(avg_system_health, 2),
+            "avg_module_health": round(avg_module_health, 2),
+            "breakdown": {
+                "healthy": healthy,
+                "degraded": degraded,
+                "critical": critical,
+                "offline": offline
+            },
+            "last_updated": datetime.utcnow().isoformat()
+        }
+
+    def get_unhealthy_systems(self, threshold: float = 80.0) -> List[Dict[str, Any]]:
+        """Get systems below health threshold"""
+        unhealthy = []
+        for system_id, data in self._health_data.items():
+            health_score = data.get("health_score", 100.0)
+            if health_score < threshold:
+                unhealthy.append({
+                    "system_id": system_id,
+                    "health_score": health_score,
+                    "status": data.get("status", "unknown"),
+                    "last_updated": data.get("last_updated")
+                })
+        return sorted(unhealthy, key=lambda x: x["health_score"])
 
 
 class SystemStatus(Enum):
@@ -161,6 +603,32 @@ class AutonomousSystemOrchestrator:
             "render": os.getenv("RENDER_API_KEY"),
         }
 
+        # NEW: Event-driven communication
+        self.event_bus = EventBus()
+
+        # NEW: Message queue for async operations
+        self.message_queue = MessageQueue(max_workers=20)
+
+        # NEW: Circuit breakers for each system
+        self.circuit_breakers: Dict[str, CircuitBreaker] = {}
+
+        # NEW: Load balancer for agent distribution
+        self.load_balancer = LoadBalancer(strategy=LoadBalancingStrategy.LEAST_LOADED)
+
+        # NEW: Priority routing
+        self.priority_routes: Dict[str, int] = {
+            "critical_alert": 1,
+            "deployment": 2,
+            "health_check": 3,
+            "scaling": 4,
+            "monitoring": 5,
+            "analytics": 8,
+            "maintenance": 10
+        }
+
+        # NEW: Health aggregation
+        self.health_aggregator = HealthAggregator()
+
     async def initialize(self):
         """Initialize the Orchestrator"""
         if self._initialized:
@@ -171,8 +639,74 @@ class AutonomousSystemOrchestrator:
         await self._create_tables()
         await self._load_systems()
 
+        # NEW: Start event bus
+        await self.event_bus.start()
+        logger.info("Event bus started")
+
+        # NEW: Start message queue
+        await self.message_queue.start()
+        logger.info("Message queue started")
+
+        # NEW: Initialize circuit breakers for all systems
+        for system_id, system in self.systems.items():
+            self.circuit_breakers[system_id] = CircuitBreaker(
+                name=f"{system.name}_breaker",
+                failure_threshold=5,
+                success_threshold=2,
+                timeout=60
+            )
+
+        # NEW: Register agent instances for load balancing
+        await self._initialize_agent_instances()
+
+        # NEW: Subscribe to important events
+        self._setup_event_handlers()
+
         self._initialized = True
-        logger.info(f"Orchestrator initialized with {len(self.systems)} systems")
+        logger.info(f"Orchestrator initialized with {len(self.systems)} systems, {len(self.circuit_breakers)} circuit breakers")
+
+    def _setup_event_handlers(self):
+        """Setup event handlers for system events"""
+        # Handle health changes
+        async def handle_health_change(event: SystemEvent):
+            system_id = event.data.get("system_id")
+            if system_id and system_id in self.systems:
+                system = self.systems[system_id]
+                self.health_aggregator.update_system_health(system_id, {
+                    "health_score": system.health_score,
+                    "status": system.status.value
+                })
+
+        # Handle circuit breaker events
+        async def handle_circuit_event(event: SystemEvent):
+            logger.warning(f"Circuit breaker event: {event.data}")
+            # Could trigger alerts or remediation here
+
+        # Handle deployment events
+        async def handle_deployment_event(event: SystemEvent):
+            deployment_id = event.data.get("deployment_id")
+            logger.info(f"Deployment event: {event.event_type.value} - {deployment_id}")
+
+        self.event_bus.subscribe(EventType.SYSTEM_HEALTH_CHANGED, handle_health_change)
+        self.event_bus.subscribe(EventType.CIRCUIT_OPENED, handle_circuit_event)
+        self.event_bus.subscribe(EventType.CIRCUIT_CLOSED, handle_circuit_event)
+        self.event_bus.subscribe(EventType.DEPLOYMENT_STARTED, handle_deployment_event)
+        self.event_bus.subscribe(EventType.DEPLOYMENT_COMPLETED, handle_deployment_event)
+
+    async def _initialize_agent_instances(self):
+        """Initialize agent instances for load balancing"""
+        # Create virtual instances for each system type
+        agent_types = ["health_check", "deployment", "monitoring", "scaling", "analytics"]
+
+        for agent_type in agent_types:
+            for i in range(3):  # 3 instances per agent type
+                instance = AgentInstance(
+                    instance_id=f"{agent_type}_instance_{i}",
+                    agent_name=agent_type,
+                    max_capacity=5,
+                    weight=1
+                )
+                self.load_balancer.register_instance(instance)
 
     async def _create_tables(self):
         """Create database tables"""
@@ -424,11 +958,26 @@ class AutonomousSystemOrchestrator:
             logger.error(f"Error persisting system: {e}")
 
     async def _check_system_health(self, system_id: str) -> Dict[str, Any]:
-        """Check health of a single system"""
+        """Check health of a single system with circuit breaker protection"""
         if system_id not in self.systems:
             return {"error": f"System {system_id} not found"}
 
         system = self.systems[system_id]
+        circuit = self.circuit_breakers.get(system_id)
+
+        # NEW: Check circuit breaker
+        if circuit and not circuit.can_execute():
+            logger.warning(f"Circuit breaker open for {system.name}, skipping health check")
+            return {
+                "system_id": system_id,
+                "status": "circuit_open",
+                "health_score": system.health_score,
+                "last_check": system.last_health_check,
+                "circuit_state": circuit.state.value
+            }
+
+        previous_status = system.status
+        success = False
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -439,6 +988,7 @@ class AutonomousSystemOrchestrator:
                         data = await response.json()
                         system.status = SystemStatus.HEALTHY
                         system.health_score = 100.0
+                        success = True
 
                         # Extract any health metrics from response
                         if isinstance(data, dict):
@@ -449,6 +999,7 @@ class AutonomousSystemOrchestrator:
                     else:
                         system.status = SystemStatus.DEGRADED
                         system.health_score = max(0, system.health_score - 10)
+                        success = True  # Degraded but not failed
 
         except asyncio.TimeoutError:
             system.status = SystemStatus.DEGRADED
@@ -467,8 +1018,41 @@ class AutonomousSystemOrchestrator:
                 "timestamp": datetime.utcnow().isoformat()
             })
 
+        # NEW: Update circuit breaker
+        if circuit:
+            if success:
+                circuit.record_success()
+                if circuit.state == CircuitState.CLOSED and previous_status != SystemStatus.HEALTHY:
+                    await self.event_bus.publish(SystemEvent(
+                        event_type=EventType.CIRCUIT_CLOSED,
+                        source=system_id,
+                        data={"system_id": system_id, "system_name": system.name}
+                    ))
+            else:
+                circuit.record_failure()
+                if circuit.state == CircuitState.OPEN:
+                    await self.event_bus.publish(SystemEvent(
+                        event_type=EventType.CIRCUIT_OPENED,
+                        source=system_id,
+                        data={"system_id": system_id, "system_name": system.name}
+                    ))
+
         system.last_health_check = datetime.utcnow().isoformat()
         await self._persist_system(system)
+
+        # NEW: Publish health change event if status changed
+        if previous_status != system.status:
+            await self.event_bus.publish(SystemEvent(
+                event_type=EventType.SYSTEM_HEALTH_CHANGED,
+                source=system_id,
+                data={
+                    "system_id": system_id,
+                    "system_name": system.name,
+                    "previous_status": previous_status.value,
+                    "new_status": system.status.value,
+                    "health_score": system.health_score
+                }
+            ))
 
         # Trigger auto-remediation if enabled
         if self.auto_remediation_enabled and system.status in [SystemStatus.CRITICAL, SystemStatus.OFFLINE]:
@@ -478,7 +1062,8 @@ class AutonomousSystemOrchestrator:
             "system_id": system_id,
             "status": system.status.value,
             "health_score": system.health_score,
-            "last_check": system.last_health_check
+            "last_check": system.last_health_check,
+            "circuit_state": circuit.state.value if circuit else "unknown"
         }
 
     async def check_all_systems_health(self) -> Dict[str, Any]:
@@ -946,8 +1531,94 @@ class AutonomousSystemOrchestrator:
             "results": results
         }
 
+    async def execute_task_with_priority(
+        self,
+        task_type: str,
+        agent_name: str,
+        data: Dict[str, Any],
+        priority: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute a task with priority routing and load balancing
+
+        Args:
+            task_type: Type of task (health_check, deployment, etc.)
+            agent_name: Agent to execute task
+            data: Task data
+            priority: Optional priority (1=highest, 10=lowest)
+
+        Returns:
+            Task execution result
+        """
+        # Determine priority if not specified
+        if priority is None:
+            priority = self.priority_routes.get(task_type, 5)
+
+        # Create task
+        task = Task(
+            task_id=self._generate_id("task"),
+            task_type=task_type,
+            agent_name=agent_name,
+            data=data,
+            priority=priority
+        )
+
+        # Select instance using load balancer
+        instance = self.load_balancer.select_instance(agent_name)
+        if not instance:
+            logger.warning(f"No available instance for {agent_name}, creating default")
+            instance = AgentInstance(
+                instance_id=f"{agent_name}_default",
+                agent_name=agent_name,
+                max_capacity=5
+            )
+            self.load_balancer.register_instance(instance)
+
+        # Update load
+        self.load_balancer.update_load(instance.instance_id, 1)
+
+        # Enqueue task
+        await self.message_queue.enqueue(task)
+
+        # Publish event
+        await self.event_bus.publish(SystemEvent(
+            event_type=EventType.AGENT_STARTED,
+            source=agent_name,
+            data={
+                "task_id": task.task_id,
+                "task_type": task_type,
+                "instance_id": instance.instance_id,
+                "priority": priority
+            },
+            priority=priority
+        ))
+
+        # Execute task (simulated for now)
+        result = {
+            "task_id": task.task_id,
+            "task_type": task_type,
+            "agent_name": agent_name,
+            "instance_id": instance.instance_id,
+            "priority": priority,
+            "status": "completed",
+            "executed_at": datetime.utcnow().isoformat()
+        }
+
+        # Update load
+        self.load_balancer.update_load(instance.instance_id, -1)
+
+        # Publish completion event
+        await self.event_bus.publish(SystemEvent(
+            event_type=EventType.AGENT_COMPLETED,
+            source=agent_name,
+            data=result,
+            priority=priority
+        ))
+
+        return result
+
     def get_command_center_dashboard(self) -> Dict[str, Any]:
-        """Get the command center dashboard data"""
+        """Get the command center dashboard data with all new features"""
         systems_by_status = defaultdict(list)
         systems_by_provider = defaultdict(list)
         systems_by_region = defaultdict(list)
@@ -961,6 +1632,14 @@ class AutonomousSystemOrchestrator:
             d for d in self.deployments.values()
             if d.status not in [DeploymentStatus.COMPLETED, DeploymentStatus.FAILED, DeploymentStatus.ROLLED_BACK]
         ]
+
+        # NEW: Circuit breaker stats
+        circuit_stats = {
+            "total": len(self.circuit_breakers),
+            "open": len([cb for cb in self.circuit_breakers.values() if cb.state == CircuitState.OPEN]),
+            "half_open": len([cb for cb in self.circuit_breakers.values() if cb.state == CircuitState.HALF_OPEN]),
+            "closed": len([cb for cb in self.circuit_breakers.values() if cb.state == CircuitState.CLOSED])
+        }
 
         return {
             "total_systems": len(self.systems),
@@ -982,6 +1661,23 @@ class AutonomousSystemOrchestrator:
             "groups": list(self.system_groups.keys()),
             "auto_remediation_enabled": self.auto_remediation_enabled,
             "auto_scaling_enabled": self.auto_scaling_enabled,
+
+            # NEW: Enhanced features
+            "circuit_breakers": circuit_stats,
+            "queue_stats": self.message_queue.get_queue_stats(),
+            "load_balancer_stats": self.load_balancer.get_stats(),
+            "health_aggregation": self.health_aggregator.get_aggregated_health(),
+            "recent_events": [
+                {
+                    "event_id": e.event_id,
+                    "type": e.event_type.value,
+                    "source": e.source,
+                    "timestamp": e.timestamp.isoformat(),
+                    "priority": e.priority
+                }
+                for e in self.event_bus.get_recent_events(limit=20)
+            ],
+
             "last_updated": datetime.utcnow().isoformat()
         }
 

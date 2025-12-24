@@ -649,10 +649,52 @@ class SelfHealingReconciler:
                 result.end_time
             ))
             conn.commit()
+
+            # Log to unified brain
+            self._log_to_unified_brain('reconciliation_cycle', {
+                'cycle_id': result.cycle_id,
+                'components_checked': result.components_checked,
+                'incidents_detected': result.incidents_detected,
+                'remediations_executed': result.remediations_executed,
+                'success': result.success
+            })
+
             cur.close()
             conn.close()
         except Exception as e:
             logger.error(f"Failed to store reconciliation: {e}")
+
+    def _log_to_unified_brain(self, action_type: str, data: Dict[str, Any]):
+        """Log reconciliation actions to unified_brain table"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+
+            # Serialize data safely
+            safe_data = json_safe_serialize(data)
+
+            cur.execute("""
+                INSERT INTO unified_brain (
+                    agent_name, action_type, input_data, output_data,
+                    success, metadata, executed_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            """, (
+                'self_healing_reconciler',
+                action_type,
+                Json(safe_data),
+                Json(safe_data),
+                data.get('success', True),
+                Json({
+                    'timestamp': datetime.now().isoformat(),
+                    'cycle': data.get('cycle_id', 'unknown')
+                })
+            ))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.debug(f"Failed to log to unified_brain: {e}")
 
 
 # Singleton instance

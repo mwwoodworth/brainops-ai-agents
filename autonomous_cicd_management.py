@@ -764,28 +764,256 @@ class AutonomousCICDManagement:
             service.health_status = "error"
             return {"status": "error", "error": str(e)}
 
+    async def detect_performance_regression(
+        self,
+        service_id: str,
+        current_metrics: Dict[str, Any],
+        baseline_metrics: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Detect performance regressions by comparing current vs baseline metrics"""
+        try:
+            regressions = []
+            improvements = []
+
+            # Compare response times
+            if "avg_response_time_ms" in current_metrics and "avg_response_time_ms" in baseline_metrics:
+                current_rt = current_metrics["avg_response_time_ms"]
+                baseline_rt = baseline_metrics["avg_response_time_ms"]
+                diff_percent = ((current_rt - baseline_rt) / baseline_rt * 100) if baseline_rt > 0 else 0
+
+                if diff_percent > 20:  # 20% slower
+                    regressions.append({
+                        "metric": "response_time",
+                        "current": f"{current_rt}ms",
+                        "baseline": f"{baseline_rt}ms",
+                        "degradation": f"{diff_percent:.1f}%",
+                        "severity": "high" if diff_percent > 50 else "medium"
+                    })
+                elif diff_percent < -10:  # 10% faster
+                    improvements.append({
+                        "metric": "response_time",
+                        "improvement": f"{abs(diff_percent):.1f}%"
+                    })
+
+            # Compare error rates
+            if "error_rate" in current_metrics and "error_rate" in baseline_metrics:
+                current_er = current_metrics["error_rate"]
+                baseline_er = baseline_metrics["error_rate"]
+                diff = current_er - baseline_er
+
+                if diff > 0.5:  # 0.5% increase in errors
+                    regressions.append({
+                        "metric": "error_rate",
+                        "current": f"{current_er}%",
+                        "baseline": f"{baseline_er}%",
+                        "increase": f"{diff:.2f}%",
+                        "severity": "critical" if diff > 2 else "high"
+                    })
+
+            # Compare throughput
+            if "requests_per_second" in current_metrics and "requests_per_second" in baseline_metrics:
+                current_rps = current_metrics["requests_per_second"]
+                baseline_rps = baseline_metrics["requests_per_second"]
+                diff_percent = ((current_rps - baseline_rps) / baseline_rps * 100) if baseline_rps > 0 else 0
+
+                if diff_percent < -15:  # 15% throughput drop
+                    regressions.append({
+                        "metric": "throughput",
+                        "current": f"{current_rps} req/s",
+                        "baseline": f"{baseline_rps} req/s",
+                        "degradation": f"{abs(diff_percent):.1f}%",
+                        "severity": "high"
+                    })
+
+            # Compare memory usage
+            if "memory_mb" in current_metrics and "memory_mb" in baseline_metrics:
+                current_mem = current_metrics["memory_mb"]
+                baseline_mem = baseline_metrics["memory_mb"]
+                diff_percent = ((current_mem - baseline_mem) / baseline_mem * 100) if baseline_mem > 0 else 0
+
+                if diff_percent > 30:  # 30% memory increase
+                    regressions.append({
+                        "metric": "memory_usage",
+                        "current": f"{current_mem}MB",
+                        "baseline": f"{baseline_mem}MB",
+                        "increase": f"{diff_percent:.1f}%",
+                        "severity": "medium"
+                    })
+
+            # Determine overall status
+            has_critical = any(r.get("severity") == "critical" for r in regressions)
+            has_high = any(r.get("severity") == "high" for r in regressions)
+
+            if has_critical:
+                status = "critical_regression"
+                action = "Immediate rollback recommended"
+            elif has_high and len(regressions) >= 2:
+                status = "significant_regression"
+                action = "Consider rollback or hotfix"
+            elif len(regressions) > 0:
+                status = "minor_regression"
+                action = "Monitor closely"
+            else:
+                status = "no_regression"
+                action = "Deployment performing as expected"
+
+            return {
+                "service_id": service_id,
+                "status": status,
+                "action": action,
+                "regressions": regressions,
+                "improvements": improvements,
+                "regression_count": len(regressions),
+                "evaluated_at": datetime.utcnow().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Performance regression detection failed: {e}")
+            return {
+                "error": str(e),
+                "status": "unknown"
+            }
+
+    async def advanced_deployment_monitoring(
+        self,
+        service_id: str,
+        deployment_id: str,
+        duration_minutes: int = 15
+    ) -> Dict[str, Any]:
+        """Advanced monitoring after deployment with multiple checks"""
+        try:
+            service = self.services.get(service_id)
+            if not service:
+                return {"error": f"Service {service_id} not found"}
+
+            monitoring_results = {
+                "service_id": service_id,
+                "deployment_id": deployment_id,
+                "started_at": datetime.utcnow().isoformat(),
+                "duration_minutes": duration_minutes,
+                "checks": []
+            }
+
+            # Health check
+            health_result = await self._check_service_health(
+                aiohttp.ClientSession(),
+                service
+            )
+            monitoring_results["checks"].append({
+                "type": "health_check",
+                "status": health_result.get("status"),
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
+            # Performance baseline comparison (simulated)
+            current_metrics = {
+                "avg_response_time_ms": 250,
+                "error_rate": 0.3,
+                "requests_per_second": 150,
+                "memory_mb": 512
+            }
+            baseline_metrics = {
+                "avg_response_time_ms": 200,
+                "error_rate": 0.2,
+                "requests_per_second": 180,
+                "memory_mb": 450
+            }
+
+            regression_result = await self.detect_performance_regression(
+                service_id,
+                current_metrics,
+                baseline_metrics
+            )
+            monitoring_results["regression_analysis"] = regression_result
+
+            # Log analysis (simulated)
+            log_analysis = {
+                "error_count": 5,
+                "warning_count": 12,
+                "critical_issues": [],
+                "patterns_detected": ["Increased database query time"]
+            }
+            monitoring_results["log_analysis"] = log_analysis
+
+            # Overall assessment
+            if regression_result.get("status") == "critical_regression":
+                monitoring_results["overall_status"] = "failed"
+                monitoring_results["recommendation"] = "Rollback immediately"
+            elif regression_result.get("status") == "significant_regression":
+                monitoring_results["overall_status"] = "degraded"
+                monitoring_results["recommendation"] = "Investigate and consider rollback"
+            elif health_result.get("status") == "unhealthy":
+                monitoring_results["overall_status"] = "unhealthy"
+                monitoring_results["recommendation"] = "Service is not responding correctly"
+            else:
+                monitoring_results["overall_status"] = "healthy"
+                monitoring_results["recommendation"] = "Deployment successful, continue monitoring"
+
+            return monitoring_results
+
+        except Exception as e:
+            logger.error(f"Advanced monitoring failed: {e}")
+            return {
+                "error": str(e),
+                "overall_status": "error"
+            }
+
     async def get_deployment_metrics(self) -> Dict[str, Any]:
-        """Get CI/CD metrics"""
-        return {
-            "total_services": len(self.services),
-            "total_deployments": self.total_deployments,
-            "successful_deployments": self.successful_deployments,
-            "success_rate": (
-                self.successful_deployments / self.total_deployments * 100
-                if self.total_deployments > 0 else 100
-            ),
-            "auto_rollbacks": self.auto_rollbacks,
-            "avg_deployment_time_seconds": self.avg_deployment_time_seconds,
-            "services_by_platform": {
-                platform.value: len([s for s in self.services.values() if s.platform == platform])
-                for platform in DeploymentPlatform
-                if any(s.platform == platform for s in self.services.values())
-            },
-            "health_status": {
-                service.name: service.health_status
-                for service in self.services.values()
-            },
-        }
+        """Get CI/CD metrics with enhanced analytics"""
+        try:
+            # Calculate deployment velocity
+            recent_deployments = [d for d in self.deployments.values()
+                                if d.started_at and
+                                datetime.fromisoformat(d.started_at) > datetime.utcnow() - timedelta(days=7)]
+
+            deployment_velocity = len(recent_deployments) / 7  # deployments per day
+
+            # Calculate mean time to recovery (MTTR)
+            rollback_deployments = [d for d in self.deployments.values()
+                                  if d.triggered_by == "auto_rollback" and d.duration_seconds]
+            avg_mttr = sum(d.duration_seconds for d in rollback_deployments) / len(rollback_deployments) if rollback_deployments else 0
+
+            # Calculate change failure rate
+            failed_deployments = [d for d in self.deployments.values()
+                                if d.status == DeploymentStatus.FAILED]
+            change_failure_rate = len(failed_deployments) / max(self.total_deployments, 1) * 100
+
+            return {
+                "total_services": len(self.services),
+                "total_deployments": self.total_deployments,
+                "successful_deployments": self.successful_deployments,
+                "success_rate": (
+                    self.successful_deployments / self.total_deployments * 100
+                    if self.total_deployments > 0 else 100
+                ),
+                "auto_rollbacks": self.auto_rollbacks,
+                "avg_deployment_time_seconds": self.avg_deployment_time_seconds,
+                "deployment_velocity_per_day": round(deployment_velocity, 2),
+                "mean_time_to_recovery_seconds": round(avg_mttr, 2),
+                "change_failure_rate": round(change_failure_rate, 2),
+                "services_by_platform": {
+                    platform.value: len([s for s in self.services.values() if s.platform == platform])
+                    for platform in DeploymentPlatform
+                    if any(s.platform == platform for s in self.services.values())
+                },
+                "health_status": {
+                    service.name: service.health_status
+                    for service in self.services.values()
+                },
+                "dora_metrics": {
+                    "deployment_frequency": f"{deployment_velocity:.1f} per day",
+                    "lead_time_for_changes": f"{self.avg_deployment_time_seconds:.0f}s",
+                    "mean_time_to_recovery": f"{avg_mttr:.0f}s",
+                    "change_failure_rate": f"{change_failure_rate:.1f}%"
+                }
+            }
+        except Exception as e:
+            logger.error(f"Failed to get metrics: {e}")
+            return {
+                "error": str(e),
+                "total_services": len(self.services),
+                "total_deployments": self.total_deployments
+            }
 
     async def deploy_all(self, triggered_by: str = "autonomous") -> List[Deployment]:
         """Deploy all services (coordinated multi-service deployment)"""

@@ -88,6 +88,37 @@ class DecisionNode:
     metadata: Dict
 
 @dataclass
+class RiskAssessment:
+    """Risk assessment for a decision"""
+    overall_risk_score: float  # 0-1 (0=no risk, 1=critical risk)
+    risk_categories: Dict[str, float]  # category -> score
+    mitigation_strategies: List[str]
+    escalation_required: bool
+    human_review_required: bool
+    risk_factors: List[str]
+
+@dataclass
+class MultiCriteriaScore:
+    """Multi-criteria decision analysis result"""
+    criteria_scores: Dict[str, float]  # criterion -> normalized score (0-1)
+    weighted_scores: Dict[str, float]  # criterion -> weighted score
+    total_score: float
+    sensitivity_analysis: Dict[str, Any]
+    pareto_efficient: bool
+
+@dataclass
+class DecisionAuditEntry:
+    """Audit trail entry for a decision"""
+    entry_id: str
+    decision_id: str
+    timestamp: datetime
+    event_type: str  # 'created', 'evaluated', 'executed', 'outcome_recorded', 'learned'
+    actor: str  # 'system', 'human', 'agent_name'
+    action: str
+    context: Dict[str, Any]
+    changes: Dict[str, Any]
+
+@dataclass
 class DecisionResult:
     """Result of a decision process"""
     decision_id: str
@@ -100,6 +131,12 @@ class DecisionResult:
     monitoring_plan: Dict
     success_criteria: List[str]
     rollback_plan: Optional[Dict]
+    # Enhanced fields
+    multi_criteria_analysis: Optional[MultiCriteriaScore] = None
+    risk_assessment: Optional[RiskAssessment] = None
+    audit_trail: List[DecisionAuditEntry] = field(default_factory=list)
+    human_escalation_triggered: bool = False
+    escalation_reason: Optional[str] = None
 
 class AIDecisionTree:
     """AI Decision Tree for autonomous decision making"""
@@ -184,7 +221,57 @@ class AIDecisionTree:
                     outcome JSONB,
                     success BOOLEAN,
                     execution_time_ms INT,
-                    timestamp TIMESTAMPTZ DEFAULT NOW()
+                    timestamp TIMESTAMPTZ DEFAULT NOW(),
+                    multi_criteria_analysis JSONB,
+                    risk_assessment JSONB,
+                    human_escalation_triggered BOOLEAN DEFAULT FALSE,
+                    escalation_reason TEXT
+                )
+            """)
+
+            # Create decision audit trail table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ai_decision_audit_trail (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    entry_id VARCHAR(255) UNIQUE NOT NULL,
+                    decision_id VARCHAR(255) NOT NULL,
+                    timestamp TIMESTAMPTZ DEFAULT NOW(),
+                    event_type VARCHAR(50) NOT NULL,
+                    actor VARCHAR(100) NOT NULL,
+                    action TEXT NOT NULL,
+                    context JSONB DEFAULT '{}'::jsonb,
+                    changes JSONB DEFAULT '{}'::jsonb,
+                    FOREIGN KEY (decision_id) REFERENCES ai_decision_history(decision_id)
+                )
+            """)
+
+            # Create decision outcome tracking table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ai_decision_outcomes (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    decision_id VARCHAR(255) NOT NULL,
+                    actual_outcome JSONB NOT NULL,
+                    expected_outcome JSONB NOT NULL,
+                    variance_analysis JSONB,
+                    success_score FLOAT,
+                    lessons_learned TEXT[],
+                    improvement_suggestions TEXT[],
+                    recorded_at TIMESTAMPTZ DEFAULT NOW(),
+                    FOREIGN KEY (decision_id) REFERENCES ai_decision_history(decision_id)
+                )
+            """)
+
+            # Create decision optimization table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ai_decision_optimizations (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    decision_type VARCHAR(50) NOT NULL,
+                    optimization_type VARCHAR(50),
+                    parameter_adjustments JSONB NOT NULL,
+                    performance_improvement FLOAT,
+                    applied_at TIMESTAMPTZ DEFAULT NOW(),
+                    applied_by VARCHAR(100),
+                    validation_results JSONB
                 )
             """)
 
@@ -496,16 +583,54 @@ class AIDecisionTree:
                            decision_type: DecisionType) -> DecisionResult:
         """Make an autonomous decision based on context"""
         decision_id = f"decision_{uuid.uuid4().hex[:8]}"
+        audit_trail = []
 
         try:
+            # Create audit entry for decision initiation
+            audit_trail.append(self._create_audit_entry(
+                decision_id, 'created', 'system', 'Decision process initiated',
+                {'decision_type': decision_type.value, 'context': asdict(context)}
+            ))
+
             # Select appropriate decision tree
             tree = self._select_decision_tree(decision_type, context)
 
             # Traverse tree to find best option
             selected_option, alternatives = await self._traverse_tree(tree, context)
 
+            # Enhanced: Multi-criteria decision analysis
+            multi_criteria = self._perform_multi_criteria_analysis(
+                selected_option, alternatives, context
+            )
+
+            audit_trail.append(self._create_audit_entry(
+                decision_id, 'evaluated', 'system', 'Multi-criteria analysis completed',
+                {'criteria_count': len(multi_criteria.criteria_scores)}
+            ))
+
+            # Enhanced: Comprehensive risk assessment
+            risk_assessment = self._assess_decision_risk(
+                selected_option, context, decision_type
+            )
+
+            audit_trail.append(self._create_audit_entry(
+                decision_id, 'evaluated', 'system', 'Risk assessment completed',
+                {'risk_score': risk_assessment.overall_risk_score}
+            ))
+
             # Evaluate confidence
             confidence_level = self._evaluate_confidence(selected_option, context)
+
+            # Enhanced: Check if human escalation is needed
+            human_escalation, escalation_reason = self._check_human_escalation(
+                selected_option, risk_assessment, confidence_level, context
+            )
+
+            if human_escalation:
+                audit_trail.append(self._create_audit_entry(
+                    decision_id, 'escalated', 'system', 'Human review required',
+                    {'reason': escalation_reason}
+                ))
 
             # Generate reasoning
             reasoning = self._generate_reasoning(selected_option, context, tree)
@@ -521,7 +646,7 @@ class AIDecisionTree:
 
             # Create rollback plan if needed
             rollback_plan = None
-            if selected_option.confidence < 0.7:
+            if selected_option.confidence < 0.7 or risk_assessment.overall_risk_score > 0.7:
                 rollback_plan = self._create_rollback_plan(selected_option)
 
             result = DecisionResult(
@@ -534,11 +659,19 @@ class AIDecisionTree:
                 execution_plan=execution_plan,
                 monitoring_plan=monitoring_plan,
                 success_criteria=success_criteria,
-                rollback_plan=rollback_plan
+                rollback_plan=rollback_plan,
+                multi_criteria_analysis=multi_criteria,
+                risk_assessment=risk_assessment,
+                audit_trail=audit_trail,
+                human_escalation_triggered=human_escalation,
+                escalation_reason=escalation_reason
             )
 
-            # Store decision
+            # Store decision with enhanced data
             self._store_decision(result, tree, context)
+
+            # Store audit trail
+            self._store_audit_trail(audit_trail)
 
             # Update metrics
             self._update_metrics(decision_type, result)
@@ -547,6 +680,9 @@ class AIDecisionTree:
 
         except Exception as e:
             logger.error(f"Error making decision: {e}")
+            audit_trail.append(self._create_audit_entry(
+                decision_id, 'error', 'system', f'Decision failed: {str(e)}', {}
+            ))
             return self._create_fallback_decision(decision_id, context, str(e))
 
     def _select_decision_tree(self, decision_type: DecisionType,
@@ -928,19 +1064,280 @@ class AIDecisionTree:
             rollback_plan=None
         )
 
-    def _store_decision(self, result: DecisionResult, tree: Dict,
-                       context: DecisionContext):
-        """Store decision in database"""
+    def _perform_multi_criteria_analysis(
+        self,
+        selected_option: DecisionOption,
+        alternatives: List[DecisionOption],
+        context: DecisionContext
+    ) -> MultiCriteriaScore:
+        """Perform multi-criteria decision analysis"""
+        # Define decision criteria with weights
+        criteria_weights = {
+            'success_probability': 0.25,
+            'impact_score': 0.20,
+            'cost_efficiency': 0.20,
+            'risk_level': 0.15,
+            'time_efficiency': 0.10,
+            'resource_efficiency': 0.10
+        }
+
+        # Score selected option on all criteria
+        criteria_scores = {
+            'success_probability': selected_option.success_probability,
+            'impact_score': selected_option.impact_score,
+            'cost_efficiency': 1.0 - (selected_option.cost_estimate / max(context.available_resources.get('budget', 1), 1)),
+            'risk_level': 1.0 - (len(selected_option.risks) * 0.15),  # Inverse risk
+            'time_efficiency': 1.0 - (selected_option.estimated_duration.total_seconds() / (context.time_constraints.total_seconds() if context.time_constraints else 86400)),
+            'resource_efficiency': self._evaluate_resource_efficiency(selected_option, context)
+        }
+
+        # Normalize all scores to 0-1 range
+        normalized_scores = {k: max(0.0, min(1.0, v)) for k, v in criteria_scores.items()}
+
+        # Calculate weighted scores
+        weighted_scores = {
+            criterion: normalized_scores[criterion] * criteria_weights[criterion]
+            for criterion in normalized_scores
+        }
+
+        total_score = sum(weighted_scores.values())
+
+        # Sensitivity analysis: how much does each criterion affect the total?
+        sensitivity_analysis = {}
+        for criterion in criteria_weights:
+            # Calculate score if this criterion was 0 vs 1
+            impact = criteria_weights[criterion]
+            sensitivity_analysis[criterion] = {
+                'weight': criteria_weights[criterion],
+                'current_contribution': weighted_scores[criterion],
+                'max_potential_impact': impact,
+                'sensitivity_ratio': weighted_scores[criterion] / impact if impact > 0 else 0
+            }
+
+        # Check if this is Pareto efficient (no alternative dominates in all criteria)
+        pareto_efficient = True
+        for alt in alternatives:
+            alt_scores = {
+                'success_probability': alt.success_probability,
+                'impact_score': alt.impact_score,
+                'cost_efficiency': 1.0 - (alt.cost_estimate / max(context.available_resources.get('budget', 1), 1)),
+                'risk_level': 1.0 - (len(alt.risks) * 0.15),
+                'time_efficiency': 1.0 - (alt.estimated_duration.total_seconds() / (context.time_constraints.total_seconds() if context.time_constraints else 86400)),
+                'resource_efficiency': self._evaluate_resource_efficiency(alt, context)
+            }
+            # Check if alternative dominates in all criteria
+            if all(alt_scores.get(k, 0) >= normalized_scores.get(k, 0) for k in normalized_scores):
+                if any(alt_scores.get(k, 0) > normalized_scores.get(k, 0) for k in normalized_scores):
+                    pareto_efficient = False
+                    break
+
+        return MultiCriteriaScore(
+            criteria_scores=normalized_scores,
+            weighted_scores=weighted_scores,
+            total_score=total_score,
+            sensitivity_analysis=sensitivity_analysis,
+            pareto_efficient=pareto_efficient
+        )
+
+    def _assess_decision_risk(
+        self,
+        option: DecisionOption,
+        context: DecisionContext,
+        decision_type: DecisionType
+    ) -> RiskAssessment:
+        """Comprehensive risk assessment for a decision"""
+        risk_categories = {}
+        risk_factors = []
+        mitigation_strategies = []
+
+        # Financial risk
+        financial_risk = min(option.cost_estimate / max(context.available_resources.get('budget', 1), 1), 1.0)
+        risk_categories['financial'] = financial_risk
+        if financial_risk > 0.7:
+            risk_factors.append(f"High financial commitment: ${option.cost_estimate}")
+            mitigation_strategies.append("Implement staged funding with milestones")
+
+        # Execution risk (inverse of success probability)
+        execution_risk = 1.0 - option.success_probability
+        risk_categories['execution'] = execution_risk
+        if execution_risk > 0.5:
+            risk_factors.append(f"Low success probability: {option.success_probability:.1%}")
+            mitigation_strategies.append("Develop detailed contingency plans")
+
+        # Time risk
+        if context.time_constraints:
+            time_risk = option.estimated_duration.total_seconds() / context.time_constraints.total_seconds()
+            risk_categories['time'] = min(time_risk, 1.0)
+            if time_risk > 0.8:
+                risk_factors.append("Tight timeline constraints")
+                mitigation_strategies.append("Allocate buffer time and resources")
+
+        # Impact risk (high impact = high risk if failure)
+        impact_risk = option.impact_score * execution_risk
+        risk_categories['impact'] = impact_risk
+        if impact_risk > 0.6:
+            risk_factors.append("High-impact decision with execution uncertainty")
+            mitigation_strategies.append("Establish monitoring and early warning system")
+
+        # Specific risk factors from option
+        specific_risk = len(option.risks) * 0.15
+        risk_categories['specific_factors'] = min(specific_risk, 1.0)
+        if option.risks:
+            risk_factors.extend(option.risks)
+            mitigation_strategies.append("Address each identified risk factor individually")
+
+        # Decision type specific risks
+        if decision_type == DecisionType.FINANCIAL:
+            risk_categories['regulatory'] = 0.3
+            mitigation_strategies.append("Ensure compliance with financial regulations")
+        elif decision_type == DecisionType.EMERGENCY:
+            risk_categories['urgency'] = 0.8
+            mitigation_strategies.append("Maintain rapid response capability")
+
+        # Calculate overall risk score (weighted average)
+        overall_risk = sum(risk_categories.values()) / len(risk_categories)
+
+        # Determine escalation requirements
+        escalation_required = overall_risk > 0.7
+        human_review_required = overall_risk > 0.6 or len(risk_factors) > 5
+
+        return RiskAssessment(
+            overall_risk_score=overall_risk,
+            risk_categories=risk_categories,
+            mitigation_strategies=mitigation_strategies,
+            escalation_required=escalation_required,
+            human_review_required=human_review_required,
+            risk_factors=risk_factors
+        )
+
+    def _check_human_escalation(
+        self,
+        option: DecisionOption,
+        risk_assessment: RiskAssessment,
+        confidence_level: ConfidenceLevel,
+        context: DecisionContext
+    ) -> Tuple[bool, Optional[str]]:
+        """Determine if human escalation is needed"""
+        escalation_reasons = []
+
+        # High risk decisions
+        if risk_assessment.overall_risk_score > 0.7:
+            escalation_reasons.append(f"High risk score: {risk_assessment.overall_risk_score:.1%}")
+
+        # Low confidence decisions
+        if confidence_level in [ConfidenceLevel.LOW, ConfidenceLevel.UNCERTAIN]:
+            escalation_reasons.append(f"Low confidence: {confidence_level.value}")
+
+        # High-value decisions
+        if option.cost_estimate > context.available_resources.get('budget', float('inf')) * 0.5:
+            escalation_reasons.append(f"High cost: ${option.cost_estimate}")
+
+        # Low success probability
+        if option.success_probability < 0.5:
+            escalation_reasons.append(f"Low success probability: {option.success_probability:.1%}")
+
+        # Critical decision types
+        if context.metadata.get('requires_approval', False):
+            escalation_reasons.append("Explicit approval required")
+
+        # Multiple high-severity risks
+        if len([r for r in risk_assessment.risk_categories.values() if r > 0.7]) >= 2:
+            escalation_reasons.append("Multiple high-severity risks detected")
+
+        human_escalation = len(escalation_reasons) > 0
+        escalation_reason = "; ".join(escalation_reasons) if escalation_reasons else None
+
+        return human_escalation, escalation_reason
+
+    def _create_audit_entry(
+        self,
+        decision_id: str,
+        event_type: str,
+        actor: str,
+        action: str,
+        context: Dict[str, Any],
+        changes: Dict[str, Any] = None
+    ) -> DecisionAuditEntry:
+        """Create an audit trail entry"""
+        return DecisionAuditEntry(
+            entry_id=f"{decision_id}_{event_type}_{uuid.uuid4().hex[:8]}",
+            decision_id=decision_id,
+            timestamp=datetime.now(),
+            event_type=event_type,
+            actor=actor,
+            action=action,
+            context=context,
+            changes=changes or {}
+        )
+
+    def _store_audit_trail(self, audit_trail: List[DecisionAuditEntry]):
+        """Store audit trail entries in database"""
         try:
             conn = self._get_connection()
             cur = conn.cursor()
+
+            for entry in audit_trail:
+                cur.execute("""
+                    INSERT INTO ai_decision_audit_trail (
+                        entry_id, decision_id, timestamp, event_type,
+                        actor, action, context, changes
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    entry.entry_id,
+                    entry.decision_id,
+                    entry.timestamp,
+                    entry.event_type,
+                    entry.actor,
+                    entry.action,
+                    json.dumps(entry.context, default=str),
+                    json.dumps(entry.changes, default=str)
+                ))
+
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error storing audit trail: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                conn.close()
+
+    def _store_decision(self, result: DecisionResult, tree: Dict,
+                       context: DecisionContext):
+        """Store decision in database with enhanced fields"""
+        try:
+            conn = self._get_connection()
+            cur = conn.cursor()
+
+            # Serialize multi-criteria analysis and risk assessment
+            multi_criteria_json = None
+            if result.multi_criteria_analysis:
+                multi_criteria_json = json.dumps({
+                    'criteria_scores': result.multi_criteria_analysis.criteria_scores,
+                    'weighted_scores': result.multi_criteria_analysis.weighted_scores,
+                    'total_score': result.multi_criteria_analysis.total_score,
+                    'sensitivity_analysis': result.multi_criteria_analysis.sensitivity_analysis,
+                    'pareto_efficient': result.multi_criteria_analysis.pareto_efficient
+                }, default=str)
+
+            risk_assessment_json = None
+            if result.risk_assessment:
+                risk_assessment_json = json.dumps({
+                    'overall_risk_score': result.risk_assessment.overall_risk_score,
+                    'risk_categories': result.risk_assessment.risk_categories,
+                    'mitigation_strategies': result.risk_assessment.mitigation_strategies,
+                    'escalation_required': result.risk_assessment.escalation_required,
+                    'human_review_required': result.risk_assessment.human_review_required,
+                    'risk_factors': result.risk_assessment.risk_factors
+                }, default=str)
 
             cur.execute("""
                 INSERT INTO ai_decision_history (
                     decision_id, tree_id, node_path, context,
                     selected_option, confidence_level, reasoning,
-                    execution_plan, timestamp
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    execution_plan, timestamp, multi_criteria_analysis,
+                    risk_assessment, human_escalation_triggered, escalation_reason
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 result.decision_id,
                 None,  # Would need to look up tree_id
@@ -950,7 +1347,11 @@ class AIDecisionTree:
                 result.confidence_level.value,
                 result.reasoning,
                 json.dumps(result.execution_plan, default=str),
-                result.timestamp
+                result.timestamp,
+                multi_criteria_json,
+                risk_assessment_json,
+                result.human_escalation_triggered,
+                result.escalation_reason
             ))
 
             conn.commit()
@@ -1067,27 +1468,98 @@ class AIDecisionTree:
         """Handle learning decisions"""
         return await self.make_decision(context, DecisionType.LEARNING)
 
-    def learn_from_outcome(self, decision_id: str, outcome: Dict, success: bool):
-        """Learn from decision outcome to improve future decisions"""
+    def record_decision_outcome(
+        self,
+        decision_id: str,
+        actual_outcome: Dict[str, Any],
+        success_score: float = None
+    ):
+        """Record the actual outcome of a decision for learning and optimization"""
         try:
             conn = self._get_connection()
             cur = conn.cursor()
+
+            # Fetch the original decision
+            cur.execute("""
+                SELECT selected_option, context FROM ai_decision_history
+                WHERE decision_id = %s
+            """, (decision_id,))
+
+            row = cur.fetchone()
+            if not row:
+                logger.warning(f"Decision {decision_id} not found")
+                return
+
+            selected_option_data = json.loads(row[0])
+            context_data = json.loads(row[1])
+            expected_outcome = selected_option_data.get('expected_outcome', {})
+
+            # Perform variance analysis
+            variance_analysis = self._analyze_outcome_variance(
+                expected_outcome, actual_outcome
+            )
+
+            # Extract lessons learned
+            lessons_learned = self._extract_lessons_learned(
+                variance_analysis, success_score or 0.5
+            )
+
+            # Generate improvement suggestions
+            improvement_suggestions = self._generate_improvement_suggestions(
+                variance_analysis, lessons_learned
+            )
+
+            # Calculate success score if not provided
+            if success_score is None:
+                success_score = self._calculate_success_score(
+                    expected_outcome, actual_outcome
+                )
+
+            # Store outcome
+            cur.execute("""
+                INSERT INTO ai_decision_outcomes (
+                    decision_id, actual_outcome, expected_outcome,
+                    variance_analysis, success_score, lessons_learned,
+                    improvement_suggestions, recorded_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+            """, (
+                decision_id,
+                json.dumps(actual_outcome, default=str),
+                json.dumps(expected_outcome, default=str),
+                json.dumps(variance_analysis, default=str),
+                success_score,
+                lessons_learned,
+                improvement_suggestions
+            ))
 
             # Update decision history with outcome
             cur.execute("""
                 UPDATE ai_decision_history
                 SET outcome = %s, success = %s
                 WHERE decision_id = %s
-            """, (json.dumps(outcome), success, decision_id))
+            """, (json.dumps(actual_outcome, default=str), success_score > 0.6, decision_id))
 
             conn.commit()
+
+            # Create audit entry
+            audit_entry = self._create_audit_entry(
+                decision_id, 'outcome_recorded', 'system',
+                'Decision outcome recorded and analyzed',
+                {'success_score': success_score, 'lessons_count': len(lessons_learned)}
+            )
+            self._store_audit_trail([audit_entry])
+
+            # Trigger optimization if needed
+            if success_score < 0.5:
+                self._trigger_decision_optimization(decision_id, variance_analysis)
 
             # Add to learning buffer
             self.learning_buffer.append({
                 'decision_id': decision_id,
-                'outcome': outcome,
-                'success': success,
-                'timestamp': datetime.now()
+                'outcome': actual_outcome,
+                'success': success_score > 0.6,
+                'timestamp': datetime.now(),
+                'variance_analysis': variance_analysis
             })
 
             # Process learning if buffer is full
@@ -1095,12 +1567,224 @@ class AIDecisionTree:
                 self._process_learning_buffer()
 
         except Exception as e:
-            logger.error(f"Error learning from outcome: {e}")
+            logger.error(f"Error recording outcome: {e}")
             if conn:
                 conn.rollback()
         finally:
             if conn:
                 conn.close()
+
+    def _analyze_outcome_variance(
+        self,
+        expected: Dict[str, Any],
+        actual: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze variance between expected and actual outcomes"""
+        variance = {
+            'matched_expectations': [],
+            'exceeded_expectations': [],
+            'fell_short': [],
+            'unexpected_outcomes': []
+        }
+
+        # Check each expected outcome
+        for key, expected_value in expected.items():
+            actual_value = actual.get(key)
+
+            if actual_value is None:
+                variance['fell_short'].append({
+                    'metric': key,
+                    'expected': expected_value,
+                    'actual': None,
+                    'reason': 'Outcome not achieved'
+                })
+            elif isinstance(expected_value, (int, float)) and isinstance(actual_value, (int, float)):
+                variance_pct = ((actual_value - expected_value) / max(expected_value, 1)) * 100
+                if abs(variance_pct) < 10:
+                    variance['matched_expectations'].append({
+                        'metric': key,
+                        'variance_pct': variance_pct
+                    })
+                elif variance_pct > 0:
+                    variance['exceeded_expectations'].append({
+                        'metric': key,
+                        'expected': expected_value,
+                        'actual': actual_value,
+                        'variance_pct': variance_pct
+                    })
+                else:
+                    variance['fell_short'].append({
+                        'metric': key,
+                        'expected': expected_value,
+                        'actual': actual_value,
+                        'variance_pct': variance_pct
+                    })
+            else:
+                # String/categorical comparison
+                if str(expected_value).lower() == str(actual_value).lower():
+                    variance['matched_expectations'].append({'metric': key})
+                else:
+                    variance['fell_short'].append({
+                        'metric': key,
+                        'expected': expected_value,
+                        'actual': actual_value
+                    })
+
+        # Check for unexpected outcomes
+        for key in actual:
+            if key not in expected:
+                variance['unexpected_outcomes'].append({
+                    'metric': key,
+                    'value': actual[key]
+                })
+
+        return variance
+
+    def _extract_lessons_learned(
+        self,
+        variance_analysis: Dict[str, Any],
+        success_score: float
+    ) -> List[str]:
+        """Extract lessons learned from outcome variance"""
+        lessons = []
+
+        if success_score > 0.8:
+            lessons.append("Decision process was highly effective")
+            if variance_analysis.get('exceeded_expectations'):
+                lessons.append("Outcomes exceeded expectations - consider adjusting future estimates upward")
+
+        if success_score < 0.4:
+            lessons.append("Decision process needs significant improvement")
+            if len(variance_analysis.get('fell_short', [])) > 2:
+                lessons.append("Multiple outcomes fell short - review decision criteria and risk assessment")
+
+        if variance_analysis.get('unexpected_outcomes'):
+            lessons.append("Decision analysis missed key factors - expand context gathering")
+
+        fell_short = variance_analysis.get('fell_short', [])
+        if any('cost' in item.get('metric', '').lower() for item in fell_short):
+            lessons.append("Cost estimation accuracy needs improvement")
+
+        if any('time' in item.get('metric', '').lower() for item in fell_short):
+            lessons.append("Timeline estimation accuracy needs improvement")
+
+        return lessons
+
+    def _generate_improvement_suggestions(
+        self,
+        variance_analysis: Dict[str, Any],
+        lessons_learned: List[str]
+    ) -> List[str]:
+        """Generate actionable improvement suggestions"""
+        suggestions = []
+
+        if len(variance_analysis.get('fell_short', [])) > 0:
+            suggestions.append("Implement more conservative initial estimates")
+            suggestions.append("Add additional validation checkpoints during execution")
+
+        if variance_analysis.get('unexpected_outcomes'):
+            suggestions.append("Expand pre-decision context gathering and analysis")
+            suggestions.append("Include stakeholder feedback in decision process")
+
+        if "cost" in str(lessons_learned).lower():
+            suggestions.append("Develop more detailed cost breakdown models")
+            suggestions.append("Add contingency buffers to financial estimates")
+
+        if "time" in str(lessons_learned).lower():
+            suggestions.append("Build timeline buffers for critical path items")
+            suggestions.append("Track historical duration data for similar decisions")
+
+        return suggestions
+
+    def _calculate_success_score(
+        self,
+        expected: Dict[str, Any],
+        actual: Dict[str, Any]
+    ) -> float:
+        """Calculate a 0-1 success score based on outcomes"""
+        if not expected:
+            return 0.5  # Neutral if no expectations
+
+        total_score = 0.0
+        metrics_count = 0
+
+        for key, expected_value in expected.items():
+            actual_value = actual.get(key)
+            metrics_count += 1
+
+            if actual_value is None:
+                continue  # 0 contribution for missing outcomes
+
+            if isinstance(expected_value, (int, float)) and isinstance(actual_value, (int, float)):
+                # Numerical comparison - score based on how close actual is to expected
+                if expected_value == 0:
+                    score = 1.0 if actual_value == 0 else 0.5
+                else:
+                    ratio = actual_value / expected_value
+                    score = 1.0 - abs(1.0 - ratio)  # Perfect = 1.0, further away = lower
+                    score = max(0.0, min(1.0, score))
+            else:
+                # Categorical comparison
+                score = 1.0 if str(actual_value).lower() == str(expected_value).lower() else 0.0
+
+            total_score += score
+
+        return total_score / metrics_count if metrics_count > 0 else 0.5
+
+    def _trigger_decision_optimization(
+        self,
+        decision_id: str,
+        variance_analysis: Dict[str, Any]
+    ):
+        """Trigger automatic optimization based on poor outcomes"""
+        try:
+            conn = self._get_connection()
+            cur = conn.cursor()
+
+            # Identify which parameters need adjustment
+            parameter_adjustments = {}
+
+            fell_short = variance_analysis.get('fell_short', [])
+            for item in fell_short:
+                metric = item.get('metric', '')
+                variance_pct = item.get('variance_pct', 0)
+
+                if 'cost' in metric.lower():
+                    parameter_adjustments['cost_estimation_buffer'] = abs(variance_pct) / 100
+                elif 'time' in metric.lower():
+                    parameter_adjustments['time_estimation_buffer'] = abs(variance_pct) / 100
+                elif 'risk' in metric.lower():
+                    parameter_adjustments['risk_sensitivity'] = 0.1  # Increase risk sensitivity
+
+            if parameter_adjustments:
+                cur.execute("""
+                    INSERT INTO ai_decision_optimizations (
+                        decision_type, optimization_type, parameter_adjustments,
+                        performance_improvement, applied_by
+                    ) VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    'general',  # Could be more specific based on decision context
+                    'variance_correction',
+                    json.dumps(parameter_adjustments, default=str),
+                    None,  # Will be calculated after application
+                    'auto_optimizer'
+                ))
+
+                conn.commit()
+                logger.info(f"Optimization triggered for decision {decision_id}: {parameter_adjustments}")
+
+        except Exception as e:
+            logger.error(f"Error triggering optimization: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                conn.close()
+
+    def learn_from_outcome(self, decision_id: str, outcome: Dict, success: bool):
+        """Legacy method - redirects to enhanced outcome recording"""
+        success_score = 1.0 if success else 0.0
+        self.record_decision_outcome(decision_id, outcome, success_score)
 
     def _process_learning_buffer(self):
         """Process accumulated learning data"""

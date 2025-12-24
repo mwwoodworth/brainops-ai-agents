@@ -201,12 +201,41 @@ class AITrainingPipeline:
                 )
             """)
 
+            # Outcome patterns table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_outcome_patterns (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    pattern_type VARCHAR(50),
+                    pattern_signature TEXT,
+                    success_rate FLOAT,
+                    occurrence_count INT DEFAULT 1,
+                    last_seen TIMESTAMPTZ DEFAULT NOW(),
+                    context JSONB DEFAULT '{}',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+
+            # Learning history table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_learning_history (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    model_type VARCHAR(50),
+                    lesson_learned TEXT,
+                    evidence JSONB,
+                    impact_score FLOAT,
+                    applied BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+
             # Create indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_interactions_customer ON ai_customer_interactions(customer_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_interactions_type ON ai_customer_interactions(interaction_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_training_category ON ai_training_data(category)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_models_type ON ai_trained_models(model_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_insights_type ON ai_learning_insights(insight_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_outcome_patterns ON ai_outcome_patterns(pattern_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_learning_history ON ai_learning_history(model_type)")
 
             conn.commit()
             cursor.close()
@@ -841,8 +870,175 @@ class AITrainingPipeline:
             logger.error(f"Failed to record feedback: {e}")
             return {'status': 'error', 'message': str(e)}
 
+    async def detect_outcome_patterns(self) -> List[Dict]:
+        """Detect patterns in outcomes for continuous learning"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            cursor = conn.cursor()
+
+            patterns = []
+
+            # Detect success patterns
+            cursor.execute("""
+                SELECT
+                    i.intent,
+                    i.sentiment_score,
+                    i.outcome,
+                    COUNT(*) as count,
+                    AVG(CASE WHEN i.outcome = 'success' THEN 1.0 ELSE 0.0 END) as success_rate
+                FROM ai_customer_interactions i
+                WHERE i.created_at > NOW() - INTERVAL '30 days'
+                  AND i.outcome IS NOT NULL
+                GROUP BY i.intent, i.sentiment_score, i.outcome
+                HAVING COUNT(*) >= 5
+                ORDER BY success_rate DESC
+            """)
+
+            outcome_patterns = cursor.fetchall()
+
+            for pattern in outcome_patterns:
+                signature = f"{pattern['intent']}_{pattern['sentiment_score']:.1f}_{pattern['outcome']}"
+
+                # Store pattern
+                cursor.execute("""
+                    INSERT INTO ai_outcome_patterns
+                    (pattern_type, pattern_signature, success_rate, occurrence_count, context)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (pattern_signature)
+                    DO UPDATE SET
+                        occurrence_count = EXCLUDED.occurrence_count,
+                        success_rate = EXCLUDED.success_rate,
+                        last_seen = NOW()
+                """, (
+                    'intent_sentiment_outcome',
+                    signature,
+                    float(pattern['success_rate']),
+                    pattern['count'],
+                    Json({
+                        'intent': pattern['intent'],
+                        'sentiment': float(pattern['sentiment_score']) if pattern['sentiment_score'] else 0,
+                        'outcome': pattern['outcome']
+                    })
+                ))
+
+                patterns.append({
+                    "type": "intent_sentiment_outcome",
+                    "signature": signature,
+                    "success_rate": float(pattern['success_rate']),
+                    "count": pattern['count']
+                })
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            return patterns
+
+        except Exception as e:
+            logger.error(f"Failed to detect outcome patterns: {e}")
+            return []
+
+    async def learn_from_outcomes(self) -> Dict:
+        """Continuous learning from agent outcomes"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            cursor = conn.cursor()
+
+            lessons = []
+
+            # Learn from model feedback
+            cursor.execute("""
+                SELECT
+                    m.model_type,
+                    COUNT(f.id) as feedback_count,
+                    AVG(f.accuracy_delta) as avg_accuracy_delta
+                FROM ai_trained_models m
+                JOIN ai_feedback_loop f ON f.model_id = m.id
+                WHERE f.created_at > NOW() - INTERVAL '7 days'
+                GROUP BY m.model_type
+                HAVING AVG(f.accuracy_delta) < 0.5
+            """)
+
+            underperforming = cursor.fetchall()
+
+            for model in underperforming:
+                lesson = f"Model {model['model_type']} showing poor performance with avg accuracy delta {model['avg_accuracy_delta']:.2f}"
+
+                cursor.execute("""
+                    INSERT INTO ai_learning_history
+                    (model_type, lesson_learned, evidence, impact_score)
+                    VALUES (%s, %s, %s, %s)
+                """, (
+                    model['model_type'],
+                    lesson,
+                    Json({'feedback_count': model['feedback_count'], 'avg_delta': float(model['avg_accuracy_delta'])}),
+                    abs(float(model['avg_accuracy_delta']))
+                ))
+
+                lessons.append({
+                    "model_type": model['model_type'],
+                    "lesson": lesson,
+                    "impact": abs(float(model['avg_accuracy_delta']))
+                })
+
+            # Learn from successful patterns
+            cursor.execute("""
+                SELECT pattern_type, pattern_signature, success_rate, occurrence_count
+                FROM ai_outcome_patterns
+                WHERE success_rate > 0.8
+                ORDER BY occurrence_count DESC
+                LIMIT 5
+            """)
+
+            successful_patterns = cursor.fetchall()
+
+            for pattern in successful_patterns:
+                lesson = f"High success pattern detected: {pattern['pattern_signature']} with {pattern['success_rate']:.1%} success rate"
+
+                cursor.execute("""
+                    INSERT INTO ai_learning_history
+                    (model_type, lesson_learned, evidence, impact_score, applied)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    'pattern_recognition',
+                    lesson,
+                    Json({
+                        'pattern_type': pattern['pattern_type'],
+                        'signature': pattern['pattern_signature'],
+                        'success_rate': float(pattern['success_rate']),
+                        'count': pattern['occurrence_count']
+                    }),
+                    float(pattern['success_rate']),
+                    False
+                ))
+
+                lessons.append({
+                    "type": "successful_pattern",
+                    "lesson": lesson,
+                    "impact": float(pattern['success_rate'])
+                })
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            # Detect outcome patterns
+            patterns = await self.detect_outcome_patterns()
+
+            return {
+                "lessons_learned": len(lessons),
+                "lessons": lessons,
+                "patterns_detected": len(patterns),
+                "patterns": patterns,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to learn from outcomes: {e}")
+            return {"error": str(e)}
+
     async def get_training_metrics(self) -> Dict:
-        """Get comprehensive training metrics"""
+        """Get comprehensive training metrics with learning insights"""
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -893,6 +1089,26 @@ class AITrainingPipeline:
             """)
             insights = cursor.fetchone()
 
+            # Learning history
+            cursor.execute("""
+                SELECT
+                    COUNT(*) as total_lessons,
+                    COUNT(*) FILTER (WHERE applied = TRUE) as applied_lessons,
+                    AVG(impact_score) as avg_impact
+                FROM ai_learning_history
+                WHERE created_at > NOW() - INTERVAL '30 days'
+            """)
+            learning = cursor.fetchone()
+
+            # Outcome patterns
+            cursor.execute("""
+                SELECT
+                    COUNT(*) as total_patterns,
+                    AVG(success_rate) as avg_success_rate
+                FROM ai_outcome_patterns
+            """)
+            patterns = cursor.fetchone()
+
             cursor.close()
             conn.close()
 
@@ -901,6 +1117,8 @@ class AITrainingPipeline:
                 'model_performance': models,
                 'training_queue': queue,
                 'insights': insights,
+                'learning_history': learning,
+                'outcome_patterns': patterns,
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
 

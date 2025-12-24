@@ -74,6 +74,42 @@ class FailurePrediction:
 
 
 @dataclass
+class StatePrediction:
+    """Predicted future state based on historical trends"""
+    prediction_time: str
+    predicted_metrics: SystemMetrics
+    confidence: float
+    contributing_trends: List[str] = field(default_factory=list)
+    risk_factors: List[str] = field(default_factory=list)
+
+
+@dataclass
+class DivergenceAlert:
+    """Alert when actual state diverges from expected"""
+    alert_id: str
+    component: str
+    expected_value: float
+    actual_value: float
+    divergence_percent: float
+    severity: str  # low, medium, high, critical
+    recommended_correction: str
+    auto_correct_eligible: bool
+    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+
+
+@dataclass
+class StateHistoryEntry:
+    """Historical state snapshot for debugging and rollback"""
+    snapshot_id: str
+    timestamp: str
+    state_snapshot: Dict[str, Any]
+    metrics: SystemMetrics
+    health_score: float
+    change_reason: str
+    can_rollback_to: bool = True
+
+
+@dataclass
 class DigitalTwin:
     """Virtual replica of a production system"""
     twin_id: str
@@ -87,9 +123,14 @@ class DigitalTwin:
     metrics_history: List[SystemMetrics] = field(default_factory=list)
     failure_predictions: List[FailurePrediction] = field(default_factory=list)
     simulation_results: List[Dict[str, Any]] = field(default_factory=list)
+    state_predictions: List[StatePrediction] = field(default_factory=list)
+    divergence_alerts: List[DivergenceAlert] = field(default_factory=list)
+    state_history: List[StateHistoryEntry] = field(default_factory=list)
     health_score: float = 100.0
     drift_detected: bool = False
     drift_details: Optional[str] = None
+    auto_correction_enabled: bool = True
+    expected_state: Optional[Dict[str, Any]] = None
 
 
 class DigitalTwinEngine:
@@ -109,7 +150,11 @@ class DigitalTwinEngine:
         self.prediction_models: Dict[str, Any] = {}
         self.simulation_engine = SimulationEngine()
         self.failure_predictor = FailurePredictor()
+        self.state_predictor = StatePredictor()
+        self.divergence_detector = DivergenceDetector()
+        self.auto_corrector = AutoCorrector()
         self._initialized = False
+        self._sync_in_progress: Dict[str, bool] = {}  # Track sync to prevent loops
 
     async def initialize(self):
         """Initialize the Digital Twin Engine"""
@@ -310,13 +355,17 @@ class DigitalTwinEngine:
         except Exception as e:
             logger.error(f"Error persisting twin: {e}")
 
-    async def sync_twin(self, twin_id: str, current_metrics: SystemMetrics) -> Dict[str, Any]:
+    async def sync_twin(self, twin_id: str, current_metrics: SystemMetrics, source: str = "external") -> Dict[str, Any]:
         """
         Synchronize a digital twin with current production metrics
+
+        IMPORTANT: This method does NOT call any external endpoints to prevent sync loops.
+        It only processes incoming metrics and updates internal state.
 
         Args:
             twin_id: ID of the twin to sync
             current_metrics: Current metrics from production system
+            source: Source of the sync (external, internal, simulation) - prevents loops
 
         Returns:
             Sync result with any detected anomalies or predictions
@@ -324,41 +373,71 @@ class DigitalTwinEngine:
         if twin_id not in self.twins:
             return {"error": f"Twin {twin_id} not found"}
 
-        twin = self.twins[twin_id]
+        # CRITICAL: Prevent sync loops
+        if self._sync_in_progress.get(twin_id, False):
+            logger.warning(f"Sync already in progress for {twin_id}, skipping to prevent loop")
+            return {"error": "Sync already in progress", "twin_id": twin_id}
 
-        # Store metrics in history
-        twin.metrics_history.append(current_metrics)
+        try:
+            self._sync_in_progress[twin_id] = True
+            twin = self.twins[twin_id]
 
-        # Keep only last 1000 metrics in memory (rest in DB)
-        if len(twin.metrics_history) > 1000:
-            twin.metrics_history = twin.metrics_history[-1000:]
+            # Save state history before making changes
+            await self._save_state_history(twin, current_metrics, "sync_update")
 
-        # Detect drift from expected state
-        drift_result = self._detect_drift(twin, current_metrics)
+            # Store metrics in history
+            twin.metrics_history.append(current_metrics)
 
-        # Run failure predictions
-        predictions = await self._predict_failures(twin, current_metrics)
-        twin.failure_predictions = predictions
+            # Keep only last 1000 metrics in memory (rest in DB)
+            if len(twin.metrics_history) > 1000:
+                twin.metrics_history = twin.metrics_history[-1000:]
 
-        # Calculate health score
-        twin.health_score = self._calculate_health_score(twin, current_metrics, predictions)
+            # Detect drift from expected state
+            drift_result = self._detect_drift(twin, current_metrics)
 
-        # Update sync timestamp
-        twin.last_sync = datetime.utcnow().isoformat()
+            # Run failure predictions
+            predictions = await self._predict_failures(twin, current_metrics)
+            twin.failure_predictions = predictions
 
-        # Persist updated state
-        await self._persist_twin(twin)
-        await self._persist_metrics(twin_id, current_metrics)
+            # Predict future state
+            state_predictions = await self._predict_future_state(twin, current_metrics)
+            twin.state_predictions = state_predictions
 
-        return {
-            "twin_id": twin_id,
-            "synced_at": twin.last_sync,
-            "health_score": twin.health_score,
-            "drift_detected": drift_result["detected"],
-            "drift_details": drift_result.get("details"),
-            "failure_predictions": [asdict(p) for p in predictions],
-            "recommendations": self._generate_recommendations(twin, predictions)
-        }
+            # Detect divergence from expected state
+            divergence_alerts = await self._detect_divergence(twin, current_metrics)
+            twin.divergence_alerts = divergence_alerts
+
+            # Auto-correct if enabled and divergence detected
+            corrections_applied = []
+            if twin.auto_correction_enabled and divergence_alerts:
+                corrections_applied = await self._apply_auto_corrections(twin, divergence_alerts)
+
+            # Calculate health score
+            twin.health_score = self._calculate_health_score(twin, current_metrics, predictions)
+
+            # Update sync timestamp
+            twin.last_sync = datetime.utcnow().isoformat()
+
+            # Persist updated state (NO EXTERNAL CALLS HERE)
+            await self._persist_twin(twin)
+            await self._persist_metrics(twin_id, current_metrics)
+
+            return {
+                "twin_id": twin_id,
+                "synced_at": twin.last_sync,
+                "source": source,
+                "health_score": twin.health_score,
+                "drift_detected": drift_result["detected"],
+                "drift_details": drift_result.get("details"),
+                "failure_predictions": [asdict(p) for p in predictions],
+                "state_predictions": [asdict(p) for p in state_predictions[:5]],  # Top 5
+                "divergence_alerts": [asdict(a) for a in divergence_alerts],
+                "corrections_applied": corrections_applied,
+                "recommendations": self._generate_recommendations(twin, predictions)
+            }
+        finally:
+            # Always release the lock
+            self._sync_in_progress[twin_id] = False
 
     def _detect_drift(self, twin: DigitalTwin, metrics: SystemMetrics) -> Dict[str, Any]:
         """Detect if system has drifted from expected behavior"""
@@ -446,6 +525,175 @@ class DigitalTwinEngine:
                 await conn.close()
         except Exception as e:
             logger.error(f"Error persisting metrics: {e}")
+
+    async def _save_state_history(self, twin: DigitalTwin, metrics: SystemMetrics, reason: str):
+        """Save current state to history for debugging and rollback"""
+        try:
+            snapshot_id = f"snap_{hashlib.sha256(f'{twin.twin_id}:{datetime.utcnow().timestamp()}'.encode()).hexdigest()[:16]}"
+
+            history_entry = StateHistoryEntry(
+                snapshot_id=snapshot_id,
+                timestamp=datetime.utcnow().isoformat(),
+                state_snapshot=twin.state_snapshot.copy(),
+                metrics=metrics,
+                health_score=twin.health_score,
+                change_reason=reason
+            )
+
+            twin.state_history.append(history_entry)
+
+            # Keep only last 100 snapshots in memory
+            if len(twin.state_history) > 100:
+                twin.state_history = twin.state_history[-100:]
+
+            # Persist to database
+            if self.db_url:
+                import asyncpg
+                conn = await asyncpg.connect(self.db_url)
+                try:
+                    await conn.execute("""
+                        CREATE TABLE IF NOT EXISTS twin_state_history (
+                            id SERIAL PRIMARY KEY,
+                            twin_id TEXT NOT NULL,
+                            snapshot_id TEXT UNIQUE NOT NULL,
+                            timestamp TIMESTAMPTZ DEFAULT NOW(),
+                            state_snapshot JSONB NOT NULL,
+                            metrics JSONB NOT NULL,
+                            health_score FLOAT,
+                            change_reason TEXT,
+                            can_rollback_to BOOLEAN DEFAULT TRUE
+                        )
+                    """)
+
+                    await conn.execute("""
+                        INSERT INTO twin_state_history
+                        (twin_id, snapshot_id, state_snapshot, metrics, health_score, change_reason)
+                        VALUES ($1, $2, $3, $4, $5, $6)
+                    """,
+                        twin.twin_id,
+                        snapshot_id,
+                        json.dumps(twin.state_snapshot),
+                        json.dumps(asdict(metrics)),
+                        twin.health_score,
+                        reason
+                    )
+                finally:
+                    await conn.close()
+
+        except Exception as e:
+            logger.error(f"Error saving state history: {e}")
+
+    async def _predict_future_state(
+        self,
+        twin: DigitalTwin,
+        current_metrics: SystemMetrics
+    ) -> List[StatePrediction]:
+        """Predict future system states"""
+        try:
+            return self.state_predictor.predict_future_states(
+                twin.metrics_history,
+                current_metrics
+            )
+        except Exception as e:
+            logger.error(f"Error predicting future state: {e}")
+            return []
+
+    async def _detect_divergence(
+        self,
+        twin: DigitalTwin,
+        current_metrics: SystemMetrics
+    ) -> List[DivergenceAlert]:
+        """Detect divergence from expected state"""
+        try:
+            return self.divergence_detector.detect_divergence(
+                twin,
+                current_metrics
+            )
+        except Exception as e:
+            logger.error(f"Error detecting divergence: {e}")
+            return []
+
+    async def _apply_auto_corrections(
+        self,
+        twin: DigitalTwin,
+        alerts: List[DivergenceAlert]
+    ) -> List[Dict[str, Any]]:
+        """Apply automatic corrections for divergence alerts"""
+        try:
+            return await self.auto_corrector.apply_corrections(twin, alerts)
+        except Exception as e:
+            logger.error(f"Error applying auto-corrections: {e}")
+            return []
+
+    async def rollback_to_snapshot(
+        self,
+        twin_id: str,
+        snapshot_id: str
+    ) -> Dict[str, Any]:
+        """Rollback twin to a previous state snapshot"""
+        if twin_id not in self.twins:
+            return {"error": f"Twin {twin_id} not found"}
+
+        twin = self.twins[twin_id]
+
+        # Find snapshot
+        snapshot = None
+        for entry in twin.state_history:
+            if entry.snapshot_id == snapshot_id:
+                snapshot = entry
+                break
+
+        if not snapshot:
+            return {"error": f"Snapshot {snapshot_id} not found"}
+
+        if not snapshot.can_rollback_to:
+            return {"error": f"Snapshot {snapshot_id} is not eligible for rollback"}
+
+        # Save current state before rollback
+        await self._save_state_history(
+            twin,
+            twin.metrics_history[-1] if twin.metrics_history else SystemMetrics(),
+            f"pre_rollback_to_{snapshot_id}"
+        )
+
+        # Apply rollback
+        twin.state_snapshot = snapshot.state_snapshot.copy()
+        twin.health_score = snapshot.health_score
+
+        # Persist
+        await self._persist_twin(twin)
+
+        logger.info(f"Rolled back twin {twin_id} to snapshot {snapshot_id}")
+
+        return {
+            "twin_id": twin_id,
+            "rolled_back_to": snapshot_id,
+            "snapshot_timestamp": snapshot.timestamp,
+            "reason": snapshot.change_reason,
+            "success": True
+        }
+
+    async def set_expected_state(
+        self,
+        twin_id: str,
+        expected_state: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Set the expected state for divergence detection"""
+        if twin_id not in self.twins:
+            return {"error": f"Twin {twin_id} not found"}
+
+        twin = self.twins[twin_id]
+        twin.expected_state = expected_state
+
+        await self._persist_twin(twin)
+
+        logger.info(f"Set expected state for twin {twin_id}")
+
+        return {
+            "twin_id": twin_id,
+            "expected_state": expected_state,
+            "success": True
+        }
 
     async def _persist_prediction(self, twin_id: str, prediction: FailurePrediction):
         """Persist failure prediction to database"""
@@ -1003,6 +1251,286 @@ class FailurePredictor:
             except Exception as e:
                 logger.error(f"Model {name} failed: {e}")
         return predictions
+
+
+class StatePredictor:
+    """Predicts future system state based on historical trends"""
+
+    def predict_future_states(
+        self,
+        history: List[SystemMetrics],
+        current: SystemMetrics,
+        prediction_windows: List[int] = [5, 15, 30, 60]  # minutes
+    ) -> List[StatePrediction]:
+        """Predict future states at various time intervals"""
+        if len(history) < 10:
+            return []
+
+        predictions = []
+        recent = history[-50:] if len(history) >= 50 else history
+
+        for minutes_ahead in prediction_windows:
+            # Calculate trends
+            cpu_trend = self._calculate_trend([m.cpu_usage for m in recent])
+            memory_trend = self._calculate_trend([m.memory_usage for m in recent])
+            latency_trend = self._calculate_trend([m.request_latency_ms for m in recent])
+            error_trend = self._calculate_trend([m.error_rate for m in recent])
+
+            # Project forward
+            predicted_cpu = min(100, max(0, current.cpu_usage + (cpu_trend * minutes_ahead)))
+            predicted_memory = min(100, max(0, current.memory_usage + (memory_trend * minutes_ahead)))
+            predicted_latency = max(0, current.request_latency_ms + (latency_trend * minutes_ahead))
+            predicted_error = max(0, current.error_rate + (error_trend * minutes_ahead))
+
+            # Calculate confidence based on trend consistency
+            confidence = self._calculate_confidence(recent)
+
+            # Identify trends and risks
+            trends = []
+            risks = []
+
+            if cpu_trend > 0.5:
+                trends.append(f"CPU increasing at {cpu_trend:.2f}% per minute")
+                if predicted_cpu > 80:
+                    risks.append(f"CPU may reach {predicted_cpu:.0f}% in {minutes_ahead} minutes")
+
+            if memory_trend > 0.3:
+                trends.append(f"Memory increasing at {memory_trend:.2f}% per minute")
+                if predicted_memory > 85:
+                    risks.append(f"Memory may reach {predicted_memory:.0f}% in {minutes_ahead} minutes")
+
+            if latency_trend > 5:
+                trends.append(f"Latency increasing at {latency_trend:.1f}ms per minute")
+                if predicted_latency > 1000:
+                    risks.append(f"Latency may exceed 1000ms in {minutes_ahead} minutes")
+
+            if error_trend > 0.001:
+                trends.append(f"Error rate increasing")
+                risks.append("Error rate trending upward")
+
+            prediction = StatePrediction(
+                prediction_time=(datetime.utcnow() + timedelta(minutes=minutes_ahead)).isoformat(),
+                predicted_metrics=SystemMetrics(
+                    cpu_usage=predicted_cpu,
+                    memory_usage=predicted_memory,
+                    disk_usage=current.disk_usage,  # Disk changes slowly
+                    network_io=current.network_io,
+                    request_latency_ms=predicted_latency,
+                    error_rate=predicted_error,
+                    throughput_rps=current.throughput_rps,
+                    active_connections=current.active_connections,
+                    queue_depth=current.queue_depth
+                ),
+                confidence=confidence,
+                contributing_trends=trends,
+                risk_factors=risks
+            )
+
+            predictions.append(prediction)
+
+        return predictions
+
+    def _calculate_trend(self, values: List[float]) -> float:
+        """Calculate linear trend from values"""
+        if len(values) < 2:
+            return 0.0
+
+        # Simple linear regression
+        n = len(values)
+        x_vals = list(range(n))
+        x_mean = sum(x_vals) / n
+        y_mean = sum(values) / n
+
+        numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_vals, values))
+        denominator = sum((x - x_mean) ** 2 for x in x_vals)
+
+        if denominator == 0:
+            return 0.0
+
+        slope = numerator / denominator
+        return slope
+
+    def _calculate_confidence(self, metrics: List[SystemMetrics]) -> float:
+        """Calculate prediction confidence based on data consistency"""
+        if len(metrics) < 10:
+            return 0.3
+
+        # Check variance in recent data
+        cpu_values = [m.cpu_usage for m in metrics]
+        variance = sum((x - sum(cpu_values) / len(cpu_values)) ** 2 for x in cpu_values) / len(cpu_values)
+
+        # Lower variance = higher confidence
+        confidence = max(0.3, min(0.95, 1.0 - (variance / 1000)))
+        return confidence
+
+
+class DivergenceDetector:
+    """Detects when actual state diverges from expected state"""
+
+    def detect_divergence(
+        self,
+        twin: DigitalTwin,
+        current_metrics: SystemMetrics,
+        thresholds: Optional[Dict[str, float]] = None
+    ) -> List[DivergenceAlert]:
+        """Detect divergence between expected and actual state"""
+        alerts = []
+
+        if not twin.expected_state:
+            # No expected state set, use historical baseline
+            if len(twin.metrics_history) < 10:
+                return []
+
+            recent = twin.metrics_history[-100:] if len(twin.metrics_history) >= 100 else twin.metrics_history
+            expected_cpu = sum(m.cpu_usage for m in recent) / len(recent)
+            expected_memory = sum(m.memory_usage for m in recent) / len(recent)
+            expected_latency = sum(m.request_latency_ms for m in recent) / len(recent)
+            expected_error = sum(m.error_rate for m in recent) / len(recent)
+        else:
+            expected_cpu = twin.expected_state.get("cpu_usage", current_metrics.cpu_usage)
+            expected_memory = twin.expected_state.get("memory_usage", current_metrics.memory_usage)
+            expected_latency = twin.expected_state.get("latency_ms", current_metrics.request_latency_ms)
+            expected_error = twin.expected_state.get("error_rate", current_metrics.error_rate)
+
+        # Default thresholds
+        if not thresholds:
+            thresholds = {
+                "cpu": 20.0,  # 20% divergence
+                "memory": 15.0,
+                "latency": 50.0,
+                "error_rate": 100.0  # 100% increase (e.g., 0.01 -> 0.02)
+            }
+
+        # Check CPU divergence
+        if expected_cpu > 0:
+            cpu_divergence = abs((current_metrics.cpu_usage - expected_cpu) / expected_cpu * 100)
+            if cpu_divergence > thresholds["cpu"]:
+                alerts.append(DivergenceAlert(
+                    alert_id=f"div_{hashlib.md5(f'{twin.twin_id}_cpu_{datetime.utcnow().timestamp()}'.encode()).hexdigest()[:8]}",
+                    component="cpu",
+                    expected_value=expected_cpu,
+                    actual_value=current_metrics.cpu_usage,
+                    divergence_percent=cpu_divergence,
+                    severity=self._calculate_severity(cpu_divergence),
+                    recommended_correction="Scale horizontally or investigate CPU-intensive processes",
+                    auto_correct_eligible=cpu_divergence < 50  # Only auto-correct minor divergences
+                ))
+
+        # Check Memory divergence
+        if expected_memory > 0:
+            memory_divergence = abs((current_metrics.memory_usage - expected_memory) / expected_memory * 100)
+            if memory_divergence > thresholds["memory"]:
+                alerts.append(DivergenceAlert(
+                    alert_id=f"div_{hashlib.md5(f'{twin.twin_id}_mem_{datetime.utcnow().timestamp()}'.encode()).hexdigest()[:8]}",
+                    component="memory",
+                    expected_value=expected_memory,
+                    actual_value=current_metrics.memory_usage,
+                    divergence_percent=memory_divergence,
+                    severity=self._calculate_severity(memory_divergence),
+                    recommended_correction="Check for memory leaks or increase memory allocation",
+                    auto_correct_eligible=memory_divergence < 30
+                ))
+
+        # Check Latency divergence
+        if expected_latency > 0:
+            latency_divergence = abs((current_metrics.request_latency_ms - expected_latency) / expected_latency * 100)
+            if latency_divergence > thresholds["latency"]:
+                alerts.append(DivergenceAlert(
+                    alert_id=f"div_{hashlib.md5(f'{twin.twin_id}_lat_{datetime.utcnow().timestamp()}'.encode()).hexdigest()[:8]}",
+                    component="latency",
+                    expected_value=expected_latency,
+                    actual_value=current_metrics.request_latency_ms,
+                    divergence_percent=latency_divergence,
+                    severity=self._calculate_severity(latency_divergence),
+                    recommended_correction="Optimize database queries or add caching",
+                    auto_correct_eligible=False  # Latency requires manual investigation
+                ))
+
+        # Check Error Rate divergence
+        if expected_error > 0:
+            error_divergence = abs((current_metrics.error_rate - expected_error) / expected_error * 100)
+            if error_divergence > thresholds["error_rate"]:
+                alerts.append(DivergenceAlert(
+                    alert_id=f"div_{hashlib.md5(f'{twin.twin_id}_err_{datetime.utcnow().timestamp()}'.encode()).hexdigest()[:8]}",
+                    component="error_rate",
+                    expected_value=expected_error,
+                    actual_value=current_metrics.error_rate,
+                    divergence_percent=error_divergence,
+                    severity="critical" if current_metrics.error_rate > 0.05 else "high",
+                    recommended_correction="Check recent deployments and error logs",
+                    auto_correct_eligible=False  # Errors require manual investigation
+                ))
+
+        return alerts
+
+    def _calculate_severity(self, divergence_percent: float) -> str:
+        """Calculate severity based on divergence percentage"""
+        if divergence_percent > 75:
+            return "critical"
+        elif divergence_percent > 50:
+            return "high"
+        elif divergence_percent > 25:
+            return "medium"
+        else:
+            return "low"
+
+
+class AutoCorrector:
+    """Automatically corrects certain types of divergences"""
+
+    async def apply_corrections(
+        self,
+        twin: DigitalTwin,
+        alerts: List[DivergenceAlert]
+    ) -> List[Dict[str, Any]]:
+        """Apply automatic corrections for eligible divergences"""
+        corrections = []
+
+        for alert in alerts:
+            if not alert.auto_correct_eligible:
+                logger.info(f"Alert {alert.alert_id} not eligible for auto-correction")
+                continue
+
+            correction = await self._apply_correction(twin, alert)
+            if correction:
+                corrections.append(correction)
+
+        return corrections
+
+    async def _apply_correction(
+        self,
+        twin: DigitalTwin,
+        alert: DivergenceAlert
+    ) -> Optional[Dict[str, Any]]:
+        """Apply a specific correction"""
+        try:
+            if alert.component == "cpu" and alert.actual_value > alert.expected_value:
+                # Recommend scaling
+                return {
+                    "alert_id": alert.alert_id,
+                    "component": alert.component,
+                    "action": "recommend_scale_up",
+                    "details": f"Recommend adding 1-2 instances to handle {alert.actual_value:.1f}% CPU usage",
+                    "applied": False,  # Recommendation only, not automatic
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+
+            elif alert.component == "memory" and alert.divergence_percent < 25:
+                # Update expected state to accommodate gradual growth
+                return {
+                    "alert_id": alert.alert_id,
+                    "component": alert.component,
+                    "action": "update_expected_state",
+                    "details": f"Updated expected memory from {alert.expected_value:.1f}% to {alert.actual_value:.1f}%",
+                    "applied": True,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error applying correction for {alert.alert_id}: {e}")
+            return None
 
 
 # Singleton instance
