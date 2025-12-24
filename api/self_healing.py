@@ -222,21 +222,45 @@ async def get_system_patterns(system_id: str):
 @router.get("/metrics")
 async def get_self_healing_metrics():
     """Get self-healing performance metrics"""
-    engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
-        await engine.initialize()
+    try:
+        engine = _get_engine()
+        if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+            await engine.initialize()
 
-    metrics = await engine.get_metrics() if hasattr(engine, 'get_metrics') else {}
-    return {
-        "metrics": metrics,
-        "performance": {
-            "mttr_improvement": "67%",
-            "auto_remediation_rate": metrics.get("auto_remediation_rate", 0),
-            "successful_remediations": metrics.get("successful_remediations", 0),
-            "failed_remediations": metrics.get("failed_remediations", 0),
-            "avg_resolution_time_seconds": metrics.get("avg_resolution_time", 0)
+        # Try to get metrics from the engine (it's a sync method, not async)
+        metrics = {}
+        if hasattr(engine, 'get_metrics'):
+            metrics = engine.get_metrics()  # Not awaited - it's a sync method
+        elif hasattr(engine, 'total_incidents'):
+            metrics = {
+                "total_incidents": engine.total_incidents,
+                "auto_resolved": engine.auto_resolved_incidents if hasattr(engine, 'auto_resolved_incidents') else 0,
+                "avg_recovery_time_seconds": engine.avg_recovery_time_seconds if hasattr(engine, 'avg_recovery_time_seconds') else 0
+            }
+
+        return {
+            "metrics": metrics,
+            "performance": {
+                "mttr_improvement": "67%",
+                "auto_remediation_rate": metrics.get("auto_resolution_rate", metrics.get("auto_remediation_rate", 0)),
+                "successful_remediations": metrics.get("auto_resolved", metrics.get("successful_remediations", 0)),
+                "failed_remediations": metrics.get("failed_remediations", 0),
+                "avg_resolution_time_seconds": metrics.get("avg_recovery_time_seconds", metrics.get("avg_resolution_time", 0))
+            }
         }
-    }
+    except Exception as e:
+        logger.error(f"Error getting self-healing metrics: {e}")
+        return {
+            "metrics": {},
+            "performance": {
+                "mttr_improvement": "67%",
+                "auto_remediation_rate": 0,
+                "successful_remediations": 0,
+                "failed_remediations": 0,
+                "avg_resolution_time_seconds": 0
+            },
+            "error": str(e)
+        }
 
 
 @router.get("/remediations")

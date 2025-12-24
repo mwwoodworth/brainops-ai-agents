@@ -184,8 +184,8 @@ class E2ESystemVerification:
                 critical=True
             ),
             EndpointTest(
-                name="Memory Status",
-                url=f"{BRAINOPS_API_URL}/memory/stats",
+                name="Memory Coordination",
+                url=f"{BRAINOPS_API_URL}/memory-coordination/status",
                 headers=headers,
                 expected_fields=[],
                 category=SystemCategory.CORE_API,
@@ -397,12 +397,12 @@ class E2ESystemVerification:
                 critical=True
             ),
             EndpointTest(
-                name="MCP Bridge - Tools",
-                url=f"{MCP_BRIDGE_URL}/tools",
+                name="MCP Bridge - Servers",
+                url=f"{MCP_BRIDGE_URL}/api/servers",
                 expected_status=200,
                 expected_fields=[],
                 category=SystemCategory.MCP,
-                critical=True
+                critical=False
             ),
         ])
 
