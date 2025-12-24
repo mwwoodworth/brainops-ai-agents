@@ -876,8 +876,8 @@ class AUREA:
                 self.memory.store(Memory(
                     memory_type=MemoryType.EPISODIC,
                     content={
-                        "decision": asdict(decision),
-                        "execution_result": result,
+                        "decision": json_safe_serialize(asdict(decision)),
+                        "execution_result": json_safe_serialize(result),
                         "timestamp": datetime.now().isoformat()
                     },
                     source_system="aurea",
@@ -999,9 +999,11 @@ class AUREA:
         }
 
         event_type = event_type_map.get(decision.type, BusinessEventType.SYSTEM_HEALTH_CHECK)
+        # Serialize decision to ensure datetime/Decimal objects are JSON-safe
+        decision_dict = json_safe_serialize(asdict(decision))
         result = await self.activation_system.handle_business_event(
             event_type,
-            {"decision": asdict(decision), "aurea_initiated": True, "verification_mode": True, "dry_run": True}
+            {"decision": decision_dict, "aurea_initiated": True, "verification_mode": True, "dry_run": True}
         )
 
         return {"action": "generic_activation", "event_type": event_type.value, "result": result, "mode": "verification_only"}

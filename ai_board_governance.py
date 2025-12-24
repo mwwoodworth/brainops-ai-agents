@@ -18,7 +18,7 @@ from psycopg2.extras import RealDictCursor, Json
 from ai_core import ai_core
 from ai_advanced_providers import advanced_ai
 from unified_memory_manager import get_memory_manager, Memory, MemoryType
-from agent_activation_system import get_activation_system, BusinessEventType
+from agent_activation_system import get_activation_system, BusinessEventType, json_safe_serialize
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -810,8 +810,8 @@ Output MUST be valid JSON only (no markdown) with this schema:
             memory_type=MemoryType.EPISODIC,
             content={
                 "event": "board_decision",
-                "proposal": asdict(proposal),
-                "decision": asdict(decision),
+                "proposal": json_safe_serialize(asdict(proposal)),
+                "decision": json_safe_serialize(asdict(decision)),
                 "timestamp": datetime.now().isoformat()
             },
             source_system="ai_board",
