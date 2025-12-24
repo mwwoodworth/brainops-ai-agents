@@ -450,12 +450,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info(f"🚀 Starting BrainOps AI Agents v{VERSION} - Build: {BUILD_TIME}")
 
+    # Main production tenant with actual data (5,298 customers, 2,487 invoices, 940 overdue)
+    PRODUCTION_TENANT = "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+
     tenant_id = (
         os.getenv("TENANT_ID")
         or os.getenv("DEFAULT_TENANT_ID")
         or os.getenv("CENTERPOINT_TENANT_ID")
         or os.getenv("SYSTEM_TENANT_ID")
-        or "brainops-production"  # Default tenant for production AI OS
+        or PRODUCTION_TENANT  # Fallback to main production tenant with real data
     )
     logger.info(f"🔑 Using tenant_id: {tenant_id}")
 
