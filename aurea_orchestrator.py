@@ -27,6 +27,7 @@ from ai_board_governance import get_ai_board, Proposal, ProposalType
 from ai_self_awareness import get_self_aware_ai, SelfAwareAI
 from revenue_generation_system import get_revenue_system, AutonomousRevenueSystem
 from ai_knowledge_graph import get_knowledge_graph, AIKnowledgeGraph
+from mcp_integration import get_mcp_client, MCPClient, MCPServer, MCPToolResult
 import aiohttp
 import warnings
 warnings.filterwarnings('ignore')
@@ -168,6 +169,13 @@ class AUREA:
             return get_pool()
         except Exception:
             return None
+
+    @property
+    def mcp(self) -> MCPClient:
+        """Get singleton MCPClient - the centralized MCP Bridge integration"""
+        if not hasattr(self, '_mcp_client') or self._mcp_client is None:
+            self._mcp_client = get_mcp_client()
+        return self._mcp_client
 
     async def _async_fetch(self, query: str, *args) -> List[Dict]:
         """Execute query and return results using async pool"""
@@ -1249,83 +1257,101 @@ class AUREA:
             await self._execute_mcp_action(action)
 
     async def _execute_mcp_action(self, action: str) -> Dict[str, Any]:
-        """Execute an action via MCP Bridge - connects AUREA to 345 external tools"""
+        """Execute an action via MCP Bridge - uses centralized MCPClient (345 tools)"""
         try:
             # Parse action: "mcp:server:tool" or "mcp:tool"
             parts = action.replace("mcp:", "").split(":")
             if len(parts) == 2:
-                server, tool = parts
+                server_str, tool = parts
             else:
                 tool = parts[0]
-                server = self._infer_mcp_server(tool)
+                server_str = self._infer_mcp_server(tool)
 
-            logger.info(f"🔗 Executing MCP action: {server}/{tool}")
+            logger.info(f"🔗 Executing MCP action via MCPClient: {server_str}/{tool}")
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{MCP_BRIDGE_URL}/mcp/execute",
-                    headers={
-                        "X-API-Key": MCP_API_KEY,
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "server": server,
-                        "tool": tool,
-                        "params": {"triggered_by": "aurea", "tenant_id": self.tenant_id},
-                    },
-                    timeout=aiohttp.ClientTimeout(total=60)
-                ) as resp:
-                    if resp.status == 200:
-                        result = await resp.json()
-                        logger.info(f"✅ MCP action successful: {tool}")
-                        return {"success": True, "result": result}
-                    else:
-                        error = await resp.text()
-                        logger.warning(f"❌ MCP action failed: {error}")
-                        return {"success": False, "error": error}
+            # Convert server string to MCPServer enum
+            server = self._get_mcp_server_enum(server_str)
+
+            # Use centralized MCPClient with connection pooling and retry logic
+            result: MCPToolResult = await self.mcp.execute_tool(
+                server,
+                tool,
+                {"triggered_by": "aurea", "tenant_id": self.tenant_id}
+            )
+
+            if result.success:
+                logger.info(f"✅ MCP action successful: {tool} ({result.duration_ms:.0f}ms)")
+                return {"success": True, "result": result.result, "duration_ms": result.duration_ms}
+            else:
+                logger.warning(f"❌ MCP action failed: {result.error}")
+                return {"success": False, "error": result.error}
+
         except Exception as e:
             logger.error(f"MCP execution error: {e}")
             return {"success": False, "error": str(e)}
 
+    def _get_mcp_server_enum(self, server_str: str) -> MCPServer:
+        """Convert server string to MCPServer enum"""
+        server_map = {
+            "render": MCPServer.RENDER,
+            "render-mcp": MCPServer.RENDER,
+            "vercel": MCPServer.VERCEL,
+            "vercel-mcp": MCPServer.VERCEL,
+            "supabase": MCPServer.SUPABASE,
+            "supabase-mcp": MCPServer.SUPABASE,
+            "github": MCPServer.GITHUB,
+            "github-mcp": MCPServer.GITHUB,
+            "docker": MCPServer.DOCKER,
+            "docker-mcp": MCPServer.DOCKER,
+            "stripe": MCPServer.STRIPE,
+            "stripe-mcp": MCPServer.STRIPE,
+            "openai": MCPServer.OPENAI,
+            "anthropic": MCPServer.ANTHROPIC,
+            "playwright": MCPServer.PLAYWRIGHT,
+            "python": MCPServer.PYTHON,
+            "python-executor": MCPServer.PYTHON,
+        }
+        return server_map.get(server_str.lower(), MCPServer.RENDER)
+
     def _infer_mcp_server(self, tool: str) -> str:
         """Infer which MCP server to use based on tool name"""
-        if any(k in tool.lower() for k in ["render", "service", "deploy"]):
-            return "render-mcp"
-        elif any(k in tool.lower() for k in ["vercel", "preview", "domain"]):
-            return "vercel-mcp"
-        elif any(k in tool.lower() for k in ["supabase", "sql", "database", "query"]):
-            return "supabase-mcp"
-        elif any(k in tool.lower() for k in ["github", "repo", "branch", "pr", "issue"]):
-            return "github-mcp"
-        elif any(k in tool.lower() for k in ["docker", "container", "image"]):
-            return "docker-mcp"
-        elif any(k in tool.lower() for k in ["stripe", "payment", "invoice", "subscription"]):
-            return "stripe-mcp"
+        tool_lower = tool.lower()
+        if any(k in tool_lower for k in ["render", "service", "deploy", "restart"]):
+            return "render"
+        elif any(k in tool_lower for k in ["vercel", "preview", "domain", "deployment"]):
+            return "vercel"
+        elif any(k in tool_lower for k in ["supabase", "sql", "database", "query", "insert"]):
+            return "supabase"
+        elif any(k in tool_lower for k in ["github", "repo", "branch", "pr", "issue", "workflow"]):
+            return "github"
+        elif any(k in tool_lower for k in ["docker", "container", "image", "kubernetes"]):
+            return "docker"
+        elif any(k in tool_lower for k in ["stripe", "payment", "invoice", "subscription", "customer"]):
+            return "stripe"
+        elif any(k in tool_lower for k in ["playwright", "browser", "screenshot"]):
+            return "playwright"
+        elif any(k in tool_lower for k in ["openai", "gpt", "embedding"]):
+            return "openai"
+        elif any(k in tool_lower for k in ["anthropic", "claude"]):
+            return "anthropic"
         else:
-            return "generic-mcp"
+            return "render"  # Default to Render for infrastructure
 
     async def execute_external_tool(self, server: str, tool: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Public method for AUREA to execute any MCP tool"""
+        """Public method for AUREA to execute any MCP tool - uses centralized MCPClient"""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{MCP_BRIDGE_URL}/mcp/execute",
-                    headers={
-                        "X-API-Key": MCP_API_KEY,
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "server": server,
-                        "tool": tool,
-                        "params": params or {},
-                    },
-                    timeout=aiohttp.ClientTimeout(total=120)
-                ) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-                    else:
-                        return {"success": False, "error": await resp.text()}
+            server_enum = self._get_mcp_server_enum(server)
+            result: MCPToolResult = await self.mcp.execute_tool(server_enum, tool, params or {})
+
+            return {
+                "success": result.success,
+                "result": result.result,
+                "error": result.error,
+                "duration_ms": result.duration_ms,
+                "execution_id": result.execution_id
+            }
         except Exception as e:
+            logger.error(f"External tool execution error: {e}")
             return {"success": False, "error": str(e)}
 
     async def _check_system_health(self) -> SystemHealth:
