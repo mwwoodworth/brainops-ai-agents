@@ -49,6 +49,10 @@ from api.gumroad_webhook import router as gumroad_router
 from api.codebase_graph import router as codebase_graph_router
 from api.state_sync import router as state_sync_router
 from api.revenue import router as revenue_router
+from api.digital_twin import router as digital_twin_router
+from api.market_intelligence import router as market_intelligence_router
+from api.system_orchestrator import router as system_orchestrator_router
+from api.self_healing import router as self_healing_router
 from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
 from observability import RequestMetrics, TTLCache
@@ -922,6 +926,12 @@ app.include_router(codebase_graph_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(state_sync_router, dependencies=SECURED_DEPENDENCIES)  # Real-time state synchronization
 app.include_router(revenue_router, dependencies=SECURED_DEPENDENCIES)  # Revenue generation system
 
+# Bleeding-edge AI systems (2025)
+app.include_router(digital_twin_router, dependencies=SECURED_DEPENDENCIES)  # Digital Twin virtual replicas
+app.include_router(market_intelligence_router, dependencies=SECURED_DEPENDENCIES)  # Predictive market intelligence
+app.include_router(system_orchestrator_router, dependencies=SECURED_DEPENDENCIES)  # Autonomous system orchestration (1-10K systems)
+app.include_router(self_healing_router, dependencies=SECURED_DEPENDENCIES)  # Enhanced self-healing AI infrastructure
+
 # Import and include analytics router
 try:
     from analytics_endpoint import router as analytics_router
@@ -1257,7 +1267,12 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
                 "code_quality": CODE_QUALITY_AVAILABLE,
                 "customer_success": CUSTOMER_SUCCESS_AVAILABLE,
                 "competitive_intelligence": COMPETITIVE_INTEL_AVAILABLE,
-                "vision_alignment": VISION_ALIGNMENT_AVAILABLE
+                "vision_alignment": VISION_ALIGNMENT_AVAILABLE,
+                # Phase 3 - Bleeding Edge 2025
+                "digital_twin": True,
+                "market_intelligence": True,
+                "system_orchestrator": True,
+                "enhanced_self_healing": True
             },
             "config": {
                 "environment": config.environment,
