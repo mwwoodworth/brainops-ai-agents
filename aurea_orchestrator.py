@@ -125,12 +125,18 @@ class AUREA:
     The Master AI Orchestrator - The Brain of BrainOps
     """
 
-    def __init__(self, autonomy_level: AutonomyLevel = AutonomyLevel.SUPERVISED, tenant_id: Optional[str] = None):
+    def __init__(
+        self,
+        autonomy_level: AutonomyLevel = AutonomyLevel.SUPERVISED,
+        tenant_id: Optional[str] = None,
+        db_pool: Optional[Any] = None  # Async database pool injection
+    ):
         if not tenant_id:
             raise ValueError("tenant_id is required for AUREA")
-        
+
         self.tenant_id = tenant_id
         self.autonomy_level = autonomy_level
+        self._db_pool = db_pool  # Injected async pool
         self.memory = get_memory_manager()
         self.activation_system = get_activation_system(tenant_id)
         self.ai = RealAICore()
@@ -151,6 +157,96 @@ class AUREA:
         self._init_database()
 
         logger.info(f"🧠 AUREA initialized for tenant {tenant_id} at autonomy level: {autonomy_level.name}")
+
+    @property
+    def db_pool(self) -> Optional[Any]:
+        """Get async database pool - try injected first, then global"""
+        if self._db_pool is not None:
+            return self._db_pool
+        try:
+            from database.async_connection import get_pool
+            return get_pool()
+        except Exception:
+            return None
+
+    async def _async_fetch(self, query: str, *args) -> List[Dict]:
+        """Execute query and return results using async pool"""
+        pool = self.db_pool
+        if pool is None:
+            # Fallback to sync psycopg2
+            return self._sync_fetch(query, *args)
+        try:
+            rows = await pool.fetch(query, *args)
+            return [dict(r) for r in rows] if rows else []
+        except Exception as e:
+            logger.warning(f"Async fetch failed, falling back to sync: {e}")
+            return self._sync_fetch(query, *args)
+
+    async def _async_fetchrow(self, query: str, *args) -> Optional[Dict]:
+        """Execute query and return single row using async pool"""
+        pool = self.db_pool
+        if pool is None:
+            return self._sync_fetchrow(query, *args)
+        try:
+            row = await pool.fetchrow(query, *args)
+            return dict(row) if row else None
+        except Exception as e:
+            logger.warning(f"Async fetchrow failed, falling back to sync: {e}")
+            return self._sync_fetchrow(query, *args)
+
+    async def _async_execute(self, query: str, *args) -> bool:
+        """Execute command using async pool"""
+        pool = self.db_pool
+        if pool is None:
+            return self._sync_execute(query, *args)
+        try:
+            await pool.execute(query, *args)
+            return True
+        except Exception as e:
+            logger.warning(f"Async execute failed, falling back to sync: {e}")
+            return self._sync_execute(query, *args)
+
+    def _sync_fetch(self, query: str, *args) -> List[Dict]:
+        """Sync fallback for fetch"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(query, args if args else None)
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+            return [dict(r) for r in rows] if rows else []
+        except Exception as e:
+            logger.error(f"Sync fetch failed: {e}")
+            return []
+
+    def _sync_fetchrow(self, query: str, *args) -> Optional[Dict]:
+        """Sync fallback for fetchrow"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(query, args if args else None)
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Sync fetchrow failed: {e}")
+            return None
+
+    def _sync_execute(self, query: str, *args) -> bool:
+        """Sync fallback for execute"""
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+            cur.execute(query, args if args else None)
+            conn.commit()
+            cur.close()
+            conn.close()
+            return True
+        except Exception as e:
+            logger.error(f"Sync execute failed: {e}")
+            return False
 
     async def _ensure_integrations(self):
         """Lazy-init optional integrations (board, safety, revenue, knowledge)."""
@@ -460,74 +556,67 @@ class AUREA:
                 await asyncio.sleep(30)  # Longer sleep on error
 
     async def _observe(self) -> List[Dict[str, Any]]:
-        """Observe the environment and gather all relevant data"""
+        """Observe the environment and gather all relevant data (ASYNC)"""
         observations = []
 
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-
-            # Check for new customers
-            cur.execute("""
+            # Check for new customers (ASYNC)
+            new_cust = await self._async_fetchrow("""
             SELECT COUNT(*) as count FROM customers
             WHERE created_at > NOW() - INTERVAL '5 minutes'
-            AND tenant_id = %s
-            """, (self.tenant_id,))
-            new_customers = cur.fetchone()['count']
-            if new_customers > 0:
+            AND tenant_id = $1
+            """, self.tenant_id)
+            if new_cust and new_cust.get('count', 0) > 0:
                 observations.append({
                     "type": "new_customers",
-                    "count": new_customers,
+                    "count": new_cust['count'],
                     "trigger": BusinessEventType.NEW_CUSTOMER
                 })
 
-            # Check for pending estimates
-            cur.execute("""
+            # Check for pending estimates (ASYNC)
+            pending_est = await self._async_fetchrow("""
             SELECT COUNT(*) as count, MIN(created_at) as oldest
             FROM estimates WHERE status = 'pending'
-            AND tenant_id = %s
-            """, (self.tenant_id,))
-            pending_estimates = cur.fetchone()
-            if pending_estimates['count'] > 0:
+            AND tenant_id = $1
+            """, self.tenant_id)
+            if pending_est and pending_est.get('count', 0) > 0:
                 observations.append({
                     "type": "pending_estimates",
-                    "count": pending_estimates['count'],
-                    "oldest": pending_estimates['oldest'],
+                    "count": pending_est['count'],
+                    "oldest": pending_est.get('oldest'),
                     "trigger": BusinessEventType.ESTIMATE_REQUESTED
                 })
 
-            # Check for overdue invoices (using balance_cents - the ACTUAL column with data)
-            cur.execute("""
+            # Check for overdue invoices (ASYNC)
+            overdue = await self._async_fetchrow("""
             SELECT COUNT(*) as count,
                    SUM(COALESCE(balance_cents::numeric/100, 0)) as total_due
             FROM invoices
             WHERE due_date < NOW() AND status != 'paid'
-            AND tenant_id = %s
-            """, (self.tenant_id,))
-            overdue = cur.fetchone()
-            if overdue['count'] > 0:
+            AND tenant_id = $1
+            """, self.tenant_id)
+            if overdue and overdue.get('count', 0) > 0:
                 observations.append({
                     "type": "overdue_invoices",
                     "count": overdue['count'],
-                    "total_due": float(overdue['total_due'] or 0),
+                    "total_due": float(overdue.get('total_due') or 0),
                     "trigger": BusinessEventType.INVOICE_OVERDUE
                 })
 
-            # Check for scheduling conflicts
-            cur.execute("""
+            # Check for scheduling conflicts (ASYNC)
+            conflicts = await self._async_fetchrow("""
             SELECT COUNT(*) as conflicts FROM jobs j1
             JOIN jobs j2 ON j1.crew_id = j2.crew_id
             WHERE j1.id != j2.id
               AND j1.scheduled_start < j2.scheduled_end
               AND j1.scheduled_end > j2.scheduled_start
               AND j1.status = 'scheduled' AND j2.status = 'scheduled'
-              AND j1.tenant_id = %s AND j2.tenant_id = %s
-            """, (self.tenant_id, self.tenant_id))
-            conflicts = cur.fetchone()['conflicts']
-            if conflicts > 0:
+              AND j1.tenant_id = $1 AND j2.tenant_id = $1
+            """, self.tenant_id)
+            if conflicts and conflicts.get('conflicts', 0) > 0:
                 observations.append({
                     "type": "scheduling_conflicts",
-                    "count": conflicts,
+                    "count": conflicts['conflicts'],
                     "trigger": BusinessEventType.SCHEDULING_CONFLICT
                 })
 
@@ -540,25 +629,21 @@ class AUREA:
                     "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK
                 })
 
-            # Check for customer churn risks - customers with past jobs but no activity in 90 days
-            cur.execute("""
+            # Check for customer churn risks (ASYNC)
+            churn = await self._async_fetchrow("""
             SELECT COUNT(*) as at_risk FROM customers c
             WHERE EXISTS (SELECT 1 FROM jobs j WHERE j.customer_id = c.id)
               AND COALESCE(c.last_job_date,
                           (SELECT MAX(scheduled_start) FROM jobs WHERE customer_id = c.id),
                           c.created_at) < NOW() - INTERVAL '90 days'
-              AND tenant_id = %s
-            """, (self.tenant_id,))
-            churn_risk = cur.fetchone()['at_risk']
-            if churn_risk > 0:
+              AND tenant_id = $1
+            """, self.tenant_id)
+            if churn and churn.get('at_risk', 0) > 0:
                 observations.append({
                     "type": "churn_risk",
-                    "count": churn_risk,
+                    "count": churn['at_risk'],
                     "trigger": BusinessEventType.CUSTOMER_CHURN_RISK
                 })
-
-            cur.close()
-            conn.close()
 
         except Exception as e:
             logger.error(f"Observation error: {e}")
@@ -777,7 +862,7 @@ class AUREA:
 
                 # Update decision status in database (use db_id if available, else fallback)
                 decision_db_id = getattr(decision, 'db_id', None) or decision.id
-                self._update_decision_status(decision_db_id, "completed", result)
+                await self._update_decision_status(decision_db_id, "completed", result)
 
                 # Store execution in memory
                 self.memory.store(Memory(
@@ -798,7 +883,7 @@ class AUREA:
             except Exception as e:
                 logger.error(f"Failed to execute decision {decision.id}: {e}")
                 decision_db_id = getattr(decision, 'db_id', None) or decision.id
-                self._update_decision_status(decision_db_id, "failed", {"error": str(e)})
+                await self._update_decision_status(decision_db_id, "failed", {"error": str(e)})
                 results.append({
                     "decision_id": decision.id,
                     "status": "failed",
@@ -807,37 +892,43 @@ class AUREA:
 
         return results
 
-    def _update_decision_status(self, decision_id: str, status: str, result: Dict = None):
-        """Update decision execution status in database"""
+    async def _update_decision_status(self, decision_id: str, status: str, result: Dict = None):
+        """Update decision execution status in database (ASYNC)"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-
             # Serialize result to ensure all datetime/Decimal objects are converted
             safe_result = json_safe_serialize(result) if result else None
+            safe_json = json.dumps(safe_result) if safe_result else None
 
-            # Try UUID match first, then fallback to text match
-            cur.execute("""
-            UPDATE aurea_decisions
-            SET execution_status = %s,
-                execution_result = %s,
-                executed_at = NOW()
-            WHERE id::text = %s
-            """, (
-                status,
-                Json(safe_result) if safe_result else None,
-                decision_id
-            ))
-
-            rows_updated = cur.rowcount
-            conn.commit()
-            cur.close()
-            conn.close()
-
-            if rows_updated > 0:
+            # Try async first, fallback to sync
+            pool = self.db_pool
+            if pool is not None:
+                await pool.execute("""
+                UPDATE aurea_decisions
+                SET execution_status = $1,
+                    execution_result = $2::jsonb,
+                    executed_at = NOW()
+                WHERE id::text = $3
+                """, status, safe_json, decision_id)
                 logger.info(f"✅ Updated decision {decision_id} status to {status}")
             else:
-                logger.warning(f"⚠️ No decision found with id {decision_id} to update")
+                # Sync fallback
+                conn = psycopg2.connect(**DB_CONFIG)
+                cur = conn.cursor()
+                cur.execute("""
+                UPDATE aurea_decisions
+                SET execution_status = %s,
+                    execution_result = %s,
+                    executed_at = NOW()
+                WHERE id::text = %s
+                """, (status, Json(safe_result) if safe_result else None, decision_id))
+                rows_updated = cur.rowcount
+                conn.commit()
+                cur.close()
+                conn.close()
+                if rows_updated > 0:
+                    logger.info(f"✅ Updated decision {decision_id} status to {status}")
+                else:
+                    logger.warning(f"⚠️ No decision found with id {decision_id} to update")
 
         except Exception as e:
             logger.error(f"Failed to update decision status: {e}")
