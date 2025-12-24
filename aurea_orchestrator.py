@@ -27,8 +27,13 @@ from ai_board_governance import get_ai_board, Proposal, ProposalType
 from ai_self_awareness import get_self_aware_ai, SelfAwareAI
 from revenue_generation_system import get_revenue_system, AutonomousRevenueSystem
 from ai_knowledge_graph import get_knowledge_graph, AIKnowledgeGraph
+import aiohttp
 import warnings
 warnings.filterwarnings('ignore')
+
+# MCP Bridge Configuration
+MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
+MCP_API_KEY = os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
 
 # Configure logging
 logging.basicConfig(
@@ -939,6 +944,89 @@ class AUREA:
                 logger.info(f"🧹 Cleared {cleared} stale decisions from backlog")
             except Exception as e:
                 logger.error(f"Failed to clear decision backlog: {e}")
+        elif action.startswith("mcp:"):
+            # Execute MCP tool action (e.g., "mcp:render:restart_service")
+            await self._execute_mcp_action(action)
+
+    async def _execute_mcp_action(self, action: str) -> Dict[str, Any]:
+        """Execute an action via MCP Bridge - connects AUREA to 345 external tools"""
+        try:
+            # Parse action: "mcp:server:tool" or "mcp:tool"
+            parts = action.replace("mcp:", "").split(":")
+            if len(parts) == 2:
+                server, tool = parts
+            else:
+                tool = parts[0]
+                server = self._infer_mcp_server(tool)
+
+            logger.info(f"🔗 Executing MCP action: {server}/{tool}")
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{MCP_BRIDGE_URL}/mcp/execute",
+                    headers={
+                        "X-API-Key": MCP_API_KEY,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "server": server,
+                        "tool": tool,
+                        "params": {"triggered_by": "aurea", "tenant_id": self.tenant_id},
+                    },
+                    timeout=aiohttp.ClientTimeout(total=60)
+                ) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        logger.info(f"✅ MCP action successful: {tool}")
+                        return {"success": True, "result": result}
+                    else:
+                        error = await resp.text()
+                        logger.warning(f"❌ MCP action failed: {error}")
+                        return {"success": False, "error": error}
+        except Exception as e:
+            logger.error(f"MCP execution error: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _infer_mcp_server(self, tool: str) -> str:
+        """Infer which MCP server to use based on tool name"""
+        if any(k in tool.lower() for k in ["render", "service", "deploy"]):
+            return "render-mcp"
+        elif any(k in tool.lower() for k in ["vercel", "preview", "domain"]):
+            return "vercel-mcp"
+        elif any(k in tool.lower() for k in ["supabase", "sql", "database", "query"]):
+            return "supabase-mcp"
+        elif any(k in tool.lower() for k in ["github", "repo", "branch", "pr", "issue"]):
+            return "github-mcp"
+        elif any(k in tool.lower() for k in ["docker", "container", "image"]):
+            return "docker-mcp"
+        elif any(k in tool.lower() for k in ["stripe", "payment", "invoice", "subscription"]):
+            return "stripe-mcp"
+        else:
+            return "generic-mcp"
+
+    async def execute_external_tool(self, server: str, tool: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Public method for AUREA to execute any MCP tool"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{MCP_BRIDGE_URL}/mcp/execute",
+                    headers={
+                        "X-API-Key": MCP_API_KEY,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "server": server,
+                        "tool": tool,
+                        "params": params or {},
+                    },
+                    timeout=aiohttp.ClientTimeout(total=120)
+                ) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    else:
+                        return {"success": False, "error": await resp.text()}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     async def _check_system_health(self) -> SystemHealth:
         """Check overall system health"""
