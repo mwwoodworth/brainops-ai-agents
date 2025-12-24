@@ -291,48 +291,68 @@ async def get_failure_predictions(
 @router.get("/dashboard")
 async def get_self_healing_dashboard():
     """Get a comprehensive self-healing dashboard"""
-    engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
-        await engine.initialize()
-
-    # Try to get active incidents from the module's standalone function
-    active_incidents = []
-    metrics = {}
     try:
-        from enhanced_self_healing import get_active_incidents as get_incidents_func
-        active_incidents = await get_incidents_func()
-    except Exception as e:
-        logger.warning(f"Could not get active incidents: {e}")
+        engine = _get_engine()
+        if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+            await engine.initialize()
 
-    try:
-        from enhanced_self_healing import get_self_healing_metrics as get_metrics_func
-        metrics = await get_metrics_func()
-    except Exception as e:
-        logger.warning(f"Could not get metrics: {e}")
+        # Try to get active incidents from the module's standalone function
+        active_incidents = []
+        metrics = {}
+        try:
+            from enhanced_self_healing import get_active_incidents as get_incidents_func
+            active_incidents = await get_incidents_func()
+        except Exception as e:
+            logger.warning(f"Could not get active incidents: {e}")
 
-    return {
-        "overview": {
-            "active_incidents": len(active_incidents),
-            "pending_approvals": sum(1 for i in active_incidents if i.get("requires_approval")),
-            "auto_remediating": sum(1 for i in active_incidents if i.get("auto_remediating")),
-            "mttr_improvement": "67%"
-        },
-        "incidents_by_severity": {
-            "critical": sum(1 for i in active_incidents if i.get("severity") == "critical"),
-            "high": sum(1 for i in active_incidents if i.get("severity") == "high"),
-            "medium": sum(1 for i in active_incidents if i.get("severity") == "medium"),
-            "low": sum(1 for i in active_incidents if i.get("severity") == "low")
-        },
-        "metrics": {
-            "total_incidents_24h": metrics.get("incidents_24h", 0),
-            "auto_remediated_24h": metrics.get("auto_remediated_24h", 0),
-            "avg_resolution_seconds": metrics.get("avg_resolution_time", 0),
-            "success_rate": metrics.get("success_rate", 0)
-        },
-        "autonomy_tiers": {
-            "tier_1_auto": "Routine issues (restarts, cache clears, scaling)",
-            "tier_2_supervised": "Complex issues (database, credentials, failover)",
-            "tier_3_manual": "Critical issues (data integrity, security, architecture)"
-        },
-        "recent_incidents": active_incidents[:10]
-    }
+        try:
+            from enhanced_self_healing import get_self_healing_metrics as get_metrics_func
+            metrics = await get_metrics_func()
+        except Exception as e:
+            logger.warning(f"Could not get metrics: {e}")
+
+        return {
+            "overview": {
+                "active_incidents": len(active_incidents) if active_incidents else 0,
+                "pending_approvals": sum(1 for i in active_incidents if isinstance(i, dict) and i.get("requires_approval")) if active_incidents else 0,
+                "auto_remediating": sum(1 for i in active_incidents if isinstance(i, dict) and i.get("auto_remediating")) if active_incidents else 0,
+                "mttr_improvement": "67%"
+            },
+            "incidents_by_severity": {
+                "critical": sum(1 for i in active_incidents if isinstance(i, dict) and i.get("severity") == "critical") if active_incidents else 0,
+                "high": sum(1 for i in active_incidents if isinstance(i, dict) and i.get("severity") == "high") if active_incidents else 0,
+                "medium": sum(1 for i in active_incidents if isinstance(i, dict) and i.get("severity") == "medium") if active_incidents else 0,
+                "low": sum(1 for i in active_incidents if isinstance(i, dict) and i.get("severity") == "low") if active_incidents else 0
+            },
+            "metrics": {
+                "total_incidents_24h": metrics.get("incidents_24h", 0) if isinstance(metrics, dict) else 0,
+                "auto_remediated_24h": metrics.get("auto_remediated_24h", 0) if isinstance(metrics, dict) else 0,
+                "avg_resolution_seconds": metrics.get("avg_resolution_time", 0) if isinstance(metrics, dict) else 0,
+                "success_rate": metrics.get("success_rate", 0) if isinstance(metrics, dict) else 0
+            },
+            "autonomy_tiers": {
+                "tier_1_auto": "Routine issues (restarts, cache clears, scaling)",
+                "tier_2_supervised": "Complex issues (database, credentials, failover)",
+                "tier_3_manual": "Critical issues (data integrity, security, architecture)"
+            },
+            "recent_incidents": active_incidents[:10] if active_incidents else []
+        }
+    except Exception as e:
+        logger.error(f"Error in self-healing dashboard: {e}")
+        return {
+            "overview": {
+                "active_incidents": 0,
+                "pending_approvals": 0,
+                "auto_remediating": 0,
+                "mttr_improvement": "67%",
+                "error": str(e)
+            },
+            "incidents_by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+            "metrics": {"total_incidents_24h": 0, "auto_remediated_24h": 0, "avg_resolution_seconds": 0, "success_rate": 0},
+            "autonomy_tiers": {
+                "tier_1_auto": "Routine issues (restarts, cache clears, scaling)",
+                "tier_2_supervised": "Complex issues (database, credentials, failover)",
+                "tier_3_manual": "Critical issues (data integrity, security, architecture)"
+            },
+            "recent_incidents": []
+        }
