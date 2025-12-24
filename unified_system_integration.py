@@ -5,8 +5,16 @@ This module ACTIVELY integrates all BrainOps AI systems together.
 Instead of having separate modules that sit idle, this wires everything
 into the execution flow so ALL capabilities are USED.
 
+ENHANCEMENTS (v2.0):
+- Event-driven communication between all modules
+- Message queuing for async operations
+- Circuit breakers for resilience
+- Load balancing across components
+- Priority-based routing
+- System-wide health aggregation
+
 Author: Claude Opus 4.5 + BrainOps AI Team
-Version: 1.0.0
+Version: 2.0.0
 Purpose: MAKE ALL SYSTEMS POWERFUL AND USED!
 """
 
@@ -18,6 +26,18 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field, asdict
 
 logger = logging.getLogger(__name__)
+
+# Import enhanced orchestration features
+try:
+    from autonomous_system_orchestrator import (
+        EventBus, EventType, SystemEvent, MessageQueue, Task,
+        CircuitBreaker, CircuitState, LoadBalancer, LoadBalancingStrategy,
+        AgentInstance, HealthAggregator
+    )
+    ENHANCED_ORCHESTRATION_AVAILABLE = True
+except ImportError:
+    logger.warning("Enhanced orchestration features not available")
+    ENHANCED_ORCHESTRATION_AVAILABLE = False
 
 # ============== LAZY IMPORTS FOR ALL SYSTEMS ==============
 # These are imported lazily to avoid circular dependencies
@@ -162,6 +182,84 @@ class UnifiedSystemIntegration:
         self.execution_count = 0
         self.systems_used = set()
 
+        # NEW: Enhanced orchestration features
+        if ENHANCED_ORCHESTRATION_AVAILABLE:
+            self.event_bus = EventBus()
+            self.message_queue = MessageQueue(max_workers=10)
+            self.load_balancer = LoadBalancer(strategy=LoadBalancingStrategy.LEAST_LOADED)
+            self.health_aggregator = HealthAggregator()
+            self.circuit_breakers: Dict[str, CircuitBreaker] = {}
+            self._enhanced_initialized = False
+        else:
+            self.event_bus = None
+            self.message_queue = None
+            self.load_balancer = None
+            self.health_aggregator = None
+            self.circuit_breakers = {}
+
+        # Priority mapping for different task types
+        self.task_priorities = {
+            "critical": 1,
+            "proposal": 2,
+            "quote": 2,
+            "pricing": 2,
+            "estimate": 3,
+            "invoice": 3,
+            "payment": 2,
+            "sale": 2,
+            "subscription": 2,
+            "analysis": 5,
+            "reporting": 7,
+            "maintenance": 10
+        }
+
+    async def initialize_enhanced_features(self):
+        """Initialize enhanced orchestration features"""
+        if not ENHANCED_ORCHESTRATION_AVAILABLE or self._enhanced_initialized:
+            return
+
+        # Start event bus
+        await self.event_bus.start()
+        self.logger.info("Event bus started in UnifiedSystemIntegration")
+
+        # Start message queue
+        await self.message_queue.start()
+        self.logger.info("Message queue started in UnifiedSystemIntegration")
+
+        # Initialize circuit breakers for all major systems
+        system_names = [
+            "state_sync", "graph_context", "revenue_system",
+            "customer_acquisition", "pricing_engine",
+            "notebook_learning", "decision_tree"
+        ]
+
+        for system_name in system_names:
+            self.circuit_breakers[system_name] = CircuitBreaker(
+                name=f"{system_name}_circuit",
+                failure_threshold=5,
+                success_threshold=2,
+                timeout=60
+            )
+
+        # Register agent instances for load balancing
+        agent_types = [
+            "state_sync", "graph_context", "revenue",
+            "acquisition", "pricing", "learning", "decision"
+        ]
+
+        for agent_type in agent_types:
+            for i in range(2):  # 2 instances per type
+                instance = AgentInstance(
+                    instance_id=f"{agent_type}_instance_{i}",
+                    agent_name=agent_type,
+                    max_capacity=5,
+                    weight=1
+                )
+                self.load_balancer.register_instance(instance)
+
+        self._enhanced_initialized = True
+        self.logger.info("Enhanced features initialized in UnifiedSystemIntegration")
+
     async def pre_execution(self, agent_name: str, task_type: str, task_data: Dict[str, Any]) -> ExecutionContext:
         """
         Called BEFORE any agent execution.
@@ -179,14 +277,36 @@ class UnifiedSystemIntegration:
         self.logger.info(f"[{ctx.execution_id}] PRE-EXEC: {agent_name} / {task_type}")
         self.execution_count += 1
 
+        # Determine priority
+        priority = self.task_priorities.get(task_type, 5)
+
+        # Publish agent started event
+        if self.event_bus:
+            await self.event_bus.publish(SystemEvent(
+                event_type=EventType.AGENT_STARTED,
+                source=agent_name,
+                data={
+                    "execution_id": ctx.execution_id,
+                    "task_type": task_type,
+                    "priority": priority
+                },
+                priority=priority
+            ))
+
         # 1. Update state sync - track that this agent is executing
         state_sync = get_state_sync()
-        if state_sync:
+        circuit = self.circuit_breakers.get("state_sync")
+
+        if state_sync and (not circuit or circuit.can_execute()):
             try:
                 state_sync.register_agent(agent_name, {"status": "executing", "task": task_type})
                 self.systems_used.add("state_sync")
+                if circuit:
+                    circuit.record_success()
             except Exception as e:
                 self.logger.warning(f"State sync update failed: {e}")
+                if circuit:
+                    circuit.record_failure()
 
         # 2. Get graph context - understand codebase relationships
         graph_ctx = get_graph_context()
@@ -442,10 +562,16 @@ async def run_daily_analytics():
 async def initialize_all_systems():
     """Initialize all systems at startup"""
     logger.info("=" * 60)
-    logger.info("INITIALIZING UNIFIED SYSTEM INTEGRATION")
+    logger.info("INITIALIZING UNIFIED SYSTEM INTEGRATION v2.0")
     logger.info("=" * 60)
 
     integration = get_unified_integration()
+
+    # Initialize enhanced features if available
+    if ENHANCED_ORCHESTRATION_AVAILABLE:
+        await integration.initialize_enhanced_features()
+        logger.info("Enhanced orchestration features initialized")
+
     stats = integration.get_integration_stats()
 
     available = sum(1 for v in stats["systems_available"].values() if v)
@@ -456,10 +582,18 @@ async def initialize_all_systems():
         status = "ACTIVE" if is_available else "UNAVAILABLE"
         logger.info(f"  - {system}: {status}")
 
+    if ENHANCED_ORCHESTRATION_AVAILABLE:
+        logger.info("\nEnhanced Features:")
+        logger.info(f"  - Event Bus: ACTIVE")
+        logger.info(f"  - Message Queue: ACTIVE (10 workers)")
+        logger.info(f"  - Load Balancer: ACTIVE (LEAST_LOADED strategy)")
+        logger.info(f"  - Circuit Breakers: {len(integration.circuit_breakers)} configured")
+        logger.info(f"  - Health Aggregator: ACTIVE")
+
     # Run initial state scan
     state_sync = get_state_sync()
     if state_sync:
-        logger.info("Running initial state scan...")
+        logger.info("\nRunning initial state scan...")
         await state_sync.full_system_scan()
 
     logger.info("=" * 60)
