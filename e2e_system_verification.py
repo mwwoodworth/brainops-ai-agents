@@ -392,17 +392,9 @@ class E2ESystemVerification:
                 name="MCP Bridge - Health",
                 url=f"{MCP_BRIDGE_URL}/health",
                 expected_status=200,
-                expected_fields=[],
-                category=SystemCategory.MCP,
-                critical=True
-            ),
-            EndpointTest(
-                name="MCP Bridge - Root",
-                url=f"{MCP_BRIDGE_URL}/",
-                expected_status=200,
                 expected_fields=["status", "mcpServers", "totalTools"],
                 category=SystemCategory.MCP,
-                critical=False
+                critical=True
             ),
         ])
 
