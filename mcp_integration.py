@@ -20,8 +20,9 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # MCP Bridge Configuration
+# The MCP_API_KEY must match the key set on the MCP Bridge Render service
 MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
-MCP_API_KEY = os.getenv("MCP_API_KEY", "brainops_prod_key_2025")
+MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("MCP_BRIDGE_API_KEY") or "brainops_mcp_2025"
 
 
 class MCPServer(Enum):
@@ -153,42 +154,42 @@ class MCPClient:
             )
 
     # =========================================================================
-    # RENDER OPERATIONS (39 tools)
+    # RENDER OPERATIONS (39 tools) - Tool names use render_ prefix
     # =========================================================================
 
     async def render_list_services(self) -> MCPToolResult:
         """List all Render services"""
-        return await self.execute_tool(MCPServer.RENDER, "listServices")
+        return await self.execute_tool(MCPServer.RENDER, "render_list_services")
 
     async def render_get_service(self, service_id: str) -> MCPToolResult:
         """Get details of a specific Render service"""
-        return await self.execute_tool(MCPServer.RENDER, "getService", {"serviceId": service_id})
+        return await self.execute_tool(MCPServer.RENDER, "render_get_service", {"serviceId": service_id})
 
     async def render_trigger_deploy(self, service_id: str) -> MCPToolResult:
         """Trigger a new deployment on Render"""
-        return await self.execute_tool(MCPServer.RENDER, "triggerDeploy", {"serviceId": service_id})
+        return await self.execute_tool(MCPServer.RENDER, "render_trigger_deploy", {"serviceId": service_id})
 
     async def render_restart_service(self, service_id: str) -> MCPToolResult:
         """Restart a Render service (for self-healing)"""
-        return await self.execute_tool(MCPServer.RENDER, "restartService", {"serviceId": service_id})
+        return await self.execute_tool(MCPServer.RENDER, "render_restart_service", {"serviceId": service_id})
 
     async def render_get_deploy_status(self, service_id: str, deploy_id: str) -> MCPToolResult:
         """Get deployment status"""
-        return await self.execute_tool(MCPServer.RENDER, "getDeployStatus", {
+        return await self.execute_tool(MCPServer.RENDER, "render_get_deploy", {
             "serviceId": service_id,
             "deployId": deploy_id
         })
 
     async def render_scale_service(self, service_id: str, num_instances: int) -> MCPToolResult:
         """Scale a Render service"""
-        return await self.execute_tool(MCPServer.RENDER, "scaleService", {
+        return await self.execute_tool(MCPServer.RENDER, "render_scale_service", {
             "serviceId": service_id,
             "numInstances": num_instances
         })
 
     async def render_get_logs(self, service_id: str, lines: int = 100) -> MCPToolResult:
         """Get service logs"""
-        return await self.execute_tool(MCPServer.RENDER, "getLogs", {
+        return await self.execute_tool(MCPServer.RENDER, "render_get_logs", {
             "serviceId": service_id,
             "lines": lines
         })
