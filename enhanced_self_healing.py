@@ -258,6 +258,66 @@ class EnhancedSelfHealing:
             RemediationAction.INCREASE_RESOURCES: self._handle_increase_resources,
         }
 
+    async def _execute_mcp_tool(
+        self,
+        platform: str,
+        tool: str,
+        params: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Execute a tool via MCP Bridge - connects self-healing to 345 external tools.
+
+        Supported platforms: render, vercel, supabase, docker, github, stripe
+        """
+        import aiohttp
+
+        MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
+        MCP_API_KEY = os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+
+        # Map platform to MCP server name
+        server_map = {
+            "render": "render",
+            "vercel": "vercel",
+            "supabase": "supabase",
+            "docker": "docker",
+            "github": "github",
+            "stripe": "stripe",
+            "kubernetes": "kubernetes",
+            "aws": "aws",
+        }
+
+        server = server_map.get(platform, platform)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{MCP_BRIDGE_URL}/mcp/execute",
+                    headers={
+                        "X-API-Key": MCP_API_KEY,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "server": server,
+                        "tool": tool,
+                        "params": params
+                    },
+                    timeout=aiohttp.ClientTimeout(total=120)
+                ) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        logger.info(f"MCP tool {server}:{tool} executed successfully")
+                        return {"success": True, "result": result}
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"MCP tool {server}:{tool} failed: {resp.status} - {error_text}")
+                        return {"success": False, "error": error_text, "status_code": resp.status}
+        except asyncio.TimeoutError:
+            logger.error(f"MCP tool {server}:{tool} timed out")
+            return {"success": False, "error": "Request timed out"}
+        except Exception as e:
+            logger.error(f"MCP tool {server}:{tool} error: {e}")
+            return {"success": False, "error": str(e)}
+
     def _generate_id(self, prefix: str) -> str:
         """Generate unique ID"""
         hash_input = f"{prefix}:{datetime.utcnow().timestamp()}"
@@ -673,81 +733,417 @@ class EnhancedSelfHealing:
 
     # Remediation handlers
     async def _handle_restart_service(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle service restart"""
+        """Handle service restart via MCP Bridge"""
         component = params.get("component", "unknown")
-        logger.info(f"Restarting service: {component}")
+        service_id = params.get("service_id")
+        platform = params.get("platform", "render")
+        logger.info(f"Restarting service: {component} on {platform}")
 
-        # This would integrate with actual service management
-        await asyncio.sleep(10)  # Simulate restart time
-
-        return {"success": True, "action": "restart_service", "component": component}
+        # Use MCP Bridge for real restart
+        try:
+            mcp_result = await self._execute_mcp_tool(
+                platform=platform,
+                tool="restart_service" if platform == "render" else "redeploy",
+                params={"service_id": service_id, "component": component}
+            )
+            return {
+                "success": mcp_result.get("success", False),
+                "action": "restart_service",
+                "component": component,
+                "mcp_result": mcp_result
+            }
+        except Exception as e:
+            logger.error(f"MCP restart failed: {e}")
+            return {"success": False, "action": "restart_service", "error": str(e)}
 
     async def _handle_scale_up(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle scale up"""
+        """Handle scale up via MCP Bridge - Render/Kubernetes"""
         component = params.get("component", "unknown")
         amount = params.get("amount", 1)
-        logger.info(f"Scaling up {component} by {amount}")
+        platform = params.get("platform", "render")
+        service_id = params.get("service_id")
+        logger.info(f"Scaling up {component} by {amount} on {platform}")
 
-        await asyncio.sleep(30)  # Simulate scaling time
+        try:
+            if platform == "render":
+                # Render: Scale by updating instance count
+                mcp_result = await self._execute_mcp_tool(
+                    platform="render",
+                    tool="scale_service",
+                    params={
+                        "service_id": service_id,
+                        "num_instances": amount,
+                        "component": component
+                    }
+                )
+            elif platform == "kubernetes":
+                # K8s: Scale deployment replicas
+                mcp_result = await self._execute_mcp_tool(
+                    platform="kubernetes",
+                    tool="scale_deployment",
+                    params={
+                        "deployment": component,
+                        "replicas": amount
+                    }
+                )
+            else:
+                # Fallback: Try generic scale command
+                mcp_result = await self._execute_mcp_tool(
+                    platform=platform,
+                    tool="scale",
+                    params={"component": component, "instances": amount}
+                )
 
-        return {"success": True, "action": "scale_up", "component": component, "amount": amount}
+            return {
+                "success": mcp_result.get("success", False),
+                "action": "scale_up",
+                "component": component,
+                "amount": amount,
+                "mcp_result": mcp_result
+            }
+        except Exception as e:
+            logger.error(f"Scale up failed: {e}")
+            return {"success": False, "action": "scale_up", "error": str(e)}
 
     async def _handle_scale_down(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle scale down"""
+        """Handle scale down via MCP Bridge"""
         component = params.get("component", "unknown")
         amount = params.get("amount", 1)
-        logger.info(f"Scaling down {component} by {amount}")
+        platform = params.get("platform", "render")
+        service_id = params.get("service_id")
+        current_instances = params.get("current_instances", 2)
+        logger.info(f"Scaling down {component} by {amount} on {platform}")
 
-        await asyncio.sleep(30)
+        try:
+            new_count = max(1, current_instances - amount)  # Never scale to 0
 
-        return {"success": True, "action": "scale_down", "component": component, "amount": amount}
+            if platform == "render":
+                mcp_result = await self._execute_mcp_tool(
+                    platform="render",
+                    tool="scale_service",
+                    params={
+                        "service_id": service_id,
+                        "num_instances": new_count,
+                        "component": component
+                    }
+                )
+            elif platform == "kubernetes":
+                mcp_result = await self._execute_mcp_tool(
+                    platform="kubernetes",
+                    tool="scale_deployment",
+                    params={
+                        "deployment": component,
+                        "replicas": new_count
+                    }
+                )
+            else:
+                mcp_result = await self._execute_mcp_tool(
+                    platform=platform,
+                    tool="scale",
+                    params={"component": component, "instances": new_count}
+                )
+
+            return {
+                "success": mcp_result.get("success", False),
+                "action": "scale_down",
+                "component": component,
+                "new_count": new_count,
+                "mcp_result": mcp_result
+            }
+        except Exception as e:
+            logger.error(f"Scale down failed: {e}")
+            return {"success": False, "action": "scale_down", "error": str(e)}
 
     async def _handle_clear_cache(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle cache clear"""
+        """Handle cache clear via MCP Bridge - Supabase/Redis"""
         component = params.get("component", "unknown")
-        logger.info(f"Clearing cache for {component}")
+        cache_type = params.get("cache_type", "application")
+        platform = params.get("platform", "supabase")
+        logger.info(f"Clearing {cache_type} cache for {component}")
 
-        await asyncio.sleep(5)
+        try:
+            if platform == "supabase" or cache_type == "database":
+                # Clear Supabase query cache / connection pool
+                mcp_result = await self._execute_mcp_tool(
+                    platform="supabase",
+                    tool="execute_sql",
+                    params={
+                        "query": "DISCARD ALL;",  # Clear session-level caches
+                        "reason": f"Self-healing cache clear for {component}"
+                    }
+                )
+            elif cache_type == "redis":
+                mcp_result = await self._execute_mcp_tool(
+                    platform="redis",
+                    tool="flushdb",
+                    params={"pattern": f"{component}:*"}
+                )
+            else:
+                # Restart service to clear in-memory cache
+                mcp_result = await self._execute_mcp_tool(
+                    platform="render",
+                    tool="restart_service",
+                    params={"component": component}
+                )
 
-        return {"success": True, "action": "clear_cache", "component": component}
+            return {
+                "success": mcp_result.get("success", False),
+                "action": "clear_cache",
+                "component": component,
+                "cache_type": cache_type,
+                "mcp_result": mcp_result
+            }
+        except Exception as e:
+            logger.error(f"Cache clear failed: {e}")
+            return {"success": False, "action": "clear_cache", "error": str(e)}
 
     async def _handle_failover(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle failover"""
+        """Handle failover via MCP Bridge - Multi-step orchestration"""
         component = params.get("component", "unknown")
-        logger.info(f"Initiating failover for {component}")
+        backup_region = params.get("backup_region", "us-west-2")
+        platform = params.get("platform", "render")
+        logger.info(f"Initiating failover for {component} to {backup_region}")
 
-        await asyncio.sleep(60)
+        try:
+            # Step 1: Check backup service health
+            health_check = await self._execute_mcp_tool(
+                platform=platform,
+                tool="get_service_health",
+                params={"component": f"{component}-backup", "region": backup_region}
+            )
 
-        return {"success": True, "action": "failover", "component": component}
+            if not health_check.get("success"):
+                # Start backup service if not healthy
+                await self._execute_mcp_tool(
+                    platform=platform,
+                    tool="deploy_service",
+                    params={"component": f"{component}-backup", "region": backup_region}
+                )
+                # Wait for startup
+                await asyncio.sleep(30)
+
+            # Step 2: Update DNS/routing to point to backup
+            route_result = await self._execute_mcp_tool(
+                platform=platform,
+                tool="update_routing",
+                params={
+                    "component": component,
+                    "target": f"{component}-backup",
+                    "weight": 100
+                }
+            )
+
+            # Step 3: Mark primary as failed in monitoring
+            await self._execute_mcp_tool(
+                platform="supabase",
+                tool="execute_sql",
+                params={
+                    "query": f"UPDATE ai_agents SET status = 'failed_over' WHERE name = '{component}'"
+                }
+            )
+
+            return {
+                "success": route_result.get("success", False),
+                "action": "failover",
+                "component": component,
+                "failover_target": f"{component}-backup",
+                "region": backup_region,
+                "mcp_result": route_result
+            }
+        except Exception as e:
+            logger.error(f"Failover failed: {e}")
+            return {"success": False, "action": "failover", "error": str(e)}
 
     async def _handle_rollback(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle rollback"""
+        """Handle rollback via MCP Bridge - Render/Vercel/GitHub"""
         component = params.get("component", "unknown")
-        logger.info(f"Rolling back {component}")
+        platform = params.get("platform", "render")
+        service_id = params.get("service_id")
+        rollback_to = params.get("rollback_to", "previous")  # previous, or specific commit/deploy
+        logger.info(f"Rolling back {component} to {rollback_to} on {platform}")
 
-        await asyncio.sleep(120)
+        try:
+            if platform == "render":
+                # Render: Rollback to previous deployment
+                mcp_result = await self._execute_mcp_tool(
+                    platform="render",
+                    tool="rollback_deploy",
+                    params={
+                        "service_id": service_id,
+                        "target": rollback_to
+                    }
+                )
+            elif platform == "vercel":
+                # Vercel: Promote previous deployment
+                mcp_result = await self._execute_mcp_tool(
+                    platform="vercel",
+                    tool="promote_deployment",
+                    params={
+                        "project": component,
+                        "target": "previous"
+                    }
+                )
+            elif platform == "github":
+                # GitHub: Revert commit
+                mcp_result = await self._execute_mcp_tool(
+                    platform="github",
+                    tool="revert_commit",
+                    params={
+                        "repo": component,
+                        "commit": rollback_to
+                    }
+                )
+            else:
+                mcp_result = await self._execute_mcp_tool(
+                    platform=platform,
+                    tool="rollback",
+                    params={"component": component, "target": rollback_to}
+                )
 
-        return {"success": True, "action": "rollback", "component": component}
+            # Log rollback in database for audit
+            await self._execute_mcp_tool(
+                platform="supabase",
+                tool="execute_sql",
+                params={
+                    "query": f"""
+                        INSERT INTO remediation_history
+                        (incident_type, component, action_taken, success, recovery_time_seconds)
+                        VALUES ('rollback', '{component}', 'rollback_{platform}', true, 0)
+                    """
+                }
+            )
+
+            return {
+                "success": mcp_result.get("success", False),
+                "action": "rollback",
+                "component": component,
+                "rollback_to": rollback_to,
+                "platform": platform,
+                "mcp_result": mcp_result
+            }
+        except Exception as e:
+            logger.error(f"Rollback failed: {e}")
+            return {"success": False, "action": "rollback", "error": str(e)}
 
     async def _handle_flush_connections(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle connection flush"""
+        """Handle connection flush via MCP Bridge - Supabase/PostgreSQL"""
         component = params.get("component", "unknown")
-        logger.info(f"Flushing connections for {component}")
+        platform = params.get("platform", "supabase")
+        max_age_seconds = params.get("max_age_seconds", 300)
+        logger.info(f"Flushing connections for {component} older than {max_age_seconds}s")
 
-        await asyncio.sleep(5)
+        try:
+            if platform == "supabase":
+                # Terminate idle connections in PostgreSQL
+                mcp_result = await self._execute_mcp_tool(
+                    platform="supabase",
+                    tool="execute_sql",
+                    params={
+                        "query": f"""
+                            SELECT pg_terminate_backend(pid)
+                            FROM pg_stat_activity
+                            WHERE state = 'idle'
+                            AND query_start < NOW() - INTERVAL '{max_age_seconds} seconds'
+                            AND pid <> pg_backend_pid()
+                        """,
+                        "reason": f"Self-healing connection flush for {component}"
+                    }
+                )
+            else:
+                # Generic: Restart to clear all connections
+                mcp_result = await self._execute_mcp_tool(
+                    platform="render",
+                    tool="restart_service",
+                    params={"component": component}
+                )
 
-        return {"success": True, "action": "flush_connections", "component": component}
+            return {
+                "success": mcp_result.get("success", False),
+                "action": "flush_connections",
+                "component": component,
+                "max_age_seconds": max_age_seconds,
+                "mcp_result": mcp_result
+            }
+        except Exception as e:
+            logger.error(f"Connection flush failed: {e}")
+            return {"success": False, "action": "flush_connections", "error": str(e)}
 
     async def _handle_increase_resources(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle resource increase"""
+        """Handle resource increase via MCP Bridge - Render/K8s"""
         component = params.get("component", "unknown")
-        resource_type = params.get("resource_type", "memory")
+        resource_type = params.get("resource_type", "memory")  # memory, cpu, disk
         amount = params.get("amount", "25%")
-        logger.info(f"Increasing {resource_type} for {component} by {amount}")
+        platform = params.get("platform", "render")
+        service_id = params.get("service_id")
+        logger.info(f"Increasing {resource_type} for {component} by {amount} on {platform}")
 
-        await asyncio.sleep(30)
+        try:
+            if platform == "render":
+                # Render: Update service plan
+                plan_map = {
+                    "starter": "standard",
+                    "standard": "pro",
+                    "pro": "pro_plus"
+                }
+                current_plan = params.get("current_plan", "starter")
+                new_plan = plan_map.get(current_plan, "standard")
 
-        return {"success": True, "action": "increase_resources", "component": component}
+                mcp_result = await self._execute_mcp_tool(
+                    platform="render",
+                    tool="update_service",
+                    params={
+                        "service_id": service_id,
+                        "plan": new_plan
+                    }
+                )
+            elif platform == "kubernetes":
+                # K8s: Update resource requests/limits
+                mcp_result = await self._execute_mcp_tool(
+                    platform="kubernetes",
+                    tool="patch_deployment",
+                    params={
+                        "deployment": component,
+                        "patch": {
+                            "spec": {
+                                "template": {
+                                    "spec": {
+                                        "containers": [{
+                                            "name": component,
+                                            "resources": {
+                                                "requests": {
+                                                    resource_type: amount
+                                                }
+                                            }
+                                        }]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                )
+            else:
+                # Fallback: Restart with more resources (if supported)
+                mcp_result = await self._execute_mcp_tool(
+                    platform=platform,
+                    tool="update_resources",
+                    params={
+                        "component": component,
+                        "resource_type": resource_type,
+                        "amount": amount
+                    }
+                )
+
+            return {
+                "success": mcp_result.get("success", False),
+                "action": "increase_resources",
+                "component": component,
+                "resource_type": resource_type,
+                "amount": amount,
+                "mcp_result": mcp_result
+            }
+        except Exception as e:
+            logger.error(f"Resource increase failed: {e}")
+            return {"success": False, "action": "increase_resources", "error": str(e)}
 
     def _update_avg_recovery_time(self, new_time: float):
         """Update average recovery time"""
@@ -984,7 +1380,7 @@ class EnhancedSelfHealing:
             "detected_at": incident.detected_at,
             "root_cause": incident.root_cause,
             "remediation_steps": incident.remediation_steps,
-            "metrics_at_detection": incident.metrics_at_detection
+            "metrics": incident.metrics
         }
 
     async def get_remediation_plan(self, incident_id: str) -> Optional[Dict[str, Any]]:
