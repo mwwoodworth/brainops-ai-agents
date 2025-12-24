@@ -397,10 +397,10 @@ class E2ESystemVerification:
                 critical=True
             ),
             EndpointTest(
-                name="MCP Bridge - Status",
-                url=f"{MCP_BRIDGE_URL}/status",
+                name="MCP Bridge - Root",
+                url=f"{MCP_BRIDGE_URL}/",
                 expected_status=200,
-                expected_fields=[],
+                expected_fields=["status", "mcpServers", "totalTools"],
                 category=SystemCategory.MCP,
                 critical=False
             ),
