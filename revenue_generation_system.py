@@ -702,8 +702,8 @@ Return ONLY valid JSON array, no other text."""
                     logger.info(f"Extracted {len(extracted)} leads from discovery")
                     return extracted
 
-            # Perplexity unavailable - check database for existing unprocessed leads instead
-            logger.warning("Perplexity unavailable, checking database for existing leads")
+            # Perplexity unavailable - check database for opportunities
+            logger.warning("Perplexity unavailable, checking database for opportunities")
             try:
                 import psycopg2
                 from psycopg2.extras import RealDictCursor
@@ -717,7 +717,7 @@ Return ONLY valid JSON array, no other text."""
                 conn = psycopg2.connect(**db_config)
                 cur = conn.cursor(cursor_factory=RealDictCursor)
 
-                # Find leads in NEW or CONTACTED status that need attention
+                # First, check for existing leads in NEW or CONTACTED status
                 cur.execute("""
                     SELECT id, company_name, contact_name, email, phone, location,
                            source, buying_signals, estimated_value, confidence_score
@@ -729,19 +729,53 @@ Return ONLY valid JSON array, no other text."""
                 """)
 
                 existing_leads = cur.fetchall()
+                if existing_leads:
+                    logger.info(f"Found {len(existing_leads)} existing leads in database")
+                    cur.close()
+                    conn.close()
+                    return [dict(lead) for lead in existing_leads]
+
+                # Second, find existing customers with upsell/cross-sell potential
+                cur.execute("""
+                    SELECT DISTINCT
+                        c.id::text as id,
+                        c.company as company_name,
+                        c.first_name || ' ' || c.last_name as contact_name,
+                        c.email,
+                        c.phone,
+                        COALESCE(c.city, '') || ', ' || COALESCE(c.state, '') as location,
+                        'existing_customer' as source,
+                        ARRAY['repeat_customer', 'has_history'] as buying_signals,
+                        COALESCE(
+                            (SELECT AVG(total_amount) FROM invoices WHERE customer_id = c.id AND status = 'paid'),
+                            5000
+                        )::float as estimated_value,
+                        0.75 as confidence_score
+                    FROM customers c
+                    WHERE c.email IS NOT NULL
+                      AND c.created_at < NOW() - INTERVAL '30 days'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM jobs j
+                          WHERE j.customer_id = c.id
+                            AND j.created_at > NOW() - INTERVAL '90 days'
+                      )
+                    ORDER BY estimated_value DESC
+                    LIMIT 10
+                """)
+
+                customer_opportunities = cur.fetchall()
                 cur.close()
                 conn.close()
 
-                if existing_leads:
-                    logger.info(f"Found {len(existing_leads)} existing leads in database")
-                    return [dict(lead) for lead in existing_leads]
+                if customer_opportunities:
+                    logger.info(f"Found {len(customer_opportunities)} customer upsell opportunities")
+                    return [dict(opp) for opp in customer_opportunities]
 
-                logger.info("No existing leads found - real lead discovery requires Perplexity API")
+                logger.info("No leads or opportunities found - need Perplexity API for cold outreach")
                 return []
 
             except Exception as db_error:
-                logger.warning(f"Could not query existing leads: {db_error}")
-                # Return empty - no fake data ever
+                logger.warning(f"Could not query leads/opportunities: {db_error}")
                 return []
 
         except Exception as e:

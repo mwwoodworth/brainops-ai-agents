@@ -17,6 +17,13 @@ import os
 import logging
 import hashlib
 
+# Use centralized MCPClient instead of duplicating MCP code
+try:
+    from mcp_integration import get_mcp_client, MCPServer
+    MCP_AVAILABLE = True
+except ImportError:
+    MCP_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -265,57 +272,43 @@ class EnhancedSelfHealing:
         params: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Execute a tool via MCP Bridge - connects self-healing to 345 external tools.
+        Execute a tool via centralized MCPClient - unified access to 345+ tools.
 
-        Supported platforms: render, vercel, supabase, docker, github, stripe
+        Uses the shared MCPClient from mcp_integration.py to avoid code duplication
+        and ensure consistent error handling across all AI systems.
         """
-        import aiohttp
+        if not MCP_AVAILABLE:
+            logger.warning("MCP integration not available, falling back to internal healing only")
+            return {"success": False, "error": "MCP integration not available"}
 
-        MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
-        MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "brainops_mcp_2025"
-
-        # Map platform to MCP server name
+        # Map platform to MCPServer enum
         server_map = {
-            "render": "render",
-            "vercel": "vercel",
-            "supabase": "supabase",
-            "docker": "docker",
-            "github": "github",
-            "stripe": "stripe",
-            "kubernetes": "kubernetes",
-            "aws": "aws",
+            "render": MCPServer.RENDER,
+            "vercel": MCPServer.VERCEL,
+            "supabase": MCPServer.SUPABASE,
+            "docker": MCPServer.DOCKER,
+            "github": MCPServer.GITHUB,
+            "stripe": MCPServer.STRIPE,
         }
 
-        server = server_map.get(platform, platform)
+        server = server_map.get(platform)
+        if not server:
+            # Try using platform string directly if not in map
+            server = platform
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{MCP_BRIDGE_URL}/mcp/execute",
-                    headers={
-                        "X-API-Key": MCP_API_KEY,
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "server": server,
-                        "tool": tool,
-                        "params": params
-                    },
-                    timeout=aiohttp.ClientTimeout(total=120)
-                ) as resp:
-                    if resp.status == 200:
-                        result = await resp.json()
-                        logger.info(f"MCP tool {server}:{tool} executed successfully")
-                        return {"success": True, "result": result}
-                    else:
-                        error_text = await resp.text()
-                        logger.error(f"MCP tool {server}:{tool} failed: {resp.status} - {error_text}")
-                        return {"success": False, "error": error_text, "status_code": resp.status}
-        except asyncio.TimeoutError:
-            logger.error(f"MCP tool {server}:{tool} timed out")
-            return {"success": False, "error": "Request timed out"}
+            mcp_client = get_mcp_client()
+            result = await mcp_client.execute_tool(server, tool, params)
+
+            if result.success:
+                logger.info(f"Self-healing MCP tool {platform}:{tool} executed in {result.duration_ms:.0f}ms")
+                return {"success": True, "result": result.result}
+            else:
+                logger.error(f"Self-healing MCP tool {platform}:{tool} failed: {result.error}")
+                return {"success": False, "error": result.error}
+
         except Exception as e:
-            logger.error(f"MCP tool {server}:{tool} error: {e}")
+            logger.error(f"Self-healing MCP tool {platform}:{tool} error: {e}")
             return {"success": False, "error": str(e)}
 
     def _generate_id(self, prefix: str) -> str:
