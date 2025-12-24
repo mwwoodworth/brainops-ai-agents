@@ -34,11 +34,16 @@ warnings.filterwarnings('ignore')
 
 
 def json_safe_serialize(obj: Any) -> Any:
-    """Recursively convert datetime/Decimal objects to JSON-serializable types"""
+    """Recursively convert datetime/Decimal/Enum objects to JSON-serializable types"""
     if isinstance(obj, datetime):
         return obj.isoformat()
     elif isinstance(obj, Decimal):
         return float(obj)
+    elif isinstance(obj, Enum):
+        return obj.value
+    elif hasattr(obj, '__dataclass_fields__'):
+        # Handle dataclasses
+        return {k: json_safe_serialize(v) for k, v in obj.__dict__.items()}
     elif isinstance(obj, dict):
         return {k: json_safe_serialize(v) for k, v in obj.items()}
     elif isinstance(obj, list):
