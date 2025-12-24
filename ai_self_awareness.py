@@ -34,12 +34,12 @@ except ImportError:
     AI_CORE_AVAILABLE = False
     logger.warning("⚠️ ai_core not available - self-awareness will use fallback mode")
 
-# Database configuration
+# Database configuration - uses environment variables only (no hardcoded credentials)
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
+    'host': os.getenv('DB_HOST', ''),
     'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('DB_PASSWORD', '<DB_PASSWORD_REDACTED>'),
+    'user': os.getenv('DB_USER', ''),
+    'password': os.getenv('DB_PASSWORD', ''),
     'port': int(os.getenv('DB_PORT', 5432))
 }
 
@@ -550,8 +550,10 @@ class SelfAwareAI:
             root_cause, what_learned
         )
 
-        # Calculate new confidence
-        confidence_after = max(Decimal('0'), confidence_before * Decimal('0.8'))  # Reduce by 20%
+        # Calculate new confidence using AI introspection when available
+        confidence_after = await self._calculate_post_mistake_confidence(
+            agent_id, what_went_wrong, root_cause, confidence_before
+        )
 
         # Check for similar past mistakes
         similar_mistakes_count = await self._count_similar_mistakes(agent_id, root_cause)
@@ -813,8 +815,25 @@ class SelfAwareAI:
         alternatives: List[Dict[str, Any]],
         evidence: List[Dict[str, Any]]
     ) -> str:
-        """Explain why this choice was made"""
-        return f"Chose {decision} because it scored highest (0.92) based on accuracy, speed, and risk factors. Alternative options had lower scores."
+        """Explain why this choice was made using AI introspection"""
+        # Use AI for real explanation when available
+        if AI_CORE_AVAILABLE:
+            try:
+                ai_core = RealAICore()
+                prompt = f"""Explain concisely why the decision '{decision}' was made.
+
+Evidence considered: {json.dumps(evidence[:3], default=str)}
+Alternatives: {json.dumps([a.get('option', 'unknown') for a in alternatives])}
+
+Provide a 1-2 sentence explanation focusing on the key reasoning."""
+                explanation = await ai_core.generate(prompt)
+                return explanation[:500] if explanation else f"Decision '{decision}' was selected based on the available evidence."
+            except Exception as e:
+                logger.warning(f"AI explanation failed, using fallback: {e}")
+
+        # Fallback: Generate explanation from evidence
+        evidence_summary = ", ".join([e.get('description', 'data point')[:30] for e in evidence[:3]])
+        return f"Chose '{decision}' based on evidence: {evidence_summary}. Alternative options scored lower on key metrics."
 
     async def _calculate_decision_confidence(
         self,
@@ -822,17 +841,75 @@ class SelfAwareAI:
         assumptions: List[str],
         alternatives: List[Dict[str, Any]]
     ) -> Decimal:
-        """Calculate confidence in the decision"""
-        base_confidence = 85.0
+        """Calculate confidence in the decision using AI analysis"""
+        # Use AI for real confidence calculation when available
+        if AI_CORE_AVAILABLE:
+            try:
+                ai_core = RealAICore()
+                prompt = f"""Analyze this decision context and provide a confidence score (0-100).
 
-        # Adjust based on evidence quality
-        avg_evidence_confidence = sum(e.get('confidence', 0.5) for e in evidence) / len(evidence)
-        base_confidence *= avg_evidence_confidence
+Evidence quality: {len(evidence)} pieces, avg confidence: {sum(e.get('confidence', 0.5) for e in evidence) / max(1, len(evidence)):.2f}
+Assumptions made: {len(assumptions)} - {assumptions[:3]}
+Alternatives considered: {len(alternatives)}
 
-        # Adjust based on assumptions count
-        base_confidence *= (1 - (len(assumptions) * 0.05))
+Based on evidence strength, assumption reliability, and alternative quality, what is the overall confidence score? Reply with just a number 0-100."""
+                response = await ai_core.generate(prompt)
+                try:
+                    confidence = float(response.strip())
+                    return Decimal(str(min(100, max(0, confidence))))
+                except ValueError:
+                    pass
+            except Exception as e:
+                logger.warning(f"AI confidence calculation failed: {e}")
 
-        return Decimal(str(min(100, max(0, base_confidence))))
+        # Fallback: Weighted calculation
+        base_confidence = 75.0
+        evidence_factor = sum(e.get('confidence', 0.5) for e in evidence) / max(1, len(evidence))
+        assumption_penalty = min(0.3, len(assumptions) * 0.05)  # Cap at 30%
+        alternative_bonus = min(0.1, len(alternatives) * 0.02)  # Bonus for considering alternatives
+
+        final = base_confidence * evidence_factor * (1 - assumption_penalty) * (1 + alternative_bonus)
+        return Decimal(str(min(100, max(0, final))))
+
+    async def _calculate_post_mistake_confidence(
+        self,
+        agent_id: str,
+        what_went_wrong: str,
+        root_cause: str,
+        confidence_before: Decimal
+    ) -> Decimal:
+        """Calculate confidence after learning from a mistake using AI"""
+        if AI_CORE_AVAILABLE:
+            try:
+                ai_core = RealAICore()
+                prompt = f"""An AI agent made a mistake. Calculate the new confidence level after learning.
+
+Previous confidence: {confidence_before}%
+What went wrong: {what_went_wrong}
+Root cause: {root_cause}
+
+How much should confidence be reduced? Consider:
+- Severity of the mistake
+- Whether it's a systemic issue
+- Learning opportunity value
+
+Reply with the new confidence percentage (0-100)."""
+                response = await ai_core.generate(prompt)
+                try:
+                    new_confidence = float(response.strip())
+                    return Decimal(str(min(100, max(0, new_confidence))))
+                except ValueError:
+                    pass
+            except Exception as e:
+                logger.warning(f"AI post-mistake confidence failed: {e}")
+
+        # Fallback: Proportional reduction based on error severity
+        reduction = Decimal('0.8')  # Default 20% reduction
+        if 'critical' in what_went_wrong.lower():
+            reduction = Decimal('0.6')  # 40% reduction for critical
+        elif 'minor' in what_went_wrong.lower():
+            reduction = Decimal('0.9')  # 10% reduction for minor
+        return max(Decimal('0'), confidence_before * reduction)
 
     async def _identify_potential_errors(
         self,
@@ -840,12 +917,32 @@ class SelfAwareAI:
         assumptions: List[str],
         evidence: List[Dict[str, Any]]
     ) -> List[str]:
-        """Identify potential errors in reasoning"""
-        return [
-            "Assumption about market conditions may not hold",
-            "Historical data may not perfectly predict future",
-            "Sample size of evidence could be larger"
-        ]
+        """Identify potential errors in reasoning using AI analysis"""
+        if AI_CORE_AVAILABLE:
+            try:
+                ai_core = RealAICore()
+                prompt = f"""Identify potential errors in this decision-making process.
+
+Decision: {decision}
+Assumptions: {assumptions[:5]}
+Evidence count: {len(evidence)}
+
+List 3-5 specific potential errors or blind spots. Be concise."""
+                response = await ai_core.generate(prompt)
+                # Parse response into list
+                errors = [line.strip().lstrip('- •1234567890.') for line in response.split('\n') if line.strip()]
+                return errors[:5] if errors else ["Could not identify specific errors"]
+            except Exception as e:
+                logger.warning(f"AI error identification failed: {e}")
+
+        # Fallback: Generate context-aware potential errors
+        errors = []
+        if assumptions:
+            errors.append(f"Assumption '{assumptions[0][:50]}...' may not hold in all conditions")
+        if len(evidence) < 5:
+            errors.append("Limited evidence sample size may affect accuracy")
+        errors.append("External factors not considered in analysis")
+        return errors[:5]
 
     async def _suggest_verification(
         self,
