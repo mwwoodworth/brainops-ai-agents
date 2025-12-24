@@ -145,7 +145,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.1.1"  # Fixed revenue API schema compatibility with existing database tables
+VERSION = "9.1.2"  # E2E verification fixes - correct endpoints and thresholds
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
