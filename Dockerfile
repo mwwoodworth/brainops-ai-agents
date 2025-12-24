@@ -89,5 +89,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Expose port
 EXPOSE 10000
 
-# Start cron and application (use explicit path to ensure packages are found)
-CMD service cron start && /root/.local/bin/python -m uvicorn app:app --host 0.0.0.0 --port ${PORT}
+# Start cron and application
+# Python is at /usr/local/bin/python (from base image), packages are in /root/.local (from builder)
+# PATH includes /root/.local/bin for console_scripts installed by pip
+CMD service cron start && python -m uvicorn app:app --host 0.0.0.0 --port ${PORT}
