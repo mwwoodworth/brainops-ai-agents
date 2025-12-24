@@ -265,8 +265,174 @@ class KnowledgeAgent:
             logger.error(f"Context summary error: {e}")
             raise
 
+    async def generate_insights(self) -> List[Dict[str, Any]]:
+        """Generate insights from knowledge base patterns"""
+        conn = self.get_db_connection()
+        if not conn:
+            raise Exception("Database unavailable")
+
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            insights = []
+
+            # Knowledge growth trends
+            cursor.execute("""
+                SELECT
+                    type,
+                    DATE_TRUNC('day', created_at) as day,
+                    COUNT(*) as count
+                FROM brainops_knowledge
+                WHERE created_at > NOW() - INTERVAL '30 days'
+                GROUP BY type, DATE_TRUNC('day', created_at)
+                ORDER BY day DESC, count DESC
+            """)
+
+            growth_data = cursor.fetchall()
+            if growth_data:
+                insights.append({
+                    "type": "knowledge_growth",
+                    "title": "Knowledge Base Growth",
+                    "description": f"Added {sum(r['count'] for r in growth_data[:7])} entries in last 7 days",
+                    "priority": "medium",
+                    "data": [dict(r) for r in growth_data[:7]]
+                })
+
+            # System coverage analysis
+            cursor.execute("""
+                SELECT
+                    system,
+                    COUNT(*) as entry_count,
+                    COUNT(DISTINCT type) as type_diversity
+                FROM brainops_knowledge
+                WHERE deleted_at IS NULL
+                GROUP BY system
+                ORDER BY entry_count DESC
+            """)
+
+            coverage = cursor.fetchall()
+            if coverage:
+                top_system = coverage[0]
+                insights.append({
+                    "type": "system_coverage",
+                    "title": f"Primary Focus: {top_system['system']}",
+                    "description": f"{top_system['entry_count']} entries across {top_system['type_diversity']} types",
+                    "priority": "high",
+                    "recommendation": "Ensure balanced coverage across all systems"
+                })
+
+            # Knowledge freshness
+            cursor.execute("""
+                SELECT
+                    COUNT(*) FILTER (WHERE updated_at > NOW() - INTERVAL '7 days') as recent_updates,
+                    COUNT(*) FILTER (WHERE updated_at < NOW() - INTERVAL '30 days') as stale_entries,
+                    COUNT(*) as total
+                FROM brainops_knowledge
+                WHERE deleted_at IS NULL
+            """)
+
+            freshness = cursor.fetchone()
+            if freshness and freshness['stale_entries'] > 0:
+                stale_pct = (freshness['stale_entries'] / freshness['total']) * 100
+                insights.append({
+                    "type": "knowledge_freshness",
+                    "title": "Knowledge Maintenance Needed",
+                    "description": f"{stale_pct:.1f}% of entries haven't been updated in 30+ days",
+                    "priority": "medium" if stale_pct > 50 else "low",
+                    "recommendation": "Review and update stale knowledge entries"
+                })
+
+            cursor.close()
+            conn.close()
+
+            return insights
+
+        except Exception as e:
+            if conn:
+                conn.close()
+            logger.error(f"Insight generation error: {e}")
+            raise
+
+    async def generate_recommendations(self, context: Optional[Dict] = None) -> List[Dict[str, Any]]:
+        """Generate actionable recommendations based on knowledge base"""
+        conn = self.get_db_connection()
+        if not conn:
+            raise Exception("Database unavailable")
+
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            recommendations = []
+
+            # Recommend knowledge gaps to fill
+            cursor.execute("""
+                SELECT DISTINCT type
+                FROM brainops_knowledge
+                WHERE deleted_at IS NULL
+            """)
+            existing_types = {r['type'] for r in cursor.fetchall()}
+
+            expected_types = {'architecture', 'api', 'deployment', 'troubleshooting', 'configuration', 'security'}
+            missing_types = expected_types - existing_types
+
+            if missing_types:
+                recommendations.append({
+                    "type": "knowledge_gap",
+                    "priority": "high",
+                    "action": f"Add knowledge entries for: {', '.join(missing_types)}",
+                    "impact": "Improves system coverage and reduces blind spots"
+                })
+
+            # Recommend consolidation of duplicate knowledge
+            cursor.execute("""
+                SELECT title, COUNT(*) as count
+                FROM brainops_knowledge
+                WHERE deleted_at IS NULL
+                GROUP BY title
+                HAVING COUNT(*) > 1
+                ORDER BY count DESC
+                LIMIT 5
+            """)
+
+            duplicates = cursor.fetchall()
+            if duplicates:
+                recommendations.append({
+                    "type": "consolidation",
+                    "priority": "medium",
+                    "action": f"Review and consolidate {len(duplicates)} duplicate title(s)",
+                    "impact": "Reduces confusion and improves knowledge quality"
+                })
+
+            # Recommend based on recent activity
+            cursor.execute("""
+                SELECT system, COUNT(*) as recent_activity
+                FROM brainops_knowledge
+                WHERE created_at > NOW() - INTERVAL '7 days'
+                GROUP BY system
+                ORDER BY recent_activity DESC
+                LIMIT 1
+            """)
+
+            active_system = cursor.fetchone()
+            if active_system:
+                recommendations.append({
+                    "type": "expand_coverage",
+                    "priority": "medium",
+                    "action": f"Expand documentation for {active_system['system']} (high activity detected)",
+                    "impact": "Capitalizes on current focus area"
+                })
+
+            cursor.close()
+            conn.close()
+
+            return recommendations
+
+        except Exception as e:
+            if conn:
+                conn.close()
+            logger.error(f"Recommendation generation error: {e}")
+            raise
+
     async def ask(self, question: str, context: Optional[List[str]] = None) -> Dict[str, Any]:
-        """AI-powered question answering using knowledge base"""
+        """AI-powered question answering using knowledge base with insights"""
         # First, search knowledge base
         relevant_knowledge = await self.query_knowledge(question, {'limit': 5})
 
@@ -286,7 +452,8 @@ Question: {question}
 Relevant Knowledge:
 {context_text}
 
-Provide a concise, accurate answer based only on the information provided."""
+Provide a concise, accurate answer based only on the information provided.
+Include actionable recommendations if applicable."""
 
                 response = self.gemini_model.generate_content(prompt)
                 answer = response.text
@@ -296,11 +463,18 @@ Provide a concise, accurate answer based only on the information provided."""
         else:
             answer = f"Knowledge base results:\n\n{context_text[:1000]}"
 
+        # Generate contextual recommendations
+        try:
+            recommendations = await self.generate_recommendations({'question': question})
+        except:
+            recommendations = []
+
         return {
             'question': question,
             'answer': answer,
             'relevant_entries': len(relevant_knowledge),
             'sources': [{'title': k['title'], 'system': k['system']} for k in relevant_knowledge],
+            'recommendations': recommendations[:3],  # Top 3
             'timestamp': datetime.utcnow().isoformat()
         }
 

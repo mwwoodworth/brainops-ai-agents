@@ -152,7 +152,7 @@ Respond with JSON only:
             return {"error": str(e), "quality_score": 0}
 
     async def review_pr(self, pr_details: Dict[str, Any]) -> Dict[str, Any]:
-        """Review a pull request using AI analysis"""
+        """Review a pull request using AI analysis with detailed suggestions"""
         try:
             client = get_openai_client()
             if not client:
@@ -161,36 +161,70 @@ Respond with JSON only:
             # Extract PR info
             title = pr_details.get("title", "Unknown PR")
             description = pr_details.get("description", "")
-            diff = pr_details.get("diff", "")[:4000]  # Limit diff size
+            diff = pr_details.get("diff", "")[:6000]  # Increased limit
             files_changed = pr_details.get("files_changed", [])
+            author = pr_details.get("author", "unknown")
 
-            prompt = f"""Review this pull request and provide constructive feedback.
+            prompt = f"""You are an expert code reviewer. Provide a comprehensive pull request review.
 
 Title: {title}
+Author: {author}
 Description: {description}
 Files changed: {files_changed}
 Diff (partial):
 {diff}
 
+Provide detailed analysis covering:
+1. Code quality and best practices
+2. Potential bugs or logic errors
+3. Performance implications
+4. Security vulnerabilities
+5. Test coverage
+6. Documentation needs
+7. Specific improvement suggestions with code examples
+
 Respond with JSON only:
 {{
     "status": "approved" or "changes_requested" or "needs_discussion",
-    "summary": "one sentence summary",
-    "comments": ["specific comment 1", "specific comment 2"],
-    "suggestions": ["improvement suggestion 1"],
-    "security_concerns": ["any security issues"],
-    "score": 0-100
+    "summary": "one sentence summary of the PR",
+    "quality_score": 0-100,
+    "comments": [
+        {{
+            "file": "filename",
+            "line": number,
+            "severity": "critical/high/medium/low",
+            "category": "bug/performance/security/style/docs",
+            "comment": "specific issue description",
+            "suggestion": "how to fix it"
+        }}
+    ],
+    "code_suggestions": [
+        {{
+            "file": "filename",
+            "original_code": "current code",
+            "suggested_code": "improved code",
+            "explanation": "why this is better"
+        }}
+    ],
+    "security_concerns": ["concern 1", "concern 2"],
+    "performance_notes": ["note 1", "note 2"],
+    "test_recommendations": ["test 1", "test 2"],
+    "documentation_needs": ["doc 1", "doc 2"],
+    "best_practices": ["practice 1", "practice 2"],
+    "overall_assessment": "detailed paragraph",
+    "confidence_score": 0-100
 }}"""
 
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=800
+                max_tokens=1500
             )
 
             review = json.loads(response.choices[0].message.content)
             review["reviewed_at"] = datetime.utcnow().isoformat()
             review["pr_title"] = title
+            review["pr_author"] = author
 
             # Persist review
             await self._save_review(pr_details, review)
@@ -200,6 +234,194 @@ Respond with JSON only:
         except Exception as e:
             logger.error(f"PR review failed: {e}")
             return {"error": str(e), "status": "error"}
+
+    async def automated_code_review(self, file_path: str, code_content: str) -> Dict[str, Any]:
+        """Perform automated code review with AI suggestions"""
+        try:
+            client = get_openai_client()
+            if not client:
+                return {"error": "OpenAI client not available"}
+
+            results = {
+                "file_path": file_path,
+                "reviewed_at": datetime.utcnow().isoformat(),
+                "issues": [],
+                "suggestions": [],
+                "metrics": {}
+            }
+
+            # Basic static analysis
+            lines = code_content.split('\n')
+            results["metrics"]["total_lines"] = len(lines)
+            results["metrics"]["code_lines"] = sum(1 for line in lines if line.strip() and not line.strip().startswith('#'))
+            results["metrics"]["comment_lines"] = sum(1 for line in lines if line.strip().startswith('#'))
+
+            # Check for common issues
+            issues = []
+            for i, line in enumerate(lines, 1):
+                stripped = line.strip()
+
+                # Check for long lines
+                if len(line) > 120:
+                    issues.append({
+                        "line": i,
+                        "severity": "low",
+                        "category": "style",
+                        "message": f"Line exceeds 120 characters ({len(line)} chars)"
+                    })
+
+                # Check for print statements (debugging code)
+                if 'print(' in stripped and not stripped.startswith('#'):
+                    issues.append({
+                        "line": i,
+                        "severity": "medium",
+                        "category": "debug",
+                        "message": "Found print statement (consider using logging)"
+                    })
+
+                # Check for TODO/FIXME
+                if 'TODO' in stripped or 'FIXME' in stripped:
+                    issues.append({
+                        "line": i,
+                        "severity": "low",
+                        "category": "maintenance",
+                        "message": "Unfinished task marker found"
+                    })
+
+                # Check for bare except
+                if 'except:' in stripped and 'except Exception' not in stripped:
+                    issues.append({
+                        "line": i,
+                        "severity": "high",
+                        "category": "bug",
+                        "message": "Bare except clause catches all exceptions"
+                    })
+
+            results["issues"] = issues
+            results["metrics"]["issue_count"] = len(issues)
+
+            # Use AI for deeper analysis (on a sample if file is large)
+            code_sample = code_content[:4000] if len(code_content) > 4000 else code_content
+
+            prompt = f"""Analyze this Python code and provide improvement suggestions:
+
+File: {file_path}
+Code:
+{code_sample}
+
+Provide analysis covering:
+1. Code structure and organization
+2. Potential bugs or edge cases
+3. Performance optimizations
+4. Security best practices
+5. Pythonic improvements
+6. Type hints and documentation
+7. Error handling
+
+Respond with JSON only:
+{{
+    "code_quality_grade": "A/B/C/D/F",
+    "maintainability_score": 0-100,
+    "complexity_assessment": "low/medium/high",
+    "suggestions": [
+        {{
+            "category": "performance/security/style/bug/architecture",
+            "priority": "high/medium/low",
+            "description": "what to improve",
+            "code_example": "example of better code",
+            "impact": "expected impact"
+        }}
+    ],
+    "refactoring_opportunities": ["opportunity 1", "opportunity 2"],
+    "security_recommendations": ["rec 1", "rec 2"],
+    "performance_tips": ["tip 1", "tip 2"],
+    "strengths": ["strength 1", "strength 2"],
+    "weaknesses": ["weakness 1", "weakness 2"],
+    "confidence_score": 0-100
+}}"""
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1200
+            )
+
+            ai_analysis = json.loads(response.choices[0].message.content)
+            results.update(ai_analysis)
+
+            await self._save_code_review(file_path, results)
+            return results
+
+        except Exception as e:
+            logger.error(f"Automated code review failed: {e}")
+            return {"error": str(e)}
+
+    async def suggest_refactoring(self, code_content: str, context: str = "") -> Dict[str, Any]:
+        """Suggest refactoring improvements for code"""
+        try:
+            client = get_openai_client()
+            if not client:
+                return {"error": "OpenAI client not available"}
+
+            prompt = f"""Suggest refactoring improvements for this code:
+
+Context: {context}
+Code:
+{code_content[:3000]}
+
+Provide specific refactoring suggestions with before/after examples.
+
+Respond with JSON only:
+{{
+    "refactorings": [
+        {{
+            "type": "extract_method/rename/simplify/optimize",
+            "priority": "high/medium/low",
+            "description": "what to refactor and why",
+            "before": "original code snippet",
+            "after": "refactored code snippet",
+            "benefits": ["benefit 1", "benefit 2"]
+        }}
+    ],
+    "estimated_effort": "X hours",
+    "complexity_reduction": "X%",
+    "readability_improvement": "high/medium/low",
+    "confidence_score": 0-100
+}}"""
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1000
+            )
+
+            suggestions = json.loads(response.choices[0].message.content)
+            suggestions["suggested_at"] = datetime.utcnow().isoformat()
+
+            return suggestions
+
+        except Exception as e:
+            logger.error(f"Refactoring suggestions failed: {e}")
+            return {"error": str(e)}
+
+    async def _save_code_review(self, file_path: str, results: Dict[str, Any]):
+        """Save code review results to database"""
+        conn = self._get_db_connection()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO ai_code_reviews (tenant_id, file_path, review_data, reviewed_at)
+                VALUES (%s, %s, %s, NOW())
+            """, (self.tenant_id, file_path, json.dumps(results)))
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Failed to save code review: {e}")
+            if conn:
+                conn.close()
 
     async def _save_analysis(self, results: Dict[str, Any]):
         """Save analysis results to database"""

@@ -207,8 +207,12 @@ class AgentScheduler:
 
         logger.info(f"⚙️ Executing {agent_type} agent: {agent_name}")
 
+        # Health monitoring agent
+        if agent_name == 'HealthMonitor':
+            return self._execute_health_monitor(agent, cur, conn)
+
         # Revenue-generating agents
-        if 'revenue' in agent_type or agent_name == 'RevenueOptimizer':
+        elif 'revenue' in agent_type or agent_name == 'RevenueOptimizer':
             return self._execute_revenue_agent(agent, cur, conn)
 
         # Lead generation agents
@@ -668,6 +672,55 @@ class AgentScheduler:
             },
             "timestamp": datetime.utcnow().isoformat()
         }
+
+    def _execute_health_monitor(self, agent: Dict, cur, conn) -> Dict:
+        """Execute health monitoring agent - checks all agents and auto-restarts failed ones"""
+        logger.info(f"Running health monitoring for agent: {agent['name']}")
+
+        try:
+            # Import health monitor
+            from agent_health_monitor import get_health_monitor
+            health_monitor = get_health_monitor()
+
+            # Run health check for all agents
+            health_summary = health_monitor.check_all_agents_health()
+
+            # Auto-restart critical agents
+            restart_result = health_monitor.auto_restart_critical_agents()
+
+            # Store results in brain
+            if self.brain:
+                try:
+                    self.brain.store(
+                        key=f"health_check_{datetime.utcnow().isoformat()}",
+                        value={
+                            "total_agents": health_summary.get("total_agents", 0),
+                            "healthy": health_summary.get("healthy", 0),
+                            "degraded": health_summary.get("degraded", 0),
+                            "critical": health_summary.get("critical", 0),
+                            "restarted": restart_result.get("restarted", 0)
+                        },
+                        category="health_monitoring",
+                        priority="high" if health_summary.get("critical", 0) > 0 else "medium",
+                        source="health_monitor_agent"
+                    )
+                except Exception as mem_err:
+                    logger.warning(f"Failed to store health check in brain: {mem_err}")
+
+            return {
+                "agent": agent['name'],
+                "health_summary": health_summary,
+                "auto_restart_result": restart_result,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Health monitoring failed: {e}")
+            return {
+                "agent": agent['name'],
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
     def load_schedules_from_db(self):
         """Load agent schedules from database"""

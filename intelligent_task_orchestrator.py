@@ -128,6 +128,11 @@ class IntelligentTask:
     completed_at: Optional[datetime] = None
     assigned_agent: Optional[str] = None
     execution_result: Optional[Dict[str, Any]] = None
+    # Enhanced decision-making fields
+    risk_assessment: Optional[Dict[str, Any]] = None
+    confidence_score: float = 0.0
+    human_escalation_required: bool = False
+    escalation_reason: Optional[str] = None
 
 
 class NotificationService:
@@ -325,6 +330,19 @@ class IntelligentTaskOrchestrator:
             CREATE INDEX IF NOT EXISTS idx_notifications_severity ON task_notifications(severity);
             CREATE INDEX IF NOT EXISTS idx_notifications_time ON task_notifications(sent_at DESC);
             CREATE INDEX IF NOT EXISTS idx_exec_history_task ON task_execution_history(task_id);
+
+            -- Enhanced decision tracking
+            ALTER TABLE task_execution_history
+            ADD COLUMN IF NOT EXISTS risk_assessment JSONB;
+
+            ALTER TABLE task_execution_history
+            ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0;
+
+            ALTER TABLE task_execution_history
+            ADD COLUMN IF NOT EXISTS human_escalation_required BOOLEAN DEFAULT FALSE;
+
+            ALTER TABLE task_execution_history
+            ADD COLUMN IF NOT EXISTS escalation_reason TEXT;
             """)
 
             conn.commit()
@@ -436,7 +454,7 @@ class IntelligentTaskOrchestrator:
             except Exception as e:
                 logger.debug(f"AI priority analysis failed: {e}")
 
-        return IntelligentTask(
+        task = IntelligentTask(
             id=str(row.get("id", "")),
             title=row.get("title", "Untitled Task"),
             description=payload.get("description", ""),
@@ -453,6 +471,17 @@ class IntelligentTaskOrchestrator:
             retry_count=row.get("retry_count", 0),
             max_retries=payload.get("max_retries", 3)
         )
+
+        # Enhanced: Perform risk assessment
+        task.risk_assessment = self._assess_task_risk(task)
+
+        # Enhanced: Calculate confidence score
+        task.confidence_score = self._calculate_task_confidence(task)
+
+        # Enhanced: Check for human escalation
+        task.human_escalation_required, task.escalation_reason = self._check_task_escalation(task)
+
+        return task
 
     async def _execute_task(self, task: IntelligentTask):
         """Execute a task with full tracking and notifications"""
@@ -724,8 +753,105 @@ class IntelligentTaskOrchestrator:
         except Exception as e:
             logger.error(f"Failed to update task status: {e}")
 
+    def _assess_task_risk(self, task: IntelligentTask) -> Dict[str, Any]:
+        """Assess risk level of a task"""
+        risk_assessment = {
+            'overall_risk': 0.0,
+            'risk_categories': {},
+            'risk_factors': [],
+            'mitigation_strategies': []
+        }
+
+        # High-risk task types
+        high_risk_types = ['revenue_action', 'data_sync', 'financial', 'deletion', 'payment']
+        if task.task_type in high_risk_types:
+            risk_assessment['risk_categories']['task_type'] = 0.8
+            risk_assessment['risk_factors'].append(f"High-risk task type: {task.task_type}")
+
+        # Retry history indicates instability
+        if task.retry_count > 0:
+            retry_risk = min(task.retry_count / task.max_retries, 1.0)
+            risk_assessment['risk_categories']['retry_history'] = retry_risk
+            risk_assessment['risk_factors'].append(f"Task has been retried {task.retry_count} times")
+
+        # Priority vs complexity
+        if task.priority > 75 and task.estimated_duration_mins > 30:
+            risk_assessment['risk_categories']['complexity'] = 0.7
+            risk_assessment['risk_factors'].append("High-priority complex task")
+
+        # Dependencies create risk
+        if len(task.dependencies) > 3:
+            risk_assessment['risk_categories']['dependencies'] = 0.6
+            risk_assessment['risk_factors'].append(f"{len(task.dependencies)} dependencies may cause cascading failures")
+
+        # Calculate overall risk
+        risk_values = list(risk_assessment['risk_categories'].values())
+        risk_assessment['overall_risk'] = sum(risk_values) / len(risk_values) if risk_values else 0.3
+
+        # Generate mitigation strategies
+        if risk_assessment['overall_risk'] > 0.6:
+            risk_assessment['mitigation_strategies'].append("Enable detailed monitoring")
+            risk_assessment['mitigation_strategies'].append("Prepare rollback procedures")
+
+        return risk_assessment
+
+    def _calculate_task_confidence(self, task: IntelligentTask) -> float:
+        """Calculate confidence in successful task execution"""
+        confidence_factors = []
+
+        # Historical success rate for this task type
+        # (Would query database in real implementation)
+        base_confidence = 0.7
+        confidence_factors.append(base_confidence)
+
+        # Penalty for retries
+        if task.retry_count > 0:
+            retry_penalty = task.retry_count * 0.1
+            confidence_factors.append(max(0.3, 1.0 - retry_penalty))
+
+        # Boost for simple tasks
+        if task.estimated_duration_mins < 10:
+            confidence_factors.append(0.9)
+
+        # Penalty for complex dependencies
+        if len(task.dependencies) > 0:
+            dependency_penalty = len(task.dependencies) * 0.05
+            confidence_factors.append(max(0.5, 1.0 - dependency_penalty))
+
+        return sum(confidence_factors) / len(confidence_factors)
+
+    def _check_task_escalation(self, task: IntelligentTask) -> tuple[bool, Optional[str]]:
+        """Check if task requires human escalation"""
+        escalation_reasons = []
+
+        # High-risk tasks
+        if task.risk_assessment and task.risk_assessment.get('overall_risk', 0) > 0.7:
+            escalation_reasons.append(f"High risk: {task.risk_assessment['overall_risk']:.1%}")
+
+        # Low confidence
+        if task.confidence_score < 0.5:
+            escalation_reasons.append(f"Low confidence: {task.confidence_score:.1%}")
+
+        # Multiple retry failures
+        if task.retry_count >= task.max_retries - 1:
+            escalation_reasons.append(f"Near max retries: {task.retry_count}/{task.max_retries}")
+
+        # Critical task types
+        critical_types = ['payment', 'financial', 'deletion', 'legal']
+        if task.task_type in critical_types:
+            escalation_reasons.append(f"Critical task type: {task.task_type}")
+
+        # High priority with high risk
+        if task.priority > 80 and task.risk_assessment and task.risk_assessment.get('overall_risk', 0) > 0.6:
+            escalation_reasons.append("High priority + high risk combination")
+
+        human_escalation = len(escalation_reasons) > 0
+        escalation_reason = "; ".join(escalation_reasons) if escalation_reasons else None
+
+        return human_escalation, escalation_reason
+
     async def _store_execution_history(self, task: IntelligentTask, status: str, result: Dict):
-        """Store task execution history"""
+        """Store task execution history with enhanced fields"""
         try:
             duration_ms = 0
             if task.started_at and task.completed_at:
@@ -735,12 +861,17 @@ class IntelligentTaskOrchestrator:
             cur = conn.cursor()
             cur.execute("""
             INSERT INTO task_execution_history
-            (task_id, status, assigned_agent, started_at, completed_at, duration_ms, result, retry_count)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (task_id, status, assigned_agent, started_at, completed_at, duration_ms, result, retry_count,
+             risk_assessment, confidence_score, human_escalation_required, escalation_reason)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 task.id, status, task.assigned_agent,
                 task.started_at, task.completed_at, duration_ms,
-                Json(result), task.retry_count
+                Json(result), task.retry_count,
+                Json(task.risk_assessment) if task.risk_assessment else None,
+                task.confidence_score,
+                task.human_escalation_required,
+                task.escalation_reason
             ))
             conn.commit()
             cur.close()

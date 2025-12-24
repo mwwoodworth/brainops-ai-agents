@@ -1063,6 +1063,532 @@ class SuccessPredictor:
         return max(0, min(1, probability))
 
 
+class FeatureAdoptionTracker:
+    """Track and analyze feature adoption during onboarding"""
+
+    def __init__(self):
+        self.conn = None
+
+    def _get_connection(self):
+        """Get database connection"""
+        if not self.conn or self.conn.closed:
+            self.conn = psycopg2.connect(**DB_CONFIG)
+        return self.conn
+
+    async def track_feature_usage(
+        self,
+        journey_id: str,
+        customer_id: str,
+        feature_name: str,
+        usage_context: Dict
+    ) -> Dict:
+        """Track when a customer uses a feature"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Record feature usage
+            usage_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO ai_feature_usage (
+                    id, journey_id, customer_id, feature_name,
+                    usage_context, first_used_at, last_used_at,
+                    usage_count, created_at
+                ) VALUES (%s, %s, %s, %s, %s, NOW(), NOW(), 1, NOW())
+                ON CONFLICT (customer_id, feature_name)
+                DO UPDATE SET
+                    last_used_at = NOW(),
+                    usage_count = ai_feature_usage.usage_count + 1,
+                    usage_context = EXCLUDED.usage_context
+                RETURNING *
+            """, (
+                usage_id, journey_id, customer_id, feature_name,
+                json.dumps(usage_context)
+            ))
+
+            usage_record = cursor.fetchone()
+            conn.commit()
+
+            # Check if this unlocks any achievements
+            achievements = await self._check_achievements(
+                customer_id, feature_name, cursor
+            )
+
+            # Update onboarding progress
+            await self._update_adoption_progress(journey_id, customer_id, cursor)
+
+            conn.commit()
+
+            return {
+                "usage_id": usage_record['id'],
+                "feature": feature_name,
+                "usage_count": usage_record['usage_count'],
+                "achievements": achievements,
+                "tracked_at": datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Error tracking feature usage: {e}")
+            if conn:
+                conn.rollback()
+            return {"error": str(e)}
+
+    async def _check_achievements(
+        self,
+        customer_id: str,
+        feature_name: str,
+        cursor: Any
+    ) -> List[Dict]:
+        """Check if feature usage unlocks any achievements"""
+        achievements = []
+
+        # Get total features used
+        cursor.execute("""
+            SELECT COUNT(DISTINCT feature_name) as features_used
+            FROM ai_feature_usage
+            WHERE customer_id = %s
+        """, (customer_id,))
+
+        result = cursor.fetchone()
+        features_used = result['features_used'] if result else 0
+
+        # Achievement milestones
+        if features_used == 1:
+            achievements.append({
+                "name": "First Steps",
+                "description": "Used your first feature!",
+                "points": 10
+            })
+        elif features_used == 5:
+            achievements.append({
+                "name": "Explorer",
+                "description": "Tried 5 different features",
+                "points": 50
+            })
+        elif features_used == 10:
+            achievements.append({
+                "name": "Power User",
+                "description": "Mastered 10 features",
+                "points": 100
+            })
+
+        # Record achievements
+        for achievement in achievements:
+            cursor.execute("""
+                INSERT INTO ai_customer_achievements (
+                    id, customer_id, achievement_name,
+                    achievement_description, points_earned,
+                    earned_at
+                ) VALUES (%s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (customer_id, achievement_name) DO NOTHING
+            """, (
+                str(uuid.uuid4()), customer_id,
+                achievement['name'], achievement['description'],
+                achievement['points']
+            ))
+
+        return achievements
+
+    async def _update_adoption_progress(
+        self,
+        journey_id: str,
+        customer_id: str,
+        cursor: Any
+    ) -> None:
+        """Update overall feature adoption progress"""
+        # Get adoption metrics
+        cursor.execute("""
+            SELECT
+                COUNT(DISTINCT feature_name) as unique_features,
+                SUM(usage_count) as total_usages,
+                AVG(usage_count) as avg_usage_per_feature
+            FROM ai_feature_usage
+            WHERE customer_id = %s
+        """, (customer_id,))
+
+        metrics = cursor.fetchone()
+
+        # Update journey with adoption metrics
+        cursor.execute("""
+            UPDATE ai_onboarding_journeys
+            SET adoption_metrics = %s,
+                updated_at = NOW()
+            WHERE id = %s
+        """, (json.dumps(dict(metrics)), journey_id))
+
+    async def get_adoption_analysis(
+        self,
+        customer_id: str,
+        journey_id: Optional[str] = None
+    ) -> Dict:
+        """Get comprehensive feature adoption analysis"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Get feature usage summary
+            cursor.execute("""
+                SELECT
+                    feature_name,
+                    usage_count,
+                    first_used_at,
+                    last_used_at,
+                    EXTRACT(EPOCH FROM (last_used_at - first_used_at))/86400 as usage_span_days
+                FROM ai_feature_usage
+                WHERE customer_id = %s
+                ORDER BY first_used_at
+            """, (customer_id,))
+
+            features = cursor.fetchall()
+
+            # Calculate adoption metrics
+            total_features = len(features)
+            total_usages = sum(f['usage_count'] for f in features)
+            avg_usage = total_usages / total_features if total_features > 0 else 0
+
+            # Determine adoption level
+            if total_features >= 10 and avg_usage >= 5:
+                adoption_level = "advanced"
+            elif total_features >= 5 and avg_usage >= 3:
+                adoption_level = "intermediate"
+            elif total_features >= 2:
+                adoption_level = "beginner"
+            else:
+                adoption_level = "getting_started"
+
+            # Get recommended next features
+            recommended_features = await self._get_recommended_features(
+                customer_id, features, cursor
+            )
+
+            return {
+                "customer_id": customer_id,
+                "adoption_level": adoption_level,
+                "total_features_used": total_features,
+                "total_feature_usages": total_usages,
+                "average_usage_per_feature": round(avg_usage, 2),
+                "features": [dict(f) for f in features],
+                "recommended_next_features": recommended_features,
+                "analyzed_at": datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting adoption analysis: {e}")
+            return {"error": str(e)}
+
+    async def _get_recommended_features(
+        self,
+        customer_id: str,
+        current_features: List[Dict],
+        cursor: Any
+    ) -> List[Dict]:
+        """Get recommended features based on current usage"""
+        used_features = [f['feature_name'] for f in current_features]
+
+        # Define feature progression paths
+        feature_paths = {
+            "basic_profile": ["advanced_settings", "team_management"],
+            "first_job": ["job_templates", "scheduling", "invoicing"],
+            "invoicing": ["payment_processing", "financial_reports"],
+            "team_management": ["role_permissions", "team_analytics"],
+            "scheduling": ["calendar_integration", "automated_reminders"]
+        }
+
+        recommendations = []
+        for used_feature in used_features:
+            if used_feature in feature_paths:
+                for next_feature in feature_paths[used_feature]:
+                    if next_feature not in used_features:
+                        recommendations.append({
+                            "feature": next_feature,
+                            "reason": f"Natural progression from {used_feature}",
+                            "priority": "high"
+                        })
+
+        return recommendations[:5]  # Return top 5 recommendations
+
+
+class PersonalizedOnboardingFlows:
+    """Create and manage personalized onboarding flows"""
+
+    def __init__(self):
+        self.conn = None
+
+    def _get_connection(self):
+        """Get database connection"""
+        if not self.conn or self.conn.closed:
+            self.conn = psycopg2.connect(**DB_CONFIG)
+        return self.conn
+
+    async def create_personalized_flow(
+        self,
+        customer_id: str,
+        customer_profile: Dict,
+        business_goals: List[str],
+        experience_level: str
+    ) -> Dict:
+        """Create a fully personalized onboarding flow"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            flow_id = str(uuid.uuid4())
+
+            # Analyze customer needs
+            flow_analysis = self._analyze_customer_needs(
+                customer_profile, business_goals, experience_level
+            )
+
+            # Generate personalized milestones
+            milestones = self._generate_personalized_milestones(
+                business_goals, experience_level, flow_analysis
+            )
+
+            # Create custom content sequence
+            content_sequence = self._create_content_sequence(
+                customer_profile, flow_analysis
+            )
+
+            # Define success metrics
+            success_metrics = self._define_success_metrics(
+                business_goals, experience_level
+            )
+
+            # Store personalized flow
+            cursor.execute("""
+                INSERT INTO ai_personalized_flows (
+                    id, customer_id, flow_analysis,
+                    milestones, content_sequence,
+                    success_metrics, experience_level,
+                    created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+            """, (
+                flow_id, customer_id,
+                json.dumps(flow_analysis),
+                json.dumps(milestones),
+                json.dumps(content_sequence),
+                json.dumps(success_metrics),
+                experience_level
+            ))
+
+            conn.commit()
+
+            return {
+                "flow_id": flow_id,
+                "customer_id": customer_id,
+                "flow_type": flow_analysis['flow_type'],
+                "milestones": milestones,
+                "content_sequence": content_sequence,
+                "success_metrics": success_metrics,
+                "estimated_completion": flow_analysis['estimated_days'],
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Error creating personalized flow: {e}")
+            if conn:
+                conn.rollback()
+            return {"error": str(e)}
+
+    def _analyze_customer_needs(
+        self,
+        profile: Dict,
+        goals: List[str],
+        experience_level: str
+    ) -> Dict:
+        """Analyze customer needs to determine flow type"""
+        analysis = {
+            "flow_type": "standard",
+            "pace": "moderate",
+            "focus_areas": [],
+            "estimated_days": 14
+        }
+
+        # Determine flow type based on profile
+        if profile.get('company_size', 0) > 50:
+            analysis['flow_type'] = "enterprise"
+            analysis['estimated_days'] = 30
+        elif profile.get('is_technical', False):
+            analysis['flow_type'] = "technical"
+            analysis['pace'] = "fast"
+            analysis['estimated_days'] = 7
+        elif experience_level == "beginner":
+            analysis['flow_type'] = "beginner_friendly"
+            analysis['pace'] = "slow"
+            analysis['estimated_days'] = 21
+
+        # Determine focus areas from goals
+        goal_mapping = {
+            "increase_efficiency": "automation",
+            "improve_tracking": "analytics",
+            "grow_business": "sales",
+            "manage_team": "team_management",
+            "financial_control": "accounting"
+        }
+
+        analysis['focus_areas'] = [
+            goal_mapping.get(goal, goal) for goal in goals
+        ]
+
+        return analysis
+
+    def _generate_personalized_milestones(
+        self,
+        goals: List[str],
+        experience_level: str,
+        analysis: Dict
+    ) -> List[Dict]:
+        """Generate milestones tailored to customer goals"""
+        milestones = []
+
+        # Universal first milestone
+        milestones.append({
+            "name": "Getting Started",
+            "description": "Complete account setup and profile",
+            "target_day": 1,
+            "tasks": [
+                "Complete profile information",
+                "Set up company details",
+                "Configure preferences"
+            ],
+            "success_criteria": "Profile 100% complete"
+        })
+
+        # Goal-specific milestones
+        if "increase_efficiency" in goals:
+            milestones.append({
+                "name": "Automation Setup",
+                "description": "Configure automated workflows",
+                "target_day": 5,
+                "tasks": [
+                    "Set up job templates",
+                    "Configure automated notifications",
+                    "Enable smart scheduling"
+                ],
+                "success_criteria": "First automated workflow created"
+            })
+
+        if "grow_business" in goals:
+            milestones.append({
+                "name": "First Customer Win",
+                "description": "Complete your first customer transaction",
+                "target_day": 7,
+                "tasks": [
+                    "Add first customer",
+                    "Create first job",
+                    "Send first invoice"
+                ],
+                "success_criteria": "Complete end-to-end customer workflow"
+            })
+
+        if "manage_team" in goals:
+            milestones.append({
+                "name": "Team Onboarded",
+                "description": "Get your team up and running",
+                "target_day": 10,
+                "tasks": [
+                    "Invite team members",
+                    "Set up roles and permissions",
+                    "Assign first tasks"
+                ],
+                "success_criteria": "At least 3 team members active"
+            })
+
+        # Final milestone
+        milestones.append({
+            "name": "Full Adoption",
+            "description": "Become a power user",
+            "target_day": analysis['estimated_days'],
+            "tasks": [
+                "Use 10+ features",
+                "Complete 5+ workflows",
+                "Share feedback or referral"
+            ],
+            "success_criteria": "Advanced adoption level achieved"
+        })
+
+        return milestones
+
+    def _create_content_sequence(
+        self,
+        profile: Dict,
+        analysis: Dict
+    ) -> List[Dict]:
+        """Create personalized content delivery sequence"""
+        sequence = []
+
+        # Welcome content
+        sequence.append({
+            "day": 0,
+            "type": "welcome",
+            "title": f"Welcome to your {analysis['flow_type']} onboarding",
+            "content_items": [
+                "Welcome video",
+                "Quick start guide",
+                "Success checklist"
+            ],
+            "channel": "email"
+        })
+
+        # Focus area content
+        for focus in analysis['focus_areas']:
+            sequence.append({
+                "day": len(sequence) + 2,
+                "type": "educational",
+                "title": f"Mastering {focus}",
+                "content_items": [
+                    f"{focus} tutorial",
+                    f"{focus} best practices",
+                    f"{focus} templates"
+                ],
+                "channel": "in_app"
+            })
+
+        # Check-in content
+        sequence.append({
+            "day": 7,
+            "type": "check_in",
+            "title": "How are you doing?",
+            "content_items": [
+                "Progress review",
+                "Feedback request",
+                "Support offer"
+            ],
+            "channel": "email"
+        })
+
+        return sequence
+
+    def _define_success_metrics(
+        self,
+        goals: List[str],
+        experience_level: str
+    ) -> Dict:
+        """Define success metrics for the personalized flow"""
+        metrics = {
+            "completion_threshold": 80 if experience_level == "beginner" else 90,
+            "engagement_minimum": 5 if experience_level == "beginner" else 10,
+            "time_to_value_days": 14 if experience_level == "beginner" else 7,
+            "feature_adoption_target": 5 if experience_level == "beginner" else 10,
+            "goal_specific_metrics": {}
+        }
+
+        # Add goal-specific metrics
+        for goal in goals:
+            if goal == "increase_efficiency":
+                metrics['goal_specific_metrics'][goal] = {
+                    "automated_workflows": 3,
+                    "time_saved_hours": 5
+                }
+            elif goal == "grow_business":
+                metrics['goal_specific_metrics'][goal] = {
+                    "new_customers": 5,
+                    "revenue_generated": 1000
+                }
+
+        return metrics
+
+
 class OnboardingContentGenerator:
     """Generate dynamic onboarding content"""
 
@@ -1151,5 +1677,7 @@ __all__ = [
     'InterventionManager',
     'SuccessPredictor',
     'OnboardingContentGenerator',
+    'FeatureAdoptionTracker',
+    'PersonalizedOnboardingFlows',
     'get_ai_customer_onboarding'
 ]

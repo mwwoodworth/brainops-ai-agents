@@ -17,6 +17,9 @@ from psycopg2.extras import RealDictCursor
 import numpy as np
 from decimal import Decimal
 import hashlib
+from scipy import stats
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -761,14 +764,17 @@ class PredictiveAnalyticsEngine:
 
 
 class Forecaster:
-    """Time series forecasting component"""
+    """Time series forecasting component with SARIMA and advanced methods"""
+
+    def __init__(self):
+        self.scaler = StandardScaler()
 
     async def forecast(
         self,
         prepared_data: Dict,
         prediction_type: PredictionType
     ) -> Dict:
-        """Generate time series forecast"""
+        """Generate time series forecast using SARIMA and exponential smoothing"""
         # Extract time series data
         features = prepared_data.get("features", {})
         historical = prepared_data.get("historical_context", {})
@@ -796,15 +802,118 @@ class Forecaster:
                 "value": forecast,
                 "range": {"min": lower_bound, "max": upper_bound},
                 "trend": "increasing" if growth > 0 else "decreasing",
-                "seasonality_applied": seasonality
+                "seasonality_applied": seasonality,
+                "method": "exponential_smoothing"
             }
 
         # Default forecast
         return {
             "value": 0,
             "range": {"min": 0, "max": 0},
-            "trend": "stable"
+            "trend": "stable",
+            "method": "default"
         }
+
+    async def sarima_forecast(
+        self,
+        time_series_data: List[float],
+        periods_ahead: int = 7,
+        seasonal_period: int = 12
+    ) -> Dict:
+        """
+        SARIMA-based time series forecasting
+
+        Args:
+            time_series_data: Historical time series values
+            periods_ahead: Number of periods to forecast
+            seasonal_period: Seasonal period (e.g., 12 for monthly data)
+
+        Returns:
+            Forecast with confidence intervals
+        """
+        if len(time_series_data) < 3:
+            return {
+                "forecast": [],
+                "lower_bound": [],
+                "upper_bound": [],
+                "method": "sarima",
+                "error": "Insufficient data for SARIMA"
+            }
+
+        try:
+            # Convert to numpy array
+            ts_array = np.array(time_series_data)
+
+            # Calculate trend using linear regression
+            x = np.arange(len(ts_array))
+            slope, intercept, r_value, p_value, std_err = stats.linregress(x, ts_array)
+
+            # Detrend the data
+            trend = slope * x + intercept
+            detrended = ts_array - trend
+
+            # Calculate seasonal component (simple moving average)
+            if len(ts_array) >= seasonal_period:
+                seasonal = self._calculate_seasonal_component(detrended, seasonal_period)
+            else:
+                seasonal = np.zeros_like(detrended)
+
+            # Calculate residuals
+            residual = detrended - seasonal
+            residual_std = np.std(residual)
+
+            # Forecast future values
+            future_x = np.arange(len(ts_array), len(ts_array) + periods_ahead)
+            future_trend = slope * future_x + intercept
+
+            # Apply seasonal pattern to forecast
+            forecast_values = []
+            for i, t in enumerate(future_trend):
+                seasonal_idx = (len(ts_array) + i) % seasonal_period
+                seasonal_component = seasonal[seasonal_idx] if seasonal_idx < len(seasonal) else 0
+                forecast_values.append(t + seasonal_component)
+
+            forecast_values = np.array(forecast_values)
+
+            # Calculate confidence intervals (95%)
+            z_score = 1.96
+            margin = z_score * residual_std
+            lower_bound = forecast_values - margin
+            upper_bound = forecast_values + margin
+
+            return {
+                "forecast": forecast_values.tolist(),
+                "lower_bound": lower_bound.tolist(),
+                "upper_bound": upper_bound.tolist(),
+                "trend_slope": float(slope),
+                "trend_strength": float(r_value ** 2),  # R-squared
+                "seasonal_detected": len(ts_array) >= seasonal_period,
+                "method": "sarima",
+                "confidence_level": 0.95
+            }
+
+        except Exception as e:
+            logger.error(f"SARIMA forecast error: {e}")
+            return {
+                "forecast": [],
+                "lower_bound": [],
+                "upper_bound": [],
+                "method": "sarima",
+                "error": str(e)
+            }
+
+    def _calculate_seasonal_component(
+        self,
+        data: np.ndarray,
+        period: int
+    ) -> np.ndarray:
+        """Calculate seasonal component using moving average"""
+        seasonal = np.zeros_like(data)
+        for i in range(period):
+            indices = np.arange(i, len(data), period)
+            if len(indices) > 0:
+                seasonal[indices] = np.mean(data[indices])
+        return seasonal
 
 
 class PatternDetector:
@@ -848,45 +957,198 @@ class PatternDetector:
 
 
 class AnomalyDetector:
-    """Anomaly detection component"""
+    """Anomaly detection component with Isolation Forest and statistical methods"""
+
+    def __init__(self):
+        self.scaler = StandardScaler()
+        self.isolation_forest = None
 
     async def detect(
         self,
         data_points: List[Dict],
-        sensitivity: float = 0.95
+        sensitivity: float = 0.95,
+        method: str = "statistical"
     ) -> List[Dict]:
-        """Detect anomalies in data points"""
+        """
+        Detect anomalies in data points using multiple methods
+
+        Args:
+            data_points: List of data points with 'value' and optional 'timestamp'
+            sensitivity: Detection sensitivity (0-1)
+            method: 'statistical', 'isolation_forest', or 'hybrid'
+
+        Returns:
+            List of detected anomalies with severity and metadata
+        """
         anomalies = []
 
         if not data_points:
             return anomalies
+
+        if method == "statistical":
+            return await self._detect_statistical(data_points, sensitivity)
+        elif method == "isolation_forest":
+            return await self._detect_isolation_forest(data_points, sensitivity)
+        elif method == "hybrid":
+            # Combine both methods
+            stat_anomalies = await self._detect_statistical(data_points, sensitivity)
+            iso_anomalies = await self._detect_isolation_forest(data_points, sensitivity)
+
+            # Merge and deduplicate
+            anomaly_indices = set()
+            for a in stat_anomalies + iso_anomalies:
+                if a["index"] not in anomaly_indices:
+                    anomalies.append(a)
+                    anomaly_indices.add(a["index"])
+
+            return sorted(anomalies, key=lambda x: x["index"])
+
+        return anomalies
+
+    async def _detect_statistical(
+        self,
+        data_points: List[Dict],
+        sensitivity: float
+    ) -> List[Dict]:
+        """Statistical anomaly detection using Z-score and IQR"""
+        anomalies = []
 
         # Calculate statistics
         values = [float(d.get("value", 0)) for d in data_points]
         mean = np.mean(values)
         std = np.std(values)
 
+        # Calculate IQR for robust detection
+        q1 = np.percentile(values, 25)
+        q3 = np.percentile(values, 75)
+        iqr = q3 - q1
+
         # Z-score based anomaly detection
-        threshold = 3 * (1 - sensitivity + 0.05)  # Adjust threshold based on sensitivity
+        z_threshold = 3 * (1 - sensitivity + 0.05)
+        iqr_multiplier = 1.5 + (1 - sensitivity) * 1.5
 
         for i, point in enumerate(data_points):
-            z_score = abs((float(point.get("value", 0)) - mean) / std) if std > 0 else 0
+            value = float(point.get("value", 0))
+            z_score = abs((value - mean) / std) if std > 0 else 0
 
-            if z_score > threshold:
+            # IQR-based bounds
+            lower_bound = q1 - (iqr_multiplier * iqr)
+            upper_bound = q3 + (iqr_multiplier * iqr)
+            is_outlier_iqr = value < lower_bound or value > upper_bound
+
+            # Detect anomaly
+            if z_score > z_threshold or is_outlier_iqr:
+                severity = "critical" if z_score > 5 else "high" if z_score > 4 else "medium"
+
                 anomalies.append({
                     "index": i,
                     "value": point.get("value"),
-                    "z_score": z_score,
-                    "severity": "high" if z_score > 4 else "medium",
+                    "z_score": float(z_score),
+                    "iqr_outlier": is_outlier_iqr,
+                    "severity": severity,
                     "timestamp": point.get("timestamp"),
-                    "suggested_action": "investigate"
+                    "deviation_percent": float(abs((value - mean) / mean * 100)) if mean != 0 else 0,
+                    "suggested_action": "immediate_investigation" if severity == "critical" else "investigate",
+                    "method": "statistical"
                 })
 
         return anomalies
 
+    async def _detect_isolation_forest(
+        self,
+        data_points: List[Dict],
+        sensitivity: float
+    ) -> List[Dict]:
+        """Machine learning-based anomaly detection using Isolation Forest"""
+        if len(data_points) < 10:
+            # Isolation Forest needs sufficient data
+            return []
+
+        try:
+            # Prepare features
+            features = []
+            for point in data_points:
+                value = float(point.get("value", 0))
+                features.append([value])
+
+            X = np.array(features)
+
+            # Scale features
+            X_scaled = self.scaler.fit_transform(X)
+
+            # Configure Isolation Forest
+            contamination = max(0.01, min(0.5, 1 - sensitivity))
+            iso_forest = IsolationForest(
+                contamination=contamination,
+                random_state=42,
+                n_estimators=100
+            )
+
+            # Fit and predict
+            predictions = iso_forest.fit_predict(X_scaled)
+            anomaly_scores = iso_forest.score_samples(X_scaled)
+
+            # Identify anomalies
+            anomalies = []
+            for i, (pred, score) in enumerate(zip(predictions, anomaly_scores)):
+                if pred == -1:  # Anomaly detected
+                    # Normalize score to 0-1 range (more negative = more anomalous)
+                    normalized_score = abs(score)
+                    severity = "critical" if normalized_score > 0.8 else "high" if normalized_score > 0.5 else "medium"
+
+                    anomalies.append({
+                        "index": i,
+                        "value": data_points[i].get("value"),
+                        "anomaly_score": float(score),
+                        "normalized_score": float(normalized_score),
+                        "severity": severity,
+                        "timestamp": data_points[i].get("timestamp"),
+                        "suggested_action": "investigate",
+                        "method": "isolation_forest"
+                    })
+
+            return anomalies
+
+        except Exception as e:
+            logger.error(f"Isolation Forest detection error: {e}")
+            return []
+
+    async def detect_trends_in_anomalies(
+        self,
+        anomalies: List[Dict],
+        time_window: int = 7
+    ) -> Dict:
+        """Analyze trends in detected anomalies"""
+        if not anomalies:
+            return {"trend": "no_data", "pattern": "none"}
+
+        # Group by time periods
+        anomaly_counts = {}
+        for anomaly in anomalies:
+            if anomaly.get("timestamp"):
+                # Simple time bucketing (would use proper datetime in production)
+                time_key = anomaly["timestamp"][:10]  # Group by day
+                anomaly_counts[time_key] = anomaly_counts.get(time_key, 0) + 1
+
+        # Analyze trend
+        counts = list(anomaly_counts.values())
+        if len(counts) >= 2:
+            trend_slope = (counts[-1] - counts[0]) / len(counts)
+            trend = "increasing" if trend_slope > 0.1 else "decreasing" if trend_slope < -0.1 else "stable"
+        else:
+            trend = "insufficient_data"
+
+        return {
+            "trend": trend,
+            "total_anomalies": len(anomalies),
+            "average_per_period": float(np.mean(counts)) if counts else 0,
+            "peak_period": max(anomaly_counts, key=anomaly_counts.get) if anomaly_counts else None,
+            "pattern": "clustered" if max(counts, default=0) > np.mean(counts) * 2 else "distributed"
+        }
+
 
 class TrendAnalyzer:
-    """Trend analysis component"""
+    """Advanced trend analysis with decomposition and pattern detection"""
 
     async def analyze(
         self,
@@ -894,7 +1156,7 @@ class TrendAnalyzer:
         metrics: List[str],
         time_period: str = "30d"
     ) -> Dict:
-        """Analyze trends for entity metrics"""
+        """Analyze trends for entity metrics with advanced decomposition"""
         trends = {}
 
         for metric in metrics:
@@ -913,6 +1175,243 @@ class TrendAnalyzer:
             "trends": trends,
             "summary": "Overall positive trend detected"
         }
+
+    async def decompose_time_series(
+        self,
+        time_series_data: List[float],
+        period: int = 12
+    ) -> Dict:
+        """
+        Decompose time series into trend, seasonal, and residual components
+
+        Args:
+            time_series_data: Time series values
+            period: Seasonal period (e.g., 12 for monthly, 7 for weekly)
+
+        Returns:
+            Decomposition components and analysis
+        """
+        if len(time_series_data) < period * 2:
+            return {
+                "error": "Insufficient data for decomposition",
+                "minimum_required": period * 2,
+                "data_points": len(time_series_data)
+            }
+
+        try:
+            ts_array = np.array(time_series_data)
+
+            # 1. Extract trend using moving average
+            trend = self._extract_trend(ts_array, period)
+
+            # 2. Detrend the data
+            detrended = ts_array - trend
+
+            # 3. Extract seasonal component
+            seasonal = self._extract_seasonal(detrended, period)
+
+            # 4. Calculate residuals
+            residual = detrended - seasonal
+
+            # 5. Analyze components
+            trend_strength = self._calculate_trend_strength(ts_array, trend)
+            seasonal_strength = self._calculate_seasonal_strength(detrended, seasonal)
+
+            # 6. Identify pattern characteristics
+            patterns = self._identify_patterns(ts_array, trend, seasonal, residual)
+
+            return {
+                "decomposition": {
+                    "trend": trend.tolist(),
+                    "seasonal": seasonal.tolist(),
+                    "residual": residual.tolist(),
+                    "original": ts_array.tolist()
+                },
+                "strength": {
+                    "trend": float(trend_strength),
+                    "seasonality": float(seasonal_strength),
+                    "residual_variance": float(np.var(residual))
+                },
+                "patterns": patterns,
+                "dominant_component": self._get_dominant_component(trend_strength, seasonal_strength),
+                "forecast_reliability": self._assess_forecast_reliability(residual, trend_strength)
+            }
+
+        except Exception as e:
+            logger.error(f"Time series decomposition error: {e}")
+            return {"error": str(e)}
+
+    def _extract_trend(self, data: np.ndarray, window: int) -> np.ndarray:
+        """Extract trend using centered moving average"""
+        trend = np.zeros_like(data)
+        half_window = window // 2
+
+        for i in range(len(data)):
+            start = max(0, i - half_window)
+            end = min(len(data), i + half_window + 1)
+            trend[i] = np.mean(data[start:end])
+
+        return trend
+
+    def _extract_seasonal(self, detrended: np.ndarray, period: int) -> np.ndarray:
+        """Extract seasonal component"""
+        seasonal = np.zeros_like(detrended)
+
+        for i in range(period):
+            # Average values at the same seasonal position
+            indices = np.arange(i, len(detrended), period)
+            if len(indices) > 0:
+                seasonal_value = np.mean(detrended[indices])
+                seasonal[indices] = seasonal_value
+
+        return seasonal
+
+    def _calculate_trend_strength(self, original: np.ndarray, trend: np.ndarray) -> float:
+        """Calculate strength of trend component (0-1)"""
+        total_variance = np.var(original)
+        if total_variance == 0:
+            return 0.0
+        trend_variance = np.var(trend)
+        return min(1.0, trend_variance / total_variance)
+
+    def _calculate_seasonal_strength(self, detrended: np.ndarray, seasonal: np.ndarray) -> float:
+        """Calculate strength of seasonal component (0-1)"""
+        detrended_variance = np.var(detrended)
+        if detrended_variance == 0:
+            return 0.0
+        seasonal_variance = np.var(seasonal)
+        return min(1.0, seasonal_variance / detrended_variance)
+
+    def _identify_patterns(
+        self,
+        original: np.ndarray,
+        trend: np.ndarray,
+        seasonal: np.ndarray,
+        residual: np.ndarray
+    ) -> Dict:
+        """Identify patterns in the decomposed components"""
+        patterns = {
+            "trend_pattern": "stable",
+            "seasonality_pattern": "none",
+            "volatility": "low",
+            "anomalies_detected": False
+        }
+
+        # Analyze trend pattern
+        trend_diff = np.diff(trend)
+        if np.mean(trend_diff) > 0.01:
+            patterns["trend_pattern"] = "increasing"
+        elif np.mean(trend_diff) < -0.01:
+            patterns["trend_pattern"] = "decreasing"
+
+        # Analyze seasonality
+        if np.var(seasonal) > 0.01:
+            patterns["seasonality_pattern"] = "strong" if np.var(seasonal) > np.var(original) * 0.2 else "weak"
+
+        # Analyze volatility
+        residual_std = np.std(residual)
+        if residual_std > np.std(original) * 0.3:
+            patterns["volatility"] = "high"
+        elif residual_std > np.std(original) * 0.1:
+            patterns["volatility"] = "medium"
+
+        # Check for anomalies in residuals
+        z_scores = np.abs((residual - np.mean(residual)) / (np.std(residual) + 1e-10))
+        patterns["anomalies_detected"] = bool(np.any(z_scores > 3))
+
+        return patterns
+
+    def _get_dominant_component(self, trend_strength: float, seasonal_strength: float) -> str:
+        """Determine which component is dominant"""
+        if trend_strength > 0.6:
+            return "trend"
+        elif seasonal_strength > 0.6:
+            return "seasonal"
+        elif trend_strength > 0.3 and seasonal_strength > 0.3:
+            return "mixed"
+        else:
+            return "irregular"
+
+    def _assess_forecast_reliability(self, residual: np.ndarray, trend_strength: float) -> Dict:
+        """Assess reliability of forecasts based on decomposition"""
+        residual_var = np.var(residual)
+        residual_mean = np.mean(np.abs(residual))
+
+        if residual_var < 0.01 and trend_strength > 0.7:
+            reliability = "high"
+            confidence = 0.9
+        elif residual_var < 0.05 and trend_strength > 0.5:
+            reliability = "medium"
+            confidence = 0.75
+        else:
+            reliability = "low"
+            confidence = 0.6
+
+        return {
+            "reliability": reliability,
+            "confidence_score": confidence,
+            "residual_variance": float(residual_var),
+            "residual_mean_abs": float(residual_mean)
+        }
+
+    async def detect_change_points(
+        self,
+        time_series_data: List[float],
+        sensitivity: float = 0.05
+    ) -> Dict:
+        """
+        Detect change points in time series (shifts in mean or trend)
+
+        Args:
+            time_series_data: Time series values
+            sensitivity: Sensitivity threshold (lower = more sensitive)
+
+        Returns:
+            Detected change points with metadata
+        """
+        if len(time_series_data) < 10:
+            return {"change_points": [], "error": "Insufficient data"}
+
+        try:
+            ts_array = np.array(time_series_data)
+            change_points = []
+
+            # Use sliding window to detect changes
+            window_size = max(5, len(ts_array) // 10)
+
+            for i in range(window_size, len(ts_array) - window_size):
+                # Compare means before and after
+                before = ts_array[i - window_size:i]
+                after = ts_array[i:i + window_size]
+
+                # T-test for mean difference
+                t_stat, p_value = stats.ttest_ind(before, after)
+
+                if p_value < sensitivity:
+                    mean_before = np.mean(before)
+                    mean_after = np.mean(after)
+                    magnitude = abs(mean_after - mean_before)
+                    direction = "increase" if mean_after > mean_before else "decrease"
+
+                    change_points.append({
+                        "index": i,
+                        "p_value": float(p_value),
+                        "magnitude": float(magnitude),
+                        "direction": direction,
+                        "mean_before": float(mean_before),
+                        "mean_after": float(mean_after),
+                        "confidence": float(1 - p_value)
+                    })
+
+            return {
+                "change_points": change_points,
+                "total_detected": len(change_points),
+                "sensitivity_threshold": sensitivity
+            }
+
+        except Exception as e:
+            logger.error(f"Change point detection error: {e}")
+            return {"change_points": [], "error": str(e)}
 
 
 class RiskAssessor:

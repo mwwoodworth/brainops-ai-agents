@@ -61,12 +61,32 @@ class EdgeType(Enum):
     REFERENCES = "references"        # Concept references Concept
     PERFORMED_BY = "performed_by"    # Job performed by Agent
 
+class EntityType(Enum):
+    """Types of entities that can be extracted"""
+    PERSON = "person"
+    ORGANIZATION = "organization"
+    LOCATION = "location"
+    PRODUCT = "product"
+    SERVICE = "service"
+    TECHNOLOGY = "technology"
+    METRIC = "metric"
+    EVENT = "event"
+    TIMESTAMP = "timestamp"
+    MONEY = "money"
+
 class KnowledgeExtractor:
     """Extract knowledge from system interactions"""
 
     def __init__(self):
         self.extraction_patterns = {}
         self.entity_cache = {}
+        self.relationship_patterns = {
+            "customer_owns_job": r"customer.*(?:owns|has|purchased).*job",
+            "agent_executed": r"agent.*(?:executed|performed|completed).*(?:task|workflow)",
+            "caused_by": r"(?:caused by|due to|because of)",
+            "resulted_in": r"(?:resulted in|led to|produced)",
+            "depends_on": r"(?:depends on|requires|needs)",
+        }
 
     async def extract_from_executions(
         self,
@@ -129,8 +149,9 @@ class KnowledgeExtractor:
         }
         items.append(agent_node)
 
-        # Extract concepts from prompt
+        # Extract entities from prompt
         if execution.get('prompt'):
+            # Extract concepts
             concepts = self._extract_concepts(execution['prompt'])
             for concept in concepts:
                 items.append({
@@ -139,6 +160,33 @@ class KnowledgeExtractor:
                     "properties": {
                         "source": "prompt",
                         "execution_id": execution['id']
+                    }
+                })
+
+            # Extract entities with NER
+            entities = self.extract_entities(execution['prompt'])
+            for entity in entities:
+                items.append({
+                    "type": NodeType.CONCEPT.value,
+                    "name": f"{entity['type']}:{entity['value']}",
+                    "properties": {
+                        "entity_type": entity['type'],
+                        "entity_value": entity['value'],
+                        "source": "entity_extraction",
+                        "execution_id": execution['id']
+                    }
+                })
+
+            # Extract relationships
+            relationships = self.extract_relationships(execution['prompt'], entities)
+            for rel in relationships:
+                items.append({
+                    "type": NodeType.PATTERN.value,
+                    "name": f"relationship:{rel['type']}",
+                    "properties": {
+                        "relationship_type": rel['type'],
+                        "context": rel.get('context', ''),
+                        "confidence": rel.get('confidence', 0.5)
                     }
                 })
 
@@ -153,6 +201,96 @@ class KnowledgeExtractor:
                 })
 
         return items
+
+    def extract_entities(self, text: str) -> List[Dict]:
+        """Extract entities from text with NER-like functionality"""
+        entities = []
+        import re
+
+        # Extract monetary values
+        money_pattern = r'\$[\d,]+(?:\.\d{2})?'
+        for match in re.finditer(money_pattern, text):
+            entities.append({
+                "type": EntityType.MONEY.value,
+                "value": match.group(),
+                "position": match.span()
+            })
+
+        # Extract dates and timestamps
+        date_pattern = r'\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4}'
+        for match in re.finditer(date_pattern, text):
+            entities.append({
+                "type": EntityType.TIMESTAMP.value,
+                "value": match.group(),
+                "position": match.span()
+            })
+
+        # Extract metrics (percentages, numbers with units)
+        metric_pattern = r'\d+(?:\.\d+)?(?:%|GB|MB|KB|hours?|days?|minutes?)'
+        for match in re.finditer(metric_pattern, text):
+            entities.append({
+                "type": EntityType.METRIC.value,
+                "value": match.group(),
+                "position": match.span()
+            })
+
+        # Extract technology terms
+        tech_terms = ['AI', 'API', 'database', 'PostgreSQL', 'Python', 'FastAPI', 'LangChain', 'OpenAI']
+        for term in tech_terms:
+            if term in text:
+                entities.append({
+                    "type": EntityType.TECHNOLOGY.value,
+                    "value": term,
+                    "context": text
+                })
+
+        # Extract business entities
+        business_patterns = {
+            EntityType.PRODUCT.value: r'(?:product|service|package):\s*([A-Z][a-zA-Z\s]+)',
+            EntityType.EVENT.value: r'(?:event|meeting|call):\s*([A-Z][a-zA-Z\s]+)',
+        }
+
+        for entity_type, pattern in business_patterns.items():
+            for match in re.finditer(pattern, text):
+                entities.append({
+                    "type": entity_type,
+                    "value": match.group(1).strip(),
+                    "position": match.span()
+                })
+
+        return entities
+
+    def extract_relationships(self, text: str, entities: List[Dict]) -> List[Dict]:
+        """Extract relationships between entities"""
+        relationships = []
+        import re
+
+        # Pattern-based relationship extraction
+        for rel_type, pattern in self.relationship_patterns.items():
+            matches = re.finditer(pattern, text.lower())
+            for match in matches:
+                relationships.append({
+                    "type": rel_type,
+                    "context": match.group(),
+                    "position": match.span(),
+                    "confidence": 0.7
+                })
+
+        # Entity proximity-based relationships
+        for i, entity1 in enumerate(entities):
+            for entity2 in entities[i+1:]:
+                if 'position' in entity1 and 'position' in entity2:
+                    distance = abs(entity1['position'][0] - entity2['position'][0])
+                    if distance < 50:  # Within 50 characters
+                        relationships.append({
+                            "type": "related_to",
+                            "source": entity1,
+                            "target": entity2,
+                            "distance": distance,
+                            "confidence": max(0.3, 1.0 - (distance / 100))
+                        })
+
+        return relationships
 
     def _extract_concepts(self, text: str) -> List[str]:
         """Extract concepts from text"""
@@ -525,10 +663,22 @@ class KnowledgeGraphBuilder:
             raise
 
 class KnowledgeQueryEngine:
-    """Query and traverse knowledge graph"""
+    """Query and traverse knowledge graph with vector embeddings support"""
 
     def __init__(self):
         self.graph = None
+        self.embedding_cache = {}
+        self.openai_client = None
+
+        # Initialize OpenAI for semantic queries
+        try:
+            import openai
+            api_key = os.getenv("OPENAI_API_KEY")
+            if api_key:
+                from openai import OpenAI
+                self.openai_client = OpenAI(api_key=api_key)
+        except Exception as e:
+            logger.warning(f"OpenAI not available for semantic queries: {e}")
 
     async def load_graph(self) -> nx.DiGraph:
         """Load graph from database"""
@@ -661,8 +811,89 @@ class KnowledgeQueryEngine:
 
         return related
 
+    async def semantic_query(self, query_text: str, limit: int = 10) -> List[Dict]:
+        """Perform semantic search using vector embeddings"""
+        if not self.openai_client:
+            logger.warning("OpenAI not available, falling back to keyword search")
+            return await self.keyword_search(query_text, limit)
+
+        try:
+            # Generate query embedding
+            response = self.openai_client.embeddings.create(
+                model="text-embedding-3-small",
+                input=query_text
+            )
+            query_embedding = response.data[0].embedding
+
+            # Load graph with embeddings
+            if not self.graph:
+                await self.load_graph()
+
+            # Search in database for vector similarity
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
+
+            cursor.execute("""
+                SELECT
+                    id, node_type, name, properties,
+                    1 - (embedding <=> %s::vector) as similarity
+                FROM ai_knowledge_nodes
+                WHERE embedding IS NOT NULL
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+            """, (embedding_str, embedding_str, limit))
+
+            results = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            return [{
+                "id": r['id'],
+                "type": r['node_type'],
+                "name": r['name'],
+                "properties": r['properties'],
+                "similarity": float(r['similarity'])
+            } for r in results]
+
+        except Exception as e:
+            logger.error(f"Semantic query failed: {e}")
+            return []
+
+    async def keyword_search(self, query_text: str, limit: int = 10) -> List[Dict]:
+        """Fallback keyword-based search"""
+        if not self.graph:
+            await self.load_graph()
+
+        results = []
+        query_lower = query_text.lower()
+
+        for node_id, data in self.graph.nodes(data=True):
+            score = 0
+            if query_lower in data.get('name', '').lower():
+                score += 1.0
+
+            # Check properties
+            props = {k: v for k, v in data.items() if k not in ['name', 'type']}
+            for value in props.values():
+                if isinstance(value, str) and query_lower in value.lower():
+                    score += 0.5
+
+            if score > 0:
+                results.append({
+                    "id": node_id,
+                    "type": data.get('type'),
+                    "name": data.get('name'),
+                    "properties": props,
+                    "score": score
+                })
+
+        results.sort(key=lambda x: x['score'], reverse=True)
+        return results[:limit]
+
     async def get_insights(self) -> List[Dict]:
-        """Extract insights from graph structure"""
+        """Extract insights from graph structure with pattern recognition"""
         if not self.graph:
             await self.load_graph()
 
@@ -679,10 +910,11 @@ class KnowledgeQueryEngine:
                     "type": "hub_node",
                     "title": f"Key {node_data['type']}: {node_data['name']}",
                     "description": f"Central to {int(centrality * 100)}% of relationships",
-                    "importance": centrality
+                    "importance": centrality,
+                    "recommendation": f"Focus on maintaining and expanding connections for {node_data['name']}"
                 })
 
-        # Find clusters
+        # Find clusters and communities
         if self.graph.number_of_nodes() > 10:
             components = list(nx.weakly_connected_components(self.graph))
             if len(components) > 1:
@@ -690,10 +922,11 @@ class KnowledgeQueryEngine:
                     "type": "clustering",
                     "title": f"Knowledge organized in {len(components)} clusters",
                     "description": f"Largest cluster has {max(len(c) for c in components)} nodes",
-                    "importance": 0.7
+                    "importance": 0.7,
+                    "recommendation": "Consider building bridges between isolated knowledge clusters"
                 })
 
-        # Find patterns
+        # Find patterns and trends
         node_types = defaultdict(int)
         for _, data in self.graph.nodes(data=True):
             node_types[data['type']] += 1
@@ -703,8 +936,58 @@ class KnowledgeQueryEngine:
             "type": "pattern",
             "title": f"Knowledge focus: {dominant_type[0]}",
             "description": f"{dominant_type[1]} nodes of this type ({int(dominant_type[1]/self.graph.number_of_nodes()*100)}%)",
-            "importance": 0.5
+            "importance": 0.5,
+            "recommendation": f"Diversify knowledge base by adding more varied node types"
         })
+
+        # Detect knowledge gaps
+        edge_types = defaultdict(int)
+        for _, _, edge_data in self.graph.edges(data=True):
+            edge_types[edge_data.get('type', 'unknown')] += 1
+
+        if len(edge_types) < 3:
+            insights.append({
+                "type": "knowledge_gap",
+                "title": "Limited relationship diversity",
+                "description": f"Only {len(edge_types)} relationship types found",
+                "importance": 0.6,
+                "recommendation": "Capture more diverse interactions to enrich knowledge graph"
+            })
+
+        # Identify trending patterns
+        try:
+            # Get temporal patterns
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            cursor.execute("""
+                SELECT
+                    node_type,
+                    COUNT(*) as count,
+                    DATE_TRUNC('day', created_at) as day
+                FROM ai_knowledge_nodes
+                WHERE created_at > NOW() - INTERVAL '7 days'
+                GROUP BY node_type, DATE_TRUNC('day', created_at)
+                ORDER BY day DESC, count DESC
+            """)
+
+            temporal_data = cursor.fetchall()
+            if temporal_data:
+                recent_type = temporal_data[0]['node_type']
+                recent_count = temporal_data[0]['count']
+
+                insights.append({
+                    "type": "trend",
+                    "title": f"Trending knowledge type: {recent_type}",
+                    "description": f"{recent_count} new nodes in the last day",
+                    "importance": 0.8,
+                    "recommendation": f"Monitor {recent_type} growth and ensure quality"
+                })
+
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error detecting trends: {e}")
 
         return insights
 
