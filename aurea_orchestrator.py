@@ -886,12 +886,23 @@ class AUREA:
             logger.warning(f"Could not apply learning insight: {e}")
 
     async def _self_heal(self):
-        """Detect and fix system issues"""
-        if self.system_health and self.system_health.overall_score < 70:
-            logger.warning(f"⚕️ System health low: {self.system_health.overall_score}")
+        """
+        Detect and fix system issues with MCP-powered auto-remediation.
 
-            # Attempt healing actions
-            healing_actions = []
+        This is a KEY force multiplier - the system uses its own infrastructure
+        tools (MCP Bridge) to heal itself, creating autonomous operations.
+        """
+        if not self.system_health:
+            return
+
+        healing_actions = []
+        mcp_actions = []  # Actions that require MCP Bridge
+
+        # =========================================================================
+        # RULE 1: Low overall health (<70) - Internal fixes first
+        # =========================================================================
+        if self.system_health.overall_score < 70:
+            logger.warning(f"⚕️ System health low: {self.system_health.overall_score}")
 
             if self.system_health.error_rate > 0.1:
                 healing_actions.append("restart_failed_agents")
@@ -902,8 +913,91 @@ class AUREA:
             if self.system_health.decision_backlog > 10:
                 healing_actions.append("clear_decision_backlog")
 
-            for action in healing_actions:
-                await self._execute_healing_action(action)
+        # =========================================================================
+        # RULE 2: Critical error rate (>20%) - Trigger service restart via MCP
+        # =========================================================================
+        if self.system_health.error_rate > 0.2:
+            logger.critical(f"🚨 Critical error rate: {self.system_health.error_rate*100:.1f}%")
+            mcp_actions.append({
+                "action": "mcp:render:restart_service",
+                "reason": f"Critical error rate {self.system_health.error_rate*100:.1f}%",
+                "params": {"service_id": "srv-d0ulv1idbo4c73apd4t0"}  # AI Agents service
+            })
+
+        # =========================================================================
+        # RULE 3: Very low health (<50) - Scale up services
+        # =========================================================================
+        if self.system_health.overall_score < 50:
+            logger.critical(f"🚨 Very low health: {self.system_health.overall_score}")
+            mcp_actions.append({
+                "action": "mcp:render:scale_service",
+                "reason": f"Health score critical: {self.system_health.overall_score}",
+                "params": {"num_instances": 2}
+            })
+
+        # =========================================================================
+        # RULE 4: Performance score very low (<40) - Consider rollback
+        # =========================================================================
+        if self.system_health.performance_score < 40:
+            logger.warning(f"⚠️ Performance degraded: {self.system_health.performance_score}")
+            # Check if this started recently (after a deployment)
+            # For now, log it for human review
+            mcp_actions.append({
+                "action": "mcp:supabase:execute_sql",
+                "reason": "Log performance alert",
+                "params": {
+                    "query": f"""
+                        INSERT INTO ai_system_alerts (alert_type, severity, message, component, created_at)
+                        VALUES ('performance_degraded', 'high',
+                                'Performance score: {self.system_health.performance_score}',
+                                'aurea_orchestrator', NOW())
+                    """
+                }
+            })
+
+        # =========================================================================
+        # RULE 5: Memory pressure - Notify and potentially scale
+        # =========================================================================
+        if self.system_health.memory_utilization > 0.85:
+            logger.warning(f"⚠️ High memory: {self.system_health.memory_utilization*100:.1f}%")
+            # First try internal consolidation
+            healing_actions.append("consolidate_memory")
+            # If still high, might need infrastructure action
+            if self.system_health.memory_utilization > 0.95:
+                mcp_actions.append({
+                    "action": "mcp:render:restart_service",
+                    "reason": f"Memory exhaustion: {self.system_health.memory_utilization*100:.1f}%",
+                    "params": {"service_id": "srv-d0ulv1idbo4c73apd4t0"}
+                })
+
+        # =========================================================================
+        # EXECUTE: Internal healing actions first, then MCP actions
+        # =========================================================================
+        for action in healing_actions:
+            await self._execute_healing_action(action)
+
+        for mcp_action in mcp_actions:
+            logger.info(f"🔧 Executing MCP auto-remediation: {mcp_action['action']} - {mcp_action['reason']}")
+            result = await self._execute_mcp_action(mcp_action["action"])
+            # Log the remediation attempt
+            try:
+                conn = psycopg2.connect(**DB_CONFIG)
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO remediation_history
+                    (incident_type, component, action_taken, success, recovery_time_seconds)
+                    VALUES (%s, %s, %s, %s, 0)
+                """, (
+                    mcp_action["reason"][:100],
+                    "aurea_orchestrator",
+                    mcp_action["action"],
+                    result.get("success", False)
+                ))
+                conn.commit()
+                cur.close()
+                conn.close()
+            except Exception as e:
+                logger.error(f"Failed to log remediation: {e}")
 
     async def _execute_healing_action(self, action: str):
         """Execute a specific healing action"""
