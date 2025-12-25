@@ -209,7 +209,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.11.1"  # Service recovery - scheduler restart
+VERSION = "9.12.0"  # Stability optimization - reduced loop frequencies to prevent resource exhaustion
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -936,10 +936,10 @@ async def lifespan(app: FastAPI):
                         except Exception as heal_error:
                             logger.error(f"Self-healing detection failed: {heal_error}")
 
-                await asyncio.sleep(60)  # Check every minute
+                await asyncio.sleep(120)  # Check every 2 minutes (optimized for stability)
             except Exception as e:
                 logger.error(f"Health monitoring error: {e}")
-                await asyncio.sleep(30)
+                await asyncio.sleep(60)  # Back off on errors
 
     asyncio.create_task(health_monitoring_loop())
     logger.info("💓 Health monitoring loop STARTED")
