@@ -111,8 +111,8 @@ class RealAICore:
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=self.gemini_key)
-                self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
-                logger.info("Gemini AI initialized - powerful fallback available")
+                self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+                logger.info("Gemini 2.0 Flash initialized - powerful fallback available")
             except Exception as e:
                 logger.warning(f"Gemini initialization failed: {e}")
         else:

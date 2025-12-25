@@ -29,6 +29,7 @@ from psycopg2.extras import RealDictCursor
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -43,13 +44,18 @@ DB_CONFIG = {
 
 
 def json_safe_serialize(obj: Any) -> Any:
-    """Recursively convert datetime/Decimal/UUID objects to JSON-serializable types"""
+    """Recursively convert datetime/Decimal/UUID/Enum objects to JSON-serializable types"""
     if isinstance(obj, datetime):
         return obj.isoformat()
     elif isinstance(obj, Decimal):
         return float(obj)
+    elif isinstance(obj, Enum):
+        return obj.value
     elif isinstance(obj, uuid.UUID):
         return str(obj)
+    elif hasattr(obj, '__dataclass_fields__'):
+        # Handle dataclasses
+        return {k: json_safe_serialize(v) for k, v in obj.__dict__.items()}
     elif isinstance(obj, dict):
         return {k: json_safe_serialize(v) for k, v in obj.items()}
     elif isinstance(obj, list):

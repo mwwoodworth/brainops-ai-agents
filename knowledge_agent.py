@@ -52,8 +52,8 @@ class KnowledgeAgent:
 
         if GEMINI_AVAILABLE and os.getenv("GOOGLE_API_KEY"):
             genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-            self.gemini_model = genai.GenerativeModel('gemini-1.5-flash-002')
-            logger.info("✅ Gemini model initialized for Q&A")
+            self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+            logger.info("✅ Gemini 2.0 Flash model initialized for Q&A")
 
     def get_db_connection(self):
         """Get database connection"""
