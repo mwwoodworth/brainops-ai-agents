@@ -153,6 +153,19 @@ except ImportError:
 
 from config import config
 
+# Customer Acquisition Agents
+try:
+    from customer_acquisition_agents import (
+        WebSearchAgent as AcqWebSearchAgent,
+        SocialMediaAgent as AcqSocialMediaAgent,
+        OutreachAgent as AcqOutreachAgent,
+        ConversionAgent as AcqConversionAgent
+    )
+    ACQUISITION_AGENTS_AVAILABLE = True
+except ImportError:
+    ACQUISITION_AGENTS_AVAILABLE = False
+    logger.warning("Customer acquisition agents not available")
+
 # Database configuration
 DB_CONFIG = {
     "host": config.database.host,
@@ -455,6 +468,14 @@ class AgentExecutor:
         self.agents['CustomerSuccess'] = CustomerSuccessAgentAdapter()
         self.agents['CompetitiveIntelligence'] = CompetitiveIntelligenceAgentAdapter()
         self.agents['VisionAlignment'] = VisionAlignmentAgentAdapter()
+
+        # Customer Acquisition Agents
+        if ACQUISITION_AGENTS_AVAILABLE:
+            self.agents['WebSearch'] = AcqWebSearchAgent()
+            self.agents['SocialMedia'] = AcqSocialMediaAgent()
+            self.agents['Outreach'] = AcqOutreachAgent()
+            self.agents['Conversion'] = AcqConversionAgent()
+            logger.info("Customer acquisition agents registered: WebSearch, SocialMedia, Outreach, Conversion")
 
     def _get_workflow_runner(self):
         """Lazily initialize LangGraph workflow runner with review loops."""
