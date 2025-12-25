@@ -508,7 +508,7 @@ class UnifiedMemoryManager:
     def _find_duplicate(self, memory: Memory) -> Optional[Dict]:
         """Find duplicate memory using content hash"""
         try:
-            content_str = json.dumps(memory.content, sort_keys=True)
+            content_str = json.dumps(memory.content, sort_keys=True, cls=CustomJSONEncoder)
             content_hash = hashlib.sha256(content_str.encode()).hexdigest()
 
             with self._get_cursor() as cur:
@@ -569,7 +569,7 @@ class UnifiedMemoryManager:
         3. Anthropic via voyage-3 (if available)
         4. Local sentence-transformers (last resort, always available)
         """
-        text_content = json.dumps(content, sort_keys=True)
+        text_content = json.dumps(content, sort_keys=True, cls=CustomJSONEncoder)
 
         # Try OpenAI first
         openai_key = os.getenv("OPENAI_API_KEY")
