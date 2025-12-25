@@ -264,13 +264,13 @@ class HealthMonitor:
             if cursor:
                 try:
                     cursor.close()
-                except Exception:
-                    pass
+                except Exception as cursor_err:
+                    logger.debug(f"Cursor close cleanup error (non-fatal): {cursor_err}")
             if conn:
                 try:
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as conn_err:
+                    logger.debug(f"Connection close cleanup error (non-fatal): {conn_err}")
     
     def get_service_status(self, service_name: str) -> Optional[ServiceHealth]:
         """Get current service status"""
@@ -455,13 +455,13 @@ class DataReplicator:
             if cursor:
                 try:
                     cursor.close()
-                except Exception:
-                    pass
+                except Exception as cursor_err:
+                    logger.debug(f"Cursor close cleanup error (non-fatal): {cursor_err}")
             if conn:
                 try:
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as conn_err:
+                    logger.debug(f"Connection close cleanup error (non-fatal): {conn_err}")
     
     def queue_replication(self, operation_type: str, query: str, params: tuple):
         """Queue data for replication"""
@@ -596,13 +596,13 @@ class FailoverManager:
             if cursor:
                 try:
                     cursor.close()
-                except Exception:
-                    pass
+                except Exception as cursor_err:
+                    logger.debug(f"Cursor close cleanup error (non-fatal): {cursor_err}")
             if conn:
                 try:
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as conn_err:
+                    logger.debug(f"Connection close cleanup error (non-fatal): {conn_err}")
     
     def get_current_endpoint(self, service_name: str) -> Optional[str]:
         """Get current active endpoint for service"""
@@ -699,13 +699,13 @@ class DisasterRecovery:
             if cursor:
                 try:
                     cursor.close()
-                except Exception:
-                    pass
+                except Exception as cursor_err:
+                    logger.debug(f"Cursor close cleanup error (non-fatal): {cursor_err}")
             if conn:
                 try:
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as conn_err:
+                    logger.debug(f"Connection close cleanup error (non-fatal): {conn_err}")
     
     async def _backup_configuration(self, service_name: str, backup_path: Path) -> Dict:
         """Backup service configuration"""
