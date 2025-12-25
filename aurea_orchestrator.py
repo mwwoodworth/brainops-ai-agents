@@ -1931,13 +1931,15 @@ class AUREA:
         ))
 
     def _calculate_sleep_time(self, observations: int, decisions: int) -> int:
-        """Calculate adaptive sleep time based on activity"""
+        """Calculate adaptive sleep time based on activity - OPTIMIZED for stability"""
+        # Minimum 60s between cycles to prevent resource exhaustion
+        base_interval = int(os.getenv("AUREA_CYCLE_INTERVAL", "60"))
         if observations == 0 and decisions == 0:
-            return 30  # Low activity, sleep longer
+            return base_interval * 2  # Low activity: 120s
         elif observations > 5 or decisions > 3:
-            return 5   # High activity, check frequently
+            return base_interval  # High activity: 60s
         else:
-            return 10  # Normal activity
+            return int(base_interval * 1.5)  # Normal activity: 90s
 
     async def _detect_patterns(self) -> List[Dict[str, Any]]:
         """Detect patterns from historical data and system behavior"""
