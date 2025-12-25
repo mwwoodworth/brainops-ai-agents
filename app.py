@@ -209,7 +209,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.10.0"  # Fixed database column names, JSON serialization, and Gemini model
+VERSION = "9.11.0"  # Fixed scheduler method, acquisition import, full system activation
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -2464,7 +2464,7 @@ async def activate_all_agents_scheduler():
                 """, agent_id, frequency)
 
                 # Add to scheduler
-                scheduler.add_agent_job(agent_id, agent_name, frequency)
+                scheduler.add_schedule(agent_id, agent_name, frequency)
                 scheduled_count += 1
                 logger.info(f"✅ Scheduled agent {agent_name} every {frequency} min")
 
