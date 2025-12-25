@@ -59,6 +59,7 @@ from api.mcp import router as mcp_router  # MCP Bridge Integration - 345 tools
 from api.cicd import router as cicd_router  # Autonomous CI/CD Management - 1-10K systems
 from api.a2ui import router as a2ui_router  # Google A2UI Protocol - Agent-to-User Interface
 from api.aurea_chat import router as aurea_chat_router  # AUREA Live Conversational Interface
+from api.observability import router as full_observability_router  # Comprehensive Observability Dashboard
 from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
 from observability import RequestMetrics, TTLCache
@@ -1097,6 +1098,7 @@ app.include_router(mcp_router, dependencies=SECURED_DEPENDENCIES)  # MCP Bridge 
 app.include_router(cicd_router, dependencies=SECURED_DEPENDENCIES)  # Autonomous CI/CD - manage 1-10K deployments
 app.include_router(a2ui_router, dependencies=SECURED_DEPENDENCIES)  # Google A2UI Protocol - Agent-generated UIs
 app.include_router(aurea_chat_router, dependencies=SECURED_DEPENDENCIES)  # AUREA Live Conversational AI
+app.include_router(full_observability_router, dependencies=SECURED_DEPENDENCIES)  # Comprehensive Observability Dashboard
 
 # Import and include analytics router
 try:
