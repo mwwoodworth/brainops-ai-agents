@@ -215,7 +215,7 @@ class SelfHealingReconciler:
         self.circuit_breaker = CircuitBreaker()
         self.active_incidents: Dict[str, Incident] = {}
         self.running = False
-        self.reconcile_interval = int(os.getenv("HEAL_INTERVAL_SECONDS", "60"))
+        self.reconcile_interval = int(os.getenv("HEAL_INTERVAL_SECONDS", "120"))  # 2 min for stability
 
         self._init_database()
 
