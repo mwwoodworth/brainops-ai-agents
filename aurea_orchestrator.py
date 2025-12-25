@@ -1619,9 +1619,9 @@ class AUREA:
                 conn = psycopg2.connect(**DB_CONFIG)
                 cur = conn.cursor()
                 cur.execute("""
-                    UPDATE ai_decision_history
-                    SET status = 'expired', updated_at = NOW()
-                    WHERE status = 'pending' AND created_at < NOW() - INTERVAL '24 hours'
+                    UPDATE aurea_decisions
+                    SET execution_status = 'expired', updated_at = NOW()
+                    WHERE execution_status = 'pending' AND created_at < NOW() - INTERVAL '24 hours'
                 """)
                 cleared = cur.rowcount
                 conn.commit()
