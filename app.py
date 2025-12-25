@@ -1463,9 +1463,10 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
     return {**payload, "cached": from_cache}
 
 
-@app.get("/observability/metrics")
+@app.get("/observability/metrics", dependencies=[Depends(verify_api_key)])
 async def observability_metrics():
-    """Lightweight monitoring endpoint for request, cache, DB, and orchestrator health."""
+    """Lightweight monitoring endpoint for request, cache, DB, and orchestrator health.
+    SECURITY: Requires API key authentication to prevent data leakage."""
     pool = get_pool()
     db_probe_ms = None
     db_error = None

@@ -448,8 +448,17 @@ async def get_history(limit: int = 100):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket for real-time updates"""
+    """WebSocket for real-time updates - requires API key authentication"""
+    # SECURITY: Verify API key before accepting connection
+    api_key = websocket.query_params.get("api_key") or websocket.headers.get("x-api-key")
+    if config.security.auth_required:
+        if not api_key or api_key not in config.security.valid_api_keys:
+            await websocket.close(code=4003, reason="Invalid or missing API key")
+            logger.warning(f"WebSocket connection rejected - invalid API key from {websocket.client}")
+            return
+
     await websocket.accept()
+    logger.info(f"WebSocket connection accepted from {websocket.client}")
     mcp_server.connections.append(websocket)
 
     try:

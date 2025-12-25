@@ -139,7 +139,7 @@ async def list_twins():
         # Fallback: query DB directly if in-memory is empty
         if not twins_list:
             import os
-            db_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or "postgresql://postgres.yomagoqdmxszqtdwuhab:Brain0ps2O2S@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
+            db_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")  # SECURITY: No hardcoded credentials
             if db_url:
                 try:
                     import asyncpg
