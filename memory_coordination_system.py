@@ -184,11 +184,12 @@ class UnifiedMemoryCoordinator:
                 if self.conn.closed or self.conn.status != extensions.STATUS_READY:
                     try:
                         self.conn.close()
-                    except Exception:
-                        pass
+                    except Exception as close_err:
+                        logger.debug(f"Connection close cleanup error (non-fatal): {close_err}")
                     self.conn = None
                     self.cursor = None
-        except Exception:
+        except Exception as check_err:
+            logger.warning(f"Connection health check failed: {check_err}")
             self.conn = None
             self.cursor = None
 

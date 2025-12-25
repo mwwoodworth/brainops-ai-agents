@@ -94,19 +94,19 @@ def _run_psycopg2_operation(
     except Exception:
         try:
             conn.rollback()
-        except Exception:
-            pass
+        except Exception as rollback_err:
+            logger.debug(f"Rollback cleanup error (non-fatal): {rollback_err}")
         raise
     finally:
         if cursor is not None:
             try:
                 cursor.close()
-            except Exception:
-                pass
+            except Exception as cursor_err:
+                logger.debug(f"Cursor close cleanup error (non-fatal): {cursor_err}")
         try:
             conn.autocommit = False
-        except Exception:
-            pass
+        except Exception as autocommit_err:
+            logger.debug(f"Autocommit reset error (non-fatal): {autocommit_err}")
         pool.putconn(conn)
 
 
