@@ -367,13 +367,18 @@ class MCPServer:
         log_file = log_files.get(service)
         if log_file and os.path.exists(log_file):
             try:
-                proc = await asyncio.create_subprocess_shell(
-                    f"tail -n {lines} {log_file}",
-                    stdout=asyncio.subprocess.PIPE
+                # SECURITY FIX: Sanitize lines parameter to prevent command injection
+                safe_lines = max(1, min(int(lines), 10000))  # Clamp to reasonable range
+                # Use subprocess with args list instead of shell=True to prevent injection
+                proc = await asyncio.create_subprocess_exec(
+                    'tail', '-n', str(safe_lines), log_file,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
                 )
                 stdout, _ = await proc.communicate()
                 return stdout.decode().split('\n')
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to read log file {log_file}: {e}")
                 pass
 
         return []
