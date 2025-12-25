@@ -166,6 +166,30 @@ except ImportError:
     ACQUISITION_AGENTS_AVAILABLE = False
     logger.warning("Customer acquisition agents not available")
 
+# Knowledge Agent - Permanent memory and context management
+try:
+    from knowledge_agent import KnowledgeAgent
+    KNOWLEDGE_AGENT_AVAILABLE = True
+except ImportError:
+    KNOWLEDGE_AGENT_AVAILABLE = False
+    logger.warning("Knowledge agent not available")
+
+# UI Tester Agent - Automated UI testing with Playwright
+try:
+    from ui_tester_agent import UITesterAgent
+    UI_TESTER_AVAILABLE = True
+except ImportError:
+    UI_TESTER_AVAILABLE = False
+    logger.warning("UI tester agent not available")
+
+# Deployment Monitor Agent - Render/Vercel deployment monitoring
+try:
+    from deployment_monitor_agent import DeploymentMonitorAgent
+    DEPLOYMENT_MONITOR_AVAILABLE = True
+except ImportError:
+    DEPLOYMENT_MONITOR_AVAILABLE = False
+    logger.warning("Deployment monitor agent not available")
+
 # Database configuration
 DB_CONFIG = {
     "host": config.database.host,
@@ -476,6 +500,30 @@ class AgentExecutor:
             self.agents['Outreach'] = AcqOutreachAgent()
             self.agents['Conversion'] = AcqConversionAgent()
             logger.info("Customer acquisition agents registered: WebSearch, SocialMedia, Outreach, Conversion")
+
+        # Knowledge Agent - Permanent memory and context management
+        if KNOWLEDGE_AGENT_AVAILABLE:
+            try:
+                self.agents['Knowledge'] = KnowledgeAgent(DB_CONFIG)
+                logger.info("Knowledge agent registered")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Knowledge agent: {e}")
+
+        # UI Tester Agent - Automated UI testing
+        if UI_TESTER_AVAILABLE:
+            try:
+                self.agents['UITester'] = UITesterAgent()
+                logger.info("UI tester agent registered")
+            except Exception as e:
+                logger.warning(f"Failed to initialize UI tester agent: {e}")
+
+        # Deployment Monitor Agent - Deployment monitoring
+        if DEPLOYMENT_MONITOR_AVAILABLE:
+            try:
+                self.agents['DeploymentMonitor'] = DeploymentMonitorAgent()
+                logger.info("Deployment monitor agent registered")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Deployment monitor agent: {e}")
 
     def _get_workflow_runner(self):
         """Lazily initialize LangGraph workflow runner with review loops."""
