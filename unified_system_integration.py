@@ -81,8 +81,8 @@ def get_revenue_system():
 def get_customer_acquisition():
     """Get customer acquisition agents"""
     try:
-        from customer_acquisition_agents import CustomerAcquisitionOrchestrator
-        return CustomerAcquisitionOrchestrator()
+        from customer_acquisition_agents import AcquisitionOrchestrator
+        return AcquisitionOrchestrator()
     except ImportError:
         logger.warning("Customer acquisition not available")
         return None
