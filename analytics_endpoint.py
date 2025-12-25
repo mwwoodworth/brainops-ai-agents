@@ -2,7 +2,7 @@
 AI Agent Analytics Endpoint
 Provides comprehensive analytics for agent executions and performance
 """
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Query
 import logging
