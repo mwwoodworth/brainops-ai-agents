@@ -839,6 +839,24 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Unified System Integration failed: {e}")
         app.state.unified_integration = None
 
+    # Initialize AI Operating System (Task 28 Integration - The Final Layer)
+    try:
+        from ai_operating_system import get_ai_operating_system
+        ai_os = get_ai_operating_system()
+        boot_result = await ai_os.boot()
+        app.state.ai_os = ai_os
+        logger.info(f"🤖 AI Operating System BOOTED: {boot_result['status']}")
+        if boot_result.get('steps'):
+             for step in boot_result['steps']:
+                 if step['status'] == 'failed':
+                     logger.warning(f"  - AI OS Boot Step Failed: {step['step']} - {step.get('error')}")
+    except ImportError:
+        logger.warning("⚠️ AI Operating System module not found")
+        app.state.ai_os = None
+    except Exception as e:
+        logger.error(f"❌ AI OS initialization failed: {e}")
+        app.state.ai_os = None
+
     logger.info("=" * 80)
     logger.info("🚀 BRAINOPS AI AGENTS v8.0.0 - COMPLETE AI OPERATING SYSTEM")
     logger.info("🧠 AI INTEGRATION LAYER ACTIVATED - All Systems Connected!")
