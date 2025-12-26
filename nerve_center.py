@@ -19,8 +19,8 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
-import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from config import config
+from database.async_connection import get_pool, init_pool, PoolConfig, using_fallback
 
 # Import all alive components
 from alive_core import get_alive_core, AliveCore, ConsciousnessState, ThoughtType
@@ -53,36 +53,6 @@ except ImportError:
     get_system_awareness = None
 
 logger = logging.getLogger("NERVE_CENTER")
-
-# Build DB config with DATABASE_URL fallback for Render compatibility
-def _build_db_config():
-    """Build database config, supporting both individual vars and DATABASE_URL"""
-    config = {
-        'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-        'database': os.getenv('DB_NAME', 'postgres'),
-        'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-        'password': os.getenv('DB_PASSWORD'),
-        'port': int(os.getenv('DB_PORT', 5432))
-    }
-    # Fallback to DATABASE_URL if password not set
-    if not config['password']:
-        database_url = os.getenv('DATABASE_URL', '')
-        if database_url:
-            from urllib.parse import urlparse
-            try:
-                parsed = urlparse(database_url)
-                config['host'] = parsed.hostname or config['host']
-                config['database'] = parsed.path.lstrip('/') or config['database']
-                config['user'] = parsed.username or config['user']
-                config['password'] = parsed.password or ''
-                config['port'] = parsed.port or config['port']
-                logger.info(f"NerveCenter using DATABASE_URL: host={config['host']}")
-            except Exception as e:
-                logger.error(f"Failed to parse DATABASE_URL: {e}")
-    return config
-
-DB_CONFIG = _build_db_config()
-
 
 class SystemSignal(Enum):
     """Types of signals flowing through the nerve center"""
@@ -144,16 +114,30 @@ class NerveCenter:
         # Schema is pre-created in database - skip blocking init
         # self._ensure_schema() - moved to lazy init via activate()
 
-    def _get_connection(self):
-        return psycopg2.connect(**DB_CONFIG)
+    async def _get_pool(self):
+        try:
+            return get_pool()
+        except Exception:
+            pool_config = PoolConfig(
+                host=config.database.host,
+                port=config.database.port,
+                user=config.database.user,
+                password=config.database.password,
+                database=config.database.database,
+                ssl=config.database.ssl,
+                ssl_verify=config.database.ssl_verify,
+            )
+            await init_pool(pool_config)
+            return get_pool()
 
-    def _ensure_schema(self):
+    async def _ensure_schema(self):
         """Create nerve center tables"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            pool = await self._get_pool()
+            if using_fallback():
+                return
 
-            cur.execute("""
+            await pool.execute("""
                 -- Nerve center signals log
                 CREATE TABLE IF NOT EXISTS ai_nerve_signals (
                     id SERIAL PRIMARY KEY,
@@ -202,9 +186,6 @@ class NerveCenter:
                     ON ai_emergency_events(created_at)
                     WHERE NOT resolved;
             """)
-
-            conn.commit()
-            conn.close()
             logger.info("✅ NerveCenter schema initialized")
         except Exception as e:
             logger.error(f"Schema init failed: {e}")
@@ -219,18 +200,19 @@ class NerveCenter:
 
         # Log signal
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
-            cur.execute("""
+            pool = await self._get_pool()
+            if not using_fallback():
+                await pool.execute("""
                 INSERT INTO ai_nerve_signals
                 (signal_type, source, target, payload, priority)
-                VALUES (%s, %s, %s, %s, %s)
+                VALUES ($1, $2, $3, $4, $5)
             """, (
-                signal.type.value, signal.source, signal.target,
-                Json(signal.payload), signal.priority
-            ))
-            conn.commit()
-            conn.close()
+                    signal.type.value,
+                    signal.source,
+                    signal.target,
+                    json.dumps(signal.payload),
+                    signal.priority,
+                ))
         except Exception as e:
             logger.warning(f"Failed to log signal: {e}")
 
@@ -321,21 +303,20 @@ class NerveCenter:
 
         # Log emergency
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
-            cur.execute("""
+            pool = await self._get_pool()
+            if using_fallback():
+                return
+            await pool.execute("""
                 INSERT INTO ai_emergency_events
                 (event_type, severity, description, source, data)
-                VALUES (%s, %s, %s, %s, %s)
+                VALUES ($1, $2, $3, $4, $5)
             """, (
                 data.get('type', 'unknown'),
                 data.get('severity', 'high'),
                 data.get('description', str(data)),
                 'alive_core',
-                Json(data)
+                json.dumps(data),
             ))
-            conn.commit()
-            conn.close()
         except Exception as e:
             logger.error(f"Failed to log emergency: {e}")
 
@@ -442,23 +423,22 @@ class NerveCenter:
             if self.alive_core and self.alive_core.state == ConsciousnessState.EMERGENCY:
                 health = "emergency"
 
-            conn = self._get_connection()
-            cur = conn.cursor()
-            cur.execute("""
+            pool = await self._get_pool()
+            if using_fallback():
+                return
+            await pool.execute("""
                 INSERT INTO ai_system_snapshot
                 (components, consciousness_state, health_status, active_predictions,
                  thought_count, uptime_seconds)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                VALUES ($1, $2, $3, $4, $5, $6)
             """, (
-                Json(components),
+                json.dumps(components),
                 self.alive_core.state.value if self.alive_core else 'unknown',
                 health,
                 len(self.proactive.predictions) if self.proactive else 0,
                 self.alive_core.thought_counter if self.alive_core else 0,
-                (datetime.utcnow() - self.start_time).total_seconds()
+                (datetime.utcnow() - self.start_time).total_seconds(),
             ))
-            conn.commit()
-            conn.close()
 
         except Exception as e:
             logger.warning(f"Snapshot failed: {e}")
