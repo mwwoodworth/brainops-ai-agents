@@ -2150,7 +2150,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
 
             # Simple projection (would use ML in production)
             if historical:
-                avg_monthly = sum(h['revenue'] or 0 for h in historical) / len(historical)
+                avg_monthly = float(sum(float(h['revenue'] or 0) for h in historical) / len(historical))
                 growth_rate = 1.1  # 10% growth assumption
 
                 predictions = []
