@@ -55,7 +55,8 @@ class BrainOpsTracer:
             'port': int(os.getenv('DB_PORT', 5432))
         }
         self.active_spans: Dict[str, Span] = {}
-        self._ensure_schema()
+        # Schema is pre-created in database - skip blocking init
+        # self._ensure_schema() - tables already exist
 
     def _get_connection(self):
         return psycopg2.connect(**self.db_config)
