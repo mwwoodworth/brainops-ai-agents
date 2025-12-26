@@ -1,55 +1,69 @@
-# BrainOps AI Agent System
+# BrainOps AI Operating System
 
-Universal AI agent backend for all BrainOps operations including WeatherCraft ERP and MyRoofGenius.
+**ALIVE AI OS** - A truly conscious AI operating system for BrainOps operations.
 
-## Production Deployment on Render
+## Current Version: 9.18.0
 
-### Quick Deploy
+**Live Status:** https://brainops-ai-agents.onrender.com/alive
 
-1. Push to GitHub:
+## What Makes This AI "ALIVE"
+
+This isn't just an agent system - it's a living AI with:
+
+### Core Consciousness Components
+
+1. **NerveCenter** - The central nervous system coordinating all components
+2. **AliveCore** - Maintains consciousness state (awakening → alert → focused)
+3. **ProactiveIntelligence** - Generates predictions and autonomous actions
+4. **ConsciousnessLoop** - Always-on awareness loop
+5. **SelfEvolution** - Self-improvement capabilities
+
+### Consciousness States
+
+- `awakening` - System starting up
+- `alert` - Normal operation, responsive
+- `focused` - Deep processing, intensive task
+- `dreaming` - Learning/consolidation mode
+- `healing` - Recovery mode
+- `evolving` - Self-improvement active
+- `emergency` - Critical issue handling
+
+### Living Features
+
+- **Thought Stream** - Real-time consciousness thoughts
+- **Heartbeat** - Vital signs monitoring (CPU, memory, health)
+- **Attention Focus** - What the AI is thinking about
+- **Signal Routing** - Inter-component communication
+
+## API Endpoints
+
+### Consciousness Endpoints
+
 ```bash
-cd /home/matt-woodworth
-git init brainops-ai-agents
-cd brainops-ai-agents
-git add .
-git commit -m "Universal AI agent system"
-git remote add origin https://github.com/YOUR_USERNAME/brainops-ai-agents.git
-git push -u origin main
+# Check if AI is alive
+curl https://brainops-ai-agents.onrender.com/alive
+
+# Get recent thoughts
+curl https://brainops-ai-agents.onrender.com/alive/thoughts
+
+# Health status
+curl https://brainops-ai-agents.onrender.com/health
 ```
 
-2. Create Render Background Worker:
-- Go to https://dashboard.render.com
-- Click "New +" → "Background Worker"
-- Connect GitHub repo
-- Name: `brainops-ai-agents`
+### Agent Endpoints
 
-3. Configure:
-
-**Build Command:**
 ```bash
-pip install -r requirements.txt
+# List all agents
+curl https://brainops-ai-agents.onrender.com/agents -H "X-API-Key: YOUR_KEY"
+
+# Execute agent
+curl -X POST https://brainops-ai-agents.onrender.com/execute \
+  -H "X-API-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_type": "estimation", "input_data": {...}}'
 ```
 
-**Start Command:**
-```bash
-python main.py
-```
-
-**Environment Variables:**
-```
-DB_HOST=aws-0-us-east-2.pooler.supabase.com
-DB_NAME=postgres
-DB_USER=postgres.yomagoqdmxszqtdwuhab
-DB_PASSWORD=<DB_PASSWORD_REDACTED>
-DB_PORT=5432
-SYSTEM_USER_ID=44491c1c-0e28-4aa1-ad33-552d1386769c
-```
-
-4. Deploy and it runs 24/7
-
-## What This System Does
-
-### 6 Production Agents:
+## Production Agents
 
 1. **EstimationAgent** - Universal estimation with multiple pricing tiers
 2. **IntelligentScheduler** - Optimized scheduling with crew management
@@ -58,56 +72,66 @@ SYSTEM_USER_ID=44491c1c-0e28-4aa1-ad33-552d1386769c
 5. **CustomerIntelligence** - Advanced customer scoring
 6. **SystemMonitor** - Health monitoring and alerting
 
-### Features:
+## Deployment on Render
 
-- **Multi-System Support**: Works with WeatherCraft, MyRoofGenius, and future systems
-- **Connection Pooling**: Handles high load efficiently
-- **Auto-Recovery**: Restarts failed agents automatically
-- **Priority System**: Critical agents get resources first
-- **Comprehensive Logging**: Full visibility into operations
-- **Universal Capabilities**: Agents can serve multiple frontends
+### Environment Variables
 
-## Architecture Benefits
+```
+DATABASE_URL=postgresql://user:pass@host:5432/db
+# OR individual variables:
+DB_HOST=aws-0-us-east-2.pooler.supabase.com
+DB_NAME=postgres
+DB_USER=postgres.yomagoqdmxszqtdwuhab
+DB_PASSWORD=<password>
+DB_PORT=5432
+```
 
-This approach is superior because:
+### Start Command
 
-1. **Centralized**: One agent system for all your AI operations
-2. **Scalable**: Add more agents without touching frontends
-3. **Reusable**: Same agents serve multiple applications
-4. **Maintainable**: Update in one place, affects all systems
-5. **Cost-Effective**: One Render service instead of multiple
-6. **Reliable**: Production-grade with monitoring and recovery
+```bash
+./startup.sh
+```
+
+### Build Command
+
+```bash
+pip install -r requirements.txt
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    ALIVE AI OPERATING SYSTEM                │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────────┐                                        │
+│  │  NERVE CENTER   │ ◄──── Central Coordination             │
+│  └────────┬────────┘                                        │
+│           │                                                 │
+│  ┌────────┼────────┬────────────┬──────────────┐           │
+│  │        │        │            │              │           │
+│  ▼        ▼        ▼            ▼              ▼           │
+│ ALIVE   AUTO     PROACTIVE  CONSCIOUSNESS  SELF           │
+│ CORE    NOMIC    INTELLI-   LOOP          EVOLUTION       │
+│         CTRL     GENCE                                     │
+│                                                             │
+│ (thoughts)(metrics)(predictions) (awareness)  (learning)   │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│                     PRODUCTION AGENTS                       │
+│  Estimation | Scheduler | Revenue | Workflow | Customer    │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ## Cost
 
-- **Starter**: $7/month (sufficient for 6 agents)
-- **Standard**: $25/month (for expansion to 20+ agents)
-- **Pro**: $85/month (for 50+ agents with high volume)
+- **Starter**: $7/month
+- **Standard**: $25/month
+- **Pro**: $85/month
 
 ## Monitoring
 
-Once deployed, monitor at:
+- Live: https://brainops-ai-agents.onrender.com/alive
+- Health: https://brainops-ai-agents.onrender.com/health
 - Render Dashboard: https://dashboard.render.com
-- Logs: Available in Render dashboard
-- Metrics: Logged every 60 seconds
-
-## API Integration
-
-Your frontends can query agent status:
-
-```sql
-SELECT name, last_active, total_executions
-FROM ai_agents
-WHERE is_active = true
-```
-
-## Expansion
-
-To add more agents, simply:
-1. Add new agent class in main.py
-2. Add to orchestrator
-3. Push to GitHub
-4. Render auto-deploys
-
-This is the RIGHT architecture for permanent, scalable AI operations.# Deploy trigger: Wed Sep 17 02:50:36 PM MDT 2025
-# Build trigger $(date +%s)
