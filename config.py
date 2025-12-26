@@ -101,12 +101,13 @@ class SecurityConfig:
             self.valid_api_keys.add(effective_test_key)
             self.test_api_key = effective_test_key
 
-        if self.auth_required and not self.valid_api_keys:
+        self.auth_configured = bool(self.valid_api_keys)
+        if self.auth_required and not self.auth_configured:
             logger.critical(
                 "AUTH_REQUIRED is enabled but no API keys are configured. "
-                "Set API_KEYS or enable a non-production test key via ALLOW_TEST_KEY."
+                "Set API_KEYS or enable a non-production test key via ALLOW_TEST_KEY. "
+                "Service will start in lockdown mode (all secured endpoints return 503)."
             )
-            raise RuntimeError("Authentication required but no API keys provided.")
         
         cors_origins_str = os.getenv('ALLOWED_ORIGINS', '')
         if cors_origins_str:
