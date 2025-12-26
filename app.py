@@ -87,7 +87,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.16.0"  # ALIVE AI OS - Fixed startup: DATABASE_URL parsing, no blocking schema init
+VERSION = "9.17.0"  # ALIVE AI OS - Added error diagnostics to /alive endpoint
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -773,13 +773,17 @@ async def lifespan(app: FastAPI):
     except ImportError as e:
         logger.warning(f"⚠️ Nerve Center import failed: {e}")
         import traceback
-        logger.warning(traceback.format_exc())
+        error_trace = traceback.format_exc()
+        logger.warning(error_trace)
         app.state.nerve_center = None
+        app.state.nerve_center_error = f"ImportError: {e}\n{error_trace}"
     except Exception as e:
         logger.error(f"❌ Nerve Center initialization failed: {e}")
         import traceback
-        logger.error(traceback.format_exc())
+        error_trace = traceback.format_exc()
+        logger.error(error_trace)
         app.state.nerve_center = None
+        app.state.nerve_center_error = f"Exception: {e}\n{error_trace}"
 
     logger.info("=" * 80)
     logger.info("🚀 BRAINOPS AI AGENTS v9.15.0 - ALIVE AI OPERATING SYSTEM")
@@ -1426,7 +1430,8 @@ async def alive_status():
     status["_debug"] = {
         "has_nerve_center_attr": has_attr,
         "nerve_center_type": nc_type,
-        "nerve_center_truthy": bool(nc_value) if nc_value != 'NOT_SET' else False
+        "nerve_center_truthy": bool(nc_value) if nc_value != 'NOT_SET' else False,
+        "init_error": getattr(app.state, 'nerve_center_error', None)
     }
 
     if has_attr and nc_value:
