@@ -991,6 +991,9 @@ async def verify_api_key(
     if not config.security.auth_required:
         return True
 
+    if not config.security.auth_configured:
+        raise HTTPException(status_code=503, detail="Authentication misconfigured")
+
     provided = api_key
     if not provided:
         auth_header = request.headers.get("authorization")
@@ -1348,6 +1351,7 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
         pool = get_pool()
         db_healthy = await pool.test_connection()
         db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
+        auth_configured = config.security.auth_configured
 
         active_systems = _collect_active_systems()
 
@@ -1359,7 +1363,7 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
                 embedded_memory_stats = {"status": "error"}
 
         return {
-            "status": "healthy" if db_healthy else "degraded",
+            "status": "healthy" if db_healthy and auth_configured else "degraded",
             "version": VERSION,
             "build": BUILD_TIME,
             "database": db_status,
@@ -1395,9 +1399,12 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
                 "environment": config.environment,
                 "security": {
                     "auth_required": config.security.auth_required,
-                    "dev_mode": config.security.dev_mode
+                    "dev_mode": config.security.dev_mode,
+                    "auth_configured": auth_configured,
+                    "api_keys_configured": len(config.security.valid_api_keys),
                 }
-            }
+            },
+            "missing_systems": getattr(app.state, "missing_systems", []),
         }
 
     if force_refresh:
