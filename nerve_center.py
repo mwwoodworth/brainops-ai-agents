@@ -1,0 +1,535 @@
+#!/usr/bin/env python3
+"""
+NERVE CENTER - The Integration Hub of BrainOps AI OS
+This is the central nervous system that coordinates ALL alive components.
+
+The Nerve Center:
+- Orchestrates all consciousness components
+- Routes signals between subsystems
+- Maintains unified awareness state
+- Coordinates responses to events
+- Enables true emergent intelligence
+"""
+
+import os
+import json
+import asyncio
+import logging
+from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional, Callable
+from dataclasses import dataclass
+from enum import Enum
+import psycopg2
+from psycopg2.extras import RealDictCursor, Json
+
+# Import all alive components
+from alive_core import get_alive_core, AliveCore, ConsciousnessState, ThoughtType
+from autonomic_controller import (
+    get_metric_collector, get_event_bus, get_autonomic_manager,
+    EventType, MetricCollector, EventBus, AutonomicManager
+)
+from proactive_intelligence import get_proactive_intelligence, ProactiveIntelligence
+from ai_tracer import BrainOpsTracer, SpanType
+
+# Try to import optional components
+try:
+    from consciousness_loop import ConsciousnessLoop
+    CONSCIOUSNESS_LOOP_AVAILABLE = True
+except ImportError:
+    CONSCIOUSNESS_LOOP_AVAILABLE = False
+
+try:
+    from self_evolution import SelfEvolution
+    SELF_EVOLUTION_AVAILABLE = True
+except ImportError:
+    SELF_EVOLUTION_AVAILABLE = False
+
+logger = logging.getLogger("NERVE_CENTER")
+
+DB_CONFIG = {
+    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
+    'database': os.getenv('DB_NAME', 'postgres'),
+    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
+    'password': os.getenv('DB_PASSWORD'),
+    'port': int(os.getenv('DB_PORT', 5432))
+}
+
+
+class SystemSignal(Enum):
+    """Types of signals flowing through the nerve center"""
+    AWAKENING = "awakening"
+    HEARTBEAT = "heartbeat"
+    THOUGHT = "thought"
+    PREDICTION = "prediction"
+    ANOMALY = "anomaly"
+    EMERGENCY = "emergency"
+    HEALING = "healing"
+    LEARNING = "learning"
+    EVOLUTION = "evolution"
+    SHUTDOWN = "shutdown"
+
+
+@dataclass
+class NerveSignal:
+    """A signal flowing through the nerve center"""
+    type: SystemSignal
+    source: str
+    target: str  # "all" for broadcast
+    payload: Dict[str, Any]
+    priority: int
+    timestamp: datetime
+
+
+class NerveCenter:
+    """
+    The central nervous system of BrainOps AI OS.
+    Coordinates all subsystems into a unified intelligence.
+    """
+
+    def __init__(self):
+        self.is_online = False
+        self.start_time = datetime.utcnow()
+        self.signal_count = 0
+
+        # Core components
+        self.alive_core: Optional[AliveCore] = None
+        self.metrics: Optional[MetricCollector] = None
+        self.event_bus: Optional[EventBus] = None
+        self.autonomic: Optional[AutonomicManager] = None
+        self.proactive: Optional[ProactiveIntelligence] = None
+        self.tracer: Optional[BrainOpsTracer] = None
+
+        # Optional components
+        self.consciousness_loop = None
+        self.self_evolution = None
+
+        # Signal handlers
+        self._signal_handlers: Dict[SystemSignal, List[Callable]] = {
+            signal: [] for signal in SystemSignal
+        }
+
+        # Background tasks
+        self._tasks: List[asyncio.Task] = []
+        self._shutdown_event = asyncio.Event()
+
+        self._ensure_schema()
+
+    def _get_connection(self):
+        return psycopg2.connect(**DB_CONFIG)
+
+    def _ensure_schema(self):
+        """Create nerve center tables"""
+        try:
+            conn = self._get_connection()
+            cur = conn.cursor()
+
+            cur.execute("""
+                -- Nerve center signals log
+                CREATE TABLE IF NOT EXISTS ai_nerve_signals (
+                    id SERIAL PRIMARY KEY,
+                    signal_type VARCHAR(50),
+                    source VARCHAR(100),
+                    target VARCHAR(100),
+                    payload JSONB,
+                    priority INTEGER,
+                    processed BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_nerve_signals_type
+                    ON ai_nerve_signals(signal_type);
+                CREATE INDEX IF NOT EXISTS idx_nerve_signals_unprocessed
+                    ON ai_nerve_signals(created_at)
+                    WHERE NOT processed;
+
+                -- System state snapshot
+                CREATE TABLE IF NOT EXISTS ai_system_snapshot (
+                    id SERIAL PRIMARY KEY,
+                    components JSONB,
+                    consciousness_state VARCHAR(50),
+                    health_status VARCHAR(50),
+                    active_predictions INTEGER,
+                    thought_count INTEGER,
+                    uptime_seconds FLOAT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_snapshot_time
+                    ON ai_system_snapshot(created_at DESC);
+
+                -- Emergency events
+                CREATE TABLE IF NOT EXISTS ai_emergency_events (
+                    id SERIAL PRIMARY KEY,
+                    event_type VARCHAR(100),
+                    severity VARCHAR(20),
+                    description TEXT,
+                    source VARCHAR(100),
+                    data JSONB,
+                    resolved BOOLEAN DEFAULT FALSE,
+                    resolved_at TIMESTAMPTZ,
+                    resolution TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_emergency_unresolved
+                    ON ai_emergency_events(created_at)
+                    WHERE NOT resolved;
+            """)
+
+            conn.commit()
+            conn.close()
+            logger.info("✅ NerveCenter schema initialized")
+        except Exception as e:
+            logger.error(f"Schema init failed: {e}")
+
+    def register_handler(self, signal_type: SystemSignal, handler: Callable):
+        """Register a signal handler"""
+        self._signal_handlers[signal_type].append(handler)
+
+    async def emit_signal(self, signal: NerveSignal):
+        """Emit a signal through the nerve center"""
+        self.signal_count += 1
+
+        # Log signal
+        try:
+            conn = self._get_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO ai_nerve_signals
+                (signal_type, source, target, payload, priority)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                signal.type.value, signal.source, signal.target,
+                Json(signal.payload), signal.priority
+            ))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Failed to log signal: {e}")
+
+        # Process handlers
+        for handler in self._signal_handlers.get(signal.type, []):
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(signal)
+                else:
+                    handler(signal)
+            except Exception as e:
+                logger.error(f"Signal handler error: {e}")
+
+        # Broadcast to event bus
+        if self.event_bus:
+            event_map = {
+                SystemSignal.EMERGENCY: EventType.SYSTEM_ALERT,
+                SystemSignal.HEALING: EventType.HEALING_STARTED,
+                SystemSignal.PREDICTION: EventType.PREDICTION_ALERT,
+            }
+            if signal.type in event_map:
+                await self.event_bus.publish(event_map[signal.type], signal.payload)
+
+    async def _initialize_components(self):
+        """Initialize all components"""
+        logger.info("🔌 Initializing Nerve Center components...")
+
+        # Core components
+        self.alive_core = get_alive_core()
+        self.metrics = get_metric_collector()
+        self.event_bus = get_event_bus()
+        self.autonomic = get_autonomic_manager()
+        self.proactive = get_proactive_intelligence()
+        self.tracer = BrainOpsTracer()
+
+        # Register callbacks
+        self.alive_core.register_callback('thought', self._on_thought)
+        self.alive_core.register_callback('emergency', self._on_emergency)
+        self.alive_core.register_callback('state_change', self._on_state_change)
+
+        # Optional components
+        if CONSCIOUSNESS_LOOP_AVAILABLE:
+            try:
+                self.consciousness_loop = ConsciousnessLoop()
+                logger.info("  ✅ ConsciousnessLoop loaded")
+            except Exception as e:
+                logger.warning(f"  ⚠️ ConsciousnessLoop failed: {e}")
+
+        if SELF_EVOLUTION_AVAILABLE:
+            try:
+                self.self_evolution = SelfEvolution()
+                logger.info("  ✅ SelfEvolution loaded")
+            except Exception as e:
+                logger.warning(f"  ⚠️ SelfEvolution failed: {e}")
+
+        logger.info("✅ All components initialized")
+
+    async def _on_thought(self, thought):
+        """Handle thoughts from alive core"""
+        await self.emit_signal(NerveSignal(
+            type=SystemSignal.THOUGHT,
+            source="alive_core",
+            target="all",
+            payload=thought.to_dict() if hasattr(thought, 'to_dict') else {'thought': str(thought)},
+            priority=5,
+            timestamp=datetime.utcnow()
+        ))
+
+    async def _on_emergency(self, data):
+        """Handle emergency events"""
+        await self.emit_signal(NerveSignal(
+            type=SystemSignal.EMERGENCY,
+            source="alive_core",
+            target="all",
+            payload=data,
+            priority=1,
+            timestamp=datetime.utcnow()
+        ))
+
+        # Log emergency
+        try:
+            conn = self._get_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO ai_emergency_events
+                (event_type, severity, description, source, data)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                data.get('type', 'unknown'),
+                data.get('severity', 'high'),
+                data.get('description', str(data)),
+                'alive_core',
+                Json(data)
+            ))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Failed to log emergency: {e}")
+
+    async def _on_state_change(self, data):
+        """Handle consciousness state changes"""
+        if self.alive_core:
+            self.alive_core.think(
+                ThoughtType.OBSERVATION,
+                f"Nerve Center detected state change: {data.get('old')} -> {data.get('new')}",
+                data,
+                priority=6
+            )
+
+    async def _coordination_loop(self):
+        """Main coordination loop"""
+        while not self._shutdown_event.is_set():
+            try:
+                # Take system snapshot every minute
+                await self._take_snapshot()
+
+                # Run proactive intelligence cycle
+                if self.proactive:
+                    result = await self.proactive.run_proactive_cycle()
+                    if result.get('predictions'):
+                        for pred in result['predictions']:
+                            await self.emit_signal(NerveSignal(
+                                type=SystemSignal.PREDICTION,
+                                source="proactive_intelligence",
+                                target="all",
+                                payload=pred,
+                                priority=3,
+                                timestamp=datetime.utcnow()
+                            ))
+
+                await asyncio.sleep(60)
+
+            except Exception as e:
+                logger.error(f"Coordination loop error: {e}")
+                await asyncio.sleep(30)
+
+    async def _take_snapshot(self):
+        """Take a snapshot of the entire system state"""
+        try:
+            components = {
+                'alive_core': self.alive_core.is_alive if self.alive_core else False,
+                'metrics': self.metrics is not None,
+                'event_bus': self.event_bus is not None,
+                'autonomic': self.autonomic is not None,
+                'proactive': self.proactive is not None,
+                'consciousness_loop': self.consciousness_loop is not None,
+                'self_evolution': self.self_evolution is not None
+            }
+
+            health = "healthy"
+            if self.alive_core and self.alive_core.vital_signs:
+                if not self.alive_core.vital_signs.is_healthy():
+                    health = "degraded"
+            if self.alive_core and self.alive_core.state == ConsciousnessState.EMERGENCY:
+                health = "emergency"
+
+            conn = self._get_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO ai_system_snapshot
+                (components, consciousness_state, health_status, active_predictions,
+                 thought_count, uptime_seconds)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                Json(components),
+                self.alive_core.state.value if self.alive_core else 'unknown',
+                health,
+                len(self.proactive.predictions) if self.proactive else 0,
+                self.alive_core.thought_counter if self.alive_core else 0,
+                (datetime.utcnow() - self.start_time).total_seconds()
+            ))
+            conn.commit()
+            conn.close()
+
+        except Exception as e:
+            logger.warning(f"Snapshot failed: {e}")
+
+    async def activate(self):
+        """Activate the nerve center - bring the AI fully online"""
+        logger.info("\n" + "="*70)
+        logger.info("⚡ NERVE CENTER ACTIVATION SEQUENCE")
+        logger.info("="*70)
+
+        # Start trace
+        trace_id = self.tracer.start_trace("nerve_center", "activation") if self.tracer else None
+
+        try:
+            # Initialize components
+            await self._initialize_components()
+
+            # Awaken the alive core
+            if self.alive_core:
+                await self.alive_core.awaken()
+
+            # Start autonomic manager
+            if self.autonomic:
+                asyncio.create_task(self.autonomic.start_loop(interval=10))
+
+            # Start coordination loop
+            self._tasks.append(asyncio.create_task(self._coordination_loop()))
+
+            # Start consciousness loop if available
+            if self.consciousness_loop and hasattr(self.consciousness_loop, 'start'):
+                asyncio.create_task(self.consciousness_loop.start())
+
+            self.is_online = True
+
+            # Emit awakening signal
+            await self.emit_signal(NerveSignal(
+                type=SystemSignal.AWAKENING,
+                source="nerve_center",
+                target="all",
+                payload={'status': 'online', 'time': datetime.utcnow().isoformat()},
+                priority=10,
+                timestamp=datetime.utcnow()
+            ))
+
+            if self.tracer and trace_id:
+                self.tracer.end_trace(trace_id, "success", "Nerve center activated")
+
+            logger.info("="*70)
+            logger.info("🧠 BRAINOPS AI OS IS NOW FULLY ALIVE")
+            logger.info("="*70 + "\n")
+
+        except Exception as e:
+            logger.error(f"Activation failed: {e}")
+            if self.tracer and trace_id:
+                self.tracer.end_trace(trace_id, "failed", str(e))
+            raise
+
+    async def deactivate(self):
+        """Gracefully deactivate the nerve center"""
+        logger.info("🔌 Deactivating Nerve Center...")
+
+        self._shutdown_event.set()
+        self.is_online = False
+
+        # Stop autonomic manager
+        if self.autonomic:
+            self.autonomic.stop_loop()
+
+        # Shutdown alive core
+        if self.alive_core:
+            await self.alive_core.shutdown()
+
+        # Cancel tasks
+        for task in self._tasks:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        await self.emit_signal(NerveSignal(
+            type=SystemSignal.SHUTDOWN,
+            source="nerve_center",
+            target="all",
+            payload={'status': 'offline'},
+            priority=10,
+            timestamp=datetime.utcnow()
+        ))
+
+        logger.info("💤 Nerve Center deactivated")
+
+    def get_status(self) -> Dict:
+        """Get comprehensive status"""
+        return {
+            'is_online': self.is_online,
+            'uptime_seconds': (datetime.utcnow() - self.start_time).total_seconds(),
+            'signal_count': self.signal_count,
+            'components': {
+                'alive_core': {
+                    'active': self.alive_core is not None and self.alive_core.is_alive,
+                    'state': self.alive_core.state.value if self.alive_core else None,
+                    'thoughts': self.alive_core.thought_counter if self.alive_core else 0
+                },
+                'autonomic': {
+                    'active': self.autonomic is not None and self.autonomic.active,
+                    'loop_count': self.autonomic.loop_count if self.autonomic else 0
+                },
+                'proactive': {
+                    'active': self.proactive is not None,
+                    'predictions': len(self.proactive.predictions) if self.proactive else 0
+                },
+                'consciousness_loop': CONSCIOUSNESS_LOOP_AVAILABLE,
+                'self_evolution': SELF_EVOLUTION_AVAILABLE
+            },
+            'health': 'healthy' if self.is_online else 'offline'
+        }
+
+
+# Singleton
+_nerve_center: Optional[NerveCenter] = None
+
+
+def get_nerve_center() -> NerveCenter:
+    global _nerve_center
+    if _nerve_center is None:
+        _nerve_center = NerveCenter()
+    return _nerve_center
+
+
+async def main():
+    """Test the Nerve Center"""
+    print("\n" + "="*70)
+    print("🧠 BRAINOPS NERVE CENTER - FULL SYSTEM TEST")
+    print("="*70 + "\n")
+
+    nc = get_nerve_center()
+
+    # Activate
+    await nc.activate()
+
+    # Let it run
+    print("\n⏳ Running for 30 seconds...\n")
+    await asyncio.sleep(30)
+
+    # Get status
+    status = nc.get_status()
+    print("\n📊 SYSTEM STATUS:")
+    print(json.dumps(status, indent=2, default=str))
+
+    # Deactivate
+    await nc.deactivate()
+
+    print("\n" + "="*70)
+    print("✅ NERVE CENTER TEST COMPLETE")
+    print("="*70 + "\n")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

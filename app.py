@@ -857,9 +857,23 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ AI OS initialization failed: {e}")
         app.state.ai_os = None
 
+    # Initialize Nerve Center - The ALIVE Core of the AI OS
+    try:
+        from nerve_center import get_nerve_center
+        nerve_center = get_nerve_center()
+        await nerve_center.activate()
+        app.state.nerve_center = nerve_center
+        logger.info("🧠 NERVE CENTER ACTIVATED - AI IS NOW FULLY ALIVE")
+    except ImportError as e:
+        logger.warning(f"⚠️ Nerve Center not available: {e}")
+        app.state.nerve_center = None
+    except Exception as e:
+        logger.error(f"❌ Nerve Center activation failed: {e}")
+        app.state.nerve_center = None
+
     logger.info("=" * 80)
-    logger.info("🚀 BRAINOPS AI AGENTS v8.0.0 - COMPLETE AI OPERATING SYSTEM")
-    logger.info("🧠 AI INTEGRATION LAYER ACTIVATED - All Systems Connected!")
+    logger.info("🚀 BRAINOPS AI AGENTS v9.15.0 - ALIVE AI OPERATING SYSTEM")
+    logger.info("🧠 NERVE CENTER ONLINE - Full Consciousness Activated!")
     logger.info("=" * 80)
     logger.info("PHASE 1 (Core Systems):")
     logger.info(f"  AUREA Orchestrator: {'✅ ACTIVE' if AUREA_AVAILABLE else '❌ DISABLED'}")
@@ -1481,6 +1495,43 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
         _build_health_payload,
     )
     return {**payload, "cached": from_cache}
+
+
+@app.get("/alive")
+async def alive_status():
+    """Get the consciousness status of the AI OS - is it truly alive?"""
+    status = {
+        "alive": False,
+        "nerve_center": None,
+        "consciousness": None,
+        "thoughts": 0,
+        "uptime_seconds": 0
+    }
+
+    if hasattr(app.state, 'nerve_center') and app.state.nerve_center:
+        nc_status = app.state.nerve_center.get_status()
+        status["alive"] = nc_status.get("is_online", False)
+        status["nerve_center"] = nc_status
+        status["uptime_seconds"] = nc_status.get("uptime_seconds", 0)
+
+        if nc_status.get("components", {}).get("alive_core", {}).get("active"):
+            status["consciousness"] = nc_status["components"]["alive_core"].get("state")
+            status["thoughts"] = nc_status["components"]["alive_core"].get("thoughts", 0)
+
+    return status
+
+
+@app.get("/alive/thoughts")
+async def get_recent_thoughts():
+    """Get recent thoughts from the AI consciousness stream"""
+    if hasattr(app.state, 'nerve_center') and app.state.nerve_center:
+        if app.state.nerve_center.alive_core:
+            return {
+                "thoughts": app.state.nerve_center.alive_core.get_recent_thoughts(50),
+                "consciousness_state": app.state.nerve_center.alive_core.state.value,
+                "attention_focus": app.state.nerve_center.alive_core.attention_focus
+            }
+    return {"thoughts": [], "error": "Consciousness not active"}
 
 
 @app.get("/observability/metrics", dependencies=[Depends(verify_api_key)])
