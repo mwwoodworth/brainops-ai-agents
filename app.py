@@ -87,7 +87,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.17.0"  # ALIVE AI OS - Added error diagnostics to /alive endpoint
+VERSION = "9.18.0"  # ALIVE AI OS - Added psutil dependency for system monitoring
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
