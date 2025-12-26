@@ -60,10 +60,10 @@ class ModelRouter:
         return "gpt-4-0125-preview"
 
     def _reasoning_model(self) -> str:
-        """Return OpenAI o1-preview for deep reasoning tasks."""
+        """Return OpenAI o3-mini for deep reasoning tasks (fast, cost-efficient)."""
         if self.openai_available:
-            return "o1-preview"
-        # Fallback to strong model if o1 not available
+            return "o3-mini"  # Updated: o1-preview deprecated, o3-mini is current
+        # Fallback to strong model if reasoning model not available
         return self._strong_model()
 
     def route(
@@ -165,14 +165,14 @@ class RealAICore:
             return "claude-3-opus-20240229"
         if model.startswith("claude-3-haiku"):
             return "claude-3-haiku-20240307"
-        # o1 reasoning models - preserve exact model name
-        if model in {"o1", "o1-preview", "o1-mini"}:
+        # o-series reasoning models - preserve exact model name
+        if model in {"o1", "o1-preview", "o1-mini", "o3", "o3-mini", "o4-mini"}:
             return model
         return model
 
     def _is_reasoning_model(self, model: str) -> bool:
-        """Check if model is an o1 reasoning model (requires different API params)."""
-        return model in {"o1", "o1-preview", "o1-mini"}
+        """Check if model is an o-series reasoning model (requires different API params)."""
+        return model in {"o1", "o1-preview", "o1-mini", "o3", "o3-mini", "o4-mini"}
 
     def _safe_json(self, text: str) -> Dict[str, Any]:
         """Parse JSON content without failing the caller."""
@@ -364,9 +364,9 @@ class RealAICore:
         problem: str,
         context: Optional[Dict[str, Any]] = None,
         max_tokens: int = 4000,
-        model: str = "o1-preview"
+        model: str = "o3-mini"
     ) -> Dict[str, Any]:
-        """Use o1 reasoning model for complex multi-step problems.
+        """Use o3-mini reasoning model for complex multi-step problems.
 
         This method is specifically designed for tasks requiring:
         - Complex calculations (e.g., material waste ratios, pricing optimization)
@@ -378,7 +378,7 @@ class RealAICore:
             problem: The problem statement requiring deep reasoning
             context: Additional context data (will be JSON-serialized)
             max_tokens: Maximum completion tokens (default 4000 for complex reasoning)
-            model: Reasoning model to use (o1-preview or o1-mini)
+            model: Reasoning model to use (o3-mini, o3, o4-mini)
 
         Returns:
             Dict with 'reasoning' (full response) and 'conclusion' (extracted answer)
