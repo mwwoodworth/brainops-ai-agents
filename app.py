@@ -209,7 +209,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.12.0"  # Stability optimization - reduced loop frequencies to prevent resource exhaustion
+VERSION = "9.13.0"  # Added o1-preview reasoning model support for complex calculations
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -2809,6 +2809,57 @@ async def ai_explain_reasoning(
     except Exception as e:
         logger.error(f"Reasoning explanation failed: {e}")
         raise HTTPException(status_code=500, detail=f"Reasoning explanation failed: {str(e)}")
+
+
+class ReasoningRequest(BaseModel):
+    """Request model for o1 reasoning endpoint"""
+    problem: str
+    context: Optional[Dict[str, Any]] = None
+    max_tokens: int = 4000
+    model: str = "o1-preview"
+
+
+@app.post("/ai/reason", dependencies=SECURED_DEPENDENCIES)
+async def ai_deep_reasoning(request: Request, body: ReasoningRequest):
+    """
+    Use o1-preview reasoning model for complex multi-step problems.
+
+    This endpoint is designed for tasks requiring:
+    - Complex calculations (e.g., material waste ratios, pricing optimization)
+    - Multi-step logical reasoning
+    - Strategic planning and analysis
+    - Scientific or technical problem solving
+
+    Example use cases:
+    - "Calculate the optimal material waste ratio for a 12-pitch roof with 4 dormers given current lumber prices"
+    - "Analyze the profitability impact of a 15% price increase across different customer segments"
+    - "Design an optimal crew scheduling algorithm for 50 jobs over 2 weeks"
+
+    Returns reasoning chain and extracted conclusion.
+    """
+    if not AI_CORE_AVAILABLE or ai_core is None:
+        raise HTTPException(status_code=503, detail="AI Core not available")
+
+    try:
+        result = await ai_core.reason(
+            problem=body.problem,
+            context=body.context,
+            max_tokens=body.max_tokens,
+            model=body.model
+        )
+
+        return {
+            "success": True,
+            "reasoning": result.get("reasoning", ""),
+            "conclusion": result.get("conclusion", ""),
+            "model_used": result.get("model_used", body.model),
+            "tokens_used": result.get("tokens_used"),
+            "error": result.get("error")
+        }
+
+    except Exception as e:
+        logger.error(f"o1 reasoning failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Reasoning failed: {str(e)}")
 
 
 @app.post("/ai/learn-from-mistake")
