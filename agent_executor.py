@@ -540,7 +540,13 @@ class AgentExecutor:
     async def execute(self, agent_name: str, task: Dict[str, Any]) -> Dict[str, Any]:
         """Execute task with specific agent - NOW WITH UNIFIED SYSTEM INTEGRATION"""
         await self._ensure_agents_loaded()
-        task = dict(task or {})
+        # Handle task being a string (e.g., "analyze customer trends") vs dict
+        if isinstance(task, str):
+            task = {"task": task, "action": task}
+        elif task is None:
+            task = {}
+        else:
+            task = dict(task) if not isinstance(task, dict) else task
         # Support clients (e.g. /ai/analyze) that pass parameters under task["data"].
         # Flatten missing keys into the top-level task for compatibility with existing agents.
         task_data = task.get("data")
