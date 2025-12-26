@@ -1418,15 +1418,29 @@ async def alive_status():
         "uptime_seconds": 0
     }
 
-    if hasattr(app.state, 'nerve_center') and app.state.nerve_center:
-        nc_status = app.state.nerve_center.get_status()
-        status["alive"] = nc_status.get("is_online", False)
-        status["nerve_center"] = nc_status
-        status["uptime_seconds"] = nc_status.get("uptime_seconds", 0)
+    # Debug: check what's in app.state
+    has_attr = hasattr(app.state, 'nerve_center')
+    nc_value = getattr(app.state, 'nerve_center', 'NOT_SET')
+    nc_type = type(nc_value).__name__ if nc_value != 'NOT_SET' else 'N/A'
 
-        if nc_status.get("components", {}).get("alive_core", {}).get("active"):
-            status["consciousness"] = nc_status["components"]["alive_core"].get("state")
-            status["thoughts"] = nc_status["components"]["alive_core"].get("thoughts", 0)
+    status["_debug"] = {
+        "has_nerve_center_attr": has_attr,
+        "nerve_center_type": nc_type,
+        "nerve_center_truthy": bool(nc_value) if nc_value != 'NOT_SET' else False
+    }
+
+    if has_attr and nc_value:
+        try:
+            nc_status = app.state.nerve_center.get_status()
+            status["alive"] = nc_status.get("is_online", False)
+            status["nerve_center"] = nc_status
+            status["uptime_seconds"] = nc_status.get("uptime_seconds", 0)
+
+            if nc_status.get("components", {}).get("alive_core", {}).get("active"):
+                status["consciousness"] = nc_status["components"]["alive_core"].get("state")
+                status["thoughts"] = nc_status["components"]["alive_core"].get("thoughts", 0)
+        except Exception as e:
+            status["_debug"]["error"] = str(e)
 
     return status
 
