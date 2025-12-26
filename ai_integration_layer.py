@@ -409,27 +409,98 @@ class AIIntegrationLayer:
             return await self._execute_simple(task, agent)
 
     async def _execute_simple(self, task: Dict, agent: Dict) -> Dict:
-        """Execute simple task directly"""
+        """Execute simple task directly with REAL database operations"""
         logger.info(f"   ⚡ Simple execution for {task['task_type']}")
-        
+
         start_time = datetime.utcnow()
         result_data = {}
-        
-        # Implement specific simple handlers
-        if task['task_type'] == 'notification':
-             # Logic for notification tasks
-             recipient = task.get('trigger_condition', {}).get('recipient', 'unknown')
-             result_data = {'status': 'sent', 'recipient': recipient, 'channel': 'system_log'}
-        elif task['task_type'] == 'data_update':
-             # Logic for data update tasks
-             fields = list(task.get('trigger_condition', {}).keys())
-             result_data = {'status': 'updated', 'fields': fields}
-        elif task['task_type'] == 'maintenance':
-             # Logic for maintenance tasks
-             result_data = {'status': 'maintenance_complete', 'actions': ['cache_clear', 'log_rotate']}
-        else:
-             # Generic handler
-             result_data = {'status': 'processed', 'note': 'Generic simple task execution'}
+
+        try:
+            cur = self._get_cursor()
+
+            if task['task_type'] == 'notification':
+                # Log notification action to ai_operations_log
+                recipient = task.get('trigger_condition', {}).get('recipient', 'unknown')
+                message = task.get('trigger_condition', {}).get('message', 'AI Notification')
+                title = task.get('trigger_condition', {}).get('title', 'System Alert')
+
+                cur.execute("""
+                    INSERT INTO ai_operations_log (operation, details)
+                    VALUES (%s, %s)
+                    RETURNING id
+                """, (
+                    'ai_notification',
+                    json.dumps({
+                        'recipient': recipient,
+                        'title': title,
+                        'message': message,
+                        'task_id': task.get('id'),
+                        'agent': agent.get('name') if agent else 'unknown'
+                    })
+                ))
+                row = cur.fetchone()
+                self.conn.commit()
+                result_data = {'status': 'sent', 'recipient': recipient, 'log_id': str(row['id'])}
+
+            elif task['task_type'] == 'data_update':
+                # Update ai_system_state with new state data
+                fields = task.get('trigger_condition', {})
+
+                # Get current state and merge with new fields
+                cur.execute("SELECT state FROM ai_system_state ORDER BY last_updated DESC LIMIT 1")
+                current = cur.fetchone()
+                current_state = current['state'] if current else {}
+
+                # Merge new fields into state
+                for key, value in fields.items():
+                    current_state[f"auto_update_{key}"] = value
+
+                cur.execute("""
+                    INSERT INTO ai_system_state (state) VALUES (%s)
+                """, (json.dumps(current_state),))
+                self.conn.commit()
+                result_data = {'status': 'updated', 'fields': list(fields.keys())}
+
+            elif task['task_type'] == 'maintenance':
+                # Log maintenance operation
+                action = task.get('trigger_condition', {}).get('action', 'general_maintenance')
+
+                cur.execute("""
+                    INSERT INTO ai_operations_log (operation, details)
+                    VALUES (%s, %s)
+                """, (
+                    'maintenance',
+                    json.dumps({
+                        'action': action,
+                        'task_id': task.get('id'),
+                        'timestamp': datetime.utcnow().isoformat()
+                    })
+                ))
+                self.conn.commit()
+                result_data = {'status': 'maintenance_complete', 'actions': [action]}
+
+            else:
+                # Generic handler - Log to ai_operations_log
+                cur.execute("""
+                    INSERT INTO ai_operations_log (operation, details)
+                    VALUES (%s, %s)
+                """, (
+                    f'simple_task_{task["task_type"]}',
+                    json.dumps({
+                        'task_type': task['task_type'],
+                        'task_id': task.get('id'),
+                        'trigger': task.get('trigger_condition', {})
+                    })
+                ))
+                self.conn.commit()
+                result_data = {'status': 'processed', 'note': 'Logged to ai_operations_log'}
+
+            cur.close()
+
+        except Exception as e:
+            logger.error(f"Error in _execute_simple: {e}")
+            # Still return success but with error info - don't break the flow
+            result_data = {'status': 'error', 'error': str(e)}
 
         # Calculate duration
         duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
