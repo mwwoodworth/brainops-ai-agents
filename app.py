@@ -209,7 +209,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.13.0"  # Added o1-preview reasoning model support for complex calculations
+VERSION = "9.13.1"  # Fixed AI_CORE_AVAILABLE NameError in /ai/reason endpoint
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -2837,7 +2837,7 @@ async def ai_deep_reasoning(request: Request, body: ReasoningRequest):
 
     Returns reasoning chain and extracted conclusion.
     """
-    if not AI_CORE_AVAILABLE or ai_core is None:
+    if not AI_AVAILABLE or ai_core is None:
         raise HTTPException(status_code=503, detail="AI Core not available")
 
     try:
