@@ -414,13 +414,13 @@ class NerveCenter:
                                 timestamp=datetime.utcnow()
                             ))
 
-                await asyncio.sleep(30)  # Scan every 30 seconds instead of 60
+                await asyncio.sleep(60)  # Scan every 60 seconds to reduce DB connection pressure
 
             except Exception as e:
                 logger.error(f"Coordination loop error: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
-                await asyncio.sleep(30)
+                await asyncio.sleep(60)
 
     async def _take_snapshot(self):
         """Take a snapshot of the entire system state"""
