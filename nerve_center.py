@@ -44,6 +44,14 @@ try:
 except ImportError:
     SELF_EVOLUTION_AVAILABLE = False
 
+# System awareness for REAL monitoring
+try:
+    from system_awareness import get_system_awareness, SystemAwareness
+    SYSTEM_AWARENESS_AVAILABLE = True
+except ImportError:
+    SYSTEM_AWARENESS_AVAILABLE = False
+    get_system_awareness = None
+
 logger = logging.getLogger("NERVE_CENTER")
 
 # Build DB config with DATABASE_URL fallback for Render compatibility
@@ -278,6 +286,15 @@ class NerveCenter:
             except Exception as e:
                 logger.warning(f"  ⚠️ SelfEvolution failed: {e}")
 
+        # System awareness - REAL monitoring
+        self.system_awareness = None
+        if SYSTEM_AWARENESS_AVAILABLE and get_system_awareness:
+            try:
+                self.system_awareness = get_system_awareness()
+                logger.info("  ✅ SystemAwareness loaded - REAL monitoring enabled")
+            except Exception as e:
+                logger.warning(f"  ⚠️ SystemAwareness failed: {e}")
+
         logger.info("✅ All components initialized")
 
     async def _on_thought(self, thought):
@@ -333,14 +350,58 @@ class NerveCenter:
             )
 
     async def _coordination_loop(self):
-        """Main coordination loop"""
+        """Main coordination loop - the REAL brain of the system"""
+        scan_counter = 0
+
         while not self._shutdown_event.is_set():
             try:
+                scan_counter += 1
+
                 # Take system snapshot every minute
                 await self._take_snapshot()
 
-                # Run proactive intelligence cycle
-                if self.proactive:
+                # Run REAL system awareness scan every cycle
+                if self.system_awareness:
+                    logger.info("🔍 Running system awareness scan...")
+                    scan_result = await self.system_awareness.run_full_scan()
+
+                    # Generate thoughts based on real insights
+                    if scan_result.get('insights'):
+                        for insight in scan_result['insights']:
+                            thought_type = ThoughtType.CONCERN if insight['severity'] in ['warning', 'critical'] else ThoughtType.OBSERVATION
+
+                            if self.alive_core:
+                                self.alive_core.think(
+                                    thought_type,
+                                    f"[{insight['category'].upper()}] {insight['title']}: {insight['description']}",
+                                    insight,
+                                    confidence=0.9,
+                                    priority=9 if insight['severity'] == 'critical' else 6 if insight['severity'] == 'warning' else 4
+                                )
+
+                    # ACTUALLY change attention based on what we found
+                    if self.alive_core and self.system_awareness:
+                        focus, reason, priority = self.system_awareness.get_attention_priority()
+                        current_focus = self.alive_core.attention_focus
+
+                        if focus != current_focus and priority >= 6:
+                            self.alive_core.focus_attention(focus, reason, priority)
+                            logger.info(f"🎯 Attention shifted: {current_focus} -> {focus}")
+
+                    # Log critical insights as predictions
+                    critical = [i for i in scan_result.get('insights', []) if i['severity'] == 'critical']
+                    for c in critical:
+                        await self.emit_signal(NerveSignal(
+                            type=SystemSignal.PREDICTION,
+                            source="system_awareness",
+                            target="all",
+                            payload=c,
+                            priority=1,
+                            timestamp=datetime.utcnow()
+                        ))
+
+                # Run proactive intelligence cycle (less frequently)
+                if self.proactive and scan_counter % 5 == 0:
                     result = await self.proactive.run_proactive_cycle()
                     if result.get('predictions'):
                         for pred in result['predictions']:
@@ -353,10 +414,12 @@ class NerveCenter:
                                 timestamp=datetime.utcnow()
                             ))
 
-                await asyncio.sleep(60)
+                await asyncio.sleep(30)  # Scan every 30 seconds instead of 60
 
             except Exception as e:
                 logger.error(f"Coordination loop error: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 await asyncio.sleep(30)
 
     async def _take_snapshot(self):
