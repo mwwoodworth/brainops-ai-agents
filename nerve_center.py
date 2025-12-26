@@ -133,7 +133,8 @@ class NerveCenter:
         self._tasks: List[asyncio.Task] = []
         self._shutdown_event = asyncio.Event()
 
-        self._ensure_schema()
+        # Schema is pre-created in database - skip blocking init
+        # self._ensure_schema() - moved to lazy init via activate()
 
     def _get_connection(self):
         return psycopg2.connect(**DB_CONFIG)

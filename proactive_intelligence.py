@@ -135,7 +135,8 @@ class ProactiveIntelligence:
         self.learning_history: List[Dict] = []
         self.action_counter = 0
         self.prediction_counter = 0
-        self._ensure_schema()
+        # Schema is pre-created in database - skip blocking init
+        # self._ensure_schema() - tables already exist
 
     def _get_connection(self):
         return psycopg2.connect(**DB_CONFIG)

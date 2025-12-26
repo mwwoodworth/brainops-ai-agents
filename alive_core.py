@@ -176,8 +176,8 @@ class AliveCore:
             'awakening': []
         }
 
-        # Initialize database
-        self._ensure_schema()
+        # Schema is pre-created in database - skip blocking init
+        # self._ensure_schema() - tables already exist
 
     def _get_connection(self):
         """Get database connection"""
