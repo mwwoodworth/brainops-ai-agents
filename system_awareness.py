@@ -108,6 +108,7 @@ class SystemAwareness:
     async def scan_business_metrics(self) -> List[Insight]:
         """Scan real business data for insights"""
         insights = []
+        conn = None
 
         try:
             conn = self._get_connection()
@@ -219,8 +220,6 @@ class SystemAwareness:
                         data={'today': today, 'average': avg}
                     ))
 
-            conn.close()
-
         except Exception as e:
             logger.error(f"Business scan error: {e}")
             insights.append(Insight(
@@ -230,6 +229,12 @@ class SystemAwareness:
                 severity="warning",
                 data={'error': str(e)}
             ))
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
 
         return insights
 
@@ -288,6 +293,7 @@ class SystemAwareness:
     async def scan_error_rates(self) -> List[Insight]:
         """Analyze error patterns"""
         insights = []
+        conn = None
 
         try:
             conn = self._get_connection()
@@ -319,16 +325,21 @@ class SystemAwareness:
                             action_recommended=f"Review {ae['agent_type']} agent logs and fix issues"
                         ))
 
-            conn.close()
-
         except Exception as e:
             logger.error(f"Error scan failed: {e}")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
 
         return insights
 
     async def scan_security(self) -> List[Insight]:
         """Check for security concerns"""
         insights = []
+        conn = None
 
         try:
             conn = self._get_connection()
@@ -357,11 +368,15 @@ class SystemAwareness:
                         action_recommended="Review failed auth attempts for potential attack"
                     ))
 
-            conn.close()
-
         except Exception as e:
             # Table might not exist, that's ok
             pass
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
 
         return insights
 
@@ -417,6 +432,7 @@ class SystemAwareness:
 
     async def _persist_insights(self, insights: List[Insight]):
         """Store insights in database"""
+        conn = None
         try:
             conn = self._get_connection()
             cur = conn.cursor()
@@ -450,10 +466,15 @@ class SystemAwareness:
                 ))
 
             conn.commit()
-            conn.close()
 
         except Exception as e:
             logger.error(f"Failed to persist insights: {e}")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
 
     def get_attention_priority(self) -> Tuple[str, str, int]:
         """Determine what should have attention right now"""
