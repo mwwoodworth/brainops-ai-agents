@@ -35,7 +35,7 @@ DB_CONFIG = {
 }
 
 class ModelRouter:
-    """Lightweight router to pick cheap vs. strong models."""
+    """Lightweight router to pick cheap vs. strong vs. reasoning models."""
 
     def __init__(self, openai_available: bool, anthropic_available: bool):
         self.openai_available = openai_available
@@ -59,14 +59,37 @@ class ModelRouter:
             return "claude-3-opus-20240229"
         return "gpt-4-0125-preview"
 
+    def _reasoning_model(self) -> str:
+        """Return OpenAI o1-preview for deep reasoning tasks."""
+        if self.openai_available:
+            return "o1-preview"
+        # Fallback to strong model if o1 not available
+        return self._strong_model()
+
     def route(
         self,
         intent: str = "general",
         complexity: str = "standard",
         prefer_anthropic: bool = False,
-        allow_expensive: bool = True
+        allow_expensive: bool = True,
+        require_reasoning: bool = False
     ) -> str:
-        """Choose model based on intent/complexity without expensive defaults."""
+        """Choose model based on intent/complexity without expensive defaults.
+
+        Args:
+            intent: Task intent (routing, review, reasoning, estimation, etc.)
+            complexity: Task complexity (routing, classification, standard, complex)
+            prefer_anthropic: Prefer Claude models when available
+            allow_expensive: Allow expensive models like GPT-4
+            require_reasoning: Force use of o1 reasoning model for complex tasks
+        """
+        # Reasoning intents that benefit from o1's chain-of-thought
+        reasoning_intents = {"reasoning", "estimation", "calculation", "analysis", "planning", "optimization"}
+
+        # Use o1 for deep reasoning tasks
+        if require_reasoning or (intent in reasoning_intents and allow_expensive):
+            return self._reasoning_model()
+
         routing_intents = {"routing", "selector", "classification", "quality_gate", "review"}
         if complexity in {"routing", "classification"} or intent in routing_intents or not allow_expensive:
             return self._fast_model(prefer_anthropic)
@@ -142,7 +165,14 @@ class RealAICore:
             return "claude-3-opus-20240229"
         if model.startswith("claude-3-haiku"):
             return "claude-3-haiku-20240307"
+        # o1 reasoning models - preserve exact model name
+        if model in {"o1", "o1-preview", "o1-mini"}:
+            return model
         return model
+
+    def _is_reasoning_model(self, model: str) -> bool:
+        """Check if model is an o1 reasoning model (requires different API params)."""
+        return model in {"o1", "o1-preview", "o1-mini"}
 
     def _safe_json(self, text: str) -> Dict[str, Any]:
         """Parse JSON content without failing the caller."""
@@ -185,27 +215,45 @@ class RealAICore:
                 allow_expensive=allow_expensive
             )
         selected_model = self._normalize_model_name(selected_model)
-        is_openai_model = selected_model.startswith("gpt") or selected_model == "openai"
+        is_openai_model = selected_model.startswith("gpt") or selected_model == "openai" or self._is_reasoning_model(selected_model)
         is_anthropic_model = selected_model.startswith("claude") or selected_model == "anthropic"
 
         try:
             if is_openai_model and self.async_openai:
-                messages = []
-                if system_prompt:
-                    messages.append({"role": "system", "content": system_prompt})
-                messages.append({"role": "user", "content": prompt})
+                # o1 models have different API requirements
+                if self._is_reasoning_model(selected_model):
+                    # o1 doesn't support system prompts - combine into user message
+                    combined_prompt = prompt
+                    if system_prompt:
+                        combined_prompt = f"{system_prompt}\n\n{prompt}"
+                    messages = [{"role": "user", "content": combined_prompt}]
 
-                response = await self.async_openai.chat.completions.create(
-                    model=selected_model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    stream=stream,
-                    timeout=5  # Add timeout
-                )
-                if stream:
-                    return response
-                return response.choices[0].message.content
+                    # o1 uses max_completion_tokens, not max_tokens
+                    # o1 doesn't support temperature or streaming
+                    response = await self.async_openai.chat.completions.create(
+                        model=selected_model,
+                        messages=messages,
+                        max_completion_tokens=max_tokens,
+                        timeout=120  # o1 needs longer timeout for reasoning
+                    )
+                    return response.choices[0].message.content
+                else:
+                    messages = []
+                    if system_prompt:
+                        messages.append({"role": "system", "content": system_prompt})
+                    messages.append({"role": "user", "content": prompt})
+
+                    response = await self.async_openai.chat.completions.create(
+                        model=selected_model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        stream=stream,
+                        timeout=5  # Add timeout
+                    )
+                    if stream:
+                        return response
+                    return response.choices[0].message.content
 
             # Use Claude as alternative
             elif is_anthropic_model and self.async_anthropic:
@@ -310,6 +358,85 @@ class RealAICore:
             response.raise_for_status()
             data = response.json()
             return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+    async def reason(
+        self,
+        problem: str,
+        context: Optional[Dict[str, Any]] = None,
+        max_tokens: int = 4000,
+        model: str = "o1-preview"
+    ) -> Dict[str, Any]:
+        """Use o1 reasoning model for complex multi-step problems.
+
+        This method is specifically designed for tasks requiring:
+        - Complex calculations (e.g., material waste ratios, pricing optimization)
+        - Multi-step logical reasoning
+        - Strategic planning and analysis
+        - Scientific or technical problem solving
+
+        Args:
+            problem: The problem statement requiring deep reasoning
+            context: Additional context data (will be JSON-serialized)
+            max_tokens: Maximum completion tokens (default 4000 for complex reasoning)
+            model: Reasoning model to use (o1-preview or o1-mini)
+
+        Returns:
+            Dict with 'reasoning' (full response) and 'conclusion' (extracted answer)
+        """
+        if not self.async_openai:
+            logger.warning("OpenAI not available for o1 reasoning, falling back to GPT-4")
+            response = await self.generate(
+                prompt=problem,
+                system_prompt="Think step by step and provide detailed reasoning.",
+                model="gpt-4-0125-preview",
+                max_tokens=max_tokens
+            )
+            return {"reasoning": response, "conclusion": response, "model_used": "gpt-4-0125-preview"}
+
+        # Build the reasoning prompt with context
+        full_prompt = problem
+        if context:
+            context_str = json.dumps(context, indent=2, default=str)[:2000]
+            full_prompt = f"Context:\n{context_str}\n\nProblem:\n{problem}"
+
+        try:
+            response = await self.async_openai.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": full_prompt}],
+                max_completion_tokens=max_tokens,
+                timeout=180  # Extended timeout for complex reasoning
+            )
+
+            reasoning_text = response.choices[0].message.content
+
+            # Try to extract a conclusion if present
+            conclusion = reasoning_text
+            if "conclusion" in reasoning_text.lower():
+                parts = reasoning_text.lower().split("conclusion")
+                if len(parts) > 1:
+                    conclusion = parts[-1].strip(": \n")[:500]
+            elif "therefore" in reasoning_text.lower():
+                parts = reasoning_text.lower().split("therefore")
+                if len(parts) > 1:
+                    conclusion = "Therefore " + parts[-1].strip(": \n")[:500]
+
+            logger.info(f"✅ o1 reasoning completed using {model}")
+            return {
+                "reasoning": reasoning_text,
+                "conclusion": conclusion,
+                "model_used": model,
+                "tokens_used": response.usage.total_tokens if response.usage else None
+            }
+
+        except Exception as e:
+            logger.error(f"o1 reasoning failed: {e}, falling back to GPT-4")
+            response = await self.generate(
+                prompt=problem,
+                system_prompt="Think step by step and provide detailed reasoning.",
+                model="gpt-4-0125-preview",
+                max_tokens=max_tokens
+            )
+            return {"reasoning": response, "conclusion": response, "model_used": "gpt-4-0125-preview (fallback)", "error": str(e)}
 
     async def route_agent(self, task: Dict[str, Any], candidate_agents: List[str]) -> Dict[str, Any]:
         """Use a cheap model to route work to the right agent."""
