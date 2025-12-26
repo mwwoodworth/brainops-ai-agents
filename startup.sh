@@ -9,13 +9,33 @@ echo "Environment: Production"
 echo "Python: $(python3 --version)"
 echo "Starting app.py (NOT web_service.py)"
 
-# Export environment variables - ALL credentials must come from environment
+# Export environment variables - support both DATABASE_URL and individual vars
 export PYTHONUNBUFFERED=1
-export DB_HOST=${DB_HOST:?"ERROR: DB_HOST environment variable required"}
+
+# Parse DATABASE_URL if individual vars not set (Render provides DATABASE_URL)
+if [ -n "$DATABASE_URL" ] && [ -z "$DB_PASSWORD" ]; then
+    echo "📌 Parsing DATABASE_URL for database credentials..."
+    # Extract components from DATABASE_URL: postgresql://user:password@host:port/database
+    export DB_USER=$(echo "$DATABASE_URL" | sed -n 's|.*://\([^:]*\):.*|\1|p')
+    export DB_PASSWORD=$(echo "$DATABASE_URL" | sed -n 's|.*://[^:]*:\([^@]*\)@.*|\1|p')
+    export DB_HOST=$(echo "$DATABASE_URL" | sed -n 's|.*@\([^:]*\):.*|\1|p')
+    export DB_PORT=$(echo "$DATABASE_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
+    export DB_NAME=$(echo "$DATABASE_URL" | sed -n 's|.*/\([^?]*\).*|\1|p')
+    echo "✅ Extracted: host=$DB_HOST, db=$DB_NAME, user=$DB_USER"
+fi
+
+# Fallback to defaults if still not set (for local development)
+export DB_HOST=${DB_HOST:-"aws-0-us-east-2.pooler.supabase.com"}
 export DB_NAME=${DB_NAME:-"postgres"}
-export DB_USER=${DB_USER:?"ERROR: DB_USER environment variable required"}
-export DB_PASSWORD=${DB_PASSWORD:?"ERROR: DB_PASSWORD environment variable required"}
+export DB_USER=${DB_USER:-"postgres.yomagoqdmxszqtdwuhab"}
 export DB_PORT=${DB_PORT:-5432}
+
+# Password is REQUIRED - fail if not set after all fallbacks
+if [ -z "$DB_PASSWORD" ]; then
+    echo "❌ ERROR: No database password found!"
+    echo "   Set either DATABASE_URL or DB_PASSWORD environment variable"
+    exit 1
+fi
 
 echo "✅ Environment configured"
 
