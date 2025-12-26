@@ -87,7 +87,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.20.0"  # ALIVE AI OS - Async DB operations & defensive config
+VERSION = "9.21.0"  # ALIVE AI OS - Real autonomous action execution system
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
