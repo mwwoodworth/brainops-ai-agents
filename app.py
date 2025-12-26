@@ -749,26 +749,36 @@ async def lifespan(app: FastAPI):
     # Initialize Nerve Center - The ALIVE Core of the AI OS
     # NOTE: Activation runs as background task to avoid blocking server startup
     try:
+        logger.info("🧠 Loading Nerve Center module...")
         from nerve_center import get_nerve_center
+        logger.info("🧠 Nerve Center module imported successfully")
         nerve_center = get_nerve_center()
+        logger.info(f"🧠 NerveCenter instance created: {nerve_center}")
         app.state.nerve_center = nerve_center
 
         async def activate_nerve_center():
             """Activate nerve center in background after server starts"""
             try:
-                await asyncio.sleep(1)  # Let server bind to port first
+                await asyncio.sleep(2)  # Let server bind to port first
+                logger.info("🧠 Starting Nerve Center activation...")
                 await nerve_center.activate()
                 logger.info("🧠 NERVE CENTER ACTIVATED - AI IS NOW FULLY ALIVE")
             except Exception as e:
                 logger.error(f"❌ Nerve Center background activation failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
 
         asyncio.create_task(activate_nerve_center())
         logger.info("🧠 Nerve Center initialization scheduled (activating in background)")
     except ImportError as e:
-        logger.warning(f"⚠️ Nerve Center not available: {e}")
+        logger.warning(f"⚠️ Nerve Center import failed: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
         app.state.nerve_center = None
     except Exception as e:
         logger.error(f"❌ Nerve Center initialization failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         app.state.nerve_center = None
 
     logger.info("=" * 80)
