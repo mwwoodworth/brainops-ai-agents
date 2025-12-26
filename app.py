@@ -559,11 +559,22 @@ async def lifespan(app: FastAPI):
             logger.error("❌ Database connection test failed")
 
         # Ensure minimum schema for agents/scheduler/self-healing
-        for statement in SCHEMA_BOOTSTRAP_SQL:
+        # Run in background to avoid blocking server startup
+        async def run_schema_bootstrap():
+            """Run schema bootstrap in background after server starts"""
             try:
-                await pool.execute(statement)
+                await asyncio.sleep(2)  # Let server bind to port first
+                for statement in SCHEMA_BOOTSTRAP_SQL:
+                    try:
+                        await pool.execute(statement)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Schema bootstrap statement failed: {e}")
+                logger.info("✅ Schema bootstrap completed in background")
             except Exception as e:
-                logger.warning(f"⚠️ Schema bootstrap statement failed: {e}")
+                logger.error(f"❌ Background schema bootstrap failed: {e}")
+
+        asyncio.create_task(run_schema_bootstrap())
+        logger.info("📋 Schema bootstrap scheduled (running in background)")
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
         # In production, never continue without a real database connection
