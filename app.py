@@ -209,7 +209,7 @@ logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.13.1"  # Fixed AI_CORE_AVAILABLE NameError in /ai/reason endpoint
+VERSION = "9.14.0"  # Updated reasoning model: o1-preview (deprecated) → o3-mini
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -2812,17 +2812,17 @@ async def ai_explain_reasoning(
 
 
 class ReasoningRequest(BaseModel):
-    """Request model for o1 reasoning endpoint"""
+    """Request model for o3 reasoning endpoint"""
     problem: str
     context: Optional[Dict[str, Any]] = None
     max_tokens: int = 4000
-    model: str = "o1-preview"
+    model: str = "o3-mini"  # Updated: o1-preview deprecated, using o3-mini
 
 
 @app.post("/ai/reason", dependencies=SECURED_DEPENDENCIES)
 async def ai_deep_reasoning(request: Request, body: ReasoningRequest):
     """
-    Use o1-preview reasoning model for complex multi-step problems.
+    Use o3-mini reasoning model for complex multi-step problems.
 
     This endpoint is designed for tasks requiring:
     - Complex calculations (e.g., material waste ratios, pricing optimization)
