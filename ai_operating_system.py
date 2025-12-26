@@ -32,11 +32,34 @@ warnings.filterwarnings('ignore')
 try:
     from ai_tracer import BrainOpsTracer, SpanType
     from self_healing_recovery import get_self_healing_recovery, RecoveryStrategy
+    from predictive_analytics_engine import get_predictive_analytics_engine, PredictionType, TimeHorizon
+    from performance_optimization_layer import get_performance_optimizer, OptimizationStrategy
+    from autonomic_controller import (
+        get_metric_collector, get_event_bus, get_autonomic_manager,
+        MetricCollector, EventBus, AutonomicManager,
+        EventType, PredictiveFailureDetector, ResourceOptimizer
+    )
+    AUTONOMIC_AVAILABLE = True
 except ImportError:
     # Fallback for local testing if not in path
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     from ai_tracer import BrainOpsTracer, SpanType
     from self_healing_recovery import get_self_healing_recovery, RecoveryStrategy
+    AUTONOMIC_AVAILABLE = False
+    try:
+        from predictive_analytics_engine import get_predictive_analytics_engine, PredictionType, TimeHorizon
+        from performance_optimization_layer import get_performance_optimizer, OptimizationStrategy
+    except ImportError:
+        pass  # Handle gracefully if these specific files are missing during bootstrap
+    try:
+        from autonomic_controller import (
+            get_metric_collector, get_event_bus, get_autonomic_manager,
+            MetricCollector, EventBus, AutonomicManager,
+            EventType, PredictiveFailureDetector, ResourceOptimizer
+        )
+        AUTONOMIC_AVAILABLE = True
+    except ImportError:
+        AUTONOMIC_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -81,6 +104,7 @@ class SystemComponent(Enum):
     PERFORMANCE = "performance_optimization_layer"  # Task 25
     FAILOVER = "failover_redundancy_system"  # Task 26
     MULTI_REGION = "multi_region_deployment"  # Task 27
+    PREDICTIVE_ANALYTICS = "predictive_analytics_engine"  # New Integration
 
 
 @dataclass
@@ -195,7 +219,91 @@ class SystemOrchestrator:
         # New Capabilities
         self.tracer = BrainOpsTracer()
         self.self_healing = get_self_healing_recovery()
+        
+        # Advanced Engines
+        try:
+            self.predictive_engine = get_predictive_analytics_engine()
+            self.performance_optimizer = get_performance_optimizer()
+        except NameError:
+            self.predictive_engine = None
+            self.performance_optimizer = None
+            logger.warning("Advanced engines (Predictive/Performance) not available")
     
+    async def detect_predictive_failures(self) -> Dict:
+        """
+        Enhancement 4: Predictive Failure Detection
+        Analyze system metrics to predict potential component failures
+        """
+        if not self.predictive_engine:
+            return {'status': 'skipped', 'reason': 'Predictive engine not available'}
+
+        logger.info("Running predictive failure detection...")
+        
+        # 1. Gather current system state as input data
+        health = await self.get_system_health()
+        input_data = {
+            'error_rate': health['metrics']['error_rate'],
+            'active_components': health['components']['healthy'],
+            'total_requests': health['metrics']['total_requests'],
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        
+        # 2. Detect Anomalies in recent metrics
+        # (Simulating a list of recent data points for the detector)
+        data_points = [{'value': health['metrics']['error_rate'], 'timestamp': datetime.utcnow().isoformat()}]
+        anomalies = await self.predictive_engine.detect_anomalies(data_points, sensitivity=0.9)
+        
+        # 3. Create Prediction for System Risk
+        prediction_id = await self.predictive_engine.create_prediction(
+            prediction_type=PredictionType.RISK,
+            entity_id="system_core",
+            entity_type="operating_system",
+            time_horizon=TimeHorizon.HOURLY,
+            input_data=input_data
+        )
+        
+        # 4. Generate Report
+        return {
+            'status': 'completed',
+            'prediction_id': prediction_id,
+            'anomalies_detected': len(anomalies),
+            'anomalies': anomalies,
+            'risk_assessment': 'analyzed'
+        }
+
+    async def optimize_resources(self) -> Dict:
+        """
+        Enhancement 5: Resource Optimization
+        Analyze performance and apply proactive resource optimizations
+        """
+        if not self.performance_optimizer or not self.predictive_engine:
+            return {'status': 'skipped', 'reason': 'Optimization components not available'}
+
+        logger.info("Running resource optimization...")
+        
+        # 1. Reactive: Analyze current performance and apply immediate fixes
+        optimization_report = await self.performance_optimizer.get_optimization_report()
+        
+        # 2. Proactive: Forecast future resource needs
+        # We assume some metric like 'cpu_usage' or 'request_load' is relevant
+        current_load = {'load': self.request_count} # Simplified
+        
+        prediction_id = await self.predictive_engine.create_prediction(
+            prediction_type=PredictionType.RESOURCE_NEED,
+            entity_id="system_resources",
+            entity_type="infrastructure",
+            time_horizon=TimeHorizon.DAILY,
+            input_data=current_load
+        )
+        
+        return {
+            'status': 'optimized',
+            'reactive_actions': optimization_report.get('applied_optimizations', []),
+            'recommendations': optimization_report.get('recommendations', []),
+            'proactive_forecast_id': prediction_id,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+
     async def initialize_system(self) -> Dict:
         """Initialize all AI OS components"""
         logger.info("Initializing AI Operating System...")
@@ -407,12 +515,28 @@ class SystemOrchestrator:
 
 
 class AIOperatingSystem:
-    """Complete AI Operating System"""
-    
+    """Complete AI Operating System with Autonomic Capabilities"""
+
     def __init__(self):
         self.orchestrator = SystemOrchestrator()
         self.initialized = False
         self.capabilities = self._define_capabilities()
+
+        # Autonomic capabilities
+        if AUTONOMIC_AVAILABLE:
+            self.metrics = get_metric_collector()
+            self.event_bus = get_event_bus()
+            self.autonomic_manager = get_autonomic_manager()
+            self.predictor = PredictiveFailureDetector(self.metrics, self.event_bus)
+            self.optimizer = ResourceOptimizer(self.metrics, self.event_bus)
+            self.autonomic_enabled = True
+        else:
+            self.metrics = None
+            self.event_bus = None
+            self.autonomic_manager = None
+            self.predictor = None
+            self.optimizer = None
+            self.autonomic_enabled = False
     
     def _define_capabilities(self) -> Dict:
         """Define AI OS capabilities"""
@@ -428,25 +552,29 @@ class AIOperatingSystem:
                 'predictive_analytics',
                 'natural_language_processing'
             ],
-            'optimization': [
-                'performance_tuning',
-                'cost_reduction',
-                'resource_allocation',
-                'auto_scaling'
-            ],
-            'reliability': [
-                'fault_tolerance',
-                'disaster_recovery',
-                'data_replication',
-                'high_availability',
-                'self_healing'  # Added
-            ],
             'observability': [
                 'real_time_monitoring',
                 'logging',
                 'alerting',
                 'reporting',
-                'distributed_tracing'  # Added
+                'distributed_tracing',
+                'predictive_failure_detection',
+                'metric_collection',
+                'trend_analysis'
+            ],
+            'autonomic': [
+                'mape_k_loop',
+                'event_driven_architecture',
+                'resource_optimization',
+                'anomaly_detection',
+                'self_driving_orchestration'
+            ],
+            'optimization': [
+                'performance_tuning',
+                'cost_reduction',
+                'resource_allocation',
+                'auto_scaling',
+                'resource_optimization' # Added
             ],
             'business': [
                 'revenue_generation',
@@ -462,7 +590,7 @@ class AIOperatingSystem:
         
         boot_sequence = {
             'timestamp': datetime.utcnow().isoformat(),
-            'version': '2.0.0', # Bumped version
+            'version': '3.0.0',  # Autonomic capabilities added
             'steps': []
         }
         
@@ -559,6 +687,15 @@ class AIOperatingSystem:
             workflow_type = command.split(':')[1]
             return await self.orchestrator.execute_workflow(workflow_type, params)
         
+        elif command == 'workflow:decision_making':
+             return await self.orchestrator.execute_workflow('decision_making', params)
+        
+        elif command == 'predictive_check':
+            return await self.orchestrator.detect_predictive_failures()
+            
+        elif command == 'optimize_resources':
+            return await self.orchestrator.optimize_resources()
+
         elif command == 'status':
             return await self.get_status()
         
@@ -570,7 +707,52 @@ class AIOperatingSystem:
         
         elif command == 'capabilities':
             return self.capabilities
-        
+
+        elif command == 'autonomic:start':
+            if self.autonomic_enabled:
+                asyncio.create_task(self.autonomic_manager.start_loop(
+                    interval=params.get('interval', 10.0)
+                ))
+                return {'status': 'started', 'interval': params.get('interval', 10.0)}
+            return {'error': 'Autonomic controller not available'}
+
+        elif command == 'autonomic:stop':
+            if self.autonomic_enabled:
+                self.autonomic_manager.stop_loop()
+                return {'status': 'stopped'}
+            return {'error': 'Autonomic controller not available'}
+
+        elif command == 'autonomic:predict':
+            if self.autonomic_enabled:
+                predictions = await self.predictor.predict_failures()
+                return {'predictions': predictions, 'count': len(predictions)}
+            return {'error': 'Autonomic controller not available'}
+
+        elif command == 'autonomic:optimize':
+            if self.autonomic_enabled:
+                return await self.optimizer.optimize()
+            return {'error': 'Autonomic controller not available'}
+
+        elif command == 'metrics':
+            if self.autonomic_enabled:
+                all_stats = self.metrics.get_all_stats()
+                return {
+                    name: {
+                        'current': s.current if s else None,
+                        'avg': s.avg if s else None,
+                        'trend': s.trend if s else None
+                    }
+                    for name, s in all_stats.items()
+                }
+            return {'error': 'Metrics not available'}
+
+        elif command == 'events':
+            if self.autonomic_enabled:
+                return {
+                    'recent_events': self.event_bus.get_recent_events(limit=params.get('limit', 50))
+                }
+            return {'error': 'Event bus not available'}
+
         else:
             return {'error': f'Unknown command: {command}'}
     
@@ -581,7 +763,7 @@ class AIOperatingSystem:
         
         return {
             'system': 'AI Operating System',
-            'version': '2.0.0',
+            'version': '3.0.0',
             'status': health['status'],
             'uptime_hours': health['uptime_hours'],
             'components': {
@@ -593,6 +775,11 @@ class AIOperatingSystem:
                 'requests': health['metrics']['total_requests'],
                 'errors': health['metrics']['errors'],
                 'error_rate': health['metrics']['error_rate']
+            },
+            'autonomic': {
+                'enabled': self.autonomic_enabled,
+                'mape_k_active': self.autonomic_manager.active if self.autonomic_enabled else False,
+                'loop_count': self.autonomic_manager.loop_count if self.autonomic_enabled else 0
             },
             'capabilities': len(self.capabilities),
             'timestamp': datetime.utcnow().isoformat()
@@ -657,6 +844,20 @@ if __name__ == "__main__":
         # Decision making
         result = await ai_os.execute('workflow:decision_making', {'decision_type': 'strategic'})
         print(f"✅ Decision workflow: {result.get('status', 'unknown')}")
+
+        # Predictive Failure Check
+        print("\n🔮 PREDICTIVE ANALYTICS...")
+        result = await ai_os.execute('predictive_check')
+        print(f"✅ Failure Prediction: {result.get('status', 'unknown')}")
+        if result.get('anomalies_detected', 0) > 0:
+            print(f"   ⚠️ Anomalies detected: {result['anomalies_detected']}")
+
+        # Resource Optimization
+        print("\n⚡ RESOURCE OPTIMIZATION...")
+        result = await ai_os.execute('optimize_resources')
+        print(f"✅ Optimization: {result.get('status', 'unknown')}")
+        if result.get('recommendations'):
+            print(f"   💡 Recommendations: {len(result['recommendations'])}")
         
         # Get status
         print("\n📊 SYSTEM STATUS...")
