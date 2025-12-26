@@ -28,13 +28,32 @@ from psycopg2.extras import RealDictCursor, Json
 
 logger = logging.getLogger("PROACTIVE_INTELLIGENCE")
 
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-    'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('DB_PASSWORD'),
-    'port': int(os.getenv('DB_PORT', 5432))
-}
+# Database configuration with DATABASE_URL fallback
+def _build_db_config():
+    """Build database config, supporting both individual vars and DATABASE_URL"""
+    config = {
+        'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
+        'database': os.getenv('DB_NAME', 'postgres'),
+        'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
+        'password': os.getenv('DB_PASSWORD'),
+        'port': int(os.getenv('DB_PORT', 5432))
+    }
+    if not config['password']:
+        database_url = os.getenv('DATABASE_URL', '')
+        if database_url:
+            from urllib.parse import urlparse
+            try:
+                parsed = urlparse(database_url)
+                config['host'] = parsed.hostname or config['host']
+                config['database'] = parsed.path.lstrip('/') or config['database']
+                config['user'] = parsed.username or config['user']
+                config['password'] = parsed.password or ''
+                config['port'] = parsed.port or config['port']
+            except Exception as e:
+                logger.error(f"Failed to parse DATABASE_URL: {e}")
+    return config
+
+DB_CONFIG = _build_db_config()
 
 
 class PredictionType(Enum):
