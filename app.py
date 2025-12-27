@@ -60,6 +60,40 @@ from api.cicd import router as cicd_router  # Autonomous CI/CD Management - 1-10
 from api.a2ui import router as a2ui_router  # Google A2UI Protocol - Agent-to-User Interface
 from api.aurea_chat import router as aurea_chat_router  # AUREA Live Conversational Interface
 from api.observability import router as full_observability_router  # Comprehensive Observability Dashboard
+
+# New Pipeline Routers - Secure, authenticated endpoints
+try:
+    from api.product_generation import router as product_generation_router
+    PRODUCT_GEN_ROUTER_AVAILABLE = True
+    logger.info("Product Generation Router loaded")
+except ImportError as e:
+    PRODUCT_GEN_ROUTER_AVAILABLE = False
+    logger.warning(f"Product Generation Router not available: {e}")
+
+try:
+    from api.affiliate import router as affiliate_router
+    AFFILIATE_ROUTER_AVAILABLE = True
+    logger.info("Affiliate Router loaded")
+except ImportError as e:
+    AFFILIATE_ROUTER_AVAILABLE = False
+    logger.warning(f"Affiliate Router not available: {e}")
+
+try:
+    from api.knowledge import router as knowledge_base_router
+    KNOWLEDGE_BASE_ROUTER_AVAILABLE = True
+    logger.info("Knowledge Base Router loaded")
+except ImportError as e:
+    KNOWLEDGE_BASE_ROUTER_AVAILABLE = False
+    logger.warning(f"Knowledge Base Router not available: {e}")
+
+try:
+    from api.sop import router as sop_router
+    SOP_ROUTER_AVAILABLE = True
+    logger.info("SOP Generator Router loaded")
+except ImportError as e:
+    SOP_ROUTER_AVAILABLE = False
+    logger.warning(f"SOP Router not available: {e}")
+
 from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
 from observability import RequestMetrics, TTLCache
@@ -1048,6 +1082,23 @@ app.include_router(cicd_router, dependencies=SECURED_DEPENDENCIES)  # Autonomous
 app.include_router(a2ui_router, dependencies=SECURED_DEPENDENCIES)  # Google A2UI Protocol - Agent-generated UIs
 app.include_router(aurea_chat_router, dependencies=SECURED_DEPENDENCIES)  # AUREA Live Conversational AI
 app.include_router(full_observability_router, dependencies=SECURED_DEPENDENCIES)  # Comprehensive Observability Dashboard
+
+# Mount New Pipeline Routers (with graceful fallback)
+if PRODUCT_GEN_ROUTER_AVAILABLE:
+    app.include_router(product_generation_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: Product Generation API at /products")
+
+if AFFILIATE_ROUTER_AVAILABLE:
+    app.include_router(affiliate_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: Affiliate API at /affiliate")
+
+if KNOWLEDGE_BASE_ROUTER_AVAILABLE:
+    app.include_router(knowledge_base_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: Knowledge Base API at /knowledge-base")
+
+if SOP_ROUTER_AVAILABLE:
+    app.include_router(sop_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: SOP Generator API at /sop")
 
 # Import and include analytics router
 try:
