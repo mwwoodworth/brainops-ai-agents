@@ -3275,23 +3275,20 @@ async def get_aurea_status():
                 }
             }
 
-        async with pool.acquire() as conn:
-            # Check for recent OODA cycle activity (last 5 minutes)
-            recent_cycles = await conn.fetchval("""
-                SELECT COUNT(*) FROM aurea_state
-                WHERE timestamp > NOW() - INTERVAL '5 minutes'
-            """)
+        # Use pool methods directly (they handle acquire internally)
+        recent_cycles = await pool.fetchval("""
+            SELECT COUNT(*) FROM aurea_state
+            WHERE timestamp > NOW() - INTERVAL '5 minutes'
+        """)
 
-            # Check for recent decisions
-            recent_decisions = await conn.fetchval("""
-                SELECT COUNT(*) FROM aurea_decisions
-                WHERE created_at > NOW() - INTERVAL '1 hour'
-            """)
+        recent_decisions = await pool.fetchval("""
+            SELECT COUNT(*) FROM aurea_decisions
+            WHERE created_at > NOW() - INTERVAL '1 hour'
+        """)
 
-            # Check active agents
-            active_agents = await conn.fetchval("""
-                SELECT COUNT(*) FROM ai_agents WHERE status = 'active'
-            """)
+        active_agents = await pool.fetchval("""
+            SELECT COUNT(*) FROM ai_agents WHERE status = 'active'
+        """)
 
         # AUREA is operational if we have recent OODA cycles
         aurea_operational = recent_cycles > 0
