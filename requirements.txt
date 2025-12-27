@@ -57,3 +57,4 @@ numpy==1.26.4
 # ML for AI Training Pipeline (lightweight)
 scikit-learn>=1.3.0
 scipy>=1.11.0
+bleach>=6.0.0
