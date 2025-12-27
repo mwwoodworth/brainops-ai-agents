@@ -393,6 +393,68 @@ class LangGraphOrchestrator:
             "execution_time": final_state["metadata"].get("end_time")
         }
 
+    async def execute(self, agent_name: str, prompt: str, tenant_id: str = None, context: Dict = None) -> Dict:
+        """
+        Execute an agent task - main entry point called by external systems.
+
+        This method provides a simple interface for invoking the orchestrator
+        with an agent name and prompt, handling all the internal workflow details.
+
+        Args:
+            agent_name: Name of the agent to invoke (e.g., 'workflow-orchestrator', 'crew-allocator')
+            prompt: The task/prompt to execute
+            tenant_id: Optional tenant ID for multi-tenancy
+            context: Optional additional context
+
+        Returns:
+            Dict with success, response, agent_used, errors, execution_time
+        """
+        try:
+            # Convert agent_name to internal agent type
+            agent_type_map = {
+                'workflow-orchestrator': 'workflow',
+                'crew-allocator': 'workflow',
+                'weather-monitor': 'analyzer',
+                'customer-success': 'customer',
+                'revenue-optimizer': 'revenue',
+                'technical-support': 'technical',
+                'data-analyst': 'analyzer',
+            }
+
+            # Build messages from prompt
+            messages = [HumanMessage(content=prompt)]
+
+            # Build metadata
+            metadata = {
+                'workflow_id': f"{agent_name}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
+                'requested_agent': agent_name,
+                'tenant_id': tenant_id,
+                'context': context or {}
+            }
+
+            # Force agent type if known
+            mapped_type = agent_type_map.get(agent_name, 'workflow')
+
+            # Run the workflow
+            result = await self.run_workflow(messages, metadata)
+
+            # If agent mapping caused a different agent, note it
+            if result.get('agent_used') != mapped_type:
+                result['requested_agent'] = agent_name
+
+            logger.info(f"Executed agent {agent_name}: success={result.get('success')}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Execute failed for agent {agent_name}: {e}")
+            return {
+                'success': False,
+                'response': None,
+                'agent_used': agent_name,
+                'errors': [str(e)],
+                'execution_time': datetime.now(timezone.utc).isoformat()
+            }
+
 # Global orchestrator instance - create lazily
 langgraph_orchestrator = None
 
