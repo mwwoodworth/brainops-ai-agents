@@ -35,23 +35,35 @@ warnings.filterwarnings('ignore')
 
 
 def json_safe_serialize(obj: Any) -> Any:
-    """Recursively convert datetime/Decimal/Enum objects to JSON-serializable types"""
-    if isinstance(obj, datetime):
+    """Recursively convert datetime/Decimal/Enum/bytes objects to JSON-serializable types"""
+    if obj is None:
+        return None
+    elif isinstance(obj, datetime):
         return obj.isoformat()
     elif isinstance(obj, Decimal):
         return float(obj)
     elif isinstance(obj, Enum):
         return obj.value
+    elif isinstance(obj, bytes):
+        # Convert bytes to base64 string to avoid bytea interpretation errors
+        import base64
+        return base64.b64encode(obj).decode('utf-8')
+    elif isinstance(obj, (int, float, str, bool)):
+        return obj
     elif hasattr(obj, '__dataclass_fields__'):
         # Handle dataclasses
         return {k: json_safe_serialize(v) for k, v in obj.__dict__.items()}
     elif isinstance(obj, dict):
-        return {k: json_safe_serialize(v) for k, v in obj.items()}
+        return {str(k): json_safe_serialize(v) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [json_safe_serialize(item) for item in obj]
     elif isinstance(obj, tuple):
-        return tuple(json_safe_serialize(item) for item in obj)
-    return obj
+        return list(json_safe_serialize(item) for item in obj)
+    elif hasattr(obj, '__dict__'):
+        return json_safe_serialize(obj.__dict__)
+    else:
+        # Fallback: convert to string
+        return str(obj)
 
 
 # MCP Bridge Configuration
