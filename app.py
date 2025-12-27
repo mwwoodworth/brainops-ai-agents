@@ -23,6 +23,13 @@ from fastapi.security import APIKeyHeader
 # Import our production-ready components
 from config import config
 
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, config.log_level, logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
 # Import agent executor for actual agent dispatch
 try:
     from agent_executor import AgentExecutor
@@ -111,13 +118,6 @@ except ImportError:
 SCHEMA_BOOTSTRAP_SQL = [
     "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
 ]
-
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, config.log_level, logging.INFO),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
@@ -3257,16 +3257,51 @@ async def ai_analyze(
 @app.get("/aurea/status")
 async def get_aurea_status():
     """
-    Get AUREA operational status - simple health check.
-    This is a convenience endpoint that redirects to the full AUREA chat API.
+    Get AUREA operational status - checks actual OODA loop activity.
+    This endpoint verifies real AUREA activity in the database.
     """
     try:
-        # Check if AUREA orchestrator is available
-        aurea_available = hasattr(app.state, 'aurea_orchestrator') and app.state.aurea_orchestrator is not None
+        pool = get_pool()
+        if not pool:
+            return {
+                "status": "initializing",
+                "aurea_available": False,
+                "message": "Database pool not available",
+                "timestamp": datetime.utcnow().isoformat(),
+                "endpoints": {
+                    "full_status": "/aurea/chat/status",
+                    "chat": "/aurea/chat/message",
+                    "websocket": "/aurea/chat/ws/{session_id}"
+                }
+            }
+
+        async with pool.acquire() as conn:
+            # Check for recent OODA cycle activity (last 5 minutes)
+            recent_cycles = await conn.fetchval("""
+                SELECT COUNT(*) FROM aurea_state
+                WHERE timestamp > NOW() - INTERVAL '5 minutes'
+            """)
+
+            # Check for recent decisions
+            recent_decisions = await conn.fetchval("""
+                SELECT COUNT(*) FROM aurea_decisions
+                WHERE created_at > NOW() - INTERVAL '1 hour'
+            """)
+
+            # Check active agents
+            active_agents = await conn.fetchval("""
+                SELECT COUNT(*) FROM ai_agents WHERE status = 'active'
+            """)
+
+        # AUREA is operational if we have recent OODA cycles
+        aurea_operational = recent_cycles > 0
 
         return {
-            "status": "operational" if aurea_available else "initializing",
-            "aurea_available": aurea_available,
+            "status": "operational" if aurea_operational else "idle",
+            "aurea_available": True,
+            "ooda_cycles_last_5min": recent_cycles,
+            "decisions_last_hour": recent_decisions,
+            "active_agents": active_agents,
             "timestamp": datetime.utcnow().isoformat(),
             "endpoints": {
                 "full_status": "/aurea/chat/status",
