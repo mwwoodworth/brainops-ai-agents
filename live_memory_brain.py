@@ -1069,10 +1069,11 @@ class LiveMemoryBrain:
                 if m.importance < 0.3 and m.memory_type in [MemoryType.EPISODIC, MemoryType.SEMANTIC]
             ]
             if len(low_importance) >= 10:
-                consolidated = self.compressor.compress(low_importance)
+                # Use correct method name: compress_memories instead of compress
+                consolidated, wisdom = await self.compressor.compress_memories(low_importance)
                 if consolidated:
-                    # Store consolidated memory and remove originals
-                    await self.remember(consolidated)
+                    # Store consolidated memory using correct method name: store instead of remember
+                    await self.store(consolidated, MemoryType.CRYSTALLIZED, importance=0.7)
                     for mem in low_importance[:len(low_importance)//2]:
                         if mem.id in self.long_term_memory:
                             del self.long_term_memory[mem.id]
@@ -1080,6 +1081,9 @@ class LiveMemoryBrain:
 
     async def _ensure_tables(self):
         """Ensure all required tables exist"""
+        if not self._db_pool:
+            logger.warning("Database pool not initialized, skipping table creation")
+            return
         conn = self._db_pool.getconn()
         try:
             cursor = conn.cursor()

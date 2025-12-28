@@ -952,8 +952,8 @@ class ConsciousnessEmergenceController:
         # Integration metrics
         self.integration_events: List[Dict] = []
 
-        # ENHANCEMENT: Experience processing pipeline
-        self._experience_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        # ENHANCEMENT: Experience processing pipeline (lazy initialization to avoid event loop issues)
+        self._experience_queue: Optional[asyncio.Queue] = None
         self._experience_processor_task: Optional[asyncio.Task] = None
         self._experience_batch_size = 5
         self._experience_batch_timeout = 0.5  # seconds
@@ -1018,6 +1018,10 @@ class ConsciousnessEmergenceController:
         ENHANCEMENT: Background loop for batched experience processing.
         Collects experiences and processes them in batches for efficiency.
         """
+        # Lazy initialization of queue
+        if self._experience_queue is None:
+            self._experience_queue = asyncio.Queue(maxsize=100)
+
         while self.consciousness_active:
             try:
                 batch = []
@@ -1124,6 +1128,9 @@ class ConsciousnessEmergenceController:
         ENHANCEMENT: Queue an experience for async processing.
         Returns True if queued, False if queue is full.
         """
+        # Lazy initialization of queue to avoid event loop issues
+        if self._experience_queue is None:
+            self._experience_queue = asyncio.Queue(maxsize=100)
         try:
             self._experience_queue.put_nowait(experience)
             return True
