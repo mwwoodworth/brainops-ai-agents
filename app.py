@@ -68,6 +68,15 @@ from api.a2ui import router as a2ui_router  # Google A2UI Protocol - Agent-to-Us
 from api.aurea_chat import router as aurea_chat_router  # AUREA Live Conversational Interface
 from api.observability import router as full_observability_router  # Comprehensive Observability Dashboard
 
+# Bleeding Edge AI Capabilities - Revolutionary systems (2025-12-27)
+try:
+    from api.bleeding_edge import router as bleeding_edge_router
+    BLEEDING_EDGE_AVAILABLE = True
+    logger.info("Bleeding Edge AI Router loaded - 6 revolutionary systems")
+except ImportError as e:
+    BLEEDING_EDGE_AVAILABLE = False
+    logger.warning(f"Bleeding Edge Router not available: {e}")
+
 # New Pipeline Routers - Secure, authenticated endpoints
 try:
     from api.product_generation import router as product_generation_router
@@ -121,7 +130,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.22.0"  # ALIVE AI OS - Real autonomous action execution system
+VERSION = "9.23.0"  # BLEEDING EDGE AI OS - 6 revolutionary systems (OODA, Hallucination Prevention, Live Memory, Dependability, Consciousness, Circuit Breaker)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -1083,6 +1092,11 @@ app.include_router(a2ui_router, dependencies=SECURED_DEPENDENCIES)  # Google A2U
 app.include_router(aurea_chat_router, dependencies=SECURED_DEPENDENCIES)  # AUREA Live Conversational AI
 app.include_router(full_observability_router, dependencies=SECURED_DEPENDENCIES)  # Comprehensive Observability Dashboard
 
+# Bleeding Edge AI Systems (2025-12-27) - Revolutionary capabilities
+if BLEEDING_EDGE_AVAILABLE:
+    app.include_router(bleeding_edge_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: Bleeding Edge AI API at /bleeding-edge - 37 capabilities")
+
 # Mount New Pipeline Routers (with graceful fallback)
 if PRODUCT_GEN_ROUTER_AVAILABLE:
     app.include_router(product_generation_router, dependencies=SECURED_DEPENDENCIES)
@@ -1142,6 +1156,9 @@ def _collect_active_systems() -> List[str]:
         active.append("Vision Alignment Agent")
     if RECONCILER_AVAILABLE and getattr(app.state, "reconciler", None):
         active.append("Self-Healing Reconciler")
+    # Bleeding Edge AI Systems (2025-12-27)
+    if BLEEDING_EDGE_AVAILABLE:
+        active.append("Bleeding Edge AI (OODA, Hallucination, Memory, Dependability, Consciousness, Circuit Breaker)")
     return active
 
 
@@ -1444,7 +1461,14 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
                 "market_intelligence": True,
                 "system_orchestrator": True,
                 "enhanced_self_healing": True,
-                "reconciliation_loop": RECONCILER_AVAILABLE
+                "reconciliation_loop": RECONCILER_AVAILABLE,
+                # Phase 4 - Revolutionary AI (2025-12-27)
+                "bleeding_edge_ooda": BLEEDING_EDGE_AVAILABLE,
+                "hallucination_prevention": BLEEDING_EDGE_AVAILABLE,
+                "live_memory_brain": BLEEDING_EDGE_AVAILABLE,
+                "dependability_framework": BLEEDING_EDGE_AVAILABLE,
+                "consciousness_emergence": BLEEDING_EDGE_AVAILABLE,
+                "enhanced_circuit_breaker": BLEEDING_EDGE_AVAILABLE
             },
             "config": {
                 "environment": config.environment,
