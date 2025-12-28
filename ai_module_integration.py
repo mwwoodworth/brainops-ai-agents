@@ -385,15 +385,10 @@ class ModuleIntegrationOrchestrator:
         # Feedback handlers
         self._feedback_handlers: Dict[str, List[Callable]] = defaultdict(list)
 
-        # Cross-module signal queues - initialize for all modules
-        self._signal_queues: Dict[str, asyncio.Queue] = {
-            "ooda": asyncio.Queue(maxsize=100),
-            "consciousness": asyncio.Queue(maxsize=100),
-            "memory": asyncio.Queue(maxsize=100),
-            "dependability": asyncio.Queue(maxsize=100),
-            "circuit_breaker": asyncio.Queue(maxsize=100),
-            "hallucination": asyncio.Queue(maxsize=100)
-        }
+        # Cross-module signal queues - lazy initialization to avoid event loop issues
+        # FIX: Don't create asyncio.Queue outside of event loop context
+        self._signal_queues: Dict[str, Optional[asyncio.Queue]] = {}
+        self._signal_queue_modules = ["ooda", "consciousness", "memory", "dependability", "circuit_breaker", "hallucination"]
 
         # Signal handlers registered by modules
         self._signal_handlers: Dict[str, Dict[str, Callable]] = defaultdict(dict)
@@ -435,11 +430,22 @@ class ModuleIntegrationOrchestrator:
         logger.debug(f"Registered signal handler: {module}.{method}")
 
     def get_signal_queue(self, module: str) -> Optional[asyncio.Queue]:
-        """Get the signal queue for a module"""
+        """Get the signal queue for a module (lazy initialization)"""
+        if module in self._signal_queue_modules and module not in self._signal_queues:
+            try:
+                self._signal_queues[module] = asyncio.Queue(maxsize=100)
+            except RuntimeError:
+                # No event loop - will be created later
+                return None
         return self._signal_queues.get(module)
 
     async def start_signal_processor(self):
         """Start processing signals for all modules"""
+        # Initialize signal queues now that we have an event loop
+        for module in self._signal_queue_modules:
+            if module not in self._signal_queues:
+                self._signal_queues[module] = asyncio.Queue(maxsize=100)
+
         if self._signal_processor_task is None:
             self._signal_processor_task = asyncio.create_task(self._process_signals())
             logger.info("Signal processor started")
@@ -655,7 +661,12 @@ class ModuleIntegrationOrchestrator:
 
         # If severe, trigger recovery
         if contradiction.get("severity") == "high":
-            asyncio.create_task(self._coordinate_recovery("memory", contradiction))
+            # FIX: Safely create task only if event loop is running
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._coordinate_recovery("memory", contradiction))
+            except RuntimeError:
+                logger.warning("No running event loop, skipping recovery task for memory contradiction")
 
     def _on_guard_violation(self, event: Event):
         """Handle guard violation -> coordinate recovery"""
@@ -667,7 +678,12 @@ class ModuleIntegrationOrchestrator:
 
         severity = violation.get("severity", "low")
         if severity in ["critical", "high"]:
-            asyncio.create_task(self._coordinate_recovery("dependability", violation))
+            # FIX: Safely create task only if event loop is running
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._coordinate_recovery("dependability", violation))
+            except RuntimeError:
+                logger.warning("No running event loop, skipping recovery task for guard violation")
 
     def _on_circuit_state_changed(self, event: Event):
         """Handle circuit breaker state change"""
@@ -870,7 +886,8 @@ class ModuleIntegrationOrchestrator:
                 "consciousness": {
                     "awareness_level": self._state.awareness_level,
                     "consciousness_level": round(self._state.consciousness_level, 3),
-                    "active_intentions": len(self._state.active_intentions)
+                    "active_intentions_count": len(self._state.active_intentions),
+                    "active_intentions": list(self._state.active_intentions)  # FIX: Return actual list for get_intention_context
                 },
                 "memory": {
                     "working_count": self._state.working_memory_count,

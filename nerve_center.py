@@ -15,6 +15,7 @@ import os
 import json
 import asyncio
 import logging
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
@@ -101,6 +102,8 @@ class NerveCenter:
         # Optional components
         self.consciousness_loop = None
         self.self_evolution = None
+        # FIX: Initialize system_awareness in __init__ to avoid AttributeError
+        self.system_awareness = None
 
         # Signal handlers
         self._signal_handlers: Dict[SystemSignal, List[Callable]] = {
@@ -202,17 +205,18 @@ class NerveCenter:
         try:
             pool = await self._get_pool()
             if not using_fallback():
+                # FIX: Use positional args, not tuple for asyncpg
                 await pool.execute("""
                 INSERT INTO ai_nerve_signals
                 (signal_type, source, target, payload, priority)
                 VALUES ($1, $2, $3, $4, $5)
-            """, (
+            """,
                     signal.type.value,
                     signal.source,
                     signal.target,
                     json.dumps(signal.payload),
-                    signal.priority,
-                ))
+                    signal.priority
+                )
         except Exception as e:
             logger.warning(f"Failed to log signal: {e}")
 
@@ -306,17 +310,18 @@ class NerveCenter:
             pool = await self._get_pool()
             if using_fallback():
                 return
+            # FIX: Use positional args, not tuple for asyncpg
             await pool.execute("""
                 INSERT INTO ai_emergency_events
                 (event_type, severity, description, source, data)
                 VALUES ($1, $2, $3, $4, $5)
-            """, (
+            """,
                 data.get('type', 'unknown'),
                 data.get('severity', 'high'),
                 data.get('description', str(data)),
                 'alive_core',
-                json.dumps(data),
-            ))
+                json.dumps(data)
+            )
         except Exception as e:
             logger.error(f"Failed to log emergency: {e}")
 
@@ -426,19 +431,20 @@ class NerveCenter:
             pool = await self._get_pool()
             if using_fallback():
                 return
+            # FIX: Use positional args, not tuple for asyncpg
             await pool.execute("""
                 INSERT INTO ai_system_snapshot
                 (components, consciousness_state, health_status, active_predictions,
                  thought_count, uptime_seconds)
                 VALUES ($1, $2, $3, $4, $5, $6)
-            """, (
+            """,
                 json.dumps(components),
                 self.alive_core.state.value if self.alive_core else 'unknown',
                 health,
                 len(self.proactive.predictions) if self.proactive else 0,
                 self.alive_core.thought_counter if self.alive_core else 0,
-                (datetime.utcnow() - self.start_time).total_seconds(),
-            ))
+                (datetime.utcnow() - self.start_time).total_seconds()
+            )
 
         except Exception as e:
             logger.warning(f"Snapshot failed: {e}")
@@ -460,16 +466,18 @@ class NerveCenter:
             if self.alive_core:
                 await self.alive_core.awaken()
 
-            # Start autonomic manager
+            # Start autonomic manager - FIX: Track task to allow proper cancellation
             if self.autonomic:
-                asyncio.create_task(self.autonomic.start_loop(interval=10))
+                task = asyncio.create_task(self.autonomic.start_loop(interval=10))
+                self._tasks.append(task)
 
             # Start coordination loop
             self._tasks.append(asyncio.create_task(self._coordination_loop()))
 
-            # Start consciousness loop if available
+            # Start consciousness loop if available - FIX: Track task
             if self.consciousness_loop and hasattr(self.consciousness_loop, 'start'):
-                asyncio.create_task(self.consciousness_loop.start())
+                task = asyncio.create_task(self.consciousness_loop.start())
+                self._tasks.append(task)
 
             self.is_online = True
 
@@ -557,14 +565,17 @@ class NerveCenter:
         }
 
 
-# Singleton
+# Singleton with thread safety
 _nerve_center: Optional[NerveCenter] = None
+_nerve_center_lock = threading.Lock()
 
 
 def get_nerve_center() -> NerveCenter:
     global _nerve_center
     if _nerve_center is None:
-        _nerve_center = NerveCenter()
+        with _nerve_center_lock:
+            if _nerve_center is None:
+                _nerve_center = NerveCenter()
     return _nerve_center
 
 

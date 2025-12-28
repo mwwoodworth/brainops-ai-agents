@@ -327,10 +327,16 @@ class DynamicCircuitBreaker:
             self._consecutive_failures = 0
             self._last_success_time = now
 
-            # Record in sliding window
+            # Record in sliding window (legacy)
             self._request_history.append((now, True))
             if response_time_ms > 0:
                 self._response_times.append(response_time_ms)
+
+            # OPTIMIZATION: Also record in sliding counter
+            self._sliding_counter.record_success(response_time_ms)
+
+            # ENHANCEMENT: Update health score
+            self._update_health_score(True)
 
             # Handle half-open success
             if self._state == CircuitState.HALF_OPEN:
@@ -350,10 +356,16 @@ class DynamicCircuitBreaker:
             self._consecutive_successes = 0
             self._last_failure_time = now
 
-            # Record in sliding window
+            # Record in sliding window (legacy)
             self._request_history.append((now, False))
             if response_time_ms > 0:
                 self._response_times.append(response_time_ms)
+
+            # OPTIMIZATION: Also record in sliding counter
+            self._sliding_counter.record_failure(response_time_ms)
+
+            # ENHANCEMENT: Update health score
+            self._update_health_score(False)
 
             # Handle half-open failure
             if self._state == CircuitState.HALF_OPEN:
@@ -476,6 +488,9 @@ class DynamicCircuitBreaker:
         self._half_open_requests = 0
         self._recovery_attempts = 0
         self._current_recovery_timeout = self._base_recovery_timeout
+
+        # ENHANCEMENT: Track consecutive successful recoveries
+        self._half_open_success_streak += 1
 
         logger.info(f"Circuit CLOSED for {self.component_id}")
         self._emit_alert(
@@ -960,7 +975,7 @@ class SidecarHealthMonitor:
 
         self._running = False
         self._check_task: Optional[asyncio.Task] = None
-        self._health_history: deque = deque(maxlen=100)
+        self._health_history: deque = deque(maxlen=100)  # Already bounded
         self._current_health: Dict[str, Any] = {
             "status": "unknown",
             "latency_ok": True,
@@ -1106,7 +1121,8 @@ class SelfHealingController:
         self._deadlock_detector = DeadlockDetector()
         self._cascade_protector = CascadeProtector()
         self._running = False
-        self._healing_history: List[Dict[str, Any]] = []
+        # FIX: Use bounded deque instead of unbounded list to prevent memory leak
+        self._healing_history: deque = deque(maxlen=500)
 
     async def start(self):
         """Start all self-healing components"""
@@ -1245,12 +1261,15 @@ class SelfHealingController:
 # =============================================================================
 
 _controller: Optional[SelfHealingController] = None
+_controller_lock = threading.Lock()
 
 
 def get_self_healing_controller() -> SelfHealingController:
     global _controller
     if _controller is None:
-        _controller = SelfHealingController()
+        with _controller_lock:
+            if _controller is None:
+                _controller = SelfHealingController()
     return _controller
 
 
