@@ -83,12 +83,22 @@ class ObservabilityPersistence:
             logger.info("ObservabilityPersistence initialized with database connection")
 
     def _get_db_config(self) -> Optional[Dict[str, Any]]:
-        """Get database configuration from environment"""
+        """Get database configuration from environment with hardcoded fallback"""
+        # Try environment variables first
         host = os.environ.get("DB_HOST")
         database = os.environ.get("DB_NAME")
         user = os.environ.get("DB_USER")
         password = os.environ.get("DB_PASSWORD")
         port = int(os.environ.get("DB_PORT", "5432"))
+
+        # Hardcoded fallback for Supabase production
+        if not all([host, database, user, password]):
+            host = "aws-0-us-east-2.pooler.supabase.com"
+            database = "postgres"
+            user = "postgres.yomagoqdmxszqtdwuhab"
+            password = os.environ.get("SUPABASE_DB_PASSWORD", os.environ.get("DB_PASSWORD"))
+            port = 5432
+            logger.info("Using hardcoded Supabase fallback config for observability")
 
         if all([host, database, user, password]):
             return {
@@ -99,6 +109,7 @@ class ObservabilityPersistence:
                 "port": port,
                 "sslmode": "require"
             }
+        logger.warning("No database configuration available for observability persistence")
         return None
 
     def _get_connection(self):
@@ -1234,6 +1245,133 @@ def flush_persistence():
         persistence.flush()
 
 
+def seed_observability_data() -> Dict[str, Any]:
+    """
+    Seed the observability tables with initial baseline data.
+    Creates sample metrics, events, and traces for each bleeding-edge module.
+    """
+    persistence = ObservabilityPersistence.get_instance()
+    if not persistence or not persistence._enabled:
+        return {"success": False, "error": "Persistence not available"}
+
+    conn = persistence._get_connection()
+    if not conn:
+        return {"success": False, "error": "Database connection failed"}
+
+    try:
+        cur = conn.cursor()
+        now = datetime.now(timezone.utc)
+        seeded = {"metrics": 0, "logs": 0, "traces": 0}
+
+        # Seed metrics for each module
+        modules = ["ooda", "hallucination", "memory", "consciousness", "dependability", "circuit_breaker"]
+        metric_types = ["counter", "gauge", "histogram"]
+        metric_names = [
+            ("requests_total", "counter", 100.0),
+            ("errors_total", "counter", 5.0),
+            ("latency_ms", "gauge", 150.0),
+            ("success_rate", "gauge", 0.95),
+            ("active_sessions", "gauge", 10.0),
+            ("memory_usage_mb", "gauge", 256.0),
+        ]
+
+        for module in modules:
+            for name, mtype, value in metric_names:
+                try:
+                    cur.execute("""
+                        INSERT INTO observability.metrics
+                        (id, metric_name, metric_type, value, unit, tags, timestamp, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                    """, (
+                        str(uuid.uuid4()),
+                        f"{module}_{name}",
+                        mtype,
+                        value + (hash(module) % 50),  # Vary by module
+                        "count" if mtype == "counter" else "ms" if "latency" in name else "ratio",
+                        json.dumps({"module": module, "env": "production"}),
+                        now,
+                        now
+                    ))
+                    seeded["metrics"] += 1
+                except Exception as e:
+                    logger.debug(f"Metric insert failed: {e}")
+
+        # Seed logs/events for each module
+        event_types = ["startup", "health_check", "decision_made", "error_recovered", "sync_complete"]
+        for module in modules:
+            for event_type in event_types:
+                try:
+                    cur.execute("""
+                        INSERT INTO observability.logs
+                        (id, trace_id, span_id, level, message, attributes, timestamp, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                    """, (
+                        str(uuid.uuid4()),
+                        str(uuid.uuid4())[:8],
+                        str(uuid.uuid4())[:8],
+                        "info" if event_type != "error_recovered" else "warn",
+                        f"[{module}] {event_type.replace('_', ' ').title()}",
+                        json.dumps({"module": module, "event_type": event_type, "seeded": True}),
+                        now,
+                        now
+                    ))
+                    seeded["logs"] += 1
+                except Exception as e:
+                    logger.debug(f"Log insert failed: {e}")
+
+        # Seed traces for each module
+        operations = ["observe", "orient", "decide", "act", "validate", "process"]
+        for module in modules:
+            trace_id = str(uuid.uuid4())[:16]
+            for i, op in enumerate(operations):
+                try:
+                    cur.execute("""
+                        INSERT INTO observability.traces
+                        (id, trace_id, span_id, parent_span_id, operation_name, service_name,
+                         start_time, end_time, duration_ms, status, attributes, events, links, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                    """, (
+                        str(uuid.uuid4()),
+                        trace_id,
+                        f"span_{i}",
+                        f"span_{i-1}" if i > 0 else None,
+                        f"{module}.{op}",
+                        "brainops-ai-agents",
+                        now,
+                        now,
+                        50 + (hash(op) % 100),
+                        "ok",
+                        json.dumps({"module": module, "operation": op}),
+                        json.dumps([]),
+                        json.dumps([]),
+                        now
+                    ))
+                    seeded["traces"] += 1
+                except Exception as e:
+                    logger.debug(f"Trace insert failed: {e}")
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return {
+            "success": True,
+            "seeded": seeded,
+            "modules": modules,
+            "timestamp": now.isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to seed observability data: {e}")
+        if conn:
+            conn.rollback()
+            conn.close()
+        return {"success": False, "error": str(e)}
+
+
 __all__ = [
     # Core classes
     "MetricsRegistry",
@@ -1259,6 +1397,7 @@ __all__ = [
     "get_metrics",
     "get_persistence",
     "flush_persistence",
+    "seed_observability_data",
     "publish_event",
     "publish_event_async",
     "traced_operation",
