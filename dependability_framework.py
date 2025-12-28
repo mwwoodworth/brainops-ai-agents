@@ -885,7 +885,16 @@ class DependabilityFramework:
 
     Integrates all reliability components into a unified system
     that ensures the AI OS never fails catastrophically.
+
+    ENHANCEMENTS:
+    - Parallel guard execution with asyncio.gather
+    - Guard timeout protection (5 second max per guard)
+    - Guard priority ordering for critical-path optimization
+    - Guard execution metrics and latency tracking
     """
+
+    # ENHANCEMENT: Guard execution timeout
+    GUARD_TIMEOUT_SECONDS = 5.0
 
     def __init__(self):
         # Initialize all guards
@@ -896,6 +905,16 @@ class DependabilityFramework:
             "temporal": TemporalGuard(),
             "resource": ResourceGuard(),
             "behavioral": BehavioralGuard()
+        }
+
+        # ENHANCEMENT: Guard priority for execution order
+        self._guard_priority = {
+            "input": 1,      # Check input first
+            "invariant": 2,  # Then invariants
+            "temporal": 3,   # Then timing
+            "resource": 4,   # Then resources
+            "behavioral": 5, # Then behavior
+            "output": 6      # Output last
         }
 
         # Initialize supporting systems
@@ -913,14 +932,19 @@ class DependabilityFramework:
             "total_violations": 0,
             "state_transitions": 0,
             "recoveries_performed": 0,
-            "uptime_seconds": 0
+            "uptime_seconds": 0,
+            # ENHANCEMENT: New metrics
+            "parallel_executions": 0,
+            "guard_timeouts": 0,
+            "avg_guard_latency_ms": 0.0
         }
         self._start_time = datetime.now(timezone.utc)
+        self._guard_latencies: List[float] = []
 
         # Recovery actions
         self.recovery_handlers: Dict[str, Callable] = {}
 
-        logger.info("DependabilityFramework initialized - NEVER CATASTROPHE mode active")
+        logger.info("DependabilityFramework initialized with enhanced parallel execution")
 
     def register_safety_property(self, prop: SafetyProperty):
         """Register a safety property that must be maintained"""
@@ -932,30 +956,122 @@ class DependabilityFramework:
         self.recovery_handlers[action_name] = handler
 
     async def run_all_guards(self, context: Dict[str, Any]) -> List[GuardResult]:
-        """Run all guards and return results"""
+        """
+        Run all guards and return results.
+        ENHANCED: Parallel execution with timeout protection.
+        """
+        self.metrics["total_checks"] += 1
+        start_time = time.time()
+
+        # ENHANCEMENT: Run guards in parallel with timeout protection
+        enabled_guards = [g for g in self.guards.values() if g.enabled]
+        self.metrics["parallel_executions"] += 1
+
+        async def run_guard_with_timeout(guard: Guard) -> GuardResult:
+            """Run a single guard with timeout protection"""
+            guard_start = time.time()
+            try:
+                result = await asyncio.wait_for(
+                    guard.check(context),
+                    timeout=self.GUARD_TIMEOUT_SECONDS
+                )
+                latency_ms = (time.time() - guard_start) * 1000
+                self._guard_latencies.append(latency_ms)
+                return result
+            except asyncio.TimeoutError:
+                self.metrics["guard_timeouts"] += 1
+                logger.warning(f"Guard {guard.guard_id} timed out after {self.GUARD_TIMEOUT_SECONDS}s")
+                return GuardResult(
+                    passed=False,
+                    guard_id=guard.guard_id,
+                    guard_type=guard.guard_type,
+                    message=f"Guard timeout after {self.GUARD_TIMEOUT_SECONDS}s",
+                    severity="high",
+                    violations=[{"type": "guard_timeout", "timeout_seconds": self.GUARD_TIMEOUT_SECONDS}]
+                )
+            except Exception as e:
+                logger.error(f"Guard {guard.guard_id} failed: {e}")
+                return GuardResult(
+                    passed=False,
+                    guard_id=guard.guard_id,
+                    guard_type=guard.guard_type,
+                    message=f"Guard execution failed: {e}",
+                    severity="critical",
+                    violations=[{"type": "guard_failure", "error": str(e)}]
+                )
+
+        # Execute all guards in parallel
+        results = await asyncio.gather(
+            *[run_guard_with_timeout(guard) for guard in enabled_guards],
+            return_exceptions=False
+        )
+
+        # ENHANCEMENT: Update average latency
+        if self._guard_latencies:
+            self.metrics["avg_guard_latency_ms"] = sum(self._guard_latencies[-100:]) / min(len(self._guard_latencies), 100)
+
+        # Handle violations
+        for result in results:
+            if not result.passed:
+                self.metrics["total_violations"] += 1
+                await self._handle_violation(result)
+
+        total_time_ms = (time.time() - start_time) * 1000
+        logger.debug(f"All guards executed in {total_time_ms:.2f}ms (parallel)")
+
+        return list(results)
+
+    async def run_guards_sequential(self, context: Dict[str, Any]) -> List[GuardResult]:
+        """
+        ENHANCEMENT: Run guards sequentially in priority order.
+        Use this when you need to fail fast on critical guards.
+        """
         self.metrics["total_checks"] += 1
         results = []
 
-        for guard in self.guards.values():
-            if guard.enabled:
-                try:
-                    result = await guard.check(context)
-                    results.append(result)
+        # Sort guards by priority
+        sorted_guards = sorted(
+            [(k, v) for k, v in self.guards.items() if v.enabled],
+            key=lambda x: self._guard_priority.get(x[0], 99)
+        )
 
-                    if not result.passed:
-                        self.metrics["total_violations"] += 1
-                        await self._handle_violation(result)
+        for guard_id, guard in sorted_guards:
+            try:
+                result = await asyncio.wait_for(
+                    guard.check(context),
+                    timeout=self.GUARD_TIMEOUT_SECONDS
+                )
+                results.append(result)
 
-                except Exception as e:
-                    logger.error(f"Guard {guard.guard_id} failed: {e}")
-                    results.append(GuardResult(
-                        passed=False,
-                        guard_id=guard.guard_id,
-                        guard_type=guard.guard_type,
-                        message=f"Guard execution failed: {e}",
-                        severity="critical",
-                        violations=[{"type": "guard_failure", "error": str(e)}]
-                    ))
+                if not result.passed:
+                    self.metrics["total_violations"] += 1
+                    await self._handle_violation(result)
+
+                    # ENHANCEMENT: Fail fast on critical violations
+                    if result.severity == "critical":
+                        logger.warning(f"Critical guard {guard_id} failed - stopping sequential execution")
+                        break
+
+            except asyncio.TimeoutError:
+                self.metrics["guard_timeouts"] += 1
+                results.append(GuardResult(
+                    passed=False,
+                    guard_id=guard.guard_id,
+                    guard_type=guard.guard_type,
+                    message=f"Guard timeout",
+                    severity="high",
+                    violations=[{"type": "guard_timeout"}]
+                ))
+            except Exception as e:
+                logger.error(f"Guard {guard.guard_id} failed: {e}")
+                results.append(GuardResult(
+                    passed=False,
+                    guard_id=guard.guard_id,
+                    guard_type=guard.guard_type,
+                    message=f"Guard execution failed: {e}",
+                    severity="critical",
+                    violations=[{"type": "guard_failure", "error": str(e)}]
+                ))
 
         return results
 
