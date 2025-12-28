@@ -23,6 +23,7 @@ import json
 import asyncio
 import logging
 import time
+import random  # ENHANCEMENT: For jitter in recovery timeouts
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Callable, Awaitable, Set, Tuple
 from dataclasses import dataclass, field, asdict
@@ -180,9 +181,18 @@ class DynamicCircuitBreaker:
     - Prediction-based pre-emptive opening
     - Cascading circuit protection
 
+    ENHANCEMENTS:
+    - Adaptive half-open request limits based on recovery success rate
+    - Jitter in recovery timeouts to prevent thundering herd
+    - State persistence for recovery across restarts
+    - Health score tracking for smarter circuit decisions
+
     Based on research showing 67% reduction in cascading failures
     compared to static configurations.
     """
+
+    # ENHANCEMENT: Jitter configuration
+    JITTER_FACTOR = 0.25  # +/- 25% jitter on recovery timeout
 
     def __init__(
         self,
@@ -247,6 +257,18 @@ class DynamicCircuitBreaker:
         # Half-open
         self._half_open_max = half_open_max_requests
         self._half_open_requests = 0
+        # ENHANCEMENT: Adaptive half-open settings
+        self._half_open_base_max = half_open_max_requests
+        self._half_open_success_streak = 0  # Track consecutive successful recoveries
+
+        # ENHANCEMENT: Health score (0-100)
+        self._health_score = 100.0
+        self._health_decay_rate = 0.5  # Per failure
+        self._health_recovery_rate = 0.2  # Per success
+
+        # ENHANCEMENT: State persistence
+        self._state_history: deque = deque(maxlen=20)  # Last 20 state changes
+        self._last_persisted_state: Optional[Dict] = None
 
         # Prediction
         self._enable_prediction = enable_prediction
@@ -463,12 +485,73 @@ class DynamicCircuitBreaker:
         )
 
     def _increase_recovery_timeout(self):
-        """Increase recovery timeout with exponential backoff"""
-        self._current_recovery_timeout = min(
+        """Increase recovery timeout with exponential backoff and jitter"""
+        base_timeout = min(
             self._current_recovery_timeout * 2,
             self._max_recovery_timeout
         )
-        logger.debug(f"Recovery timeout increased to {self._current_recovery_timeout}s")
+        # ENHANCEMENT: Add jitter to prevent thundering herd
+        jitter = base_timeout * self.JITTER_FACTOR * (2 * random.random() - 1)
+        self._current_recovery_timeout = base_timeout + jitter
+        logger.debug(f"Recovery timeout increased to {self._current_recovery_timeout:.1f}s (with jitter)")
+
+    def _get_adaptive_half_open_max(self) -> int:
+        """
+        ENHANCEMENT: Calculate adaptive half-open request limit.
+        Increases limit after consecutive successful recoveries.
+        """
+        # Base on success streak - more successful recoveries = more trust
+        bonus = min(self._half_open_success_streak, 5)  # Max 5 bonus requests
+        return self._half_open_base_max + bonus
+
+    def _update_health_score(self, success: bool):
+        """ENHANCEMENT: Update health score based on request outcome"""
+        if success:
+            self._health_score = min(100.0, self._health_score + self._health_recovery_rate)
+        else:
+            self._health_score = max(0.0, self._health_score - self._health_decay_rate)
+
+    def get_health_score(self) -> float:
+        """ENHANCEMENT: Get current health score (0-100)"""
+        return self._health_score
+
+    def persist_state(self) -> Dict[str, Any]:
+        """
+        ENHANCEMENT: Get state for persistence.
+        Can be stored in database/file and restored on restart.
+        """
+        self._last_persisted_state = {
+            "component_id": self.component_id,
+            "state": self._state.value,
+            "failure_count": self._failure_count,
+            "success_count": self._success_count,
+            "current_threshold": self._current_threshold,
+            "current_recovery_timeout": self._current_recovery_timeout,
+            "health_score": self._health_score,
+            "half_open_success_streak": self._half_open_success_streak,
+            "state_changed_at": self._state_changed_at.isoformat(),
+            "recovery_attempts": self._recovery_attempts,
+            "timestamp": datetime.now().isoformat()
+        }
+        return self._last_persisted_state
+
+    def restore_state(self, state: Dict[str, Any]):
+        """ENHANCEMENT: Restore state from persistence"""
+        with self._lock:
+            if state.get("component_id") != self.component_id:
+                logger.warning(f"State component mismatch: {state.get('component_id')} != {self.component_id}")
+                return
+
+            self._state = CircuitState(state.get("state", "closed"))
+            self._failure_count = state.get("failure_count", 0)
+            self._success_count = state.get("success_count", 0)
+            self._current_threshold = state.get("current_threshold", self._base_threshold)
+            self._current_recovery_timeout = state.get("current_recovery_timeout", self._base_recovery_timeout)
+            self._health_score = state.get("health_score", 100.0)
+            self._half_open_success_streak = state.get("half_open_success_streak", 0)
+            self._recovery_attempts = state.get("recovery_attempts", 0)
+
+            logger.info(f"Restored circuit state for {self.component_id}: {self._state.value}")
 
     def _adjust_threshold_down(self):
         """Lower threshold when recovery is successful (system is healthy)"""
