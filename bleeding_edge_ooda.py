@@ -32,6 +32,14 @@ import aiohttp
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 
+# OPTIMIZATION: Use orjson for 10-20x faster JSON serialization
+try:
+    import orjson
+    ORJSON_AVAILABLE = True
+except ImportError:
+    ORJSON_AVAILABLE = False
+    logging.warning("orjson not available, falling back to standard json")
+
 logger = logging.getLogger(__name__)
 
 # Database configuration
@@ -166,12 +174,17 @@ class InputIntegrityValidator:
         )
 
     def _compute_hash(self, data: Dict[str, Any]) -> str:
-        """Compute SHA-256 hash of observation data"""
+        """Compute SHA-256 hash of observation data (OPTIMIZED with orjson)"""
         # Exclude integrity fields from hash
         clean_data = {k: v for k, v in data.items()
                       if k not in ("integrity_hash", "signatures")}
-        serialized = json.dumps(clean_data, sort_keys=True, default=str)
-        return hashlib.sha256(serialized.encode()).hexdigest()
+        # OPTIMIZATION: Use orjson for 10-20x faster serialization
+        if ORJSON_AVAILABLE:
+            serialized = orjson.dumps(clean_data, option=orjson.OPT_SORT_KEYS)
+            return hashlib.sha256(serialized).hexdigest()
+        else:
+            serialized = json.dumps(clean_data, sort_keys=True, default=str)
+            return hashlib.sha256(serialized.encode()).hexdigest()
 
     def _determine_validity(
         self,
@@ -965,6 +978,8 @@ class SpeculativeExecutor:
     - Only speculate on read-only or reversible actions
     - Confidence threshold (default 70%)
     - Maximum speculation depth (default 2 levels)
+
+    OPTIMIZATION: Markov Chain for O(1) probability lookups
     """
 
     def __init__(self):
@@ -977,6 +992,10 @@ class SpeculativeExecutor:
             "query", "fetch", "analyze", "predict",
             "calculate", "search", "validate"
         }
+        # OPTIMIZATION: Markov Chain transition matrix for O(1) lookups
+        # Structure: {observation_type: {action: count}}
+        self.markov_transitions: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        self.markov_totals: Dict[str, int] = defaultdict(int)  # Total transitions per observation
 
     async def learn_pattern(
         self,
@@ -984,36 +1003,43 @@ class SpeculativeExecutor:
         action_taken: str,
         success: bool
     ):
-        """Learn from observation → action patterns"""
+        """Learn from observation → action patterns (OPTIMIZED with Markov Chain)"""
+        # Legacy storage for compatibility
         self.action_sequences[observation_type].append(action_taken)
 
         # Keep last 100 patterns per observation type
         if len(self.action_sequences[observation_type]) > 100:
+            # When pruning, also update Markov totals
+            removed = self.action_sequences[observation_type][0]
+            self.markov_transitions[observation_type][removed] -= 1
+            self.markov_totals[observation_type] -= 1
             self.action_sequences[observation_type] = \
                 self.action_sequences[observation_type][-100:]
+
+        # OPTIMIZATION: Update Markov Chain incrementally - O(1)
+        self.markov_transitions[observation_type][action_taken] += 1
+        self.markov_totals[observation_type] += 1
 
     async def predict_next_actions(
         self,
         current_observations: List[Dict[str, Any]]
     ) -> List[PredictedAction]:
-        """Predict likely next actions based on observations"""
+        """Predict likely next actions based on observations (OPTIMIZED with Markov Chain O(1))"""
         predictions = []
 
         for obs in current_observations:
             obs_type = obs.get("observation", obs.get("type", "unknown"))
 
-            # Get historical actions for this observation type
-            history = self.action_sequences.get(obs_type, [])
-            if not history:
+            # OPTIMIZATION: Use pre-computed Markov totals - O(1) lookup
+            total = self.markov_totals.get(obs_type, 0)
+            if total == 0:
                 continue
 
-            # Calculate action probabilities
-            action_counts = defaultdict(int)
-            for action in history:
-                action_counts[action] += 1
-
-            total = len(history)
-            for action, count in action_counts.items():
+            # OPTIMIZATION: Direct dictionary access instead of iteration - O(k) where k is unique actions
+            transitions = self.markov_transitions.get(obs_type, {})
+            for action, count in transitions.items():
+                if count <= 0:
+                    continue
                 probability = count / total
 
                 if probability >= self.confidence_threshold:

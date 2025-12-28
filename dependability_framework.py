@@ -538,15 +538,18 @@ class BehavioralGuard(Guard):
     """
     Layer 6: Behavioral Guard
     Monitors for anomalous behavior patterns.
+    OPTIMIZED with Welford's Algorithm for online variance.
     """
 
     def __init__(self, guard_id: str = "behavioral_guard"):
         super().__init__(guard_id, GuardType.BEHAVIORAL)
         self.normal_patterns: Dict[str, Dict] = {}
         self.anomaly_threshold = 3.0  # Standard deviations
+        # OPTIMIZATION: Welford's Algorithm state for each behavior
+        self._welford_state: Dict[str, Dict] = {}
 
     def learn_normal_pattern(self, behavior_id: str, samples: List[float]):
-        """Learn what normal behavior looks like"""
+        """Learn what normal behavior looks like (batch mode for initialization)"""
         if len(samples) < 2:
             return
 
@@ -559,6 +562,53 @@ class BehavioralGuard(Guard):
             "std_dev": std_dev,
             "sample_count": len(samples)
         }
+
+        # OPTIMIZATION: Initialize Welford state for incremental updates
+        self._welford_state[behavior_id] = {
+            "count": len(samples),
+            "mean": mean,
+            "M2": variance * len(samples)  # Sum of squared differences
+        }
+
+    def update_pattern_incrementally(self, behavior_id: str, new_value: float):
+        """
+        OPTIMIZATION: Welford's Algorithm for single-pass, online variance.
+        Updates statistics with a single new observation in O(1) time.
+
+        Reference: Welford, B.P. (1962). "Note on a method for calculating
+        corrected sums of squares and products"
+        """
+        if behavior_id not in self._welford_state:
+            # First observation - initialize
+            self._welford_state[behavior_id] = {
+                "count": 1,
+                "mean": new_value,
+                "M2": 0.0
+            }
+            self.normal_patterns[behavior_id] = {
+                "mean": new_value,
+                "std_dev": 0.0,
+                "sample_count": 1
+            }
+            return
+
+        state = self._welford_state[behavior_id]
+
+        # Welford's update equations
+        state["count"] += 1
+        delta = new_value - state["mean"]
+        state["mean"] += delta / state["count"]
+        delta2 = new_value - state["mean"]
+        state["M2"] += delta * delta2
+
+        # Update the pattern with new statistics
+        if state["count"] >= 2:
+            variance = state["M2"] / state["count"]
+            self.normal_patterns[behavior_id] = {
+                "mean": state["mean"],
+                "std_dev": variance ** 0.5,
+                "sample_count": state["count"]
+            }
 
     async def check(self, context: Dict[str, Any]) -> GuardResult:
         """Check for behavioral anomalies"""
