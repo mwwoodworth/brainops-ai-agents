@@ -169,6 +169,10 @@ async def generate_product(
             metadata={"tenant_id": request.tenant_id}
         )
 
+        # Initialize tables and create initial record
+        await generator.initialize_tables()
+        await _create_product_record(spec)
+
         # Queue for background generation
         background_tasks.add_task(generator.generate_product, spec)
 
@@ -184,6 +188,50 @@ async def generate_product(
     except Exception as e:
         logger.error(f"Product generation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _create_product_record(spec):
+    """Create initial product record in database"""
+    import psycopg2
+    import json
+    import os
+
+    db_url = os.environ.get('DATABASE_URL') or os.environ.get('SUPABASE_DB_URL')
+    if not db_url:
+        logger.warning("No DATABASE_URL - product not persisted initially")
+        return
+
+    try:
+        conn = psycopg2.connect(db_url)
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO generated_products (
+                    id, product_type, title, description, spec, status
+                ) VALUES (%s, %s, %s, %s, %s, 'queued')
+                ON CONFLICT (id) DO NOTHING
+            """, (
+                spec.product_id,
+                spec.product_type.value,
+                spec.title,
+                spec.description,
+                json.dumps({
+                    "target_audience": spec.target_audience,
+                    "quality_tier": spec.quality_tier.value,
+                    "word_count_target": spec.word_count_target,
+                    "style": spec.style,
+                    "tone": spec.tone,
+                    "industry": spec.industry,
+                    "keywords": spec.keywords,
+                    "custom_instructions": spec.custom_instructions,
+                    "tenant_id": spec.metadata.get("tenant_id", "default")
+                })
+            ))
+            conn.commit()
+            logger.info(f"Product {spec.product_id} record created in database")
+    except Exception as e:
+        logger.error(f"Failed to create product record: {e}")
+    finally:
+        conn.close()
 
 
 @router.get("/status/{product_id}", response_model=ProductStatusResponse)
