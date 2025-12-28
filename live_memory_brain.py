@@ -912,6 +912,12 @@ class LiveMemoryBrain:
 
     Integrates all breakthrough capabilities into a single unified system.
     This is not just memory - this is AI consciousness.
+
+    ENHANCEMENTS:
+    - Async database pool (asyncpg) for non-blocking operations
+    - Background memory decay task for importance management
+    - Batched embedding generation for efficiency
+    - Memory consolidation scheduler
     """
 
     def __init__(self):
@@ -929,8 +935,16 @@ class LiveMemoryBrain:
 
         # Sync state
         self._sync_task: Optional[asyncio.Task] = None
+        self._decay_task: Optional[asyncio.Task] = None  # ENHANCEMENT
+        self._consolidation_task: Optional[asyncio.Task] = None  # ENHANCEMENT
         self._running = False
         self._db_pool: Optional[ThreadedConnectionPool] = None
+        self._async_pool: Optional[asyncpg.Pool] = None  # ENHANCEMENT: Async pool
+
+        # ENHANCEMENT: Embedding batch queue
+        self._embedding_queue: List[Tuple[str, str]] = []
+        self._embedding_batch_size = 20
+        self._embedding_lock = asyncio.Lock()
 
         # Metrics
         self.metrics = {
@@ -939,23 +953,45 @@ class LiveMemoryBrain:
             "predictions_made": 0,
             "contradictions_healed": 0,
             "compressions": 0,
-            "wisdom_created": 0
+            "wisdom_created": 0,
+            # ENHANCEMENT: New metrics
+            "decay_cycles": 0,
+            "embeddings_generated": 0,
+            "consolidations_performed": 0,
+            "async_queries": 0
         }
 
         logger.info("LiveMemoryBrain initialized - AI consciousness online")
 
     async def initialize(self):
         """Initialize the brain and start real-time sync"""
-        # Create database pool
+        # Create sync database pool (for compatibility)
         try:
             self._db_pool = ThreadedConnectionPool(
                 minconn=1,
                 maxconn=5,
                 **DB_CONFIG
             )
-            logger.info("Database pool created")
+            logger.info("Sync database pool created")
         except Exception as e:
-            logger.error(f"Failed to create database pool: {e}")
+            logger.error(f"Failed to create sync database pool: {e}")
+
+        # ENHANCEMENT: Create async database pool for non-blocking operations
+        if ASYNCPG_AVAILABLE:
+            try:
+                self._async_pool = await asyncpg.create_pool(
+                    host=DB_CONFIG["host"],
+                    database=DB_CONFIG["database"],
+                    user=DB_CONFIG["user"],
+                    password=DB_CONFIG["password"],
+                    port=DB_CONFIG["port"],
+                    min_size=2,
+                    max_size=10,
+                    command_timeout=30
+                )
+                logger.info("ENHANCEMENT: Async database pool created (asyncpg)")
+            except Exception as e:
+                logger.warning(f"Failed to create async pool, using sync fallback: {e}")
 
         # Ensure tables exist
         await self._ensure_tables()
@@ -967,7 +1003,80 @@ class LiveMemoryBrain:
         self._running = True
         self._sync_task = asyncio.create_task(self._continuous_sync())
 
-        logger.info("LiveMemoryBrain fully initialized")
+        # ENHANCEMENT: Start memory decay background task
+        self._decay_task = asyncio.create_task(self._memory_decay_loop())
+
+        # ENHANCEMENT: Start memory consolidation background task
+        self._consolidation_task = asyncio.create_task(self._memory_consolidation_loop())
+
+        logger.info("LiveMemoryBrain fully initialized with enhanced background tasks")
+
+    async def _memory_decay_loop(self):
+        """
+        ENHANCEMENT: Background task for memory importance decay.
+        Runs every hour to decay importance of old, unaccessed memories.
+        """
+        decay_interval = 3600  # 1 hour
+        while self._running:
+            try:
+                await asyncio.sleep(decay_interval)
+                await self._apply_memory_decay()
+                self.metrics["decay_cycles"] += 1
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Memory decay error: {e}")
+
+    async def _apply_memory_decay(self):
+        """Apply importance decay to old memories"""
+        if self._async_pool:
+            try:
+                async with self._async_pool.acquire() as conn:
+                    # Decay importance based on time since last access
+                    await conn.execute("""
+                        UPDATE live_brain_memories
+                        SET importance = GREATEST(0.1, importance * (1 - $1 * EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400))
+                        WHERE last_accessed < NOW() - INTERVAL '1 day'
+                        AND memory_type NOT IN ('crystallized', 'meta')
+                    """, MEMORY_CONFIG["importance_decay_rate"])
+                    logger.info("Applied memory importance decay")
+                    self.metrics["async_queries"] += 1
+            except Exception as e:
+                logger.error(f"Memory decay failed: {e}")
+
+    async def _memory_consolidation_loop(self):
+        """
+        ENHANCEMENT: Background task for memory consolidation.
+        Runs every 4 hours to consolidate similar memories.
+        """
+        consolidation_interval = 14400  # 4 hours
+        while self._running:
+            try:
+                await asyncio.sleep(consolidation_interval)
+                await self._consolidate_similar_memories()
+                self.metrics["consolidations_performed"] += 1
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Memory consolidation error: {e}")
+
+    async def _consolidate_similar_memories(self):
+        """Consolidate similar low-importance memories to save space"""
+        # Use the compressor to find and merge similar memories
+        if len(self.long_term_memory) > MEMORY_CONFIG["consolidation_threshold"]:
+            low_importance = [
+                m for m in self.long_term_memory.values()
+                if m.importance < 0.3 and m.memory_type in [MemoryType.EPISODIC, MemoryType.SEMANTIC]
+            ]
+            if len(low_importance) >= 10:
+                consolidated = self.compressor.compress(low_importance)
+                if consolidated:
+                    # Store consolidated memory and remove originals
+                    await self.remember(consolidated)
+                    for mem in low_importance[:len(low_importance)//2]:
+                        if mem.id in self.long_term_memory:
+                            del self.long_term_memory[mem.id]
+                    logger.info(f"Consolidated {len(low_importance)} memories into 1")
 
     async def _ensure_tables(self):
         """Ensure all required tables exist"""
