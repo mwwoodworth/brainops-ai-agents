@@ -427,7 +427,8 @@ async def get_consciousness_status() -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail="Consciousness controller not available")
 
     try:
-        status = await controller.get_status()
+        # get_consciousness_state is synchronous, not async
+        status = controller.get_consciousness_state()
         return {
             "status": status,
             "timestamp": datetime.utcnow().isoformat()
