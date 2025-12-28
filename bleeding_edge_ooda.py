@@ -23,6 +23,7 @@ import json
 import asyncio
 import hashlib
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple, Set, Callable, Awaitable
 from dataclasses import dataclass, field, asdict
@@ -98,22 +99,21 @@ def get_db_connection():
 
 
 def execute_with_connection(query: str, params: tuple = None, fetch: bool = True):
-    """Execute a query with automatic connection management"""
+    """Execute a query with automatic connection management using proper context managers"""
     conn = get_db_connection()
     if not conn:
         return None
     try:
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute(query, params)
-        result = cur.fetchall() if fetch else None
-        cur.close()
-        conn.close()
-        return result
+        with conn:  # Auto-commit on success, rollback on exception
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(query, params)
+                result = cur.fetchall() if fetch else None
+                return result
     except Exception as e:
         logger.debug(f"Query failed: {e}")
-        if conn:
-            conn.close()
         return None
+    finally:
+        conn.close()
 
 
 # =============================================================================
@@ -1246,27 +1246,25 @@ class DecisionRAG:
 
             embedding = await self._get_embedding(context_text)
 
-            # Search in database
+            # Search in database with proper connection handling
             conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-
-            # Use pgvector for similarity search
-            cur.execute("""
-                SELECT
-                    id, decision_type, description, outcome,
-                    confidence, success, created_at,
-                    1 - (embedding <=> %s::vector) as similarity
-                FROM aurea_decisions
-                WHERE embedding IS NOT NULL
-                ORDER BY embedding <=> %s::vector
-                LIMIT %s
-            """, (embedding, embedding, limit))
-
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
-
-            return [dict(r) for r in rows]
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # Use pgvector for similarity search
+                    cur.execute("""
+                        SELECT
+                            id, decision_type, description, outcome,
+                            confidence, success, created_at,
+                            1 - (embedding <=> %s::vector) as similarity
+                        FROM aurea_decisions
+                        WHERE embedding IS NOT NULL
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                    """, (embedding, embedding, limit))
+                    rows = cur.fetchall()
+                    return [dict(r) for r in rows]
+            finally:
+                conn.close()
 
         except Exception as e:
             logger.warning(f"Decision RAG search failed: {e}")
@@ -1280,28 +1278,25 @@ class DecisionRAG:
         """Get patterns from successful decisions of a given type"""
         try:
             conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-
-            cur.execute("""
-                SELECT
-                    context_patterns,
-                    COUNT(*) as occurrence_count,
-                    AVG(CASE WHEN success THEN 1 ELSE 0 END) as success_rate
-                FROM aurea_decisions
-                WHERE decision_type = %s
-                  AND created_at > NOW() - INTERVAL '30 days'
-                GROUP BY context_patterns
-                HAVING AVG(CASE WHEN success THEN 1 ELSE 0 END) >= %s
-                ORDER BY occurrence_count DESC
-                LIMIT 10
-            """, (decision_type, min_success_rate))
-
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
-
-            return [dict(r) for r in rows]
-
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT
+                            context_patterns,
+                            COUNT(*) as occurrence_count,
+                            AVG(CASE WHEN success THEN 1 ELSE 0 END) as success_rate
+                        FROM aurea_decisions
+                        WHERE decision_type = %s
+                          AND created_at > NOW() - INTERVAL '30 days'
+                        GROUP BY context_patterns
+                        HAVING AVG(CASE WHEN success THEN 1 ELSE 0 END) >= %s
+                        ORDER BY occurrence_count DESC
+                        LIMIT 10
+                    """, (decision_type, min_success_rate))
+                    rows = cur.fetchall()
+                    return [dict(r) for r in rows]
+            finally:
+                conn.close()
         except Exception as e:
             logger.warning(f"Success pattern lookup failed: {e}")
             return []
@@ -1333,10 +1328,8 @@ class DecisionRAG:
     async def _get_embedding(self, text: str) -> List[float]:
         """
         Get embedding from OpenAI with LRU caching and retry logic.
-        ENHANCED: Uses class-level LRU cache and exponential backoff.
+        ENHANCED: Uses class-level LRU cache, exponential backoff, and proper async execution.
         """
-        import openai
-
         cache_key = hashlib.md5(text.encode()).hexdigest()
 
         # Check cache
@@ -1350,14 +1343,18 @@ class DecisionRAG:
 
         self._cache_misses += 1
 
-        # ENHANCEMENT: Retry with backoff
+        # ENHANCEMENT: Retry with backoff using async-safe execution
         async def get_embedding_with_retry():
-            client = openai.OpenAI()
-            response = client.embeddings.create(
-                model="text-embedding-3-small",
-                input=text
-            )
-            return response.data[0].embedding
+            import openai
+            # Use asyncio.to_thread to avoid blocking the event loop
+            def sync_get_embedding():
+                client = openai.OpenAI()
+                response = client.embeddings.create(
+                    model="text-embedding-3-small",
+                    input=text
+                )
+                return response.data[0].embedding
+            return await asyncio.to_thread(sync_get_embedding)
 
         try:
             embedding = await retry_with_backoff(get_embedding_with_retry)
@@ -1404,31 +1401,28 @@ class DecisionRAG:
                 return []
 
             conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # Build ILIKE query
+                    conditions = " OR ".join([
+                        f"description ILIKE %s" for _ in keywords
+                    ])
+                    params = [f"%{kw}%" for kw in keywords]
+                    params.append(limit)
 
-            # Build ILIKE query
-            conditions = " OR ".join([
-                f"description ILIKE %s" for _ in keywords
-            ])
-            params = [f"%{kw}%" for kw in keywords]
-            params.append(limit)
-
-            cur.execute(f"""
-                SELECT
-                    id, decision_type, description, outcome,
-                    confidence, success, created_at
-                FROM aurea_decisions
-                WHERE {conditions}
-                ORDER BY created_at DESC
-                LIMIT %s
-            """, params)
-
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
-
-            return [dict(r) for r in rows]
-
+                    cur.execute(f"""
+                        SELECT
+                            id, decision_type, description, outcome,
+                            confidence, success, created_at
+                        FROM aurea_decisions
+                        WHERE {conditions}
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, params)
+                    rows = cur.fetchall()
+                    return [dict(r) for r in rows]
+            finally:
+                conn.close()
         except Exception as e:
             logger.warning(f"Keyword search failed: {e}")
             return []
@@ -1664,34 +1658,36 @@ class BleedingEdgeOODAController:
         """Run a complete enhanced OODA cycle with all optimizations."""
         return await enhanced_ooda_cycle(self.tenant_id, context or {})
 
-    async def validate_input(self, data: Any, input_type: str = "general") -> IntegrityReport:
+    async def validate_input(self, data: Dict[str, Any], level: IntegrityLevel = IntegrityLevel.MEDIUM) -> IntegrityReport:
         """Validate input data integrity."""
-        return await self.input_validator.validate(data, input_type)
+        return await self.input_validator.validate_observation(data, level)
 
-    async def validate_processing(self, process_id: str, inputs: Dict, outputs: Dict) -> IntegrityReport:
+    async def validate_processing(self, decisions: List[Dict[str, Any]], context: Dict[str, Any]) -> IntegrityReport:
         """Validate processing integrity."""
-        return await self.processing_validator.validate(process_id, inputs, outputs)
+        return await self.processing_validator.validate_decision_chain(decisions, context)
 
-    async def validate_output(self, output: Any, expected_schema: Optional[Dict] = None) -> IntegrityReport:
+    async def validate_output(self, action: Dict[str, Any], result: Dict[str, Any], expected: Optional[Dict] = None) -> IntegrityReport:
         """Validate output integrity."""
-        return await self.output_validator.validate(output, expected_schema)
+        return await self.output_validator.validate_action_result(action, result, expected)
 
     async def query_similar_decisions(self, decision_context: Dict[str, Any], limit: int = 5) -> List[Dict[str, Any]]:
         """Query RAG for similar historical decisions."""
-        return await self.decision_rag.query_similar_decisions(decision_context, limit)
+        return await self.decision_rag.find_similar_decisions(decision_context, limit)
 
     async def register_agent(self, agent_id: str, capabilities: List[Dict[str, Any]]) -> bool:
         """Register an agent with the A2A protocol."""
-        caps = [
-            AgentCapability(
-                name=c["name"],
-                description=c.get("description", ""),
-                input_schema=c.get("input_schema", {}),
-                output_schema=c.get("output_schema", {})
-            )
-            for c in capabilities
-        ]
-        return await self.a2a_protocol.register_agent(agent_id, caps)
+        # Create proper AgentCapability with correct field names
+        agent_cap = AgentCapability(
+            agent_id=agent_id,
+            agent_name=capabilities[0].get("name", agent_id) if capabilities else agent_id,
+            capabilities=[c.get("name", "") for c in capabilities],
+            load=0.0,
+            available=True,
+            latency_avg_ms=0.0,
+            success_rate=1.0
+        )
+        await self.a2a_protocol.register_agent(agent_cap)
+        return True
 
     async def send_agent_message(
         self,
@@ -1711,38 +1707,44 @@ class BleedingEdgeOODAController:
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Pre-execute likely actions speculatively."""
-        results = {}
-        for action in likely_actions:
-            action_type = action.get("type", "unknown")
-            async def mock_executor(**kwargs):
-                return {"status": "speculated", "kwargs": kwargs}
-
-            result = await self.speculative_executor.speculate(
-                action_type=action_type,
-                executor=mock_executor,
-                context=context,
-                **action.get("params", {})
+        # Convert actions to PredictedAction format
+        predictions = [
+            PredictedAction(
+                action_type=action.get("type", "unknown"),
+                probability=action.get("probability", 0.8),
+                parameters=action.get("params", {}),
+                estimated_duration_ms=action.get("duration_ms", 1000)
             )
-            results[action_type] = result
-        return results
+            for action in likely_actions
+        ]
+
+        async def mock_executor(action_type: str, params: Dict) -> Any:
+            return {"status": "speculated", "action_type": action_type, "params": params}
+
+        # Call speculate with correct signature
+        return await self.speculative_executor.speculate(predictions, mock_executor)
 
     def get_metrics(self) -> Dict[str, Any]:
         """Get all controller metrics."""
         return {
             "parallel_observer": {
-                "sources_registered": len(self.parallel_observer.observation_sources)
+                "cache_size": len(self.parallel_observer.cache),
+                "cache_ttl": self.parallel_observer.cache_ttl,
+                "tenant_id": self.parallel_observer.tenant_id
             },
             "a2a_protocol": {
-                "registered_agents": len(self.a2a_protocol.registered_agents),
-                "message_queues": len(self.a2a_protocol.message_queues)
+                "registered_agents": len(self.a2a_protocol.agent_registry),
+                "message_queue_size": self.a2a_protocol.message_queue.qsize() if self.a2a_protocol.message_queue else 0,
+                "pending_responses": len(self.a2a_protocol.pending_responses),
+                "running": self.a2a_protocol.running
             },
             "speculative_executor": {
-                "cache_size": len(self.speculative_executor.speculation_cache),
-                "stats": self.speculative_executor.speculation_stats
+                "speculation_results_count": len(self.speculative_executor.speculation_results),
+                "confidence_threshold": self.speculative_executor.confidence_threshold,
+                "max_speculation_depth": self.speculative_executor.max_speculation_depth,
+                "action_sequences_count": len(self.speculative_executor.action_sequences)
             },
-            "decision_rag": {
-                "memory_loaded": self.decision_rag.memory is not None
-            }
+            "decision_rag": self.decision_rag.get_cache_stats()
         }
 
 

@@ -2617,11 +2617,11 @@ async def store_memory(
     Store a memory in the AI memory system.
     This enables the AI to remember and learn from experiences.
     """
-    if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory_manager') or not app.state.memory_manager:
+    if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory') or not app.state.memory:
         raise HTTPException(status_code=503, detail="Memory system not available")
 
     try:
-        memory_manager = app.state.memory_manager
+        memory_manager = app.state.memory
         memory_id = await memory_manager.store_async(
             content=content,
             memory_type=memory_type,
@@ -2647,11 +2647,11 @@ async def search_memory(
     """
     Search the AI memory system for relevant memories.
     """
-    if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory_manager') or not app.state.memory_manager:
+    if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory') or not app.state.memory:
         raise HTTPException(status_code=503, detail="Memory system not available")
 
     try:
-        memory_manager = app.state.memory_manager
+        memory_manager = app.state.memory
         memories = await memory_manager.search(
             query=query,
             limit=limit,
@@ -2678,8 +2678,20 @@ async def backfill_embeddings(
     Uses local sentence-transformers when cloud APIs unavailable.
     """
     try:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+
+        # Construct DB_CONFIG from config module
+        db_config = {
+            "host": config.database.host,
+            "port": config.database.port,
+            "database": config.database.database,
+            "user": config.database.user,
+            "password": config.database.password,
+        }
+
         # Get memories without embeddings
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = psycopg2.connect(**db_config)
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
         cur.execute("""
@@ -2725,7 +2737,7 @@ async def backfill_embeddings(
         conn.close()
 
         # Get remaining count
-        conn2 = psycopg2.connect(**DB_CONFIG)
+        conn2 = psycopg2.connect(**db_config)
         cur2 = conn2.cursor()
         cur2.execute("SELECT COUNT(*) FROM unified_ai_memory WHERE embedding IS NULL")
         remaining = cur2.fetchone()[0]
@@ -3943,7 +3955,7 @@ async def api_v1_agents_execute(
 
     delegated_request: Request = StarletteRequest(scope, receive)  # type: ignore[arg-type]
 
-    return await execute_agent(agent_id=agent_id, request=delegated_request, _=_)
+    return await execute_agent(agent_id=agent_id, request=delegated_request, authenticated=True)
 
 
 @app.post("/api/v1/agents/activate")

@@ -389,6 +389,7 @@ class MultiModelCrossValidator:
     # ENHANCEMENT: Concurrency control
     _api_semaphore: Optional[asyncio.Semaphore] = None
     _max_concurrent_calls = 3
+    _semaphore_lock = asyncio.Lock() if hasattr(asyncio, 'Lock') else None
 
     def __init__(self):
         self.providers = AI_PROVIDERS
@@ -402,13 +403,20 @@ class MultiModelCrossValidator:
         self._api_calls_made = 0
         self._cache_hits = 0
         self._cache_misses = 0
+        # Instance-level semaphore to avoid event loop issues
+        self._instance_semaphore: Optional[asyncio.Semaphore] = None
 
-    @classmethod
-    def _get_semaphore(cls) -> asyncio.Semaphore:
-        """ENHANCEMENT: Get or create API concurrency semaphore"""
-        if cls._api_semaphore is None:
-            cls._api_semaphore = asyncio.Semaphore(cls._max_concurrent_calls)
-        return cls._api_semaphore
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """ENHANCEMENT: Get or create API concurrency semaphore (event loop safe)"""
+        # Use instance-level semaphore to avoid event loop binding issues
+        if self._instance_semaphore is None:
+            try:
+                # Only create when we have a running event loop
+                self._instance_semaphore = asyncio.Semaphore(self._max_concurrent_calls)
+            except RuntimeError:
+                # No running event loop - create without binding
+                self._instance_semaphore = asyncio.Semaphore(self._max_concurrent_calls)
+        return self._instance_semaphore
 
     def _get_cache_key(self, prompt: str, response: str, level: str) -> str:
         """ENHANCEMENT: Generate cache key for validation result"""
@@ -673,16 +681,16 @@ class MultiModelCrossValidator:
                 # Fast path - return early without API calls
                 logger.info(f"CASCADE: Fast path taken (confidence: {quick_result['confidence']:.2f})")
                 return ValidationResult(
-                    is_valid=True,
+                    validated=True,
                     confidence_score=quick_result["confidence"],
+                    consensus_level=1.0,  # Full consensus (single check)
                     hallucination_detected=False,
-                    issues_found=[],
-                    suggested_corrections={},
-                    model_agreements={"fast_check": "VALID"},
-                    consensus_level=ConsensusLevel.FULL,
-                    validation_time_ms=(datetime.now(timezone.utc) - start_time).total_seconds() * 1000,
-                    claims_verified=[],
-                    sac3_result=None
+                    hallucination_type=None,
+                    flagged_claims=[],
+                    model_responses={"fast_check": {"verdict": "VALID", "method": "heuristic"}},
+                    validation_method="fast_heuristic_check",
+                    validation_duration_ms=(datetime.now(timezone.utc) - start_time).total_seconds() * 1000,
+                    recommendations=[]
                 )
 
         # Step 1: Extract claims from the response
