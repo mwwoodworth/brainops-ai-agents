@@ -1497,7 +1497,7 @@ def get_output_validator() -> OutputIntegrityValidator:
 # INTEGRATION EXAMPLE
 # =============================================================================
 
-async def enhanced_ooda_cycle(tenant_id: str) -> Dict[str, Any]:
+async def enhanced_ooda_cycle(tenant_id: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Enhanced OODA cycle with all bleeding-edge patterns.
 
@@ -1508,12 +1508,17 @@ async def enhanced_ooda_cycle(tenant_id: str) -> Dict[str, Any]:
     4. Speculative execution
     5. A2A protocol for agent coordination
     6. Output integrity validation
+
+    Args:
+        tenant_id: Tenant identifier
+        context: Optional initial context for the cycle
     """
     import uuid
 
     cycle_id = str(uuid.uuid4())[:8]
     start_time = datetime.now()
     metrics = {}
+    initial_context = context or {}
 
     # Initialize components
     observer = get_parallel_observer(tenant_id)
@@ -1542,7 +1547,7 @@ async def enhanced_ooda_cycle(tenant_id: str) -> Dict[str, Any]:
 
     # PHASE 2: ORIENT (Build Context)
     orient_start = datetime.now()
-    context = {
+    cycle_context = {
         "cycle_id": cycle_id,
         "tenant_id": tenant_id,
         "timestamp": datetime.now().isoformat(),
@@ -1550,7 +1555,8 @@ async def enhanced_ooda_cycle(tenant_id: str) -> Dict[str, Any]:
         "observation_summary": {
             obs.get("observation", "unknown"): obs.get("count", 0)
             for obs in valid_observations
-        }
+        },
+        **initial_context  # Merge initial context
     }
     metrics["orient_duration_ms"] = (datetime.now() - orient_start).total_seconds() * 1000
 
@@ -1568,7 +1574,7 @@ async def enhanced_ooda_cycle(tenant_id: str) -> Dict[str, Any]:
 
     # PHASE 4: DECIDE (with RAG)
     decide_start = datetime.now()
-    similar_decisions = await decision_rag.find_similar_decisions(context, limit=3)
+    similar_decisions = await decision_rag.find_similar_decisions(cycle_context, limit=3)
 
     decisions = []
     for obs in valid_observations:
@@ -1592,7 +1598,7 @@ async def enhanced_ooda_cycle(tenant_id: str) -> Dict[str, Any]:
 
     # Validate decision chain
     process_integrity = await process_validator.validate_decision_chain(
-        decisions, context
+        decisions, cycle_context
     )
     metrics["decision_chain_valid"] = process_integrity.valid
 

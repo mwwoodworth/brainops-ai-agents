@@ -207,16 +207,25 @@ class ObservabilityPersistence:
         if not metrics:
             return
         try:
+            # Schema: id, metric_name, metric_type, value, unit, tags, timestamp, created_at
             execute_values(
                 cur,
                 """
-                INSERT INTO observability.metrics (name, value, metric_type, labels, module, timestamp)
+                INSERT INTO observability.metrics (id, metric_name, metric_type, value, unit, tags, timestamp, created_at)
                 VALUES %s
                 ON CONFLICT DO NOTHING
                 """,
-                [(m["name"], m["value"], m["metric_type"], m["labels"],
-                  m["module"], m["timestamp"]) for m in metrics],
-                template="(%s, %s, %s, %s, %s, %s)"
+                [(
+                    str(uuid.uuid4()),
+                    m["name"],
+                    m["metric_type"],
+                    m["value"],
+                    "count",  # default unit
+                    m["labels"],  # Already JSON string
+                    m["timestamp"],
+                    m["timestamp"]
+                ) for m in metrics],
+                template="(%s, %s, %s, %s, %s, %s, %s, %s)"
             )
         except Exception as e:
             logger.error(f"Failed to insert metrics: {e}")
@@ -226,16 +235,25 @@ class ObservabilityPersistence:
         if not events:
             return
         try:
+            # Schema: id, trace_id, span_id, level, message, attributes, timestamp, created_at
             execute_values(
                 cur,
                 """
-                INSERT INTO observability.logs (event_type, source_module, payload, correlation_id, timestamp)
+                INSERT INTO observability.logs (id, trace_id, span_id, level, message, attributes, timestamp, created_at)
                 VALUES %s
                 ON CONFLICT DO NOTHING
                 """,
-                [(e["event_type"], e["source_module"], e["payload"],
-                  e["correlation_id"], e["timestamp"]) for e in events],
-                template="(%s, %s, %s, %s, %s)"
+                [(
+                    str(uuid.uuid4()),
+                    e["correlation_id"] or str(uuid.uuid4()),  # trace_id
+                    str(uuid.uuid4())[:8],  # span_id
+                    "INFO",  # level
+                    f"{e['event_type']} from {e['source_module']}",  # message
+                    e["payload"],  # attributes (already JSON)
+                    e["timestamp"],
+                    e["timestamp"]
+                ) for e in events],
+                template="(%s, %s, %s, %s, %s, %s, %s, %s)"
             )
         except Exception as e:
             logger.error(f"Failed to insert events: {e}")
@@ -245,16 +263,34 @@ class ObservabilityPersistence:
         if not traces:
             return
         try:
+            # Schema: id, trace_id, span_id, parent_span_id, operation_name, service_name,
+            #         start_time, end_time, duration_ms, status, attributes, events, links, created_at
+            now = datetime.now(timezone.utc)
             execute_values(
                 cur,
                 """
-                INSERT INTO observability.traces (request_id, span_id, parent_span_id, operation, module, duration_ms, status, timestamp)
+                INSERT INTO observability.traces (id, trace_id, span_id, parent_span_id, operation_name,
+                    service_name, start_time, end_time, duration_ms, status, attributes, events, links, created_at)
                 VALUES %s
                 ON CONFLICT DO NOTHING
                 """,
-                [(t["request_id"], t["span_id"], t["parent_span_id"], t["operation"],
-                  t["module"], t["duration_ms"], t["status"], t["timestamp"]) for t in traces],
-                template="(%s, %s, %s, %s, %s, %s, %s, %s)"
+                [(
+                    str(uuid.uuid4()),
+                    t["request_id"],  # trace_id
+                    t["span_id"],
+                    t["parent_span_id"] or None,
+                    t["operation"],  # operation_name
+                    t["module"],  # service_name
+                    t["timestamp"] - timedelta(milliseconds=t["duration_ms"]),  # start_time
+                    t["timestamp"],  # end_time
+                    int(t["duration_ms"]),
+                    t["status"],
+                    json.dumps({"module": t["module"]}),  # attributes
+                    json.dumps([]),  # events
+                    json.dumps([]),  # links
+                    now
+                ) for t in traces],
+                template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
             )
         except Exception as e:
             logger.error(f"Failed to insert traces: {e}")
