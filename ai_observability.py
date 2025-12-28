@@ -35,6 +35,230 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
+# Database persistence (optional)
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor, execute_values
+    DB_AVAILABLE = True
+except ImportError:
+    DB_AVAILABLE = False
+    logger.info("psycopg2 not available, database persistence disabled")
+
+
+# =============================================================================
+# DATABASE PERSISTENCE ADAPTER
+# =============================================================================
+
+class ObservabilityPersistence:
+    """
+    Optional database persistence for observability data.
+    Writes metrics, events, and traces to observability.* tables.
+    """
+    _instance = None
+    _lock = threading.Lock()
+
+    @classmethod
+    def get_instance(cls) -> Optional["ObservabilityPersistence"]:
+        if not DB_AVAILABLE:
+            return None
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    try:
+                        cls._instance = cls()
+                    except Exception as e:
+                        logger.error(f"Failed to initialize ObservabilityPersistence: {e}")
+                        return None
+        return cls._instance
+
+    def __init__(self):
+        self._db_config = self._get_db_config()
+        self._write_buffer_metrics: deque = deque(maxlen=1000)
+        self._write_buffer_events: deque = deque(maxlen=1000)
+        self._write_buffer_traces: deque = deque(maxlen=1000)
+        self._flush_interval = 10  # seconds
+        self._last_flush = time.time()
+        self._enabled = self._db_config is not None
+        if self._enabled:
+            logger.info("ObservabilityPersistence initialized with database connection")
+
+    def _get_db_config(self) -> Optional[Dict[str, Any]]:
+        """Get database configuration from environment"""
+        host = os.environ.get("DB_HOST")
+        database = os.environ.get("DB_NAME")
+        user = os.environ.get("DB_USER")
+        password = os.environ.get("DB_PASSWORD")
+        port = int(os.environ.get("DB_PORT", "5432"))
+
+        if all([host, database, user, password]):
+            return {
+                "host": host,
+                "database": database,
+                "user": user,
+                "password": password,
+                "port": port,
+                "sslmode": "require"
+            }
+        return None
+
+    def _get_connection(self):
+        """Get a database connection"""
+        if not self._db_config:
+            return None
+        try:
+            return psycopg2.connect(**self._db_config)
+        except Exception as e:
+            logger.error(f"Database connection failed: {e}")
+            return None
+
+    def record_metric(self, name: str, value: float, metric_type: str,
+                      labels: Dict[str, str] = None, module: str = ""):
+        """Buffer a metric for persistence"""
+        if not self._enabled:
+            return
+        self._write_buffer_metrics.append({
+            "name": name,
+            "value": value,
+            "metric_type": metric_type,
+            "labels": json.dumps(labels or {}),
+            "module": module,
+            "timestamp": datetime.now(timezone.utc)
+        })
+        self._maybe_flush()
+
+    def record_event(self, event_type: str, source_module: str,
+                     payload: Dict[str, Any], correlation_id: str = ""):
+        """Buffer an event for persistence"""
+        if not self._enabled:
+            return
+        self._write_buffer_events.append({
+            "event_type": event_type,
+            "source_module": source_module,
+            "payload": json.dumps(payload),
+            "correlation_id": correlation_id,
+            "timestamp": datetime.now(timezone.utc)
+        })
+        self._maybe_flush()
+
+    def record_trace(self, request_id: str, span_id: str, parent_span_id: str,
+                     operation: str, module: str, duration_ms: float, status: str = "ok"):
+        """Buffer a trace span for persistence"""
+        if not self._enabled:
+            return
+        self._write_buffer_traces.append({
+            "request_id": request_id,
+            "span_id": span_id,
+            "parent_span_id": parent_span_id,
+            "operation": operation,
+            "module": module,
+            "duration_ms": duration_ms,
+            "status": status,
+            "timestamp": datetime.now(timezone.utc)
+        })
+        self._maybe_flush()
+
+    def _maybe_flush(self):
+        """Flush buffers if interval has elapsed"""
+        now = time.time()
+        if now - self._last_flush >= self._flush_interval:
+            self.flush()
+            self._last_flush = now
+
+    def flush(self):
+        """Flush all buffered data to database"""
+        if not self._enabled:
+            return
+
+        conn = self._get_connection()
+        if not conn:
+            return
+
+        try:
+            cur = conn.cursor()
+
+            # Flush metrics
+            if self._write_buffer_metrics:
+                metrics_to_write = list(self._write_buffer_metrics)
+                self._write_buffer_metrics.clear()
+                self._insert_metrics(cur, metrics_to_write)
+
+            # Flush events
+            if self._write_buffer_events:
+                events_to_write = list(self._write_buffer_events)
+                self._write_buffer_events.clear()
+                self._insert_events(cur, events_to_write)
+
+            # Flush traces
+            if self._write_buffer_traces:
+                traces_to_write = list(self._write_buffer_traces)
+                self._write_buffer_traces.clear()
+                self._insert_traces(cur, traces_to_write)
+
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            logger.error(f"Failed to flush observability data: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def _insert_metrics(self, cur, metrics: List[Dict]):
+        """Insert metrics into observability.metrics table"""
+        if not metrics:
+            return
+        try:
+            execute_values(
+                cur,
+                """
+                INSERT INTO observability.metrics (name, value, metric_type, labels, module, timestamp)
+                VALUES %s
+                ON CONFLICT DO NOTHING
+                """,
+                [(m["name"], m["value"], m["metric_type"], m["labels"],
+                  m["module"], m["timestamp"]) for m in metrics],
+                template="(%s, %s, %s, %s, %s, %s)"
+            )
+        except Exception as e:
+            logger.error(f"Failed to insert metrics: {e}")
+
+    def _insert_events(self, cur, events: List[Dict]):
+        """Insert events into observability.logs table"""
+        if not events:
+            return
+        try:
+            execute_values(
+                cur,
+                """
+                INSERT INTO observability.logs (event_type, source_module, payload, correlation_id, timestamp)
+                VALUES %s
+                ON CONFLICT DO NOTHING
+                """,
+                [(e["event_type"], e["source_module"], e["payload"],
+                  e["correlation_id"], e["timestamp"]) for e in events],
+                template="(%s, %s, %s, %s, %s)"
+            )
+        except Exception as e:
+            logger.error(f"Failed to insert events: {e}")
+
+    def _insert_traces(self, cur, traces: List[Dict]):
+        """Insert traces into observability.traces table"""
+        if not traces:
+            return
+        try:
+            execute_values(
+                cur,
+                """
+                INSERT INTO observability.traces (request_id, span_id, parent_span_id, operation, module, duration_ms, status, timestamp)
+                VALUES %s
+                ON CONFLICT DO NOTHING
+                """,
+                [(t["request_id"], t["span_id"], t["parent_span_id"], t["operation"],
+                  t["module"], t["duration_ms"], t["status"], t["timestamp"]) for t in traces],
+                template="(%s, %s, %s, %s, %s, %s, %s, %s)"
+            )
+        except Exception as e:
+            logger.error(f"Failed to insert traces: {e}")
+
 
 # =============================================================================
 # METRIC TYPES
@@ -209,9 +433,13 @@ def traced_operation(name: str, module: str):
 
     set_current_context(ctx)
     start_time = time.time()
+    status = "ok"
 
     try:
         yield ctx
+    except Exception as e:
+        status = "error"
+        raise
     finally:
         duration_ms = (time.time() - start_time) * 1000
         MetricsRegistry.get_instance().observe_histogram(
@@ -219,6 +447,20 @@ def traced_operation(name: str, module: str):
             duration_ms,
             {"operation": name}
         )
+
+        # Persist trace span to database
+        persistence = ObservabilityPersistence.get_instance()
+        if persistence:
+            persistence.record_trace(
+                request_id=ctx.request_id,
+                span_id=ctx.span_id,
+                parent_span_id=ctx.parent_span_id or "",
+                operation=name,
+                module=module,
+                duration_ms=duration_ms,
+                status=status
+            )
+
         if parent_ctx:
             set_current_context(parent_ctx)
 
@@ -357,6 +599,16 @@ class EventBus:
             {"event_type": event.event_type.value, "source": event.source_module}
         )
 
+        # Persist to database
+        persistence = ObservabilityPersistence.get_instance()
+        if persistence:
+            persistence.record_event(
+                event_type=event.event_type.value,
+                source_module=event.source_module,
+                payload=event.payload,
+                correlation_id=event.correlation_id
+            )
+
     async def publish_async(self, event: Event):
         """Publish event asynchronously"""
         ctx = get_current_context()
@@ -370,10 +622,15 @@ class EventBus:
         # Call async handlers
         handlers = self._async_handlers.get(event.event_type, [])
         if handlers:
-            await asyncio.gather(
+            results = await asyncio.gather(
                 *[handler(event) for handler in handlers],
                 return_exceptions=True
             )
+            # Log any exceptions
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(f"Async handler error for {event.event_type}: {result}")
+                    self._dead_letter_queue.append((event, str(result)))
 
         # Call sync handlers in executor
         for handler in self._handlers.get(event.event_type, []):
@@ -382,6 +639,32 @@ class EventBus:
             except Exception as e:
                 logger.error(f"Event handler error: {e}")
                 self._dead_letter_queue.append((event, str(e)))
+
+        # Call catch-all subscribers (was missing in async version)
+        for handler in self._subscribers:
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(event)
+                else:
+                    handler(event)
+            except Exception as e:
+                logger.error(f"Subscriber error for {event.event_type}: {e}")
+
+        # Track metric (was missing in async version)
+        MetricsRegistry.get_instance().increment_counter(
+            "event_bus_events_total",
+            {"event_type": event.event_type.value, "source": event.source_module, "async": "true"}
+        )
+
+        # Persist to database
+        persistence = ObservabilityPersistence.get_instance()
+        if persistence:
+            persistence.record_event(
+                event_type=event.event_type.value,
+                source_module=event.source_module,
+                payload=event.payload,
+                correlation_id=event.correlation_id
+            )
 
     def get_event_counts(self) -> Dict[str, int]:
         """Get event counts by type"""
@@ -455,10 +738,19 @@ class MetricsRegistry:
             self._histograms[full_name].observe(value)
 
     def get_histogram(self, name: str, labels: Dict[str, str] = None) -> Optional[Histogram]:
-        """Get histogram by name"""
+        """Get histogram by name and optional labels"""
         label_key = self._labels_to_key(labels or {})
         full_name = f"{name}:{label_key}"
         return self._histograms.get(full_name)
+
+    def get_histograms_by_name(self, name: str) -> List[Histogram]:
+        """Get all histograms matching a base name (ignoring labels)"""
+        with self._lock:
+            matching = []
+            for full_name, histogram in self._histograms.items():
+                if histogram.name == name or full_name.startswith(f"{name}:"):
+                    matching.append(histogram)
+            return matching
 
     def set_threshold(self, name: str, min_val: float = None, max_val: float = None):
         """Set threshold for metric alerts"""
@@ -536,18 +828,33 @@ class MetricsRegistry:
                 "uptime_seconds": (datetime.now(timezone.utc) - self._start_time).total_seconds()
             }
 
+            # Counters - group by name, then by label key string
             for name, values in self._counters.items():
-                metrics["counters"][name] = {
-                    self._key_to_labels(k) or "default": v for k, v in values.items()
-                }
+                if name not in metrics["counters"]:
+                    metrics["counters"][name] = {}
+                for label_key, value in values.items():
+                    # Use the label key string directly, or "default" for empty labels
+                    key_str = label_key if label_key and label_key != "{}" else "default"
+                    metrics["counters"][name][key_str] = value
 
+            # Gauges - same approach
             for name, values in self._gauges.items():
-                metrics["gauges"][name] = {
-                    self._key_to_labels(k) or "default": v for k, v in values.items()
-                }
+                if name not in metrics["gauges"]:
+                    metrics["gauges"][name] = {}
+                for label_key, value in values.items():
+                    key_str = label_key if label_key and label_key != "{}" else "default"
+                    metrics["gauges"][name][key_str] = value
 
+            # Histograms - group by base name with labels preserved
             for full_name, histogram in self._histograms.items():
-                metrics["histograms"][histogram.name] = {
+                base_name = histogram.name
+                if base_name not in metrics["histograms"]:
+                    metrics["histograms"][base_name] = {}
+
+                # Use labels as key identifier
+                label_key = json.dumps(histogram.labels, sort_keys=True) if histogram.labels else "default"
+                metrics["histograms"][base_name][label_key] = {
+                    "labels": histogram.labels,
                     "count": histogram._count,
                     "sum": histogram._sum,
                     "avg": histogram.avg,
@@ -879,11 +1186,24 @@ async def publish_event_async(event_type: EventType, source: str, payload: Dict[
 
 
 # Export all public classes and functions
+def get_persistence() -> Optional[ObservabilityPersistence]:
+    """Get the global observability persistence instance"""
+    return ObservabilityPersistence.get_instance()
+
+
+def flush_persistence():
+    """Flush all pending observability data to database"""
+    persistence = ObservabilityPersistence.get_instance()
+    if persistence:
+        persistence.flush()
+
+
 __all__ = [
     # Core classes
     "MetricsRegistry",
     "EventBus",
     "ObservabilityController",
+    "ObservabilityPersistence",
     "CorrelationContext",
     "Event",
     "EventType",
@@ -901,6 +1221,8 @@ __all__ = [
     "get_observability",
     "get_event_bus",
     "get_metrics",
+    "get_persistence",
+    "flush_persistence",
     "publish_event",
     "publish_event_async",
     "traced_operation",
