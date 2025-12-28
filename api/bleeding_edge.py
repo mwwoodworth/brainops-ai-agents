@@ -277,7 +277,8 @@ async def validate_response(
         raise HTTPException(status_code=503, detail="Hallucination prevention not available")
 
     try:
-        result = await controller.validate_and_correct(
+        # validate_and_sanitize is the correct method name
+        result = await controller.validate_and_sanitize(
             response=response,
             original_query=query,
             context=context
@@ -367,7 +368,8 @@ async def get_memory_status() -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail="Live memory brain not available")
 
     try:
-        status = await brain.get_status()
+        # get_unified_context is synchronous
+        status = brain.get_unified_context()
         return {
             "status": status,
             "timestamp": datetime.utcnow().isoformat()
