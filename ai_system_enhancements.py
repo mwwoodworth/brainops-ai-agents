@@ -213,7 +213,9 @@ class HealthScorer:
 
     def get_health_history(self, module_name: str, limit: int = 100) -> List[Dict]:
         """Get health history for a module"""
-        return list(self._health_history.get(module_name, []))[-limit:]
+        # FIX: Add thread safety for reading health history
+        with self._lock:
+            return list(self._health_history.get(module_name, []))[-limit:]
 
 
 # =============================================================================
@@ -336,7 +338,23 @@ class AlertingSystem:
 
         with self._lock:
             self._active_alerts[alert.id] = alert
-            self._alert_history.append(asdict(alert))
+            # FIX: Convert alert to dict with proper serialization (handle datetime and enum)
+            alert_dict = {
+                "id": alert.id,
+                "alert_type": alert.alert_type,
+                "severity": alert.severity.value,  # Convert enum to string
+                "module": alert.module,
+                "metric": alert.metric,
+                "current_value": alert.current_value,
+                "threshold": alert.threshold,
+                "message": alert.message,
+                "timestamp": alert.timestamp.isoformat(),  # Convert datetime to string
+                "acknowledged": alert.acknowledged,
+                "resolved": alert.resolved,
+                "resolution_time": alert.resolution_time.isoformat() if alert.resolution_time else None,
+                "metadata": alert.metadata
+            }
+            self._alert_history.append(alert_dict)
 
         # Call handlers
         for handler in self._handlers:
