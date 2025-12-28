@@ -385,11 +385,24 @@ class ModuleIntegrationOrchestrator:
         # Feedback handlers
         self._feedback_handlers: Dict[str, List[Callable]] = defaultdict(list)
 
-        # Cross-module signal queues
-        self._signal_queues: Dict[str, asyncio.Queue] = {}
+        # Cross-module signal queues - initialize for all modules
+        self._signal_queues: Dict[str, asyncio.Queue] = {
+            "ooda": asyncio.Queue(maxsize=100),
+            "consciousness": asyncio.Queue(maxsize=100),
+            "memory": asyncio.Queue(maxsize=100),
+            "dependability": asyncio.Queue(maxsize=100),
+            "circuit_breaker": asyncio.Queue(maxsize=100),
+            "hallucination": asyncio.Queue(maxsize=100)
+        }
+
+        # Signal handlers registered by modules
+        self._signal_handlers: Dict[str, Dict[str, Callable]] = defaultdict(dict)
 
         # Set up event subscriptions
         self._setup_event_handlers()
+
+        # Start signal processor
+        self._signal_processor_task = None
 
         logger.info("ModuleIntegrationOrchestrator initialized")
 
@@ -415,6 +428,70 @@ class ModuleIntegrationOrchestrator:
 
         # Hallucination events
         self.event_bus.subscribe(EventType.HALLUCINATION_DETECTED, self._on_hallucination_detected)
+
+    def register_signal_handler(self, module: str, method: str, handler: Callable):
+        """Register a handler for signals sent to a module"""
+        self._signal_handlers[module][method] = handler
+        logger.debug(f"Registered signal handler: {module}.{method}")
+
+    def get_signal_queue(self, module: str) -> Optional[asyncio.Queue]:
+        """Get the signal queue for a module"""
+        return self._signal_queues.get(module)
+
+    async def start_signal_processor(self):
+        """Start processing signals for all modules"""
+        if self._signal_processor_task is None:
+            self._signal_processor_task = asyncio.create_task(self._process_signals())
+            logger.info("Signal processor started")
+
+    async def _process_signals(self):
+        """Process signals from all module queues"""
+        while True:
+            try:
+                # Process each module's queue
+                for module, queue in self._signal_queues.items():
+                    try:
+                        # Non-blocking check for signals
+                        while not queue.empty():
+                            method, data = queue.get_nowait()
+                            await self._dispatch_signal(module, method, data)
+                    except asyncio.QueueEmpty:
+                        pass
+                    except Exception as e:
+                        logger.error(f"Error processing signal for {module}: {e}")
+
+                # Small delay to prevent busy-waiting
+                await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                logger.info("Signal processor cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Signal processor error: {e}")
+                await asyncio.sleep(1)
+
+    async def _dispatch_signal(self, module: str, method: str, data: Dict):
+        """Dispatch a signal to the appropriate handler"""
+        handler = self._signal_handlers.get(module, {}).get(method)
+        if handler:
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(data)
+                else:
+                    handler(data)
+
+                self.observability.metrics.increment_counter(
+                    "integration_signals_dispatched_total",
+                    {"module": module, "method": method}
+                )
+            except Exception as e:
+                logger.error(f"Signal dispatch error {module}.{method}: {e}")
+                self.observability.metrics.increment_counter(
+                    "integration_signals_failed_total",
+                    {"module": module, "method": method}
+                )
+        else:
+            # No handler registered, but signal was queued - log for debugging
+            logger.debug(f"No handler for {module}.{method}, signal data: {list(data.keys())}")
 
     # =========================================================================
     # EVENT HANDLERS - Cross-Module Integration
@@ -702,6 +779,9 @@ class ModuleIntegrationOrchestrator:
             logger.warning(f"Recovery request denied for {source}")
             return
 
+        # Initialize success before try block to avoid UnboundLocalError
+        success = False
+
         try:
             with self._state_lock:
                 self._state.recovery_in_progress = True
@@ -717,6 +797,10 @@ class ModuleIntegrationOrchestrator:
             success = await self._execute_recovery(source, error_type, violation)
 
             await self.recovery.complete_recovery(source, success, {"violation": violation})
+
+        except Exception as e:
+            logger.error(f"Recovery coordination error for {source}: {e}")
+            await self.recovery.complete_recovery(source, False, {"violation": violation, "error": str(e)})
 
         finally:
             with self._state_lock:
