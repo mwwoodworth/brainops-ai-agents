@@ -86,6 +86,15 @@ except ImportError as e:
     AI_OBSERVABILITY_AVAILABLE = False
     logger.warning(f"AI Observability Router not available: {e}")
 
+# AI System Enhancements - Health scoring, alerting, correlation, WebSocket (2025-12-28)
+try:
+    from api.ai_enhancements_api import router as ai_enhancements_router
+    AI_ENHANCEMENTS_AVAILABLE = True
+    logger.info("AI Enhancements Router loaded - health, alerting, correlation, WebSocket")
+except ImportError as e:
+    AI_ENHANCEMENTS_AVAILABLE = False
+    logger.warning(f"AI Enhancements Router not available: {e}")
+
 # New Pipeline Routers - Secure, authenticated endpoints
 try:
     from api.product_generation import router as product_generation_router
@@ -139,7 +148,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.23.0"  # BLEEDING EDGE AI OS - 6 revolutionary systems (OODA, Hallucination Prevention, Live Memory, Dependability, Consciousness, Circuit Breaker)
+VERSION = "9.24.0"  # ENHANCED AI OS - Health Scoring, Alerting, Correlation, Auto-Recovery, WebSocket Streaming, Enhanced Learning
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -1111,6 +1120,11 @@ if AI_OBSERVABILITY_AVAILABLE:
     app.include_router(ai_observability_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("Mounted: AI Observability API at /ai - unified metrics, events, learning")
 
+# AI System Enhancements (2025-12-28) - Health scoring, alerting, correlation, WebSocket
+if AI_ENHANCEMENTS_AVAILABLE:
+    app.include_router(ai_enhancements_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: AI Enhancements API at /ai/enhanced - health, alerting, WebSocket")
+
 # Mount New Pipeline Routers (with graceful fallback)
 if PRODUCT_GEN_ROUTER_AVAILABLE:
     app.include_router(product_generation_router, dependencies=SECURED_DEPENDENCIES)
@@ -1487,7 +1501,14 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
                 "ai_observability": AI_OBSERVABILITY_AVAILABLE,
                 "cross_module_integration": AI_OBSERVABILITY_AVAILABLE,
                 "unified_metrics": AI_OBSERVABILITY_AVAILABLE,
-                "learning_feedback_loops": AI_OBSERVABILITY_AVAILABLE
+                "learning_feedback_loops": AI_OBSERVABILITY_AVAILABLE,
+                # Phase 6 - Enhanced Systems (2025-12-28)
+                "module_health_scoring": AI_ENHANCEMENTS_AVAILABLE,
+                "realtime_alerting": AI_ENHANCEMENTS_AVAILABLE,
+                "event_correlation": AI_ENHANCEMENTS_AVAILABLE,
+                "auto_recovery": AI_ENHANCEMENTS_AVAILABLE,
+                "websocket_streaming": AI_ENHANCEMENTS_AVAILABLE,
+                "enhanced_learning": AI_ENHANCEMENTS_AVAILABLE
             },
             "config": {
                 "environment": config.environment,
