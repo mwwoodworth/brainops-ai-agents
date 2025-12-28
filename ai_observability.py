@@ -30,8 +30,8 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 from collections import defaultdict, deque
 from contextlib import contextmanager
-import hashlib
 import uuid
+# hashlib removed - was unused
 
 logger = logging.getLogger(__name__)
 
@@ -184,25 +184,28 @@ class ObservabilityPersistence:
         if not conn:
             return
 
+        # FIX: Thread-safe buffer access - copy and clear under lock
+        with self._lock:
+            metrics_to_write = list(self._write_buffer_metrics)
+            self._write_buffer_metrics.clear()
+            events_to_write = list(self._write_buffer_events)
+            self._write_buffer_events.clear()
+            traces_to_write = list(self._write_buffer_traces)
+            self._write_buffer_traces.clear()
+
         try:
             cur = conn.cursor()
 
             # Flush metrics
-            if self._write_buffer_metrics:
-                metrics_to_write = list(self._write_buffer_metrics)
-                self._write_buffer_metrics.clear()
+            if metrics_to_write:
                 self._insert_metrics(cur, metrics_to_write)
 
             # Flush events
-            if self._write_buffer_events:
-                events_to_write = list(self._write_buffer_events)
-                self._write_buffer_events.clear()
+            if events_to_write:
                 self._insert_events(cur, events_to_write)
 
             # Flush traces
-            if self._write_buffer_traces:
-                traces_to_write = list(self._write_buffer_traces)
-                self._write_buffer_traces.clear()
+            if traces_to_write:
                 self._insert_traces(cur, traces_to_write)
 
             conn.commit()
@@ -508,8 +511,8 @@ def traced_operation(name: str, module: str):
                 status=status
             )
 
-        if parent_ctx:
-            set_current_context(parent_ctx)
+        # FIX: Always restore context (even if parent_ctx is None) to avoid context leakage
+        set_current_context(parent_ctx)
 
 
 # =============================================================================
@@ -621,20 +624,24 @@ class EventBus:
         if ctx:
             event.correlation_id = ctx.request_id
 
+        # FIX: Copy handlers under lock to avoid iteration issues
         with self._lock:
             self._event_history.append(event)
             self._event_counts[event.event_type.value] += 1
+            handlers = list(self._handlers.get(event.event_type, []))
+            subscribers = list(self._subscribers)
 
-        # Call sync handlers
-        for handler in self._handlers.get(event.event_type, []):
+        # Call sync handlers (outside lock to avoid blocking)
+        for handler in handlers:
             try:
                 handler(event)
             except Exception as e:
                 logger.error(f"Event handler error for {event.event_type}: {e}")
-                self._dead_letter_queue.append((event, str(e)))
+                with self._lock:
+                    self._dead_letter_queue.append((event, str(e)))
 
         # Call catch-all subscribers
-        for handler in self._subscribers:
+        for handler in subscribers:
             try:
                 handler(event)
             except Exception as e:

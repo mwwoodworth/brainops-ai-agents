@@ -328,8 +328,13 @@ class AliveCore:
         except Exception as e:
             logger.warning(f"Failed to persist thought: {e}")
 
-        # Emit thought event
-        asyncio.create_task(self._emit_event('thought', thought))
+        # Emit thought event - FIX: Safely create task only if event loop is running
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._emit_event('thought', thought))
+        except RuntimeError:
+            # No running event loop - skip async callback
+            pass
 
         return thought
 
@@ -365,9 +370,15 @@ class AliveCore:
         except Exception as e:
             logger.warning(f"Failed to persist state: {e}")
 
-        asyncio.create_task(self._emit_event('state_change', {
-            'old': old_state, 'new': new_state, 'reason': reason
-        }))
+        # FIX: Safely create task only if event loop is running
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._emit_event('state_change', {
+                'old': old_state, 'new': new_state, 'reason': reason
+            }))
+        except RuntimeError:
+            # No running event loop - skip async callback
+            pass
 
     def focus_attention(self, target: str, reason: str, priority: int = 5):
         """Shift attention to a new target"""
@@ -408,8 +419,9 @@ class AliveCore:
         process = psutil.Process()
 
         # Calculate thought rate (thoughts per minute)
+        # FIX: Use total_seconds() instead of .seconds for correct time comparison
         recent_thoughts = [t for t in self.thought_stream
-                         if (datetime.utcnow() - t.timestamp).seconds < 60]
+                         if (datetime.utcnow() - t.timestamp).total_seconds() < 60]
         thought_rate = len(recent_thoughts)
 
         vitals = VitalSigns(
@@ -687,15 +699,18 @@ class AliveCore:
         }
 
 
-# Singleton instance
+# Singleton instance with thread safety
 _alive_core: Optional[AliveCore] = None
+_alive_core_lock = threading.Lock()
 
 
 def get_alive_core() -> AliveCore:
     """Get the singleton AliveCore instance"""
     global _alive_core
     if _alive_core is None:
-        _alive_core = AliveCore()
+        with _alive_core_lock:
+            if _alive_core is None:
+                _alive_core = AliveCore()
     return _alive_core
 
 
