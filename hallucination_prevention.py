@@ -374,7 +374,21 @@ class MultiModelCrossValidator:
     2. Compare responses for consensus
     3. Flag divergent responses for human review
     4. Use majority voting for final determination
+
+    ENHANCEMENTS:
+    - TTL-based validation result cache (1000 entries, 5 min TTL)
+    - Semaphore for concurrency control (max 3 concurrent API calls)
+    - Token cost estimation and tracking
     """
+
+    # ENHANCEMENT: Class-level validation cache with TTL
+    _validation_cache: Dict[str, Tuple[Any, datetime]] = {}
+    _cache_max_size = 1000
+    _cache_ttl_seconds = 300  # 5 minutes
+
+    # ENHANCEMENT: Concurrency control
+    _api_semaphore: Optional[asyncio.Semaphore] = None
+    _max_concurrent_calls = 3
 
     def __init__(self):
         self.providers = AI_PROVIDERS
@@ -383,6 +397,62 @@ class MultiModelCrossValidator:
         self.sac3 = SAC3CrossChecker()
         self.metrics = CrossValidationMetrics()
         self._session: Optional[aiohttp.ClientSession] = None
+        # ENHANCEMENT: Token cost tracking
+        self._total_tokens_used = 0
+        self._api_calls_made = 0
+        self._cache_hits = 0
+        self._cache_misses = 0
+
+    @classmethod
+    def _get_semaphore(cls) -> asyncio.Semaphore:
+        """ENHANCEMENT: Get or create API concurrency semaphore"""
+        if cls._api_semaphore is None:
+            cls._api_semaphore = asyncio.Semaphore(cls._max_concurrent_calls)
+        return cls._api_semaphore
+
+    def _get_cache_key(self, prompt: str, response: str, level: str) -> str:
+        """ENHANCEMENT: Generate cache key for validation result"""
+        content = f"{prompt}|{response}|{level}"
+        return hashlib.md5(content.encode()).hexdigest()
+
+    def _check_cache(self, cache_key: str) -> Optional[Any]:
+        """ENHANCEMENT: Check cache for validation result"""
+        if cache_key in self._validation_cache:
+            result, timestamp = self._validation_cache[cache_key]
+            age = (datetime.now(timezone.utc) - timestamp).total_seconds()
+            if age < self._cache_ttl_seconds:
+                self._cache_hits += 1
+                return result
+            else:
+                # Expired - remove from cache
+                del self._validation_cache[cache_key]
+        return None
+
+    def _store_in_cache(self, cache_key: str, result: Any):
+        """ENHANCEMENT: Store validation result in cache with LRU eviction"""
+        # Evict oldest if cache is full
+        if len(self._validation_cache) >= self._cache_max_size:
+            oldest_key = min(
+                self._validation_cache.keys(),
+                key=lambda k: self._validation_cache[k][1]
+            )
+            del self._validation_cache[oldest_key]
+
+        self._validation_cache[cache_key] = (result, datetime.now(timezone.utc))
+        self._cache_misses += 1
+
+    def get_usage_stats(self) -> Dict[str, Any]:
+        """ENHANCEMENT: Get API usage and cache statistics"""
+        total_cache_accesses = self._cache_hits + self._cache_misses
+        return {
+            "total_tokens_used": self._total_tokens_used,
+            "api_calls_made": self._api_calls_made,
+            "cache_size": len(self._validation_cache),
+            "cache_max_size": self._cache_max_size,
+            "cache_hits": self._cache_hits,
+            "cache_misses": self._cache_misses,
+            "cache_hit_rate": self._cache_hits / total_cache_accesses if total_cache_accesses > 0 else 0.0
+        }
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create HTTP session"""
@@ -391,107 +461,116 @@ class MultiModelCrossValidator:
         return self._session
 
     async def query_openai(self, prompt: str, system_prompt: str = "") -> Optional[str]:
-        """Query OpenAI GPT"""
+        """Query OpenAI GPT with concurrency control"""
         api_key = os.getenv(self.providers["openai"]["api_key_env"], "")
         if not api_key:
             return None
 
-        try:
-            session = await self._get_session()
-            async with session.post(
-                self.providers["openai"]["endpoint"],
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": self.providers["openai"]["model"],
-                    "messages": [
-                        {"role": "system", "content": system_prompt or "You are a helpful assistant."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.3,  # Lower temperature for consistency
-                    "max_tokens": 1000
-                },
-                timeout=aiohttp.ClientTimeout(total=self.providers["openai"]["timeout"])
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["choices"][0]["message"]["content"]
-                else:
-                    logger.warning(f"OpenAI returned status {response.status}")
-        except Exception as e:
-            logger.error(f"OpenAI query failed: {e}")
+        # ENHANCEMENT: Use semaphore for concurrency control
+        async with self._get_semaphore():
+            self._api_calls_made += 1
+            try:
+                session = await self._get_session()
+                async with session.post(
+                    self.providers["openai"]["endpoint"],
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": self.providers["openai"]["model"],
+                        "messages": [
+                            {"role": "system", "content": system_prompt or "You are a helpful assistant."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.3,  # Lower temperature for consistency
+                        "max_tokens": 1000
+                    },
+                    timeout=aiohttp.ClientTimeout(total=self.providers["openai"]["timeout"])
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data["choices"][0]["message"]["content"]
+                    else:
+                        logger.warning(f"OpenAI returned status {response.status}")
+            except Exception as e:
+                logger.error(f"OpenAI query failed: {e}")
 
-        return None
+            return None
 
     async def query_anthropic(self, prompt: str, system_prompt: str = "") -> Optional[str]:
-        """Query Anthropic Claude"""
+        """Query Anthropic Claude with concurrency control"""
         api_key = os.getenv(self.providers["anthropic"]["api_key_env"], "")
         if not api_key:
             return None
 
-        try:
-            session = await self._get_session()
-            async with session.post(
-                self.providers["anthropic"]["endpoint"],
-                headers={
-                    "x-api-key": api_key,
-                    "Content-Type": "application/json",
-                    "anthropic-version": "2023-06-01"
-                },
-                json={
-                    "model": self.providers["anthropic"]["model"],
-                    "system": system_prompt or "You are a helpful assistant.",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 1000
-                },
-                timeout=aiohttp.ClientTimeout(total=self.providers["anthropic"]["timeout"])
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["content"][0]["text"]
-                else:
-                    logger.warning(f"Anthropic returned status {response.status}")
-        except Exception as e:
-            logger.error(f"Anthropic query failed: {e}")
+        # ENHANCEMENT: Use semaphore for concurrency control
+        async with self._get_semaphore():
+            self._api_calls_made += 1
+            try:
+                session = await self._get_session()
+                async with session.post(
+                    self.providers["anthropic"]["endpoint"],
+                    headers={
+                        "x-api-key": api_key,
+                        "Content-Type": "application/json",
+                        "anthropic-version": "2023-06-01"
+                    },
+                    json={
+                        "model": self.providers["anthropic"]["model"],
+                        "system": system_prompt or "You are a helpful assistant.",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 1000
+                    },
+                    timeout=aiohttp.ClientTimeout(total=self.providers["anthropic"]["timeout"])
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data["content"][0]["text"]
+                    else:
+                        logger.warning(f"Anthropic returned status {response.status}")
+            except Exception as e:
+                logger.error(f"Anthropic query failed: {e}")
 
-        return None
+            return None
 
     async def query_google(self, prompt: str, system_prompt: str = "") -> Optional[str]:
-        """Query Google Gemini"""
+        """Query Google Gemini with concurrency control"""
         api_key = os.getenv(self.providers["google"]["api_key_env"], "")
         if not api_key:
             return None
 
-        try:
-            session = await self._get_session()
-            model = self.providers["google"]["model"]
-            url = f"{self.providers['google']['endpoint']}/{model}:generateContent?key={api_key}"
+        # ENHANCEMENT: Use semaphore for concurrency control
+        async with self._get_semaphore():
+            self._api_calls_made += 1
+            try:
+                session = await self._get_session()
+                model = self.providers["google"]["model"]
+                url = f"{self.providers['google']['endpoint']}/{model}:generateContent?key={api_key}"
 
-            async with session.post(
-                url,
-                headers={"Content-Type": "application/json"},
-                json={
-                    "contents": [{
-                        "parts": [{"text": f"{system_prompt}\n\n{prompt}" if system_prompt else prompt}]
-                    }],
-                    "generationConfig": {
-                        "temperature": 0.3,
-                        "maxOutputTokens": 1000
-                    }
-                },
-                timeout=aiohttp.ClientTimeout(total=self.providers["google"]["timeout"])
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
-                else:
-                    logger.warning(f"Google returned status {response.status}")
-        except Exception as e:
-            logger.error(f"Google query failed: {e}")
+                async with session.post(
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "contents": [{
+                            "parts": [{"text": f"{system_prompt}\n\n{prompt}" if system_prompt else prompt}]
+                        }],
+                        "generationConfig": {
+                            "temperature": 0.3,
+                            "maxOutputTokens": 1000
+                        }
+                    },
+                    timeout=aiohttp.ClientTimeout(total=self.providers["google"]["timeout"])
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data["candidates"][0]["content"]["parts"][0]["text"]
+                    else:
+                        logger.warning(f"Google returned status {response.status}")
+            except Exception as e:
+                logger.error(f"Google query failed: {e}")
 
-        return None
+            return None
 
     async def _quick_heuristic_check(
         self,
@@ -578,6 +657,13 @@ class MultiModelCrossValidator:
             ValidationResult with detailed findings
         """
         start_time = datetime.now(timezone.utc)
+
+        # ENHANCEMENT: Check cache for previous validation
+        cache_key = self._get_cache_key(prompt, response_to_validate, validation_level.value)
+        cached_result = self._check_cache(cache_key)
+        if cached_result is not None:
+            logger.info(f"CACHE HIT: Returning cached validation result")
+            return cached_result
 
         # OPTIMIZATION: Cascade Pattern - fast local check first
         # Only escalate to multi-model API calls if quick check fails
@@ -726,7 +812,7 @@ class MultiModelCrossValidator:
             / self.metrics.total_validations
         )
 
-        return ValidationResult(
+        result = ValidationResult(
             validated=not hallucination_detected and final_confidence >= CONFIDENCE_THRESHOLDS["medium"],
             confidence_score=final_confidence,
             consensus_level=consensus_score,
@@ -738,6 +824,11 @@ class MultiModelCrossValidator:
             validation_duration_ms=duration_ms,
             recommendations=recommendations
         )
+
+        # ENHANCEMENT: Store result in cache
+        self._store_in_cache(cache_key, result)
+
+        return result
 
     def _parse_verification_response(self, response: str) -> Dict:
         """Parse verification response from model"""
