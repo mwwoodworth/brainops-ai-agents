@@ -95,6 +95,15 @@ except ImportError as e:
     AI_ENHANCEMENTS_AVAILABLE = False
     logger.warning(f"AI Enhancements Router not available: {e}")
 
+# Unified AI Awareness - Self-reporting AI OS consciousness (2025-12-27)
+try:
+    from unified_awareness import get_unified_awareness, check_status, get_status_report
+    UNIFIED_AWARENESS_AVAILABLE = True
+    logger.info("Unified AI Awareness loaded - AI OS is now self-aware")
+except ImportError as e:
+    UNIFIED_AWARENESS_AVAILABLE = False
+    logger.warning(f"Unified Awareness not available: {e}")
+
 # New Pipeline Routers - Secure, authenticated endpoints
 try:
     from api.product_generation import router as product_generation_router
@@ -1508,7 +1517,10 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
                 "event_correlation": AI_ENHANCEMENTS_AVAILABLE,
                 "auto_recovery": AI_ENHANCEMENTS_AVAILABLE,
                 "websocket_streaming": AI_ENHANCEMENTS_AVAILABLE,
-                "enhanced_learning": AI_ENHANCEMENTS_AVAILABLE
+                "enhanced_learning": AI_ENHANCEMENTS_AVAILABLE,
+                # Phase 7 - Unified Self-Awareness (2025-12-27)
+                "unified_awareness": UNIFIED_AWARENESS_AVAILABLE,
+                "self_reporting": UNIFIED_AWARENESS_AVAILABLE
             },
             "config": {
                 "environment": config.environment,
@@ -1583,6 +1595,56 @@ async def get_recent_thoughts():
                 "attention_focus": app.state.nerve_center.alive_core.attention_focus
             }
     return {"thoughts": [], "error": "Consciousness not active"}
+
+
+# ============================================================================
+# UNIFIED AI AWARENESS - Self-Reporting AI OS
+# ============================================================================
+
+@app.get("/awareness")
+async def get_awareness_status():
+    """
+    Quick status check - AI OS reports its current state.
+    This is the AI talking to you about how it's doing.
+    """
+    if not UNIFIED_AWARENESS_AVAILABLE:
+        return {"status": "unavailable", "message": "Unified awareness system not loaded"}
+
+    try:
+        return {"status": check_status()}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@app.get("/awareness/report")
+async def get_full_awareness_report():
+    """
+    Full self-reporting status - AI OS tells you everything it knows about itself.
+    This is the AI's comprehensive understanding of its own state.
+    """
+    if not UNIFIED_AWARENESS_AVAILABLE:
+        return {"available": False, "message": "Unified awareness system not loaded"}
+
+    try:
+        return get_status_report()
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@app.get("/awareness/pulse")
+async def get_system_pulse():
+    """
+    Real-time system pulse - the AI's heartbeat and vital signs.
+    """
+    if not UNIFIED_AWARENESS_AVAILABLE:
+        return {"available": False, "message": "Unified awareness system not loaded"}
+
+    try:
+        awareness = get_unified_awareness()
+        pulse = awareness.get_system_pulse()
+        return pulse.to_dict()
+    except Exception as e:
+        return {"available": False, "error": str(e)}
 
 
 @app.get("/observability/metrics", dependencies=[Depends(verify_api_key)])
