@@ -77,6 +77,15 @@ except ImportError as e:
     BLEEDING_EDGE_AVAILABLE = False
     logger.warning(f"Bleeding Edge Router not available: {e}")
 
+# AI Observability & Integration - Perfect cross-module integration (2025-12-27)
+try:
+    from api.ai_observability_api import router as ai_observability_router
+    AI_OBSERVABILITY_AVAILABLE = True
+    logger.info("AI Observability Router loaded - unified metrics, events, integration")
+except ImportError as e:
+    AI_OBSERVABILITY_AVAILABLE = False
+    logger.warning(f"AI Observability Router not available: {e}")
+
 # New Pipeline Routers - Secure, authenticated endpoints
 try:
     from api.product_generation import router as product_generation_router
@@ -1097,6 +1106,11 @@ if BLEEDING_EDGE_AVAILABLE:
     app.include_router(bleeding_edge_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("Mounted: Bleeding Edge AI API at /bleeding-edge - 37 capabilities")
 
+# AI Observability & Integration (2025-12-27) - Perfect cross-module integration
+if AI_OBSERVABILITY_AVAILABLE:
+    app.include_router(ai_observability_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: AI Observability API at /ai - unified metrics, events, learning")
+
 # Mount New Pipeline Routers (with graceful fallback)
 if PRODUCT_GEN_ROUTER_AVAILABLE:
     app.include_router(product_generation_router, dependencies=SECURED_DEPENDENCIES)
@@ -1468,7 +1482,12 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
                 "live_memory_brain": BLEEDING_EDGE_AVAILABLE,
                 "dependability_framework": BLEEDING_EDGE_AVAILABLE,
                 "consciousness_emergence": BLEEDING_EDGE_AVAILABLE,
-                "enhanced_circuit_breaker": BLEEDING_EDGE_AVAILABLE
+                "enhanced_circuit_breaker": BLEEDING_EDGE_AVAILABLE,
+                # Phase 5 - Perfect Integration (2025-12-27)
+                "ai_observability": AI_OBSERVABILITY_AVAILABLE,
+                "cross_module_integration": AI_OBSERVABILITY_AVAILABLE,
+                "unified_metrics": AI_OBSERVABILITY_AVAILABLE,
+                "learning_feedback_loops": AI_OBSERVABILITY_AVAILABLE
             },
             "config": {
                 "environment": config.environment,
