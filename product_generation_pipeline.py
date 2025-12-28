@@ -1395,6 +1395,131 @@ class ProductGenerator:
             code[lang or 'text'].append(block.strip())
         return code
 
+    async def get_status(self, product_id: str) -> Optional[Dict]:
+        """Get status of a product generation job"""
+        try:
+            conn = self._get_connection()
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT id, product_type, title, status, quality_score,
+                               word_count, models_used, generation_time_seconds,
+                               created_at, completed_at, spec, content
+                        FROM generated_products WHERE id = %s
+                    """, (product_id,))
+                    row = cur.fetchone()
+                    if not row:
+                        return None
+                    return {
+                        "product_id": str(row['id']),
+                        "status": row['status'],
+                        "progress": self._status_to_progress(row['status']),
+                        "preview": str(row.get('content', {}))[:500] if row.get('content') else None,
+                        "quality_score": row['quality_score'],
+                        "models_used": row['models_used'] or [],
+                        "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+                        "updated_at": row['completed_at'].isoformat() if row['completed_at'] else None,
+                        "metadata": row.get('spec', {})
+                    }
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Failed to get status: {e}")
+            return None
+
+    async def list_products(self, tenant_id: str = "default", status: str = None,
+                           product_type: str = None, limit: int = 50, offset: int = 0) -> List[Dict]:
+        """List products with optional filters"""
+        try:
+            conn = self._get_connection()
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    query = """
+                        SELECT id, product_type, title, status, quality_score,
+                               word_count, created_at, completed_at
+                        FROM generated_products
+                        WHERE 1=1
+                    """
+                    params = []
+                    if status:
+                        query += " AND status = %s"
+                        params.append(status)
+                    if product_type:
+                        query += " AND product_type = %s"
+                        params.append(product_type)
+                    query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+                    params.extend([limit, offset])
+
+                    cur.execute(query, params)
+                    rows = cur.fetchall()
+                    return [
+                        {
+                            "product_id": str(row['id']),
+                            "product_type": row['product_type'],
+                            "title": row['title'],
+                            "status": row['status'],
+                            "quality_score": row['quality_score'],
+                            "word_count": row['word_count'],
+                            "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+                            "completed_at": row['completed_at'].isoformat() if row['completed_at'] else None
+                        }
+                        for row in rows
+                    ]
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Failed to list products: {e}")
+            return []
+
+    async def get_product(self, product_id: str) -> Optional[Dict]:
+        """Get full product data including content"""
+        try:
+            conn = self._get_connection()
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT * FROM generated_products WHERE id = %s
+                    """, (product_id,))
+                    row = cur.fetchone()
+                    if not row:
+                        return None
+                    return {
+                        "product_id": str(row['id']),
+                        "product_type": row['product_type'],
+                        "title": row['title'],
+                        "description": row['description'],
+                        "status": row['status'],
+                        "content": row['content'],
+                        "assets": row['assets'] or [],
+                        "quality_score": row['quality_score'],
+                        "word_count": row['word_count'],
+                        "models_used": row['models_used'] or [],
+                        "generation_time": row['generation_time_seconds'],
+                        "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+                        "completed_at": row['completed_at'].isoformat() if row['completed_at'] else None,
+                        "metadata": row.get('spec', {})
+                    }
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Failed to get product: {e}")
+            return None
+
+    def _status_to_progress(self, status: str) -> float:
+        """Convert status to progress percentage"""
+        progress_map = {
+            "queued": 0,
+            "researching": 10,
+            "outlining": 20,
+            "generating": 40,
+            "reviewing": 70,
+            "designing": 85,
+            "finalizing": 95,
+            "completed": 100,
+            "failed": 0
+        }
+        return progress_map.get(status, 0)
+
 
 # =====================================
 # PRODUCT PIPELINE SCHEDULER
