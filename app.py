@@ -157,7 +157,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.24.0"  # ENHANCED AI OS - Health Scoring, Alerting, Correlation, Auto-Recovery, WebSocket Streaming, Enhanced Learning
+VERSION = "9.25.0"  # Database Persistence Fixes - Revenue Leads, Product Generation Status
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
