@@ -604,30 +604,33 @@ class RevenueAutomationEngine:
         try:
             import asyncpg
             if not self._db_url:
+                logger.warning("No DATABASE_URL configured - lead not persisted")
                 return
 
             conn = await asyncpg.connect(self._db_url)
             try:
+                # Use NOW() for timestamps instead of passing strings
                 await conn.execute("""
                     INSERT INTO revenue_leads
                     (lead_id, email, phone, name, company, industry, source, status,
                      score, estimated_value, created_at, updated_at, tags, custom_fields,
                      automation_history, notes)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW(), $11, $12, $13, $14)
                     ON CONFLICT (lead_id) DO UPDATE SET
                         status = $8, score = $9, updated_at = NOW(),
-                        automation_history = $15, notes = $16
+                        automation_history = $13, notes = $14
                 """,
                     lead.lead_id, lead.email, lead.phone, lead.name, lead.company,
                     lead.industry.value, lead.source.value, lead.status.value,
-                    lead.score, lead.estimated_value, lead.created_at, lead.updated_at,
+                    lead.score, float(lead.estimated_value),  # Convert Decimal to float
                     json.dumps(lead.tags), json.dumps(lead.custom_fields),
                     json.dumps(lead.automation_history), json.dumps(lead.notes)
                 )
+                logger.info(f"Lead {lead.lead_id} persisted to database")
             finally:
                 await conn.close()
         except Exception as e:
-            logger.error(f"Failed to persist lead: {e}")
+            logger.error(f"Failed to persist lead {lead.lead_id}: {e}", exc_info=True)
 
     async def _trigger_automation(self, lead: Lead, trigger: str):
         """Trigger automation sequence for a lead"""
@@ -884,26 +887,37 @@ class RevenueAutomationEngine:
         try:
             import asyncpg
             if not self._db_url:
+                logger.warning("No DATABASE_URL configured - transaction not persisted")
                 return
 
             conn = await asyncpg.connect(self._db_url)
             try:
+                # Parse completed_at if it's a string
+                completed_at = None
+                if tx.completed_at:
+                    try:
+                        completed_at = datetime.fromisoformat(tx.completed_at.replace('Z', '+00:00'))
+                    except:
+                        completed_at = datetime.utcnow()
+
                 await conn.execute("""
                     INSERT INTO revenue_transactions
                     (transaction_id, lead_id, amount, currency, status, payment_method,
                      processor_id, created_at, completed_at, industry, product_service, metadata)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, $10, $11)
                     ON CONFLICT (transaction_id) DO UPDATE SET
-                        status = $5, completed_at = $9, processor_id = $7
+                        status = $5, completed_at = $8, processor_id = $7
                 """,
-                    tx.transaction_id, tx.lead_id, tx.amount, tx.currency, tx.status,
-                    tx.payment_method, tx.processor_id, tx.created_at, tx.completed_at,
-                    tx.industry.value, tx.product_service, json.dumps(tx.metadata)
+                    tx.transaction_id, tx.lead_id, float(tx.amount), tx.currency, tx.status,
+                    tx.payment_method, tx.processor_id, completed_at,
+                    tx.industry.value if hasattr(tx.industry, 'value') else tx.industry,
+                    tx.product_service, json.dumps(tx.metadata)
                 )
+                logger.info(f"Transaction {tx.transaction_id} persisted to database")
             finally:
                 await conn.close()
         except Exception as e:
-            logger.error(f"Failed to persist transaction: {e}")
+            logger.error(f"Failed to persist transaction {tx.transaction_id}: {e}", exc_info=True)
 
     # =========================================
     # REVENUE METRICS
