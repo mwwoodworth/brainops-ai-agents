@@ -14,6 +14,7 @@ Provides:
 
 import logging
 from fastapi import APIRouter, Query
+from fastapi.responses import PlainTextResponse
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 
@@ -52,17 +53,19 @@ def get_integration():
 # METRICS ENDPOINTS
 # =============================================================================
 
-@router.get("/metrics")
+@router.get("/metrics", response_class=PlainTextResponse)
 async def get_prometheus_metrics():
     """
     Get all metrics in Prometheus format.
     Compatible with Prometheus scraping.
+    Returns text/plain content type.
     """
     obs = get_observability()
     if not obs:
-        return {"error": "Observability not available"}
+        return PlainTextResponse("# Error: Observability not available\n", status_code=503)
 
-    return obs.get_prometheus_metrics()
+    metrics_text = obs.get_prometheus_metrics()
+    return PlainTextResponse(metrics_text, media_type="text/plain; version=0.0.4")
 
 
 @router.get("/metrics/json")
@@ -77,22 +80,46 @@ async def get_metrics_json():
 
 @router.get("/metrics/histogram/{name}")
 async def get_histogram(name: str):
-    """Get specific histogram with percentiles"""
+    """Get specific histogram with percentiles. Returns all histograms matching the base name."""
     obs = get_observability()
     if not obs:
         return {"error": "Observability not available"}
 
-    histogram = obs.metrics.get_histogram(name)
-    if histogram:
-        return {
-            "name": histogram.name,
-            "count": histogram._count,
-            "sum": histogram._sum,
-            "avg": histogram.avg,
-            "p50": histogram.p50,
-            "p95": histogram.p95,
-            "p99": histogram.p99
+    # Get all histograms matching this name (handles labeled histograms)
+    histograms = obs.metrics.get_histograms_by_name(name)
+
+    if not histograms:
+        # Try exact match as fallback
+        histogram = obs.metrics.get_histogram(name)
+        if histogram:
+            histograms = [histogram]
+
+    if histograms:
+        result = {
+            "name": name,
+            "instances": []
         }
+        for histogram in histograms:
+            result["instances"].append({
+                "labels": histogram.labels,
+                "count": histogram._count,
+                "sum": histogram._sum,
+                "avg": histogram.avg,
+                "p50": histogram.p50,
+                "p95": histogram.p95,
+                "p99": histogram.p99
+            })
+
+        # Also provide aggregated stats across all instances
+        total_count = sum(h._count for h in histograms)
+        total_sum = sum(h._sum for h in histograms)
+        result["aggregated"] = {
+            "total_count": total_count,
+            "total_sum": total_sum,
+            "avg": total_sum / total_count if total_count > 0 else 0
+        }
+        return result
+
     return {"error": f"Histogram {name} not found"}
 
 
@@ -347,6 +374,182 @@ async def get_circuit_breaker_metrics():
 # =============================================================================
 # SUMMARY ENDPOINT
 # =============================================================================
+
+# =============================================================================
+# SMOKE TEST ENDPOINT
+# =============================================================================
+
+@router.post("/smoke-test")
+async def run_smoke_test():
+    """
+    Run a smoke test to verify the observability and integration layer is alive.
+    Emits a test decision and verifies events and state change.
+    """
+    import uuid
+    from datetime import datetime, timezone
+
+    obs = get_observability()
+    integration = get_integration()
+
+    if not obs or not integration:
+        return {
+            "success": False,
+            "error": "Observability or Integration not available",
+            "observability_available": obs is not None,
+            "integration_available": integration is not None
+        }
+
+    test_id = str(uuid.uuid4())[:8]
+    results = {
+        "test_id": test_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tests": {}
+    }
+
+    # Test 1: Emit a test event and verify it appears in event counts
+    try:
+        from ai_observability import EventType, Event, EventBus
+        event_bus = EventBus.get_instance()
+
+        initial_counts = event_bus.get_event_counts()
+        initial_decision_count = initial_counts.get("ooda.decision_made", 0)
+
+        # Publish a test decision event
+        test_event = Event(
+            event_type=EventType.DECISION_MADE,
+            source_module="smoke_test",
+            payload={
+                "id": f"smoke_test_{test_id}",
+                "type": "smoke_test",
+                "confidence": 0.95,
+                "test": True
+            }
+        )
+        event_bus.publish(test_event)
+
+        new_counts = event_bus.get_event_counts()
+        new_decision_count = new_counts.get("ooda.decision_made", 0)
+
+        results["tests"]["event_publishing"] = {
+            "success": new_decision_count > initial_decision_count,
+            "initial_count": initial_decision_count,
+            "new_count": new_decision_count
+        }
+    except Exception as e:
+        results["tests"]["event_publishing"] = {
+            "success": False,
+            "error": str(e)
+        }
+
+    # Test 2: Verify metrics are being recorded
+    try:
+        from ai_observability import MetricsRegistry
+        registry = MetricsRegistry.get_instance()
+
+        # Record a test metric
+        registry.increment_counter(
+            "smoke_test_counter",
+            {"test_id": test_id}
+        )
+        registry.set_gauge(
+            "smoke_test_gauge",
+            42.0,
+            {"test_id": test_id}
+        )
+        registry.observe_histogram(
+            "smoke_test_histogram",
+            0.123,
+            {"test_id": test_id}
+        )
+
+        metrics = registry.get_all_metrics()
+        results["tests"]["metrics_recording"] = {
+            "success": True,
+            "counters_count": len(metrics.get("counters", {})),
+            "gauges_count": len(metrics.get("gauges", {})),
+            "histograms_count": len(metrics.get("histograms", {}))
+        }
+    except Exception as e:
+        results["tests"]["metrics_recording"] = {
+            "success": False,
+            "error": str(e)
+        }
+
+    # Test 3: Verify state updates work
+    try:
+        state_before = integration.get_unified_state()
+        initial_decisions = state_before.get("decisions", {}).get("total", 0)
+
+        # The event we published should have updated the state
+        state_after = integration.get_unified_state()
+        new_decisions = state_after.get("decisions", {}).get("total", 0)
+
+        results["tests"]["state_updates"] = {
+            "success": new_decisions >= initial_decisions,
+            "initial_total_decisions": initial_decisions,
+            "new_total_decisions": new_decisions,
+            "consciousness_level": state_after.get("consciousness", {}).get("consciousness_level", 0)
+        }
+    except Exception as e:
+        results["tests"]["state_updates"] = {
+            "success": False,
+            "error": str(e)
+        }
+
+    # Test 4: Verify signal queues are initialized
+    try:
+        queues = list(integration._signal_queues.keys())
+        results["tests"]["signal_queues"] = {
+            "success": len(queues) > 0,
+            "queues": queues,
+            "count": len(queues)
+        }
+    except Exception as e:
+        results["tests"]["signal_queues"] = {
+            "success": False,
+            "error": str(e)
+        }
+
+    # Test 5: Verify learning manager is tracking
+    try:
+        from ai_module_integration import LearningOutcome
+        learning = integration.learning
+
+        # Record a test outcome
+        outcome = LearningOutcome(
+            operation_id=f"smoke_test_{test_id}",
+            operation_type="smoke_test_operation",
+            predicted_outcome="success",
+            actual_outcome="success",
+            success=True,
+            confidence_delta=0.01,
+            context={"test": True}
+        )
+        learning.record_outcome(outcome)
+
+        summary = learning.get_learning_summary()
+        results["tests"]["learning_manager"] = {
+            "success": summary.get("total_outcomes", 0) > 0,
+            "total_outcomes": summary.get("total_outcomes", 0),
+            "operation_types": summary.get("operation_types", 0)
+        }
+    except Exception as e:
+        results["tests"]["learning_manager"] = {
+            "success": False,
+            "error": str(e)
+        }
+
+    # Calculate overall success
+    all_tests_passed = all(
+        test_result.get("success", False)
+        for test_result in results["tests"].values()
+    )
+    results["success"] = all_tests_passed
+    results["passed"] = sum(1 for t in results["tests"].values() if t.get("success", False))
+    results["total"] = len(results["tests"])
+
+    return results
+
 
 @router.get("/summary")
 async def get_full_summary():
