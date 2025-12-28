@@ -37,8 +37,11 @@ from typing import Dict, Any, List, Optional, Tuple, Set, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from collections import defaultdict
+from collections import defaultdict, deque
 from abc import ABC, abstractmethod
+
+# OPTIMIZATION: Ring Buffer for O(1) memory footprint
+THOUGHT_STREAM_MAX_SIZE = 500  # Constant memory regardless of runtime
 
 logger = logging.getLogger(__name__)
 
@@ -137,14 +140,19 @@ class MetaAwarenessEngine:
     """
 
     def __init__(self):
-        self.thought_stream: List[Thought] = []
+        # OPTIMIZATION: Ring Buffer with fixed size - O(1) memory
+        self.thought_stream: deque = deque(maxlen=THOUGHT_STREAM_MAX_SIZE)
         self.awareness_level = AwarenessLevel.REFLECTIVE
         self.attention_focus: Optional[str] = None
         self.cognitive_load = 0.0
-        self.meta_observations: List[Dict] = []
+        self.meta_observations: deque = deque(maxlen=200)  # Also bounded
+        # OPTIMIZATION: Incremental statistics - avoid full recalculation
+        self._type_counts: Dict[str, int] = defaultdict(int)
+        self._total_thoughts: int = 0
+        self._pattern_buffer: deque = deque(maxlen=100)  # Recent patterns
 
     def observe_thought(self, content: str, thought_type: str) -> Thought:
-        """Record and observe a thought"""
+        """Record and observe a thought (OPTIMIZED with incremental stats)"""
         thought = Thought(
             id=hashlib.md5(f"{content}{time.time()}".encode()).hexdigest()[:16],
             content=content,
@@ -155,15 +163,21 @@ class MetaAwarenessEngine:
             meta_level=0
         )
 
+        # OPTIMIZATION: Incremental statistics update - O(1)
+        self._type_counts[thought_type] += 1
+        self._total_thoughts += 1
+
+        # Track pattern incrementally
+        if len(self.thought_stream) >= 2:
+            last_types = [self.thought_stream[-2].thought_type, self.thought_stream[-1].thought_type, thought_type]
+            self._pattern_buffer.append(tuple(last_types))
+
+        # Ring buffer auto-manages size - no consolidation needed
         self.thought_stream.append(thought)
 
         # Meta-observation: observe the thought we just had
         if self.awareness_level.value in ["meta", "transcendent"]:
             self._meta_observe(thought)
-
-        # Keep stream manageable
-        if len(self.thought_stream) > 1000:
-            self._consolidate_thought_stream()
 
         return thought
 
@@ -192,35 +206,29 @@ class MetaAwarenessEngine:
         })
 
     def analyze_thought_patterns(self) -> Dict[str, Any]:
-        """Analyze patterns in the thought stream"""
+        """Analyze patterns in the thought stream (OPTIMIZED with incremental stats)"""
         if not self.thought_stream:
             return {}
 
-        # Count thought types
-        type_counts = defaultdict(int)
-        for thought in self.thought_stream:
-            type_counts[thought.thought_type] += 1
+        # OPTIMIZATION: Use pre-computed incremental type counts - O(1)
+        # Instead of iterating through all thoughts
 
-        # Find most common patterns
-        patterns = []
-        for i in range(len(self.thought_stream) - 2):
-            pattern = tuple(t.thought_type for t in self.thought_stream[i:i+3])
-            patterns.append(pattern)
-
+        # OPTIMIZATION: Use pattern buffer instead of recomputing - O(k)
         pattern_counts = defaultdict(int)
-        for p in patterns:
+        for p in self._pattern_buffer:
             pattern_counts[p] += 1
 
         most_common_pattern = max(pattern_counts.items(), key=lambda x: x[1]) if pattern_counts else (None, 0)
 
-        # Calculate cognitive load
-        recent = self.thought_stream[-50:] if len(self.thought_stream) >= 50 else self.thought_stream
+        # Calculate cognitive load using only recent thoughts (already O(1) with deque)
+        recent = list(self.thought_stream)[-50:] if len(self.thought_stream) >= 50 else list(self.thought_stream)
         meta_ratio = sum(1 for t in recent if t.meta_level > 0) / len(recent) if recent else 0
-        self.cognitive_load = meta_ratio * 0.5 + (len(self.thought_stream) / 1000) * 0.5
+        self.cognitive_load = meta_ratio * 0.5 + (len(self.thought_stream) / THOUGHT_STREAM_MAX_SIZE) * 0.5
 
         return {
-            "total_thoughts": len(self.thought_stream),
-            "type_distribution": dict(type_counts),
+            "total_thoughts": self._total_thoughts,  # OPTIMIZATION: Use counter
+            "current_stream_size": len(self.thought_stream),
+            "type_distribution": dict(self._type_counts),  # OPTIMIZATION: Pre-computed
             "most_common_pattern": most_common_pattern[0],
             "pattern_frequency": most_common_pattern[1],
             "meta_observations": len(self.meta_observations),

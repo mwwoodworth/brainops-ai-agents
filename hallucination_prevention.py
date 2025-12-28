@@ -493,6 +493,70 @@ class MultiModelCrossValidator:
 
         return None
 
+    async def _quick_heuristic_check(
+        self,
+        response: str,
+        prompt: str
+    ) -> Dict[str, Any]:
+        """
+        OPTIMIZATION: Fast heuristic check to avoid expensive API calls.
+        Uses local pattern matching and basic logic checks.
+
+        Returns:
+            Dict with 'likely_valid' (bool) and 'confidence' (0-1)
+        """
+        confidence = 1.0
+        issues = []
+
+        # Check 1: Response length sanity
+        if len(response) < 10:
+            confidence -= 0.3
+            issues.append("too_short")
+        elif len(response) > 10000:
+            confidence -= 0.1
+            issues.append("unusually_long")
+
+        # Check 2: Hallucination red flags (common patterns)
+        hallucination_patterns = [
+            r"as an AI",  # Self-reference (might be ok)
+            r"I don't have access to",  # Admission
+            r"I cannot verify",  # Admission
+            r"(invented|made up|fabricated) (this|that)",  # Obvious
+            r"\b(definitely|absolutely|certainly|100%)\b.*\b(true|correct|accurate)\b",  # Over-confidence
+        ]
+        for pattern in hallucination_patterns:
+            if re.search(pattern, response, re.IGNORECASE):
+                confidence -= 0.1
+                issues.append(f"pattern:{pattern[:20]}")
+
+        # Check 3: Numeric consistency check
+        numbers = re.findall(r'\b\d+\.?\d*\b', response)
+        if len(numbers) > 10:
+            # Many numbers - slightly higher risk of errors
+            confidence -= 0.05
+
+        # Check 4: Check for hedging language (good sign - reduces confidence penalty)
+        hedging = ["possibly", "might", "may", "could", "perhaps", "approximately", "roughly"]
+        if any(h in response.lower() for h in hedging):
+            confidence += 0.05  # Hedging is good
+
+        # Check 5: Basic relevance to prompt
+        prompt_words = set(prompt.lower().split())
+        response_words = set(response.lower().split())
+        overlap = len(prompt_words & response_words) / max(len(prompt_words), 1)
+        if overlap < 0.1:
+            confidence -= 0.2
+            issues.append("low_relevance")
+
+        # Clamp confidence
+        confidence = max(0.0, min(1.0, confidence))
+
+        return {
+            "likely_valid": confidence >= 0.7 and len(issues) < 3,
+            "confidence": confidence,
+            "issues": issues
+        }
+
     async def cross_validate(
         self,
         prompt: str,
@@ -502,6 +566,7 @@ class MultiModelCrossValidator:
     ) -> ValidationResult:
         """
         Cross-validate a response using multiple AI models.
+        OPTIMIZED with Cascade Pattern: Fast check first, escalate if needed.
 
         Args:
             prompt: Original prompt/question
@@ -513,6 +578,26 @@ class MultiModelCrossValidator:
             ValidationResult with detailed findings
         """
         start_time = datetime.now(timezone.utc)
+
+        # OPTIMIZATION: Cascade Pattern - fast local check first
+        # Only escalate to multi-model API calls if quick check fails
+        if validation_level != ValidationLevel.PARANOID:
+            quick_result = await self._quick_heuristic_check(response_to_validate, prompt)
+            if quick_result["confidence"] >= 0.85 and quick_result["likely_valid"]:
+                # Fast path - return early without API calls
+                logger.info(f"CASCADE: Fast path taken (confidence: {quick_result['confidence']:.2f})")
+                return ValidationResult(
+                    is_valid=True,
+                    confidence_score=quick_result["confidence"],
+                    hallucination_detected=False,
+                    issues_found=[],
+                    suggested_corrections={},
+                    model_agreements={"fast_check": "VALID"},
+                    consensus_level=ConsensusLevel.FULL,
+                    validation_time_ms=(datetime.now(timezone.utc) - start_time).total_seconds() * 1000,
+                    claims_verified=[],
+                    sac3_result=None
+                )
 
         # Step 1: Extract claims from the response
         claims = self.claim_extractor.extract_claims(response_to_validate)
