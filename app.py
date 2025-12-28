@@ -67,6 +67,7 @@ from api.cicd import router as cicd_router  # Autonomous CI/CD Management - 1-10
 from api.a2ui import router as a2ui_router  # Google A2UI Protocol - Agent-to-User Interface
 from api.aurea_chat import router as aurea_chat_router  # AUREA Live Conversational Interface
 from api.observability import router as full_observability_router  # Comprehensive Observability Dashboard
+from api.self_awareness import router as self_awareness_router  # Self-Awareness Dashboard
 
 # Bleeding Edge AI Capabilities - Revolutionary systems (2025-12-27)
 try:
@@ -1118,6 +1119,7 @@ app.include_router(cicd_router, dependencies=SECURED_DEPENDENCIES)  # Autonomous
 app.include_router(a2ui_router, dependencies=SECURED_DEPENDENCIES)  # Google A2UI Protocol - Agent-generated UIs
 app.include_router(aurea_chat_router, dependencies=SECURED_DEPENDENCIES)  # AUREA Live Conversational AI
 app.include_router(full_observability_router, dependencies=SECURED_DEPENDENCIES)  # Comprehensive Observability Dashboard
+app.include_router(self_awareness_router, dependencies=SECURED_DEPENDENCIES)  # Self-Awareness Dashboard
 
 # Bleeding Edge AI Systems (2025-12-27) - Revolutionary capabilities
 if BLEEDING_EDGE_AVAILABLE:
