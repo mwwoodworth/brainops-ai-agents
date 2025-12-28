@@ -71,14 +71,49 @@ async def retry_with_backoff(
                 await asyncio.sleep(wait_time)
     raise last_error
 
-# Database configuration
+# Database configuration with hardcoded fallback
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
     'database': os.getenv('DB_NAME', 'postgres'),
     'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('DB_PASSWORD'),
-    'port': int(os.getenv('DB_PORT', 5432))
+    'password': os.getenv('DB_PASSWORD') or os.getenv('SUPABASE_DB_PASSWORD'),
+    'port': int(os.getenv('DB_PORT', 5432)),
+    'sslmode': 'require'
 }
+
+# Connection pool for efficient DB usage
+_db_pool = None
+_pool_lock = asyncio.Lock() if hasattr(asyncio, 'Lock') else None
+
+
+def get_db_connection():
+    """Get a database connection with proper config"""
+    if not DB_CONFIG.get('password'):
+        return None
+    try:
+        return psycopg2.connect(**DB_CONFIG)
+    except Exception as e:
+        logger.debug(f"DB connection failed: {e}")
+        return None
+
+
+def execute_with_connection(query: str, params: tuple = None, fetch: bool = True):
+    """Execute a query with automatic connection management"""
+    conn = get_db_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(query, params)
+        result = cur.fetchall() if fetch else None
+        cur.close()
+        conn.close()
+        return result
+    except Exception as e:
+        logger.debug(f"Query failed: {e}")
+        if conn:
+            conn.close()
+        return None
 
 
 # =============================================================================
@@ -499,154 +534,122 @@ class ParallelObserver:
 
     async def _observe_new_customers(self) -> Dict[str, Any]:
         """Observe new customers in last 5 minutes"""
-        try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute("""
-                SELECT id, name, email, created_at
-                FROM customers
-                WHERE tenant_id = %s
-                  AND created_at > NOW() - INTERVAL '5 minutes'
-                ORDER BY created_at DESC
-                LIMIT 10
-            """, (self.tenant_id,))
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
+        rows = execute_with_connection("""
+            SELECT id, name, email, created_at
+            FROM customers
+            WHERE tenant_id = %s
+              AND created_at > NOW() - INTERVAL '5 minutes'
+            ORDER BY created_at DESC
+            LIMIT 10
+        """, (self.tenant_id,))
 
-            return {
-                "data": [dict(r) for r in rows],
-                "count": len(rows),
-                "observation": "new_customers_detected" if rows else "no_new_customers"
-            }
-        except Exception as e:
-            logger.debug(f"New customers observation failed: {e}")
+        if rows is None:
             return {"data": [], "count": 0, "observation": "query_failed"}
+
+        return {
+            "data": [dict(r) for r in rows],
+            "count": len(rows),
+            "observation": "new_customers_detected" if rows else "no_new_customers"
+        }
 
     async def _observe_pending_estimates(self) -> Dict[str, Any]:
         """Observe pending estimates with age tracking"""
-        try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute("""
-                SELECT id, customer_id, created_at,
-                       EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600 as age_hours
-                FROM estimates
-                WHERE tenant_id = %s
-                  AND status = 'pending'
-                ORDER BY created_at ASC
-                LIMIT 20
-            """, (self.tenant_id,))
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
+        rows = execute_with_connection("""
+            SELECT id, customer_id, created_at,
+                   EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600 as age_hours
+            FROM estimates
+            WHERE tenant_id = %s
+              AND status = 'pending'
+            ORDER BY created_at ASC
+            LIMIT 20
+        """, (self.tenant_id,))
 
-            urgent = [r for r in rows if r.get('age_hours', 0) > 24]
-
-            return {
-                "data": [dict(r) for r in rows],
-                "count": len(rows),
-                "urgent_count": len(urgent),
-                "observation": "urgent_estimates" if urgent else "estimates_pending"
-            }
-        except Exception as e:
-            logger.debug(f"Pending estimates observation failed: {e}")
+        if rows is None:
             return {"data": [], "count": 0, "urgent_count": 0, "observation": "query_failed"}
+
+        urgent = [r for r in rows if r.get('age_hours', 0) > 24]
+        return {
+            "data": [dict(r) for r in rows],
+            "count": len(rows),
+            "urgent_count": len(urgent),
+            "observation": "urgent_estimates" if urgent else "estimates_pending"
+        }
 
     async def _observe_overdue_invoices(self) -> Dict[str, Any]:
         """Observe overdue invoices with debt totals"""
-        try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute("""
-                SELECT i.id, i.customer_id, i.total, i.due_date,
-                       c.name as customer_name,
-                       EXTRACT(EPOCH FROM (NOW() - i.due_date)) / 86400 as days_overdue
-                FROM invoices i
-                JOIN customers c ON c.id = i.customer_id
-                WHERE i.tenant_id = %s
-                  AND i.status = 'sent'
-                  AND i.due_date < NOW()
-                ORDER BY i.due_date ASC
-                LIMIT 20
-            """, (self.tenant_id,))
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
+        rows = execute_with_connection("""
+            SELECT i.id, i.customer_id, i.total, i.due_date,
+                   c.name as customer_name,
+                   EXTRACT(EPOCH FROM (NOW() - i.due_date)) / 86400 as days_overdue
+            FROM invoices i
+            JOIN customers c ON c.id = i.customer_id
+            WHERE i.tenant_id = %s
+              AND i.status = 'sent'
+              AND i.due_date < NOW()
+            ORDER BY i.due_date ASC
+            LIMIT 20
+        """, (self.tenant_id,))
 
-            total_overdue = sum(float(r.get('total', 0)) for r in rows)
-
-            return {
-                "data": [dict(r) for r in rows],
-                "count": len(rows),
-                "total_overdue": total_overdue,
-                "observation": "overdue_invoices" if rows else "no_overdue"
-            }
-        except Exception as e:
-            logger.debug(f"Overdue invoices observation failed: {e}")
+        if rows is None:
             return {"data": [], "count": 0, "total_overdue": 0, "observation": "query_failed"}
+
+        total_overdue = sum(float(r.get('total', 0)) for r in rows)
+        return {
+            "data": [dict(r) for r in rows],
+            "count": len(rows),
+            "total_overdue": total_overdue,
+            "observation": "overdue_invoices" if rows else "no_overdue"
+        }
 
     async def _observe_scheduling_conflicts(self) -> Dict[str, Any]:
         """Observe crew scheduling conflicts"""
-        try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute("""
-                SELECT j1.id as job1_id, j2.id as job2_id,
-                       j1.scheduled_date, j1.assigned_crew_id
-                FROM jobs j1
-                JOIN jobs j2 ON j1.assigned_crew_id = j2.assigned_crew_id
-                  AND j1.scheduled_date = j2.scheduled_date
-                  AND j1.id < j2.id
-                WHERE j1.tenant_id = %s
-                  AND j1.scheduled_date >= CURRENT_DATE
-                  AND j1.status = 'scheduled'
-                  AND j2.status = 'scheduled'
-                LIMIT 10
-            """, (self.tenant_id,))
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
+        rows = execute_with_connection("""
+            SELECT j1.id as job1_id, j2.id as job2_id,
+                   j1.scheduled_date, j1.assigned_crew_id
+            FROM jobs j1
+            JOIN jobs j2 ON j1.assigned_crew_id = j2.assigned_crew_id
+              AND j1.scheduled_date = j2.scheduled_date
+              AND j1.id < j2.id
+            WHERE j1.tenant_id = %s
+              AND j1.scheduled_date >= CURRENT_DATE
+              AND j1.status = 'scheduled'
+              AND j2.status = 'scheduled'
+            LIMIT 10
+        """, (self.tenant_id,))
 
-            return {
-                "data": [dict(r) for r in rows],
-                "count": len(rows),
-                "observation": "scheduling_conflicts" if rows else "no_conflicts"
-            }
-        except Exception as e:
-            logger.debug(f"Scheduling conflicts observation failed: {e}")
+        if rows is None:
             return {"data": [], "count": 0, "observation": "query_failed"}
+
+        return {
+            "data": [dict(r) for r in rows],
+            "count": len(rows),
+            "observation": "scheduling_conflicts" if rows else "no_conflicts"
+        }
 
     async def _observe_churn_risks(self) -> Dict[str, Any]:
         """Observe customers at risk of churning (90+ days inactive)"""
-        try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute("""
-                SELECT c.id, c.name, c.email,
-                       MAX(j.completed_date) as last_job_date,
-                       EXTRACT(EPOCH FROM (NOW() - MAX(j.completed_date))) / 86400 as days_inactive
-                FROM customers c
-                LEFT JOIN jobs j ON j.customer_id = c.id AND j.status = 'completed'
-                WHERE c.tenant_id = %s
-                GROUP BY c.id, c.name, c.email
-                HAVING MAX(j.completed_date) < NOW() - INTERVAL '90 days'
-                   OR MAX(j.completed_date) IS NULL
-                ORDER BY last_job_date ASC NULLS FIRST
-                LIMIT 20
-            """, (self.tenant_id,))
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
+        rows = execute_with_connection("""
+            SELECT c.id, c.name, c.email,
+                   MAX(j.completed_date) as last_job_date,
+                   EXTRACT(EPOCH FROM (NOW() - MAX(j.completed_date))) / 86400 as days_inactive
+            FROM customers c
+            LEFT JOIN jobs j ON j.customer_id = c.id AND j.status = 'completed'
+            WHERE c.tenant_id = %s
+            GROUP BY c.id, c.name, c.email
+            HAVING MAX(j.completed_date) < NOW() - INTERVAL '90 days'
+               OR MAX(j.completed_date) IS NULL
+            ORDER BY last_job_date ASC NULLS FIRST
+            LIMIT 20
+        """, (self.tenant_id,))
 
-            return {
-                "data": [dict(r) for r in rows],
-                "count": len(rows),
-                "observation": "churn_risks" if rows else "no_churn_risks"
-            }
-        except Exception as e:
-            logger.debug(f"Churn risks observation failed: {e}")
+        if rows is None:
             return {"data": [], "count": 0, "observation": "query_failed"}
+
+        return {
+            "data": [dict(r) for r in rows],
+            "count": len(rows),
+            "observation": "churn_risks" if rows else "no_churn_risks"
+        }
 
     async def _observe_system_health(self) -> Dict[str, Any]:
         """Observe backend system health"""

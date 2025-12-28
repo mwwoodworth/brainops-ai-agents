@@ -580,3 +580,60 @@ async def get_full_summary():
         summary["recovery"] = integration.recovery.get_recovery_summary()
 
     return summary
+
+
+# =============================================================================
+# SEEDING & PERSISTENCE
+# =============================================================================
+
+@router.post("/seed")
+async def seed_observability():
+    """
+    Seed observability tables with baseline data for all bleeding-edge modules.
+    Creates sample metrics, events, and traces to initialize the observability system.
+    """
+    try:
+        from ai_observability import seed_observability_data
+        result = seed_observability_data()
+        return result
+    except Exception as e:
+        logger.error(f"Failed to seed observability data: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/flush")
+async def flush_observability():
+    """Flush all pending observability data to database"""
+    try:
+        from ai_observability import flush_persistence
+        flush_persistence()
+        return {"success": True, "message": "Observability data flushed"}
+    except Exception as e:
+        logger.error(f"Failed to flush observability data: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/persistence/status")
+async def get_persistence_status():
+    """Get observability persistence status"""
+    try:
+        from ai_observability import get_persistence
+        persistence = get_persistence()
+        if not persistence:
+            return {
+                "enabled": False,
+                "reason": "Persistence not initialized"
+            }
+        return {
+            "enabled": persistence._enabled,
+            "buffer_sizes": {
+                "metrics": len(persistence._write_buffer_metrics),
+                "events": len(persistence._write_buffer_events),
+                "traces": len(persistence._write_buffer_traces)
+            },
+            "flush_interval": persistence._flush_interval,
+            "db_configured": persistence._db_config is not None
+        }
+    except Exception as e:
+        logger.error(f"Failed to get persistence status: {e}")
+        return {"enabled": False, "error": str(e)}
