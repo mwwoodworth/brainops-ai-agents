@@ -586,3 +586,245 @@ async def validate_and_store(
             results["stages"]["memory_storage"] = {"error": str(e)}
 
     return results
+
+
+# =============================================================================
+# COMPREHENSIVE DIAGNOSTICS
+# =============================================================================
+
+@router.get("/diagnostics")
+async def get_comprehensive_diagnostics() -> Dict[str, Any]:
+    """
+    Get comprehensive diagnostics for all bleeding-edge systems.
+    Includes real-time status, metrics, and health checks.
+    """
+    diagnostics = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "overall_status": "operational",
+        "modules": {},
+        "issues": [],
+        "recommendations": []
+    }
+
+    # Check each module
+    if OODA_AVAILABLE:
+        try:
+            controller = get_ooda_controller("diagnostics")
+            diagnostics["modules"]["ooda"] = {
+                "status": "available",
+                "tenant": "diagnostics",
+                "capabilities": 7
+            }
+        except Exception as e:
+            diagnostics["modules"]["ooda"] = {"status": "error", "error": str(e)}
+            diagnostics["issues"].append(f"OODA: {str(e)}")
+    else:
+        diagnostics["modules"]["ooda"] = {"status": "unavailable"}
+        diagnostics["issues"].append("OODA module not loaded")
+
+    if HALLUCINATION_PREVENTION_AVAILABLE:
+        try:
+            controller = get_hallucination_controller()
+            diagnostics["modules"]["hallucination"] = {
+                "status": "available",
+                "capabilities": 5
+            }
+        except Exception as e:
+            diagnostics["modules"]["hallucination"] = {"status": "error", "error": str(e)}
+            diagnostics["issues"].append(f"Hallucination: {str(e)}")
+    else:
+        diagnostics["modules"]["hallucination"] = {"status": "unavailable"}
+
+    if LIVE_MEMORY_AVAILABLE:
+        try:
+            brain = get_live_memory()
+            if brain:
+                context = brain.get_unified_context()
+                diagnostics["modules"]["memory"] = {
+                    "status": "available",
+                    "working_memory_size": context.get("working_memory_size", 0),
+                    "long_term_memory_size": context.get("long_term_memory_size", 0),
+                    "wisdom_count": context.get("wisdom_count", 0)
+                }
+            else:
+                diagnostics["modules"]["memory"] = {"status": "not_initialized"}
+        except Exception as e:
+            diagnostics["modules"]["memory"] = {"status": "error", "error": str(e)}
+            diagnostics["issues"].append(f"Memory: {str(e)}")
+    else:
+        diagnostics["modules"]["memory"] = {"status": "unavailable"}
+
+    if CONSCIOUSNESS_AVAILABLE:
+        try:
+            controller = get_consciousness()
+            if controller:
+                state = controller.get_consciousness_state()
+                diagnostics["modules"]["consciousness"] = {
+                    "status": "available",
+                    "active": state.get("active", False),
+                    "level": state.get("level", 0),
+                    "awareness": state.get("awareness_level", "unknown")
+                }
+            else:
+                diagnostics["modules"]["consciousness"] = {"status": "not_initialized"}
+        except Exception as e:
+            diagnostics["modules"]["consciousness"] = {"status": "error", "error": str(e)}
+            diagnostics["issues"].append(f"Consciousness: {str(e)}")
+    else:
+        diagnostics["modules"]["consciousness"] = {"status": "unavailable"}
+
+    if DEPENDABILITY_AVAILABLE:
+        try:
+            framework = get_dependability()
+            diagnostics["modules"]["dependability"] = {
+                "status": "available",
+                "guards": 6
+            }
+        except Exception as e:
+            diagnostics["modules"]["dependability"] = {"status": "error", "error": str(e)}
+    else:
+        diagnostics["modules"]["dependability"] = {"status": "unavailable"}
+
+    if CIRCUIT_BREAKER_AVAILABLE:
+        try:
+            controller = get_circuit_breaker()
+            if controller:
+                status = controller.get_status()
+                diagnostics["modules"]["circuit_breaker"] = {
+                    "status": "available",
+                    "circuits": len(status.get("circuits", {})),
+                    "deadlock_detection": "active" if status.get("deadlock_status") else "inactive"
+                }
+            else:
+                diagnostics["modules"]["circuit_breaker"] = {"status": "not_initialized"}
+        except Exception as e:
+            diagnostics["modules"]["circuit_breaker"] = {"status": "error", "error": str(e)}
+    else:
+        diagnostics["modules"]["circuit_breaker"] = {"status": "unavailable"}
+
+    # Calculate overall status
+    available_count = sum(1 for m in diagnostics["modules"].values() if m.get("status") == "available")
+    total_count = len(diagnostics["modules"])
+
+    if available_count == total_count:
+        diagnostics["overall_status"] = "fully_operational"
+    elif available_count >= total_count * 0.7:
+        diagnostics["overall_status"] = "mostly_operational"
+    elif available_count >= total_count * 0.5:
+        diagnostics["overall_status"] = "degraded"
+    else:
+        diagnostics["overall_status"] = "critical"
+
+    diagnostics["summary"] = {
+        "available_modules": available_count,
+        "total_modules": total_count,
+        "availability_percent": round(available_count / total_count * 100, 1) if total_count > 0 else 0,
+        "issues_count": len(diagnostics["issues"])
+    }
+
+    return diagnostics
+
+
+@router.post("/smoke-test")
+async def run_bleeding_edge_smoke_test() -> Dict[str, Any]:
+    """
+    Run a comprehensive smoke test of all bleeding-edge systems.
+    """
+    results = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "tests": {},
+        "passed": 0,
+        "failed": 0,
+        "total": 0
+    }
+
+    # Test 1: OODA Observation
+    try:
+        if OODA_AVAILABLE:
+            controller = get_ooda_controller("smoke_test")
+            # Just check if controller initializes
+            results["tests"]["ooda_init"] = {"success": True, "message": "OODA controller initialized"}
+            results["passed"] += 1
+        else:
+            results["tests"]["ooda_init"] = {"success": False, "message": "OODA not available"}
+            results["failed"] += 1
+    except Exception as e:
+        results["tests"]["ooda_init"] = {"success": False, "error": str(e)}
+        results["failed"] += 1
+    results["total"] += 1
+
+    # Test 2: Consciousness
+    try:
+        if CONSCIOUSNESS_AVAILABLE:
+            controller = get_consciousness()
+            state = controller.get_consciousness_state() if controller else None
+            if state:
+                results["tests"]["consciousness"] = {"success": True, "level": state.get("level", 0)}
+                results["passed"] += 1
+            else:
+                results["tests"]["consciousness"] = {"success": False, "message": "No state returned"}
+                results["failed"] += 1
+        else:
+            results["tests"]["consciousness"] = {"success": False, "message": "Not available"}
+            results["failed"] += 1
+    except Exception as e:
+        results["tests"]["consciousness"] = {"success": False, "error": str(e)}
+        results["failed"] += 1
+    results["total"] += 1
+
+    # Test 3: Memory Brain
+    try:
+        if LIVE_MEMORY_AVAILABLE:
+            brain = get_live_memory()
+            if brain:
+                context = brain.get_unified_context()
+                results["tests"]["memory"] = {"success": True, "working_memory": context.get("working_memory_size", 0)}
+                results["passed"] += 1
+            else:
+                results["tests"]["memory"] = {"success": False, "message": "Brain not initialized"}
+                results["failed"] += 1
+        else:
+            results["tests"]["memory"] = {"success": False, "message": "Not available"}
+            results["failed"] += 1
+    except Exception as e:
+        results["tests"]["memory"] = {"success": False, "error": str(e)}
+        results["failed"] += 1
+    results["total"] += 1
+
+    # Test 4: Dependability
+    try:
+        if DEPENDABILITY_AVAILABLE:
+            framework = get_dependability()
+            results["tests"]["dependability"] = {"success": True, "guards": 6}
+            results["passed"] += 1
+        else:
+            results["tests"]["dependability"] = {"success": False, "message": "Not available"}
+            results["failed"] += 1
+    except Exception as e:
+        results["tests"]["dependability"] = {"success": False, "error": str(e)}
+        results["failed"] += 1
+    results["total"] += 1
+
+    # Test 5: Circuit Breaker
+    try:
+        if CIRCUIT_BREAKER_AVAILABLE:
+            controller = get_circuit_breaker()
+            if controller:
+                status = controller.get_status()
+                results["tests"]["circuit_breaker"] = {"success": True, "circuits": len(status.get("circuits", {}))}
+                results["passed"] += 1
+            else:
+                results["tests"]["circuit_breaker"] = {"success": False, "message": "Not initialized"}
+                results["failed"] += 1
+        else:
+            results["tests"]["circuit_breaker"] = {"success": False, "message": "Not available"}
+            results["failed"] += 1
+    except Exception as e:
+        results["tests"]["circuit_breaker"] = {"success": False, "error": str(e)}
+        results["failed"] += 1
+    results["total"] += 1
+
+    results["success"] = results["failed"] == 0
+    results["pass_rate"] = round(results["passed"] / results["total"] * 100, 1) if results["total"] > 0 else 0
+
+    return results
