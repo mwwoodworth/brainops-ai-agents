@@ -374,30 +374,63 @@ class RevenueAutomationEngine:
 
             conn = await asyncpg.connect(self._db_url)
             try:
-                # Load leads
+                # Load leads - handle schema variations
                 rows = await conn.fetch("SELECT * FROM revenue_leads ORDER BY created_at DESC LIMIT 10000")
                 for row in rows:
-                    lead = Lead(
-                        lead_id=row['lead_id'],
-                        email=row['email'],
-                        phone=row['phone'],
-                        name=row['name'],
-                        company=row['company'],
-                        industry=Industry(row['industry']),
-                        source=LeadSource(row['source']),
-                        status=LeadStatus(row['status']),
-                        score=row['score'],
-                        estimated_value=Decimal(str(row['estimated_value'])),
-                        created_at=row['created_at'].isoformat() if row['created_at'] else None,
-                        updated_at=row['updated_at'].isoformat() if row['updated_at'] else None,
-                        contacted_at=row['contacted_at'].isoformat() if row['contacted_at'] else None,
-                        converted_at=row['converted_at'].isoformat() if row['converted_at'] else None,
-                        tags=json.loads(row['tags']) if row['tags'] else [],
-                        custom_fields=json.loads(row['custom_fields']) if row['custom_fields'] else {},
-                        automation_history=json.loads(row['automation_history']) if row['automation_history'] else [],
-                        notes=json.loads(row['notes']) if row['notes'] else []
-                    )
-                    self.leads[lead.lead_id] = lead
+                    try:
+                        # Handle column name variations
+                        lead_id = row.get('lead_id') or str(row.get('id', ''))
+                        company = row.get('company') or row.get('company_name', '')
+                        name = row.get('name') or row.get('contact_name', '')
+
+                        # Parse industry/source/status with fallbacks
+                        try:
+                            industry = Industry(row.get('industry', 'generic'))
+                        except ValueError:
+                            industry = Industry.GENERIC
+
+                        try:
+                            source_val = row.get('source', 'website')
+                            source = LeadSource(source_val) if source_val else LeadSource.WEBSITE
+                        except ValueError:
+                            source = LeadSource.WEBSITE
+
+                        try:
+                            status_val = row.get('status') or row.get('stage', 'new')
+                            status = LeadStatus(status_val) if status_val else LeadStatus.NEW
+                        except ValueError:
+                            status = LeadStatus.NEW
+
+                        # Handle estimated_value variations
+                        est_value = row.get('estimated_value') or row.get('value_estimate') or 0
+
+                        lead = Lead(
+                            lead_id=lead_id,
+                            email=row.get('email', ''),
+                            phone=row.get('phone', ''),
+                            name=name,
+                            company=company,
+                            industry=industry,
+                            source=source,
+                            status=status,
+                            score=row.get('score', 0) or 0,
+                            estimated_value=Decimal(str(est_value)),
+                            created_at=row['created_at'].isoformat() if row.get('created_at') else None,
+                            updated_at=row['updated_at'].isoformat() if row.get('updated_at') else None,
+                            contacted_at=row['contacted_at'].isoformat() if row.get('contacted_at') else None,
+                            converted_at=row['converted_at'].isoformat() if row.get('converted_at') else None,
+                            tags=json.loads(row['tags']) if row.get('tags') and isinstance(row['tags'], str) else (row.get('tags') or []),
+                            custom_fields=json.loads(row['custom_fields']) if row.get('custom_fields') and isinstance(row['custom_fields'], str) else (row.get('custom_fields') or {}),
+                            automation_history=json.loads(row['automation_history']) if row.get('automation_history') and isinstance(row['automation_history'], str) else (row.get('automation_history') or []),
+                            notes=[]
+                        )
+                        if lead_id:
+                            self.leads[lead.lead_id] = lead
+                    except Exception as e:
+                        logger.warning(f"Failed to load lead {row.get('id', 'unknown')}: {e}")
+                        continue
+
+                logger.info(f"Loaded {len(self.leads)} leads from database")
 
                 # Load transactions and calculate revenue
                 rows = await conn.fetch("SELECT * FROM revenue_transactions WHERE status = 'completed'")
