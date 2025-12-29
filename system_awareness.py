@@ -78,20 +78,17 @@ class SystemAwareness:
         }
 
     async def _get_pool(self):
+        """Get shared async pool - DO NOT reinitialize to prevent MaxClientsInSessionMode"""
         try:
             return get_pool()
-        except Exception:
-            pool_config = PoolConfig(
-                host=config.database.host,
-                port=config.database.port,
-                user=config.database.user,
-                password=config.database.password,
-                database=config.database.database,
-                ssl=config.database.ssl,
-                ssl_verify=config.database.ssl_verify,
-            )
-            await init_pool(pool_config)
-            return get_pool()
+        except RuntimeError as e:
+            # Pool not initialized - log but don't try to reinitialize
+            # (pool should be initialized once at app startup)
+            logger.warning(f"Async pool not available: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Error getting pool: {e}")
+            raise
 
     @staticmethod
     def _row_to_dict(row: Any) -> Optional[Dict[str, Any]]:
