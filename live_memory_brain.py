@@ -53,6 +53,19 @@ try:
 except ImportError:
     ASYNCPG_AVAILABLE = False
 
+# CRITICAL: Use shared connection pools to prevent MaxClientsInSessionMode
+try:
+    from database.sync_pool import get_sync_pool
+    SYNC_POOL_AVAILABLE = True
+except ImportError:
+    SYNC_POOL_AVAILABLE = False
+
+try:
+    from database.async_connection import get_pool as get_async_pool
+    ASYNC_POOL_AVAILABLE = True
+except ImportError:
+    ASYNC_POOL_AVAILABLE = False
+
 # OPTIMIZATION: HNSW-style approximate nearest neighbor indexing
 # Using a simple locality-sensitive hashing approach for O(1) lookups
 try:
@@ -965,33 +978,30 @@ class LiveMemoryBrain:
 
     async def initialize(self):
         """Initialize the brain and start real-time sync"""
-        # Create sync database pool (for compatibility)
-        try:
-            self._db_pool = ThreadedConnectionPool(
-                minconn=1,
-                maxconn=5,
-                **DB_CONFIG
-            )
-            logger.info("Sync database pool created")
-        except Exception as e:
-            logger.error(f"Failed to create sync database pool: {e}")
+        # CRITICAL: Use SHARED pools to prevent MaxClientsInSessionMode
+        # Do NOT create separate pools - use the centralized ones
 
-        # ENHANCEMENT: Create async database pool for non-blocking operations
-        if ASYNCPG_AVAILABLE:
+        # Get shared sync pool
+        if SYNC_POOL_AVAILABLE:
             try:
-                self._async_pool = await asyncpg.create_pool(
-                    host=DB_CONFIG["host"],
-                    database=DB_CONFIG["database"],
-                    user=DB_CONFIG["user"],
-                    password=DB_CONFIG["password"],
-                    port=DB_CONFIG["port"],
-                    min_size=2,
-                    max_size=10,
-                    command_timeout=30
-                )
-                logger.info("ENHANCEMENT: Async database pool created (asyncpg)")
+                self._shared_sync_pool = get_sync_pool()
+                logger.info("Using shared sync database pool")
             except Exception as e:
-                logger.warning(f"Failed to create async pool, using sync fallback: {e}")
+                logger.warning(f"Shared sync pool not available: {e}")
+                self._shared_sync_pool = None
+        else:
+            self._shared_sync_pool = None
+
+        # Get shared async pool
+        if ASYNC_POOL_AVAILABLE:
+            try:
+                self._async_pool = get_async_pool()
+                logger.info("Using shared async database pool")
+            except Exception as e:
+                logger.warning(f"Shared async pool not available: {e}")
+                self._async_pool = None
+        else:
+            self._async_pool = None
 
         # Ensure tables exist
         await self._ensure_tables()
@@ -1081,58 +1091,59 @@ class LiveMemoryBrain:
 
     async def _ensure_tables(self):
         """Ensure all required tables exist"""
-        if not self._db_pool:
-            logger.warning("Database pool not initialized, skipping table creation")
+        if not self._shared_sync_pool:
+            logger.warning("Shared sync pool not available, skipping table creation")
             return
-        conn = self._db_pool.getconn()
         try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS live_brain_memories (
-                    id TEXT PRIMARY KEY,
-                    content JSONB NOT NULL,
-                    memory_type TEXT NOT NULL,
-                    importance FLOAT DEFAULT 0.5,
-                    confidence FLOAT DEFAULT 1.0,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    last_accessed TIMESTAMPTZ DEFAULT NOW(),
-                    access_count INT DEFAULT 0,
-                    embedding vector(1536),
-                    provenance JSONB DEFAULT '{}'::jsonb,
-                    connections TEXT[],
-                    temporal_context JSONB DEFAULT '{}'::jsonb,
-                    predictions JSONB DEFAULT '[]'::jsonb,
-                    contradictions TEXT[],
-                    crystallization_count INT DEFAULT 0
-                );
+            with self._shared_sync_pool.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS live_brain_memories (
+                        id TEXT PRIMARY KEY,
+                        content JSONB NOT NULL,
+                        memory_type TEXT NOT NULL,
+                        importance FLOAT DEFAULT 0.5,
+                        confidence FLOAT DEFAULT 1.0,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        last_accessed TIMESTAMPTZ DEFAULT NOW(),
+                        access_count INT DEFAULT 0,
+                        embedding vector(1536),
+                        provenance JSONB DEFAULT '{}'::jsonb,
+                        connections TEXT[],
+                        temporal_context JSONB DEFAULT '{}'::jsonb,
+                        predictions JSONB DEFAULT '[]'::jsonb,
+                        contradictions TEXT[],
+                        crystallization_count INT DEFAULT 0
+                    );
 
-                CREATE TABLE IF NOT EXISTS live_brain_wisdom (
-                    id TEXT PRIMARY KEY,
-                    wisdom_type TEXT NOT NULL,
-                    content JSONB NOT NULL,
-                    source_memories TEXT[],
-                    occurrence_count INT DEFAULT 1,
-                    confidence FLOAT DEFAULT 0.5,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    last_accessed TIMESTAMPTZ DEFAULT NOW()
-                );
+                    CREATE TABLE IF NOT EXISTS live_brain_wisdom (
+                        id TEXT PRIMARY KEY,
+                        wisdom_type TEXT NOT NULL,
+                        content JSONB NOT NULL,
+                        source_memories TEXT[],
+                        occurrence_count INT DEFAULT 1,
+                        confidence FLOAT DEFAULT 0.5,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        last_accessed TIMESTAMPTZ DEFAULT NOW()
+                    );
 
-                CREATE TABLE IF NOT EXISTS live_brain_events (
-                    id SERIAL PRIMARY KEY,
-                    event_type TEXT NOT NULL,
-                    context JSONB NOT NULL,
-                    caused_by TEXT,
-                    timestamp TIMESTAMPTZ DEFAULT NOW()
-                );
+                    CREATE TABLE IF NOT EXISTS live_brain_events (
+                        id SERIAL PRIMARY KEY,
+                        event_type TEXT NOT NULL,
+                        context JSONB NOT NULL,
+                        caused_by TEXT,
+                        timestamp TIMESTAMPTZ DEFAULT NOW()
+                    );
 
-                CREATE INDEX IF NOT EXISTS idx_live_brain_memories_type ON live_brain_memories(memory_type);
-                CREATE INDEX IF NOT EXISTS idx_live_brain_memories_importance ON live_brain_memories(importance DESC);
-                CREATE INDEX IF NOT EXISTS idx_live_brain_memories_accessed ON live_brain_memories(last_accessed DESC);
-            """)
-            conn.commit()
-            logger.info("LiveMemoryBrain tables ensured")
-        finally:
-            self._db_pool.putconn(conn)
+                    CREATE INDEX IF NOT EXISTS idx_live_brain_memories_type ON live_brain_memories(memory_type);
+                    CREATE INDEX IF NOT EXISTS idx_live_brain_memories_importance ON live_brain_memories(importance DESC);
+                    CREATE INDEX IF NOT EXISTS idx_live_brain_memories_accessed ON live_brain_memories(last_accessed DESC);
+                """)
+                conn.commit()
+                cursor.close()
+                logger.info("LiveMemoryBrain tables ensured")
+        except Exception as e:
+            logger.error(f"Failed to ensure tables: {e}")
 
     def _register_known_systems(self):
         """Register known systems for omniscience"""
@@ -1278,46 +1289,44 @@ class LiveMemoryBrain:
 
     async def _persist_memory(self, memory: MemoryNode):
         """Persist memory to database"""
-        if not self._db_pool:
+        if not self._shared_sync_pool:
             return
 
-        conn = self._db_pool.getconn()
         try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO live_brain_memories (
-                    id, content, memory_type, importance, confidence,
-                    created_at, last_accessed, access_count, provenance,
-                    connections, temporal_context, predictions, contradictions,
-                    crystallization_count
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    content = EXCLUDED.content,
-                    importance = EXCLUDED.importance,
-                    last_accessed = EXCLUDED.last_accessed,
-                    access_count = EXCLUDED.access_count
-            """, (
-                memory.id,
-                json.dumps(memory.content),
-                memory.memory_type.value,
-                memory.importance,
-                memory.confidence,
-                memory.created_at,
-                memory.last_accessed,
-                memory.access_count,
-                json.dumps(memory.provenance),
-                list(memory.connections),
-                json.dumps(memory.temporal_context),
-                json.dumps(memory.predictions),
-                memory.contradictions,
-                memory.crystallization_count
-            ))
-            conn.commit()
+            with self._shared_sync_pool.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO live_brain_memories (
+                        id, content, memory_type, importance, confidence,
+                        created_at, last_accessed, access_count, provenance,
+                        connections, temporal_context, predictions, contradictions,
+                        crystallization_count
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO UPDATE SET
+                        content = EXCLUDED.content,
+                        importance = EXCLUDED.importance,
+                        last_accessed = EXCLUDED.last_accessed,
+                        access_count = EXCLUDED.access_count
+                """, (
+                    memory.id,
+                    json.dumps(memory.content),
+                    memory.memory_type.value,
+                    memory.importance,
+                    memory.confidence,
+                    memory.created_at,
+                    memory.last_accessed,
+                    memory.access_count,
+                    json.dumps(memory.provenance),
+                    list(memory.connections),
+                    json.dumps(memory.temporal_context),
+                    json.dumps(memory.predictions),
+                    memory.contradictions,
+                    memory.crystallization_count
+                ))
+                conn.commit()
+                cursor.close()
         except Exception as e:
             logger.error(f"Failed to persist memory: {e}")
-            conn.rollback()
-        finally:
-            self._db_pool.putconn(conn)
 
     def get_unified_context(self) -> Dict[str, Any]:
         """Get the complete unified context across all systems"""
@@ -1341,11 +1350,19 @@ class LiveMemoryBrain:
     async def shutdown(self):
         """Gracefully shutdown the brain"""
         self._running = False
+
+        # Cancel all background tasks
         if self._sync_task:
             self._sync_task.cancel()
+        if hasattr(self, '_decay_task') and self._decay_task:
+            self._decay_task.cancel()
+        if hasattr(self, '_consolidation_task') and self._consolidation_task:
+            self._consolidation_task.cancel()
 
-        if self._db_pool:
-            self._db_pool.closeall()
+        # CRITICAL: Do NOT close shared pools - they're managed globally
+        # The old self._db_pool was a local pool that needed closing
+        # but now we use shared pools (self._shared_sync_pool, self._async_pool)
+        # that are managed at application level
 
         logger.info("LiveMemoryBrain shutdown complete")
 
