@@ -451,6 +451,10 @@ class UnifiedMemoryManager:
 
     def _migrate_table(self, table_name: str, tenant_id: str, limit: int) -> int:
         """Migrate a single table to unified memory"""
+        # Validate table name to prevent SQL injection
+        import re
+        if not re.match(r'^[a-z_][a-z0-9_]*$', table_name):
+            raise ValueError(f"Invalid table name: {table_name}")
         try:
             with self._get_cursor() as cur:
                 # First check if table exists
