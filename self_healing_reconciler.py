@@ -30,8 +30,34 @@ from decimal import Decimal
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 import httpx
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# SHARED CONNECTION POOL - CRITICAL for preventing MaxClientsInSessionMode
+# ============================================================================
+try:
+    from database.sync_pool import get_sync_pool
+    _POOL_AVAILABLE = True
+except ImportError:
+    _POOL_AVAILABLE = False
+
+
+@contextmanager
+def _get_pooled_connection():
+    """Get connection from shared pool - ALWAYS use this instead of psycopg2.connect()"""
+    if _POOL_AVAILABLE:
+        pool = get_sync_pool()
+        with pool.get_connection() as conn:
+            yield conn
+    else:
+        conn = psycopg2.connect(**DB_CONFIG)
+        try:
+            yield conn
+        finally:
+            if conn and not conn.closed:
+                conn.close()
 
 
 class CustomJSONEncoder(json.JSONEncoder):
@@ -230,10 +256,13 @@ class SelfHealingReconciler:
     def _init_database(self):
         """Initialize self-healing tables"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
+            with _get_pooled_connection() as conn:
+                if not conn:
+                    logger.warning("Self-healing database init skipped - no connection available")
+                    return
+                cur = conn.cursor()
 
-            cur.execute("""
+                cur.execute("""
             CREATE TABLE IF NOT EXISTS healing_incidents (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 component_id TEXT NOT NULL,
@@ -271,12 +300,11 @@ class SelfHealingReconciler:
             CREATE INDEX IF NOT EXISTS idx_healing_incidents_time ON healing_incidents(detected_at DESC);
             CREATE INDEX IF NOT EXISTS idx_healing_metrics_component ON healing_metrics_history(component_id);
             CREATE INDEX IF NOT EXISTS idx_healing_metrics_time ON healing_metrics_history(recorded_at DESC);
-            """)
+                """)
 
-            conn.commit()
-            cur.close()
-            conn.close()
-            logger.info("✅ Self-healing database initialized")
+                conn.commit()
+                cur.close()
+                logger.info("✅ Self-healing database initialized")
         except Exception as e:
             logger.warning(f"Self-healing database init failed: {e}")
 
@@ -559,16 +587,17 @@ class SelfHealingReconciler:
 
         # Store escalation
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            cur.execute("""
-            UPDATE healing_incidents
-            SET human_escalated = TRUE
-            WHERE id = %s::uuid OR component_id = %s
-            """, (incident.incident_id, incident.component_id))
-            conn.commit()
-            cur.close()
-            conn.close()
+            with _get_pooled_connection() as conn:
+                if not conn:
+                    return
+                cur = conn.cursor()
+                cur.execute("""
+                UPDATE healing_incidents
+                SET human_escalated = TRUE
+                WHERE id = %s::uuid OR component_id = %s
+                """, (incident.incident_id, incident.component_id))
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.error(f"Failed to record escalation: {e}")
 
@@ -579,84 +608,93 @@ class SelfHealingReconciler:
             del self.active_incidents[incident.incident_id]
 
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            cur.execute("""
-            UPDATE healing_incidents
-            SET resolved_at = NOW()
-            WHERE component_id = %s AND resolved_at IS NULL
-            """, (incident.component_id,))
-            conn.commit()
-            cur.close()
-            conn.close()
+            with _get_pooled_connection() as conn:
+                if not conn:
+                    return
+                cur = conn.cursor()
+                cur.execute("""
+                UPDATE healing_incidents
+                SET resolved_at = NOW()
+                WHERE component_id = %s AND resolved_at IS NULL
+                """, (incident.component_id,))
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.error(f"Failed to resolve incident: {e}")
 
     def _store_incident(self, incident: Incident):
         """Store incident in database"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            cur.execute("""
-            INSERT INTO healing_incidents
-            (component_id, severity, incident_type, description, metrics)
-            VALUES (%s, %s, %s, %s, %s)
-            """, (
-                incident.component_id,
-                incident.severity,
-                incident.incident_type,
-                incident.description,
-                Json(asdict(incident.metrics))
-            ))
-            conn.commit()
-            cur.close()
-            conn.close()
+            with _get_pooled_connection() as conn:
+                if not conn:
+                    return
+                cur = conn.cursor()
+                # Convert metrics to safe dict
+                safe_metrics = json_safe_serialize(asdict(incident.metrics))
+                cur.execute("""
+                INSERT INTO healing_incidents
+                (component_id, severity, incident_type, description, metrics)
+                VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    incident.component_id,
+                    incident.severity,
+                    incident.incident_type,
+                    incident.description,
+                    Json(safe_metrics)
+                ))
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.error(f"Failed to store incident: {e}")
 
     def _store_metrics(self, metrics: HealthMetrics):
         """Store metrics history"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            cur.execute("""
-            INSERT INTO healing_metrics_history
-            (component_id, component_type, metrics)
-            VALUES (%s, %s, %s)
-            """, (
-                metrics.component_id,
-                metrics.component_type,
-                Json(asdict(metrics))
-            ))
-            conn.commit()
-            cur.close()
-            conn.close()
+            with _get_pooled_connection() as conn:
+                if not conn:
+                    return
+                cur = conn.cursor()
+                safe_metrics = json_safe_serialize(asdict(metrics))
+                cur.execute("""
+                INSERT INTO healing_metrics_history
+                (component_id, component_type, metrics)
+                VALUES (%s, %s, %s)
+                """, (
+                    metrics.component_id,
+                    metrics.component_type,
+                    Json(safe_metrics)
+                ))
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.debug(f"Failed to store metrics: {e}")
 
     def _store_reconciliation(self, result: ReconciliationResult):
         """Store reconciliation result"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            # Use json_safe_serialize to handle datetime and enum types
-            safe_details = json_safe_serialize(result.details)
-            cur.execute("""
-            INSERT INTO healing_reconciliations
-            (cycle_id, components_checked, incidents_detected,
-             remediations_executed, success, details, started_at, ended_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                result.cycle_id,
-                result.components_checked,
-                result.incidents_detected,
-                result.remediations_executed,
-                result.success,
-                Json(safe_details),
-                result.start_time,
-                result.end_time
-            ))
-            conn.commit()
+            with _get_pooled_connection() as conn:
+                if not conn:
+                    return
+                cur = conn.cursor()
+                # Use json_safe_serialize to handle datetime and enum types
+                safe_details = json_safe_serialize(result.details)
+                cur.execute("""
+                INSERT INTO healing_reconciliations
+                (cycle_id, components_checked, incidents_detected,
+                 remediations_executed, success, details, started_at, ended_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    result.cycle_id,
+                    result.components_checked,
+                    result.incidents_detected,
+                    result.remediations_executed,
+                    result.success,
+                    Json(safe_details),
+                    result.start_time,
+                    result.end_time
+                ))
+                conn.commit()
+                cur.close()
 
             # Log to unified brain
             self._log_to_unified_brain('reconciliation_cycle', {
@@ -666,41 +704,39 @@ class SelfHealingReconciler:
                 'remediations_executed': result.remediations_executed,
                 'success': result.success
             })
-
-            cur.close()
-            conn.close()
         except Exception as e:
             logger.error(f"Failed to store reconciliation: {e}")
 
     def _log_to_unified_brain(self, action_type: str, data: Dict[str, Any]):
         """Log reconciliation actions to unified_brain table"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
+            with _get_pooled_connection() as conn:
+                if not conn:
+                    return
+                cur = conn.cursor()
 
-            # Serialize data safely
-            safe_data = json_safe_serialize(data)
+                # Serialize data safely
+                safe_data = json_safe_serialize(data)
 
-            cur.execute("""
-                INSERT INTO unified_brain (
-                    agent_name, action_type, input_data, output_data,
-                    success, metadata, executed_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, NOW())
-            """, (
-                'self_healing_reconciler',
-                action_type,
-                Json(safe_data),
-                Json(safe_data),
-                data.get('success', True),
-                Json({
-                    'timestamp': datetime.now().isoformat(),
-                    'cycle': data.get('cycle_id', 'unknown')
-                })
-            ))
+                cur.execute("""
+                    INSERT INTO unified_brain (
+                        agent_name, action_type, input_data, output_data,
+                        success, metadata, executed_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                """, (
+                    'self_healing_reconciler',
+                    action_type,
+                    Json(safe_data),
+                    Json(safe_data),
+                    data.get('success', True),
+                    Json({
+                        'timestamp': datetime.now().isoformat(),
+                        'cycle': data.get('cycle_id', 'unknown')
+                    })
+                ))
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.debug(f"Failed to log to unified_brain: {e}")
 

@@ -20,9 +20,44 @@ from collections import defaultdict, deque
 import time
 import inspect
 from functools import wraps
+from contextlib import contextmanager
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# SHARED CONNECTION POOL - CRITICAL for preventing MaxClientsInSessionMode
+# ============================================================================
+try:
+    from database.sync_pool import get_sync_pool
+    _POOL_AVAILABLE = True
+except ImportError:
+    _POOL_AVAILABLE = False
+
+# Database config for fallback
+DB_CONFIG = {
+    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
+    "database": os.getenv("DB_NAME", "postgres"),
+    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
+    "password": os.getenv("DB_PASSWORD", "REDACTED_SUPABASE_DB_PASSWORD"),
+    "port": os.getenv("DB_PORT", "6543"),
+}
+
+
+@contextmanager
+def _get_pooled_connection():
+    """Get connection from shared pool - ALWAYS use this instead of psycopg2.connect()"""
+    if _POOL_AVAILABLE:
+        pool = get_sync_pool()
+        with pool.get_connection() as conn:
+            yield conn
+    else:
+        conn = psycopg2.connect(**DB_CONFIG)
+        try:
+            yield conn
+        finally:
+            if conn and not conn.closed:
+                conn.close()
 
 class ErrorSeverity(Enum):
     LOW = "low"           # Can be ignored or logged
@@ -112,162 +147,144 @@ class SelfHealingRecovery:
         self._load_healing_rules()
 
     def _get_connection(self):
-        """Get database connection from SHARED pool to prevent exhaustion"""
-        try:
-            from database.sync_pool import get_sync_pool
-            pool = get_sync_pool()
-            return pool.get_connection().__enter__()
-        except Exception:
-            # Fallback to direct connection with retry
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    return psycopg2.connect(**self.db_config)
-                except psycopg2.OperationalError:
-                    if attempt < max_retries - 1:
-                        time.sleep(2 ** attempt)
-                    else:
-                        raise
+        """Get database connection context from SHARED pool - use with 'with' statement"""
+        return _get_pooled_connection()
 
     def _initialize_database(self):
         """Initialize database tables for error recovery"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_connection() as conn:
+                cur = conn.cursor()
 
-            # Create error log table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_error_logs (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    error_id VARCHAR(255) UNIQUE NOT NULL,
-                    error_type VARCHAR(255) NOT NULL,
-                    error_message TEXT,
-                    stack_trace TEXT,
-                    component VARCHAR(255),
-                    function_name VARCHAR(255),
-                    severity VARCHAR(20),
-                    retry_count INT DEFAULT 0,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    timestamp TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create error log table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_error_logs (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        error_id VARCHAR(255) UNIQUE NOT NULL,
+                        error_type VARCHAR(255) NOT NULL,
+                        error_message TEXT,
+                        stack_trace TEXT,
+                        component VARCHAR(255),
+                        function_name VARCHAR(255),
+                        severity VARCHAR(20),
+                        retry_count INT DEFAULT 0,
+                        metadata JSONB DEFAULT '{}'::jsonb,
+                        timestamp TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Create recovery actions table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_recovery_actions_log (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    error_id VARCHAR(255) REFERENCES ai_error_logs(error_id),
-                    action_id VARCHAR(255) NOT NULL,
-                    strategy VARCHAR(50),
-                    success BOOLEAN,
-                    recovery_time_ms FLOAT,
-                    action_taken TEXT,
-                    result_data JSONB,
-                    executed_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create recovery actions table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_recovery_actions_log (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        error_id VARCHAR(255) REFERENCES ai_error_logs(error_id),
+                        action_id VARCHAR(255) NOT NULL,
+                        strategy VARCHAR(50),
+                        success BOOLEAN,
+                        recovery_time_ms FLOAT,
+                        action_taken TEXT,
+                        result_data JSONB,
+                        executed_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Create component health table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_component_health (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    component_name VARCHAR(255) UNIQUE NOT NULL,
-                    current_state VARCHAR(50),
-                    health_score FLOAT DEFAULT 100.0,
-                    error_count INT DEFAULT 0,
-                    success_count INT DEFAULT 0,
-                    last_error_id VARCHAR(255),
-                    last_recovery_at TIMESTAMPTZ,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create component health table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_component_health (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        component_name VARCHAR(255) UNIQUE NOT NULL,
+                        current_state VARCHAR(50),
+                        health_score FLOAT DEFAULT 100.0,
+                        error_count INT DEFAULT 0,
+                        success_count INT DEFAULT 0,
+                        last_error_id VARCHAR(255),
+                        last_recovery_at TIMESTAMPTZ,
+                        metadata JSONB DEFAULT '{}'::jsonb,
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Create error patterns table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_error_patterns (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    pattern_name VARCHAR(255) UNIQUE NOT NULL,
-                    error_signature TEXT NOT NULL,
-                    occurrence_count INT DEFAULT 1,
-                    recovery_strategy VARCHAR(50),
-                    auto_heal_enabled BOOLEAN DEFAULT false,
-                    healing_script TEXT,
-                    success_rate FLOAT DEFAULT 0.0,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    last_seen TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create error patterns table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_error_patterns (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        pattern_name VARCHAR(255) UNIQUE NOT NULL,
+                        error_signature TEXT NOT NULL,
+                        occurrence_count INT DEFAULT 1,
+                        recovery_strategy VARCHAR(50),
+                        auto_heal_enabled BOOLEAN DEFAULT false,
+                        healing_script TEXT,
+                        success_rate FLOAT DEFAULT 0.0,
+                        metadata JSONB DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        last_seen TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Create healing rules table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_healing_rules (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    rule_name VARCHAR(255) UNIQUE NOT NULL,
-                    condition TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    priority INT DEFAULT 50,
-                    enabled BOOLEAN DEFAULT true,
-                    success_count INT DEFAULT 0,
-                    failure_count INT DEFAULT 0,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create healing rules table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_healing_rules (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        rule_name VARCHAR(255) UNIQUE NOT NULL,
+                        condition TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        priority INT DEFAULT 50,
+                        enabled BOOLEAN DEFAULT true,
+                        success_count INT DEFAULT 0,
+                        failure_count INT DEFAULT 0,
+                        metadata JSONB DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Create proactive health monitoring table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_proactive_health (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    component VARCHAR(255) NOT NULL,
-                    health_score FLOAT DEFAULT 100.0,
-                    trend VARCHAR(20) DEFAULT 'stable',
-                    predicted_failure_time TIMESTAMPTZ,
-                    failure_probability FLOAT DEFAULT 0.0,
-                    metrics JSONB DEFAULT '{}'::jsonb,
-                    warnings JSONB DEFAULT '[]'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create proactive health monitoring table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_proactive_health (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        component VARCHAR(255) NOT NULL,
+                        health_score FLOAT DEFAULT 100.0,
+                        trend VARCHAR(20) DEFAULT 'stable',
+                        predicted_failure_time TIMESTAMPTZ,
+                        failure_probability FLOAT DEFAULT 0.0,
+                        metrics JSONB DEFAULT '{}'::jsonb,
+                        warnings JSONB DEFAULT '[]'::jsonb,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Create rollback history table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_rollback_history (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    component VARCHAR(255) NOT NULL,
-                    rollback_type VARCHAR(50) NOT NULL,
-                    from_state JSONB,
-                    to_state JSONB,
-                    success BOOLEAN DEFAULT false,
-                    error_message TEXT,
-                    executed_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create rollback history table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_rollback_history (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        component VARCHAR(255) NOT NULL,
+                        rollback_type VARCHAR(50) NOT NULL,
+                        from_state JSONB,
+                        to_state JSONB,
+                        success BOOLEAN DEFAULT false,
+                        error_message TEXT,
+                        executed_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Create indexes
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_error_logs_component
-                ON ai_error_logs(component);
+                # Create indexes
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_error_logs_component
+                    ON ai_error_logs(component);
 
-                CREATE INDEX IF NOT EXISTS idx_error_logs_timestamp
-                ON ai_error_logs(timestamp DESC);
+                    CREATE INDEX IF NOT EXISTS idx_error_logs_timestamp
+                    ON ai_error_logs(timestamp DESC);
 
-                CREATE INDEX IF NOT EXISTS idx_error_logs_severity
-                ON ai_error_logs(severity);
-            """)
+                    CREATE INDEX IF NOT EXISTS idx_error_logs_severity
+                    ON ai_error_logs(severity);
+                """)
 
-            conn.commit()
-            logger.info("Self-healing recovery tables initialized successfully")
+                conn.commit()
+                cur.close()
+                logger.info("Self-healing recovery tables initialized successfully")
 
         except Exception as e:
             logger.error(f"Error initializing recovery tables: {e}")
-            if conn:
-                conn.rollback()
-        finally:
-            if conn:
-                conn.close()
 
     def _load_recovery_strategies(self):
         """Load predefined recovery strategies"""
@@ -321,24 +338,22 @@ class SelfHealingRecovery:
     def _load_healing_rules(self):
         """Load self-healing rules from database"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._get_connection() as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            cur.execute("""
-                SELECT * FROM ai_healing_rules
-                WHERE enabled = true
-                ORDER BY priority DESC
-            """)
+                cur.execute("""
+                    SELECT * FROM ai_healing_rules
+                    WHERE enabled = true
+                    ORDER BY priority DESC
+                """)
 
-            rules = cur.fetchall()
-            for rule in rules:
-                self.healing_rules[rule['rule_name']] = rule
+                rules = cur.fetchall()
+                for rule in rules:
+                    self.healing_rules[rule['rule_name']] = rule
+                cur.close()
 
         except Exception as e:
             logger.error(f"Error loading healing rules: {e}")
-        finally:
-            if conn:
-                conn.close()
 
     def self_healing_decorator(self,
                               component: str = "unknown",
@@ -543,50 +558,48 @@ class SelfHealingRecovery:
     def _match_error_pattern(self, error_context: ErrorContext) -> Optional[Dict]:
         """Match error against known patterns"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._get_connection() as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            # Create error signature
-            signature = f"{error_context.error_type}:{error_context.component}"
+                # Create error signature
+                signature = f"{error_context.error_type}:{error_context.component}"
 
-            # Check for matching pattern
-            cur.execute("""
-                SELECT * FROM ai_error_patterns
-                WHERE error_signature = %s
-                LIMIT 1
-            """, (signature,))
-
-            pattern = cur.fetchone()
-
-            if pattern:
-                # Update occurrence count
+                # Check for matching pattern
                 cur.execute("""
-                    UPDATE ai_error_patterns
-                    SET occurrence_count = occurrence_count + 1,
-                        last_seen = NOW()
-                    WHERE id = %s
-                """, (pattern['id'],))
-            else:
-                # Create new pattern
-                cur.execute("""
-                    INSERT INTO ai_error_patterns (
-                        pattern_name, error_signature, recovery_strategy
-                    ) VALUES (%s, %s, %s)
-                """, (
-                    f"pattern_{error_context.error_id}",
-                    signature,
-                    RecoveryStrategy.RETRY.value
-                ))
+                    SELECT * FROM ai_error_patterns
+                    WHERE error_signature = %s
+                    LIMIT 1
+                """, (signature,))
 
-            conn.commit()
-            return pattern
+                pattern = cur.fetchone()
+
+                if pattern:
+                    # Update occurrence count
+                    cur.execute("""
+                        UPDATE ai_error_patterns
+                        SET occurrence_count = occurrence_count + 1,
+                            last_seen = NOW()
+                        WHERE id = %s
+                    """, (pattern['id'],))
+                else:
+                    # Create new pattern
+                    cur.execute("""
+                        INSERT INTO ai_error_patterns (
+                            pattern_name, error_signature, recovery_strategy
+                        ) VALUES (%s, %s, %s)
+                    """, (
+                        f"pattern_{error_context.error_id}",
+                        signature,
+                        RecoveryStrategy.RETRY.value
+                    ))
+
+                conn.commit()
+                cur.close()
+                return pattern
 
         except Exception as e:
             logger.error(f"Error matching pattern: {e}")
             return None
-        finally:
-            if conn:
-                conn.close()
 
     async def _execute_recovery(self, error_context: ErrorContext,
                                recovery_action: RecoveryAction,
@@ -842,134 +855,126 @@ class SelfHealingRecovery:
     def _log_error(self, error_context: ErrorContext):
         """Log error to database"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_connection() as conn:
+                cur = conn.cursor()
 
-            cur.execute("""
-                INSERT INTO ai_error_logs (
-                    error_id, error_type, error_message, stack_trace,
-                    component, function_name, severity, retry_count, metadata
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (error_id) DO UPDATE SET
-                    retry_count = EXCLUDED.retry_count
-            """, (
-                error_context.error_id,
-                error_context.error_type,
-                error_context.error_message,
-                error_context.stack_trace,
-                error_context.component,
-                error_context.function_name,
-                error_context.severity.value,
-                error_context.retry_count,
-                json.dumps(error_context.metadata)
-            ))
+                cur.execute("""
+                    INSERT INTO ai_error_logs (
+                        error_id, error_type, error_message, stack_trace,
+                        component, function_name, severity, retry_count, metadata
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (error_id) DO UPDATE SET
+                        retry_count = EXCLUDED.retry_count
+                """, (
+                    error_context.error_id,
+                    error_context.error_type,
+                    error_context.error_message,
+                    error_context.stack_trace,
+                    error_context.component,
+                    error_context.function_name,
+                    error_context.severity.value,
+                    error_context.retry_count,
+                    json.dumps(error_context.metadata)
+                ))
 
-            conn.commit()
+                conn.commit()
+                cur.close()
 
             # Add to memory history
             self.error_history.append(error_context)
 
         except Exception as e:
             logger.error(f"Failed to log error: {e}")
-        finally:
-            if conn:
-                conn.close()
 
     def _log_recovery_action(self, recovery_result: RecoveryResult):
         """Log recovery action to database"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_connection() as conn:
+                cur = conn.cursor()
 
-            cur.execute("""
-                INSERT INTO ai_recovery_actions_log (
-                    error_id, action_id, strategy, success,
-                    recovery_time_ms, action_taken, result_data
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (
-                recovery_result.error_context.error_id,
-                f"action_{uuid.uuid4().hex[:8]}",
-                recovery_result.action_taken,
-                recovery_result.success,
-                recovery_result.recovery_time_ms,
-                recovery_result.action_taken,
-                json.dumps({"state": recovery_result.new_state.value}) if recovery_result.new_state else None
-            ))
+                cur.execute("""
+                    INSERT INTO ai_recovery_actions_log (
+                        error_id, action_id, strategy, success,
+                        recovery_time_ms, action_taken, result_data
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    recovery_result.error_context.error_id,
+                    f"action_{uuid.uuid4().hex[:8]}",
+                    recovery_result.action_taken,
+                    recovery_result.success,
+                    recovery_result.recovery_time_ms,
+                    recovery_result.action_taken,
+                    json.dumps({"state": recovery_result.new_state.value}) if recovery_result.new_state else None
+                ))
 
-            conn.commit()
+                conn.commit()
+                cur.close()
 
         except Exception as e:
             logger.error(f"Failed to log recovery action: {e}")
-        finally:
-            if conn:
-                conn.close()
 
     def _update_component_health(self, component: str, success: bool,
                                 error_id: Optional[str] = None):
         """Update component health metrics"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_connection() as conn:
+                cur = conn.cursor()
 
-            if success:
-                cur.execute("""
-                    INSERT INTO ai_component_health (
-                        component_name, current_state, success_count
-                    ) VALUES (%s, %s, 1)
-                    ON CONFLICT (component_name) DO UPDATE SET
-                        success_count = ai_component_health.success_count + 1,
-                        health_score = LEAST(100, ai_component_health.health_score + 1),
-                        current_state = %s,
-                        updated_at = NOW()
-                """, (component, ComponentState.HEALTHY.value, ComponentState.HEALTHY.value))
-            else:
-                cur.execute("""
-                    INSERT INTO ai_component_health (
-                        component_name, current_state, error_count, last_error_id
-                    ) VALUES (%s, %s, 1, %s)
-                    ON CONFLICT (component_name) DO UPDATE SET
-                        error_count = ai_component_health.error_count + 1,
-                        health_score = GREATEST(0, ai_component_health.health_score - 5),
-                        current_state = %s,
-                        last_error_id = %s,
-                        updated_at = NOW()
-                """, (component, ComponentState.DEGRADED.value, error_id,
-                     ComponentState.DEGRADED.value, error_id))
+                if success:
+                    cur.execute("""
+                        INSERT INTO ai_component_health (
+                            component_name, current_state, success_count
+                        ) VALUES (%s, %s, 1)
+                        ON CONFLICT (component_name) DO UPDATE SET
+                            success_count = ai_component_health.success_count + 1,
+                            health_score = LEAST(100, ai_component_health.health_score + 1),
+                            current_state = %s,
+                            updated_at = NOW()
+                    """, (component, ComponentState.HEALTHY.value, ComponentState.HEALTHY.value))
+                else:
+                    cur.execute("""
+                        INSERT INTO ai_component_health (
+                            component_name, current_state, error_count, last_error_id
+                        ) VALUES (%s, %s, 1, %s)
+                        ON CONFLICT (component_name) DO UPDATE SET
+                            error_count = ai_component_health.error_count + 1,
+                            health_score = GREATEST(0, ai_component_health.health_score - 5),
+                            current_state = %s,
+                            last_error_id = %s,
+                            updated_at = NOW()
+                    """, (component, ComponentState.DEGRADED.value, error_id,
+                         ComponentState.DEGRADED.value, error_id))
 
-            conn.commit()
+                conn.commit()
+                cur.close()
 
         except Exception as e:
             logger.error(f"Failed to update component health: {e}")
-        finally:
-            if conn:
-                conn.close()
 
     def _update_healing_rule_stats(self, rule_name: str, success: bool):
         """Update healing rule statistics"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_connection() as conn:
+                cur = conn.cursor()
 
-            if success:
-                cur.execute("""
-                    UPDATE ai_healing_rules
-                    SET success_count = success_count + 1
-                    WHERE rule_name = %s
-                """, (rule_name,))
-            else:
-                cur.execute("""
-                    UPDATE ai_healing_rules
-                    SET failure_count = failure_count + 1
-                    WHERE rule_name = %s
-                """, (rule_name,))
+                if success:
+                    cur.execute("""
+                        UPDATE ai_healing_rules
+                        SET success_count = success_count + 1
+                        WHERE rule_name = %s
+                    """, (rule_name,))
+                else:
+                    cur.execute("""
+                        UPDATE ai_healing_rules
+                        SET failure_count = failure_count + 1
+                        WHERE rule_name = %s
+                    """, (rule_name,))
 
-            conn.commit()
+                conn.commit()
+                cur.close()
 
         except Exception as e:
             logger.error(f"Failed to update healing rule stats: {e}")
-        finally:
-            if conn:
-                conn.close()
 
     def _escalate_error(self, error_context: ErrorContext, error: Exception):
         """Escalate error to human operator"""
@@ -989,83 +994,79 @@ class SelfHealingRecovery:
     def get_health_report(self) -> Dict[str, Any]:
         """Get system health report"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._get_connection() as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            # Get component health
-            cur.execute("""
-                SELECT * FROM ai_component_health
-                ORDER BY health_score ASC
-                LIMIT 10
-            """)
-            unhealthy_components = cur.fetchall()
+                # Get component health
+                cur.execute("""
+                    SELECT * FROM ai_component_health
+                    ORDER BY health_score ASC
+                    LIMIT 10
+                """)
+                unhealthy_components = cur.fetchall()
 
-            # Get recent errors
-            cur.execute("""
-                SELECT error_type, COUNT(*) as count, MAX(timestamp) as last_seen
-                FROM ai_error_logs
-                WHERE timestamp > NOW() - INTERVAL '1 hour'
-                GROUP BY error_type
-                ORDER BY count DESC
-                LIMIT 5
-            """)
-            recent_errors = cur.fetchall()
+                # Get recent errors
+                cur.execute("""
+                    SELECT error_type, COUNT(*) as count, MAX(timestamp) as last_seen
+                    FROM ai_error_logs
+                    WHERE timestamp > NOW() - INTERVAL '1 hour'
+                    GROUP BY error_type
+                    ORDER BY count DESC
+                    LIMIT 5
+                """)
+                recent_errors = cur.fetchall()
 
-            # Get recovery success rate
-            cur.execute("""
-                SELECT
-                    COUNT(*) as total_recoveries,
-                    SUM(CASE WHEN success THEN 1 ELSE 0 END) as successful,
-                    AVG(recovery_time_ms) as avg_recovery_time
-                FROM ai_recovery_actions_log
-                WHERE executed_at > NOW() - INTERVAL '1 hour'
-            """)
-            recovery_stats = cur.fetchone()
+                # Get recovery success rate
+                cur.execute("""
+                    SELECT
+                        COUNT(*) as total_recoveries,
+                        SUM(CASE WHEN success THEN 1 ELSE 0 END) as successful,
+                        AVG(recovery_time_ms) as avg_recovery_time
+                    FROM ai_recovery_actions_log
+                    WHERE executed_at > NOW() - INTERVAL '1 hour'
+                """)
+                recovery_stats = cur.fetchone()
+                cur.close()
 
-            return {
-                "unhealthy_components": unhealthy_components,
-                "recent_error_patterns": recent_errors,
-                "recovery_stats": recovery_stats,
-                "circuit_breakers": {
-                    k: v['state'] for k, v in self.circuit_breakers.items()
-                },
-                "active_healing_rules": len(self.healing_rules)
-            }
+                return {
+                    "unhealthy_components": unhealthy_components,
+                    "recent_error_patterns": recent_errors,
+                    "recovery_stats": recovery_stats,
+                    "circuit_breakers": {
+                        k: v['state'] for k, v in self.circuit_breakers.items()
+                    },
+                    "active_healing_rules": len(self.healing_rules)
+                }
 
         except Exception as e:
             logger.error(f"Failed to get health report: {e}")
             return {}
-        finally:
-            if conn:
-                conn.close()
 
     def add_healing_rule(self, rule_name: str, condition: str, action: str,
                         priority: int = 50):
         """Add a new self-healing rule"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_connection() as conn:
+                cur = conn.cursor()
 
-            cur.execute("""
-                INSERT INTO ai_healing_rules (
-                    rule_name, condition, action, priority
-                ) VALUES (%s, %s, %s, %s)
-                ON CONFLICT (rule_name) DO UPDATE SET
-                    condition = EXCLUDED.condition,
-                    action = EXCLUDED.action,
-                    priority = EXCLUDED.priority
-            """, (rule_name, condition, action, priority))
+                cur.execute("""
+                    INSERT INTO ai_healing_rules (
+                        rule_name, condition, action, priority
+                    ) VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (rule_name) DO UPDATE SET
+                        condition = EXCLUDED.condition,
+                        action = EXCLUDED.action,
+                        priority = EXCLUDED.priority
+                """, (rule_name, condition, action, priority))
 
-            conn.commit()
+                conn.commit()
+                cur.close()
 
             # Reload rules
             self._load_healing_rules()
 
         except Exception as e:
             logger.error(f"Failed to add healing rule: {e}")
-        finally:
-            if conn:
-                conn.close()
 
     # ============================================
     # PROACTIVE HEALTH MONITORING
@@ -1294,26 +1295,24 @@ class SelfHealingRecovery:
     async def _get_previous_state(self, component: str) -> Optional[Dict]:
         """Retrieve previous working state"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._get_connection() as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            cur.execute("""
-                SELECT metadata FROM ai_component_health
-                WHERE component_name = %s
-                AND health_score > 80
-                ORDER BY updated_at DESC
-                LIMIT 1 OFFSET 1
-            """, (component,))
+                cur.execute("""
+                    SELECT metadata FROM ai_component_health
+                    WHERE component_name = %s
+                    AND health_score > 80
+                    ORDER BY updated_at DESC
+                    LIMIT 1 OFFSET 1
+                """, (component,))
 
-            result = cur.fetchone()
-            return result['metadata'] if result else None
+                result = cur.fetchone()
+                cur.close()
+                return result['metadata'] if result else None
 
         except Exception as e:
             logger.error(f"Failed to get previous state: {e}")
             return None
-        finally:
-            if conn:
-                conn.close()
 
     async def _get_current_state(self, component: str) -> Dict:
         """Get current component state"""
@@ -1339,22 +1338,20 @@ class SelfHealingRecovery:
                      to_state: Dict, success: bool):
         """Log rollback to database"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_connection() as conn:
+                cur = conn.cursor()
 
-            cur.execute("""
-                INSERT INTO ai_rollback_history (
-                    component, rollback_type, from_state, to_state, success
-                ) VALUES (%s, %s, %s, %s, %s)
-            """, (component, rollback_type, json.dumps(from_state),
-                  json.dumps(to_state), success))
+                cur.execute("""
+                    INSERT INTO ai_rollback_history (
+                        component, rollback_type, from_state, to_state, success
+                    ) VALUES (%s, %s, %s, %s, %s)
+                """, (component, rollback_type, json.dumps(from_state),
+                      json.dumps(to_state), success))
 
-            conn.commit()
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.error(f"Failed to log rollback: {e}")
-        finally:
-            if conn:
-                conn.close()
 
     # ============================================
     # RENDER API SERVICE RESTART
@@ -1420,11 +1417,10 @@ class SelfHealingRecovery:
             max_retries = 5
             for attempt in range(max_retries):
                 try:
-                    conn = self._get_connection()
-                    cur = conn.cursor()
-                    cur.execute("SELECT 1")
-                    cur.close()
-                    conn.close()
+                    with self._get_connection() as conn:
+                        cur = conn.cursor()
+                        cur.execute("SELECT 1")
+                        cur.close()
 
                     logger.info("Database connection recovered successfully")
                     self._log_to_unified_brain('db_connection_recovered', {
@@ -1546,76 +1542,72 @@ class SelfHealingRecovery:
     def _log_to_unified_brain(self, action_type: str, data: Dict[str, Any]):
         """Log all healing actions to unified_brain table"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_connection() as conn:
+                cur = conn.cursor()
 
-            # Use correct unified_brain schema: key, value, category, priority
-            key = f"self_healing_{action_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            value = {
-                'action_type': action_type,
-                'data': data,
-                'success': data.get('success', True),
-                'timestamp': datetime.now().isoformat(),
-                'component': data.get('component', 'unknown')
-            }
+                # Use correct unified_brain schema: key, value, category, priority
+                key = f"self_healing_{action_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                value = {
+                    'action_type': action_type,
+                    'data': data,
+                    'success': data.get('success', True),
+                    'timestamp': datetime.now().isoformat(),
+                    'component': data.get('component', 'unknown')
+                }
 
-            cur.execute("""
-                INSERT INTO unified_brain (
-                    key, value, category, priority, source, metadata
-                ) VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (key) DO UPDATE SET
-                    value = EXCLUDED.value,
-                    last_updated = NOW()
-            """, (
-                key,
-                json.dumps(value),
-                'self_healing',
-                'high' if action_type in ['service_restart', 'db_recovery_failed', 'automatic_rollback'] else 'medium',
-                'self_healing_system',
-                json.dumps({'component': data.get('component', 'unknown')})
-            ))
+                cur.execute("""
+                    INSERT INTO unified_brain (
+                        key, value, category, priority, source, metadata
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (key) DO UPDATE SET
+                        value = EXCLUDED.value,
+                        last_updated = NOW()
+                """, (
+                    key,
+                    json.dumps(value),
+                    'self_healing',
+                    'high' if action_type in ['service_restart', 'db_recovery_failed', 'automatic_rollback'] else 'medium',
+                    'self_healing_system',
+                    json.dumps({'component': data.get('component', 'unknown')})
+                ))
 
-            conn.commit()
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.debug(f"Failed to log to unified_brain: {e}")
-        finally:
-            if conn:
-                conn.close()
 
     def _store_proactive_health(self, component: str, health_score: float,
                                trend: str, failure_prediction: Dict, warnings: List[str]):
         """Store proactive health monitoring data"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_connection() as conn:
+                cur = conn.cursor()
 
-            cur.execute("""
-                INSERT INTO ai_proactive_health (
-                    component, health_score, trend, predicted_failure_time,
-                    failure_probability, warnings, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                ON CONFLICT (component) DO UPDATE SET
-                    health_score = EXCLUDED.health_score,
-                    trend = EXCLUDED.trend,
-                    predicted_failure_time = EXCLUDED.predicted_failure_time,
-                    failure_probability = EXCLUDED.failure_probability,
-                    warnings = EXCLUDED.warnings,
-                    updated_at = NOW()
-            """, (
-                component,
-                health_score,
-                trend,
-                None,  # predicted_failure_time
-                failure_prediction.get('probability', 0.0),
-                json.dumps(warnings)
-            ))
+                cur.execute("""
+                    INSERT INTO ai_proactive_health (
+                        component, health_score, trend, predicted_failure_time,
+                        failure_probability, warnings, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                    ON CONFLICT (component) DO UPDATE SET
+                        health_score = EXCLUDED.health_score,
+                        trend = EXCLUDED.trend,
+                        predicted_failure_time = EXCLUDED.predicted_failure_time,
+                        failure_probability = EXCLUDED.failure_probability,
+                        warnings = EXCLUDED.warnings,
+                        updated_at = NOW()
+                """, (
+                    component,
+                    health_score,
+                    trend,
+                    None,  # predicted_failure_time
+                    failure_prediction.get('probability', 0.0),
+                    json.dumps(warnings)
+                ))
 
-            conn.commit()
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.debug(f"Failed to store proactive health: {e}")
-        finally:
-            if conn:
-                conn.close()
 
 # Singleton instance
 _self_healing = None
