@@ -646,7 +646,7 @@ class RevenueAutomationEngine:
         return min(100, score)
 
     async def _persist_lead(self, lead: Lead):
-        """Persist lead to database"""
+        """Persist lead to database - uses actual revenue_leads table schema"""
         try:
             import asyncpg
             if not self._db_url:
@@ -655,22 +655,32 @@ class RevenueAutomationEngine:
 
             conn = await asyncpg.connect(self._db_url)
             try:
-                # Use NOW() for timestamps instead of passing strings
+                # Match actual revenue_leads table schema:
+                # id (uuid), company_name, contact_name, email, phone, website, stage,
+                # score, value_estimate, source, metadata, created_at, updated_at
+                metadata = {
+                    "lead_id": lead.lead_id,
+                    "industry": lead.industry.value,
+                    "tags": lead.tags,
+                    "custom_fields": lead.custom_fields,
+                    "automation_history": lead.automation_history,
+                    "notes": lead.notes
+                }
                 await conn.execute("""
                     INSERT INTO revenue_leads
-                    (lead_id, email, phone, name, company, industry, source, status,
-                     score, estimated_value, created_at, updated_at, tags, custom_fields,
-                     automation_history, notes)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW(), $11, $12, $13, $14)
-                    ON CONFLICT (lead_id) DO UPDATE SET
-                        status = $8, score = $9, updated_at = NOW(),
-                        automation_history = $13, notes = $14
+                    (company_name, contact_name, email, phone, stage,
+                     score, value_estimate, source, metadata, created_at, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
                 """,
-                    lead.lead_id, lead.email, lead.phone, lead.name, lead.company,
-                    lead.industry.value, lead.source.value, lead.status.value,
-                    lead.score, float(lead.estimated_value),  # Convert Decimal to float
-                    json.dumps(lead.tags), json.dumps(lead.custom_fields),
-                    json.dumps(lead.automation_history), json.dumps(lead.notes)
+                    lead.company or lead.name,  # company_name
+                    lead.name,  # contact_name
+                    lead.email,
+                    lead.phone,
+                    lead.status.value,  # stage
+                    float(lead.score),
+                    float(lead.estimated_value),  # value_estimate
+                    lead.source.value,
+                    json.dumps(metadata)
                 )
                 logger.info(f"Lead {lead.lead_id} persisted to database")
             finally:
