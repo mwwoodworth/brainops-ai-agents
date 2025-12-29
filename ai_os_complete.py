@@ -18,13 +18,26 @@ from enum import Enum
 # Core dependencies
 import psycopg2
 from psycopg2.pool import ThreadedConnectionPool
-import openai
-from langchain.llms import OpenAI
-from langchain.chat_models import ChatOpenAI
-from langchain.agents import initialize_agent, Tool
-from langchain.memory import ConversationBufferMemory
-from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolExecutor
+from openai import OpenAI as OpenAIClient
+try:
+    from langchain_openai import OpenAI, ChatOpenAI
+except ImportError:
+    from langchain.llms import OpenAI
+    from langchain.chat_models import ChatOpenAI
+try:
+    from langchain.agents import initialize_agent, Tool
+    from langchain.memory import ConversationBufferMemory
+except ImportError:
+    initialize_agent = None
+    Tool = None
+    ConversationBufferMemory = None
+try:
+    from langgraph.graph import StateGraph, END
+    from langgraph.prebuilt import ToolExecutor
+except ImportError:
+    StateGraph = None
+    END = None
+    ToolExecutor = None
 import redis
 import websockets
 import httpx

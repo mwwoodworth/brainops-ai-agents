@@ -14,12 +14,24 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import openai
+from openai import OpenAI
 import numpy as np
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Initialize OpenAI client
+_openai_client = None
+
+def get_openai_client():
+    """Get or create OpenAI client singleton"""
+    global _openai_client
+    if _openai_client is None:
+        api_key = os.getenv('OPENAI_API_KEY')
+        if api_key:
+            _openai_client = OpenAI(api_key=api_key)
+    return _openai_client
 
 # Database configuration
 DB_CONFIG = {
@@ -470,17 +482,20 @@ class ConversationMemory:
                 for msg in messages[:10]
             ])
 
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "Summarize this conversation segment and extract key points."},
-                    {"role": "user", "content": content_for_summary}
-                ],
-                temperature=0.3,
-                max_tokens=200
-            )
-
-            summary = response.choices[0].message.content
+            client = get_openai_client()
+            if not client:
+                summary = f"Conversation segment with {len(messages)} messages"
+            else:
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "Summarize this conversation segment and extract key points."},
+                        {"role": "user", "content": content_for_summary}
+                    ],
+                    temperature=0.3,
+                    max_tokens=200
+                )
+                summary = response.choices[0].message.content
 
             # Extract key points
             key_points = self._extract_key_points(messages)
@@ -554,17 +569,20 @@ class ConversationMemory:
                 # Use AI to generate summary
                 content = "\n".join([f"{msg[0]}: {msg[1][:100]}" for msg in messages[:20]])
 
-                response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": "Provide a concise summary of this conversation."},
-                        {"role": "user", "content": content}
-                    ],
-                    temperature=0.3,
-                    max_tokens=150
-                )
-
-                summary = response.choices[0].message.content
+                client = get_openai_client()
+                if client:
+                    response = client.chat.completions.create(
+                        model="gpt-3.5-turbo",
+                        messages=[
+                            {"role": "system", "content": "Provide a concise summary of this conversation."},
+                            {"role": "user", "content": content}
+                        ],
+                        temperature=0.3,
+                        max_tokens=150
+                    )
+                    summary = response.choices[0].message.content
+                else:
+                    summary = f"Conversation with {len(messages)} messages"
 
                 # Update conversation
                 cursor.execute("""
