@@ -14,8 +14,20 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import openai
+from openai import OpenAI
 import numpy as np
+
+# Initialize OpenAI client
+_openai_client = None
+
+def get_openai_client():
+    """Get or create OpenAI client singleton"""
+    global _openai_client
+    if _openai_client is None:
+        api_key = os.getenv('OPENAI_API_KEY')
+        if api_key:
+            _openai_client = OpenAI(api_key=api_key)
+    return _openai_client
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -296,7 +308,11 @@ class NotebookLMPlus:
         """Analyze content to determine knowledge type and importance"""
         try:
             # Use OpenAI to analyze the content
-            response = openai.ChatCompletion.create(
+            client = get_openai_client()
+            if not client:
+                return {"importance": 0.5, "confidence": 0.5, "knowledge_type": "concept"}
+
+            response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "Analyze this content and determine its knowledge type, importance, and confidence. Respond in JSON format."},
@@ -436,7 +452,11 @@ class NotebookLMPlus:
             # Use AI to synthesize
             combined_content = "\n".join([n['content'] for n in nodes])
 
-            response = openai.ChatCompletion.create(
+            client = get_openai_client()
+            if not client:
+                return  # Skip synthesis without AI
+
+            response = client.chat.completions.create(
                 model="gpt-4-turbo-preview",
                 messages=[
                     {"role": "system", "content": "Synthesize insights from these related pieces of knowledge. Identify patterns, connections, and higher-level insights."},
