@@ -112,16 +112,22 @@ class SelfHealingRecovery:
         self._load_healing_rules()
 
     def _get_connection(self):
-        """Get database connection with retry logic"""
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                return psycopg2.connect(**self.db_config)
-            except psycopg2.OperationalError as e:
-                if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)  # Exponential backoff
-                else:
-                    raise
+        """Get database connection from SHARED pool to prevent exhaustion"""
+        try:
+            from database.sync_pool import get_sync_pool
+            pool = get_sync_pool()
+            return pool.get_connection().__enter__()
+        except Exception:
+            # Fallback to direct connection with retry
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    return psycopg2.connect(**self.db_config)
+                except psycopg2.OperationalError:
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)
+                    else:
+                        raise
 
     def _initialize_database(self):
         """Initialize database tables for error recovery"""
