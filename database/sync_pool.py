@@ -99,12 +99,21 @@ class SyncConnectionPool:
             with sync_pool.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT 1")
+
+        NOTE: Fixed "generator didn't stop after throw()" error by removing
+        yield statements from except blocks. Context manager generators must
+        not yield after catching exceptions - they should either re-raise
+        or return normally.
         """
         conn = None
+        acquired = False
+
+        # Acquire connection before entering the context
         try:
             # Try to get from pool
             try:
                 conn = self._pool.get_nowait()
+                acquired = True
             except Empty:
                 # Pool empty, try to create new if under limit
                 with self._pool_lock:
@@ -112,12 +121,15 @@ class SyncConnectionPool:
                         conn = self._create_connection()
                         if conn:
                             self._size += 1
+                            acquired = True
                         else:
                             # Wait for one to become available
                             conn = self._pool.get(timeout=CONNECTION_TIMEOUT)
+                            acquired = True
                     else:
                         # At limit, must wait
                         conn = self._pool.get(timeout=CONNECTION_TIMEOUT)
+                        acquired = True
 
             # Verify connection is still valid
             if conn:
@@ -132,18 +144,24 @@ class SyncConnectionPool:
                     except Exception:
                         pass
                     conn = self._create_connection()
-
-            yield conn
+                    if not conn:
+                        acquired = False
 
         except Empty:
             logger.error("Connection pool exhausted - all connections in use")
-            yield None
+            conn = None
+            acquired = False
         except Exception as e:
-            logger.error(f"Connection pool error: {e}")
-            yield None
+            logger.error(f"Connection pool error during acquisition: {e}")
+            conn = None
+            acquired = False
+
+        # Now yield exactly once - this is the only yield in the generator
+        try:
+            yield conn
         finally:
             # Return connection to pool
-            if conn:
+            if conn and acquired:
                 try:
                     if not conn.closed:
                         self._pool.put_nowait(conn)

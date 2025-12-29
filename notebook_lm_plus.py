@@ -891,6 +891,115 @@ class NotebookLMPlus:
             logger.error(f"Failed to end session: {e}")
             return {"error": str(e)}
 
+    async def record_execution(
+        self,
+        agent: str,
+        task_type: str,
+        input_data: Dict[str, Any],
+        output_data: Dict[str, Any],
+        success: bool
+    ) -> Optional[str]:
+        """
+        Record an agent execution for learning.
+        This is the async interface expected by unified_system_integration.py.
+
+        Args:
+            agent: Name of the agent that executed
+            task_type: Type of task executed
+            input_data: Input data provided to the agent
+            output_data: Output data returned by the agent
+            success: Whether the execution succeeded
+
+        Returns:
+            Knowledge ID if recorded successfully, None otherwise
+        """
+        try:
+            # Build learning content from execution
+            content = f"Agent '{agent}' executed '{task_type}' task"
+            if success:
+                content += " successfully"
+            else:
+                content += " with failure"
+
+            # Add relevant details from output
+            if isinstance(output_data, dict):
+                if output_data.get('result'):
+                    content += f". Result: {str(output_data.get('result'))[:200]}"
+                if output_data.get('error'):
+                    content += f". Error: {str(output_data.get('error'))[:200]}"
+
+            # Build context
+            context = {
+                "agent": agent,
+                "task_type": task_type,
+                "success": success,
+                "execution_timestamp": datetime.now(timezone.utc).isoformat(),
+                "input_summary": str(input_data)[:500] if input_data else None,
+                "output_summary": str(output_data)[:500] if output_data else None
+            }
+
+            # Use the existing learn_from_interaction method
+            knowledge_id = self.learn_from_interaction(
+                content=content,
+                context=context,
+                source=LearningSource.AGENT_EXECUTION
+            )
+
+            logger.info(f"Recorded execution for {agent}/{task_type}: success={success}")
+            return knowledge_id
+
+        except Exception as e:
+            logger.error(f"Failed to record execution: {e}")
+            return None
+
+    async def record_error(
+        self,
+        agent: str,
+        task_type: str,
+        error: str,
+        context: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Record an agent error for learning.
+        This is the async interface expected by unified_system_integration.py.
+
+        Args:
+            agent: Name of the agent that failed
+            task_type: Type of task that failed
+            error: Error message
+            context: Additional context about the error
+
+        Returns:
+            Knowledge ID if recorded successfully, None otherwise
+        """
+        try:
+            # Build error learning content
+            content = f"Agent '{agent}' encountered error during '{task_type}': {error[:300]}"
+
+            # Build learning context
+            error_context = {
+                "agent": agent,
+                "task_type": task_type,
+                "error_type": "execution_failure",
+                "error_message": error,
+                "error_timestamp": datetime.now(timezone.utc).isoformat(),
+                **context
+            }
+
+            # Use the existing learn_from_interaction method
+            knowledge_id = self.learn_from_interaction(
+                content=content,
+                context=error_context,
+                source=LearningSource.ERROR_ANALYSIS
+            )
+
+            logger.warning(f"Recorded error for {agent}/{task_type}: {error[:100]}")
+            return knowledge_id
+
+        except Exception as e:
+            logger.error(f"Failed to record error: {e}")
+            return None
+
 # Global instance - create lazily
 notebook_lm = None
 
