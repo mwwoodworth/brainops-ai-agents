@@ -2363,10 +2363,13 @@ class AUREA:
                 conn.commit()
                 cur.close()
 
-            # Also store in unified brain
+            # Also store in unified brain (convert datetime to string for JSON)
+            metrics_dict = asdict(metrics)
+            if 'timestamp' in metrics_dict and hasattr(metrics_dict['timestamp'], 'isoformat'):
+                metrics_dict['timestamp'] = metrics_dict['timestamp'].isoformat()
             self.brain.store(
                 key=f"cycle_metrics_{metrics.cycle_number}",
-                value=asdict(metrics),
+                value=metrics_dict,
                 category="aurea_metrics",
                 priority="medium",
                 source="aurea_orchestrator"
