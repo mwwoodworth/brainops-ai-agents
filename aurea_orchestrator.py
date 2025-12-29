@@ -18,6 +18,33 @@ import re
 from decimal import Decimal
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
+from contextlib import contextmanager
+
+# ============================================================================
+# SHARED CONNECTION POOL - CRITICAL for preventing MaxClientsInSessionMode
+# ============================================================================
+try:
+    from database.sync_pool import get_sync_pool
+    _POOL_AVAILABLE = True
+except ImportError:
+    _POOL_AVAILABLE = False
+
+
+@contextmanager
+def _get_pooled_connection():
+    """Get connection from shared pool - ALWAYS use this instead of psycopg2.connect()"""
+    if _POOL_AVAILABLE:
+        with get_sync_pool().get_connection() as conn:
+            yield conn
+    else:
+        conn = psycopg2.connect(**DB_CONFIG)
+        try:
+            yield conn
+        finally:
+            if conn and not conn.closed:
+                conn.close()
+
+
 from unified_memory_manager import get_memory_manager, Memory, MemoryType
 from agent_activation_system import (
     get_activation_system, BusinessEventType, AgentActivationSystem
@@ -375,43 +402,47 @@ class AUREA:
         return {}
 
     def _db_connect(self):
-        return psycopg2.connect(**DB_CONFIG)
+        """Get connection from shared pool"""
+        return _get_pooled_connection()
 
     def _db_fetchall(self, query: str, params: Tuple[Any, ...] = ()) -> List[Dict[str, Any]]:
         try:
-            conn = self._db_connect()
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute(query, params)
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
-            return [dict(r) for r in rows]
+            with self._db_connect() as conn:
+                if not conn:
+                    return []
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                cur.execute(query, params)
+                rows = cur.fetchall()
+                cur.close()
+                return [dict(r) for r in rows]
         except Exception as e:
             logger.debug(f"DB fetchall failed: {e}")
             return []
 
     def _db_fetchone(self, query: str, params: Tuple[Any, ...] = ()) -> Optional[Dict[str, Any]]:
         try:
-            conn = self._db_connect()
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute(query, params)
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            return dict(row) if row else None
+            with self._db_connect() as conn:
+                if not conn:
+                    return None
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                cur.execute(query, params)
+                row = cur.fetchone()
+                cur.close()
+                return dict(row) if row else None
         except Exception as e:
             logger.debug(f"DB fetchone failed: {e}")
             return None
 
     def _db_execute(self, query: str, params: Tuple[Any, ...] = ()) -> bool:
         try:
-            conn = self._db_connect()
-            cur = conn.cursor()
-            cur.execute(query, params)
-            conn.commit()
-            cur.close()
-            conn.close()
-            return True
+            with self._db_connect() as conn:
+                if not conn:
+                    return False
+                cur = conn.cursor()
+                cur.execute(query, params)
+                conn.commit()
+                cur.close()
+                return True
         except Exception as e:
             logger.warning(f"DB execute failed: {e}")
             return False
