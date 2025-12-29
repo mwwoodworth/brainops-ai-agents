@@ -810,12 +810,11 @@ class BaseAgent:
         """Execute agent task - override in subclasses"""
         raise NotImplementedError(f"Agent {self.name} must implement execute method")
 
-    @contextmanager
     def get_db_connection(self):
-        """Get database connection from shared pool - USE WITH 'with' STATEMENT."""
-        # Delegate to global pooled connection helper
-        with _get_pooled_connection() as conn:
-            yield conn
+        """Get database connection from shared pool - USE WITH 'with' STATEMENT.
+        Returns a context manager - delegate directly to avoid nested generator issues.
+        """
+        return _get_pooled_connection()
 
     async def log_execution(self, task: Dict, result: Dict):
         """Log execution to database and Unified Brain"""
@@ -825,7 +824,7 @@ class BaseAgent:
         # 1. Log to legacy table (keep for backward compatibility)
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 cursor.execute("""
                     INSERT INTO agent_executions (
@@ -1165,7 +1164,7 @@ class MonitorAgent(BaseAgent):
         # Check database
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
                 cursor.execute("SELECT COUNT(*) as customers FROM customers")
                 customer_count = cursor.fetchone()['customers']
                 cursor.execute("SELECT COUNT(*) as jobs FROM jobs")
@@ -1221,7 +1220,7 @@ class MonitorAgent(BaseAgent):
         """Check database health"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
                 cursor.execute("""
                     SELECT
                         (SELECT COUNT(*) FROM customers) as customers,
@@ -1309,7 +1308,7 @@ class SystemMonitorAgent(BaseAgent):
             # Try to reconnect/optimize
             try:
                 with self.get_db_connection() as conn:
-                    cursor = conn.cursor()
+                    cursor = conn.cursor(cursor_factory=RealDictCursor)
                     cursor.execute("SELECT pg_stat_reset()")
                     cursor.close()
                 return {
@@ -1473,7 +1472,7 @@ class DatabaseOptimizerAgent(BaseAgent):
         """Analyze database performance"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 # Get table sizes
                 cursor.execute("""
@@ -1519,7 +1518,7 @@ class DatabaseOptimizerAgent(BaseAgent):
         """Run optimization commands"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 optimizations = []
 
@@ -1558,7 +1557,7 @@ class DatabaseOptimizerAgent(BaseAgent):
         """Clean up unnecessary data"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 cleanups = []
 
@@ -1687,7 +1686,7 @@ class WorkflowEngineAgent(BaseAgent):
         # Fallback if no job_id provided - Try to find a recent completed job without invoice
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
                 cursor.execute("""
                     SELECT id FROM jobs
                     WHERE status = 'completed'
@@ -1743,7 +1742,7 @@ class CustomerAgent(BaseAgent):
         """Analyze customer data with AI insights"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 # Get customer statistics
                 cursor.execute("""
@@ -1797,7 +1796,7 @@ class CustomerAgent(BaseAgent):
         """Segment customers into categories with AI recommendations"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 # Segment by activity
                 cursor.execute("""
@@ -1910,7 +1909,7 @@ class InvoicingAgent(BaseAgent):
 
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 # Get job details
                 cursor.execute("""
@@ -1973,7 +1972,7 @@ class InvoicingAgent(BaseAgent):
             try:
                 # Fetch invoice details for context (simplified here)
                 with self.get_db_connection() as conn:
-                    cursor = conn.cursor()
+                    cursor = conn.cursor(cursor_factory=RealDictCursor)
                     cursor.execute("""
                         SELECT i.*, c.name as customer_name, c.email
                         FROM invoices i
@@ -2013,7 +2012,7 @@ class InvoicingAgent(BaseAgent):
         """Generate invoice report with AI summary"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 cursor.execute("""
                     SELECT
@@ -2077,7 +2076,7 @@ class CustomerIntelligenceAgent(BaseAgent):
         """Analyze customer churn risk using REAL AI"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 # Identify at-risk customers
                 cursor.execute("""
@@ -2119,7 +2118,7 @@ class CustomerIntelligenceAgent(BaseAgent):
         """Calculate customer lifetime value"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 cursor.execute("""
                     SELECT
@@ -2153,7 +2152,7 @@ class CustomerIntelligenceAgent(BaseAgent):
         """Advanced customer segmentation using Real AI"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 # Fetch sample of customers with their metrics
                 cursor.execute("""
@@ -2226,7 +2225,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
         """Predict future revenue"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 # Get historical revenue data
                 cursor.execute("""
@@ -2295,7 +2294,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
         try:
             # Get some context if available, otherwise ask AI for general market forecast
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
                 cursor.execute("SELECT COUNT(*) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days'")
                 recent_jobs = cursor.fetchone()['count']
                 cursor.close()
@@ -2328,7 +2327,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
         """Analyze seasonal patterns"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 cursor.execute("""
                     SELECT
@@ -2374,7 +2373,7 @@ class ContractGeneratorAgent(BaseAgent):
         try:
             if customer_id:
                 with self.get_db_connection() as conn:
-                    cursor = conn.cursor()
+                    cursor = conn.cursor(cursor_factory=RealDictCursor)
                     if tenant_id:
                         cursor.execute("SELECT * FROM customers WHERE id = %s AND tenant_id = %s", (customer_id, tenant_id))
                     else:
@@ -2389,7 +2388,7 @@ class ContractGeneratorAgent(BaseAgent):
 
                 if customer_email and tenant_id:
                     with self.get_db_connection() as conn:
-                        cursor = conn.cursor()
+                        cursor = conn.cursor(cursor_factory=RealDictCursor)
                         cursor.execute(
                             "SELECT * FROM customers WHERE lower(email) = lower(%s) AND tenant_id = %s ORDER BY created_at DESC LIMIT 1",
                             (customer_email, tenant_id),
@@ -2605,7 +2604,7 @@ class ReportingAgent(BaseAgent):
         """Generate executive report with AI summary"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 # Gather key metrics
                 cursor.execute("""
@@ -2736,7 +2735,7 @@ class SelfBuildingAgent(BaseAgent):
 
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 # Check if agent exists
                 cursor.execute("SELECT id FROM ai_agents WHERE name = %s", (agent_name,))
@@ -2778,7 +2777,7 @@ class SelfBuildingAgent(BaseAgent):
         """Optimize agent performance"""
         try:
             with self.get_db_connection() as conn:
-                cursor = conn.cursor()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
 
                 # Analyze agent performance
                 cursor.execute("""
