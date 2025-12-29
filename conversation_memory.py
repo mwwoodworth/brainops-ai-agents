@@ -42,8 +42,7 @@ DB_CONFIG = {
     "port": int(os.getenv("DB_PORT", 5432))
 }
 
-# OpenAI configuration
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# OpenAI configuration handled by get_openai_client() function above
 
 class MessageRole(Enum):
     """Roles in conversation"""
