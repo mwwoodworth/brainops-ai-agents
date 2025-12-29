@@ -525,6 +525,89 @@ class AgentExecutor:
             except Exception as e:
                 logger.warning(f"Failed to initialize Deployment monitor agent: {e}")
 
+    # Agent name aliases - maps database names to code implementations
+    # This allows scheduled agents to use real implementations instead of AI fallback
+    AGENT_ALIASES = {
+        # Monitor agents -> Monitor or SystemMonitor
+        'HealthMonitor': 'SystemMonitor',
+        'DashboardMonitor': 'Monitor',
+        'PerformanceMonitor': 'Monitor',
+        'ExpenseMonitor': 'Monitor',
+        'QualityAgent': 'Monitor',
+        'SafetyAgent': 'Monitor',
+        'ComplianceAgent': 'Monitor',
+        'APIManagementAgent': 'Monitor',
+
+        # Revenue/Analytics agents -> CustomerIntelligence or PredictiveAnalyzer
+        'RevenueOptimizer': 'CustomerIntelligence',
+        'InsightsAnalyzer': 'PredictiveAnalyzer',
+        'MetricsCalculator': 'PredictiveAnalyzer',
+        'BudgetingAgent': 'CustomerIntelligence',
+
+        # Lead agents -> Outreach or Conversion (if available) or CustomerAgent
+        'LeadGenerationAgent': 'Outreach',
+        'LeadDiscoveryAgent': 'WebSearch',
+        'LeadQualificationAgent': 'Conversion',
+        'LeadScorer': 'PredictiveAnalyzer',
+        'DealClosingAgent': 'Conversion',
+        'NurtureExecutorAgent': 'Outreach',
+        'RevenueProposalAgent': 'ProposalGenerator',
+
+        # Workflow agents - many map to CustomerAgent
+        'CampaignAgent': 'SocialMedia',
+        'EmailMarketingAgent': 'Outreach',
+        'BackupAgent': 'SystemMonitor',
+        'BenefitsAgent': 'CustomerAgent',
+        'DeliveryAgent': 'CustomerAgent',
+        'DispatchAgent': 'CustomerAgent',
+        'InsuranceAgent': 'CustomerAgent',
+        'IntegrationAgent': 'SystemMonitor',
+        'InventoryAgent': 'CustomerAgent',
+        'NotificationAgent': 'CustomerAgent',
+        'OnboardingAgent': 'CustomerSuccess',
+        'PayrollAgent': 'CustomerAgent',
+        'PermitWorkflow': 'CustomerAgent',
+        'ProcurementAgent': 'CustomerAgent',
+        'RecruitingAgent': 'CustomerAgent',
+        'RoutingAgent': 'CustomerAgent',
+        'LogisticsOptimizer': 'CustomerAgent',
+
+        # Estimation/Scheduling
+        'EstimationAgent': 'ProposalGenerator',
+        'Elena': 'ProposalGenerator',
+        'IntelligentScheduler': 'CustomerAgent',
+        'Scheduler': 'CustomerAgent',
+
+        # Invoicing
+        'Invoicer': 'InvoicingAgent',
+
+        # Chat/Interface
+        'ChatInterface': 'CustomerSuccess',
+    }
+
+    def _resolve_agent_name(self, agent_name: str) -> str:
+        """Resolve agent name aliases to actual implementations.
+
+        This allows scheduled agents with database names like 'HealthMonitor'
+        to route to actual implementations like 'SystemMonitor'.
+        """
+        # First check if agent exists directly
+        if agent_name in self.agents:
+            return agent_name
+
+        # Check aliases
+        if agent_name in self.AGENT_ALIASES:
+            resolved = self.AGENT_ALIASES[agent_name]
+            # Verify resolved agent exists
+            if resolved in self.agents:
+                logger.debug(f"Resolved agent alias: {agent_name} -> {resolved}")
+                return resolved
+            # If alias target doesn't exist, fall back to fallback chain
+            logger.warning(f"Agent alias {agent_name} -> {resolved} but {resolved} not loaded")
+
+        # Return original name (will fall back to AI simulation)
+        return agent_name
+
     def _get_workflow_runner(self):
         """Lazily initialize LangGraph workflow runner with review loops."""
         if not LANGGRAPH_AVAILABLE:
@@ -607,11 +690,20 @@ class AgentExecutor:
             # RETRY LOGIC for Agent Execution
             RETRY_ATTEMPTS = 3
             last_exception = None
-            
+
+            # Resolve agent name aliases to actual implementations
+            original_agent_name = agent_name
+            resolved_agent_name = self._resolve_agent_name(agent_name)
+            if resolved_agent_name != agent_name:
+                logger.info(f"Agent alias resolved: {agent_name} -> {resolved_agent_name}")
+
             for attempt in range(RETRY_ATTEMPTS):
                 try:
-                    if agent_name in self.agents:
-                        result = await self.agents[agent_name].execute(task)
+                    if resolved_agent_name in self.agents:
+                        result = await self.agents[resolved_agent_name].execute(task)
+                        # Add metadata about resolution
+                        result["_original_agent"] = original_agent_name
+                        result["_resolved_agent"] = resolved_agent_name
                     else:
                         # Fallback to generic execution
                         result = await self._generic_execute(agent_name, task)
