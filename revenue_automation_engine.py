@@ -29,8 +29,21 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
-# Configuration
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Configuration - Use config module for consistent database access
+try:
+    from config import config
+    # Build DATABASE_URL from config if not directly set
+    _direct_url = os.getenv("DATABASE_URL")
+    if _direct_url:
+        DATABASE_URL = _direct_url
+    elif config.database.host and config.database.user:
+        DATABASE_URL = f"postgresql://{config.database.user}:{config.database.password}@{config.database.host}:{config.database.port}/{config.database.database}"
+    else:
+        DATABASE_URL = None
+except Exception as e:
+    logger.warning(f"Could not load config for database URL: {e}")
+    DATABASE_URL = os.getenv("DATABASE_URL")
+
 STRIPE_API_KEY = os.getenv("STRIPE_API_KEY", "")
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 TWILIO_SID = os.getenv("TWILIO_SID", "")
