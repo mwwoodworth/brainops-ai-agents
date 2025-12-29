@@ -15,7 +15,27 @@ from typing import Dict, List, Optional, Any
 import asyncio
 import uuid
 import json
+import threading
+from psycopg2 import pool as pg_pool
 from revenue_generation_system import get_revenue_system
+
+# Shared connection pool for all AgentScheduler instances
+_connection_pool = None
+_pool_lock = threading.Lock()
+
+def _get_shared_pool(db_config):
+    """Get or create shared connection pool"""
+    global _connection_pool
+    if _connection_pool is None:
+        with _pool_lock:
+            if _connection_pool is None:
+                _connection_pool = pg_pool.ThreadedConnectionPool(
+                    minconn=2,
+                    maxconn=10,
+                    **db_config
+                )
+                logger.info("✅ Created AgentScheduler connection pool (2-10 connections)")
+    return _connection_pool
 
 # Import UnifiedBrain for persistent memory integration
 try:
@@ -58,13 +78,30 @@ class AgentScheduler:
         logger.info(f"🔧 AgentScheduler initialized with DB: {self.db_config['host']}:{self.db_config['port']}")
 
     def get_db_connection(self):
-        """Get database connection"""
+        """Get database connection from pool"""
         try:
-            conn = psycopg2.connect(**self.db_config)
-            return conn
+            pool = _get_shared_pool(self.db_config)
+            return pool.getconn()
         except Exception as e:
-            logger.error(f"Database connection failed: {e}")
-            return None
+            logger.warning(f"Pool connection failed, falling back to direct: {e}")
+            try:
+                return psycopg2.connect(**self.db_config)
+            except Exception as e2:
+                logger.error(f"Database connection failed: {e2}")
+                return None
+
+    def return_db_connection(self, conn):
+        """Return connection to pool"""
+        if conn:
+            try:
+                pool = _get_shared_pool(self.db_config)
+                pool.putconn(conn)
+            except Exception as e:
+                logger.warning(f"Could not return connection to pool: {e}")
+                try:
+                    conn.close()
+                except:
+                    pass
 
     def execute_agent(self, agent_id: str, agent_name: str):
         """Execute a scheduled agent (SYNCHRONOUS for BackgroundScheduler)"""
@@ -203,10 +240,7 @@ class AgentScheduler:
                 except Exception:
                     pass
             if conn:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+                self.return_db_connection(conn)
 
     def _execute_by_type_sync(self, agent: Dict, cur, conn) -> Dict:
         """Execute agent based on its type (SYNCHRONOUS)"""
@@ -783,10 +817,7 @@ class AgentScheduler:
                 except Exception:
                     pass
             if conn:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+                self.return_db_connection(conn)
             logger.info(f"✅ Successfully loaded {len(self.registered_jobs)} jobs into scheduler")
 
     def add_schedule(self, agent_id: str, agent_name: str, frequency_minutes: int, schedule_id: str = None):

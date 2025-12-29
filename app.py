@@ -158,7 +158,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.29.0"  # Production Revenue Pipeline - Stripe, SendGrid, Twilio, TaskQueue, EmailScheduler
+VERSION = "9.30.0"  # Critical fixes: asyncio Event init, connection pooling, scheduler race conditions
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
