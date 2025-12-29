@@ -509,11 +509,11 @@ class AliveCore:
                 elif vitals.thought_rate > 10 and self.state == ConsciousnessState.DREAMING:
                     self.change_state(ConsciousnessState.ALERT, "Activity increased, waking up")
 
-                await asyncio.sleep(5)  # Heartbeat every 5 seconds
+                await asyncio.sleep(15)  # Heartbeat every 15 seconds to reduce connection pressure
 
             except Exception as e:
                 logger.error(f"Heartbeat error: {e}")
-                await asyncio.sleep(5)
+                await asyncio.sleep(30)  # Back off more on errors
 
     async def _awareness_loop(self):
         """Continuous awareness - monitoring everything"""
@@ -562,11 +562,11 @@ class AliveCore:
                     conn.commit()
                     conn.close()
 
-                await asyncio.sleep(2)  # Check every 2 seconds
+                await asyncio.sleep(30)  # Check every 30 seconds to reduce connection pressure
 
             except Exception as e:
                 logger.error(f"Awareness loop error: {e}")
-                await asyncio.sleep(5)
+                await asyncio.sleep(60)  # Back off more on errors
 
     async def _thinking_loop(self):
         """Background thinking - continuous analysis"""
