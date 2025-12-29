@@ -15,27 +15,40 @@ from typing import Dict, List, Optional, Any
 import asyncio
 import uuid
 import json
-import threading
-from psycopg2 import pool as pg_pool
+from contextlib import contextmanager
 from revenue_generation_system import get_revenue_system
 
-# Shared connection pool for all AgentScheduler instances
-_connection_pool = None
-_pool_lock = threading.Lock()
+# CRITICAL: Use shared connection pool to prevent MaxClientsInSessionMode
+try:
+    from database.sync_pool import get_sync_pool
+    _SYNC_POOL_AVAILABLE = True
+except ImportError:
+    _SYNC_POOL_AVAILABLE = False
 
-def _get_shared_pool(db_config):
-    """Get or create shared connection pool"""
-    global _connection_pool
-    if _connection_pool is None:
-        with _pool_lock:
-            if _connection_pool is None:
-                _connection_pool = pg_pool.ThreadedConnectionPool(
-                    minconn=2,
-                    maxconn=10,
-                    **db_config
-                )
-                logger.info("✅ Created AgentScheduler connection pool (2-10 connections)")
-    return _connection_pool
+
+@contextmanager
+def _get_pooled_connection(db_config=None):
+    """Get connection from shared pool - ALWAYS use this."""
+    if _SYNC_POOL_AVAILABLE:
+        pool = get_sync_pool()
+        with pool.get_connection() as conn:
+            yield conn
+    else:
+        # Fallback for environments without shared pool
+        if db_config is None:
+            db_config = {
+                'host': os.getenv('DB_HOST'),
+                'database': os.getenv('DB_NAME', 'postgres'),
+                'user': os.getenv('DB_USER'),
+                'password': os.getenv('DB_PASSWORD'),
+                'port': int(os.getenv('DB_PORT', 5432))
+            }
+        conn = psycopg2.connect(**db_config)
+        try:
+            yield conn
+        finally:
+            if conn and not conn.closed:
+                conn.close()
 
 # Import UnifiedBrain for persistent memory integration
 try:
@@ -77,170 +90,151 @@ class AgentScheduler:
 
         logger.info(f"🔧 AgentScheduler initialized with DB: {self.db_config['host']}:{self.db_config['port']}")
 
+    @contextmanager
     def get_db_connection(self):
-        """Get database connection from pool"""
-        try:
-            pool = _get_shared_pool(self.db_config)
-            return pool.getconn()
-        except Exception as e:
-            logger.warning(f"Pool connection failed, falling back to direct: {e}")
-            try:
-                return psycopg2.connect(**self.db_config)
-            except Exception as e2:
-                logger.error(f"Database connection failed: {e2}")
-                return None
+        """Get database connection from SHARED pool - USE WITH 'with' STATEMENT."""
+        with _get_pooled_connection(self.db_config) as conn:
+            yield conn
 
     def return_db_connection(self, conn):
-        """Return connection to pool"""
-        if conn:
-            try:
-                pool = _get_shared_pool(self.db_config)
-                pool.putconn(conn)
-            except Exception as e:
-                logger.warning(f"Could not return connection to pool: {e}")
-                try:
-                    conn.close()
-                except:
-                    pass
+        """DEPRECATED: No longer needed - connections are auto-returned via context manager."""
+        # This method is kept for backward compatibility but does nothing
+        # Connections are now managed by the context manager
+        pass
 
     def execute_agent(self, agent_id: str, agent_name: str):
         """Execute a scheduled agent (SYNCHRONOUS for BackgroundScheduler)"""
-        conn = None
-        cur = None
         execution_id = str(uuid.uuid4())
-        
+
         try:
             logger.info(f"🚀 Executing scheduled agent: {agent_name} ({agent_id})")
 
-            conn = self.get_db_connection()
-            if not conn:
-                logger.error("❌ Database connection failed, cannot execute agent")
-                return
+            with self.get_db_connection() as conn:
+                if not conn:
+                    logger.error("❌ Database connection failed, cannot execute agent")
+                    return
 
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            # Record execution start
-            cur.execute("""
-                INSERT INTO ai_agent_executions
-                (id, agent_name, status)
-                VALUES (%s, %s, %s)
-            """, (execution_id, agent_name, 'running'))
-            conn.commit()
-            logger.info(f"📝 Execution {execution_id} recorded as 'running'")
-
-            # Get agent configuration
-            cur.execute("SELECT * FROM ai_agents WHERE id = %s", (agent_id,))
-            agent = cur.fetchone()
-
-            if not agent:
-                logger.error(f"❌ Agent {agent_id} not found in database")
-                cur.execute("""
-                    UPDATE ai_agent_executions
-                    SET status = %s, error_message = %s
-                    WHERE id = %s
-                """, ('failed', 'Agent not found', execution_id))
-                conn.commit()
-                return
-
-            # Execute based on agent type (synchronous)
-            start_time = datetime.utcnow()
-            result = self._execute_by_type_sync(agent, cur, conn)
-            execution_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-
-            # Record execution completion
-            cur.execute("""
-                UPDATE ai_agent_executions
-                SET status = %s, output_data = %s, execution_time_ms = %s
-                WHERE id = %s
-            """, ('completed', json.dumps(result), execution_time_ms, execution_id))
-
-            # Update agent statistics
-            cur.execute("""
-                UPDATE ai_agents
-                SET total_executions = total_executions + 1,
-                    last_activation = %s,
-                    last_active = %s
-                WHERE id = %s
-            """, (datetime.utcnow(), datetime.utcnow(), agent_id))
-
-            # Update schedule next execution with row locking to prevent race conditions
-            # First lock the row, then update to prevent concurrent executions from corrupting schedule
-            cur.execute("""
-                SELECT id FROM agent_schedules
-                WHERE agent_id = %s AND enabled = true
-                FOR UPDATE NOWAIT
-            """, (agent_id,))
-
-            cur.execute("""
-                UPDATE agent_schedules
-                SET last_execution = %s,
-                    next_execution = %s,
-                    updated_at = NOW()
-                WHERE agent_id = %s AND enabled = true
-            """, (datetime.utcnow(), datetime.utcnow() + timedelta(minutes=agent.get('frequency_minutes', 60)), agent_id))
-
-            conn.commit()
-            logger.info(f"Agent {agent_name} executed successfully")
-
-            # Store execution result in persistent memory for learning and context
-            if self.brain:
                 try:
-                    self.brain.store(
-                        key=f"agent_execution_{execution_id}",
-                        value={
-                            "agent_id": agent_id,
-                            "agent_name": agent_name,
-                            "execution_id": execution_id,
-                            "status": "completed",
-                            "execution_time_ms": execution_time_ms,
-                            "result_summary": str(result)[:500] if result else None,
-                            "timestamp": datetime.utcnow().isoformat()
-                        },
-                        category="agent_execution",
-                        priority="medium",
-                        source="agent_scheduler",
-                        metadata={"agent_type": agent.get('type', 'unknown')}
-                    )
-                    logger.debug(f"🧠 Stored execution {execution_id} in persistent memory")
-                except Exception as mem_err:
-                    logger.warning(f"Failed to store in memory: {mem_err}")
+                    # Record execution start
+                    cur.execute("""
+                        INSERT INTO ai_agent_executions
+                        (id, agent_name, status)
+                        VALUES (%s, %s, %s)
+                    """, (execution_id, agent_name, 'running'))
+                    conn.commit()
+                    logger.info(f"📝 Execution {execution_id} recorded as 'running'")
 
-        except Exception as e:
-            logger.error(f"Error executing agent {agent_name}: {e}")
-            if conn and cur:
-                try:
-                    conn.rollback() # Rollback any pending transaction
+                    # Get agent configuration
+                    cur.execute("SELECT * FROM ai_agents WHERE id = %s", (agent_id,))
+                    agent = cur.fetchone()
+
+                    if not agent:
+                        logger.error(f"❌ Agent {agent_id} not found in database")
+                        cur.execute("""
+                            UPDATE ai_agent_executions
+                            SET status = %s, error_message = %s
+                            WHERE id = %s
+                        """, ('failed', 'Agent not found', execution_id))
+                        conn.commit()
+                        return
+
+                    # Execute based on agent type (synchronous)
+                    start_time = datetime.utcnow()
+                    result = self._execute_by_type_sync(agent, cur, conn)
+                    execution_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+
+                    # Record execution completion
                     cur.execute("""
                         UPDATE ai_agent_executions
-                        SET status = %s, error_message = %s
+                        SET status = %s, output_data = %s, execution_time_ms = %s
                         WHERE id = %s
-                    """, ('failed', str(e), execution_id))
-                    conn.commit()
+                    """, ('completed', json.dumps(result), execution_time_ms, execution_id))
 
-                    # Store failure in memory for learning from mistakes
+                    # Update agent statistics
+                    cur.execute("""
+                        UPDATE ai_agents
+                        SET total_executions = total_executions + 1,
+                            last_activation = %s,
+                            last_active = %s
+                        WHERE id = %s
+                    """, (datetime.utcnow(), datetime.utcnow(), agent_id))
+
+                    # Update schedule next execution with row locking to prevent race conditions
+                    # First lock the row, then update to prevent concurrent executions from corrupting schedule
+                    cur.execute("""
+                        SELECT id FROM agent_schedules
+                        WHERE agent_id = %s AND enabled = true
+                        FOR UPDATE NOWAIT
+                    """, (agent_id,))
+
+                    cur.execute("""
+                        UPDATE agent_schedules
+                        SET last_execution = %s,
+                            next_execution = %s,
+                            updated_at = NOW()
+                        WHERE agent_id = %s AND enabled = true
+                    """, (datetime.utcnow(), datetime.utcnow() + timedelta(minutes=agent.get('frequency_minutes', 60)), agent_id))
+
+                    conn.commit()
+                    logger.info(f"Agent {agent_name} executed successfully")
+
+                    # Store execution result in persistent memory for learning and context
                     if self.brain:
                         try:
-                            self.brain.store_learning(
-                                agent_id=agent_id,
-                                task_id=execution_id,
-                                mistake=f"Agent {agent_name} failed during execution",
-                                lesson=f"Error type: {type(e).__name__}. Need to handle: {str(e)[:200]}",
-                                root_cause=str(e)[:500],
-                                impact="medium"
+                            self.brain.store(
+                                key=f"agent_execution_{execution_id}",
+                                value={
+                                    "agent_id": agent_id,
+                                    "agent_name": agent_name,
+                                    "execution_id": execution_id,
+                                    "status": "completed",
+                                    "execution_time_ms": execution_time_ms,
+                                    "result_summary": str(result)[:500] if result else None,
+                                    "timestamp": datetime.utcnow().isoformat()
+                                },
+                                category="agent_execution",
+                                priority="medium",
+                                source="agent_scheduler",
+                                metadata={"agent_type": agent.get('type', 'unknown')}
                             )
-                            logger.debug(f"🧠 Stored failure learning for {agent_name}")
-                        except Exception as learn_err:
-                            logger.warning(f"Failed to store learning: {learn_err}")
-                except Exception as log_error:
-                    logger.error(f"Failed to log error: {log_error}")
-        finally:
-            if cur:
-                try:
+                            logger.debug(f"🧠 Stored execution {execution_id} in persistent memory")
+                        except Exception as mem_err:
+                            logger.warning(f"Failed to store in memory: {mem_err}")
+
+                except Exception as e:
+                    logger.error(f"Error executing agent {agent_name}: {e}")
+                    try:
+                        conn.rollback()  # Rollback any pending transaction
+                        cur.execute("""
+                            UPDATE ai_agent_executions
+                            SET status = %s, error_message = %s
+                            WHERE id = %s
+                        """, ('failed', str(e), execution_id))
+                        conn.commit()
+
+                        # Store failure in memory for learning from mistakes
+                        if self.brain:
+                            try:
+                                self.brain.store_learning(
+                                    agent_id=agent_id,
+                                    task_id=execution_id,
+                                    mistake=f"Agent {agent_name} failed during execution",
+                                    lesson=f"Error type: {type(e).__name__}. Need to handle: {str(e)[:200]}",
+                                    root_cause=str(e)[:500],
+                                    impact="medium"
+                                )
+                                logger.debug(f"🧠 Stored failure learning for {agent_name}")
+                            except Exception as learn_err:
+                                logger.warning(f"Failed to store learning: {learn_err}")
+                    except Exception as log_error:
+                        logger.error(f"Failed to log error: {log_error}")
+                finally:
                     cur.close()
-                except Exception:
-                    pass
-            if conn:
-                self.return_db_connection(conn)
+
+        except Exception as outer_e:
+            logger.error(f"Failed to get database connection for agent {agent_name}: {outer_e}")
 
     def _execute_by_type_sync(self, agent: Dict, cur, conn) -> Dict:
         """Execute agent based on its type (SYNCHRONOUS)"""
@@ -777,48 +771,42 @@ class AgentScheduler:
 
     def load_schedules_from_db(self):
         """Load agent schedules from database"""
-        conn = None
-        cur = None
         try:
             logger.info("📋 Loading agent schedules from database...")
-            conn = self.get_db_connection()
-            if not conn:
-                logger.error("❌ Cannot load schedules: DB connection failed")
-                return
 
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self.get_db_connection() as conn:
+                if not conn:
+                    logger.error("❌ Cannot load schedules: DB connection failed")
+                    return
 
-            # Get all enabled schedules
-            cur.execute("""
-                SELECT s.*, a.name as agent_name, a.type as agent_type
-                FROM agent_schedules s
-                JOIN ai_agents a ON a.id = s.agent_id
-                WHERE s.enabled = true
-            """)
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                try:
+                    # Get all enabled schedules
+                    cur.execute("""
+                        SELECT s.*, a.name as agent_name, a.type as agent_type
+                        FROM agent_schedules s
+                        JOIN ai_agents a ON a.id = s.agent_id
+                        WHERE s.enabled = true
+                    """)
 
-            schedules = cur.fetchall()
-            logger.info(f"✅ Found {len(schedules)} enabled agent schedules")
+                    schedules = cur.fetchall()
+                    logger.info(f"✅ Found {len(schedules)} enabled agent schedules")
 
-            for schedule in schedules:
-                logger.info(f"   • {schedule['agent_name']} - Every {schedule['frequency_minutes']} minutes")
-                self.add_schedule(
-                    agent_id=schedule['agent_id'],
-                    agent_name=schedule['agent_name'],
-                    frequency_minutes=schedule['frequency_minutes'] or 60,
-                    schedule_id=schedule['id']
-                )
+                    for schedule in schedules:
+                        logger.info(f"   • {schedule['agent_name']} - Every {schedule['frequency_minutes']} minutes")
+                        self.add_schedule(
+                            agent_id=schedule['agent_id'],
+                            agent_name=schedule['agent_name'],
+                            frequency_minutes=schedule['frequency_minutes'] or 60,
+                            schedule_id=schedule['id']
+                        )
+                finally:
+                    cur.close()
+
+            logger.info(f"✅ Successfully loaded {len(self.registered_jobs)} jobs into scheduler")
 
         except Exception as e:
             logger.error(f"❌ Error loading schedules: {e}", exc_info=True)
-        finally:
-            if cur:
-                try:
-                    cur.close()
-                except Exception:
-                    pass
-            if conn:
-                self.return_db_connection(conn)
-            logger.info(f"✅ Successfully loaded {len(self.registered_jobs)} jobs into scheduler")
 
     def add_schedule(self, agent_id: str, agent_name: str, frequency_minutes: int, schedule_id: str = None):
         """Add an agent to the scheduler"""
@@ -897,35 +885,24 @@ class AgentScheduler:
 # Create execution tracking table if needed
 def create_execution_table(db_config: Dict):
     """Create ai_agent_executions table if it doesn't exist"""
-    conn = None
-    cur = None
     try:
-        conn = psycopg2.connect(**db_config)
-        cur = conn.cursor()
+        with _get_pooled_connection(db_config) as conn:
+            cur = conn.cursor()
+            try:
+                # Table already exists with different schema - just ensure indexes
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_agent_executions_agent ON ai_agent_executions(agent_name);
+                    CREATE INDEX IF NOT EXISTS idx_agent_executions_created ON ai_agent_executions(created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_agent_executions_status ON ai_agent_executions(status);
+                """)
 
-        # Table already exists with different schema - just ensure indexes
-        cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_agent_executions_agent ON ai_agent_executions(agent_name);
-            CREATE INDEX IF NOT EXISTS idx_agent_executions_created ON ai_agent_executions(created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_agent_executions_status ON ai_agent_executions(status);
-        """)
-
-        conn.commit()
-        logger.info("Execution tracking table verified/created")
+                conn.commit()
+                logger.info("Execution tracking table verified/created")
+            finally:
+                cur.close()
 
     except Exception as e:
         logger.error(f"Error creating execution table: {e}")
-    finally:
-        if cur:
-            try:
-                cur.close()
-            except Exception:
-                pass
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
 
 
 # Example usage

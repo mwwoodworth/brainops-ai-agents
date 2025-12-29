@@ -24,7 +24,15 @@ import openai
 import anthropic
 from dataclasses import asdict
 from psycopg2.extras import RealDictCursor
-from psycopg2.pool import ThreadedConnectionPool
+from contextlib import contextmanager
+
+# CRITICAL: Use shared connection pool to prevent MaxClientsInSessionMode
+try:
+    from database.sync_pool import get_sync_pool
+    _SYNC_POOL_AVAILABLE = True
+except ImportError:
+    _SYNC_POOL_AVAILABLE = False
+    from psycopg2.pool import ThreadedConnectionPool  # Fallback only
 
 from ai_self_awareness import SelfAwareAI as SelfAwareness, get_self_aware_ai
 from unified_brain import UnifiedBrain
@@ -53,27 +61,25 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 _REPO_ROOT = Path(__file__).resolve().parent
-_PSYCOPG2_POOL: Optional[ThreadedConnectionPool] = None
-_PSYCOPG2_POOL_LOCK = threading.Lock()
 
+# CRITICAL: Use shared pool instead of creating our own ThreadedConnectionPool
+# This prevents MaxClientsInSessionMode errors in Supabase
 
-def _get_psycopg2_pool() -> ThreadedConnectionPool:
-    global _PSYCOPG2_POOL
-    if _PSYCOPG2_POOL is not None:
-        return _PSYCOPG2_POOL
-
-    with _PSYCOPG2_POOL_LOCK:
-        if _PSYCOPG2_POOL is not None:
-            return _PSYCOPG2_POOL
-
-        max_size = int(os.getenv("BRAINOPS_PSYCOPG2_POOL_MAX", "3"))
-        connect_timeout = int(os.getenv("BRAINOPS_DB_CONNECT_TIMEOUT_SECONDS", "5"))
-        _PSYCOPG2_POOL = ThreadedConnectionPool(
-            1,
-            max_size,
-            **{**DB_CONFIG, "connect_timeout": connect_timeout},
-        )
-        return _PSYCOPG2_POOL
+@contextmanager
+def _get_pooled_connection():
+    """Get connection from shared pool - ALWAYS use this instead of creating pools."""
+    if _SYNC_POOL_AVAILABLE:
+        pool = get_sync_pool()
+        with pool.get_connection() as conn:
+            yield conn
+    else:
+        # Fallback for environments without shared pool
+        conn = psycopg2.connect(**DB_CONFIG)
+        try:
+            yield conn
+        finally:
+            if conn and not conn.closed:
+                conn.close()
 
 
 def _run_psycopg2_operation(
@@ -81,33 +87,32 @@ def _run_psycopg2_operation(
     *,
     statement_timeout_ms: int,
 ) -> T:
-    pool = _get_psycopg2_pool()
-    conn = pool.getconn()
-    cursor = None
-    try:
-        conn.autocommit = False
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute("SET statement_timeout TO %s", (statement_timeout_ms,))
-        result = operation(cursor, conn)
-        conn.commit()
-        return result
-    except Exception:
-        try:
-            conn.rollback()
-        except Exception as rollback_err:
-            logger.debug(f"Rollback cleanup error (non-fatal): {rollback_err}")
-        raise
-    finally:
-        if cursor is not None:
-            try:
-                cursor.close()
-            except Exception as cursor_err:
-                logger.debug(f"Cursor close cleanup error (non-fatal): {cursor_err}")
+    """Run a psycopg2 operation using the SHARED connection pool."""
+    with _get_pooled_connection() as conn:
+        cursor = None
         try:
             conn.autocommit = False
-        except Exception as autocommit_err:
-            logger.debug(f"Autocommit reset error (non-fatal): {autocommit_err}")
-        pool.putconn(conn)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("SET statement_timeout TO %s", (statement_timeout_ms,))
+            result = operation(cursor, conn)
+            conn.commit()
+            return result
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception as rollback_err:
+                logger.debug(f"Rollback cleanup error (non-fatal): {rollback_err}")
+            raise
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception as cursor_err:
+                    logger.debug(f"Cursor close cleanup error (non-fatal): {cursor_err}")
+            try:
+                conn.autocommit = False
+            except Exception as autocommit_err:
+                logger.debug(f"Autocommit reset error (non-fatal): {autocommit_err}")
 
 
 async def run_db(
@@ -411,54 +416,49 @@ class AgentExecutor:
         normalized_confidence: float,
     ):
         """Persist self-awareness assessments for auditability"""
-        conn = None
         try:
-            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
-            cur = conn.cursor()
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS agent_action_audits (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    agent_name TEXT NOT NULL,
-                    action TEXT,
-                    task JSONB,
-                    confidence_score DOUBLE PRECISION,
-                    confidence_level TEXT,
-                    requires_human BOOLEAN,
-                    assessment JSONB,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS agent_action_audits (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        agent_name TEXT NOT NULL,
+                        action TEXT,
+                        task JSONB,
+                        confidence_score DOUBLE PRECISION,
+                        confidence_level TEXT,
+                        requires_human BOOLEAN,
+                        assessment JSONB,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            cur.execute("""
-                INSERT INTO agent_action_audits (
+                cur.execute("""
+                    INSERT INTO agent_action_audits (
+                        agent_name,
+                        action,
+                        task,
+                        confidence_score,
+                        confidence_level,
+                        requires_human,
+                        assessment,
+                        created_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, NOW())
+                """, (
                     agent_name,
-                    action,
-                    task,
-                    confidence_score,
-                    confidence_level,
-                    requires_human,
-                    assessment,
-                    created_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, NOW())
-            """, (
-                agent_name,
-                task.get("action"),
-                json.dumps(task, default=str),
-                normalized_confidence,
-                getattr(getattr(assessment, "confidence_level", None), "value", None),
-                getattr(assessment, "requires_human_review", False),
-                json.dumps(asdict(assessment), default=str) if assessment else None
-            ))
+                    task.get("action"),
+                    json.dumps(task, default=str),
+                    normalized_confidence,
+                    getattr(getattr(assessment, "confidence_level", None), "value", None),
+                    getattr(assessment, "requires_human_review", False),
+                    json.dumps(asdict(assessment), default=str) if assessment else None
+                ))
 
-            conn.commit()
+                conn.commit()
+                cur.close()
         except Exception as e:
-            if conn:
-                conn.rollback()
             logger.warning(f"Failed to store self-awareness audit: {e}")
-        finally:
-            if conn:
-                conn.close()
 
     def _load_agent_implementations(self):
         """Load all agent implementations"""
@@ -807,9 +807,12 @@ class BaseAgent:
         """Execute agent task - override in subclasses"""
         raise NotImplementedError(f"Agent {self.name} must implement execute method")
 
+    @contextmanager
     def get_db_connection(self):
-        """Get database connection"""
-        return psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+        """Get database connection from shared pool - USE WITH 'with' STATEMENT."""
+        # Delegate to global pooled connection helper
+        with _get_pooled_connection() as conn:
+            yield conn
 
     async def log_execution(self, task: Dict, result: Dict):
         """Log execution to database and Unified Brain"""
@@ -818,24 +821,23 @@ class BaseAgent:
 
         # 1. Log to legacy table (keep for backward compatibility)
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                INSERT INTO agent_executions (
-                    id, task_execution_id, agent_type, prompt,
-                    response, status, created_at, completed_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
-            """, (
-                exec_id, exec_id, self.type,
-                json.dumps(task), json.dumps(result),
-                result.get('status', 'completed')
-            ))
+                cursor.execute("""
+                    INSERT INTO agent_executions (
+                        id, task_execution_id, agent_type, prompt,
+                        response, status, created_at, completed_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                """, (
+                    exec_id, exec_id, self.type,
+                    json.dumps(task), json.dumps(result),
+                    result.get('status', 'completed')
+                ))
 
-            conn.commit()
-            cursor.close()
-            conn.close()
+                conn.commit()
+                cursor.close()
         except Exception as e:
             self.logger.error(f"Legacy logging failed: {e}")
 

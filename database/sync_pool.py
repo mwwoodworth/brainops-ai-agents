@@ -23,9 +23,10 @@ DB_CONFIG = {
     "port": 5432
 }
 
-# Pool settings - CRITICAL: Keep these low to prevent exhaustion
-POOL_MIN_SIZE = 2
-POOL_MAX_SIZE = 5
+# Pool settings - CRITICAL: Keep these low to prevent MaxClientsInSessionMode
+# Supabase session mode has limited connections - sync+async pools share the limit
+POOL_MIN_SIZE = 1
+POOL_MAX_SIZE = 3
 CONNECTION_TIMEOUT = 30
 IDLE_TIMEOUT = 60
 
