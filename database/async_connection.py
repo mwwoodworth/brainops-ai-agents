@@ -26,8 +26,8 @@ class PoolConfig:
     user: str
     password: str
     database: str
-    min_size: int = 1  # Reduced to prevent pool exhaustion
-    max_size: int = 3  # Supabase free tier has ~10-20 max connections total
+    min_size: int = 2  # Keep minimum connections ready
+    max_size: int = 8  # Supabase pooler allows more connections - use shared pool only
     command_timeout: int = 30
     connect_timeout: float = 30.0  # Increased to prevent timeouts on slow networks
     max_inactive_connection_lifetime: float = 60.0  # Recycle idle connections after 60s
