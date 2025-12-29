@@ -167,7 +167,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.32.0"  # AI UI Testing System, MRG Stripe auth fix, comprehensive operational fixes
+VERSION = "9.33.0"  # Enhanced UI Testing with DB persistence, scheduling, comprehensive UX fixes
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
