@@ -1559,6 +1559,21 @@ def create_sop_router():
 
 
 # =============================================================================
+# SINGLETON INSTANCE
+# =============================================================================
+
+_sop_generator_instance: Optional[AutomatedSOPGenerator] = None
+
+
+def get_sop_generator() -> AutomatedSOPGenerator:
+    """Get the singleton AutomatedSOPGenerator instance."""
+    global _sop_generator_instance
+    if _sop_generator_instance is None:
+        _sop_generator_instance = AutomatedSOPGenerator()
+    return _sop_generator_instance
+
+
+# =============================================================================
 # CLI INTERFACE
 # =============================================================================
 
@@ -1568,7 +1583,7 @@ async def main():
     print("AUTOMATED SOP GENERATOR DEMO")
     print("=" * 70)
 
-    manager = AutomatedSOPGenerator()
+    manager = get_sop_generator()
 
     # Generate SOPs
     print("\n1. Generating Technical SOP...")

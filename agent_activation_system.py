@@ -560,10 +560,11 @@ class AgentActivationSystem:
             })
             cur.execute("""
                 INSERT INTO agent_activation_log
-                (agent_id, tenant_id, action, timestamp, details)
-                VALUES (%s, %s, %s, NOW(), %s)
+                (agent_id, agent_name, tenant_id, event_type, event_data, created_at)
+                VALUES (%s, %s, %s, %s, %s, NOW())
             """, (
-                None,  # No specific agent - event-level log
+                'system',  # System-level agent ID for business events
+                'BusinessEventLogger',  # Agent name
                 self.tenant_id,
                 f"business_event:{event_type.value}",
                 json.dumps(safe_data)
