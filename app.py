@@ -195,7 +195,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.41.0"  # Fix: AIDecisionTree, NotebookLMPlus methods + sync_pool generator + graph_context params
+VERSION = "9.42.0"  # Fix: Connection pool usage in agent_activation_system + revenue system import
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)

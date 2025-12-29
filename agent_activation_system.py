@@ -13,8 +13,17 @@ from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 from enum import Enum
 from decimal import Decimal
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
+
+# Try to use sync pool, fall back to direct connections
+try:
+    from database.sync_pool import get_sync_pool
+    _SYNC_POOL_AVAILABLE = True
+except ImportError:
+    _SYNC_POOL_AVAILABLE = False
+    logger.warning("sync_pool not available, using direct connections")
 
 
 def json_safe_serialize(obj: Any) -> Any:
@@ -107,12 +116,23 @@ class AgentActivationSystem:
         self.tenant_id = tenant_id
 
     def _get_db_connection(self):
-        """Get database connection"""
-        try:
-            return psycopg2.connect(**DB_CONFIG)
-        except Exception as e:
-            logger.error(f"Database connection failed: {e}")
-            return None
+        """Get database connection from pool or direct"""
+        if _SYNC_POOL_AVAILABLE:
+            return get_sync_pool().get_connection()
+        else:
+            @contextmanager
+            def _fallback():
+                conn = None
+                try:
+                    conn = psycopg2.connect(**DB_CONFIG)
+                    yield conn
+                except Exception as e:
+                    logger.error(f"Database connection failed: {e}")
+                    yield None
+                finally:
+                    if conn and not conn.closed:
+                        conn.close()
+            return _fallback()
 
     async def activate_agent(self, agent_id: str) -> Dict[str, Any]:
         """Activate an agent with real database update"""
@@ -122,51 +142,48 @@ class AgentActivationSystem:
             "timestamp": datetime.utcnow().isoformat()
         }
 
-        conn = self._get_db_connection()
-        if not conn:
-            result["success"] = False
-            result["error"] = "Database connection failed"
-            return result
-
         try:
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._get_db_connection() as conn:
+                if not conn:
+                    result["success"] = False
+                    result["error"] = "Database connection failed"
+                    return result
 
-            # Update agent status to active
-            cur.execute("""
-                UPDATE ai_agents
-                SET status = 'active',
-                    updated_at = NOW(),
-                    last_active = NOW()
-                WHERE id = %s
-                RETURNING id, name, status, type
-            """, (agent_id,))
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            updated = cur.fetchone()
-
-            if updated:
-                result["success"] = True
-                result["agent"] = dict(updated)
-                logger.info(f"Activated agent {agent_id} for tenant {self.tenant_id}")
-
-                # Log activation event
+                # Update agent status to active
                 cur.execute("""
-                    INSERT INTO agent_activation_log (agent_id, tenant_id, action, created_at)
-                    VALUES (%s, %s, 'activate', NOW())
-                """, (agent_id, self.tenant_id))
-            else:
-                result["success"] = False
-                result["error"] = "Agent not found"
+                    UPDATE ai_agents
+                    SET status = 'active',
+                        updated_at = NOW(),
+                        last_active = NOW()
+                    WHERE id = %s
+                    RETURNING id, name, status, type
+                """, (agent_id,))
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                updated = cur.fetchone()
+
+                if updated:
+                    result["success"] = True
+                    result["agent"] = dict(updated)
+                    logger.info(f"Activated agent {agent_id} for tenant {self.tenant_id}")
+
+                    # Log activation event
+                    cur.execute("""
+                        INSERT INTO agent_activation_log (agent_id, tenant_id, action, created_at)
+                        VALUES (%s, %s, 'activate', NOW())
+                    """, (agent_id, self.tenant_id))
+                else:
+                    result["success"] = False
+                    result["error"] = "Agent not found"
+
+                conn.commit()
+                cur.close()
 
         except Exception as e:
             logger.error(f"Failed to activate agent {agent_id}: {e}")
             result["success"] = False
             result["error"] = str(e)
-            if conn:
-                conn.close()
 
         return result
 
@@ -178,50 +195,47 @@ class AgentActivationSystem:
             "timestamp": datetime.utcnow().isoformat()
         }
 
-        conn = self._get_db_connection()
-        if not conn:
-            result["success"] = False
-            result["error"] = "Database connection failed"
-            return result
-
         try:
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._get_db_connection() as conn:
+                if not conn:
+                    result["success"] = False
+                    result["error"] = "Database connection failed"
+                    return result
 
-            # Update agent status to inactive
-            cur.execute("""
-                UPDATE ai_agents
-                SET status = 'inactive',
-                    updated_at = NOW()
-                WHERE id = %s
-                RETURNING id, name, status, type
-            """, (agent_id,))
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            updated = cur.fetchone()
-
-            if updated:
-                result["success"] = True
-                result["agent"] = dict(updated)
-                logger.info(f"Deactivated agent {agent_id} for tenant {self.tenant_id}")
-
-                # Log deactivation event
+                # Update agent status to inactive
                 cur.execute("""
-                    INSERT INTO agent_activation_log (agent_id, tenant_id, action, created_at)
-                    VALUES (%s, %s, 'deactivate', NOW())
-                """, (agent_id, self.tenant_id))
-            else:
-                result["success"] = False
-                result["error"] = "Agent not found"
+                    UPDATE ai_agents
+                    SET status = 'inactive',
+                        updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING id, name, status, type
+                """, (agent_id,))
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                updated = cur.fetchone()
+
+                if updated:
+                    result["success"] = True
+                    result["agent"] = dict(updated)
+                    logger.info(f"Deactivated agent {agent_id} for tenant {self.tenant_id}")
+
+                    # Log deactivation event
+                    cur.execute("""
+                        INSERT INTO agent_activation_log (agent_id, tenant_id, action, created_at)
+                        VALUES (%s, %s, 'deactivate', NOW())
+                    """, (agent_id, self.tenant_id))
+                else:
+                    result["success"] = False
+                    result["error"] = "Agent not found"
+
+                conn.commit()
+                cur.close()
 
         except Exception as e:
             logger.error(f"Failed to deactivate agent {agent_id}: {e}")
             result["success"] = False
             result["error"] = str(e)
-            if conn:
-                conn.close()
 
         return result
 
@@ -232,45 +246,42 @@ class AgentActivationSystem:
             "timestamp": datetime.utcnow().isoformat()
         }
 
-        conn = self._get_db_connection()
-        if not conn:
-            result["status"] = "unknown"
-            result["error"] = "Database connection failed"
-            return result
-
         try:
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._get_db_connection() as conn:
+                if not conn:
+                    result["status"] = "unknown"
+                    result["error"] = "Database connection failed"
+                    return result
 
-            cur.execute("""
-                SELECT
-                    id, name, type, status,
-                    last_active, total_executions,
-                    created_at, updated_at
-                FROM ai_agents
-                WHERE id = %s
-            """, (agent_id,))
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            agent = cur.fetchone()
+                cur.execute("""
+                    SELECT
+                        id, name, type, status,
+                        last_active, total_executions,
+                        created_at, updated_at
+                    FROM ai_agents
+                    WHERE id = %s
+                """, (agent_id,))
 
-            if agent:
-                result["status"] = agent['status']
-                result["agent"] = {
-                    k: str(v) if isinstance(v, datetime) else v
-                    for k, v in dict(agent).items()
-                }
-            else:
-                result["status"] = "not_found"
-                result["error"] = "Agent not found"
+                agent = cur.fetchone()
 
-            cur.close()
-            conn.close()
+                if agent:
+                    result["status"] = agent['status']
+                    result["agent"] = {
+                        k: str(v) if isinstance(v, datetime) else v
+                        for k, v in dict(agent).items()
+                    }
+                else:
+                    result["status"] = "not_found"
+                    result["error"] = "Agent not found"
+
+                cur.close()
 
         except Exception as e:
             logger.error(f"Failed to get agent status {agent_id}: {e}")
             result["status"] = "error"
             result["error"] = str(e)
-            if conn:
-                conn.close()
 
         return result
 
@@ -282,49 +293,46 @@ class AgentActivationSystem:
             "summary": {}
         }
 
-        conn = self._get_db_connection()
-        if not conn:
-            result["error"] = "Database connection failed"
-            return result
-
         try:
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._get_db_connection() as conn:
+                if not conn:
+                    result["error"] = "Database connection failed"
+                    return result
 
-            # Get all agents
-            cur.execute("""
-                SELECT
-                    id, name, type, status,
-                    last_active, total_executions
-                FROM ai_agents
-                ORDER BY status, name
-            """)
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            agents = cur.fetchall()
-            result["agents"] = [
-                {k: str(v) if isinstance(v, datetime) else v for k, v in dict(a).items()}
-                for a in agents
-            ] if agents else []
+                # Get all agents
+                cur.execute("""
+                    SELECT
+                        id, name, type, status,
+                        last_active, total_executions
+                    FROM ai_agents
+                    ORDER BY status, name
+                """)
 
-            # Summary
-            cur.execute("""
-                SELECT
-                    status,
-                    COUNT(*) as count
-                FROM ai_agents
-                GROUP BY status
-            """)
-            summary = cur.fetchall()
-            result["summary"] = {row['status']: row['count'] for row in summary} if summary else {}
-            result["total"] = len(agents) if agents else 0
+                agents = cur.fetchall()
+                result["agents"] = [
+                    {k: str(v) if isinstance(v, datetime) else v for k, v in dict(a).items()}
+                    for a in agents
+                ] if agents else []
 
-            cur.close()
-            conn.close()
+                # Summary
+                cur.execute("""
+                    SELECT
+                        status,
+                        COUNT(*) as count
+                    FROM ai_agents
+                    GROUP BY status
+                """)
+                summary = cur.fetchall()
+                result["summary"] = {row['status']: row['count'] for row in summary} if summary else {}
+                result["total"] = len(agents) if agents else 0
+
+                cur.close()
 
         except Exception as e:
             logger.error(f"Failed to get all agents status: {e}")
             result["error"] = str(e)
-            if conn:
-                conn.close()
 
         return result
 
@@ -360,60 +368,57 @@ class AgentActivationSystem:
 
         target_types = event_agent_mapping.get(event_type, [])
 
-        conn = self._get_db_connection()
-        if not conn:
-            result["error"] = "Database connection failed"
-            return result
-
         try:
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._get_db_connection() as conn:
+                if not conn:
+                    result["error"] = "Database connection failed"
+                    return result
 
-            # Find active agents matching event type
-            cur.execute("""
-                SELECT id, name, type
-                FROM ai_agents
-                WHERE status = 'active'
-                AND type = ANY(%s)
-            """, (target_types,))
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            agents = cur.fetchall()
-
-            for agent in agents:
-                # Queue task for each matching agent
+                # Find active agents matching event type
                 cur.execute("""
-                    INSERT INTO ai_autonomous_tasks
-                    (task_type, priority, status, trigger_type, trigger_condition, agent_id, created_at)
-                    VALUES (%s, %s, 'pending', %s, %s, %s, NOW())
-                    RETURNING id
-                """, (
-                    f"{event_type.value}_handler",
-                    'high' if event_type in [BusinessEventType.SYSTEM_ALERT, BusinessEventType.SUPPORT_REQUEST] else 'medium',
-                    event_type.value,
-                    json.dumps(json_safe_serialize(event_data)),
-                    agent['id']
-                ))
-                task = cur.fetchone()
+                    SELECT id, name, type
+                    FROM ai_agents
+                    WHERE status = 'active'
+                    AND type = ANY(%s)
+                """, (target_types,))
 
-                result["triggered_agents"].append({
-                    "agent_id": agent['id'],
-                    "agent_name": agent['name'],
-                    "task_id": str(task['id']) if task else None
-                })
+                agents = cur.fetchall()
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                for agent in agents:
+                    # Queue task for each matching agent
+                    cur.execute("""
+                        INSERT INTO ai_autonomous_tasks
+                        (task_type, priority, status, trigger_type, trigger_condition, agent_id, created_at)
+                        VALUES (%s, %s, 'pending', %s, %s, %s, NOW())
+                        RETURNING id
+                    """, (
+                        f"{event_type.value}_handler",
+                        'high' if event_type in [BusinessEventType.SYSTEM_ALERT, BusinessEventType.SUPPORT_REQUEST] else 'medium',
+                        event_type.value,
+                        json.dumps(json_safe_serialize(event_data)),
+                        agent['id']
+                    ))
+                    task = cur.fetchone()
 
-            result["success"] = True
-            result["agents_triggered"] = len(result["triggered_agents"])
-            logger.info(f"Triggered {len(result['triggered_agents'])} agents for event {event_type.value}")
+                    result["triggered_agents"].append({
+                        "agent_id": agent['id'],
+                        "agent_name": agent['name'],
+                        "task_id": str(task['id']) if task else None
+                    })
+
+                conn.commit()
+                cur.close()
+
+                result["success"] = True
+                result["agents_triggered"] = len(result["triggered_agents"])
+                logger.info(f"Triggered {len(result['triggered_agents'])} agents for event {event_type.value}")
 
         except Exception as e:
             logger.error(f"Failed to trigger agents for event {event_type.value}: {e}")
             result["success"] = False
             result["error"] = str(e)
-            if conn:
-                conn.close()
 
         return result
 
@@ -427,43 +432,40 @@ class AgentActivationSystem:
             "tenant_id": self.tenant_id
         }
 
-        conn = self._get_db_connection()
-        if not conn:
-            return stats
-
         try:
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._get_db_connection() as conn:
+                if not conn:
+                    return stats
 
-            # Get total and active agent counts
-            cur.execute("""
-                SELECT
-                    COUNT(*) as total,
-                    COUNT(CASE WHEN status = 'active' THEN 1 END) as active,
-                    COUNT(CASE WHEN status = 'inactive' THEN 1 END) as inactive
-                FROM ai_agents
-            """)
-            counts = cur.fetchone()
-            if counts:
-                stats["total_agents"] = counts["total"] or 0
-                stats["active_agents"] = counts["active"] or 0
-                stats["inactive_agents"] = counts["inactive"] or 0
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            # Get recent activations (last 24h)
-            cur.execute("""
-                SELECT COUNT(*) as recent
-                FROM agent_activation_log
-                WHERE created_at > NOW() - INTERVAL '24 hours'
-            """)
-            recent = cur.fetchone()
-            if recent:
-                stats["recent_activations"] = recent["recent"] or 0
+                # Get total and active agent counts
+                cur.execute("""
+                    SELECT
+                        COUNT(*) as total,
+                        COUNT(CASE WHEN status = 'active' THEN 1 END) as active,
+                        COUNT(CASE WHEN status = 'inactive' THEN 1 END) as inactive
+                    FROM ai_agents
+                """)
+                counts = cur.fetchone()
+                if counts:
+                    stats["total_agents"] = counts["total"] or 0
+                    stats["active_agents"] = counts["active"] or 0
+                    stats["inactive_agents"] = counts["inactive"] or 0
 
-            cur.close()
-            conn.close()
+                # Get recent activations (last 24h)
+                cur.execute("""
+                    SELECT COUNT(*) as recent
+                    FROM agent_activation_log
+                    WHERE created_at > NOW() - INTERVAL '24 hours'
+                """)
+                recent = cur.fetchone()
+                if recent:
+                    stats["recent_activations"] = recent["recent"] or 0
+
+                cur.close()
         except Exception as e:
             logger.error(f"Failed to get agent stats: {e}")
-            if conn:
-                conn.close()
 
         return stats
 
@@ -547,32 +549,29 @@ class AgentActivationSystem:
         result: Dict[str, Any]
     ):
         """Log business event handling to database for observability"""
-        conn = self._get_db_connection()
-        if not conn:
-            return
-
         try:
-            cur = conn.cursor()
-            # Serialize to ensure all datetime/Decimal objects are converted
-            safe_data = json_safe_serialize({
-                "event_data": event_data,
-                "result": result
-            })
-            cur.execute("""
-                INSERT INTO agent_activation_log
-                (agent_id, agent_name, tenant_id, event_type, event_data, created_at)
-                VALUES (%s, %s, %s, %s, %s, NOW())
-            """, (
-                'system',  # System-level agent ID for business events
-                'BusinessEventLogger',  # Agent name
-                self.tenant_id,
-                f"business_event:{event_type.value}",
-                json.dumps(safe_data)
-            ))
-            conn.commit()
-            cur.close()
-            conn.close()
+            with self._get_db_connection() as conn:
+                if not conn:
+                    return
+
+                cur = conn.cursor()
+                # Serialize to ensure all datetime/Decimal objects are converted
+                safe_data = json_safe_serialize({
+                    "event_data": event_data,
+                    "result": result
+                })
+                cur.execute("""
+                    INSERT INTO agent_activation_log
+                    (agent_id, agent_name, tenant_id, event_type, event_data, created_at)
+                    VALUES (%s, %s, %s, %s, %s, NOW())
+                """, (
+                    'system',  # System-level agent ID for business events
+                    'BusinessEventLogger',  # Agent name
+                    self.tenant_id,
+                    f"business_event:{event_type.value}",
+                    json.dumps(safe_data)
+                ))
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.warning(f"Failed to log business event: {e}")
-            if conn:
-                conn.close()
