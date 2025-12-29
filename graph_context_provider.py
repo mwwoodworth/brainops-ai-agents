@@ -346,9 +346,9 @@ class GraphContextProvider:
         query = """
             SELECT DISTINCT source.*, source.node_type as type, source.codebase as repo_name, source.filepath as file_path
             FROM codebase_edges e
-            JOIN codebase_nodes target ON e.target_id = target.id
-            JOIN codebase_nodes source ON e.source_id = source.id
-            WHERE target.name = $1 AND e.type = 'calls'
+            JOIN codebase_nodes target ON e.target_node_id = target.node_id
+            JOIN codebase_nodes source ON e.source_node_id = source.node_id
+            WHERE target.name = $1 AND e.edge_type = 'calls'
         """
         params = [function_name]
 
@@ -381,9 +381,9 @@ class GraphContextProvider:
             parent_query = """
                 SELECT target.*, target.node_type as type, target.codebase as repo_name, target.filepath as file_path
                 FROM codebase_edges e
-                JOIN codebase_nodes source ON e.source_id = source.id
-                JOIN codebase_nodes target ON e.target_id = target.id
-                WHERE source.name = $1 AND e.type = 'inherits'
+                JOIN codebase_nodes source ON e.source_node_id = source.node_id
+                JOIN codebase_nodes target ON e.target_node_id = target.node_id
+                WHERE source.name = $1 AND e.edge_type = 'inherits'
             """
             params = [class_name]
             if codebase:
@@ -397,9 +397,9 @@ class GraphContextProvider:
             child_query = """
                 SELECT source.*, source.node_type as type, source.codebase as repo_name, source.filepath as file_path
                 FROM codebase_edges e
-                JOIN codebase_nodes source ON e.source_id = source.id
-                JOIN codebase_nodes target ON e.target_id = target.id
-                WHERE target.name = $1 AND e.type = 'inherits'
+                JOIN codebase_nodes source ON e.source_node_id = source.node_id
+                JOIN codebase_nodes target ON e.target_node_id = target.node_id
+                WHERE target.name = $1 AND e.edge_type = 'inherits'
             """
             children = await pool.fetch(child_query, *params)
             hierarchy["children"] = [dict(c) for c in children]
@@ -571,16 +571,16 @@ class GraphContextProvider:
 
         query = f"""
             SELECT
-                e.type,
+                e.edge_type as type,
                 source.name as source_name,
                 source.node_type as source_type,
                 target.name as target_name,
                 target.node_type as target_type
             FROM codebase_edges e
-            JOIN codebase_nodes source ON e.source_id = source.id
-            JOIN codebase_nodes target ON e.target_id = target.id
-            WHERE e.source_id IN ({id_placeholders})
-               OR e.target_id IN ({id_placeholders})
+            JOIN codebase_nodes source ON e.source_node_id = source.node_id
+            JOIN codebase_nodes target ON e.target_node_id = target.node_id
+            WHERE e.source_node_id IN ({id_placeholders})
+               OR e.target_node_id IN ({id_placeholders})
             LIMIT 50
         """
 
