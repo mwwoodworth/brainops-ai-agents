@@ -793,8 +793,9 @@ class EmbeddedMemorySystem:
         if self.sqlite_conn:
             self.sqlite_conn.close()
 
-        if self.pg_pool:
-            await self.pg_pool.close()
+        # CRITICAL: Do NOT close self.pg_pool - it's a SHARED pool managed globally
+        # Closing it here would break other modules using the same pool
+        # The shared pool is managed by database/async_connection.py
 
 
 # Global instance
