@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+import aiohttp
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -351,16 +352,24 @@ async def _get_revenue_stats() -> Dict[str, Any]:
 
         pool = get_pool()
 
-        # Get lead pipeline
-        leads = await pool.fetchrow("""
-            SELECT
-                COUNT(*) as total,
-                COUNT(CASE WHEN stage = 'NEW' THEN 1 END) as new,
-                COUNT(CASE WHEN stage = 'QUALIFIED' THEN 1 END) as qualified,
-                COUNT(CASE WHEN stage = 'PROPOSAL_SENT' THEN 1 END) as proposal_sent,
-                COUNT(CASE WHEN stage = 'WON' THEN 1 END) as won
-            FROM ai_leads
-        """)
+        async def _fetch_leads(table: str, include_status: bool) -> Dict[str, Any]:
+            stage_expr = "LOWER(COALESCE(stage, status, ''))" if include_status else "LOWER(COALESCE(stage, ''))"
+            return await pool.fetchrow(f"""
+                SELECT
+                    COUNT(*) as total,
+                    COUNT(*) FILTER (WHERE {stage_expr} IN ('new', 'lead', 'open', 'incoming', 'discovered')) as new,
+                    COUNT(*) FILTER (WHERE {stage_expr} IN ('qualified', 'qual')) as qualified,
+                    COUNT(*) FILTER (WHERE {stage_expr} IN ('proposal_sent', 'proposal', 'proposal sent', 'proposalsent', 'quote_sent', 'quoted')) as proposal_sent,
+                    COUNT(*) FILTER (WHERE {stage_expr} IN ('won', 'closed_won', 'closed won', 'closedwon')) as won
+                FROM {table}
+            """)
+
+        # Prefer revenue_leads, fallback to ai_leads for legacy data
+        try:
+            leads = await _fetch_leads("revenue_leads", include_status=True)
+        except Exception as e:
+            logger.error(f"Revenue stats fallback to ai_leads: {e}")
+            leads = await _fetch_leads("ai_leads", include_status=False)
 
         # Get tenant/customer stats (actual revenue)
         tenant_stats = await pool.fetchrow("""
@@ -397,20 +406,22 @@ async def _get_revenue_stats() -> Dict[str, Any]:
 async def _get_mcp_stats() -> Dict[str, Any]:
     """Get MCP integration stats"""
     try:
-        # Check MCP availability
-        try:
-            from mcp_integration import MCPClient
-            return {
-                "status": "available",
-                "servers": 13,  # Known count
-                "tools": 358,   # Known count
-                "last_check": datetime.utcnow().isoformat()
-            }
-        except ImportError:
-            return {
-                "status": "not_available",
-                "error": "MCP integration not loaded"
-            }
+        mcp_url = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
+        timeout = aiohttp.ClientTimeout(total=8)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(f"{mcp_url}/health") as resp:
+                if resp.status != 200:
+                    return {
+                        "status": "error",
+                        "error": f"Health check failed (HTTP {resp.status})"
+                    }
+                data = await resp.json()
+                return {
+                    "status": data.get("status", "unknown"),
+                    "servers": data.get("mcpServers"),
+                    "tools": data.get("totalTools"),
+                    "last_check": datetime.utcnow().isoformat()
+                }
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
