@@ -984,10 +984,42 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(learning_pipeline_loop())
     logger.info("📚 Learning pipeline loop STARTED")
 
+    # Start Task Queue Consumer to process pending autonomous tasks
+    try:
+        from task_queue_consumer import start_task_queue_consumer
+        await start_task_queue_consumer()
+        logger.info("📋 Task Queue Consumer STARTED")
+    except Exception as e:
+        logger.error(f"❌ Task Queue Consumer failed to start: {e}")
+
+    # Start Email Scheduler Daemon for nurture campaigns
+    try:
+        from email_scheduler_daemon import start_email_scheduler
+        await start_email_scheduler()
+        logger.info("📧 Email Scheduler Daemon STARTED")
+    except Exception as e:
+        logger.error(f"❌ Email Scheduler Daemon failed to start: {e}")
+
     yield
 
     # Shutdown
     logger.info("🛑 Shutting down BrainOps AI Agents...")
+
+    # Stop Task Queue Consumer
+    try:
+        from task_queue_consumer import stop_task_queue_consumer
+        await stop_task_queue_consumer()
+        logger.info("✅ Task Queue Consumer stopped")
+    except Exception as e:
+        logger.error(f"❌ Task Queue Consumer shutdown error: {e}")
+
+    # Stop Email Scheduler Daemon
+    try:
+        from email_scheduler_daemon import stop_email_scheduler
+        await stop_email_scheduler()
+        logger.info("✅ Email Scheduler Daemon stopped")
+    except Exception as e:
+        logger.error(f"❌ Email Scheduler Daemon shutdown error: {e}")
 
     # Shutdown scheduler if running
     if hasattr(app.state, 'scheduler') and app.state.scheduler:
