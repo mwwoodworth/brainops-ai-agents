@@ -195,7 +195,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.36.0"  # CRITICAL: Complete sync pool integration across all critical modules
+VERSION = "9.37.0"  # CRITICAL: Fixed connection leaks in self_healing_recovery + ai_board_governance
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)

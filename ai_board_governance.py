@@ -15,12 +15,39 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
+from contextlib import contextmanager
 from ai_core import ai_core
 from ai_advanced_providers import advanced_ai
 from unified_memory_manager import get_memory_manager, Memory, MemoryType
 from agent_activation_system import get_activation_system, BusinessEventType, json_safe_serialize
 import warnings
 warnings.filterwarnings('ignore')
+
+# ============================================================================
+# SHARED CONNECTION POOL - CRITICAL for preventing MaxClientsInSessionMode
+# ============================================================================
+try:
+    from database.sync_pool import get_sync_pool
+    _POOL_AVAILABLE = True
+except ImportError:
+    _POOL_AVAILABLE = False
+
+
+@contextmanager
+def _get_pooled_connection():
+    """Get connection from shared pool - ALWAYS use this instead of psycopg2.connect()"""
+    if _POOL_AVAILABLE:
+        pool = get_sync_pool()
+        with pool.get_connection() as conn:
+            yield conn
+    else:
+        conn = psycopg2.connect(**DB_CONFIG)
+        try:
+            yield conn
+        finally:
+            if conn and not conn.closed:
+                conn.close()
+
 
 # Configure logging
 logging.basicConfig(
@@ -124,14 +151,9 @@ class BoardDecision:
 class AIBoardOfDirectors:
     """The AI Board that governs autonomous business operations"""
 
-    def _get_connection(self):
-        """Get database connection from SHARED pool to prevent exhaustion"""
-        try:
-            from database.sync_pool import get_sync_pool
-            pool = get_sync_pool()
-            return pool.get_connection().__enter__()
-        except Exception:
-            return self._get_connection()
+    def _get_db_context(self):
+        """Get database connection context from SHARED pool"""
+        return _get_pooled_connection()
 
     def __init__(self):
         self.board_members = self._initialize_board()
@@ -287,82 +309,81 @@ class AIBoardOfDirectors:
     def _init_database(self):
         """Initialize database tables for board governance"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_db_context() as conn:
+                cur = conn.cursor()
 
-            # Create board proposals table
-            cur.execute("""
-            CREATE TABLE IF NOT EXISTS ai_board_proposals (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                proposal_type TEXT NOT NULL,
-                title TEXT NOT NULL,
-                description TEXT,
-                proposed_by TEXT NOT NULL,
-                impact_analysis JSONB,
-                required_resources JSONB,
-                timeline TEXT,
-                alternatives JSONB,
-                supporting_data JSONB,
-                urgency INTEGER CHECK (urgency >= 1 AND urgency <= 10),
-                status TEXT CHECK (status IN ('pending', 'deliberating', 'decided', 'deferred')),
-                created_at TIMESTAMP DEFAULT NOW()
-            );
+                # Create board proposals table
+                cur.execute("""
+                CREATE TABLE IF NOT EXISTS ai_board_proposals (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    proposal_type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    proposed_by TEXT NOT NULL,
+                    impact_analysis JSONB,
+                    required_resources JSONB,
+                    timeline TEXT,
+                    alternatives JSONB,
+                    supporting_data JSONB,
+                    urgency INTEGER CHECK (urgency >= 1 AND urgency <= 10),
+                    status TEXT CHECK (status IN ('pending', 'deliberating', 'decided', 'deferred')),
+                    created_at TIMESTAMP DEFAULT NOW()
+                );
 
-            -- Create board decisions table
-            CREATE TABLE IF NOT EXISTS ai_board_decisions (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                proposal_id TEXT NOT NULL,
-                decision TEXT NOT NULL,
-                vote_results JSONB NOT NULL,
-                consensus_level FLOAT,
-                dissenting_opinions JSONB,
-                conditions JSONB,
-                implementation_plan JSONB,
-                debate_transcript JSONB,
-                follow_up_date TIMESTAMP,
-                decided_at TIMESTAMP DEFAULT NOW()
-            );
+                -- Create board decisions table
+                CREATE TABLE IF NOT EXISTS ai_board_decisions (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    proposal_id TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    vote_results JSONB NOT NULL,
+                    consensus_level FLOAT,
+                    dissenting_opinions JSONB,
+                    conditions JSONB,
+                    implementation_plan JSONB,
+                    debate_transcript JSONB,
+                    follow_up_date TIMESTAMP,
+                    decided_at TIMESTAMP DEFAULT NOW()
+                );
 
-            -- Create board meeting minutes
-            CREATE TABLE IF NOT EXISTS ai_board_meetings (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                meeting_type TEXT NOT NULL,
-                attendees JSONB NOT NULL,
-                agenda JSONB,
-                discussions JSONB,
-                decisions_made JSONB,
-                action_items JSONB,
-                duration_minutes INTEGER,
-                meeting_date TIMESTAMP DEFAULT NOW()
-            );
+                -- Create board meeting minutes
+                CREATE TABLE IF NOT EXISTS ai_board_meetings (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    meeting_type TEXT NOT NULL,
+                    attendees JSONB NOT NULL,
+                    agenda JSONB,
+                    discussions JSONB,
+                    decisions_made JSONB,
+                    action_items JSONB,
+                    duration_minutes INTEGER,
+                    meeting_date TIMESTAMP DEFAULT NOW()
+                );
 
-            CREATE INDEX IF NOT EXISTS idx_proposals_status ON ai_board_proposals(status);
-            CREATE INDEX IF NOT EXISTS idx_proposals_urgency ON ai_board_proposals(urgency DESC);
-            CREATE INDEX IF NOT EXISTS idx_decisions_date ON ai_board_decisions(decided_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_proposals_status ON ai_board_proposals(status);
+                CREATE INDEX IF NOT EXISTS idx_proposals_urgency ON ai_board_proposals(urgency DESC);
+                CREATE INDEX IF NOT EXISTS idx_decisions_date ON ai_board_decisions(decided_at DESC);
 
-            -- Schema migrations (safe to run repeatedly)
-            ALTER TABLE ai_board_decisions
-            ADD COLUMN IF NOT EXISTS debate_transcript JSONB;
+                -- Schema migrations (safe to run repeatedly)
+                ALTER TABLE ai_board_decisions
+                ADD COLUMN IF NOT EXISTS debate_transcript JSONB;
 
-            ALTER TABLE ai_board_decisions
-            ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0;
+                ALTER TABLE ai_board_decisions
+                ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0;
 
-            ALTER TABLE ai_board_decisions
-            ADD COLUMN IF NOT EXISTS risk_assessment JSONB;
+                ALTER TABLE ai_board_decisions
+                ADD COLUMN IF NOT EXISTS risk_assessment JSONB;
 
-            ALTER TABLE ai_board_decisions
-            ADD COLUMN IF NOT EXISTS human_escalation_required BOOLEAN DEFAULT FALSE;
+                ALTER TABLE ai_board_decisions
+                ADD COLUMN IF NOT EXISTS human_escalation_required BOOLEAN DEFAULT FALSE;
 
-            ALTER TABLE ai_board_decisions
-            ADD COLUMN IF NOT EXISTS escalation_reason TEXT;
+                ALTER TABLE ai_board_decisions
+                ADD COLUMN IF NOT EXISTS escalation_reason TEXT;
 
-            ALTER TABLE ai_board_decisions
-            ADD COLUMN IF NOT EXISTS decision_criteria_scores JSONB;
-            """)
+                ALTER TABLE ai_board_decisions
+                ADD COLUMN IF NOT EXISTS decision_criteria_scores JSONB;
+                """)
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                conn.commit()
+                cur.close()
 
             logger.info("✅ Board governance database initialized")
 
@@ -423,38 +444,37 @@ class AIBoardOfDirectors:
         proposals = []
 
         try:
-            conn = self._get_connection()
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._get_db_context() as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            # Get pending proposals ordered by urgency
-            cur.execute("""
-            SELECT * FROM ai_board_proposals
-            WHERE status = 'pending'
-            ORDER BY urgency DESC, created_at ASC
-            LIMIT 10
-            """)
+                # Get pending proposals ordered by urgency
+                cur.execute("""
+                SELECT * FROM ai_board_proposals
+                WHERE status = 'pending'
+                ORDER BY urgency DESC, created_at ASC
+                LIMIT 10
+                """)
 
-            pending = cur.fetchall()
+                pending = cur.fetchall()
 
-            for p in pending:
-                proposal = Proposal(
-                    id=str(p['id']),
-                    type=ProposalType(p['proposal_type']),
-                    title=p['title'],
-                    description=p['description'],
-                    proposed_by=p['proposed_by'],
-                    impact_analysis=p['impact_analysis'] or {},
-                    required_resources=p['required_resources'] or {},
-                    timeline=p['timeline'],
-                    alternatives=p['alternatives'] or [],
-                    supporting_data=p['supporting_data'] or {},
-                    urgency=p['urgency'],
-                    created_at=p['created_at']
-                )
-                proposals.append(proposal)
+                for p in pending:
+                    proposal = Proposal(
+                        id=str(p['id']),
+                        type=ProposalType(p['proposal_type']),
+                        title=p['title'],
+                        description=p['description'],
+                        proposed_by=p['proposed_by'],
+                        impact_analysis=p['impact_analysis'] or {},
+                        required_resources=p['required_resources'] or {},
+                        timeline=p['timeline'],
+                        alternatives=p['alternatives'] or [],
+                        supporting_data=p['supporting_data'] or {},
+                        urgency=p['urgency'],
+                        created_at=p['created_at']
+                    )
+                    proposals.append(proposal)
 
-            cur.close()
-            conn.close()
+                cur.close()
 
         except Exception as e:
             logger.error(f"Failed to prepare agenda: {e}")
@@ -1083,63 +1103,63 @@ Output MUST be valid JSON only (no markdown) with this schema:
         """Identify issues that need board attention"""
         proposals = []
 
-        # Check for financial issues
-        conn = self._get_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+        try:
+            with self._get_db_context() as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Check overdue invoices
-        cur.execute("""
-        SELECT COUNT(*) as count, SUM(amount_due) as total
-        FROM invoices
-        WHERE due_date < NOW() - INTERVAL '30 days'
-          AND status != 'paid'
-        """)
-        overdue = cur.fetchone()
+                # Check overdue invoices
+                cur.execute("""
+                SELECT COUNT(*) as count, SUM(amount_due) as total
+                FROM invoices
+                WHERE due_date < NOW() - INTERVAL '30 days'
+                  AND status != 'paid'
+                """)
+                overdue = cur.fetchone()
 
-        if overdue['count'] > 10 or (overdue['total'] and overdue['total'] > 50000):
-            proposal = Proposal(
-                id=f"auto-{datetime.now().timestamp()}",
-                type=ProposalType.FINANCIAL,
-                title="Address Overdue Invoices Crisis",
-                description=f"{overdue['count']} invoices totaling ${overdue['total']} are severely overdue",
-                proposed_by="System",
-                impact_analysis={"financial_risk": "high", "cash_flow_impact": overdue['total']},
-                required_resources={"collection_agents": 3, "legal_support": True},
-                timeline="Immediate",
-                alternatives=["Collection agency", "Payment plans", "Legal action"],
-                supporting_data={"overdue_details": dict(overdue)},
-                urgency=9,
-                created_at=datetime.now()
-            )
-            proposals.append(proposal)
+                if overdue['count'] > 10 or (overdue['total'] and overdue['total'] > 50000):
+                    proposal = Proposal(
+                        id=f"auto-{datetime.now().timestamp()}",
+                        type=ProposalType.FINANCIAL,
+                        title="Address Overdue Invoices Crisis",
+                        description=f"{overdue['count']} invoices totaling ${overdue['total']} are severely overdue",
+                        proposed_by="System",
+                        impact_analysis={"financial_risk": "high", "cash_flow_impact": overdue['total']},
+                        required_resources={"collection_agents": 3, "legal_support": True},
+                        timeline="Immediate",
+                        alternatives=["Collection agency", "Payment plans", "Legal action"],
+                        supporting_data={"overdue_details": dict(overdue)},
+                        urgency=9,
+                        created_at=datetime.now()
+                    )
+                    proposals.append(proposal)
 
-        cur.close()
-        conn.close()
+                cur.close()
+        except Exception as e:
+            logger.error(f"Failed to identify issues: {e}")
 
         return proposals
 
     def _record_meeting_start(self, meeting_type: str, agenda: List[Proposal]) -> str:
         """Record meeting start in database"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_db_context() as conn:
+                cur = conn.cursor()
 
-            attendees = [m.name for m in self.board_members.values()]
-            agenda_items = [{"id": p.id, "title": p.title} for p in agenda]
+                attendees = [m.name for m in self.board_members.values()]
+                agenda_items = [{"id": p.id, "title": p.title} for p in agenda]
 
-            cur.execute("""
-            INSERT INTO ai_board_meetings
-            (meeting_type, attendees, agenda)
-            VALUES (%s, %s, %s)
-            RETURNING id
-            """, (meeting_type, Json(attendees), Json(agenda_items)))
+                cur.execute("""
+                INSERT INTO ai_board_meetings
+                (meeting_type, attendees, agenda)
+                VALUES (%s, %s, %s)
+                RETURNING id
+                """, (meeting_type, Json(attendees), Json(agenda_items)))
 
-            meeting_id = str(cur.fetchone()[0])
-            conn.commit()
-            cur.close()
-            conn.close()
+                meeting_id = str(cur.fetchone()[0])
+                conn.commit()
+                cur.close()
 
-            return meeting_id
+                return meeting_id
 
         except Exception as e:
             logger.error(f"Failed to record meeting start: {e}")
@@ -1149,24 +1169,23 @@ Output MUST be valid JSON only (no markdown) with this schema:
                            outcomes: Dict, duration: float):
         """Record meeting end in database"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_db_context() as conn:
+                cur = conn.cursor()
 
-            decision_summary = [
-                {"proposal": d.proposal_id, "decision": d.decision}
-                for d in decisions
-            ]
+                decision_summary = [
+                    {"proposal": d.proposal_id, "decision": d.decision}
+                    for d in decisions
+                ]
 
-            cur.execute("""
-            UPDATE ai_board_meetings
-            SET decisions_made = %s,
-                duration_minutes = %s
-            WHERE id = %s
-            """, (Json(decision_summary), int(duration), meeting_id))
+                cur.execute("""
+                UPDATE ai_board_meetings
+                SET decisions_made = %s,
+                    duration_minutes = %s
+                WHERE id = %s
+                """, (Json(decision_summary), int(duration), meeting_id))
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                conn.commit()
+                cur.close()
 
         except Exception as e:
             logger.error(f"Failed to record meeting end: {e}")
@@ -1355,46 +1374,45 @@ Output MUST be valid JSON only (no markdown) with this schema:
     def _record_decision(self, decision: BoardDecision):
         """Record decision in database with enhanced fields"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_db_context() as conn:
+                cur = conn.cursor()
 
-            vote_results = {k.value: v.value for k, v in decision.vote_results.items()}
+                vote_results = {k.value: v.value for k, v in decision.vote_results.items()}
 
-            cur.execute("""
-            INSERT INTO ai_board_decisions
-            (proposal_id, decision, vote_results, consensus_level,
-             dissenting_opinions, conditions, implementation_plan, debate_transcript, follow_up_date,
-             confidence_score, risk_assessment, human_escalation_required, escalation_reason,
-             decision_criteria_scores)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                decision.proposal_id,
-                decision.decision,
-                Json(vote_results),
-                decision.consensus_level,
-                Json(decision.dissenting_opinions),
-                Json(decision.conditions),
-                Json(decision.implementation_plan),
-                Json(decision.debate_transcript),
-                decision.follow_up_date,
-                decision.confidence_score,
-                Json(decision.risk_assessment),
-                decision.human_escalation_required,
-                decision.escalation_reason,
-                Json(decision.decision_criteria_scores)
-            ))
+                cur.execute("""
+                INSERT INTO ai_board_decisions
+                (proposal_id, decision, vote_results, consensus_level,
+                 dissenting_opinions, conditions, implementation_plan, debate_transcript, follow_up_date,
+                 confidence_score, risk_assessment, human_escalation_required, escalation_reason,
+                 decision_criteria_scores)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    decision.proposal_id,
+                    decision.decision,
+                    Json(vote_results),
+                    decision.consensus_level,
+                    Json(decision.dissenting_opinions),
+                    Json(decision.conditions),
+                    Json(decision.implementation_plan),
+                    Json(decision.debate_transcript),
+                    decision.follow_up_date,
+                    decision.confidence_score,
+                    Json(decision.risk_assessment),
+                    decision.human_escalation_required,
+                    decision.escalation_reason,
+                    Json(decision.decision_criteria_scores)
+                ))
 
-            # Update proposal status
-            new_status = 'deferred' if decision.decision == 'deferred' else 'decided'
-            cur.execute("""
-            UPDATE ai_board_proposals
-            SET status = %s
-            WHERE id = %s
-            """, (new_status, decision.proposal_id))
+                # Update proposal status
+                new_status = 'deferred' if decision.decision == 'deferred' else 'decided'
+                cur.execute("""
+                UPDATE ai_board_proposals
+                SET status = %s
+                WHERE id = %s
+                """, (new_status, decision.proposal_id))
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                conn.commit()
+                cur.close()
 
         except Exception as e:
             logger.error(f"Failed to record decision: {e}")
@@ -1424,35 +1442,34 @@ Output MUST be valid JSON only (no markdown) with this schema:
     async def submit_proposal(self, proposal: Proposal) -> str:
         """Submit a proposal for board consideration"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_db_context() as conn:
+                cur = conn.cursor()
 
-            cur.execute("""
-            INSERT INTO ai_board_proposals
-            (proposal_type, title, description, proposed_by, impact_analysis,
-             required_resources, timeline, alternatives, supporting_data, urgency, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
-            RETURNING id
-            """, (
-                proposal.type.value,
-                proposal.title,
-                proposal.description,
-                proposal.proposed_by,
-                Json(proposal.impact_analysis),
-                Json(proposal.required_resources),
-                proposal.timeline,
-                Json(proposal.alternatives),
-                Json(proposal.supporting_data),
-                proposal.urgency
-            ))
+                cur.execute("""
+                INSERT INTO ai_board_proposals
+                (proposal_type, title, description, proposed_by, impact_analysis,
+                 required_resources, timeline, alternatives, supporting_data, urgency, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                RETURNING id
+                """, (
+                    proposal.type.value,
+                    proposal.title,
+                    proposal.description,
+                    proposal.proposed_by,
+                    Json(proposal.impact_analysis),
+                    Json(proposal.required_resources),
+                    proposal.timeline,
+                    Json(proposal.alternatives),
+                    Json(proposal.supporting_data),
+                    proposal.urgency
+                ))
 
-            proposal_id = str(cur.fetchone()[0])
-            conn.commit()
-            cur.close()
-            conn.close()
+                proposal_id = str(cur.fetchone()[0])
+                conn.commit()
+                cur.close()
 
-            logger.info(f"📝 Proposal submitted: {proposal.title} (ID: {proposal_id})")
-            return proposal_id
+                logger.info(f"📝 Proposal submitted: {proposal.title} (ID: {proposal_id})")
+                return proposal_id
 
         except Exception as e:
             logger.error(f"Failed to submit proposal: {e}")
@@ -1477,29 +1494,28 @@ Output MUST be valid JSON only (no markdown) with this schema:
 
         # Get pending proposals count
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_db_context() as conn:
+                cur = conn.cursor()
 
-            cur.execute("SELECT COUNT(*) FROM ai_board_proposals WHERE status = 'pending'")
-            status["pending_proposals"] = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM ai_board_proposals WHERE status = 'pending'")
+                status["pending_proposals"] = cur.fetchone()[0]
 
-            # Get recent decisions
-            cur.execute("""
-            SELECT decision, consensus_level, decided_at
-            FROM ai_board_decisions
-            ORDER BY decided_at DESC
-            LIMIT 5
-            """)
+                # Get recent decisions
+                cur.execute("""
+                SELECT decision, consensus_level, decided_at
+                FROM ai_board_decisions
+                ORDER BY decided_at DESC
+                LIMIT 5
+                """)
 
-            for row in cur.fetchall():
-                status["recent_decisions"].append({
-                    "decision": row[0],
-                    "consensus": row[1],
-                    "date": row[2].isoformat() if row[2] else None
-                })
+                for row in cur.fetchall():
+                    status["recent_decisions"].append({
+                        "decision": row[0],
+                        "consensus": row[1],
+                        "date": row[2].isoformat() if row[2] else None
+                    })
 
-            cur.close()
-            conn.close()
+                cur.close()
 
         except Exception as e:
             logger.error(f"Failed to get board status: {e}")
