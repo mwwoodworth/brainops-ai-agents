@@ -50,6 +50,21 @@ TWILIO_SID = os.getenv("TWILIO_SID", "")
 TWILIO_TOKEN = os.getenv("TWILIO_TOKEN", "")
 
 
+# Connection pool helper - prefer shared pool, fallback to direct connection
+async def _get_db_connection(db_url: str = None):
+    """Get database connection, preferring shared pool"""
+    try:
+        from database.async_connection import get_pool
+        pool = get_pool()
+        return await pool.acquire()
+    except Exception:
+        # Fallback to direct connection if pool unavailable
+        if db_url:
+            import asyncpg
+            return await asyncpg.connect(db_url)
+        return None
+
+
 class Industry(Enum):
     """Supported industries for revenue automation"""
     ROOFING = "roofing"
