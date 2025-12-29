@@ -69,6 +69,15 @@ from api.aurea_chat import router as aurea_chat_router  # AUREA Live Conversatio
 from api.observability import router as full_observability_router  # Comprehensive Observability Dashboard
 from api.self_awareness import router as self_awareness_router  # Self-Awareness Dashboard
 
+# AI-Powered UI Testing System
+try:
+    from api.ui_testing import router as ui_testing_router
+    UI_TESTING_AVAILABLE = True
+    logger.info("AI UI Testing Router loaded - Automated visual testing")
+except ImportError as e:
+    UI_TESTING_AVAILABLE = False
+    logger.warning(f"UI Testing Router not available: {e}")
+
 # Bleeding Edge AI Capabilities - Revolutionary systems (2025-12-27)
 try:
     from api.bleeding_edge import router as bleeding_edge_router
@@ -158,7 +167,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.31.0"  # Consciousness persistence, thought stream DB storage, self-awareness enhancements
+VERSION = "9.32.0"  # AI UI Testing System, MRG Stripe auth fix, comprehensive operational fixes
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -1152,6 +1161,11 @@ app.include_router(a2ui_router, dependencies=SECURED_DEPENDENCIES)  # Google A2U
 app.include_router(aurea_chat_router, dependencies=SECURED_DEPENDENCIES)  # AUREA Live Conversational AI
 app.include_router(full_observability_router, dependencies=SECURED_DEPENDENCIES)  # Comprehensive Observability Dashboard
 app.include_router(self_awareness_router, dependencies=SECURED_DEPENDENCIES)  # Self-Awareness Dashboard
+
+# AI-Powered UI Testing System (2025-12-29) - Automated visual testing with AI vision
+if UI_TESTING_AVAILABLE:
+    app.include_router(ui_testing_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: AI UI Testing API at /ui-testing - visual testing, accessibility, performance")
 
 # Bleeding Edge AI Systems (2025-12-27) - Revolutionary capabilities
 if BLEEDING_EDGE_AVAILABLE:
