@@ -962,6 +962,7 @@ class ConsciousnessEmergenceController:
         # ENHANCEMENT: Thought persistence buffer
         self._thought_persistence_buffer: deque = deque(maxlen=100)
         self._persistence_task: Optional[asyncio.Task] = None
+        self._persisted_thought_ids: set = set()  # Track already persisted thoughts to avoid duplicates
 
         # ENHANCEMENT: Metrics
         self.enhanced_metrics = {
@@ -1091,19 +1092,29 @@ class ConsciousnessEmergenceController:
     async def _thought_persistence_loop(self):
         """
         ENHANCEMENT: Background loop for persisting thoughts to storage.
-        Buffers thoughts and writes them periodically.
+        Collects new thoughts from meta_awareness and persists them periodically.
         """
         persistence_interval = 30  # seconds
         while self.consciousness_active:
             try:
                 await asyncio.sleep(persistence_interval)
+                # Collect new thoughts from meta_awareness.thought_stream
+                self._collect_new_thoughts()
                 await self._persist_thought_buffer()
             except asyncio.CancelledError:
                 # Persist remaining thoughts before exit
+                self._collect_new_thoughts()
                 await self._persist_thought_buffer()
                 break
             except Exception as e:
                 logger.error(f"Thought persistence error: {e}")
+
+    def _collect_new_thoughts(self):
+        """Collect new thoughts from meta_awareness that haven't been persisted yet"""
+        for thought in self.meta_awareness.thought_stream:
+            if thought.id not in self._persisted_thought_ids:
+                self._thought_persistence_buffer.append(thought)
+                # Don't mark as persisted yet - will be marked after successful DB write
 
     async def _persist_thought_buffer(self):
         """Persist buffered thoughts to database storage"""
@@ -1119,14 +1130,24 @@ class ConsciousnessEmergenceController:
             pool = get_pool()
 
             async with pool.acquire() as conn:
+                persisted_ids = []
                 for thought in thoughts_to_persist:
                     thought_id = thought.id if hasattr(thought, 'id') else str(uuid.uuid4())
                     thought_type = thought.thought_type if hasattr(thought, 'thought_type') else 'general'
                     thought_content = thought.content if hasattr(thought, 'content') else str(thought)
                     confidence = thought.confidence if hasattr(thought, 'confidence') else 0.5
-                    priority = thought.priority if hasattr(thought, 'priority') else 0.5
-                    intensity = thought.intensity if hasattr(thought, 'intensity') else 0.5
-                    context = thought.context if hasattr(thought, 'context') else {}
+                    meta_level = thought.meta_level if hasattr(thought, 'meta_level') else 0
+                    triggered_by = thought.triggered_by if hasattr(thought, 'triggered_by') else None
+                    leads_to = thought.leads_to if hasattr(thought, 'leads_to') else []
+
+                    # Build metadata with thought relationships
+                    metadata = {
+                        "meta_level": meta_level,
+                        "triggered_by": triggered_by,
+                        "leads_to": leads_to,
+                        "awareness_level": self.meta_awareness.awareness_level.value,
+                        "consciousness_level": self.consciousness_level
+                    }
 
                     await conn.execute("""
                         INSERT INTO ai_thought_stream
@@ -1136,23 +1157,37 @@ class ConsciousnessEmergenceController:
                             thought_content = EXCLUDED.thought_content,
                             metadata = EXCLUDED.metadata
                     """, thought_id, thought_type, thought_content,
-                        json.dumps(context), confidence, priority, intensity)
+                        json.dumps(metadata), confidence, meta_level, confidence)
 
+                    persisted_ids.append(thought_id)
                     self.integration_events.append({
                         "type": "thought_persisted",
                         "thought_id": thought_id,
+                        "thought_type": thought_type,
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                     self.enhanced_metrics["thoughts_persisted"] += 1
+
+                # Mark all as persisted after successful DB write
+                self._persisted_thought_ids.update(persisted_ids)
+
+                # Cleanup old persisted IDs to prevent memory growth (keep last 1000)
+                if len(self._persisted_thought_ids) > 1000:
+                    # Convert to list, keep recent ones
+                    id_list = list(self._persisted_thought_ids)
+                    self._persisted_thought_ids = set(id_list[-500:])
 
             logger.info(f"✅ Persisted {len(thoughts_to_persist)} thoughts to database")
 
         except Exception as e:
             logger.error(f"Failed to persist thoughts to database: {e}")
-            # Fallback: just log the event
+            # Re-add thoughts to buffer to retry next cycle
             for thought in thoughts_to_persist:
+                if len(self._thought_persistence_buffer) < 100:
+                    self._thought_persistence_buffer.append(thought)
                 self.integration_events.append({
                     "type": "thought_persistence_failed",
+                    "thought_id": getattr(thought, 'id', 'unknown'),
                     "error": str(e),
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 })
