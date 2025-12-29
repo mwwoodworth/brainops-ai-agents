@@ -195,7 +195,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.43.0"  # Fix: proactive_intelligence column names + self_healing_reconciler UUID query
+VERSION = "9.44.0"  # Fix: Better exception handling for revenue system initialization
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
