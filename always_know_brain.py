@@ -146,8 +146,8 @@ class AlwaysKnowBrain:
 
         # Try to get database pool
         try:
-            from database.connection import _get_pooled_connection
-            self._db_pool = _get_pooled_connection
+            from database.sync_pool import get_sync_pool
+            self._db_pool = get_sync_pool()
         except Exception as e:
             logger.warning(f"Database pool not available: {e}")
 
@@ -263,18 +263,26 @@ class AlwaysKnowBrain:
         """Check database connection"""
         try:
             if self._db_pool:
-                with self._db_pool() as conn:
-                    if conn:
-                        cur = conn.cursor()
-                        cur.execute("SELECT 1")
-                        state.database_connected = True
+                # Use pool's fetchone method for simple queries
+                result = self._db_pool.fetchone("SELECT 1 as test")
+                if result:
+                    state.database_connected = True
 
-                        # Get counts
-                        cur.execute("SELECT COUNT(*) FROM customers")
-                        state.customers_total = cur.fetchone()[0]
-                        cur.execute("SELECT COUNT(*) FROM jobs")
-                        state.jobs_total = cur.fetchone()[0]
-                        cur.close()
+                    # Get counts
+                    customers = self._db_pool.fetchone("SELECT COUNT(*) as cnt FROM customers")
+                    if customers:
+                        state.customers_total = customers.get("cnt", 0)
+
+                    jobs = self._db_pool.fetchone("SELECT COUNT(*) as cnt FROM jobs")
+                    if jobs:
+                        state.jobs_total = jobs.get("cnt", 0)
+
+                    # Get revenue leads count
+                    leads = self._db_pool.fetchone("SELECT COUNT(*) as cnt FROM revenue_leads")
+                    if leads:
+                        state.revenue_leads = leads.get("cnt", 0)
+                else:
+                    state.database_connected = False
             else:
                 state.database_connected = False
         except Exception as e:
@@ -324,26 +332,53 @@ class AlwaysKnowBrain:
         """Check error counts"""
         try:
             if self._db_pool:
-                with self._db_pool() as conn:
-                    if conn:
-                        cur = conn.cursor()
-                        cur.execute("""
-                            SELECT
-                                COUNT(*) FILTER (WHERE occurred_at > NOW() - INTERVAL '1 hour') as errors_1h,
-                                COUNT(*) FILTER (WHERE occurred_at > NOW() - INTERVAL '24 hours') as errors_24h
-                            FROM ai_error_logs
-                            WHERE occurred_at > NOW() - INTERVAL '24 hours'
-                        """)
-                        row = cur.fetchone()
-                        if row:
-                            state.errors_last_hour = row[0] or 0
-                            state.errors_last_24h = row[1] or 0
-                        cur.close()
+                result = self._db_pool.fetchone("""
+                    SELECT
+                        COUNT(*) FILTER (WHERE occurred_at > NOW() - INTERVAL '1 hour') as errors_1h,
+                        COUNT(*) FILTER (WHERE occurred_at > NOW() - INTERVAL '24 hours') as errors_24h
+                    FROM ai_error_logs
+                    WHERE occurred_at > NOW() - INTERVAL '24 hours'
+                """)
+                if result:
+                    state.errors_last_hour = result.get("errors_1h", 0) or 0
+                    state.errors_last_24h = result.get("errors_24h", 0) or 0
         except Exception as e:
             logger.warning(f"Error check failed: {e}")
 
+    async def _resolve_recovered_alerts(self):
+        """Auto-resolve alerts when services recover"""
+        state = self.current_state
+
+        # Map of component -> health check
+        health_checks = {
+            SystemComponent.AI_AGENTS.value: state.ai_agents_healthy,
+            SystemComponent.BACKEND.value: state.backend_healthy,
+            SystemComponent.DATABASE.value: state.database_connected,
+            SystemComponent.FRONTEND_MRG.value: state.mrg_healthy,
+            SystemComponent.FRONTEND_ERP.value: state.erp_healthy,
+            SystemComponent.AUREA.value: state.aurea_operational,
+        }
+
+        # Find alerts to resolve
+        alerts_to_resolve = []
+        for alert_id, alert in list(self.alerts.items()):
+            if alert.resolved:
+                continue
+            component_key = alert.component.value
+            if component_key in health_checks and health_checks[component_key]:
+                alerts_to_resolve.append(alert_id)
+
+        # Resolve alerts
+        for alert_id in alerts_to_resolve:
+            if alert_id in self.alerts:
+                self.alerts[alert_id].resolved = True
+                logger.info(f"Alert auto-resolved: {self.alerts[alert_id].title}")
+
     async def _check_anomalies(self):
         """Check for anomalies and create alerts"""
+        # First, resolve any alerts for recovered services
+        await self._resolve_recovered_alerts()
+
         state = self.current_state
 
         # Critical: Service down

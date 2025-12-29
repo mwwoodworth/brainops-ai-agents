@@ -215,7 +215,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.45.0"  # Feature: Always-Know Brain + ChatGPT-Agent-Level UI Testing + Deep Observability
+VERSION = "9.46.0"  # Fix: Always-Know Brain database connection + alert auto-resolution
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
