@@ -195,7 +195,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.34.0"  # MASSIVE: Operational verification, system integration, background monitoring - NO MORE SILOS
+VERSION = "9.35.0"  # CRITICAL: Fixed DB connection pool exhaustion + unified sync pool + operational APIs
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
