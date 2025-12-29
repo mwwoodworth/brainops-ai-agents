@@ -1993,5 +1993,16 @@ async def main():
     print("=" * 70)
 
 
+# Singleton instance for API usage
+_affiliate_pipeline_instance: Optional[AffiliatePartnershipPipeline] = None
+
+def get_affiliate_pipeline() -> AffiliatePartnershipPipeline:
+    """Get or create the singleton affiliate pipeline instance."""
+    global _affiliate_pipeline_instance
+    if _affiliate_pipeline_instance is None:
+        _affiliate_pipeline_instance = AffiliatePartnershipPipeline()
+    return _affiliate_pipeline_instance
+
+
 if __name__ == "__main__":
     asyncio.run(main())
