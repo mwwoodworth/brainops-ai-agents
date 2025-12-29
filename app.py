@@ -195,7 +195,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.40.0"  # Major: Unified observability + 8 missing components + full schema fixes
+VERSION = "9.41.0"  # Fix: AIDecisionTree, NotebookLMPlus methods + sync_pool generator + graph_context params
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
