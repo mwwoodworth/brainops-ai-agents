@@ -20,6 +20,13 @@ try:
 except ImportError:
     asyncpg = None
 
+# Import shared async pool
+try:
+    from database.async_connection import get_pool, init_pool, PoolConfig
+    _ASYNC_POOL_AVAILABLE = True
+except ImportError:
+    _ASYNC_POOL_AVAILABLE = False
+
 # Attempt to import psutil for system metrics
 try:
     import psutil
@@ -85,20 +92,29 @@ class ConsciousnessLoop:
         """Start the consciousness loop."""
         logger.info("Starting Consciousness Loop...")
         self.running = True
-        
-        # Initialize DB connection
-        if asyncpg:
+
+        # Initialize DB connection - Use SHARED pool to prevent MaxClientsInSessionMode
+        if _ASYNC_POOL_AVAILABLE:
             try:
-                self.pool = await asyncpg.create_pool(self.db_url)
-                logger.info("Connected to consciousness database.")
+                self.pool = get_pool()
+                logger.info("Connected to consciousness database via shared pool.")
+            except RuntimeError:
+                # Pool not initialized yet - this is OK, we'll retry later
+                logger.warning("Shared async pool not yet initialized, will retry...")
+                self.pool = None
+            except Exception as e:
+                logger.error(f"Failed to get shared pool: {e}")
+                self.pool = None
+        elif asyncpg:
+            try:
+                # Fallback to creating minimal pool (only if shared pool unavailable)
+                self.pool = await asyncpg.create_pool(self.db_url, min_size=1, max_size=2)
+                logger.info("Connected to consciousness database (fallback pool).")
             except Exception as e:
                 logger.error(f"Failed to connect to database: {e}")
-                self.running = False
-                return
+                self.pool = None
         else:
-            logger.critical("asyncpg not installed. Consciousness requires asyncpg.")
-            self.running = False
-            return
+            logger.warning("asyncpg not installed. Consciousness will run without DB persistence.")
 
         # Boot sequence thought
         await self._record_thought("I am waking up. Systems coming online.", "observation", intensity=0.8)
@@ -324,8 +340,13 @@ class ConsciousnessLoop:
         self.running = False
         if self.pool:
             await self._record_thought("Shutting down consciousness.", "observation", 1.0)
-            await self.pool.close()
-            logger.info("Database pool closed.")
+            # DON'T close shared pool - it's managed globally
+            if not _ASYNC_POOL_AVAILABLE:
+                # Only close if we created our own pool
+                await self.pool.close()
+                logger.info("Local database pool closed.")
+            else:
+                logger.info("Using shared pool - not closing.")
 
 # Entry point for standalone execution
 if __name__ == "__main__":
