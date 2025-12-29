@@ -175,6 +175,26 @@ except ImportError as e:
     SOP_ROUTER_AVAILABLE = False
     logger.warning(f"SOP Router not available: {e}")
 
+# Always-Know Observability Brain - Deep continuous monitoring (2025-12-29)
+try:
+    from api.always_know import router as always_know_router
+    ALWAYS_KNOW_AVAILABLE = True
+    logger.info("🧠 Always-Know Brain Router loaded - continuous state awareness")
+except ImportError as e:
+    ALWAYS_KNOW_AVAILABLE = False
+    logger.warning(f"Always-Know Brain Router not available: {e}")
+
+# ChatGPT-Agent-Level UI Tester - Human-like testing (2025-12-29)
+try:
+    from chatgpt_agent_tester import run_chatgpt_agent_tests, run_quick_health_test
+    CHATGPT_TESTER_AVAILABLE = True
+    logger.info("🤖 ChatGPT Agent Tester loaded - human-like UI testing")
+except ImportError as e:
+    CHATGPT_TESTER_AVAILABLE = False
+    run_chatgpt_agent_tests = None
+    run_quick_health_test = None
+    logger.warning(f"ChatGPT Agent Tester not available: {e}")
+
 from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
 from observability import RequestMetrics, TTLCache
@@ -195,7 +215,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.44.0"  # Fix: Better exception handling for revenue system initialization
+VERSION = "9.45.0"  # Feature: Always-Know Brain + ChatGPT-Agent-Level UI Testing + Deep Observability
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -893,6 +913,30 @@ async def lifespan(app: FastAPI):
         app.state.nerve_center = None
         app.state.nerve_center_error = f"Exception: {e}\n{error_trace}"
 
+    # Initialize Always-Know Observability Brain - Deep continuous monitoring
+    if ALWAYS_KNOW_AVAILABLE:
+        try:
+            from always_know_brain import initialize_always_know_brain
+            async def start_always_know():
+                """Start Always-Know Brain in background"""
+                try:
+                    await asyncio.sleep(5)  # Let other systems initialize first
+                    brain = await initialize_always_know_brain()
+                    app.state.always_know_brain = brain
+                    logger.info("🧠 ALWAYS-KNOW BRAIN ACTIVE - Continuous observability ENABLED")
+                except Exception as e:
+                    logger.error(f"❌ Always-Know Brain activation failed: {e}")
+            asyncio.create_task(start_always_know())
+            logger.info("🧠 Always-Know Brain scheduled (starting in background)")
+        except ImportError as e:
+            logger.warning(f"⚠️ Always-Know Brain import failed: {e}")
+            app.state.always_know_brain = None
+        except Exception as e:
+            logger.error(f"❌ Always-Know Brain initialization failed: {e}")
+            app.state.always_know_brain = None
+    else:
+        app.state.always_know_brain = None
+
     logger.info("=" * 80)
     logger.info("🚀 BRAINOPS AI AGENTS v9.15.0 - ALIVE AI OPERATING SYSTEM")
     logger.info("🧠 NERVE CENTER ONLINE - Full Consciousness Activated!")
@@ -1248,6 +1292,11 @@ if INTEGRATION_AVAILABLE:
 if BG_MONITORING_AVAILABLE:
     app.include_router(bg_monitoring_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("Mounted: Background Task Monitoring API at /monitor/background - no more fire-and-forget")
+
+# Always-Know Observability Brain (2025-12-29) - Deep continuous monitoring
+if ALWAYS_KNOW_AVAILABLE:
+    app.include_router(always_know_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: Always-Know Brain at /always-know - continuous state awareness")
 
 # Import and include analytics router
 try:
