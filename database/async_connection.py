@@ -136,6 +136,15 @@ class AsyncDatabasePool(BasePool):
             raise RuntimeError("Database pool not initialized. Call initialize() first.")
         return self._pool
 
+    def acquire(self):
+        """Acquire a connection from the pool - delegates to underlying asyncpg pool.
+        This method provides compatibility for code that calls pool.acquire() directly.
+        Usage: async with pool.acquire() as conn: ...
+        """
+        if self._pool is None:
+            raise RuntimeError("Database pool not initialized. Call initialize() first.")
+        return self._pool.acquire()
+
     async def fetch(
         self,
         query: str,
