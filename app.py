@@ -195,7 +195,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.38.0"  # CRITICAL: Fixed consciousness_loop + system_awareness connection pool exhaustion
+VERSION = "9.39.0"  # CRITICAL: Complete connection pool fix - 12+ modules converted to shared pool
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)

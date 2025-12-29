@@ -302,43 +302,40 @@ class AUREA:
             return self._sync_execute(query, *args)
 
     def _sync_fetch(self, query: str, *args) -> List[Dict]:
-        """Sync fallback for fetch"""
+        """Sync fallback for fetch - uses shared pool"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute(query, args if args else None)
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
-            return [dict(r) for r in rows] if rows else []
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                cur.execute(query, args if args else None)
+                rows = cur.fetchall()
+                cur.close()
+                return [dict(r) for r in rows] if rows else []
         except Exception as e:
             logger.error(f"Sync fetch failed: {e}")
             return []
 
     def _sync_fetchrow(self, query: str, *args) -> Optional[Dict]:
-        """Sync fallback for fetchrow"""
+        """Sync fallback for fetchrow - uses shared pool"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute(query, args if args else None)
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            return dict(row) if row else None
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                cur.execute(query, args if args else None)
+                row = cur.fetchone()
+                cur.close()
+                return dict(row) if row else None
         except Exception as e:
             logger.error(f"Sync fetchrow failed: {e}")
             return None
 
     def _sync_execute(self, query: str, *args) -> bool:
-        """Sync fallback for execute"""
+        """Sync fallback for execute - uses shared pool"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            cur.execute(query, args if args else None)
-            conn.commit()
-            cur.close()
-            conn.close()
-            return True
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(query, args if args else None)
+                conn.commit()
+                cur.close()
+                return True
         except Exception as e:
             logger.error(f"Sync execute failed: {e}")
             return False
@@ -527,127 +524,126 @@ class AUREA:
             logger.error(f"Error storing AUREA state snapshot {state_type}: {e}")
 
     def _init_database(self):
-        """Initialize AUREA's database tables"""
+        """Initialize AUREA's database tables - uses shared pool"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor()
 
-            # Create AUREA decision log
-            cur.execute("""
-            CREATE TABLE IF NOT EXISTS aurea_decisions (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                decision_type TEXT NOT NULL,
-                description TEXT NOT NULL,
-                confidence FLOAT NOT NULL,
-                impact_assessment TEXT,
-                recommended_action TEXT,
-                alternatives JSONB,
-                requires_human_approval BOOLEAN DEFAULT FALSE,
-                human_approved BOOLEAN,
-                human_feedback TEXT,
-                execution_status TEXT CHECK (execution_status IN (
-                    'pending', 'approved', 'rejected', 'executing', 'completed', 'failed'
-                )),
-                execution_result JSONB,
-                context JSONB,
-                created_at TIMESTAMP DEFAULT NOW(),
-                executed_at TIMESTAMP,
-                tenant_id UUID
-            );
+                # Create AUREA decision log
+                cur.execute("""
+                CREATE TABLE IF NOT EXISTS aurea_decisions (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    decision_type TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    confidence FLOAT NOT NULL,
+                    impact_assessment TEXT,
+                    recommended_action TEXT,
+                    alternatives JSONB,
+                    requires_human_approval BOOLEAN DEFAULT FALSE,
+                    human_approved BOOLEAN,
+                    human_feedback TEXT,
+                    execution_status TEXT CHECK (execution_status IN (
+                        'pending', 'approved', 'rejected', 'executing', 'completed', 'failed'
+                    )),
+                    execution_result JSONB,
+                    context JSONB,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    executed_at TIMESTAMP,
+                    tenant_id UUID
+                );
 
-            CREATE INDEX IF NOT EXISTS idx_aurea_decisions_type ON aurea_decisions(decision_type);
-            CREATE INDEX IF NOT EXISTS idx_aurea_decisions_status ON aurea_decisions(execution_status);
-            CREATE INDEX IF NOT EXISTS idx_aurea_decisions_created ON aurea_decisions(created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_aurea_decisions_tenant ON aurea_decisions(tenant_id);
+                CREATE INDEX IF NOT EXISTS idx_aurea_decisions_type ON aurea_decisions(decision_type);
+                CREATE INDEX IF NOT EXISTS idx_aurea_decisions_status ON aurea_decisions(execution_status);
+                CREATE INDEX IF NOT EXISTS idx_aurea_decisions_created ON aurea_decisions(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_aurea_decisions_tenant ON aurea_decisions(tenant_id);
 
-            -- Create AUREA system state
-            CREATE TABLE IF NOT EXISTS aurea_state (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                state_type TEXT NOT NULL,
-                state_data JSONB NOT NULL,
-                cycle_number INTEGER,
-                timestamp TIMESTAMP DEFAULT NOW(),
-                tenant_id UUID
-            );
+                -- Create AUREA system state
+                CREATE TABLE IF NOT EXISTS aurea_state (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    state_type TEXT NOT NULL,
+                    state_data JSONB NOT NULL,
+                    cycle_number INTEGER,
+                    timestamp TIMESTAMP DEFAULT NOW(),
+                    tenant_id UUID
+                );
 
-            -- Create AUREA learning log
-            CREATE TABLE IF NOT EXISTS aurea_learning (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                insight_type TEXT NOT NULL,
-                insight TEXT NOT NULL,
-                confidence FLOAT,
-                source_data JSONB,
-                applied BOOLEAN DEFAULT FALSE,
-                impact_measured FLOAT,
-                created_at TIMESTAMP DEFAULT NOW(),
-                tenant_id UUID
-            );
+                -- Create AUREA learning log
+                CREATE TABLE IF NOT EXISTS aurea_learning (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    insight_type TEXT NOT NULL,
+                    insight TEXT NOT NULL,
+                    confidence FLOAT,
+                    source_data JSONB,
+                    applied BOOLEAN DEFAULT FALSE,
+                    impact_measured FLOAT,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    tenant_id UUID
+                );
 
-            -- Create AUREA cycle metrics
-            CREATE TABLE IF NOT EXISTS aurea_cycle_metrics (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                cycle_number INTEGER NOT NULL,
-                timestamp TIMESTAMP DEFAULT NOW(),
-                observations_count INTEGER,
-                decisions_count INTEGER,
-                actions_executed INTEGER,
-                actions_successful INTEGER,
-                actions_failed INTEGER,
-                cycle_duration_seconds FLOAT,
-                learning_insights_generated INTEGER,
-                health_score FLOAT,
-                autonomy_level INTEGER,
-                patterns_detected JSONB,
-                goals_achieved INTEGER,
-                goals_set INTEGER,
-                tenant_id UUID
-            );
+                -- Create AUREA cycle metrics
+                CREATE TABLE IF NOT EXISTS aurea_cycle_metrics (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    cycle_number INTEGER NOT NULL,
+                    timestamp TIMESTAMP DEFAULT NOW(),
+                    observations_count INTEGER,
+                    decisions_count INTEGER,
+                    actions_executed INTEGER,
+                    actions_successful INTEGER,
+                    actions_failed INTEGER,
+                    cycle_duration_seconds FLOAT,
+                    learning_insights_generated INTEGER,
+                    health_score FLOAT,
+                    autonomy_level INTEGER,
+                    patterns_detected JSONB,
+                    goals_achieved INTEGER,
+                    goals_set INTEGER,
+                    tenant_id UUID
+                );
 
-            CREATE INDEX IF NOT EXISTS idx_aurea_cycle_metrics_cycle ON aurea_cycle_metrics(cycle_number);
-            CREATE INDEX IF NOT EXISTS idx_aurea_cycle_metrics_timestamp ON aurea_cycle_metrics(timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_aurea_cycle_metrics_cycle ON aurea_cycle_metrics(cycle_number);
+                CREATE INDEX IF NOT EXISTS idx_aurea_cycle_metrics_timestamp ON aurea_cycle_metrics(timestamp DESC);
 
-            -- Create AUREA autonomous goals
-            CREATE TABLE IF NOT EXISTS aurea_autonomous_goals (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                goal_type TEXT NOT NULL,
-                description TEXT NOT NULL,
-                target_metric TEXT NOT NULL,
-                current_value FLOAT,
-                target_value FLOAT,
-                deadline TIMESTAMP,
-                priority INTEGER,
-                status TEXT CHECK (status IN ('active', 'achieved', 'failed', 'abandoned')),
-                progress FLOAT,
-                created_at TIMESTAMP DEFAULT NOW(),
-                updated_at TIMESTAMP DEFAULT NOW(),
-                achieved_at TIMESTAMP,
-                tenant_id UUID
-            );
+                -- Create AUREA autonomous goals
+                CREATE TABLE IF NOT EXISTS aurea_autonomous_goals (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    goal_type TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    target_metric TEXT NOT NULL,
+                    current_value FLOAT,
+                    target_value FLOAT,
+                    deadline TIMESTAMP,
+                    priority INTEGER,
+                    status TEXT CHECK (status IN ('active', 'achieved', 'failed', 'abandoned')),
+                    progress FLOAT,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    achieved_at TIMESTAMP,
+                    tenant_id UUID
+                );
 
-            CREATE INDEX IF NOT EXISTS idx_aurea_goals_status ON aurea_autonomous_goals(status);
-            CREATE INDEX IF NOT EXISTS idx_aurea_goals_priority ON aurea_autonomous_goals(priority DESC);
+                CREATE INDEX IF NOT EXISTS idx_aurea_goals_status ON aurea_autonomous_goals(status);
+                CREATE INDEX IF NOT EXISTS idx_aurea_goals_priority ON aurea_autonomous_goals(priority DESC);
 
-            -- Create AUREA pattern detection log
-            CREATE TABLE IF NOT EXISTS aurea_patterns (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                pattern_type TEXT NOT NULL,
-                pattern_description TEXT NOT NULL,
-                confidence FLOAT,
-                frequency INTEGER,
-                impact_score FLOAT,
-                pattern_data JSONB,
-                first_detected TIMESTAMP DEFAULT NOW(),
-                last_detected TIMESTAMP DEFAULT NOW(),
-                tenant_id UUID
-            );
+                -- Create AUREA pattern detection log
+                CREATE TABLE IF NOT EXISTS aurea_patterns (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    pattern_type TEXT NOT NULL,
+                    pattern_description TEXT NOT NULL,
+                    confidence FLOAT,
+                    frequency INTEGER,
+                    impact_score FLOAT,
+                    pattern_data JSONB,
+                    first_detected TIMESTAMP DEFAULT NOW(),
+                    last_detected TIMESTAMP DEFAULT NOW(),
+                    tenant_id UUID
+                );
 
-            CREATE INDEX IF NOT EXISTS idx_aurea_patterns_type ON aurea_patterns(pattern_type);
-            CREATE INDEX IF NOT EXISTS idx_aurea_patterns_confidence ON aurea_patterns(confidence DESC);
-            """)
+                CREATE INDEX IF NOT EXISTS idx_aurea_patterns_type ON aurea_patterns(pattern_type);
+                CREATE INDEX IF NOT EXISTS idx_aurea_patterns_confidence ON aurea_patterns(confidence DESC);
+                """)
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                conn.commit()
+                cur.close()
 
             logger.info("✅ AUREA database initialized")
 
@@ -1222,24 +1218,23 @@ class AUREA:
                 """, status, safe_json, decision_id)
                 logger.info(f"✅ Updated decision {decision_id} status to {status}")
             else:
-                # Sync fallback
-                conn = psycopg2.connect(**DB_CONFIG)
-                cur = conn.cursor()
-                cur.execute("""
-                UPDATE aurea_decisions
-                SET execution_status = %s,
-                    execution_result = %s,
-                    executed_at = NOW()
-                WHERE id::text = %s
-                """, (status, Json(safe_result) if safe_result else None, decision_id))
-                rows_updated = cur.rowcount
-                conn.commit()
-                cur.close()
-                conn.close()
-                if rows_updated > 0:
-                    logger.info(f"✅ Updated decision {decision_id} status to {status}")
-                else:
-                    logger.warning(f"⚠️ No decision found with id {decision_id} to update")
+                # Sync fallback - uses shared pool
+                with _get_pooled_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute("""
+                    UPDATE aurea_decisions
+                    SET execution_status = %s,
+                        execution_result = %s,
+                        executed_at = NOW()
+                    WHERE id::text = %s
+                    """, (status, Json(safe_result) if safe_result else None, decision_id))
+                    rows_updated = cur.rowcount
+                    conn.commit()
+                    cur.close()
+                    if rows_updated > 0:
+                        logger.info(f"✅ Updated decision {decision_id} status to {status}")
+                    else:
+                        logger.warning(f"⚠️ No decision found with id {decision_id} to update")
 
         except Exception as e:
             logger.error(f"Failed to update decision status: {e}")
@@ -1454,63 +1449,62 @@ class AUREA:
     async def _apply_learning(self, insight: Dict):
         """Apply learning insights to improve performance - ALWAYS stores learning data"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor()
 
-            # ALWAYS store the learning insight to the database
-            adjustment = "none"
-            if insight["type"] == "performance" and insight["data"].get("success_rate", 1.0) < 0.5:
-                adjustment = "reduced_confidence_threshold"
-            elif insight["type"] == "execution_cycle":
-                adjustment = "cycle_recorded"
+                # ALWAYS store the learning insight to the database
+                adjustment = "none"
+                if insight["type"] == "performance" and insight["data"].get("success_rate", 1.0) < 0.5:
+                    adjustment = "reduced_confidence_threshold"
+                elif insight["type"] == "execution_cycle":
+                    adjustment = "cycle_recorded"
 
-            cur.execute("""
-                INSERT INTO ai_learning_insights
-                (tenant_id, insight_type, category, insight, confidence, impact_score, recommendations, applied, metadata, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-            """, (
-                self.tenant_id,
-                insight["type"],
-                "aurea_ooda",  # category
-                insight.get("insight", f"Cycle insight: {insight['type']}"),
-                insight.get("data", {}).get("success_rate", 0.8),  # confidence
-                0.5,  # impact_score
-                json.dumps([adjustment]),  # recommendations as array
-                adjustment != "none",  # applied boolean
-                json.dumps(insight.get("data", {}))  # metadata
-            ))
-            conn.commit()
-            logger.info(f"📚 Learning recorded: {insight['type']} - {adjustment}")
-
-            if insight["type"] == "performance" and insight["data"].get("success_rate", 1.0) < 0.5:
-                # Adjust agent confidence thresholds for poor performers
-                if "agent_name" in insight["data"]:
-                    cur.execute("""
-                        UPDATE ai_agents
-                        SET config = config || '{"confidence_threshold": 0.7}'::jsonb,
-                            updated_at = NOW()
-                        WHERE name = %s AND tenant_id = %s
-                    """, (insight["data"]["agent_name"], self.tenant_id))
-
-                logger.info(f"📚 Learning applied: Adjusted confidence thresholds for low-performing agents")
-
-            elif insight["type"] == "pattern" and insight.get("pattern_confidence", 0) > 0.8:
-                # Store high-confidence patterns for future decision making
                 cur.execute("""
-                    INSERT INTO ai_decision_patterns (tenant_id, pattern_type, pattern_data, confidence, created_at)
-                    VALUES (%s, %s, %s, %s, NOW())
-                    ON CONFLICT DO NOTHING
+                    INSERT INTO ai_learning_insights
+                    (tenant_id, insight_type, category, insight, confidence, impact_score, recommendations, applied, metadata, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 """, (
                     self.tenant_id,
-                    insight.get("pattern_type", "general"),
-                    json.dumps(insight["data"]),
-                    insight.get("pattern_confidence", 0.8)
+                    insight["type"],
+                    "aurea_ooda",  # category
+                    insight.get("insight", f"Cycle insight: {insight['type']}"),
+                    insight.get("data", {}).get("success_rate", 0.8),  # confidence
+                    0.5,  # impact_score
+                    json.dumps([adjustment]),  # recommendations as array
+                    adjustment != "none",  # applied boolean
+                    json.dumps(insight.get("data", {}))  # metadata
                 ))
-                logger.info(f"📚 Learning applied: Stored new decision pattern with {insight.get('pattern_confidence', 0.8):.0%} confidence")
+                conn.commit()
+                logger.info(f"📚 Learning recorded: {insight['type']} - {adjustment}")
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                if insight["type"] == "performance" and insight["data"].get("success_rate", 1.0) < 0.5:
+                    # Adjust agent confidence thresholds for poor performers
+                    if "agent_name" in insight["data"]:
+                        cur.execute("""
+                            UPDATE ai_agents
+                            SET config = config || '{"confidence_threshold": 0.7}'::jsonb,
+                                updated_at = NOW()
+                            WHERE name = %s AND tenant_id = %s
+                        """, (insight["data"]["agent_name"], self.tenant_id))
+
+                    logger.info(f"📚 Learning applied: Adjusted confidence thresholds for low-performing agents")
+
+                elif insight["type"] == "pattern" and insight.get("pattern_confidence", 0) > 0.8:
+                    # Store high-confidence patterns for future decision making
+                    cur.execute("""
+                        INSERT INTO ai_decision_patterns (tenant_id, pattern_type, pattern_data, confidence, created_at)
+                        VALUES (%s, %s, %s, %s, NOW())
+                        ON CONFLICT DO NOTHING
+                    """, (
+                        self.tenant_id,
+                        insight.get("pattern_type", "general"),
+                        json.dumps(insight["data"]),
+                        insight.get("pattern_confidence", 0.8)
+                    ))
+                    logger.info(f"📚 Learning applied: Stored new decision pattern with {insight.get('pattern_confidence', 0.8):.0%} confidence")
+
+                conn.commit()
+                cur.close()
 
         except Exception as e:
             logger.warning(f"Could not apply learning insight: {e}")
@@ -1614,23 +1608,22 @@ class AUREA:
         for mcp_action in mcp_actions:
             logger.info(f"🔧 Executing MCP auto-remediation: {mcp_action['action']} - {mcp_action['reason']}")
             result = await self._execute_mcp_action(mcp_action["action"])
-            # Log the remediation attempt
+            # Log the remediation attempt - uses shared pool
             try:
-                conn = psycopg2.connect(**DB_CONFIG)
-                cur = conn.cursor()
-                cur.execute("""
-                    INSERT INTO remediation_history
-                    (incident_type, component, action_taken, success, recovery_time_seconds)
-                    VALUES (%s, %s, %s, %s, 0)
-                """, (
-                    mcp_action["reason"][:100],
-                    "aurea_orchestrator",
-                    mcp_action["action"],
-                    result.get("success", False)
-                ))
-                conn.commit()
-                cur.close()
-                conn.close()
+                with _get_pooled_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        INSERT INTO remediation_history
+                        (incident_type, component, action_taken, success, recovery_time_seconds)
+                        VALUES (%s, %s, %s, %s, 0)
+                    """, (
+                        mcp_action["reason"][:100],
+                        "aurea_orchestrator",
+                        mcp_action["action"],
+                        result.get("success", False)
+                    ))
+                    conn.commit()
+                    cur.close()
             except Exception as e:
                 logger.error(f"Failed to log remediation: {e}")
 
@@ -1641,36 +1634,34 @@ class AUREA:
         if action == "consolidate_memory":
             self.memory.consolidate(aggressive=True)
         elif action == "restart_failed_agents":
-            # Restart failed agents by resetting their status
+            # Restart failed agents by resetting their status - uses shared pool
             try:
-                conn = psycopg2.connect(**DB_CONFIG)
-                cur = conn.cursor()
-                cur.execute("""
-                    UPDATE ai_agents SET status = 'active', updated_at = NOW()
-                    WHERE status = 'failed' AND tenant_id = %s
-                """, (self.tenant_id,))
-                restarted = cur.rowcount
-                conn.commit()
-                cur.close()
-                conn.close()
-                logger.info(f"♻️ Restarted {restarted} failed agents")
+                with _get_pooled_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        UPDATE ai_agents SET status = 'active', updated_at = NOW()
+                        WHERE status = 'failed' AND tenant_id = %s
+                    """, (self.tenant_id,))
+                    restarted = cur.rowcount
+                    conn.commit()
+                    cur.close()
+                    logger.info(f"♻️ Restarted {restarted} failed agents")
             except Exception as e:
                 logger.error(f"Failed to restart agents: {e}")
         elif action == "clear_decision_backlog":
-            # Process backlogged decisions by marking stale ones as expired
+            # Process backlogged decisions by marking stale ones as expired - uses shared pool
             try:
-                conn = psycopg2.connect(**DB_CONFIG)
-                cur = conn.cursor()
-                cur.execute("""
-                    UPDATE aurea_decisions
-                    SET execution_status = 'expired', updated_at = NOW()
-                    WHERE execution_status = 'pending' AND created_at < NOW() - INTERVAL '24 hours'
-                """)
-                cleared = cur.rowcount
-                conn.commit()
-                cur.close()
-                conn.close()
-                logger.info(f"🧹 Cleared {cleared} stale decisions from backlog")
+                with _get_pooled_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        UPDATE aurea_decisions
+                        SET execution_status = 'expired', updated_at = NOW()
+                        WHERE execution_status = 'pending' AND created_at < NOW() - INTERVAL '24 hours'
+                    """)
+                    cleared = cur.rowcount
+                    conn.commit()
+                    cur.close()
+                    logger.info(f"🧹 Cleared {cleared} stale decisions from backlog")
             except Exception as e:
                 logger.error(f"Failed to clear decision backlog: {e}")
         elif action.startswith("mcp:"):
@@ -1776,37 +1767,38 @@ class AUREA:
             return {"success": False, "error": str(e)}
 
     async def _check_system_health(self) -> SystemHealth:
-        """Check overall system health"""
+        """Check overall system health - uses shared pool"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            # Get agent stats
-            agent_stats = self.activation_system.get_agent_stats()
+                # Get agent stats
+                agent_stats = self.activation_system.get_agent_stats()
 
-            # Get memory stats
-            memory_stats = self.memory.get_stats(self.tenant_id)
+                # Get memory stats
+                memory_stats = self.memory.get_stats(self.tenant_id)
 
-            # Get error rate from logs
-            cur.execute("""
-            SELECT
-                COUNT(CASE WHEN status = 'failed' THEN 1 END)::float /
-                NULLIF(COUNT(*), 0) as error_rate
-            FROM agent_activation_log
-            WHERE created_at > NOW() - INTERVAL '1 hour'
-            AND tenant_id = %s
-            """, (self.tenant_id,))
-            error_rate = cur.fetchone()['error_rate'] or 0
+                # Get error rate from logs
+                cur.execute("""
+                SELECT
+                    COUNT(CASE WHEN status = 'failed' THEN 1 END)::float /
+                    NULLIF(COUNT(*), 0) as error_rate
+                FROM agent_activation_log
+                WHERE created_at > NOW() - INTERVAL '1 hour'
+                AND tenant_id = %s
+                """, (self.tenant_id,))
+                error_rate = cur.fetchone()['error_rate'] or 0
 
-            # Get decision backlog
-            cur.execute("""
-            SELECT COUNT(*) as backlog
-            FROM aurea_decisions
-            WHERE execution_status = 'pending'
-              AND created_at > NOW() - INTERVAL '24 hours'
-              AND tenant_id = %s
-            """, (self.tenant_id,))
-            decision_backlog = cur.fetchone()['backlog']
+                # Get decision backlog
+                cur.execute("""
+                SELECT COUNT(*) as backlog
+                FROM aurea_decisions
+                WHERE execution_status = 'pending'
+                  AND created_at > NOW() - INTERVAL '24 hours'
+                  AND tenant_id = %s
+                """, (self.tenant_id,))
+                decision_backlog = cur.fetchone()['backlog']
+                cur.close()
 
             # Calculate performance score based on error rate and backlog
             # Performance = 100 - (Error Rate % * 0.5) - (Backlog Penalty)
@@ -1851,7 +1843,7 @@ class AUREA:
             )
 
     async def _request_human_approval(self, decision: Decision) -> bool:
-        """Request human approval for a decision"""
+        """Request human approval for a decision - uses shared pool"""
         logger.info(f"🤔 Human approval requested for: {decision.description}")
 
         # Check for test mode override
@@ -1859,94 +1851,91 @@ class AUREA:
             logger.info("⚠️ Auto-approving decision in TEST MODE")
             return True
 
-        # Store pending decision
-        conn = psycopg2.connect(**DB_CONFIG)
-        cur = conn.cursor()
-        
+        # Store pending decision - uses shared pool
         try:
-            # Update decision status
-            cur.execute("""
-            UPDATE aurea_decisions
-            SET execution_status = 'pending'
-            WHERE id = %s
-            """, (decision.id,))
-            
-            # Create notification if table exists
-            # We attempt to insert into task_notifications if it exists, otherwise rely on decision status
-            try:
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS task_notifications (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        title TEXT NOT NULL,
-                        message TEXT NOT NULL,
-                        type TEXT NOT NULL,
-                        status TEXT DEFAULT 'unread',
-                        created_at TIMESTAMP DEFAULT NOW(),
-                        tenant_id UUID
-                    )
-                """)
-                
-                cur.execute("""
-                    INSERT INTO task_notifications (title, message, type, tenant_id)
-                    VALUES (%s, %s, %s, %s)
-                """, (
-                    f"Approval Required: {decision.type.value}",
-                    f"Decision requires approval: {decision.description}",
-                    "approval_request",
-                    self.tenant_id
-                ))
-            except Exception as notify_err:
-                logger.warning(f"Could not create notification: {notify_err}")
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor()
+                try:
+                    # Update decision status
+                    cur.execute("""
+                    UPDATE aurea_decisions
+                    SET execution_status = 'pending'
+                    WHERE id = %s
+                    """, (decision.id,))
 
-            conn.commit()
-            logger.info(f"Decision {decision.id} queued for approval")
-            
+                    # Create notification if table exists
+                    try:
+                        cur.execute("""
+                            CREATE TABLE IF NOT EXISTS task_notifications (
+                                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                title TEXT NOT NULL,
+                                message TEXT NOT NULL,
+                                type TEXT NOT NULL,
+                                status TEXT DEFAULT 'unread',
+                                created_at TIMESTAMP DEFAULT NOW(),
+                                tenant_id UUID
+                            )
+                        """)
+
+                        cur.execute("""
+                            INSERT INTO task_notifications (title, message, type, tenant_id)
+                            VALUES (%s, %s, %s, %s)
+                        """, (
+                            f"Approval Required: {decision.type.value}",
+                            f"Decision requires approval: {decision.description}",
+                            "approval_request",
+                            self.tenant_id
+                        ))
+                    except Exception as notify_err:
+                        logger.warning(f"Could not create notification: {notify_err}")
+
+                    conn.commit()
+                    logger.info(f"Decision {decision.id} queued for approval")
+                finally:
+                    cur.close()
+
         except Exception as e:
             logger.error(f"Failed to queue decision for approval: {e}")
             return False
-        finally:
-            cur.close()
-            conn.close()
 
         return False
 
     def _log_decision(self, decision: Decision) -> Optional[str]:
-        """Log decision to database and return the database UUID"""
+        """Log decision to database and return the database UUID - uses shared pool"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor()
 
-            cur.execute("""
-            INSERT INTO aurea_decisions
-            (decision_type, description, confidence, impact_assessment,
-             recommended_action, alternatives, requires_human_approval,
-             execution_status, context, tenant_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-            """, (
-                decision.type.value,
-                decision.description,
-                decision.confidence,
-                decision.impact_assessment,
-                decision.recommended_action,
-                Json(decision.alternatives),
-                decision.requires_human_approval,
-                "pending",
-                Json(decision.context),
-                self.tenant_id
-            ))
+                cur.execute("""
+                INSERT INTO aurea_decisions
+                (decision_type, description, confidence, impact_assessment,
+                 recommended_action, alternatives, requires_human_approval,
+                 execution_status, context, tenant_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """, (
+                    decision.type.value,
+                    decision.description,
+                    decision.confidence,
+                    decision.impact_assessment,
+                    decision.recommended_action,
+                    Json(decision.alternatives),
+                    decision.requires_human_approval,
+                    "pending",
+                    Json(decision.context),
+                    self.tenant_id
+                ))
 
-            result = cur.fetchone()
-            db_id = str(result[0]) if result else None
+                result = cur.fetchone()
+                db_id = str(result[0]) if result else None
 
-            # Store the database ID on the decision for later use
-            decision.db_id = db_id
+                # Store the database ID on the decision for later use
+                decision.db_id = db_id
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                conn.commit()
+                cur.close()
 
-            return db_id
+                return db_id
 
         except Exception as e:
             logger.error(f"Failed to log decision: {e}")
@@ -2023,27 +2012,26 @@ class AUREA:
                         "data": {"cycle_times": cycle_times}
                     })
 
-            # Store detected patterns
+            # Store detected patterns - uses shared pool
             for pattern in patterns:
                 try:
-                    conn = psycopg2.connect(**DB_CONFIG)
-                    cur = conn.cursor()
-                    cur.execute("""
-                        INSERT INTO aurea_patterns (pattern_type, pattern_description, confidence,
-                                                     frequency, impact_score, pattern_data, tenant_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        pattern["type"],
-                        pattern["description"],
-                        pattern["confidence"],
-                        1,
-                        0.7,
-                        Json(pattern.get("data", {})),
-                        self.tenant_id
-                    ))
-                    conn.commit()
-                    cur.close()
-                    conn.close()
+                    with _get_pooled_connection() as conn:
+                        cur = conn.cursor()
+                        cur.execute("""
+                            INSERT INTO aurea_patterns (pattern_type, pattern_description, confidence,
+                                                         frequency, impact_score, pattern_data, tenant_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            pattern["type"],
+                            pattern["description"],
+                            pattern["confidence"],
+                            1,
+                            0.7,
+                            Json(pattern.get("data", {})),
+                            self.tenant_id
+                        ))
+                        conn.commit()
+                        cur.close()
                 except Exception as e:
                     logger.warning(f"Failed to store pattern: {e}")
 
@@ -2121,19 +2109,18 @@ class AUREA:
         return 0.0
 
     async def _update_goal_in_db(self, goal: AutonomousGoal):
-        """Update goal in database"""
+        """Update goal in database - uses shared pool"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            cur.execute("""
-                UPDATE aurea_autonomous_goals
-                SET current_value = %s, progress = %s, status = %s, updated_at = NOW(),
-                    achieved_at = CASE WHEN %s = 'achieved' THEN NOW() ELSE achieved_at END
-                WHERE id = %s
-            """, (goal.current_value, goal.progress, goal.status, goal.status, goal.id))
-            conn.commit()
-            cur.close()
-            conn.close()
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    UPDATE aurea_autonomous_goals
+                    SET current_value = %s, progress = %s, status = %s, updated_at = NOW(),
+                        achieved_at = CASE WHEN %s = 'achieved' THEN NOW() ELSE achieved_at END
+                    WHERE id = %s
+                """, (goal.current_value, goal.progress, goal.status, goal.status, goal.id))
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.error(f"Goal update error: {e}")
 
@@ -2251,23 +2238,22 @@ class AUREA:
         return new_goals
 
     async def _store_goal_in_db(self, goal: AutonomousGoal):
-        """Store new goal in database"""
+        """Store new goal in database - uses shared pool"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO aurea_autonomous_goals
-                (id, goal_type, description, target_metric, current_value, target_value,
-                 deadline, priority, status, progress, tenant_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                goal.id, goal.goal_type, goal.description, goal.target_metric,
-                goal.current_value, goal.target_value, goal.deadline, goal.priority,
-                goal.status, goal.progress, self.tenant_id
-            ))
-            conn.commit()
-            cur.close()
-            conn.close()
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO aurea_autonomous_goals
+                    (id, goal_type, description, target_metric, current_value, target_value,
+                     deadline, priority, status, progress, tenant_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    goal.id, goal.goal_type, goal.description, goal.target_metric,
+                    goal.current_value, goal.target_value, goal.deadline, goal.priority,
+                    goal.status, goal.progress, self.tenant_id
+                ))
+                conn.commit()
+                cur.close()
             logger.info(f"🎯 New autonomous goal set: {goal.description}")
         except Exception as e:
             logger.error(f"Goal storage error: {e}")
@@ -2306,24 +2292,25 @@ class AUREA:
             logger.error(f"Self-improvement error: {e}")
 
     async def _analyze_decision_patterns(self):
-        """Analyze decision patterns and adjust confidence thresholds"""
+        """Analyze decision patterns and adjust confidence thresholds - uses shared pool"""
         try:
             # Query recent decision outcomes
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            cur.execute("""
-                SELECT decision_type, confidence, execution_status,
-                       COUNT(*) as count,
-                       AVG(confidence) as avg_confidence
-                FROM aurea_decisions
-                WHERE created_at > NOW() - INTERVAL '24 hours'
-                  AND tenant_id = %s
-                GROUP BY decision_type, confidence, execution_status
-                ORDER BY decision_type, confidence DESC
-            """, (self.tenant_id,))
+                cur.execute("""
+                    SELECT decision_type, confidence, execution_status,
+                           COUNT(*) as count,
+                           AVG(confidence) as avg_confidence
+                    FROM aurea_decisions
+                    WHERE created_at > NOW() - INTERVAL '24 hours'
+                      AND tenant_id = %s
+                    GROUP BY decision_type, confidence, execution_status
+                    ORDER BY decision_type, confidence DESC
+                """, (self.tenant_id,))
 
-            patterns = cur.fetchall()
+                patterns = cur.fetchall()
+                cur.close()
 
             # Analyze patterns and adjust thresholds
             for pattern in patterns:
@@ -2348,37 +2335,33 @@ class AUREA:
                         source="aurea_pattern_analysis"
                     )
 
-            cur.close()
-            conn.close()
-
         except Exception as e:
             logger.error(f"Decision pattern analysis error: {e}")
 
     async def _store_cycle_metrics(self, metrics: CycleMetrics):
-        """Store cycle metrics in database"""
+        """Store cycle metrics in database - uses shared pool"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
+            with _get_pooled_connection() as conn:
+                cur = conn.cursor()
 
-            cur.execute("""
-                INSERT INTO aurea_cycle_metrics
-                (cycle_number, timestamp, observations_count, decisions_count,
-                 actions_executed, actions_successful, actions_failed, cycle_duration_seconds,
-                 learning_insights_generated, health_score, autonomy_level,
-                 patterns_detected, goals_achieved, goals_set, tenant_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                metrics.cycle_number, metrics.timestamp, metrics.observations_count,
-                metrics.decisions_count, metrics.actions_executed, metrics.actions_successful,
-                metrics.actions_failed, metrics.cycle_duration_seconds,
-                metrics.learning_insights_generated, metrics.health_score,
-                metrics.autonomy_level, Json(metrics.patterns_detected),
-                metrics.goals_achieved, metrics.goals_set, self.tenant_id
-            ))
+                cur.execute("""
+                    INSERT INTO aurea_cycle_metrics
+                    (cycle_number, timestamp, observations_count, decisions_count,
+                     actions_executed, actions_successful, actions_failed, cycle_duration_seconds,
+                     learning_insights_generated, health_score, autonomy_level,
+                     patterns_detected, goals_achieved, goals_set, tenant_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    metrics.cycle_number, metrics.timestamp, metrics.observations_count,
+                    metrics.decisions_count, metrics.actions_executed, metrics.actions_successful,
+                    metrics.actions_failed, metrics.cycle_duration_seconds,
+                    metrics.learning_insights_generated, metrics.health_score,
+                    metrics.autonomy_level, Json(metrics.patterns_detected),
+                    metrics.goals_achieved, metrics.goals_set, self.tenant_id
+                ))
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                conn.commit()
+                cur.close()
 
             # Also store in unified brain
             self.brain.store(
