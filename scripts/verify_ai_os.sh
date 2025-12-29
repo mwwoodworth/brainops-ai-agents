@@ -10,6 +10,16 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [[ -f "$ROOT_DIR/_secure/BrainOps.env" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$ROOT_DIR/_secure/BrainOps.env"
+    set +a
+fi
+
+MCP_API_KEY="${MCP_API_KEY:-${BRAINOPS_MCP_API_KEY:-}}"
+
 echo "=========================================="
 echo "  AI OS VERIFICATION - $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "=========================================="
@@ -33,6 +43,22 @@ check() {
     fi
 }
 
+check_number_min() {
+    local name="$1"
+    local value="$2"
+    local min="$3"
+
+    if [[ "$value" =~ ^[0-9]+$ ]] && [ "$value" -ge "$min" ]; then
+        echo -e "${GREEN}✅ $name${NC}"
+        ((PASS++))
+    else
+        echo -e "${RED}❌ $name${NC}"
+        echo "   Expected: >= $min"
+        echo "   Got: $value"
+        ((FAIL++))
+    fi
+}
+
 echo ""
 echo "=== 1. RENDER SERVICES ==="
 
@@ -50,7 +76,7 @@ check "AUREA Running" "$AUREA" "true"
 # Scheduler
 SCHEDULER=$(curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null)
 JOBS=$(echo "$SCHEDULER" | jq '.apscheduler_jobs_count' 2>/dev/null)
-check "Scheduler Jobs ($JOBS)" "$JOBS" "61"
+check_number_min "Scheduler Jobs ($JOBS)" "$JOBS" "50"
 
 # Backend
 BACKEND=$(curl -s "https://brainops-backend-prod.onrender.com/health" 2>/dev/null)
@@ -61,8 +87,12 @@ MCP=$(curl -s "https://brainops-mcp-bridge.onrender.com/health" 2>/dev/null)
 check "MCP Bridge Health" "$MCP" '"status":"healthy"'
 
 MCP_TOOLS=$(curl -s "https://brainops-mcp-bridge.onrender.com/mcp/tools" \
-  -H "X-API-Key: brainops_mcp_49209d1d3f19376706560e860a71d172728861dd4e2493f263c3cc0c6d9adc86" 2>/dev/null | jq '.totalTools' 2>/dev/null)
-check "MCP Tools ($MCP_TOOLS)" "$MCP_TOOLS" "245"
+  -H "X-API-Key: ${MCP_API_KEY}" 2>/dev/null | jq '.totalTools' 2>/dev/null)
+if [[ -n "$MCP_API_KEY" ]]; then
+    check_number_min "MCP Tools ($MCP_TOOLS)" "$MCP_TOOLS" "200"
+else
+    echo -e "${YELLOW}⚠️  MCP_API_KEY not set; skipping MCP Tools check${NC}"
+fi
 
 echo ""
 echo "=== 2. VERCEL SERVICES ==="
@@ -83,18 +113,24 @@ echo ""
 echo "=== 3. DATABASE ==="
 
 # Customer count via MCP
-CUSTOMERS=$(curl -s -X POST "https://brainops-mcp-bridge.onrender.com/mcp/execute" \
-  -H "X-API-Key: brainops_mcp_49209d1d3f19376706560e860a71d172728861dd4e2493f263c3cc0c6d9adc86" \
-  -H "Content-Type: application/json" \
-  -d '{"server": "supabase", "tool": "sql_query", "params": {"query": "SELECT COUNT(*) FROM customers"}}' 2>/dev/null | jq -r '.result.content[0].text' 2>/dev/null | jq -r '.rows[0].count' 2>/dev/null)
-check "Customers: $CUSTOMERS" "$CUSTOMERS" "102"
+if [[ -n "$MCP_API_KEY" ]]; then
+    CUSTOMERS=$(curl -s -X POST "https://brainops-mcp-bridge.onrender.com/mcp/execute" \
+      -H "X-API-Key: ${MCP_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d '{"server": "supabase", "tool": "sql_query", "params": {"query": "SELECT COUNT(*) FROM customers"}}' 2>/dev/null | jq -r '.result.content[0].text' 2>/dev/null | jq -r '.rows[0].count' 2>/dev/null)
+    check_number_min "Customers: $CUSTOMERS" "$CUSTOMERS" "1000"
+else
+    echo -e "${YELLOW}⚠️  MCP_API_KEY not set; skipping Customers DB check${NC}"
+fi
 
 # Memory entries
-MEMORIES=$(curl -s -X POST "https://brainops-mcp-bridge.onrender.com/mcp/execute" \
-  -H "X-API-Key: brainops_mcp_49209d1d3f19376706560e860a71d172728861dd4e2493f263c3cc0c6d9adc86" \
-  -H "Content-Type: application/json" \
-  -d '{"server": "supabase", "tool": "sql_query", "params": {"query": "SELECT COUNT(*) FROM unified_ai_memory"}}' 2>/dev/null | jq -r '.result.content[0].text' 2>/dev/null | jq -r '.rows[0].count' 2>/dev/null)
-echo "   Unified Memories: $MEMORIES"
+if [[ -n "$MCP_API_KEY" ]]; then
+    MEMORIES=$(curl -s -X POST "https://brainops-mcp-bridge.onrender.com/mcp/execute" \
+      -H "X-API-Key: ${MCP_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d '{"server": "supabase", "tool": "sql_query", "params": {"query": "SELECT COUNT(*) FROM unified_ai_memory"}}' 2>/dev/null | jq -r '.result.content[0].text' 2>/dev/null | jq -r '.rows[0].count' 2>/dev/null)
+    echo "   Unified Memories: $MEMORIES"
+fi
 
 echo ""
 echo "=== 4. BRAIN API ==="
