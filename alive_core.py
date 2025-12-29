@@ -179,9 +179,46 @@ class AliveCore:
         # Schema is pre-created in database - skip blocking init
         # self._ensure_schema() - tables already exist
 
+    # Shared connection pool for all instances
+    _connection_pool = None
+    _pool_lock = threading.Lock()
+
+    @classmethod
+    def _get_pool(cls):
+        """Get or create the shared connection pool"""
+        if cls._connection_pool is None:
+            with cls._pool_lock:
+                if cls._connection_pool is None:
+                    from psycopg2 import pool
+                    cls._connection_pool = pool.ThreadedConnectionPool(
+                        minconn=2,
+                        maxconn=10,
+                        **DB_CONFIG
+                    )
+                    logger.info("✅ Created AliveCore connection pool (2-10 connections)")
+        return cls._connection_pool
+
     def _get_connection(self):
-        """Get database connection"""
-        return psycopg2.connect(**DB_CONFIG)
+        """Get database connection from pool"""
+        try:
+            pool = self._get_pool()
+            return pool.getconn()
+        except Exception as e:
+            logger.warning(f"Pool connection failed, falling back to direct: {e}")
+            return psycopg2.connect(**DB_CONFIG)
+
+    def _return_connection(self, conn):
+        """Return connection to pool"""
+        try:
+            pool = self._get_pool()
+            if pool and conn:
+                pool.putconn(conn)
+        except Exception as e:
+            logger.warning(f"Could not return connection to pool: {e}")
+            try:
+                conn.close()
+            except:
+                pass
 
     def _ensure_schema(self):
         """Create required database tables"""

@@ -736,7 +736,7 @@ class RevenueAutomationEngine:
         })
 
     async def _send_automated_email(self, lead: Lead, template: str):
-        """Send automated email via SendGrid"""
+        """Send automated email via SendGrid - REAL IMPLEMENTATION"""
         if not SENDGRID_API_KEY:
             logger.warning("SendGrid not configured - email not sent")
             lead.automation_history.append({
@@ -746,16 +746,155 @@ class RevenueAutomationEngine:
             })
             return
 
-        # In production, this would use SendGrid API
-        logger.info(f"Would send email to {lead.email} using template: {template}")
+        try:
+            import sendgrid
+            from sendgrid.helpers.mail import Mail, Email, To, Content
+
+            # Get template content based on template name
+            template_content = self._get_email_template(template, lead)
+
+            sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
+            message = Mail(
+                from_email=Email("noreply@brainops.ai", "BrainOps AI"),
+                to_emails=To(lead.email, f"{lead.first_name} {lead.last_name}"),
+                subject=template_content.get("subject", f"Message from BrainOps"),
+                html_content=Content("text/html", template_content.get("body", ""))
+            )
+
+            response = sg.send(message)
+
+            # Log to database
+            await self._log_email_sent(lead.lead_id, lead.email, template, response.status_code)
+
+            lead.automation_history.append({
+                "action": "email_sent",
+                "template": template,
+                "status_code": response.status_code,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            logger.info(f"✅ Email sent to {lead.email} using template: {template}")
+
+        except ImportError:
+            logger.warning("SendGrid library not installed - using fallback logging")
+            lead.automation_history.append({
+                "action": "email_logged",
+                "template": template,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+        except Exception as e:
+            logger.error(f"SendGrid email failed: {e}")
+            lead.automation_history.append({
+                "action": "email_failed",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
+    def _get_email_template(self, template: str, lead: Lead) -> Dict[str, str]:
+        """Get email template content with personalization"""
+        templates = {
+            "welcome": {
+                "subject": f"Welcome to BrainOps, {lead.first_name}!",
+                "body": f"""
+                <h1>Welcome, {lead.first_name}!</h1>
+                <p>Thank you for your interest in BrainOps AI solutions.</p>
+                <p>We're excited to help you automate your {lead.industry.value} business.</p>
+                <p>Best regards,<br>The BrainOps Team</p>
+                """
+            },
+            "follow_up": {
+                "subject": f"{lead.first_name}, let's continue our conversation",
+                "body": f"""
+                <h1>Hi {lead.first_name},</h1>
+                <p>We wanted to follow up on our previous communication.</p>
+                <p>Are you ready to take the next step with BrainOps AI?</p>
+                <p>Best regards,<br>The BrainOps Team</p>
+                """
+            },
+            "proposal": {
+                "subject": f"Your Custom Proposal from BrainOps",
+                "body": f"""
+                <h1>Hi {lead.first_name},</h1>
+                <p>Based on our conversation, we've prepared a custom proposal for your {lead.industry.value} business.</p>
+                <p>Click below to view your personalized pricing.</p>
+                <p>Best regards,<br>The BrainOps Team</p>
+                """
+            },
+            "default": {
+                "subject": f"Message from BrainOps",
+                "body": f"<p>Hi {lead.first_name}, we have an update for you.</p>"
+            }
+        }
+        return templates.get(template, templates["default"])
+
+    async def _log_email_sent(self, lead_id: str, email: str, template: str, status_code: int):
+        """Log email to database for tracking"""
+        try:
+            from database.async_connection import get_pool
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute("""
+                    INSERT INTO ai_email_deliveries (recipient, status, created_at)
+                    VALUES ($1, $2, NOW())
+                """, email, 'sent' if status_code == 202 else 'failed')
+        except Exception as e:
+            logger.warning(f"Could not log email delivery: {e}")
 
     async def _send_automated_sms(self, lead: Lead, template: str):
-        """Send automated SMS via Twilio"""
-        if not TWILIO_SID or not lead.phone:
+        """Send automated SMS via Twilio - REAL IMPLEMENTATION"""
+        if not TWILIO_SID or not TWILIO_TOKEN:
+            logger.warning("Twilio not configured - SMS not sent")
             return
 
-        # In production, this would use Twilio API
-        logger.info(f"Would send SMS to {lead.phone} using template: {template}")
+        if not lead.phone:
+            logger.warning(f"No phone number for lead {lead.lead_id}")
+            return
+
+        try:
+            from twilio.rest import Client
+
+            client = Client(TWILIO_SID, TWILIO_TOKEN)
+
+            # Get SMS content based on template
+            sms_content = self._get_sms_template(template, lead)
+
+            message = client.messages.create(
+                body=sms_content,
+                from_=os.getenv("TWILIO_PHONE_NUMBER", "+15005550006"),  # Twilio test number as fallback
+                to=lead.phone
+            )
+
+            lead.automation_history.append({
+                "action": "sms_sent",
+                "template": template,
+                "message_sid": message.sid,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            logger.info(f"✅ SMS sent to {lead.phone}: {message.sid}")
+
+        except ImportError:
+            logger.warning("Twilio library not installed - SMS logged only")
+            lead.automation_history.append({
+                "action": "sms_logged",
+                "template": template,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+        except Exception as e:
+            logger.error(f"Twilio SMS failed: {e}")
+            lead.automation_history.append({
+                "action": "sms_failed",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
+    def _get_sms_template(self, template: str, lead: Lead) -> str:
+        """Get SMS template content"""
+        templates = {
+            "welcome": f"Hi {lead.first_name}! Welcome to BrainOps. We're excited to help your {lead.industry.value} business grow!",
+            "follow_up": f"Hi {lead.first_name}, just checking in! Ready to discuss how BrainOps can help your business?",
+            "reminder": f"Hi {lead.first_name}, don't forget about your pending proposal from BrainOps!",
+            "default": f"Hi {lead.first_name}, BrainOps has an update for you."
+        }
+        return templates.get(template, templates["default"])
 
     async def _notify_sales_team(self, lead: Lead, reason: str):
         """Notify sales team about a lead"""
@@ -869,8 +1008,14 @@ class RevenueAutomationEngine:
 
         self.transactions[transaction_id] = transaction
 
-        # In production, create Stripe payment link
-        payment_url = f"https://pay.brainops.ai/{transaction_id}"
+        # Create real Stripe payment link
+        payment_url = await self._create_stripe_payment_link(
+            transaction_id=transaction_id,
+            amount=amount,
+            product_service=product_service,
+            description=description,
+            lead=lead
+        )
 
         lead.automation_history.append({
             "action": "payment_link_created",
@@ -889,6 +1034,60 @@ class RevenueAutomationEngine:
             "currency": "USD",
             "status": "pending"
         }
+
+    async def _create_stripe_payment_link(
+        self,
+        transaction_id: str,
+        amount: float,
+        product_service: str,
+        description: Optional[str],
+        lead: Lead
+    ) -> str:
+        """Create real Stripe payment link - PRODUCTION IMPLEMENTATION"""
+        if not STRIPE_API_KEY:
+            logger.warning("Stripe not configured - using placeholder URL")
+            return f"https://pay.brainops.ai/{transaction_id}"
+
+        try:
+            import stripe
+            stripe.api_key = STRIPE_API_KEY
+
+            # Create a Stripe Payment Link
+            payment_link = stripe.PaymentLink.create(
+                line_items=[{
+                    'price_data': {
+                        'currency': 'usd',
+                        'product_data': {
+                            'name': product_service,
+                            'description': description or f"Payment for {product_service}",
+                        },
+                        'unit_amount': int(amount * 100),  # Stripe uses cents
+                    },
+                    'quantity': 1,
+                }],
+                metadata={
+                    'transaction_id': transaction_id,
+                    'lead_id': lead.lead_id,
+                    'industry': lead.industry.value,
+                },
+                after_completion={
+                    'type': 'redirect',
+                    'redirect': {
+                        'url': 'https://brainops.ai/payment-success?session_id={CHECKOUT_SESSION_ID}'
+                    }
+                }
+            )
+
+            logger.info(f"✅ Stripe payment link created: {payment_link.url}")
+            return payment_link.url
+
+        except ImportError:
+            logger.warning("Stripe library not installed - using placeholder URL")
+            return f"https://pay.brainops.ai/{transaction_id}"
+        except Exception as e:
+            logger.error(f"Stripe payment link creation failed: {e}")
+            # Return a fallback URL that will show an error page
+            return f"https://pay.brainops.ai/error/{transaction_id}"
 
     async def process_payment_webhook(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Process payment webhook from Stripe"""
