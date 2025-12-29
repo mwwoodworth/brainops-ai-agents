@@ -1161,14 +1161,13 @@ class MonitorAgent(BaseAgent):
 
         # Check database
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) as customers FROM customers")
-            customer_count = cursor.fetchone()['customers']
-            cursor.execute("SELECT COUNT(*) as jobs FROM jobs")
-            job_count = cursor.fetchone()['jobs']
-            cursor.close()
-            conn.close()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) as customers FROM customers")
+                customer_count = cursor.fetchone()['customers']
+                cursor.execute("SELECT COUNT(*) as jobs FROM jobs")
+                job_count = cursor.fetchone()['jobs']
+                cursor.close()
 
             results["checks"]["database"] = {
                 "status": "healthy",
@@ -1218,17 +1217,16 @@ class MonitorAgent(BaseAgent):
     async def check_database(self) -> Dict[str, Any]:
         """Check database health"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM customers) as customers,
-                    (SELECT COUNT(*) FROM jobs) as jobs,
-                    (SELECT COUNT(*) FROM ai_agents) as agents
-            """)
-            stats = cursor.fetchone()
-            cursor.close()
-            conn.close()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT
+                        (SELECT COUNT(*) FROM customers) as customers,
+                        (SELECT COUNT(*) FROM jobs) as jobs,
+                        (SELECT COUNT(*) FROM ai_agents) as agents
+                """)
+                stats = cursor.fetchone()
+                cursor.close()
             return {"status": "healthy", "stats": dict(stats)}
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -1307,11 +1305,10 @@ class SystemMonitorAgent(BaseAgent):
         elif service == "database":
             # Try to reconnect/optimize
             try:
-                conn = self.get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("SELECT pg_stat_reset()")
-                cursor.close()
-                conn.close()
+                with self.get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT pg_stat_reset()")
+                    cursor.close()
                 return {
                     "service": service,
                     "action": "stats_reset",
@@ -1472,38 +1469,37 @@ class DatabaseOptimizerAgent(BaseAgent):
     async def analyze_performance(self) -> Dict:
         """Analyze database performance"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            # Get table sizes
-            cursor.execute("""
-                SELECT
-                    schemaname,
-                    tablename,
-                    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size,
-                    n_live_tup as rows
-                FROM pg_stat_user_tables
-                ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
-                LIMIT 10
-            """)
-            table_sizes = cursor.fetchall()
+                # Get table sizes
+                cursor.execute("""
+                    SELECT
+                        schemaname,
+                        tablename,
+                        pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size,
+                        n_live_tup as rows
+                    FROM pg_stat_user_tables
+                    ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+                    LIMIT 10
+                """)
+                table_sizes = cursor.fetchall()
 
-            # Get slow queries
-            cursor.execute("""
-                SELECT
-                    calls,
-                    total_exec_time,
-                    mean_exec_time,
-                    query
-                FROM pg_stat_statements
-                WHERE query NOT LIKE '%pg_stat%'
-                ORDER BY mean_exec_time DESC
-                LIMIT 5
-            """)
-            slow_queries = cursor.fetchall() if cursor.rowcount > 0 else []
+                # Get slow queries
+                cursor.execute("""
+                    SELECT
+                        calls,
+                        total_exec_time,
+                        mean_exec_time,
+                        query
+                    FROM pg_stat_statements
+                    WHERE query NOT LIKE '%pg_stat%'
+                    ORDER BY mean_exec_time DESC
+                    LIMIT 5
+                """)
+                slow_queries = cursor.fetchall() if cursor.rowcount > 0 else []
 
-            cursor.close()
-            conn.close()
+                cursor.close()
 
             return {
                 "status": "completed",
@@ -1519,34 +1515,33 @@ class DatabaseOptimizerAgent(BaseAgent):
     async def optimize_database(self) -> Dict:
         """Run optimization commands"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            optimizations = []
+                optimizations = []
 
-            # Vacuum analyze
-            cursor.execute("VACUUM ANALYZE")
-            optimizations.append("VACUUM ANALYZE completed")
+                # Vacuum analyze
+                cursor.execute("VACUUM ANALYZE")
+                optimizations.append("VACUUM ANALYZE completed")
 
-            # Reindex
-            cursor.execute("""
-                SELECT 'REINDEX TABLE ' || tablename || ';' as cmd
-                FROM pg_tables
-                WHERE schemaname = 'public'
-                LIMIT 5
-            """)
-            reindex_cmds = cursor.fetchall()
+                # Reindex
+                cursor.execute("""
+                    SELECT 'REINDEX TABLE ' || tablename || ';' as cmd
+                    FROM pg_tables
+                    WHERE schemaname = 'public'
+                    LIMIT 5
+                """)
+                reindex_cmds = cursor.fetchall()
 
-            for cmd in reindex_cmds:
-                try:
-                    cursor.execute(cmd['cmd'])
-                    optimizations.append(f"Reindexed: {cmd['cmd']}")
-                except Exception as reindex_error:
-                    logger.warning(f"Reindex operation failed: {cmd.get('cmd', 'unknown')}: {reindex_error}")
+                for cmd in reindex_cmds:
+                    try:
+                        cursor.execute(cmd['cmd'])
+                        optimizations.append(f"Reindexed: {cmd['cmd']}")
+                    except Exception as reindex_error:
+                        logger.warning(f"Reindex operation failed: {cmd.get('cmd', 'unknown')}: {reindex_error}")
 
-            conn.commit()
-            cursor.close()
-            conn.close()
+                conn.commit()
+                cursor.close()
 
             return {
                 "status": "completed",
@@ -1559,21 +1554,20 @@ class DatabaseOptimizerAgent(BaseAgent):
     async def cleanup_tables(self) -> Dict:
         """Clean up unnecessary data"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            cleanups = []
+                cleanups = []
 
-            # Clean old logs
-            cursor.execute("""
-                DELETE FROM agent_executions
-                WHERE completed_at < NOW() - INTERVAL '30 days'
-            """)
-            cleanups.append(f"Deleted {cursor.rowcount} old agent executions")
+                # Clean old logs
+                cursor.execute("""
+                    DELETE FROM agent_executions
+                    WHERE completed_at < NOW() - INTERVAL '30 days'
+                """)
+                cleanups.append(f"Deleted {cursor.rowcount} old agent executions")
 
-            conn.commit()
-            cursor.close()
-            conn.close()
+                conn.commit()
+                cursor.close()
 
             return {
                 "status": "completed",
@@ -1689,19 +1683,18 @@ class WorkflowEngineAgent(BaseAgent):
 
         # Fallback if no job_id provided - Try to find a recent completed job without invoice
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id FROM jobs 
-                WHERE status = 'completed' 
-                AND id NOT IN (SELECT job_id FROM invoices)
-                ORDER BY completed_at DESC
-                LIMIT 1
-            """)
-            recent_job = cursor.fetchone()
-            cursor.close()
-            conn.close()
-            
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id FROM jobs
+                    WHERE status = 'completed'
+                    AND id NOT IN (SELECT job_id FROM invoices)
+                    ORDER BY completed_at DESC
+                    LIMIT 1
+                """)
+                recent_job = cursor.fetchone()
+                cursor.close()
+
             if recent_job:
                 task['job_id'] = recent_job['id']
                 task['action'] = 'generate'
@@ -1746,34 +1739,33 @@ class CustomerAgent(BaseAgent):
     async def analyze_customers(self) -> Dict:
         """Analyze customer data with AI insights"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            # Get customer statistics
-            cursor.execute("""
-                SELECT
-                    COUNT(*) as total_customers,
-                    COUNT(CASE WHEN created_at > NOW() - INTERVAL '30 days' THEN 1 END) as new_customers,
-                    COUNT(CASE WHEN status = 'active' THEN 1 END) as active_customers
-                FROM customers
-            """)
-            stats = cursor.fetchone()
+                # Get customer statistics
+                cursor.execute("""
+                    SELECT
+                        COUNT(*) as total_customers,
+                        COUNT(CASE WHEN created_at > NOW() - INTERVAL '30 days' THEN 1 END) as new_customers,
+                        COUNT(CASE WHEN status = 'active' THEN 1 END) as active_customers
+                    FROM customers
+                """)
+                stats = cursor.fetchone()
 
-            # Get top customers
-            cursor.execute("""
-                SELECT c.name, COUNT(j.id) as job_count, SUM(i.total_amount) as total_revenue
-                FROM customers c
-                LEFT JOIN jobs j ON c.id = j.customer_id
-                LEFT JOIN invoices i ON j.id = i.job_id
-                GROUP BY c.id, c.name
-                ORDER BY total_revenue DESC NULLS LAST
-                LIMIT 5
-            """)
-            top_customers = cursor.fetchall()
-            top_customers_list = [dict(c) for c in top_customers]
+                # Get top customers
+                cursor.execute("""
+                    SELECT c.name, COUNT(j.id) as job_count, SUM(i.total_amount) as total_revenue
+                    FROM customers c
+                    LEFT JOIN jobs j ON c.id = j.customer_id
+                    LEFT JOIN invoices i ON j.id = i.job_id
+                    GROUP BY c.id, c.name
+                    ORDER BY total_revenue DESC NULLS LAST
+                    LIMIT 5
+                """)
+                top_customers = cursor.fetchall()
+                top_customers_list = [dict(c) for c in top_customers]
 
-            cursor.close()
-            conn.close()
+                cursor.close()
             
             insights = "Insights not available."
             if USE_REAL_AI:
@@ -1801,32 +1793,31 @@ class CustomerAgent(BaseAgent):
     async def segment_customers(self) -> Dict:
         """Segment customers into categories with AI recommendations"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            # Segment by activity
-            cursor.execute("""
-                SELECT
-                    CASE
-                        WHEN job_count > 10 THEN 'VIP'
-                        WHEN job_count > 5 THEN 'Regular'
-                        WHEN job_count > 0 THEN 'Occasional'
-                        ELSE 'Prospect'
-                    END as segment,
-                    COUNT(*) as count
-                FROM (
-                    SELECT c.id, COUNT(j.id) as job_count
-                    FROM customers c
-                    LEFT JOIN jobs j ON c.id = j.customer_id
-                    GROUP BY c.id
-                ) customer_jobs
-                GROUP BY segment
-            """)
-            segments = cursor.fetchall()
-            segments_list = [dict(s) for s in segments]
+                # Segment by activity
+                cursor.execute("""
+                    SELECT
+                        CASE
+                            WHEN job_count > 10 THEN 'VIP'
+                            WHEN job_count > 5 THEN 'Regular'
+                            WHEN job_count > 0 THEN 'Occasional'
+                            ELSE 'Prospect'
+                        END as segment,
+                        COUNT(*) as count
+                    FROM (
+                        SELECT c.id, COUNT(j.id) as job_count
+                        FROM customers c
+                        LEFT JOIN jobs j ON c.id = j.customer_id
+                        GROUP BY c.id
+                    ) customer_jobs
+                    GROUP BY segment
+                """)
+                segments = cursor.fetchall()
+                segments_list = [dict(s) for s in segments]
 
-            cursor.close()
-            conn.close()
+                cursor.close()
             
             recommendations = {}
             if USE_REAL_AI:
@@ -1915,59 +1906,58 @@ class InvoicingAgent(BaseAgent):
             return {"status": "error", "message": "job_id required"}
 
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            # Get job details
-            cursor.execute("""
-                SELECT j.*, c.name as customer_name, c.email
-                FROM jobs j
-                JOIN customers c ON j.customer_id = c.id
-                WHERE j.id = %s
-            """, (job_id,))
+                # Get job details
+                cursor.execute("""
+                    SELECT j.*, c.name as customer_name, c.email
+                    FROM jobs j
+                    JOIN customers c ON j.customer_id = c.id
+                    WHERE j.id = %s
+                """, (job_id,))
 
-            job = cursor.fetchone()
-            if not job:
-                return {"status": "error", "message": "Job not found"}
+                job = cursor.fetchone()
+                if not job:
+                    return {"status": "error", "message": "Job not found"}
 
-            # Generate AI note for invoice
-            ai_note = ""
-            if USE_REAL_AI:
-                try:
-                    prompt = f"""
-                    Write a short, professional 'Thank You' note for an invoice.
-                    Customer: {job['customer_name']}
-                    Job Description: {job.get('description', 'Roofing Services')}
-                    
-                    Keep it warm but professional. Max 2 sentences.
-                    """
-                    ai_note = await ai_core.generate(prompt, model="gpt-3.5-turbo", temperature=0.7)
-                except Exception as e:
-                    self.logger.warning(f"AI note generation failed: {e}")
+                # Generate AI note for invoice
+                ai_note = ""
+                if USE_REAL_AI:
+                    try:
+                        prompt = f"""
+                        Write a short, professional 'Thank You' note for an invoice.
+                        Customer: {job['customer_name']}
+                        Job Description: {job.get('description', 'Roofing Services')}
 
-            # Create invoice
-            invoice_number = f"INV-{datetime.now().strftime('%Y%m%d')}-{job_id[:8]}"
-            invoice_title = f"Invoice for {job.get('description', 'Roofing Services')[:180]}"
+                        Keep it warm but professional. Max 2 sentences.
+                        """
+                        ai_note = await ai_core.generate(prompt, model="gpt-3.5-turbo", temperature=0.7)
+                    except Exception as e:
+                        self.logger.warning(f"AI note generation failed: {e}")
 
-            cursor.execute("""
-                INSERT INTO invoices (invoice_number, title, job_id, customer_id, total_amount, status, notes, created_at)
-                VALUES (%s, %s, %s, %s, %s, 'pending', %s, NOW())
-                RETURNING id
-            """, (invoice_number, invoice_title, job_id, job['customer_id'], task.get('amount', 1000), ai_note))
+                # Create invoice
+                invoice_number = f"INV-{datetime.now().strftime('%Y%m%d')}-{job_id[:8]}"
+                invoice_title = f"Invoice for {job.get('description', 'Roofing Services')[:180]}"
 
-            invoice_id = cursor.fetchone()['id']
+                cursor.execute("""
+                    INSERT INTO invoices (invoice_number, title, job_id, customer_id, total_amount, status, notes, created_at)
+                    VALUES (%s, %s, %s, %s, %s, 'pending', %s, NOW())
+                    RETURNING id
+                """, (invoice_number, invoice_title, job_id, job['customer_id'], task.get('amount', 1000), ai_note))
 
-            conn.commit()
-            cursor.close()
-            conn.close()
+                invoice_id = cursor.fetchone()['id']
 
-            return {
-                "status": "completed",
-                "invoice_id": invoice_id,
-                "invoice_number": invoice_number,
-                "customer": job['customer_name'],
-                "ai_note": ai_note
-            }
+                conn.commit()
+                cursor.close()
+
+                return {
+                    "status": "completed",
+                    "invoice_id": invoice_id,
+                    "invoice_number": invoice_number,
+                    "customer": job['customer_name'],
+                    "ai_note": ai_note
+                }
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -1979,18 +1969,17 @@ class InvoicingAgent(BaseAgent):
         if USE_REAL_AI:
             try:
                 # Fetch invoice details for context (simplified here)
-                conn = self.get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT i.*, c.name as customer_name, c.email 
-                    FROM invoices i
-                    JOIN customers c ON i.customer_id = c.id
-                    WHERE i.id = %s
-                """, (invoice_id,))
-                invoice = cursor.fetchone()
-                cursor.close()
-                conn.close()
-                
+                with self.get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT i.*, c.name as customer_name, c.email
+                        FROM invoices i
+                        JOIN customers c ON i.customer_id = c.id
+                        WHERE i.id = %s
+                    """, (invoice_id,))
+                    invoice = cursor.fetchone()
+                    cursor.close()
+
                 if invoice:
                     prompt = f"""
                     Write a polite email to send an invoice to a customer.
@@ -2020,24 +2009,23 @@ class InvoicingAgent(BaseAgent):
     async def invoice_report(self) -> Dict:
         """Generate invoice report with AI summary"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT
-                    COUNT(*) as total_invoices,
-                    COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid,
-                    COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
-                    SUM(total_amount) as total_amount
-                FROM invoices
-                WHERE created_at > NOW() - INTERVAL '30 days'
-            """)
+                cursor.execute("""
+                    SELECT
+                        COUNT(*) as total_invoices,
+                        COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid,
+                        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
+                        SUM(total_amount) as total_amount
+                    FROM invoices
+                    WHERE created_at > NOW() - INTERVAL '30 days'
+                """)
 
-            report = cursor.fetchone()
-            report_dict = dict(report)
+                report = cursor.fetchone()
+                report_dict = dict(report)
 
-            cursor.close()
-            conn.close()
+                cursor.close()
             
             summary = "Financial summary not available."
             if USE_REAL_AI:
@@ -2085,33 +2073,32 @@ class CustomerIntelligenceAgent(BaseAgent):
     async def analyze_churn_risk(self) -> Dict:
         """Analyze customer churn risk using REAL AI"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            # Identify at-risk customers
-            cursor.execute("""
-                SELECT
-                    c.id,
-                    c.name,
-                    c.email,
-                    c.phone,
-                    MAX(j.created_at) as last_job_date,
-                    EXTRACT(days FROM NOW() - MAX(j.created_at)) as days_since_last_job,
-                    COUNT(j.id) as total_jobs,
-                    AVG(i.amount) as avg_invoice_amount
-                FROM customers c
-                LEFT JOIN jobs j ON c.id = j.customer_id
-                LEFT JOIN invoices i ON c.id = i.customer_id
-                GROUP BY c.id, c.name, c.email, c.phone
-                HAVING MAX(j.created_at) < NOW() - INTERVAL '90 days'
-                ORDER BY days_since_last_job DESC
-                LIMIT 10
-            """)
+                # Identify at-risk customers
+                cursor.execute("""
+                    SELECT
+                        c.id,
+                        c.name,
+                        c.email,
+                        c.phone,
+                        MAX(j.created_at) as last_job_date,
+                        EXTRACT(days FROM NOW() - MAX(j.created_at)) as days_since_last_job,
+                        COUNT(j.id) as total_jobs,
+                        AVG(i.amount) as avg_invoice_amount
+                    FROM customers c
+                    LEFT JOIN jobs j ON c.id = j.customer_id
+                    LEFT JOIN invoices i ON c.id = i.customer_id
+                    GROUP BY c.id, c.name, c.email, c.phone
+                    HAVING MAX(j.created_at) < NOW() - INTERVAL '90 days'
+                    ORDER BY days_since_last_job DESC
+                    LIMIT 10
+                """)
 
-            at_risk = cursor.fetchall()
+                at_risk = cursor.fetchall()
 
-            cursor.close()
-            conn.close()
+                cursor.close()
 
             return {
                 "status": "completed",
@@ -2128,30 +2115,29 @@ class CustomerIntelligenceAgent(BaseAgent):
     async def calculate_lifetime_value(self) -> Dict:
         """Calculate customer lifetime value"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT
-                    c.id,
-                    c.name,
-                    COUNT(DISTINCT j.id) as total_jobs,
-                    SUM(i.total_amount) as total_revenue,
-                    AVG(i.total_amount) as avg_transaction,
-                    EXTRACT(days FROM NOW() - MIN(c.created_at))/365.0 as customer_age_years
-                FROM customers c
-                LEFT JOIN jobs j ON c.id = j.customer_id
-                LEFT JOIN invoices i ON j.id = i.job_id
-                GROUP BY c.id, c.name
-                HAVING SUM(i.total_amount) > 0
-                ORDER BY total_revenue DESC
-                LIMIT 20
-            """)
+                cursor.execute("""
+                    SELECT
+                        c.id,
+                        c.name,
+                        COUNT(DISTINCT j.id) as total_jobs,
+                        SUM(i.total_amount) as total_revenue,
+                        AVG(i.total_amount) as avg_transaction,
+                        EXTRACT(days FROM NOW() - MIN(c.created_at))/365.0 as customer_age_years
+                    FROM customers c
+                    LEFT JOIN jobs j ON c.id = j.customer_id
+                    LEFT JOIN invoices i ON j.id = i.job_id
+                    GROUP BY c.id, c.name
+                    HAVING SUM(i.total_amount) > 0
+                    ORDER BY total_revenue DESC
+                    LIMIT 20
+                """)
 
-            ltv_data = cursor.fetchall()
+                ltv_data = cursor.fetchall()
 
-            cursor.close()
-            conn.close()
+                cursor.close()
 
             return {
                 "status": "completed",
@@ -2163,21 +2149,20 @@ class CustomerIntelligenceAgent(BaseAgent):
     async def advanced_segmentation(self) -> Dict:
         """Advanced customer segmentation using Real AI"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-            
-            # Fetch sample of customers with their metrics
-            cursor.execute("""
-                SELECT c.id, c.name, COUNT(j.id) as jobs, SUM(i.total_amount) as revenue
-                FROM customers c
-                LEFT JOIN jobs j ON c.id = j.customer_id
-                LEFT JOIN invoices i ON j.id = i.job_id
-                GROUP BY c.id, c.name
-                LIMIT 50
-            """)
-            customers = cursor.fetchall()
-            cursor.close()
-            conn.close()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+
+                # Fetch sample of customers with their metrics
+                cursor.execute("""
+                    SELECT c.id, c.name, COUNT(j.id) as jobs, SUM(i.total_amount) as revenue
+                    FROM customers c
+                    LEFT JOIN jobs j ON c.id = j.customer_id
+                    LEFT JOIN invoices i ON j.id = i.job_id
+                    GROUP BY c.id, c.name
+                    LIMIT 50
+                """)
+                customers = cursor.fetchall()
+                cursor.close()
 
             if not customers:
                 return {"status": "completed", "segments": {}}
@@ -2237,25 +2222,24 @@ class PredictiveAnalyzerAgent(BaseAgent):
     async def predict_revenue(self) -> Dict:
         """Predict future revenue"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            # Get historical revenue data
-            cursor.execute("""
-                SELECT
-                    DATE_TRUNC('month', created_at) as month,
-                    SUM(total_amount) as revenue
-                FROM invoices
-                WHERE status = 'paid'
-                GROUP BY month
-                ORDER BY month DESC
-                LIMIT 12
-            """)
+                # Get historical revenue data
+                cursor.execute("""
+                    SELECT
+                        DATE_TRUNC('month', created_at) as month,
+                        SUM(total_amount) as revenue
+                    FROM invoices
+                    WHERE status = 'paid'
+                    GROUP BY month
+                    ORDER BY month DESC
+                    LIMIT 12
+                """)
 
-            historical = cursor.fetchall()
+                historical = cursor.fetchall()
 
-            cursor.close()
-            conn.close()
+                cursor.close()
 
             # Simple projection (would use ML in production)
             if historical:
@@ -2307,12 +2291,11 @@ class PredictiveAnalyzerAgent(BaseAgent):
         """Predict service demand using Real AI"""
         try:
             # Get some context if available, otherwise ask AI for general market forecast
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days'")
-            recent_jobs = cursor.fetchone()['count']
-            cursor.close()
-            conn.close()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days'")
+                recent_jobs = cursor.fetchone()['count']
+                cursor.close()
 
             prompt = f"""
             Predict roofing service demand for the next quarter based on:
@@ -2341,24 +2324,23 @@ class PredictiveAnalyzerAgent(BaseAgent):
     async def analyze_seasonality(self) -> Dict:
         """Analyze seasonal patterns"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT
-                    EXTRACT(month FROM created_at) as month,
-                    COUNT(*) as job_count,
-                    AVG(total_amount) as avg_value
-                FROM jobs j
-                LEFT JOIN invoices i ON j.id = i.job_id
-                GROUP BY month
-                ORDER BY month
-            """)
+                cursor.execute("""
+                    SELECT
+                        EXTRACT(month FROM created_at) as month,
+                        COUNT(*) as job_count,
+                        AVG(total_amount) as avg_value
+                    FROM jobs j
+                    LEFT JOIN invoices i ON j.id = i.job_id
+                    GROUP BY month
+                    ORDER BY month
+                """)
 
-            seasonal_data = cursor.fetchall()
+                seasonal_data = cursor.fetchall()
 
-            cursor.close()
-            conn.close()
+                cursor.close()
 
             return {
                 "status": "completed",
@@ -2388,15 +2370,14 @@ class ContractGeneratorAgent(BaseAgent):
 
         try:
             if customer_id:
-                conn = self.get_db_connection()
-                cursor = conn.cursor()
-                if tenant_id:
-                    cursor.execute("SELECT * FROM customers WHERE id = %s AND tenant_id = %s", (customer_id, tenant_id))
-                else:
-                    cursor.execute("SELECT * FROM customers WHERE id = %s", (customer_id,))
-                customer = cursor.fetchone()
-                cursor.close()
-                conn.close()
+                with self.get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    if tenant_id:
+                        cursor.execute("SELECT * FROM customers WHERE id = %s AND tenant_id = %s", (customer_id, tenant_id))
+                    else:
+                        cursor.execute("SELECT * FROM customers WHERE id = %s", (customer_id,))
+                    customer = cursor.fetchone()
+                    cursor.close()
 
                 if not customer:
                     return {"status": "error", "message": "Customer not found"}
@@ -2404,15 +2385,14 @@ class ContractGeneratorAgent(BaseAgent):
                 customer_email = customer_data.get('email') if isinstance(customer_data, dict) else None
 
                 if customer_email and tenant_id:
-                    conn = self.get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT * FROM customers WHERE lower(email) = lower(%s) AND tenant_id = %s ORDER BY created_at DESC LIMIT 1",
-                        (customer_email, tenant_id),
-                    )
-                    customer = cursor.fetchone()
-                    cursor.close()
-                    conn.close()
+                    with self.get_db_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "SELECT * FROM customers WHERE lower(email) = lower(%s) AND tenant_id = %s ORDER BY created_at DESC LIMIT 1",
+                            (customer_email, tenant_id),
+                        )
+                        customer = cursor.fetchone()
+                        cursor.close()
 
                 if not customer:
                     if not isinstance(customer_data, dict) or not customer_data:
@@ -2621,24 +2601,23 @@ class ReportingAgent(BaseAgent):
     async def executive_report(self) -> Dict:
         """Generate executive report with AI summary"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            # Gather key metrics
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM customers) as total_customers,
-                    (SELECT COUNT(*) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days') as recent_jobs,
-                    (SELECT SUM(total_amount) FROM invoices WHERE created_at > NOW() - INTERVAL '30 days') as monthly_revenue,
-                    (SELECT COUNT(*) FROM ai_agents WHERE status = 'active') as active_agents
-            """)
+                # Gather key metrics
+                cursor.execute("""
+                    SELECT
+                        (SELECT COUNT(*) FROM customers) as total_customers,
+                        (SELECT COUNT(*) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days') as recent_jobs,
+                        (SELECT SUM(total_amount) FROM invoices WHERE created_at > NOW() - INTERVAL '30 days') as monthly_revenue,
+                        (SELECT COUNT(*) FROM ai_agents WHERE status = 'active') as active_agents
+                """)
 
-            metrics = cursor.fetchone()
-            metrics_dict = dict(metrics)
+                metrics = cursor.fetchone()
+                metrics_dict = dict(metrics)
 
-            cursor.close()
-            conn.close()
-            
+                cursor.close()
+
             summary_text = ""
             if USE_REAL_AI:
                 try:
@@ -2753,33 +2732,32 @@ class SelfBuildingAgent(BaseAgent):
         capabilities = task.get('capabilities', [])
 
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            # Check if agent exists
-            cursor.execute("SELECT id FROM ai_agents WHERE name = %s", (agent_name,))
-            if cursor.fetchone():
-                return {"status": "error", "message": f"Agent {agent_name} already exists"}
+                # Check if agent exists
+                cursor.execute("SELECT id FROM ai_agents WHERE name = %s", (agent_name,))
+                if cursor.fetchone():
+                    return {"status": "error", "message": f"Agent {agent_name} already exists"}
 
-            # Create new agent
-            cursor.execute("""
-                INSERT INTO ai_agents (name, type, status, capabilities, created_at)
-                VALUES (%s, %s, 'active', %s, NOW())
-                RETURNING id
-            """, (agent_name, agent_type, json.dumps(capabilities)))
+                # Create new agent
+                cursor.execute("""
+                    INSERT INTO ai_agents (name, type, status, capabilities, created_at)
+                    VALUES (%s, %s, 'active', %s, NOW())
+                    RETURNING id
+                """, (agent_name, agent_type, json.dumps(capabilities)))
 
-            agent_id = cursor.fetchone()['id']
+                agent_id = cursor.fetchone()['id']
 
-            conn.commit()
-            cursor.close()
-            conn.close()
+                conn.commit()
+                cursor.close()
 
-            return {
-                "status": "completed",
-                "agent_id": agent_id,
-                "agent_name": agent_name,
-                "message": f"Agent {agent_name} created successfully"
-            }
+                return {
+                    "status": "completed",
+                    "agent_id": agent_id,
+                    "agent_name": agent_name,
+                    "message": f"Agent {agent_name} created successfully"
+                }
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -2796,26 +2774,25 @@ class SelfBuildingAgent(BaseAgent):
     async def optimize_agents(self) -> Dict:
         """Optimize agent performance"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
 
-            # Analyze agent performance
-            cursor.execute("""
-                SELECT
-                    a.name,
-                    COUNT(ae.id) as executions,
-                    AVG(EXTRACT(EPOCH FROM (ae.completed_at - ae.started_at))) as avg_execution_time
-                FROM ai_agents a
-                LEFT JOIN agent_executions ae ON a.id = ae.agent_id
-                WHERE ae.completed_at > NOW() - INTERVAL '7 days'
-                GROUP BY a.id, a.name
-                ORDER BY executions DESC
-            """)
+                # Analyze agent performance
+                cursor.execute("""
+                    SELECT
+                        a.name,
+                        COUNT(ae.id) as executions,
+                        AVG(EXTRACT(EPOCH FROM (ae.completed_at - ae.started_at))) as avg_execution_time
+                    FROM ai_agents a
+                    LEFT JOIN agent_executions ae ON a.id = ae.agent_id
+                    WHERE ae.completed_at > NOW() - INTERVAL '7 days'
+                    GROUP BY a.id, a.name
+                    ORDER BY executions DESC
+                """)
 
-            performance = cursor.fetchall()
+                performance = cursor.fetchall()
 
-            cursor.close()
-            conn.close()
+                cursor.close()
 
             # Generate optimization recommendations
             recommendations = []
