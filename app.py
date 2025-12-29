@@ -195,7 +195,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.39.4"  # Fix datetime serialization + graph_context_provider columns
+VERSION = "9.40.0"  # Major: Unified observability + 8 missing components + full schema fixes
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -4318,6 +4318,209 @@ async def execute_aurea_event(
 
 
 # ==================== END BRAINOPS CORE v1 API ====================
+
+
+# ==================== UNIFIED OBSERVABILITY SYSTEM ====================
+
+# In-memory log buffer for recent logs
+LOG_BUFFER: deque = deque(maxlen=500)
+
+class LogCapture(logging.Handler):
+    """Capture logs to buffer for API access"""
+    def emit(self, record):
+        try:
+            LOG_BUFFER.append({
+                "timestamp": datetime.fromtimestamp(record.created).isoformat(),
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+                "module": record.module,
+                "line": record.lineno
+            })
+        except Exception:
+            pass
+
+# Add log capture handler
+_log_capture = LogCapture()
+_log_capture.setLevel(logging.INFO)
+logging.getLogger().addHandler(_log_capture)
+
+
+@app.get("/logs/recent", dependencies=[Depends(verify_api_key)])
+async def get_recent_logs(
+    level: Optional[str] = None,
+    logger_name: Optional[str] = None,
+    limit: int = Query(default=100, le=500),
+    contains: Optional[str] = None
+):
+    """Get recent logs with filtering"""
+    logs = list(LOG_BUFFER)
+
+    # Filter by level
+    if level:
+        logs = [l for l in logs if l["level"] == level.upper()]
+
+    # Filter by logger
+    if logger_name:
+        logs = [l for l in logs if logger_name.lower() in l["logger"].lower()]
+
+    # Filter by content
+    if contains:
+        logs = [l for l in logs if contains.lower() in l["message"].lower()]
+
+    # Return most recent
+    return {
+        "logs": logs[-limit:],
+        "total_in_buffer": len(LOG_BUFFER),
+        "returned": min(limit, len(logs)),
+        "filters": {"level": level, "logger": logger_name, "contains": contains}
+    }
+
+
+@app.get("/observability/full", dependencies=[Depends(verify_api_key)])
+async def get_full_observability():
+    """Complete unified observability across ALL systems"""
+    import httpx
+
+    results = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "services": {},
+        "database": {},
+        "recent_errors": [],
+        "system_metrics": {}
+    }
+
+    # Check all services
+    services = {
+        "ai_agents": "https://brainops-ai-agents.onrender.com/health",
+        "backend": "https://brainops-backend-prod.onrender.com/health",
+        "mcp_bridge": "https://brainops-mcp-bridge.onrender.com/health",
+        "myroofgenius": "https://myroofgenius.com",
+        "weathercraft_erp": "https://weathercraft-erp.vercel.app",
+        "brainstackstudio": "https://brainstackstudio.com"
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for name, url in services.items():
+            try:
+                resp = await client.get(url)
+                results["services"][name] = {
+                    "status": "healthy" if resp.status_code == 200 else "degraded",
+                    "code": resp.status_code,
+                    "data": resp.json() if resp.headers.get("content-type", "").startswith("application/json") else None
+                }
+            except Exception as e:
+                results["services"][name] = {"status": "error", "error": str(e)}
+
+    # Get database stats
+    try:
+        pool = get_pool()
+        db_stats = await pool.fetchrow("""
+            SELECT
+                (SELECT COUNT(*) FROM customers) as customers,
+                (SELECT COUNT(*) FROM jobs) as jobs,
+                (SELECT COUNT(*) FROM ai_agents) as agents,
+                (SELECT COUNT(*) FROM ai_agent_executions) as executions,
+                (SELECT COUNT(*) FROM ai_agent_executions WHERE created_at > NOW() - INTERVAL '1 hour') as recent_executions,
+                (SELECT COUNT(*) FROM ai_agent_executions WHERE status = 'failed' AND created_at > NOW() - INTERVAL '1 hour') as recent_failures
+        """)
+        results["database"] = dict(db_stats) if db_stats else {}
+    except Exception as e:
+        results["database"] = {"error": str(e)}
+
+    # Get recent errors from logs
+    results["recent_errors"] = [
+        l for l in list(LOG_BUFFER)[-100:]
+        if l["level"] in ["ERROR", "CRITICAL"]
+    ][-20:]
+
+    # Get system metrics
+    try:
+        import psutil
+        results["system_metrics"] = {
+            "cpu_percent": psutil.cpu_percent(),
+            "memory_percent": psutil.virtual_memory().percent,
+            "disk_percent": psutil.disk_usage('/').percent
+        }
+    except ImportError:
+        results["system_metrics"] = {"note": "psutil not available"}
+
+    return results
+
+
+@app.get("/debug/all-errors", dependencies=[Depends(verify_api_key)])
+async def get_all_errors():
+    """Get all recent errors across systems for debugging"""
+    errors = [l for l in list(LOG_BUFFER) if l["level"] in ["ERROR", "CRITICAL", "WARNING"]]
+
+    # Categorize errors
+    categorized = {
+        "database": [],
+        "connection": [],
+        "schema": [],
+        "api": [],
+        "other": []
+    }
+
+    for err in errors:
+        msg = err["message"].lower()
+        if "database" in msg or "sql" in msg or "column" in msg or "relation" in msg:
+            categorized["database"].append(err)
+        elif "connection" in msg or "pool" in msg or "timeout" in msg:
+            categorized["connection"].append(err)
+        elif "does not exist" in msg or "schema" in msg:
+            categorized["schema"].append(err)
+        elif "api" in msg or "http" in msg or "request" in msg:
+            categorized["api"].append(err)
+        else:
+            categorized["other"].append(err)
+
+    return {
+        "total_errors": len(errors),
+        "categorized": {k: len(v) for k, v in categorized.items()},
+        "recent_errors": errors[-50:],
+        "by_category": categorized
+    }
+
+
+@app.get("/system/unified-status", dependencies=[Depends(verify_api_key)])
+async def get_unified_system_status():
+    """Get unified status of the entire AI OS"""
+    pool = get_pool()
+
+    status = {
+        "version": VERSION,
+        "timestamp": datetime.utcnow().isoformat(),
+        "overall_health": "healthy",
+        "components": {}
+    }
+
+    # Check each major component
+    components = [
+        ("database", "SELECT 1"),
+        ("agents", "SELECT COUNT(*) FROM ai_agents"),
+        ("executions", "SELECT COUNT(*) FROM ai_agent_executions WHERE created_at > NOW() - INTERVAL '24 hours'"),
+        ("memory", "SELECT COUNT(*) FROM unified_brain"),
+        ("revenue", "SELECT COUNT(*) FROM revenue_leads"),
+    ]
+
+    issues = []
+    for name, query in components:
+        try:
+            result = await pool.fetchval(query)
+            status["components"][name] = {"status": "ok", "value": result}
+        except Exception as e:
+            status["components"][name] = {"status": "error", "error": str(e)}
+            issues.append(f"{name}: {str(e)}")
+
+    if issues:
+        status["overall_health"] = "degraded"
+        status["issues"] = issues
+
+    return status
+
+
+# ==================== END UNIFIED OBSERVABILITY ====================
 
 
 @app.exception_handler(Exception)
