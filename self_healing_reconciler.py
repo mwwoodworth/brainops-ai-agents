@@ -594,8 +594,8 @@ class SelfHealingReconciler:
                 cur.execute("""
                 UPDATE healing_incidents
                 SET human_escalated = TRUE
-                WHERE id = %s::uuid OR component_id = %s
-                """, (incident.incident_id, incident.component_id))
+                WHERE component_id = %s AND resolved_at IS NULL
+                """, (incident.component_id,))
                 conn.commit()
                 cur.close()
         except Exception as e:
