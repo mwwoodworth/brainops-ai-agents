@@ -65,21 +65,24 @@ _REPO_ROOT = Path(__file__).resolve().parent
 # CRITICAL: Use shared pool instead of creating our own ThreadedConnectionPool
 # This prevents MaxClientsInSessionMode errors in Supabase
 
-@contextmanager
 def _get_pooled_connection():
-    """Get connection from shared pool - ALWAYS use this instead of creating pools."""
+    """Get connection from shared pool - ALWAYS use this instead of creating pools.
+    Returns a context manager - use with 'with' statement.
+    """
     if _SYNC_POOL_AVAILABLE:
-        pool = get_sync_pool()
-        with pool.get_connection() as conn:
-            yield conn
+        # Return the pool's context manager directly (no wrapping)
+        return get_sync_pool().get_connection()
     else:
-        # Fallback for environments without shared pool
-        conn = psycopg2.connect(**DB_CONFIG)
-        try:
-            yield conn
-        finally:
-            if conn and not conn.closed:
-                conn.close()
+        # Fallback context manager for environments without shared pool
+        @contextmanager
+        def _fallback():
+            conn = psycopg2.connect(**DB_CONFIG)
+            try:
+                yield conn
+            finally:
+                if conn and not conn.closed:
+                    conn.close()
+        return _fallback()
 
 
 def _run_psycopg2_operation(
