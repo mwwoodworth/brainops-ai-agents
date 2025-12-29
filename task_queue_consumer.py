@@ -39,7 +39,7 @@ class TaskQueueConsumer:
     agent_activation_system but never consumed.
     """
 
-    def __init__(self, poll_interval: int = 5, batch_size: int = 10):
+    def __init__(self, poll_interval: int = 30, batch_size: int = 10):
         self.poll_interval = poll_interval
         self.batch_size = batch_size
         self._running = False
@@ -105,7 +105,7 @@ class TaskQueueConsumer:
                 # Lock and fetch pending tasks
                 rows = await conn.fetch("""
                     SELECT id, task_type, priority, status, trigger_type,
-                           trigger_condition, agent_id, tenant_id, created_at
+                           trigger_condition, agent_id, created_at
                     FROM ai_autonomous_tasks
                     WHERE status = 'pending'
                     ORDER BY
@@ -154,8 +154,7 @@ class TaskQueueConsumer:
                         "task_id": str(task_id),
                         "task_type": task_type,
                         "trigger_type": task.get('trigger_type'),
-                        "trigger_condition": task.get('trigger_condition'),
-                        "tenant_id": str(task.get('tenant_id')) if task.get('tenant_id') else None
+                        "trigger_condition": task.get('trigger_condition')
                     }
                 )
 
