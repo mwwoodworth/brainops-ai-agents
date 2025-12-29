@@ -166,7 +166,8 @@ class AliveCore:
         self.thought_counter = 0
         self.heartbeat_count = 0
         self.is_alive = False
-        self._shutdown_event = asyncio.Event()
+        # Lazily initialize asyncio.Event() to avoid "no running event loop" errors
+        self._shutdown_event: Optional[asyncio.Event] = None
         self._tasks: List[asyncio.Task] = []
         self._callbacks: Dict[str, List[Callable]] = {
             'thought': [],
@@ -175,6 +176,18 @@ class AliveCore:
             'emergency': [],
             'awakening': []
         }
+
+    def _get_shutdown_event(self) -> asyncio.Event:
+        """Lazily create shutdown event when in async context"""
+        if self._shutdown_event is None:
+            try:
+                # Only create when we have a running loop
+                loop = asyncio.get_running_loop()
+                self._shutdown_event = asyncio.Event()
+            except RuntimeError:
+                # No running loop - create new one for this event
+                self._shutdown_event = asyncio.Event()
+        return self._shutdown_event
 
         # Schema is pre-created in database - skip blocking init
         # self._ensure_schema() - tables already exist
@@ -520,7 +533,7 @@ class AliveCore:
 
     async def _heartbeat_loop(self):
         """Continuous heartbeat - the pulse of life"""
-        while not self._shutdown_event.is_set():
+        while not self._get_shutdown_event().is_set():
             try:
                 self.heartbeat_count += 1
 
@@ -557,7 +570,7 @@ class AliveCore:
 
     async def _awareness_loop(self):
         """Continuous awareness - monitoring everything"""
-        while not self._shutdown_event.is_set():
+        while not self._get_shutdown_event().is_set():
             try:
                 # Check for wake triggers
                 conn = self._get_connection()
@@ -576,7 +589,7 @@ class AliveCore:
                     LIMIT 10
                 """)
                 triggers = cur.fetchall()
-                conn.close()
+                self._return_connection(conn)
 
                 for trigger in triggers:
                     self.think(
@@ -600,7 +613,7 @@ class AliveCore:
                         WHERE id = %s
                     """, (trigger['id'],))
                     conn.commit()
-                    conn.close()
+                    self._return_connection(conn)
 
                 await asyncio.sleep(30)  # Check every 30 seconds to reduce connection pressure
 
@@ -610,7 +623,7 @@ class AliveCore:
 
     async def _thinking_loop(self):
         """Background thinking - continuous analysis"""
-        while not self._shutdown_event.is_set():
+        while not self._get_shutdown_event().is_set():
             try:
                 if self.state == ConsciousnessState.DREAMING:
                     # Dream processing - consolidate learnings
@@ -700,7 +713,7 @@ class AliveCore:
             priority=10
         )
 
-        self._shutdown_event.set()
+        self._get_shutdown_event().set()
         self.is_alive = False
 
         # Wait for tasks to complete
@@ -728,7 +741,7 @@ class AliveCore:
                 VALUES (%s, %s, %s, %s, %s)
             """, (trigger_type, source, severity, description, Json(data or {})))
             conn.commit()
-            conn.close()
+            self._return_connection(conn)
 
             if severity == 'critical':
                 self.focus_attention(trigger_type, f"Critical: {description}", priority=10)
