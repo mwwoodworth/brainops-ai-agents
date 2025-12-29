@@ -14,16 +14,32 @@ import os
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/self-awareness", tags=["Self-Awareness Dashboard"])
 
-# Database connection
-DATABASE_URL = os.environ.get('DATABASE_URL') or os.environ.get('SUPABASE_DB_URL')
+# Database connection - use config module for consistency with Render env vars
+def _build_database_url():
+    """Build database URL from environment, supporting both DATABASE_URL and individual vars"""
+    database_url = os.environ.get('DATABASE_URL') or os.environ.get('SUPABASE_DB_URL')
+    if database_url:
+        return database_url
+    # Fallback to individual vars (Render uses these)
+    host = os.environ.get('DB_HOST', '')
+    user = os.environ.get('DB_USER', '')
+    password = os.environ.get('DB_PASSWORD', '')
+    database = os.environ.get('DB_NAME', 'postgres')
+    port = os.environ.get('DB_PORT', '5432')
+    if host and user and password:
+        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    return None
+
+DATABASE_URL = _build_database_url()
 
 
 async def _get_db_connection():
     """Get async database connection"""
     try:
         import asyncpg
-        if DATABASE_URL:
-            return await asyncpg.connect(DATABASE_URL)
+        db_url = DATABASE_URL or _build_database_url()
+        if db_url:
+            return await asyncpg.connect(db_url, ssl='require')
     except Exception as e:
         logger.warning(f"Database connection failed: {e}")
     return None
