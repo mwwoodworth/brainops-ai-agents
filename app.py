@@ -195,7 +195,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.42.0"  # Fix: Connection pool usage in agent_activation_system + revenue system import
+VERSION = "9.43.0"  # Fix: proactive_intelligence column names + self_healing_reconciler UUID query
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
