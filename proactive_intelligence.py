@@ -258,13 +258,12 @@ class ProactiveIntelligence:
             # Analyze performance trends
             cur.execute("""
                 SELECT
-                    DATE_TRUNC('hour', created_at) as hour,
-                    AVG(response_time_avg) as avg_response,
-                    AVG(cpu_percent) as avg_cpu,
-                    AVG(memory_percent) as avg_memory
+                    DATE_TRUNC('hour', timestamp) as hour,
+                    AVG(cpu_usage) as avg_cpu,
+                    AVG(memory_usage) as avg_memory
                 FROM ai_vital_signs
-                WHERE created_at > NOW() - INTERVAL '24 hours'
-                GROUP BY DATE_TRUNC('hour', created_at)
+                WHERE timestamp > NOW() - INTERVAL '24 hours'
+                GROUP BY DATE_TRUNC('hour', timestamp)
                 ORDER BY hour
             """)
             perf_trends = cur.fetchall()
@@ -330,12 +329,12 @@ class ProactiveIntelligence:
             # Check for resource exhaustion risk
             cur.execute("""
                 SELECT
-                    AVG(cpu_percent) as avg_cpu,
-                    AVG(memory_percent) as avg_memory,
-                    MAX(cpu_percent) as max_cpu,
-                    MAX(memory_percent) as max_memory
+                    AVG(cpu_usage) as avg_cpu,
+                    AVG(memory_usage) as avg_memory,
+                    MAX(cpu_usage) as max_cpu,
+                    MAX(memory_usage) as max_memory
                 FROM ai_vital_signs
-                WHERE created_at > NOW() - INTERVAL '1 hour'
+                WHERE timestamp > NOW() - INTERVAL '1 hour'
             """)
             vitals = cur.fetchone()
 

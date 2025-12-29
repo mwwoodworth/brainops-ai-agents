@@ -21,7 +21,11 @@ CREATE TABLE IF NOT EXISTS ai_thought_stream (
     thought_type VARCHAR(50) NOT NULL, -- 'observation', 'analysis', 'decision', 'dream', 'alert'
     related_entities JSONB DEFAULT '[]'::jsonb, -- IDs or names of things being thought about
     intensity FLOAT DEFAULT 0.5, -- 0.0 to 1.0 (emotional weight / urgency)
-    metadata JSONB DEFAULT '{}'::jsonb
+    metadata JSONB DEFAULT '{}'::jsonb,
+    priority INTEGER,
+    confidence FLOAT,
+    related_thoughts TEXT[],
+    thought_id VARCHAR(100)
 );
 
 CREATE INDEX IF NOT EXISTS idx_thought_stream_timestamp ON ai_thought_stream(timestamp);

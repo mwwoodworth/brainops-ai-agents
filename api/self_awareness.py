@@ -44,6 +44,7 @@ async def get_self_awareness_dashboard() -> Dict[str, Any]:
     """
     now = datetime.utcnow()
     conn = await _get_db_connection()
+    query_errors: List[str] = []
 
     dashboard = {
         "timestamp": now.isoformat(),
@@ -104,8 +105,22 @@ async def get_self_awareness_dashboard() -> Dict[str, Any]:
 
     if conn:
         try:
+            async def safe_fetchrow(sql: str):
+                try:
+                    return await conn.fetchrow(sql)
+                except Exception as e:
+                    query_errors.append(str(e))
+                    return None
+
+            async def safe_fetch(sql: str):
+                try:
+                    return await conn.fetch(sql)
+                except Exception as e:
+                    query_errors.append(str(e))
+                    return []
+
             # Get memory stats
-            memory_stats = await conn.fetchrow("""
+            memory_stats = await safe_fetchrow("""
                 SELECT
                     COUNT(*) as total,
                     COUNT(CASE WHEN embedding IS NOT NULL THEN 1 END) as with_embeddings,
@@ -120,39 +135,52 @@ async def get_self_awareness_dashboard() -> Dict[str, Any]:
                 dashboard["memory_state"]["last_memory_write"] = memory_stats["last_write"].isoformat() if memory_stats["last_write"] else None
 
             # Get knowledge graph stats
-            kg_stats = await conn.fetchrow("SELECT COUNT(*) as nodes FROM ai_knowledge_graph")
+            kg_stats = await safe_fetchrow("SELECT COUNT(*) as nodes FROM ai_knowledge_graph")
             if kg_stats:
                 dashboard["memory_state"]["knowledge_graph_nodes"] = kg_stats["nodes"]
 
             # Get brain entries
-            brain_stats = await conn.fetchrow("SELECT COUNT(*) as entries FROM unified_brain")
+            brain_stats = await safe_fetchrow("SELECT COUNT(*) as entries FROM unified_brain")
             if brain_stats:
                 dashboard["memory_state"]["brain_entries"] = brain_stats["entries"]
 
             # Get AUREA stats
-            aurea_stats = await conn.fetchrow("""
-                SELECT
-                    COUNT(CASE WHEN created_at > NOW() - INTERVAL '5 minutes' THEN 1 END) as ooda_5min,
-                    COUNT(CASE WHEN created_at > NOW() - INTERVAL '1 hour' THEN 1 END) as decisions_1hr,
-                    COUNT(DISTINCT agent_name) as active_agents
-                FROM aurea_decisions
+            ooda_stats = await safe_fetchrow("""
+                SELECT COUNT(*) as ooda_5min
+                FROM aurea_state
+                WHERE timestamp > NOW() - INTERVAL '5 minutes'
             """)
-            if aurea_stats:
-                dashboard["aurea_state"]["ooda_cycles_5min"] = aurea_stats["ooda_5min"] or 0
-                dashboard["aurea_state"]["decisions_1hr"] = aurea_stats["decisions_1hr"] or 0
-                dashboard["aurea_state"]["active_agents"] = aurea_stats["active_agents"] or 0
+            if ooda_stats:
+                dashboard["aurea_state"]["ooda_cycles_5min"] = ooda_stats["ooda_5min"] or 0
+
+            decision_stats = await safe_fetchrow("""
+                SELECT COUNT(*) as decisions_1hr
+                FROM aurea_decisions
+                WHERE created_at > NOW() - INTERVAL '1 hour'
+            """)
+            if decision_stats:
+                dashboard["aurea_state"]["decisions_1hr"] = decision_stats["decisions_1hr"] or 0
+
+            agent_stats = await safe_fetchrow("""
+                SELECT COUNT(DISTINCT agent_name) as active_agents
+                FROM ai_agent_executions
+                WHERE created_at > NOW() - INTERVAL '1 hour'
+            """)
+            if agent_stats:
+                dashboard["aurea_state"]["active_agents"] = agent_stats["active_agents"] or 0
 
             # Get thoughts processed
-            thoughts_stats = await conn.fetchrow("""
-                SELECT COUNT(*) as total FROM aurea_thoughts
-                WHERE created_at > NOW() - INTERVAL '1 hour'
+            thoughts_stats = await safe_fetchrow("""
+                SELECT COUNT(*) as total
+                FROM ai_thought_stream
+                WHERE timestamp > NOW() - INTERVAL '1 hour'
             """)
             if thoughts_stats:
                 dashboard["aurea_state"]["thoughts_processed"] = thoughts_stats["total"] or 0
 
             # Get recent decisions
-            recent_decisions = await conn.fetch("""
-                SELECT decision_type, action, confidence, created_at
+            recent_decisions = await safe_fetch("""
+                SELECT decision_type, recommended_action, description, confidence, created_at
                 FROM aurea_decisions
                 ORDER BY created_at DESC
                 LIMIT 5
@@ -160,7 +188,7 @@ async def get_self_awareness_dashboard() -> Dict[str, Any]:
             dashboard["recent_activity"]["recent_decisions"] = [
                 {
                     "type": row["decision_type"],
-                    "action": row["action"],
+                    "action": row["recommended_action"] or row["description"] or row["decision_type"],
                     "confidence": float(row["confidence"]) if row["confidence"] else 0,
                     "timestamp": row["created_at"].isoformat()
                 }
@@ -168,37 +196,49 @@ async def get_self_awareness_dashboard() -> Dict[str, Any]:
             ]
 
             # Get recent thoughts
-            recent_thoughts = await conn.fetch("""
-                SELECT thought_type, content, created_at
-                FROM aurea_thoughts
-                ORDER BY created_at DESC
+            recent_thoughts = await safe_fetch("""
+                SELECT thought_type, thought_content, timestamp
+                FROM ai_thought_stream
+                ORDER BY timestamp DESC
                 LIMIT 5
             """)
             dashboard["recent_activity"]["recent_thoughts"] = [
                 {
                     "type": row["thought_type"],
-                    "content": row["content"][:200] if row["content"] else "",
-                    "timestamp": row["created_at"].isoformat()
+                    "content": row["thought_content"][:200] if row["thought_content"] else "",
+                    "timestamp": row["timestamp"].isoformat()
                 }
                 for row in recent_thoughts
             ]
 
             # Get agent executions
-            exec_stats = await conn.fetchrow("""
+            exec_stats = await safe_fetchrow("""
                 SELECT
-                    COUNT(*) as total,
-                    COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
-                    COUNT(CASE WHEN status = 'error' THEN 1 END) as errors
-                FROM agent_executions
-                WHERE created_at > NOW() - INTERVAL '1 hour'
+                    SUM(total) as total,
+                    SUM(errors) as errors
+                FROM (
+                    SELECT
+                        COUNT(*) as total,
+                        COUNT(*) FILTER (WHERE lower(status) IN ('error', 'failed')) as errors
+                    FROM ai_agent_executions
+                    WHERE created_at > NOW() - INTERVAL '1 hour'
+                    UNION ALL
+                    SELECT
+                        COUNT(*) as total,
+                        COUNT(*) FILTER (WHERE lower(status) IN ('error', 'failed')) as errors
+                    FROM agent_executions
+                    WHERE created_at > NOW() - INTERVAL '1 hour'
+                ) stats
             """)
             if exec_stats:
-                total = exec_stats["total"] or 1
+                total = exec_stats["total"] or 0
                 errors = exec_stats["errors"] or 0
-                dashboard["health_metrics"]["error_rate_1hr"] = round(errors / total * 100, 2)
+                dashboard["health_metrics"]["error_rate_1hr"] = round(errors / total * 100, 2) if total else 0
 
-            dashboard["health_metrics"]["database_status"] = "connected"
-            dashboard["health_metrics"]["overall_health"] = "healthy"
+            dashboard["health_metrics"]["database_status"] = "connected_with_errors" if query_errors else "connected"
+            dashboard["health_metrics"]["overall_health"] = "degraded" if query_errors else "healthy"
+            if query_errors:
+                dashboard["health_metrics"]["query_errors"] = query_errors[:3]
 
             # Calculate awareness level based on activity
             activity_score = (
@@ -219,7 +259,19 @@ async def get_self_awareness_dashboard() -> Dict[str, Any]:
 
             dashboard["consciousness_state"]["cognitive_load"] = min(activity_score, 100)
             dashboard["consciousness_state"]["active_thoughts"] = dashboard["aurea_state"]["thoughts_processed"]
-            dashboard["consciousness_state"]["decision_confidence"] = 85  # Based on recent decisions
+            confidence_stats = await safe_fetchrow("""
+                SELECT AVG(confidence) as avg_confidence
+                FROM aurea_decisions
+                WHERE created_at > NOW() - INTERVAL '1 hour'
+            """)
+            avg_confidence = confidence_stats["avg_confidence"] if confidence_stats else None
+            if avg_confidence is None:
+                dashboard["consciousness_state"]["decision_confidence"] = 0
+            else:
+                avg_confidence = float(avg_confidence)
+                dashboard["consciousness_state"]["decision_confidence"] = (
+                    round(avg_confidence * 100, 2) if avg_confidence <= 1 else round(avg_confidence, 2)
+                )
 
         except Exception as e:
             logger.error(f"Database query error: {e}")
@@ -330,9 +382,18 @@ async def get_vitals() -> Dict[str, Any]:
 
             # Check heartbeat
             heartbeat = await conn.fetchrow("""
-                SELECT MAX(created_at) as last, COUNT(*) as count
-                FROM agent_executions
-                WHERE created_at > NOW() - INTERVAL '1 hour'
+                SELECT
+                    MAX(last_run) as last,
+                    SUM(run_count) as count
+                FROM (
+                    SELECT MAX(created_at) as last_run, COUNT(*) as run_count
+                    FROM ai_agent_executions
+                    WHERE created_at > NOW() - INTERVAL '1 hour'
+                    UNION ALL
+                    SELECT MAX(created_at) as last_run, COUNT(*) as run_count
+                    FROM agent_executions
+                    WHERE created_at > NOW() - INTERVAL '1 hour'
+                ) runs
             """)
             if heartbeat:
                 vitals["heartbeat"]["last_activity"] = heartbeat["last"].isoformat() if heartbeat["last"] else None
@@ -341,7 +402,7 @@ async def get_vitals() -> Dict[str, Any]:
             # Check thinking
             thinking = await conn.fetchrow("""
                 SELECT
-                    (SELECT COUNT(*) FROM aurea_thoughts WHERE created_at > NOW() - INTERVAL '1 hour') as thoughts,
+                    (SELECT COUNT(*) FROM ai_thought_stream WHERE timestamp > NOW() - INTERVAL '1 hour') as thoughts,
                     (SELECT COUNT(*) FROM aurea_decisions WHERE created_at > NOW() - INTERVAL '1 hour') as decisions
             """)
             if thinking:
