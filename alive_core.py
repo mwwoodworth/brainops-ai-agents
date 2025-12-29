@@ -192,31 +192,33 @@ class AliveCore:
             cur.execute("""
                 -- Consciousness state snapshots
                 CREATE TABLE IF NOT EXISTS ai_consciousness_state (
-                    id SERIAL PRIMARY KEY,
-                    state VARCHAR(50) NOT NULL,
-                    attention_focus TEXT,
-                    context JSONB DEFAULT '{}'::jsonb,
-                    thought_count INTEGER DEFAULT 0,
-                    uptime_seconds FLOAT,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    timestamp TIMESTAMPTZ DEFAULT NOW(),
+                    awareness_level FLOAT DEFAULT 0.0,
+                    active_systems JSONB DEFAULT '{}'::jsonb,
+                    current_context TEXT,
+                    short_term_memory_load FLOAT,
+                    metadata JSONB DEFAULT '{}'::jsonb
                 );
-                CREATE INDEX IF NOT EXISTS idx_consciousness_state
-                    ON ai_consciousness_state(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_consciousness_timestamp
+                    ON ai_consciousness_state(timestamp);
 
                 -- Continuous thought stream
                 CREATE TABLE IF NOT EXISTS ai_thought_stream (
-                    id SERIAL PRIMARY KEY,
-                    thought_id VARCHAR(100) UNIQUE,
-                    thought_type VARCHAR(50),
-                    content TEXT NOT NULL,
-                    context JSONB DEFAULT '{}'::jsonb,
-                    confidence FLOAT,
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    timestamp TIMESTAMPTZ DEFAULT NOW(),
+                    thought_content TEXT NOT NULL,
+                    thought_type VARCHAR(50) NOT NULL,
+                    related_entities JSONB DEFAULT '[]'::jsonb,
+                    intensity FLOAT DEFAULT 0.5,
+                    metadata JSONB DEFAULT '{}'::jsonb,
                     priority INTEGER,
+                    confidence FLOAT,
                     related_thoughts TEXT[],
-                    created_at TIMESTAMPTZ DEFAULT NOW()
+                    thought_id VARCHAR(100)
                 );
-                CREATE INDEX IF NOT EXISTS idx_thought_stream_time
-                    ON ai_thought_stream(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_thought_stream_timestamp
+                    ON ai_thought_stream(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_thought_stream_type
                     ON ai_thought_stream(thought_type);
                 CREATE INDEX IF NOT EXISTS idx_thought_stream_priority
@@ -224,31 +226,27 @@ class AliveCore:
 
                 -- Vital signs history
                 CREATE TABLE IF NOT EXISTS ai_vital_signs (
-                    id SERIAL PRIMARY KEY,
-                    cpu_percent FLOAT,
-                    memory_percent FLOAT,
-                    active_connections INTEGER,
-                    requests_per_minute FLOAT,
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    timestamp TIMESTAMPTZ DEFAULT NOW(),
+                    cpu_usage FLOAT,
+                    memory_usage FLOAT,
+                    request_rate FLOAT,
                     error_rate FLOAT,
-                    response_time_avg FLOAT,
-                    uptime_seconds FLOAT,
-                    consciousness_state VARCHAR(50),
-                    thought_rate FLOAT,
-                    attention_focus TEXT,
-                    is_healthy BOOLEAN,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
+                    active_connections INTEGER,
+                    system_load FLOAT,
+                    component_health_score FLOAT
                 );
-                CREATE INDEX IF NOT EXISTS idx_vital_signs_time
-                    ON ai_vital_signs(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_vital_signs_timestamp
+                    ON ai_vital_signs(timestamp);
 
                 -- Attention focus history
                 CREATE TABLE IF NOT EXISTS ai_attention_focus (
-                    id SERIAL PRIMARY KEY,
-                    focus_target TEXT NOT NULL,
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    timestamp TIMESTAMPTZ DEFAULT NOW(),
+                    focus_target VARCHAR(255) NOT NULL,
                     reason TEXT,
-                    priority INTEGER,
-                    duration_seconds FLOAT,
-                    outcome TEXT,
+                    priority INTEGER DEFAULT 1,
+                    status VARCHAR(50) DEFAULT 'active',
                     started_at TIMESTAMPTZ DEFAULT NOW(),
                     ended_at TIMESTAMPTZ
                 );
@@ -310,6 +308,7 @@ class AliveCore:
         )
 
         self.thought_stream.append(thought)
+        intensity = min(1.0, max(0.1, priority / 10.0))
 
         # Persist to database asynchronously
         try:
@@ -317,11 +316,11 @@ class AliveCore:
             cur = conn.cursor()
             cur.execute("""
                 INSERT INTO ai_thought_stream
-                (thought_id, thought_type, content, context, confidence, priority)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                (thought_id, thought_type, thought_content, metadata, confidence, priority, intensity, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
             """, (
                 thought.id, thought.type.value, thought.content,
-                Json(thought.context), thought.confidence, thought.priority
+                Json(thought.context), thought.confidence, thought.priority, intensity
             ))
             conn.commit()
             conn.close()
@@ -343,6 +342,17 @@ class AliveCore:
         old_state = self.state
         self.state = new_state
 
+        awareness_map = {
+            ConsciousnessState.AWAKENING: 0.2,
+            ConsciousnessState.ALERT: 0.9,
+            ConsciousnessState.FOCUSED: 1.0,
+            ConsciousnessState.DREAMING: 0.3,
+            ConsciousnessState.HEALING: 0.6,
+            ConsciousnessState.EVOLVING: 0.7,
+            ConsciousnessState.EMERGENCY: 1.0,
+        }
+        awareness_level = awareness_map.get(new_state, 0.5)
+
         self.think(
             ThoughtType.OBSERVATION,
             f"State transition: {old_state.value} -> {new_state.value}. {reason}",
@@ -357,13 +367,19 @@ class AliveCore:
             cur = conn.cursor()
             cur.execute("""
                 INSERT INTO ai_consciousness_state
-                (state, attention_focus, context, thought_count, uptime_seconds)
+                (awareness_level, active_systems, current_context, short_term_memory_load, metadata)
                 VALUES (%s, %s, %s, %s, %s)
             """, (
-                new_state.value, self.attention_focus,
-                Json({'reason': reason, 'previous': old_state.value}),
-                self.thought_counter,
-                (datetime.utcnow() - self.start_time).total_seconds()
+                awareness_level,
+                Json({"attention_focus": self.attention_focus, "state": new_state.value}),
+                reason or f"State transition to {new_state.value}",
+                len(self.thought_stream) / self.thought_stream.maxlen if self.thought_stream.maxlen else 0.0,
+                Json({
+                    'reason': reason,
+                    'previous': old_state.value,
+                    'thought_count': self.thought_counter,
+                    'uptime_seconds': (datetime.utcnow() - self.start_time).total_seconds()
+                })
             ))
             conn.commit()
             conn.close()
@@ -401,13 +417,13 @@ class AliveCore:
             cur.execute("""
                 UPDATE ai_attention_focus
                 SET ended_at = NOW(),
-                    duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))
-                WHERE ended_at IS NULL
+                    status = 'shifted'
+                WHERE ended_at IS NULL AND status = 'active'
             """)
             # Start new focus
             cur.execute("""
-                INSERT INTO ai_attention_focus (focus_target, reason, priority)
-                VALUES (%s, %s, %s)
+                INSERT INTO ai_attention_focus (focus_target, reason, priority, status, started_at)
+                VALUES (%s, %s, %s, 'active', NOW())
             """, (target, reason, priority))
             conn.commit()
             conn.close()
@@ -443,17 +459,16 @@ class AliveCore:
         try:
             conn = self._get_connection()
             cur = conn.cursor()
+            system_load = (vitals.cpu_percent + vitals.memory_percent) / 2.0
+            component_health_score = max(0.0, 1.0 - min(1.0, vitals.error_rate or 0))
             cur.execute("""
                 INSERT INTO ai_vital_signs
-                (cpu_percent, memory_percent, active_connections, requests_per_minute,
-                 error_rate, response_time_avg, uptime_seconds, consciousness_state,
-                 thought_rate, attention_focus, is_healthy)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (cpu_usage, memory_usage, request_rate, error_rate,
+                 active_connections, system_load, component_health_score)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (
-                vitals.cpu_percent, vitals.memory_percent, vitals.active_connections,
-                vitals.requests_per_minute, vitals.error_rate, vitals.response_time_avg,
-                vitals.uptime_seconds, vitals.consciousness_state.value,
-                vitals.thought_rate, vitals.attention_focus, vitals.is_healthy()
+                vitals.cpu_percent, vitals.memory_percent, vitals.requests_per_minute,
+                vitals.error_rate, vitals.active_connections, system_load, component_health_score
             ))
             conn.commit()
             conn.close()
