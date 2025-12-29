@@ -238,9 +238,9 @@ class ProactiveIntelligence:
                 SELECT
                     error_type,
                     COUNT(*) as count,
-                    AVG(EXTRACT(EPOCH FROM created_at - LAG(created_at) OVER (ORDER BY created_at))) as avg_interval
+                    AVG(EXTRACT(EPOCH FROM occurred_at - LAG(occurred_at) OVER (ORDER BY occurred_at))) as avg_interval
                 FROM ai_error_logs
-                WHERE created_at > NOW() - INTERVAL '24 hours'
+                WHERE occurred_at > NOW() - INTERVAL '24 hours'
                 GROUP BY error_type
                 HAVING COUNT(*) > 3
             """)
@@ -379,9 +379,9 @@ class ProactiveIntelligence:
             cur.execute("""
                 SELECT
                     COUNT(*) as error_count,
-                    COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '10 minutes') as recent_errors
+                    COUNT(*) FILTER (WHERE occurred_at > NOW() - INTERVAL '10 minutes') as recent_errors
                 FROM ai_error_logs
-                WHERE created_at > NOW() - INTERVAL '1 hour'
+                WHERE occurred_at > NOW() - INTERVAL '1 hour'
             """)
             errors = cur.fetchone()
 
