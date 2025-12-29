@@ -1349,6 +1349,21 @@ def create_knowledge_router():
 
 
 # =============================================================================
+# SINGLETON INSTANCE
+# =============================================================================
+
+_knowledge_base_instance: Optional[MasterKnowledgeBase] = None
+
+
+def get_knowledge_base() -> MasterKnowledgeBase:
+    """Get the singleton MasterKnowledgeBase instance."""
+    global _knowledge_base_instance
+    if _knowledge_base_instance is None:
+        _knowledge_base_instance = MasterKnowledgeBase()
+    return _knowledge_base_instance
+
+
+# =============================================================================
 # CLI INTERFACE
 # =============================================================================
 
@@ -1358,7 +1373,7 @@ async def main():
     print("MASTER KNOWLEDGE BASE DEMO")
     print("=" * 70)
 
-    kb = MasterKnowledgeBase()
+    kb = get_knowledge_base()
 
     # Create sample entries
     print("\n1. Creating knowledge entries...")
