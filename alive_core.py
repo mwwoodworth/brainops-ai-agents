@@ -192,45 +192,28 @@ class AliveCore:
         # Schema is pre-created in database - skip blocking init
         # self._ensure_schema() - tables already exist
 
-    # Shared connection pool for all instances
-    _connection_pool = None
-    _pool_lock = threading.Lock()
-
-    @classmethod
-    def _get_pool(cls):
-        """Get or create the shared connection pool"""
-        if cls._connection_pool is None:
-            with cls._pool_lock:
-                if cls._connection_pool is None:
-                    from psycopg2 import pool
-                    cls._connection_pool = pool.ThreadedConnectionPool(
-                        minconn=2,
-                        maxconn=10,
-                        **DB_CONFIG
-                    )
-                    logger.info("✅ Created AliveCore connection pool (2-10 connections)")
-        return cls._connection_pool
+    # Use shared sync pool instead of creating our own
+    _use_shared_pool = True
 
     def _get_connection(self):
-        """Get database connection from pool"""
+        """Get database connection from SHARED pool to prevent exhaustion"""
         try:
-            pool = self._get_pool()
-            return pool.getconn()
+            from database.sync_pool import get_sync_pool
+            pool = get_sync_pool()
+            # Return a context manager wrapper that the caller can use
+            return pool.get_connection().__enter__()
         except Exception as e:
-            logger.warning(f"Pool connection failed, falling back to direct: {e}")
+            logger.warning(f"Shared pool unavailable, falling back to direct: {e}")
             return psycopg2.connect(**DB_CONFIG)
 
     def _return_connection(self, conn):
-        """Return connection to pool"""
-        try:
-            pool = self._get_pool()
-            if pool and conn:
-                pool.putconn(conn)
-        except Exception as e:
-            logger.warning(f"Could not return connection to pool: {e}")
+        """Return connection - handled by context manager in shared pool"""
+        # The shared pool handles this automatically via context manager
+        # For direct connections, close them
+        if conn and hasattr(conn, 'closed') and not conn.closed:
             try:
                 conn.close()
-            except:
+            except Exception:
                 pass
 
     def _ensure_schema(self):

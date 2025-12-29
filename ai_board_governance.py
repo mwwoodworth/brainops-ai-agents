@@ -124,6 +124,15 @@ class BoardDecision:
 class AIBoardOfDirectors:
     """The AI Board that governs autonomous business operations"""
 
+    def _get_connection(self):
+        """Get database connection from SHARED pool to prevent exhaustion"""
+        try:
+            from database.sync_pool import get_sync_pool
+            pool = get_sync_pool()
+            return pool.get_connection().__enter__()
+        except Exception:
+            return self._get_connection()
+
     def __init__(self):
         self.board_members = self._initialize_board()
         self.memory = get_memory_manager()
@@ -278,7 +287,7 @@ class AIBoardOfDirectors:
     def _init_database(self):
         """Initialize database tables for board governance"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = self._get_connection()
             cur = conn.cursor()
 
             # Create board proposals table
@@ -414,7 +423,7 @@ class AIBoardOfDirectors:
         proposals = []
 
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = self._get_connection()
             cur = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get pending proposals ordered by urgency
@@ -1075,7 +1084,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
         proposals = []
 
         # Check for financial issues
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = self._get_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
         # Check overdue invoices
@@ -1112,7 +1121,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
     def _record_meeting_start(self, meeting_type: str, agenda: List[Proposal]) -> str:
         """Record meeting start in database"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = self._get_connection()
             cur = conn.cursor()
 
             attendees = [m.name for m in self.board_members.values()]
@@ -1140,7 +1149,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
                            outcomes: Dict, duration: float):
         """Record meeting end in database"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = self._get_connection()
             cur = conn.cursor()
 
             decision_summary = [
@@ -1346,7 +1355,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
     def _record_decision(self, decision: BoardDecision):
         """Record decision in database with enhanced fields"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = self._get_connection()
             cur = conn.cursor()
 
             vote_results = {k.value: v.value for k, v in decision.vote_results.items()}
@@ -1415,7 +1424,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
     async def submit_proposal(self, proposal: Proposal) -> str:
         """Submit a proposal for board consideration"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = self._get_connection()
             cur = conn.cursor()
 
             cur.execute("""
@@ -1468,7 +1477,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
 
         # Get pending proposals count
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = self._get_connection()
             cur = conn.cursor()
 
             cur.execute("SELECT COUNT(*) FROM ai_board_proposals WHERE status = 'pending'")
