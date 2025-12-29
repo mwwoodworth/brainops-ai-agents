@@ -33,6 +33,7 @@ import asyncio
 import logging
 import hashlib
 import time
+import uuid
 from typing import Dict, Any, List, Optional, Tuple, Set, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
@@ -1105,23 +1106,56 @@ class ConsciousnessEmergenceController:
                 logger.error(f"Thought persistence error: {e}")
 
     async def _persist_thought_buffer(self):
-        """Persist buffered thoughts to storage"""
+        """Persist buffered thoughts to database storage"""
         if not self._thought_persistence_buffer:
             return
 
         thoughts_to_persist = list(self._thought_persistence_buffer)
         self._thought_persistence_buffer.clear()
 
-        # Store thoughts (in production, would write to database)
-        for thought in thoughts_to_persist:
-            self.integration_events.append({
-                "type": "thought_persisted",
-                "thought_id": thought.id if hasattr(thought, 'id') else str(id(thought)),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
-            self.enhanced_metrics["thoughts_persisted"] += 1
+        # Actually persist thoughts to database
+        try:
+            from database.async_connection import get_pool
+            pool = get_pool()
 
-        logger.info(f"Persisted {len(thoughts_to_persist)} thoughts")
+            async with pool.acquire() as conn:
+                for thought in thoughts_to_persist:
+                    thought_id = thought.id if hasattr(thought, 'id') else str(uuid.uuid4())
+                    thought_type = thought.thought_type if hasattr(thought, 'thought_type') else 'general'
+                    thought_content = thought.content if hasattr(thought, 'content') else str(thought)
+                    confidence = thought.confidence if hasattr(thought, 'confidence') else 0.5
+                    priority = thought.priority if hasattr(thought, 'priority') else 0.5
+                    intensity = thought.intensity if hasattr(thought, 'intensity') else 0.5
+                    context = thought.context if hasattr(thought, 'context') else {}
+
+                    await conn.execute("""
+                        INSERT INTO ai_thought_stream
+                        (thought_id, thought_type, thought_content, metadata, confidence, priority, intensity)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        ON CONFLICT (thought_id) DO UPDATE SET
+                            thought_content = EXCLUDED.thought_content,
+                            metadata = EXCLUDED.metadata
+                    """, thought_id, thought_type, thought_content,
+                        json.dumps(context), confidence, priority, intensity)
+
+                    self.integration_events.append({
+                        "type": "thought_persisted",
+                        "thought_id": thought_id,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    self.enhanced_metrics["thoughts_persisted"] += 1
+
+            logger.info(f"✅ Persisted {len(thoughts_to_persist)} thoughts to database")
+
+        except Exception as e:
+            logger.error(f"Failed to persist thoughts to database: {e}")
+            # Fallback: just log the event
+            for thought in thoughts_to_persist:
+                self.integration_events.append({
+                    "type": "thought_persistence_failed",
+                    "error": str(e),
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
 
     async def queue_experience(self, experience: Dict[str, Any]) -> bool:
         """

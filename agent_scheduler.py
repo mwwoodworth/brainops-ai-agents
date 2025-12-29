@@ -126,11 +126,19 @@ class AgentScheduler:
                 WHERE id = %s
             """, (datetime.utcnow(), datetime.utcnow(), agent_id))
 
-            # Update schedule next execution
+            # Update schedule next execution with row locking to prevent race conditions
+            # First lock the row, then update to prevent concurrent executions from corrupting schedule
+            cur.execute("""
+                SELECT id FROM agent_schedules
+                WHERE agent_id = %s AND enabled = true
+                FOR UPDATE NOWAIT
+            """, (agent_id,))
+
             cur.execute("""
                 UPDATE agent_schedules
                 SET last_execution = %s,
-                    next_execution = %s
+                    next_execution = %s,
+                    updated_at = NOW()
                 WHERE agent_id = %s AND enabled = true
             """, (datetime.utcnow(), datetime.utcnow() + timedelta(minutes=agent.get('frequency_minutes', 60)), agent_id))
 
@@ -341,16 +349,27 @@ class AgentScheduler:
                     "workflows_started": processed
                 }
 
-            # Run autonomous tasks (handle nested event loop case)
+            # Run autonomous tasks - create dedicated event loop for this thread
+            # This avoids deadlocks from nested asyncio.run() calls
+            def run_in_new_loop():
+                """Run async tasks in a fresh event loop"""
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(
+                        asyncio.wait_for(run_autonomous_tasks(), timeout=300)
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Autonomous tasks timed out after 300s")
+                    return {"timed_out": True}
+                finally:
+                    loop.close()
+
             try:
-                loop = asyncio.get_running_loop()
-                # If we're in an async context, schedule and run via the existing loop
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    auto_stats = pool.submit(asyncio.run, run_autonomous_tasks()).result()
-            except RuntimeError:
-                # No running loop, safe to use asyncio.run
-                auto_stats = asyncio.run(run_autonomous_tasks())
+                auto_stats = run_in_new_loop()
+            except Exception as e:
+                logger.error(f"Failed to run autonomous tasks: {e}")
+                auto_stats = {"error": str(e)}
             actions_taken.append({
                 'action': 'autonomous_revenue_cycle',
                 'stats': auto_stats
