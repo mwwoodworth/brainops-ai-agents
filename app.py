@@ -158,7 +158,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.30.0"  # Critical fixes: asyncio Event init, connection pooling, scheduler race conditions
+VERSION = "9.31.0"  # Consciousness persistence, thought stream DB storage, self-awareness enhancements
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
