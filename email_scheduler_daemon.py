@@ -51,7 +51,7 @@ class EmailSchedulerDaemon:
     and dispatches them via SendGrid.
     """
 
-    def __init__(self, poll_interval: int = 30, batch_size: int = 50, max_retries: int = 3):
+    def __init__(self, poll_interval: int = 60, batch_size: int = 50, max_retries: int = 3):
         self.poll_interval = poll_interval
         self.batch_size = batch_size
         self.max_retries = max_retries
