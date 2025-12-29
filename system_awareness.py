@@ -309,13 +309,13 @@ class SystemAwareness:
 
             agent_errors = await pool.fetch("""
                 SELECT
-                    agent_type,
+                    agent_name,
                     COUNT(*) as total,
                     COUNT(*) FILTER (WHERE status = 'error') as errors,
                     COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour') as recent
                 FROM ai_agent_executions
                 WHERE created_at > NOW() - INTERVAL '24 hours'
-                GROUP BY agent_type
+                GROUP BY agent_name
             """)
 
             for row in agent_errors:
@@ -327,11 +327,11 @@ class SystemAwareness:
                     if error_rate > 0.1:
                         insights.append(Insight(
                             category=AwarenessCategory.DEVOPS,
-                            title=f"Agent Error Rate: {ae.get('agent_type')}",
+                            title=f"Agent Error Rate: {ae.get('agent_name')}",
                             description=f"{errors}/{total} executions failed ({error_rate*100:.1f}%)",
                             severity="critical" if error_rate > 0.25 else "warning",
                             data=dict(ae),
-                            action_recommended=f"Review {ae.get('agent_type')} agent logs and fix issues"
+                            action_recommended=f"Review {ae.get('agent_name')} agent logs and fix issues"
                         ))
 
         except Exception as e:
@@ -465,14 +465,14 @@ class SystemAwareness:
                     INSERT INTO ai_system_insights
                     (category, title, description, severity, data, action_recommended)
                     VALUES ($1, $2, $3, $4, $5, $6)
-                """, (
+                """,
                     insight.category.value,
                     insight.title,
                     insight.description,
                     insight.severity,
                     json.dumps(insight.data),
                     insight.action_recommended
-                ))
+                )
 
         except Exception as e:
             logger.error(f"Failed to persist insights: {e}")
