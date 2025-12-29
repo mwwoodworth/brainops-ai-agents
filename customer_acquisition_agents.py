@@ -76,72 +76,80 @@ class AcquisitionTarget:
 class CustomerAcquisitionAgent:
     """Base agent for customer acquisition"""
 
+    _tables_ensured = False  # Class-level flag to prevent repeated table checks
+
     def __init__(self, agent_type: str):
         self.agent_type = agent_type
         self.agent_id = str(uuid.uuid4())
-        self._ensure_tables()
+        # Lazy table initialization - don't connect at import time
         logger.info(f"Initialized {agent_type} acquisition agent")
 
     def _ensure_tables(self):
-        """Ensure acquisition tables exist"""
-        conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
+        """Ensure acquisition tables exist - lazy initialization"""
+        if CustomerAcquisitionAgent._tables_ensured:
+            return
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
 
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS acquisition_targets (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                company_name VARCHAR(255) NOT NULL,
-                industry VARCHAR(100),
-                company_size VARCHAR(50),
-                location VARCHAR(255),
-                website VARCHAR(255),
-                social_profiles JSONB DEFAULT '{}'::jsonb,
-                decision_makers JSONB DEFAULT '[]'::jsonb,
-                pain_points TEXT[],
-                budget_min FLOAT,
-                budget_max FLOAT,
-                intent_score FLOAT DEFAULT 0.0,
-                acquisition_channel VARCHAR(50),
-                status VARCHAR(50) DEFAULT 'identified',
-                metadata JSONB DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                contacted_at TIMESTAMPTZ,
-                converted_at TIMESTAMPTZ
-            );
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS acquisition_targets (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    company_name VARCHAR(255) NOT NULL,
+                    industry VARCHAR(100),
+                    company_size VARCHAR(50),
+                    location VARCHAR(255),
+                    website VARCHAR(255),
+                    social_profiles JSONB DEFAULT '{}'::jsonb,
+                    decision_makers JSONB DEFAULT '[]'::jsonb,
+                    pain_points TEXT[],
+                    budget_min FLOAT,
+                    budget_max FLOAT,
+                    intent_score FLOAT DEFAULT 0.0,
+                    acquisition_channel VARCHAR(50),
+                    status VARCHAR(50) DEFAULT 'identified',
+                    metadata JSONB DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW(),
+                    contacted_at TIMESTAMPTZ,
+                    converted_at TIMESTAMPTZ
+                );
 
-            CREATE TABLE IF NOT EXISTS acquisition_campaigns (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                campaign_name VARCHAR(255),
-                campaign_type VARCHAR(50),
-                target_criteria JSONB,
-                budget FLOAT,
-                start_date DATE,
-                end_date DATE,
-                status VARCHAR(50) DEFAULT 'active',
-                metrics JSONB DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
+                CREATE TABLE IF NOT EXISTS acquisition_campaigns (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    campaign_name VARCHAR(255),
+                    campaign_type VARCHAR(50),
+                    target_criteria JSONB,
+                    budget FLOAT,
+                    start_date DATE,
+                    end_date DATE,
+                    status VARCHAR(50) DEFAULT 'active',
+                    metrics JSONB DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
 
-            CREATE TABLE IF NOT EXISTS acquisition_activities (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                target_id UUID REFERENCES acquisition_targets(id),
-                activity_type VARCHAR(50),
-                activity_data JSONB,
-                outcome VARCHAR(50),
-                engagement_score FLOAT,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                agent_id UUID
-            );
+                CREATE TABLE IF NOT EXISTS acquisition_activities (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    target_id UUID REFERENCES acquisition_targets(id),
+                    activity_type VARCHAR(50),
+                    activity_data JSONB,
+                    outcome VARCHAR(50),
+                    engagement_score FLOAT,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    agent_id UUID
+                );
 
-            CREATE INDEX IF NOT EXISTS idx_acquisition_targets_intent ON acquisition_targets(intent_score DESC);
-            CREATE INDEX IF NOT EXISTS idx_acquisition_targets_status ON acquisition_targets(status);
-            CREATE INDEX IF NOT EXISTS idx_acquisition_activities_target ON acquisition_activities(target_id);
-        """)
+                CREATE INDEX IF NOT EXISTS idx_acquisition_targets_intent ON acquisition_targets(intent_score DESC);
+                CREATE INDEX IF NOT EXISTS idx_acquisition_targets_status ON acquisition_targets(status);
+                CREATE INDEX IF NOT EXISTS idx_acquisition_activities_target ON acquisition_activities(target_id);
+            """)
 
-        conn.commit()
-        cursor.close()
-        conn.close()
+            conn.commit()
+            cursor.close()
+            conn.close()
+            CustomerAcquisitionAgent._tables_ensured = True
+        except Exception as e:
+            logger.warning(f"Could not ensure acquisition tables: {e}")
 
 class WebSearchAgent(CustomerAcquisitionAgent):
     """Agent that searches the web for potential customers"""
