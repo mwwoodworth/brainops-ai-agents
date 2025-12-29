@@ -59,7 +59,7 @@ class ConsciousnessLoop:
         self.running = False
         self.paused = False
         self.awareness_level = 0.1  # Starts low, builds up
-        self.loop_interval = 5.0  # Seconds
+        self.loop_interval = 30.0  # Seconds - increased to reduce connection pressure
         self.pool = None
         
         # Configuration

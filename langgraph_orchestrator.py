@@ -100,14 +100,28 @@ class LangGraphOrchestrator:
     def _init_vector_store(self):
         """Initialize Supabase vector store for semantic memory"""
         try:
-            # Connect to Supabase vector store
-            vector_store = SupabaseVectorStore(
-                client=None,  # Will use direct connection
-                table_name="ai_memory_vectors",
-                embedding=self.embeddings,
-                connection_string=f"postgresql://{DB_CONFIG['user']}:<DB_PASSWORD_REDACTED>@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
-            )
-            return vector_store
+            # Try to import supabase client for vector store
+            from supabase import create_client
+            import os
+
+            supabase_url = os.getenv('SUPABASE_URL', '')
+            supabase_key = os.getenv('SUPABASE_KEY', '')
+
+            if supabase_url and supabase_key:
+                client = create_client(supabase_url, supabase_key)
+                vector_store = SupabaseVectorStore(
+                    client=client,
+                    table_name="ai_memory_vectors",
+                    embedding=self.embeddings,
+                    query_name="match_documents"
+                )
+                return vector_store
+            else:
+                logger.warning("Supabase URL/Key not configured, vector store disabled")
+                return None
+        except ImportError:
+            logger.warning("Supabase client not installed, vector store disabled")
+            return None
         except Exception as e:
             logger.error(f"Failed to initialize vector store: {e}")
             return None
