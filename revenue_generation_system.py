@@ -811,12 +811,15 @@ Return ONLY valid JSON array, no other text."""
 
                 # First, check for existing leads in NEW or CONTACTED status
                 cur.execute("""
-                    SELECT id, company_name, contact_name, email, phone, location,
-                           source, buying_signals, estimated_value, confidence_score
+                    SELECT id, company_name, contact_name, contact_email as email,
+                           contact_phone as phone, location, source,
+                           COALESCE(metadata->>'buying_signals', '[]')::jsonb as buying_signals,
+                           COALESCE(value_estimate, revenue_potential, 0) as estimated_value,
+                           COALESCE(score, 0.5) as confidence_score
                     FROM ai_revenue_leads
                     WHERE stage IN ('NEW', 'CONTACTED')
                       AND created_at > NOW() - INTERVAL '30 days'
-                    ORDER BY estimated_value DESC
+                    ORDER BY value_estimate DESC NULLS LAST
                     LIMIT 10
                 """)
 
