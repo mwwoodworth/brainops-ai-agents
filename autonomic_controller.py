@@ -17,6 +17,33 @@ import logging
 import collections
 import psycopg2
 from datetime import datetime, timedelta
+from contextlib import contextmanager
+
+# ============================================================================
+# SHARED CONNECTION POOL - CRITICAL for preventing MaxClientsInSessionMode
+# ============================================================================
+try:
+    from database.sync_pool import get_sync_pool
+    _POOL_AVAILABLE = True
+except ImportError:
+    _POOL_AVAILABLE = False
+
+
+@contextmanager
+def _get_pooled_connection():
+    """Get connection from shared pool - ALWAYS use this instead of psycopg2.connect()"""
+    if _POOL_AVAILABLE:
+        with get_sync_pool().get_connection() as conn:
+            yield conn
+    else:
+        conn = psycopg2.connect(**DB_CONFIG)
+        try:
+            yield conn
+        finally:
+            if conn and not conn.closed:
+                conn.close()
+
+
 from typing import Dict, List, Callable, Any, Optional
 from dataclasses import dataclass, field
 from enum import Enum
@@ -236,36 +263,37 @@ class AutonomicManager:
     def _init_db(self):
         """Initialize autonomic controller database tables"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
+            with _get_pooled_connection() as conn:
+                if not conn:
+                    logger.error("Failed to get connection for autonomic DB init")
+                    return
+                cur = conn.cursor()
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS autonomic_decisions (
+                        id SERIAL PRIMARY KEY,
+                        loop_id INTEGER,
+                        phase VARCHAR(20),
+                        decision TEXT,
+                        action_taken TEXT,
+                        result JSONB,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    );
 
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS autonomic_decisions (
-                    id SERIAL PRIMARY KEY,
-                    loop_id INTEGER,
-                    phase VARCHAR(20),
-                    decision TEXT,
-                    action_taken TEXT,
-                    result JSONB,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
+                    CREATE TABLE IF NOT EXISTS autonomic_predictions (
+                        id SERIAL PRIMARY KEY,
+                        metric_name VARCHAR(100),
+                        prediction_type VARCHAR(50),
+                        predicted_value FLOAT,
+                        confidence FLOAT,
+                        time_horizon_hours INTEGER,
+                        actual_value FLOAT,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    );
 
-                CREATE TABLE IF NOT EXISTS autonomic_predictions (
-                    id SERIAL PRIMARY KEY,
-                    metric_name VARCHAR(100),
-                    prediction_type VARCHAR(50),
-                    predicted_value FLOAT,
-                    confidence FLOAT,
-                    time_horizon_hours INTEGER,
-                    actual_value FLOAT,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_autonomic_loop ON autonomic_decisions(loop_id);
-            """)
-
-            conn.commit()
-            conn.close()
+                    CREATE INDEX IF NOT EXISTS idx_autonomic_loop ON autonomic_decisions(loop_id);
+                """)
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.error(f"Failed to init autonomic DB: {e}")
 
@@ -471,24 +499,23 @@ class AutonomicManager:
             if metrics['trend'] == 'stable':
                 self.metrics.set_baseline(name, metrics['avg'])
 
-        # Store decision for learning
+        # Store decision for learning using shared pool
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-
-            cur.execute("""
-                INSERT INTO autonomic_decisions
-                (loop_id, phase, decision, action_taken, result)
-                VALUES (%s, 'mape_k', %s, %s, %s)
-            """, (
-                self.loop_count,
-                str(analysis),
-                str([a['type'] for a in plan['actions']]),
-                psycopg2.extras.Json(result)
-            ))
-
-            conn.commit()
-            conn.close()
+            with _get_pooled_connection() as conn:
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        INSERT INTO autonomic_decisions
+                        (loop_id, phase, decision, action_taken, result)
+                        VALUES (%s, 'mape_k', %s, %s, %s)
+                    """, (
+                        self.loop_count,
+                        str(analysis),
+                        str([a['type'] for a in plan['actions']]),
+                        psycopg2.extras.Json(result)
+                    ))
+                    conn.commit()
+                    cur.close()
         except Exception as e:
             logger.error(f"Failed to store knowledge: {e}")
 

@@ -38,14 +38,13 @@ class CustomJSONEncoder(json.JSONEncoder):
             return obj.__dict__
         return super().default(obj)
 
-# Database configuration
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-    'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('DB_PASSWORD'),
-    'port': int(os.getenv('DB_PORT', 5432))
-}
+# Use shared connection pool - CRITICAL for preventing connection exhaustion
+try:
+    from database.sync_pool import get_sync_pool
+    USING_SHARED_POOL = True
+except ImportError:
+    USING_SHARED_POOL = False
+    logger.warning("⚠️ Shared sync_pool not available, falling back to direct connections")
 
 
 class MemoryType(Enum):
@@ -79,34 +78,87 @@ class UnifiedMemoryManager:
     """Enterprise-grade unified memory management system"""
 
     def __init__(self, tenant_id: str = None):
-        self.db_config = DB_CONFIG
-        self.conn = None
         self.embedding_cache = {}
         self.consolidation_threshold = 0.85  # Similarity threshold for consolidation
         self.tenant_id = tenant_id or os.getenv('TENANT_ID')
-        self._connect()
+        self._pool = None
+        self._init_pool()
 
-    def _connect(self):
-        """Establish database connection"""
-        try:
-            self.conn = psycopg2.connect(**self.db_config)
-            logger.info("✅ Connected to unified memory system")
-        except Exception as e:
-            logger.error(f"❌ Failed to connect to database: {e}")
-            # Don't raise here to allow instantiation even if DB is down (will fail on use)
-            pass
+    def _init_pool(self):
+        """Initialize shared connection pool"""
+        if USING_SHARED_POOL:
+            try:
+                self._pool = get_sync_pool()
+                logger.info("✅ Unified memory using SHARED connection pool")
+            except Exception as e:
+                logger.error(f"❌ Failed to get shared pool: {e}")
+                self._pool = None
+        else:
+            logger.warning("⚠️ Running without shared pool - connection exhaustion risk")
+
+    def _get_connection(self):
+        """Get connection from shared pool"""
+        if self._pool:
+            return self._pool.get_connection()
+        return None
+
+    @property
+    def conn(self):
+        """Backward compatibility - get connection from pool for current operation"""
+        if hasattr(self, '_current_conn') and self._current_conn:
+            return self._current_conn
+        return None
 
     def _get_cursor(self):
-        """Get database cursor with auto-reconnect"""
-        if self.conn is None or self.conn.closed:
-            self._connect()
-        
-        try:
-            self.conn.cursor().execute("SELECT 1")
-        except (psycopg2.Error, psycopg2.OperationalError, AttributeError) as conn_error:
-            logger.debug(f"Connection test failed, reconnecting: {conn_error}")
-            self._connect()
-        return self.conn.cursor(cursor_factory=RealDictCursor)
+        """Get cursor from shared pool - backward compatible context manager"""
+        from contextlib import contextmanager
+
+        @contextmanager
+        def cursor_context():
+            if not self._pool:
+                logger.error("❌ No connection pool available")
+                yield None
+                return
+
+            with self._pool.get_connection() as conn:
+                if not conn:
+                    logger.error("❌ Failed to get connection from pool")
+                    yield None
+                    return
+                self._current_conn = conn  # Store for backward compat
+                try:
+                    cursor = conn.cursor(cursor_factory=RealDictCursor)
+                    yield cursor
+                    cursor.close()
+                finally:
+                    self._current_conn = None
+
+        return cursor_context()
+
+    def _execute_query(self, query: str, params: tuple = None, fetch_one: bool = False, fetch_all: bool = False):
+        """Execute query using shared pool - returns results or None"""
+        if not self._pool:
+            logger.error("❌ No connection pool available")
+            return None
+
+        with self._pool.get_connection() as conn:
+            if not conn:
+                logger.error("❌ Failed to get connection from pool")
+                return None
+            try:
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
+                cursor.execute(query, params)
+                if fetch_one:
+                    result = cursor.fetchone()
+                elif fetch_all:
+                    result = cursor.fetchall()
+                else:
+                    result = True
+                cursor.close()
+                return result
+            except Exception as e:
+                logger.error(f"❌ Query execution failed: {e}")
+                return None
 
     def store(self, memory: Memory) -> str:
         """Store a memory with deduplication and linking"""
@@ -132,8 +184,12 @@ class UnifiedMemoryManager:
             # Find related memories
             related = self._find_related_memories(memory.content, memory.tenant_id, limit=5)
 
-            # Store the memory
+            # Store the memory using shared pool via backward-compat cursor
             with self._get_cursor() as cur:
+                if not cur:
+                    logger.error("❌ Failed to get cursor from pool")
+                    return None
+
                 query = """
                 INSERT INTO unified_ai_memory (
                     memory_type, content, source_system, source_agent,
@@ -169,17 +225,15 @@ class UnifiedMemoryManager:
                     search_text
                 ))
 
-                memory_id = cur.fetchone()['id']
-                self.conn.commit()
+                result = cur.fetchone()
+                memory_id = result['id'] if result else None
 
                 logger.info(f"✅ Stored memory {memory_id} ({memory.memory_type.value})")
                 return memory_id
 
         except Exception as e:
             logger.error(f"❌ Failed to store memory: {e}")
-            if self.conn:
-                self.conn.rollback()
-            raise
+            return None
 
     async def store_async(self, content: str, memory_type: str = "operational", category: str = None, metadata: Dict = None) -> str:
         """Async wrapper for store to match app.py interface"""
