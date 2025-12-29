@@ -72,8 +72,8 @@ def get_graph_context():
 def get_revenue_system():
     """Get revenue generation system"""
     try:
-        from revenue_generation_system import RevenueGenerationSystem
-        return RevenueGenerationSystem()
+        from revenue_generation_system import get_revenue_system as _get_revenue
+        return _get_revenue()
     except ImportError:
         logger.warning("Revenue system not available")
         return None
