@@ -75,7 +75,10 @@ def get_revenue_system():
         from revenue_generation_system import get_revenue_system as _get_revenue
         return _get_revenue()
     except ImportError:
-        logger.warning("Revenue system not available")
+        logger.warning("Revenue system not available - import error")
+        return None
+    except Exception as e:
+        logger.warning(f"Revenue system not available: {e}")
         return None
 
 def get_customer_acquisition():
