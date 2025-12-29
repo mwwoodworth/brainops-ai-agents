@@ -13,6 +13,16 @@ from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
+from contextlib import contextmanager
+
+# ============================================================================
+# SHARED CONNECTION POOL - CRITICAL for preventing MaxClientsInSessionMode
+# ============================================================================
+try:
+    from database.sync_pool import get_sync_pool
+    _POOL_AVAILABLE = True
+except ImportError:
+    _POOL_AVAILABLE = False
 
 # Configure logging early so it is available to all imports
 logging.basicConfig(level=logging.INFO)
@@ -70,7 +80,7 @@ class AIIntegrationLayer:
     """
 
     def __init__(self):
-        self.conn = None
+        self._current_conn = None  # Temporary connection for backward compat
         self.langgraph = None
         self.memory_manager = None
         self.aurea = None
@@ -79,24 +89,77 @@ class AIIntegrationLayer:
         self.agents_registry = {}
         self.active_tasks = {}
         self.execution_queue = asyncio.Queue()
-        self._connect()
+        self._pool = None
+        self._init_pool()
 
-    def _connect(self):
-        """Establish database connection"""
+    def _init_pool(self):
+        """Initialize connection to shared pool"""
         try:
-            self.conn = psycopg2.connect(**DB_CONFIG)
-            logger.info("✅ AI Integration Layer connected to database")
+            if _POOL_AVAILABLE:
+                self._pool = get_sync_pool()
+                logger.info("✅ AI Integration Layer using shared connection pool")
+            else:
+                logger.warning("⚠️ Shared pool unavailable, will use direct connections")
         except Exception as e:
-            logger.error(f"❌ Database connection failed: {e}")
-            raise
+            logger.error(f"❌ Pool initialization failed: {e}")
 
+    @contextmanager
+    def _get_db_context(self):
+        """Get database connection and cursor from shared pool"""
+        if _POOL_AVAILABLE and self._pool:
+            with self._pool.get_connection() as conn:
+                if conn:
+                    cur = conn.cursor(cursor_factory=RealDictCursor)
+                    try:
+                        yield conn, cur
+                    finally:
+                        cur.close()
+                else:
+                    yield None, None
+        else:
+            # Fallback to direct connection
+            conn = psycopg2.connect(**DB_CONFIG)
+            try:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                try:
+                    yield conn, cur
+                finally:
+                    cur.close()
+            finally:
+                conn.close()
+
+    @property
+    def conn(self):
+        """Backward compatible conn property - returns current connection"""
+        return self._current_conn
+
+    @contextmanager
     def _get_cursor(self):
-        """Get database cursor with auto-reconnect"""
-        try:
-            self.conn.cursor().execute("SELECT 1")
-        except:
-            self._connect()
-        return self.conn.cursor(cursor_factory=RealDictCursor)
+        """Get cursor with connection tracking for backward compat"""
+        if _POOL_AVAILABLE and self._pool:
+            with self._pool.get_connection() as conn:
+                if conn:
+                    self._current_conn = conn  # Store for self.conn.commit()
+                    cur = conn.cursor(cursor_factory=RealDictCursor)
+                    try:
+                        yield cur
+                    finally:
+                        cur.close()
+                        self._current_conn = None
+                else:
+                    yield None
+        else:
+            conn = psycopg2.connect(**DB_CONFIG)
+            self._current_conn = conn
+            try:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                try:
+                    yield cur
+                finally:
+                    cur.close()
+            finally:
+                conn.close()
+                self._current_conn = None
 
     async def initialize(self, langgraph=None, memory_manager=None, aurea=None, self_aware_ai=None):
         """

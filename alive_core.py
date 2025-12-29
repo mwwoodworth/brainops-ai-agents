@@ -196,115 +196,115 @@ class AliveCore:
     _use_shared_pool = True
 
     def _get_connection(self):
-        """Get database connection from SHARED pool to prevent exhaustion"""
+        """Get database connection from SHARED pool - returns context manager"""
         try:
             from database.sync_pool import get_sync_pool
             pool = get_sync_pool()
-            # Return a context manager wrapper that the caller can use
-            return pool.get_connection().__enter__()
+            return pool.get_connection()  # Returns context manager
         except Exception as e:
             logger.warning(f"Shared pool unavailable, falling back to direct: {e}")
-            return psycopg2.connect(**DB_CONFIG)
-
-    def _return_connection(self, conn):
-        """Return connection - handled by context manager in shared pool"""
-        # The shared pool handles this automatically via context manager
-        # For direct connections, close them
-        if conn and hasattr(conn, 'closed') and not conn.closed:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            # Return a fallback context manager for direct connection
+            from contextlib import contextmanager
+            @contextmanager
+            def fallback_conn():
+                conn = psycopg2.connect(**DB_CONFIG)
+                try:
+                    yield conn
+                finally:
+                    if conn and not conn.closed:
+                        conn.close()
+            return fallback_conn()
 
     def _ensure_schema(self):
         """Create required database tables"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
+            with self._get_connection() as conn:
+                if not conn:
+                    logger.error("Failed to get connection for schema init")
+                    return
+                cur = conn.cursor()
+                cur.execute("""
+                    -- Consciousness state snapshots
+                    CREATE TABLE IF NOT EXISTS ai_consciousness_state (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        timestamp TIMESTAMPTZ DEFAULT NOW(),
+                        awareness_level FLOAT DEFAULT 0.0,
+                        active_systems JSONB DEFAULT '{}'::jsonb,
+                        current_context TEXT,
+                        short_term_memory_load FLOAT,
+                        metadata JSONB DEFAULT '{}'::jsonb
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_consciousness_timestamp
+                        ON ai_consciousness_state(timestamp);
 
-            cur.execute("""
-                -- Consciousness state snapshots
-                CREATE TABLE IF NOT EXISTS ai_consciousness_state (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    awareness_level FLOAT DEFAULT 0.0,
-                    active_systems JSONB DEFAULT '{}'::jsonb,
-                    current_context TEXT,
-                    short_term_memory_load FLOAT,
-                    metadata JSONB DEFAULT '{}'::jsonb
-                );
-                CREATE INDEX IF NOT EXISTS idx_consciousness_timestamp
-                    ON ai_consciousness_state(timestamp);
+                    -- Continuous thought stream
+                    CREATE TABLE IF NOT EXISTS ai_thought_stream (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        timestamp TIMESTAMPTZ DEFAULT NOW(),
+                        thought_content TEXT NOT NULL,
+                        thought_type VARCHAR(50) NOT NULL,
+                        related_entities JSONB DEFAULT '[]'::jsonb,
+                        intensity FLOAT DEFAULT 0.5,
+                        metadata JSONB DEFAULT '{}'::jsonb,
+                        priority INTEGER,
+                        confidence FLOAT,
+                        related_thoughts TEXT[],
+                        thought_id VARCHAR(100)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_thought_stream_timestamp
+                        ON ai_thought_stream(timestamp);
+                    CREATE INDEX IF NOT EXISTS idx_thought_stream_type
+                        ON ai_thought_stream(thought_type);
+                    CREATE INDEX IF NOT EXISTS idx_thought_stream_priority
+                        ON ai_thought_stream(priority DESC);
 
-                -- Continuous thought stream
-                CREATE TABLE IF NOT EXISTS ai_thought_stream (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    thought_content TEXT NOT NULL,
-                    thought_type VARCHAR(50) NOT NULL,
-                    related_entities JSONB DEFAULT '[]'::jsonb,
-                    intensity FLOAT DEFAULT 0.5,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    priority INTEGER,
-                    confidence FLOAT,
-                    related_thoughts TEXT[],
-                    thought_id VARCHAR(100)
-                );
-                CREATE INDEX IF NOT EXISTS idx_thought_stream_timestamp
-                    ON ai_thought_stream(timestamp);
-                CREATE INDEX IF NOT EXISTS idx_thought_stream_type
-                    ON ai_thought_stream(thought_type);
-                CREATE INDEX IF NOT EXISTS idx_thought_stream_priority
-                    ON ai_thought_stream(priority DESC);
+                    -- Vital signs history
+                    CREATE TABLE IF NOT EXISTS ai_vital_signs (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        timestamp TIMESTAMPTZ DEFAULT NOW(),
+                        cpu_usage FLOAT,
+                        memory_usage FLOAT,
+                        request_rate FLOAT,
+                        error_rate FLOAT,
+                        active_connections INTEGER,
+                        system_load FLOAT,
+                        component_health_score FLOAT
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_vital_signs_timestamp
+                        ON ai_vital_signs(timestamp);
 
-                -- Vital signs history
-                CREATE TABLE IF NOT EXISTS ai_vital_signs (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    cpu_usage FLOAT,
-                    memory_usage FLOAT,
-                    request_rate FLOAT,
-                    error_rate FLOAT,
-                    active_connections INTEGER,
-                    system_load FLOAT,
-                    component_health_score FLOAT
-                );
-                CREATE INDEX IF NOT EXISTS idx_vital_signs_timestamp
-                    ON ai_vital_signs(timestamp);
+                    -- Attention focus history
+                    CREATE TABLE IF NOT EXISTS ai_attention_focus (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        timestamp TIMESTAMPTZ DEFAULT NOW(),
+                        focus_target VARCHAR(255) NOT NULL,
+                        reason TEXT,
+                        priority INTEGER DEFAULT 1,
+                        status VARCHAR(50) DEFAULT 'active',
+                        started_at TIMESTAMPTZ DEFAULT NOW(),
+                        ended_at TIMESTAMPTZ
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_attention_focus_time
+                        ON ai_attention_focus(started_at DESC);
 
-                -- Attention focus history
-                CREATE TABLE IF NOT EXISTS ai_attention_focus (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    focus_target VARCHAR(255) NOT NULL,
-                    reason TEXT,
-                    priority INTEGER DEFAULT 1,
-                    status VARCHAR(50) DEFAULT 'active',
-                    started_at TIMESTAMPTZ DEFAULT NOW(),
-                    ended_at TIMESTAMPTZ
-                );
-                CREATE INDEX IF NOT EXISTS idx_attention_focus_time
-                    ON ai_attention_focus(started_at DESC);
-
-                -- Wake triggers - events that demand attention
-                CREATE TABLE IF NOT EXISTS ai_wake_triggers (
-                    id SERIAL PRIMARY KEY,
-                    trigger_type VARCHAR(100),
-                    source VARCHAR(255),
-                    severity VARCHAR(20),
-                    description TEXT,
-                    data JSONB,
-                    handled BOOLEAN DEFAULT FALSE,
-                    handled_at TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-                CREATE INDEX IF NOT EXISTS idx_wake_triggers_pending
-                    ON ai_wake_triggers(created_at DESC) WHERE NOT handled;
-            """)
-
-            conn.commit()
-            conn.close()
-            logger.info("✅ AliveCore schema initialized")
+                    -- Wake triggers - events that demand attention
+                    CREATE TABLE IF NOT EXISTS ai_wake_triggers (
+                        id SERIAL PRIMARY KEY,
+                        trigger_type VARCHAR(100),
+                        source VARCHAR(255),
+                        severity VARCHAR(20),
+                        description TEXT,
+                        data JSONB,
+                        handled BOOLEAN DEFAULT FALSE,
+                        handled_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_wake_triggers_pending
+                        ON ai_wake_triggers(created_at DESC) WHERE NOT handled;
+                """)
+                conn.commit()
+                cur.close()
+                logger.info("✅ AliveCore schema initialized")
         except Exception as e:
             logger.error(f"Failed to init AliveCore schema: {e}")
 
@@ -343,20 +343,21 @@ class AliveCore:
         self.thought_stream.append(thought)
         intensity = min(1.0, max(0.1, priority / 10.0))
 
-        # Persist to database asynchronously
+        # Persist to database using shared pool
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO ai_thought_stream
-                (thought_id, thought_type, thought_content, metadata, confidence, priority, intensity, timestamp)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-            """, (
-                thought.id, thought.type.value, thought.content,
-                Json(thought.context), thought.confidence, thought.priority, intensity
-            ))
-            conn.commit()
-            conn.close()
+            with self._get_connection() as conn:
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        INSERT INTO ai_thought_stream
+                        (thought_id, thought_type, thought_content, metadata, confidence, priority, intensity, timestamp)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                    """, (
+                        thought.id, thought.type.value, thought.content,
+                        Json(thought.context), thought.confidence, thought.priority, intensity
+                    ))
+                    conn.commit()
+                    cur.close()
         except Exception as e:
             logger.warning(f"Failed to persist thought: {e}")
 
@@ -394,28 +395,29 @@ class AliveCore:
             priority=7
         )
 
-        # Persist state
+        # Persist state using shared pool
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO ai_consciousness_state
-                (awareness_level, active_systems, current_context, short_term_memory_load, metadata)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (
-                awareness_level,
-                Json({"attention_focus": self.attention_focus, "state": new_state.value}),
-                reason or f"State transition to {new_state.value}",
-                len(self.thought_stream) / self.thought_stream.maxlen if self.thought_stream.maxlen else 0.0,
-                Json({
-                    'reason': reason,
-                    'previous': old_state.value,
-                    'thought_count': self.thought_counter,
-                    'uptime_seconds': (datetime.utcnow() - self.start_time).total_seconds()
-                })
-            ))
-            conn.commit()
-            conn.close()
+            with self._get_connection() as conn:
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        INSERT INTO ai_consciousness_state
+                        (awareness_level, active_systems, current_context, short_term_memory_load, metadata)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (
+                        awareness_level,
+                        Json({"attention_focus": self.attention_focus, "state": new_state.value}),
+                        reason or f"State transition to {new_state.value}",
+                        len(self.thought_stream) / self.thought_stream.maxlen if self.thought_stream.maxlen else 0.0,
+                        Json({
+                            'reason': reason,
+                            'previous': old_state.value,
+                            'thought_count': self.thought_counter,
+                            'uptime_seconds': (datetime.utcnow() - self.start_time).total_seconds()
+                        })
+                    ))
+                    conn.commit()
+                    cur.close()
         except Exception as e:
             logger.warning(f"Failed to persist state: {e}")
 
@@ -445,24 +447,25 @@ class AliveCore:
             priority=priority
         )
 
-        # Record attention shift
+        # Record attention shift using shared pool
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
-            # End previous focus
-            cur.execute("""
-                UPDATE ai_attention_focus
-                SET ended_at = NOW(),
-                    status = 'shifted'
-                WHERE ended_at IS NULL AND status = 'active'
-            """)
-            # Start new focus
-            cur.execute("""
-                INSERT INTO ai_attention_focus (focus_target, reason, priority, status, started_at)
-                VALUES (%s, %s, %s, 'active', NOW())
-            """, (target, reason, priority))
-            conn.commit()
-            conn.close()
+            with self._get_connection() as conn:
+                if conn:
+                    cur = conn.cursor()
+                    # End previous focus
+                    cur.execute("""
+                        UPDATE ai_attention_focus
+                        SET ended_at = NOW(),
+                            status = 'shifted'
+                        WHERE ended_at IS NULL AND status = 'active'
+                    """)
+                    # Start new focus
+                    cur.execute("""
+                        INSERT INTO ai_attention_focus (focus_target, reason, priority, status, started_at)
+                        VALUES (%s, %s, %s, 'active', NOW())
+                    """, (target, reason, priority))
+                    conn.commit()
+                    cur.close()
         except Exception as e:
             logger.warning(f"Failed to record attention: {e}")
 
@@ -491,23 +494,24 @@ class AliveCore:
 
         self.vital_signs = vitals
 
-        # Persist vital signs
+        # Persist vital signs using shared pool
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
-            system_load = (vitals.cpu_percent + vitals.memory_percent) / 2.0
-            component_health_score = max(0.0, 1.0 - min(1.0, vitals.error_rate or 0))
-            cur.execute("""
-                INSERT INTO ai_vital_signs
-                (cpu_usage, memory_usage, request_rate, error_rate,
-                 active_connections, system_load, component_health_score)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (
-                vitals.cpu_percent, vitals.memory_percent, vitals.requests_per_minute,
-                vitals.error_rate, vitals.active_connections, system_load, component_health_score
-            ))
-            conn.commit()
-            conn.close()
+            with self._get_connection() as conn:
+                if conn:
+                    cur = conn.cursor()
+                    system_load = (vitals.cpu_percent + vitals.memory_percent) / 2.0
+                    component_health_score = max(0.0, 1.0 - min(1.0, vitals.error_rate or 0))
+                    cur.execute("""
+                        INSERT INTO ai_vital_signs
+                        (cpu_usage, memory_usage, request_rate, error_rate,
+                         active_connections, system_load, component_health_score)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        vitals.cpu_percent, vitals.memory_percent, vitals.requests_per_minute,
+                        vitals.error_rate, vitals.active_connections, system_load, component_health_score
+                    ))
+                    conn.commit()
+                    cur.close()
         except Exception as e:
             logger.warning(f"Failed to persist vitals: {e}")
 
@@ -555,24 +559,26 @@ class AliveCore:
         """Continuous awareness - monitoring everything"""
         while not self._get_shutdown_event().is_set():
             try:
-                # Check for wake triggers
-                conn = self._get_connection()
-                cur = conn.cursor(cursor_factory=RealDictCursor)
-                cur.execute("""
-                    SELECT * FROM ai_wake_triggers
-                    WHERE NOT handled
-                    ORDER BY
-                        CASE severity
-                            WHEN 'critical' THEN 1
-                            WHEN 'high' THEN 2
-                            WHEN 'medium' THEN 3
-                            ELSE 4
-                        END,
-                        created_at ASC
-                    LIMIT 10
-                """)
-                triggers = cur.fetchall()
-                self._return_connection(conn)
+                # Check for wake triggers using shared pool
+                triggers = []
+                with self._get_connection() as conn:
+                    if conn:
+                        cur = conn.cursor(cursor_factory=RealDictCursor)
+                        cur.execute("""
+                            SELECT * FROM ai_wake_triggers
+                            WHERE NOT handled
+                            ORDER BY
+                                CASE severity
+                                    WHEN 'critical' THEN 1
+                                    WHEN 'high' THEN 2
+                                    WHEN 'medium' THEN 3
+                                    ELSE 4
+                                END,
+                                created_at ASC
+                            LIMIT 10
+                        """)
+                        triggers = cur.fetchall()
+                        cur.close()
 
                 for trigger in triggers:
                     self.think(
@@ -587,16 +593,17 @@ class AliveCore:
                                          f"Critical trigger: {trigger['trigger_type']}")
                         await self._emit_event('emergency', trigger)
 
-                    # Mark as handled
-                    conn = self._get_connection()
-                    cur = conn.cursor()
-                    cur.execute("""
-                        UPDATE ai_wake_triggers
-                        SET handled = TRUE, handled_at = NOW()
-                        WHERE id = %s
-                    """, (trigger['id'],))
-                    conn.commit()
-                    self._return_connection(conn)
+                    # Mark as handled using shared pool
+                    with self._get_connection() as conn:
+                        if conn:
+                            cur = conn.cursor()
+                            cur.execute("""
+                                UPDATE ai_wake_triggers
+                                SET handled = TRUE, handled_at = NOW()
+                                WHERE id = %s
+                            """, (trigger['id'],))
+                            conn.commit()
+                            cur.close()
 
                 await asyncio.sleep(30)  # Check every 30 seconds to reduce connection pressure
 
@@ -716,15 +723,16 @@ class AliveCore:
                      severity: str, description: str, data: Dict = None):
         """Create a wake trigger to get the AI's attention"""
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO ai_wake_triggers
-                (trigger_type, source, severity, description, data)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (trigger_type, source, severity, description, Json(data or {})))
-            conn.commit()
-            self._return_connection(conn)
+            with self._get_connection() as conn:
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        INSERT INTO ai_wake_triggers
+                        (trigger_type, source, severity, description, data)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (trigger_type, source, severity, description, Json(data or {})))
+                    conn.commit()
+                    cur.close()
 
             if severity == 'critical':
                 self.focus_attention(trigger_type, f"Critical: {description}", priority=10)
