@@ -2054,6 +2054,111 @@ class AIDecisionTree:
                 'guidance': {'proceed': True, 'caution_level': 'medium'}
             }
 
+    async def record_outcome(
+        self,
+        agent_name: str,
+        task_type: str,
+        success: bool,
+        confidence_used: float = 0.5
+    ) -> None:
+        """
+        Record the outcome of an agent execution for learning.
+        This is the async interface expected by unified_system_integration.py.
+
+        Args:
+            agent_name: Name of the agent that executed
+            task_type: Type of task executed
+            success: Whether the execution succeeded
+            confidence_used: The confidence score used for the decision
+        """
+        try:
+            # Generate a decision ID for tracking
+            decision_id = f"auto_{agent_name}_{task_type}_{uuid.uuid4().hex[:8]}"
+
+            # Build outcome data
+            actual_outcome = {
+                'agent': agent_name,
+                'task_type': task_type,
+                'success': success,
+                'confidence_used': confidence_used,
+                'timestamp': datetime.now().isoformat()
+            }
+
+            # Calculate success score (0-1)
+            success_score = 1.0 if success else 0.0
+
+            # Use the existing record_decision_outcome method
+            self.record_decision_outcome(
+                decision_id=decision_id,
+                actual_outcome=actual_outcome,
+                success_score=success_score
+            )
+
+            logger.info(f"Recorded outcome for {agent_name}/{task_type}: success={success}")
+
+        except Exception as e:
+            logger.error(f"Failed to record outcome: {e}")
+
+    async def get_recovery_actions(
+        self,
+        agent_name: str,
+        error_message: str
+    ) -> List[str]:
+        """
+        Get suggested recovery actions for an agent error.
+
+        Args:
+            agent_name: Name of the agent that failed
+            error_message: The error message
+
+        Returns:
+            List of suggested recovery actions
+        """
+        try:
+            recovery_actions = []
+            error_lower = error_message.lower()
+
+            # Common error patterns and their recoveries
+            if 'timeout' in error_lower:
+                recovery_actions.append("Retry with increased timeout")
+                recovery_actions.append("Check service availability")
+            elif 'connection' in error_lower or 'network' in error_lower:
+                recovery_actions.append("Retry connection")
+                recovery_actions.append("Check network connectivity")
+                recovery_actions.append("Verify service endpoints")
+            elif 'permission' in error_lower or 'unauthorized' in error_lower:
+                recovery_actions.append("Verify credentials")
+                recovery_actions.append("Check API key validity")
+            elif 'not found' in error_lower or '404' in error_lower:
+                recovery_actions.append("Verify resource exists")
+                recovery_actions.append("Check resource path/ID")
+            elif 'validation' in error_lower or 'invalid' in error_lower:
+                recovery_actions.append("Review input data format")
+                recovery_actions.append("Check required fields")
+            elif 'database' in error_lower or 'sql' in error_lower:
+                recovery_actions.append("Retry database operation")
+                recovery_actions.append("Check database connection pool")
+            else:
+                # Generic recovery suggestions
+                recovery_actions.append("Retry operation with exponential backoff")
+                recovery_actions.append("Check system logs for details")
+
+            # Add agent-specific suggestions
+            agent_lower = agent_name.lower()
+            if 'deploy' in agent_lower:
+                recovery_actions.append("Check deployment service status")
+                recovery_actions.append("Verify build configuration")
+            elif 'customer' in agent_lower or 'invoice' in agent_lower:
+                recovery_actions.append("Verify customer data integrity")
+            elif 'monitor' in agent_lower:
+                recovery_actions.append("Check monitoring endpoints")
+
+            return recovery_actions[:5]  # Return top 5 suggestions
+
+        except Exception as e:
+            logger.error(f"Failed to get recovery actions: {e}")
+            return ["Retry operation", "Check system logs"]
+
 # Singleton instance
 _ai_decision_tree = None
 

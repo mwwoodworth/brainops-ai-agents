@@ -566,8 +566,18 @@ class GraphContextProvider:
         if not node_ids:
             return []
 
-        # Convert UUIDs to strings for parameterized query
-        id_placeholders = ", ".join(f"${i+1}" for i in range(len(node_ids)))
+        # Limit node_ids to prevent parameter explosion (max 20 IDs = 20 params)
+        # Previously: using same placeholder range for both IN clauses with duplicated
+        # params caused "expects X args, got 2X" errors when node_ids > 10
+        limited_node_ids = node_ids[:20]
+
+        # Build placeholder list for first IN clause: $1, $2, ..., $N
+        first_placeholders = ", ".join(f"${i+1}" for i in range(len(limited_node_ids)))
+
+        # Build placeholder list for second IN clause: $(N+1), $(N+2), ..., $(2N)
+        second_placeholders = ", ".join(
+            f"${i+1+len(limited_node_ids)}" for i in range(len(limited_node_ids))
+        )
 
         query = f"""
             SELECT
@@ -579,13 +589,13 @@ class GraphContextProvider:
             FROM codebase_edges e
             JOIN codebase_nodes source ON e.source_node_id = source.node_id
             JOIN codebase_nodes target ON e.target_node_id = target.node_id
-            WHERE e.source_node_id IN ({id_placeholders})
-               OR e.target_node_id IN ({id_placeholders})
+            WHERE e.source_node_id IN ({first_placeholders})
+               OR e.target_node_id IN ({second_placeholders})
             LIMIT 50
         """
 
-        # Duplicate params for both IN clauses
-        params = node_ids + node_ids
+        # Duplicate params for both IN clauses (now with separate placeholder ranges)
+        params = limited_node_ids + limited_node_ids
 
         try:
             results = await pool.fetch(query, *params)
