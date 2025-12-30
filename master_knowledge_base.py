@@ -387,8 +387,12 @@ Format as JSON with these exact keys."""
     ) -> List[List[float]]:
         """Generate embeddings for texts using OpenAI."""
         if not self.openai_api_key:
-            # Return mock embeddings for demo
-            return [[0.1 * (i % 10) for i in range(1536)] for _ in texts]
+            # Try to get from environment if not set
+            self.openai_api_key = os.getenv("OPENAI_API_KEY")
+            
+        if not self.openai_api_key:
+            logger.error("OpenAI API Key missing for embeddings")
+            raise ValueError("OPENAI_API_KEY is required for knowledge base embeddings")
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -408,7 +412,8 @@ Format as JSON with these exact keys."""
                 return [item["embedding"] for item in data["data"]]
         except Exception as e:
             logger.error(f"Embedding generation failed: {e}")
-            return [[0.0] * 1536 for _ in texts]
+            # If API fails, we cannot return mock data in production
+            raise
 
     async def generate_summary(self, content: str, max_words: int = 100) -> str:
         """Generate a summary of content."""
@@ -458,7 +463,11 @@ Return ONLY the category name that best matches, nothing else."""
     async def _call_claude(self, prompt: str) -> str:
         """Call Claude API."""
         if not self.anthropic_api_key:
-            return f"[Mock response for: {prompt[:100]}...]"
+             self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+             
+        if not self.anthropic_api_key:
+            logger.error("Anthropic API Key missing")
+            raise ValueError("ANTHROPIC_API_KEY is required for knowledge processing")
 
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -480,7 +489,7 @@ Return ONLY the category name that best matches, nothing else."""
                 return data["content"][0]["text"]
         except Exception as e:
             logger.error(f"Claude API error: {e}")
-            return ""
+            raise
 
     def _parse_json_response(self, response: str) -> Dict[str, Any]:
         """Parse JSON from AI response."""

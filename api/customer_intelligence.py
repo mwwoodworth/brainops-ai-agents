@@ -87,10 +87,59 @@ async def get_customer_intelligence(customer_id: str):
                     churn_risk = 35  # Medium - no jobs in 3 months
             
         # 4. Sentiment Score (0-100)
-        # Mocked for now, ideally comes from email/call analysis
-        sentiment_score = 85
-        if risk_score > 50:
-            sentiment_score = 45
+        # Real analysis of recent job descriptions
+        sentiment_score = 50  # Default neutral
+        
+        # Fetch text data for analysis
+        job_texts = await pool.fetch(
+            "SELECT description FROM jobs WHERE customer_id = $1 AND description IS NOT NULL ORDER BY created_at DESC LIMIT 5",
+            customer_id
+        )
+        text_content = "\n".join([r['description'] for r in job_texts])
+        
+        if text_content and len(text_content) > 10:
+            try:
+                import httpx
+                import os
+                import re
+                
+                api_key = os.getenv("OPENAI_API_KEY")
+                if api_key:
+                    async with httpx.AsyncClient(timeout=3.0) as client:
+                        response = await client.post(
+                            "https://api.openai.com/v1/chat/completions",
+                            headers={
+                                "Authorization": f"Bearer {api_key}",
+                                "Content-Type": "application/json"
+                            },
+                            json={
+                                "model": "gpt-3.5-turbo",
+                                "messages": [{
+                                    "role": "system",
+                                    "content": "Analyze customer sentiment from these job notes. Return ONLY a number 0-100 (0=angry, 100=delighted)."
+                                }, {
+                                    "role": "user",
+                                    "content": text_content[:1000]
+                                }],
+                                "temperature": 0.0,
+                                "max_tokens": 10
+                            }
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            content = data['choices'][0]['message']['content']
+                            match = re.search(r'\d+', content)
+                            if match:
+                                sentiment_score = min(100, max(0, int(match.group())))
+            except Exception as e:
+                logger.warning(f"Sentiment analysis failed: {e}")
+                # Fallback heuristics
+                if risk_score > 60:
+                    sentiment_score = 40
+        else:
+            # Fallback if no text data
+            if risk_score > 50:
+                sentiment_score = 45
 
         # 5. Profile
         profile = {
