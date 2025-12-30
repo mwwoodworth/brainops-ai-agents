@@ -10,6 +10,7 @@ import asyncio
 import os
 import base64
 import logging
+import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from enum import Enum
@@ -527,7 +528,6 @@ Return your analysis in this exact JSON format:
             elif "```" in response_text:
                 response_text = response_text.split("```")[1].split("```")[0].strip()
 
-            import json
             ai_result = json.loads(response_text)
 
             result["ai_analysis"] = ai_result
@@ -637,7 +637,6 @@ Return JSON:
                 generation_config={"temperature": 0.1}
             )
 
-            import json
             response_text = response.text.strip()
             if "```json" in response_text:
                 response_text = response_text.split("```json")[1].split("```")[0].strip()
