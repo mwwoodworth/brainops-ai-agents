@@ -314,7 +314,8 @@ class AlwaysKnowBrain:
             start = time.time()
             async with self._session.get("https://myroofgenius.com/api/health") as resp:
                 state.mrg_response_time_ms = (time.time() - start) * 1000
-                if resp.status == 200:
+                # Accept any 2xx status (200=OK, 206=Partial Content for degraded)
+                if 200 <= resp.status < 300:
                     data = await resp.json()
                     # Check if core services are healthy (DB must be healthy, Stripe optional)
                     db_healthy = data.get("services", {}).get("database", {}).get("status") == "healthy"
@@ -323,6 +324,7 @@ class AlwaysKnowBrain:
                     if not state.mrg_healthy:
                         logger.warning(f"MRG unhealthy: {data.get('services', {})}")
                 else:
+                    logger.warning(f"MRG returned non-2xx status: {resp.status}")
                     state.mrg_healthy = False
         except Exception as e:
             logger.warning(f"MRG check failed: {e}")
