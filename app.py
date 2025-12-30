@@ -2459,11 +2459,12 @@ async def execute_scheduled_agents(
                 started_at = datetime.utcnow()
                 agent_name = agent.get("name", "unknown")
 
-                # Log execution start
+                # Log execution start (use correct columns: task_execution_id, agent_type, prompt)
+                # agent_executions uses created_at with DEFAULT, not started_at
                 await pool.execute("""
-                    INSERT INTO agent_executions (id, agent_id, started_at, status, input_data)
+                    INSERT INTO agent_executions (id, task_execution_id, agent_type, status, prompt)
                     VALUES ($1, $2, $3, $4, $5)
-                """, execution_id, agent["id"], started_at, "running", json.dumps({"scheduled": True}))
+                """, execution_id, uuid.UUID(execution_id), agent.get("type", "scheduled"), "running", json.dumps({"scheduled": True, "agent_name": agent_name}))
 
                 # ACTUALLY EXECUTE THE AGENT using AgentExecutor
                 result = {"status": "skipped", "message": "No executor available"}
@@ -2500,11 +2501,11 @@ async def execute_scheduled_agents(
                         "scheduled_execution": True
                     }
 
-                # Update execution record with actual result
+                # Update execution record with actual result (use correct columns: response not output_data)
                 final_status = "completed" if result.get("status") != "error" else "failed"
                 await pool.execute("""
                     UPDATE agent_executions
-                    SET completed_at = $1, status = $2, output_data = $3
+                    SET completed_at = $1, status = $2, response = $3
                     WHERE id = $4
                 """, datetime.utcnow(), final_status, json.dumps(result), execution_id)
 
@@ -2616,9 +2617,9 @@ async def trigger_self_healing():
                         WHERE id = $1
                     """, rule["id"])
 
-        # 3. Check for stalled agents
+        # 3. Check for stalled agents (use correct column: type not agent_type)
         stalled_agents = await pool.fetch("""
-            SELECT id, name, agent_type
+            SELECT id, name, type
             FROM ai_agents
             WHERE enabled = true
             AND last_execution_at < NOW() - INTERVAL '2 hours'
