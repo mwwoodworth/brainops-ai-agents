@@ -317,31 +317,152 @@ class AIUITestingEngine:
         self._browser = None
         self._context = None
 
-    async def initialize(self):
-        """Initialize the testing engine with Playwright"""
+    async def initialize(self, timeout_seconds: int = 30):
+        """Initialize the testing engine with Playwright (with timeout)"""
         try:
             from playwright.async_api import async_playwright
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(headless=True)
-            self._context = await self._browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                device_scale_factor=2
-            )
-            os.makedirs(self.screenshot_dir, exist_ok=True)
-            logger.info("AI UI Testing Engine initialized")
+
+            # Add timeout to prevent infinite hangs
+            try:
+                self._playwright = await asyncio.wait_for(
+                    async_playwright().start(),
+                    timeout=timeout_seconds
+                )
+                self._browser = await asyncio.wait_for(
+                    self._playwright.chromium.launch(
+                        headless=True,
+                        args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+                    ),
+                    timeout=timeout_seconds
+                )
+                self._context = await asyncio.wait_for(
+                    self._browser.new_context(
+                        viewport={"width": 1920, "height": 1080},
+                        device_scale_factor=2
+                    ),
+                    timeout=10
+                )
+                os.makedirs(self.screenshot_dir, exist_ok=True)
+                logger.info("AI UI Testing Engine initialized with Playwright")
+                self._playwright_available = True
+            except asyncio.TimeoutError:
+                logger.error(f"Playwright initialization timed out after {timeout_seconds}s")
+                self._browser = None
+                self._playwright_available = False
         except ImportError:
-            logger.warning("Playwright not installed - running in analysis-only mode")
+            logger.warning("Playwright not installed - running in HTTP-only mode")
             self._browser = None
+            self._playwright_available = False
         except Exception as e:
             logger.error(f"Failed to initialize Playwright: {e}")
             self._browser = None
+            self._playwright_available = False
 
     async def close(self):
         """Close the browser and cleanup"""
-        if self._browser:
-            await self._browser.close()
-        if hasattr(self, '_playwright') and self._playwright:
-            await self._playwright.stop()
+        try:
+            if self._browser:
+                await asyncio.wait_for(self._browser.close(), timeout=10)
+            if hasattr(self, '_playwright') and self._playwright:
+                await asyncio.wait_for(self._playwright.stop(), timeout=10)
+        except asyncio.TimeoutError:
+            logger.warning("Browser close timed out")
+        except Exception as e:
+            logger.warning(f"Error closing browser: {e}")
+
+    async def test_url_http_fallback(
+        self,
+        url: str,
+        test_name: str = "UI Test"
+    ) -> UITestResult:
+        """
+        HTTP-only fallback testing when Playwright is unavailable.
+        Tests response, headers, and basic content.
+        """
+        test_id = hashlib.md5(f"{url}{datetime.now().isoformat()}".encode()).hexdigest()[:12]
+        start_time = datetime.now(timezone.utc)
+
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                async with session.get(url, allow_redirects=True) as response:
+                    status_code = response.status
+                    headers = dict(response.headers)
+                    content = await response.text()
+                    load_time_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+
+                    # Basic checks
+                    issues = []
+                    severity = TestSeverity.INFO
+                    status = TestStatus.PASSED
+
+                    # Check HTTP status
+                    if status_code >= 500:
+                        issues.append(f"Server error: HTTP {status_code}")
+                        severity = TestSeverity.CRITICAL
+                        status = TestStatus.FAILED
+                    elif status_code >= 400:
+                        issues.append(f"Client error: HTTP {status_code}")
+                        severity = TestSeverity.HIGH
+                        status = TestStatus.FAILED
+
+                    # Check for common issues in HTML
+                    content_lower = content.lower()
+                    if '<title>' not in content_lower:
+                        issues.append("Missing <title> tag")
+                    if 'viewport' not in content_lower:
+                        issues.append("Missing viewport meta tag (mobile unfriendly)")
+                    if 'error' in content_lower and ('500' in content or '404' in content):
+                        issues.append("Error page detected in content")
+                        severity = TestSeverity.HIGH
+                        status = TestStatus.FAILED
+
+                    # Check response time
+                    if load_time_ms > 5000:
+                        issues.append(f"Slow response: {load_time_ms:.0f}ms")
+                        if severity == TestSeverity.INFO:
+                            severity = TestSeverity.MEDIUM
+
+                    # Check security headers
+                    if 'strict-transport-security' not in [h.lower() for h in headers.keys()]:
+                        issues.append("Missing HSTS header")
+                    if 'x-frame-options' not in [h.lower() for h in headers.keys()]:
+                        issues.append("Missing X-Frame-Options header")
+
+                    message = f"HTTP {status_code} - {len(issues)} issues found" if issues else f"HTTP {status_code} - OK ({load_time_ms:.0f}ms)"
+
+                    return UITestResult(
+                        test_id=test_id,
+                        test_name=f"{test_name} (HTTP)",
+                        url=url,
+                        status=status,
+                        severity=severity,
+                        message=message,
+                        performance_metrics={
+                            "load_time_ms": load_time_ms,
+                            "status_code": status_code,
+                            "content_length": len(content)
+                        },
+                        suggestions=issues if issues else ["Page loaded successfully"]
+                    )
+
+        except asyncio.TimeoutError:
+            return UITestResult(
+                test_id=test_id,
+                test_name=f"{test_name} (HTTP)",
+                url=url,
+                status=TestStatus.FAILED,
+                severity=TestSeverity.CRITICAL,
+                message="Request timed out after 30 seconds"
+            )
+        except Exception as e:
+            return UITestResult(
+                test_id=test_id,
+                test_name=f"{test_name} (HTTP)",
+                url=url,
+                status=TestStatus.FAILED,
+                severity=TestSeverity.CRITICAL,
+                message=f"HTTP request failed: {str(e)}"
+            )
 
     async def test_url(
         self,
@@ -353,24 +474,39 @@ class AIUITestingEngine:
     ) -> UITestResult:
         """
         Test a single URL with comprehensive AI analysis.
+        Falls back to HTTP-only testing if Playwright unavailable.
         """
         test_id = hashlib.md5(f"{url}{datetime.now().isoformat()}".encode()).hexdigest()[:12]
 
+        # Fallback to HTTP testing if no browser
         if not self._browser:
-            return UITestResult(
-                test_id=test_id,
-                test_name=test_name,
-                url=url,
-                status=TestStatus.SKIPPED,
-                severity=TestSeverity.INFO,
-                message="Browser not available - Playwright not initialized"
-            )
-
-        page = await self._context.new_page()
+            logger.info(f"Using HTTP fallback for {url}")
+            return await self.test_url_http_fallback(url, test_name)
 
         try:
-            # Navigate to URL
-            response = await page.goto(url, wait_until="networkidle" if wait_for_load else "domcontentloaded")
+            page = await asyncio.wait_for(self._context.new_page(), timeout=10)
+        except asyncio.TimeoutError:
+            logger.error("Failed to create new page - timeout")
+            return await self.test_url_http_fallback(url, test_name)
+
+        try:
+            # Navigate to URL with timeout (60s max for slow pages)
+            try:
+                response = await asyncio.wait_for(
+                    page.goto(url, wait_until="networkidle" if wait_for_load else "domcontentloaded"),
+                    timeout=60
+                )
+            except asyncio.TimeoutError:
+                await page.close()
+                logger.warning(f"Page navigation timed out for {url}")
+                return UITestResult(
+                    test_id=test_id,
+                    test_name=test_name,
+                    url=url,
+                    status=TestStatus.FAILED,
+                    severity=TestSeverity.HIGH,
+                    message="Page navigation timed out after 60 seconds"
+                )
 
             if not response or response.status >= 400:
                 await page.close()
@@ -383,9 +519,12 @@ class AIUITestingEngine:
                     message=f"Page failed to load: HTTP {response.status if response else 'No response'}"
                 )
 
-            # Take screenshot
+            # Take screenshot with timeout
             screenshot_path = f"{self.screenshot_dir}/{test_id}.png"
-            await page.screenshot(path=screenshot_path, full_page=True)
+            try:
+                await asyncio.wait_for(page.screenshot(path=screenshot_path, full_page=True), timeout=30)
+            except asyncio.TimeoutError:
+                logger.warning(f"Screenshot timed out for {url}")
 
             # Read screenshot as base64
             with open(screenshot_path, "rb") as f:
