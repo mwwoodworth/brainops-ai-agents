@@ -64,3 +64,6 @@ bleach>=6.0.0
 
 # Email Sending (for ai_email_queue processing)
 sendgrid>=6.10.0
+
+# Payment Processing (for affiliate pipeline and webhooks)
+stripe>=7.0.0
