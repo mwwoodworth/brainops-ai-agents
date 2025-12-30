@@ -471,7 +471,7 @@ class UITesterAgent:
             screenshot_b64 = base64.b64encode(screenshot_bytes).decode('utf-8')
 
             # Initialize Gemini Vision model
-            model = genai.GenerativeModel('gemini-1.5-pro-002')
+            model = genai.GenerativeModel('gemini-2.0-flash-exp')
 
             # Comprehensive visual analysis prompt
             analysis_prompt = f"""You are an expert UI/UX analyst. Analyze this screenshot of {app_name} ({url}) and provide a comprehensive assessment.
@@ -597,7 +597,7 @@ Return your analysis in this exact JSON format:
             baseline_b64 = base64.b64encode(baseline_bytes).decode('utf-8')
 
             # Use Gemini to compare
-            model = genai.GenerativeModel('gemini-1.5-pro-002')
+            model = genai.GenerativeModel('gemini-2.0-flash-exp')
 
             comparison_prompt = """Compare these two screenshots (baseline vs current).
 Identify any meaningful visual changes that could affect user experience.
