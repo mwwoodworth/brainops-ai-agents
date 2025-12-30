@@ -186,13 +186,17 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> Dict[s
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Reset stuck 'processing' emails (older than 1 hour) back to 'queued'
+        # Reset stuck 'processing' emails back to 'queued'
+        # Either they have processing_started_at > 1 hour ago, or they don't have it (old data)
         cursor.execute("""
             UPDATE ai_email_queue
             SET status = 'queued',
                 metadata = metadata || '{"reset_from_processing": true}'::jsonb
             WHERE status = 'processing'
-            AND (metadata->>'processing_started_at')::timestamp < NOW() - INTERVAL '1 hour'
+            AND (
+                metadata->>'processing_started_at' IS NULL
+                OR (metadata->>'processing_started_at')::timestamp < NOW() - INTERVAL '1 hour'
+            )
         """)
         reset_count = cursor.rowcount
         if reset_count > 0:
