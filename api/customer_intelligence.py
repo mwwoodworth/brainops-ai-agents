@@ -53,25 +53,38 @@ async def get_customer_intelligence(customer_id: str):
             customer_id
         )
 
-        # --- Heuristic Analysis (Simulating AI for Speed/Reliability) ---
-        
-        # 1. Calculate LTV
-        total_revenue = sum(float(inv['amount'] or 0) for inv in invoices)
+        # --- REAL DATA Analysis from production tables ---
+
+        # 1. Calculate LTV from REAL invoice data (total_cents column)
+        total_invoiced = sum(float(inv.get('total_cents') or 0) / 100.0 for inv in invoices)
+        # Also include job revenue if available
+        total_job_revenue = sum(float(j.get('actual_revenue') or j.get('estimated_revenue') or 0) for j in jobs)
+        total_revenue = max(total_invoiced, total_job_revenue)  # Use higher of the two
         job_count = len(jobs)
-        
+
         # 2. Risk Score (0-100, lower is better)
         # Factors: unpaid invoices, short relationship, low job count
-        risk_score = 20 # Base risk
-        unpaid = [inv for inv in invoices if inv.get('status') != 'paid']
+        risk_score = 20  # Base risk
+        unpaid = [inv for inv in invoices if inv.get('status') not in ('paid', 'Paid')]
         if unpaid:
             risk_score += 30
         if job_count < 2:
             risk_score += 10
-        
-        # 3. Churn Risk (0-100, higher is worse)
+        if total_revenue < 1000:
+            risk_score += 10
+
+        # 3. Churn Risk (0-100, higher is worse) based on days since last job
         churn_risk = 15
-        if jobs and (datetime.utcnow() - jobs[0]['created_at'].replace(tzinfo=None)).days > 180:
-            churn_risk += 40 # No jobs in 6 months
+        if jobs:
+            last_job_date = jobs[0].get('created_at')
+            if last_job_date:
+                days_since_job = (datetime.utcnow() - last_job_date.replace(tzinfo=None)).days
+                if days_since_job > 365:
+                    churn_risk = 85  # Critical - no jobs in 12+ months
+                elif days_since_job > 180:
+                    churn_risk = 60  # High - no jobs in 6 months
+                elif days_since_job > 90:
+                    churn_risk = 35  # Medium - no jobs in 3 months
             
         # 4. Sentiment Score (0-100)
         # Mocked for now, ideally comes from email/call analysis

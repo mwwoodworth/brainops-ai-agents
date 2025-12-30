@@ -122,6 +122,14 @@ except ImportError:
     DEPLOYMENT_MONITOR_AVAILABLE = False
     logger.warning("Deployment monitor agent not available")
 
+# Revenue Pipeline Agents - REAL implementations
+try:
+    from revenue_pipeline_agents import LeadDiscoveryAgentReal, NurtureExecutorAgentReal
+    REVENUE_PIPELINE_AVAILABLE = True
+except ImportError:
+    REVENUE_PIPELINE_AVAILABLE = False
+    logger.warning("Revenue pipeline agents not available")
+
 # Database configuration (for reference, pool uses config internally)
 DB_CONFIG = {
     "host": config.database.host,
@@ -453,9 +461,13 @@ class AgentExecutor:
                 logger.warning(f"Failed to initialize Deployment monitor agent: {e}")
 
         # Revenue Pipeline Agents - REAL implementations that query customer/jobs data
-        self.agents['LeadDiscoveryAgentReal'] = LeadDiscoveryAgentReal()
-        self.agents['NurtureExecutorAgentReal'] = NurtureExecutorAgentReal()
-        logger.info("Revenue pipeline agents registered: LeadDiscoveryAgentReal, NurtureExecutorAgentReal")
+        if REVENUE_PIPELINE_AVAILABLE:
+            try:
+                self.agents['LeadDiscoveryAgentReal'] = LeadDiscoveryAgentReal()
+                self.agents['NurtureExecutorAgentReal'] = NurtureExecutorAgentReal()
+                logger.info("Revenue pipeline agents registered: LeadDiscoveryAgentReal, NurtureExecutorAgentReal")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Revenue pipeline agents: {e}")
 
     # Agent name aliases - maps database names to code implementations
     # This allows scheduled agents to use real implementations instead of AI fallback
