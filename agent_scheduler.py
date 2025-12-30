@@ -267,6 +267,10 @@ class AgentScheduler:
         elif agent_name == 'EmailProcessor' or 'email' in agent_type:
             return self._execute_email_processor(agent, cur, conn)
 
+        # Learning Feedback Loop agent - closes the gap between insights and action
+        elif agent_name == 'LearningFeedbackLoop' or agent_type == 'system_improvement':
+            return self._execute_learning_feedback_loop(agent, cur, conn)
+
         # Default: log and continue
         else:
             logger.info(f"No specific handler for agent type: {agent_type}")
@@ -825,6 +829,94 @@ class AgentScheduler:
             }
         except Exception as e:
             logger.error(f"Email processing failed: {e}")
+            return {
+                "agent": agent['name'],
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+    def _execute_learning_feedback_loop(self, agent: Dict, cur, conn) -> Dict:
+        """
+        Execute Learning Feedback Loop agent - CLOSES THE GAP BETWEEN INSIGHTS AND ACTION.
+
+        This agent:
+        1. Analyzes the 4,700+ insights that have been sitting idle
+        2. Identifies actionable patterns from agent executions
+        3. Generates improvement proposals
+        4. Auto-approves low-risk improvements
+        5. Applies approved improvements
+
+        THE SYSTEM FINALLY ACTS ON ITS OWN LEARNING!
+        """
+        logger.info(f"Running Learning Feedback Loop for agent: {agent['name']}")
+
+        try:
+            # Import the feedback loop
+            from learning_feedback_loop import run_scheduled_feedback_loop
+
+            # Run the feedback loop cycle - create dedicated event loop for this thread
+            def run_in_new_loop():
+                """Run async tasks in a fresh event loop"""
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(
+                        asyncio.wait_for(run_scheduled_feedback_loop(), timeout=300)
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Learning feedback loop timed out after 300s")
+                    return {"timed_out": True}
+                finally:
+                    loop.close()
+
+            try:
+                cycle_result = run_in_new_loop()
+            except Exception as e:
+                logger.error(f"Failed to run learning feedback loop: {e}")
+                cycle_result = {"error": str(e)}
+
+            # Store result in brain memory for meta-learning
+            if self.brain:
+                try:
+                    self.brain.store(
+                        key=f"learning_feedback_loop_{datetime.utcnow().isoformat()}",
+                        value={
+                            "agent": agent['name'],
+                            "patterns_found": cycle_result.get('patterns_found', 0),
+                            "proposals_generated": cycle_result.get('proposals_generated', 0),
+                            "auto_approved": cycle_result.get('auto_approved', 0),
+                            "improvements_applied": cycle_result.get('improvements_applied', 0),
+                            "timestamp": datetime.utcnow().isoformat()
+                        },
+                        category="learning_feedback",
+                        priority="high",
+                        source="learning_feedback_loop_agent"
+                    )
+                except Exception as mem_err:
+                    logger.warning(f"Failed to store learning cycle in brain: {mem_err}")
+
+            logger.info(
+                f"Learning Feedback Loop completed: "
+                f"{cycle_result.get('patterns_found', 0)} patterns -> "
+                f"{cycle_result.get('proposals_generated', 0)} proposals -> "
+                f"{cycle_result.get('improvements_applied', 0)} applied"
+            )
+
+            return {
+                "agent": agent['name'],
+                "cycle_result": cycle_result,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        except ImportError as e:
+            logger.error(f"Learning feedback loop module not available: {e}")
+            return {
+                "agent": agent['name'],
+                "error": f"Learning feedback loop module not available: {e}",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Learning feedback loop failed: {e}")
             return {
                 "agent": agent['name'],
                 "error": str(e),
