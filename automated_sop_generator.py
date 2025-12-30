@@ -563,7 +563,7 @@ Return optimized content in the same JSON format with:
     async def _call_claude(self, prompt: str) -> str:
         """Call Claude API."""
         if not self.anthropic_api_key:
-            return self._mock_claude_response(prompt)
+            return await self._fallback_claude_response(prompt)
 
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -585,103 +585,26 @@ Return optimized content in the same JSON format with:
                 return data["content"][0]["text"]
         except Exception as e:
             logger.error(f"Claude API error: {e}")
-            return self._mock_claude_response(prompt)
+            return await self._fallback_claude_response(prompt)
 
-    async def _call_gpt(self, prompt: str) -> str:
-        """Call OpenAI GPT API."""
-        if not self.openai_api_key:
-            return "{}"
+    async def _fallback_claude_response(self, prompt: str) -> str:
+        """
+        Fallback to a smaller model or raise error if no API access.
+        Replacing previous mock implementation with real API attempt.
+        """
+        # If we have an OpenAI key, try that as fallback
+        if self.openai_api_key:
+            logger.info("Falling back to OpenAI for SOP generation")
+            return await self._call_gpt(prompt)
+            
+        # If we have a Gemini key, try that
+        if self.gemini_api_key:
+            logger.info("Falling back to Gemini for SOP generation")
+            return await self._call_gemini(prompt)
 
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.openai_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": "gpt-4-turbo-preview",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 4096,
-                    }
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data["choices"][0]["message"]["content"]
-        except Exception as e:
-            logger.error(f"GPT API error: {e}")
-            return "{}"
-
-    async def _call_gemini(self, prompt: str) -> str:
-        """Call Google Gemini API."""
-        if not self.gemini_api_key:
-            return "{}"
-
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={self.gemini_api_key}",
-                    json={
-                        "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {"maxOutputTokens": 4096}
-                    }
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            logger.error(f"Gemini API error: {e}")
-            return "{}"
-
-    def _mock_claude_response(self, prompt: str) -> str:
-        """Generate mock response when API is not available."""
-        return json.dumps({
-            "purpose": "This SOP establishes the standard procedure for the described process.",
-            "scope": "This procedure applies to all relevant team members and systems.",
-            "definitions": {"SOP": "Standard Operating Procedure"},
-            "responsibilities": {"Owner": "Maintains and updates this SOP"},
-            "prerequisites": ["System access", "Required training completed"],
-            "procedure": [
-                {
-                    "step_number": 1,
-                    "title": "Preparation",
-                    "description": "Gather all necessary materials and access required systems.",
-                    "substeps": ["Log into system", "Verify permissions"],
-                    "warnings": [],
-                    "notes": ["Ensure you have completed prerequisite training"],
-                    "expected_outcome": "Ready to proceed with main procedure",
-                    "estimated_time_minutes": 5
-                },
-                {
-                    "step_number": 2,
-                    "title": "Execute Main Process",
-                    "description": "Perform the core procedure steps.",
-                    "substeps": ["Step 2.1", "Step 2.2", "Step 2.3"],
-                    "warnings": ["Double-check before proceeding"],
-                    "notes": [],
-                    "expected_outcome": "Process completed successfully",
-                    "estimated_time_minutes": 15
-                },
-                {
-                    "step_number": 3,
-                    "title": "Verification",
-                    "description": "Verify the procedure completed successfully.",
-                    "substeps": ["Check output", "Validate results"],
-                    "warnings": [],
-                    "notes": ["Document any issues"],
-                    "expected_outcome": "Verification complete",
-                    "estimated_time_minutes": 5
-                }
-            ],
-            "verification": "Confirm all expected outcomes were achieved.",
-            "troubleshooting": [
-                {"problem": "Access denied", "solution": "Contact IT for permissions"},
-                {"problem": "System error", "solution": "Retry after 5 minutes, escalate if persistent"}
-            ],
-            "references": ["Related SOPs", "Training materials"],
-            "revision_history": "Version 1.0.0 - Initial release"
-        })
+        # If no keys available, we must fail in production
+        logger.error("No AI providers available for SOP generation")
+        raise RuntimeError("No AI providers available. Please set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY.")
 
     def _parse_json_response(self, response: str) -> Dict[str, Any]:
         """Parse JSON from AI response."""
