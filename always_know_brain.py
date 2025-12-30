@@ -563,7 +563,7 @@ class AlwaysKnowBrain:
             if not self._db_pool:
                 return
 
-            with self._db_pool() as conn:
+            with self._db_pool.get_connection() as conn:
                 if not conn:
                     return
 
@@ -678,7 +678,7 @@ class AlwaysKnowBrain:
             if not self._db_pool:
                 return
 
-            with self._db_pool() as conn:
+            with self._db_pool.get_connection() as conn:
                 if not conn:
                     return
 
