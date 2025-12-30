@@ -476,22 +476,24 @@ class NurtureExecutorAgentReal(BaseAgent):
             sequence = self._generate_sequence(sequence_type, lead_data)
 
             sequence_id = str(uuid.uuid4())
+            # Use correct column names matching ai_nurture_sequences table schema:
+            # name (not sequence_name), is_active (not active)
+            # touchpoint_count and days_duration go in configuration JSON
             await pool.execute("""
                 INSERT INTO ai_nurture_sequences (
-                    id, sequence_name, sequence_type, target_segment,
-                    touchpoint_count, days_duration, configuration,
-                    active, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW(), NOW())
+                    id, name, sequence_type, target_segment,
+                    configuration, is_active, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, true, NOW(), NOW())
             """,
                 sequence_id,
                 f"{sequence_type.title()} Sequence for {lead_data.get('contact_name', 'Lead')}",
                 sequence_type,
                 sequence_type,
-                len(sequence['touchpoints']),
-                sequence['duration_days'],
                 json.dumps({
                     "lead_id": lead_id,
-                    "touchpoints": sequence['touchpoints']
+                    "touchpoints": sequence['touchpoints'],
+                    "touchpoint_count": len(sequence['touchpoints']),
+                    "days_duration": sequence['duration_days']
                 })
             )
 

@@ -307,21 +307,24 @@ class LeadNurturingSystem:
             # Calculate duration
             max_days = max([tp.get('days_after_trigger', 0) for tp in touchpoints])
 
-            # Create sequence
+            # Create sequence (use correct column names: name, is_active, configuration)
+            # touchpoint_count and days_duration stored in configuration
             cursor.execute("""
                 INSERT INTO ai_nurture_sequences
-                (id, sequence_name, sequence_type, target_segment,
-                 touchpoint_count, days_duration, success_criteria, configuration)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (id, name, sequence_type, target_segment,
+                 success_criteria, configuration, is_active)
+                VALUES (%s, %s, %s, %s, %s, %s, true)
             """, (
                 sequence_id,
                 name,
                 sequence_type.value,
                 target_segment.value,
-                len(touchpoints),
-                max_days,
                 Json(success_criteria or {}),
-                Json(configuration or {})
+                Json({
+                    **(configuration or {}),
+                    "touchpoint_count": len(touchpoints),
+                    "days_duration": max_days
+                })
             ))
 
             # Create touchpoints
@@ -533,10 +536,10 @@ class LeadNurturingSystem:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
 
-            # Record engagement
+            # Record engagement (use correct column name: metadata instead of engagement_data)
             cursor.execute("""
                 INSERT INTO ai_nurture_engagement
-                (execution_id, engagement_type, engagement_data)
+                (execution_id, engagement_type, metadata)
                 VALUES (%s, %s, %s)
             """, (execution_id, engagement_type, Json(engagement_data or {})))
 
