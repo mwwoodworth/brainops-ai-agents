@@ -153,6 +153,162 @@ else:
     anthropic_client = None
 
 
+# ============== AGENT EXECUTION LOGGER ==============
+
+class AgentExecutionLogger:
+    """
+    Logs detailed execution phases to agent_execution_logs table.
+
+    Tracks each phase of agent execution with timing and context data.
+    Phases: started, context_enrichment, agent_resolution, execution,
+            retry, completed, failed, memory_operations
+    """
+
+    def __init__(self, agent_name: str, agent_id: str, task_id: str):
+        self.agent_name = agent_name
+        self.agent_id = agent_id
+        self.task_id = task_id
+        self.memory_operations: List[Dict[str, Any]] = []
+        self._phase_start_times: Dict[str, datetime] = {}
+        self._logger = logging.getLogger(__name__)
+
+    async def log_phase(
+        self,
+        phase: str,
+        phase_data: Optional[Dict[str, Any]] = None,
+        duration_ms: Optional[float] = None
+    ) -> None:
+        """Log an execution phase to the agent_execution_logs table."""
+        try:
+            pool = get_pool()
+            await pool.execute("""
+                INSERT INTO agent_execution_logs (
+                    agent_name, agent_id, task_id, execution_phase,
+                    phase_data, duration_ms, memory_operations, timestamp
+                ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, NOW())
+            """,
+                self.agent_name,
+                self.agent_id,
+                self.task_id,
+                phase,
+                json.dumps(phase_data or {}, default=str),
+                duration_ms,
+                json.dumps(self.memory_operations, default=str)
+            )
+            self._logger.debug(f"Logged phase '{phase}' for task {self.task_id}")
+        except Exception as e:
+            self._logger.warning(f"Failed to log execution phase '{phase}': {e}")
+
+    def start_phase(self, phase: str) -> None:
+        """Mark the start of a phase for duration tracking."""
+        self._phase_start_times[phase] = datetime.now(timezone.utc)
+
+    async def end_phase(
+        self,
+        phase: str,
+        phase_data: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """End a phase and log it with calculated duration."""
+        duration_ms = None
+        if phase in self._phase_start_times:
+            start = self._phase_start_times[phase]
+            duration_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+            del self._phase_start_times[phase]
+        await self.log_phase(phase, phase_data, duration_ms)
+
+    def add_memory_operation(
+        self,
+        operation: str,
+        key: str,
+        success: bool,
+        details: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Record a memory operation for this execution."""
+        self.memory_operations.append({
+            "operation": operation,
+            "key": key,
+            "success": success,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "details": details or {}
+        })
+
+    async def log_started(self, task: Dict[str, Any]) -> None:
+        """Log execution start."""
+        await self.log_phase("started", {
+            "task_type": task.get("action", task.get("type", "generic")),
+            "task_keys": list(task.keys()) if isinstance(task, dict) else [],
+            "has_data": bool(task.get("data"))
+        })
+
+    async def log_context_enrichment(
+        self,
+        enriched: bool,
+        context_info: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Log context enrichment phase."""
+        await self.log_phase("context_enrichment", {
+            "enriched": enriched,
+            "context_info": context_info or {}
+        })
+
+    async def log_agent_resolution(
+        self,
+        original_name: str,
+        resolved_name: str,
+        found_in_registry: bool
+    ) -> None:
+        """Log agent resolution/alias mapping."""
+        await self.log_phase("agent_resolution", {
+            "original_name": original_name,
+            "resolved_name": resolved_name,
+            "was_aliased": original_name != resolved_name,
+            "found_in_registry": found_in_registry
+        })
+
+    async def log_execution_attempt(
+        self,
+        attempt: int,
+        max_attempts: int,
+        duration_ms: float,
+        success: bool,
+        error: Optional[str] = None
+    ) -> None:
+        """Log an execution attempt (including retries)."""
+        phase = "execution" if success else "retry"
+        await self.log_phase(phase, {
+            "attempt": attempt,
+            "max_attempts": max_attempts,
+            "success": success,
+            "error": error
+        }, duration_ms)
+
+    async def log_completed(
+        self,
+        result: Dict[str, Any],
+        total_duration_ms: float
+    ) -> None:
+        """Log successful completion."""
+        await self.log_phase("completed", {
+            "status": result.get("status", "completed"),
+            "has_result": bool(result),
+            "result_keys": list(result.keys()) if isinstance(result, dict) else [],
+            "original_agent": result.get("_original_agent"),
+            "resolved_agent": result.get("_resolved_agent")
+        }, total_duration_ms)
+
+    async def log_failed(
+        self,
+        error: str,
+        total_duration_ms: float,
+        attempts: int
+    ) -> None:
+        """Log execution failure."""
+        await self.log_phase("failed", {
+            "error": error,
+            "attempts": attempts
+        }, total_duration_ms)
+
+
 class AgentExecutor:
     """Executes actual agent tasks"""
 
@@ -567,13 +723,23 @@ class AgentExecutor:
     async def execute(self, agent_name: str, task: Dict[str, Any]) -> Dict[str, Any]:
         """Execute task with specific agent - NOW WITH UNIFIED SYSTEM INTEGRATION"""
         await self._ensure_agents_loaded()
+
         # Handle task being a string (e.g., "analyze customer trends") vs dict
+        # Must be done before accessing task properties
         if isinstance(task, str):
             task = {"task": task, "action": task}
         elif task is None:
             task = {}
         else:
             task = dict(task) if not isinstance(task, dict) else task
+
+        # Generate execution identifiers for detailed logging
+        task_id = str(task.get("task_id") or task.get("id") or uuid.uuid4())
+        agent_id = str(task.get("agent_id") or agent_name)
+        execution_start = datetime.now(timezone.utc)
+
+        # Initialize detailed execution logger
+        exec_logger = AgentExecutionLogger(agent_name, agent_id, task_id)
         # Support clients (e.g. /ai/analyze) that pass parameters under task["data"].
         # Flatten missing keys into the top-level task for compatibility with existing agents.
         task_data = task.get("data")
@@ -584,7 +750,11 @@ class AgentExecutor:
         task_type = task.get('action', task.get('type', 'generic'))
         unified_ctx = None
 
+        # Log execution start
+        await exec_logger.log_started(task)
+
         # UNIFIED INTEGRATION: Pre-execution hooks - enrich context from ALL systems
+        context_enriched = False
         if UNIFIED_INTEGRATION_AVAILABLE:
             try:
                 integration = get_unified_integration()
@@ -592,6 +762,7 @@ class AgentExecutor:
                 # Add enriched context to task
                 if unified_ctx.graph_context:
                     task["_unified_graph_context"] = unified_ctx.graph_context
+                    context_enriched = True
                 if unified_ctx.pricing_recommendations:
                     task["_pricing_recommendations"] = unified_ctx.pricing_recommendations
                 if unified_ctx.confidence_score < 1.0:
@@ -601,6 +772,17 @@ class AgentExecutor:
 
         # Phase 2: Enrich task with codebase context
         task = await self._enrich_task_with_codebase_context(task, agent_name)
+        if task.get("codebase_context"):
+            context_enriched = True
+
+        # Log context enrichment
+        await exec_logger.log_context_enrichment(
+            enriched=context_enriched,
+            context_info={
+                "unified_integration": UNIFIED_INTEGRATION_AVAILABLE and unified_ctx is not None,
+                "codebase_context": bool(task.get("codebase_context"))
+            }
+        )
 
         assessment_context = None
         if self._is_high_stakes_action(agent_name, task):
@@ -619,7 +801,21 @@ class AgentExecutor:
         ):
             runner = self._get_workflow_runner()
             if runner:
+                # Log LangGraph workflow execution
+                await exec_logger.log_phase("langgraph_workflow", {
+                    "use_langgraph": task.get("use_langgraph"),
+                    "enable_review_loop": task.get("enable_review_loop"),
+                    "quality_gate": task.get("quality_gate")
+                })
+
+                workflow_start = datetime.now(timezone.utc)
                 result = await runner.run(agent_name, task)
+                workflow_duration = (datetime.now(timezone.utc) - workflow_start).total_seconds() * 1000
+
+                # Log workflow completion
+                total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
+                await exec_logger.log_completed(result, total_duration_ms)
+
                 # UNIFIED INTEGRATION: Post-execution hooks
                 if UNIFIED_INTEGRATION_AVAILABLE and unified_ctx:
                     try:
@@ -634,6 +830,7 @@ class AgentExecutor:
             # RETRY LOGIC for Agent Execution
             RETRY_ATTEMPTS = 3
             last_exception = None
+            successful_attempt = 0
 
             # Resolve agent name aliases to actual implementations
             original_agent_name = agent_name
@@ -641,7 +838,15 @@ class AgentExecutor:
             if resolved_agent_name != agent_name:
                 logger.info(f"Agent alias resolved: {agent_name} -> {resolved_agent_name}")
 
+            # Log agent resolution
+            await exec_logger.log_agent_resolution(
+                original_name=original_agent_name,
+                resolved_name=resolved_agent_name,
+                found_in_registry=resolved_agent_name in self.agents
+            )
+
             for attempt in range(RETRY_ATTEMPTS):
+                attempt_start = datetime.now(timezone.utc)
                 try:
                     if resolved_agent_name in self.agents:
                         result = await self.agents[resolved_agent_name].execute(task)
@@ -652,10 +857,31 @@ class AgentExecutor:
                         # Fallback to generic execution
                         result = await self._generic_execute(agent_name, task)
 
+                    # Log successful attempt
+                    attempt_duration = (datetime.now(timezone.utc) - attempt_start).total_seconds() * 1000
+                    await exec_logger.log_execution_attempt(
+                        attempt=attempt + 1,
+                        max_attempts=RETRY_ATTEMPTS,
+                        duration_ms=attempt_duration,
+                        success=True
+                    )
+                    successful_attempt = attempt + 1
+
                     # If successful, break the retry loop
                     break
                 except Exception as e:
                     last_exception = e
+                    attempt_duration = (datetime.now(timezone.utc) - attempt_start).total_seconds() * 1000
+
+                    # Log failed attempt (retry)
+                    await exec_logger.log_execution_attempt(
+                        attempt=attempt + 1,
+                        max_attempts=RETRY_ATTEMPTS,
+                        duration_ms=attempt_duration,
+                        success=False,
+                        error=str(e)
+                    )
+
                     if attempt < RETRY_ATTEMPTS - 1:
                         wait_time = 2 ** attempt
                         logger.warning(f"Agent {agent_name} execution failed (attempt {attempt + 1}/{RETRY_ATTEMPTS}). Retrying in {wait_time}s. Error: {e}")
@@ -663,6 +889,12 @@ class AgentExecutor:
                     else:
                         logger.error(f"Agent {agent_name} execution failed after {RETRY_ATTEMPTS} attempts.")
                         raise last_exception
+
+            # Calculate total duration
+            total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
+
+            # Log successful completion
+            await exec_logger.log_completed(result, total_duration_ms)
 
             # UNIFIED INTEGRATION: Post-execution hooks for success
             if UNIFIED_INTEGRATION_AVAILABLE and unified_ctx:
@@ -676,6 +908,16 @@ class AgentExecutor:
             return result
 
         except Exception as e:
+            # Calculate total duration for failure
+            total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
+
+            # Log failure
+            await exec_logger.log_failed(
+                error=str(e),
+                total_duration_ms=total_duration_ms,
+                attempts=RETRY_ATTEMPTS
+            )
+
             # UNIFIED INTEGRATION: Error handling hooks
             if UNIFIED_INTEGRATION_AVAILABLE and unified_ctx:
                 try:
