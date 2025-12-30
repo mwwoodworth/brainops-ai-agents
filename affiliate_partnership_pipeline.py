@@ -28,6 +28,9 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 import os
+import stripe
+from email_sender import send_email
+from ai_core import ai_generate
 
 import httpx
 from loguru import logger
@@ -774,33 +777,16 @@ Mention affiliate link: "Link in description" at strategic points."""
         )
 
     async def _call_claude(self, prompt: str) -> str:
-        """Call Claude API for content generation."""
-        if not self.anthropic_api_key:
-            logger.warning("No Anthropic API key configured")
-            return f"[MOCK CONTENT FOR: {prompt[:100]}...]"
-
+        """Call Claude API for content generation using RealAICore."""
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={
-                        "x-api-key": self.anthropic_api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    },
-                    json={
-                        "model": "claude-3-opus-20240229",
-                        "max_tokens": 4096,
-                        "messages": [
-                            {"role": "user", "content": prompt}
-                        ]
-                    }
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data["content"][0]["text"]
+            # Use ai_core.ai_generate which handles fallback and real keys
+            return await ai_generate(
+                prompt=prompt,
+                model="claude-3-opus-20240229",
+                system_prompt="You are an expert affiliate marketing copywriter."
+            )
         except Exception as e:
-            logger.error(f"Claude API error: {e}")
+            logger.error(f"Content generation error: {e}")
             return f"[Content generation failed: {str(e)}]"
 
 
@@ -1407,18 +1393,42 @@ class AffiliatePartnershipPipeline:
         payout: Payout,
         affiliate: Affiliate
     ) -> Dict[str, Any]:
-        """Process actual payment (mock implementation)."""
-        # In production, this would integrate with Stripe, PayPal, etc.
-
+        """Process actual payment using Stripe Connect."""
+        stripe_api_key = os.getenv("STRIPE_API_KEY") or os.getenv("STRIPE_SECRET_KEY")
+        
         method = payout.payment_method
 
         if method == "stripe":
-            # Mock Stripe payout
-            return {
-                "success": True,
-                "reference": f"po_{secrets.token_hex(12)}",
-                "processor": "stripe",
-            }
+            if not stripe_api_key:
+                return {"success": False, "error": "Stripe API key not configured"}
+                
+            stripe.api_key = stripe_api_key
+            
+            try:
+                # Expect 'stripe_account_id' in payout_details for Stripe Connect
+                destination = affiliate.payout_details.get("stripe_account_id")
+                
+                if not destination:
+                     return {"success": False, "error": "No Stripe Connect account ID found in payout_details"}
+
+                # Create a Transfer to the connected account
+                transfer = stripe.Transfer.create(
+                    amount=int(payout.net_amount * 100), # cents
+                    currency=payout.currency.lower(),
+                    destination=destination,
+                    description=f"Payout {payout.payout_id} for {affiliate.company_name}",
+                    metadata={"payout_id": payout.payout_id}
+                )
+                
+                return {
+                    "success": True,
+                    "reference": transfer.id,
+                    "processor": "stripe",
+                }
+            except Exception as e:
+                logger.error(f"Stripe payout error: {e}")
+                return {"success": False, "error": str(e)}
+        
         elif method == "paypal":
             return {
                 "success": True,
@@ -1683,9 +1693,20 @@ class AffiliatePartnershipPipeline:
     # =========================================================================
 
     async def _send_welcome_email(self, affiliate: Affiliate):
-        """Send welcome email to new affiliate (mock)."""
-        logger.info(f"Sending welcome email to {affiliate.email}")
-        # In production, integrate with SendGrid/SES
+        """Send welcome email to new affiliate."""
+        subject = f"Welcome to the Partner Program, {affiliate.contact_name}!"
+        body = f"""
+        <h1>Welcome to the Team!</h1>
+        <p>Hi {affiliate.contact_name},</p>
+        <p>We are thrilled to have you on board as a {affiliate.partner_type.value}.</p>
+        <p>Your affiliate code is: <strong>{affiliate.affiliate_code}</strong></p>
+        <p><a href="{affiliate.tracking_links.get('default')}">Access your dashboard here</a></p>
+        """
+        success, msg = send_email(affiliate.email, subject, body)
+        if not success:
+            logger.error(f"Failed to send welcome email to {affiliate.email}: {msg}")
+        else:
+            logger.info(f"Sent welcome email to {affiliate.email}")
 
     def generate_tracking_link(
         self,
