@@ -1403,6 +1403,9 @@ Output MUST be valid JSON only (no markdown) with this schema:
                     Json(decision.decision_criteria_scores)
                 ))
 
+                # ALSO persist to ai_decisions table for centralized visibility
+                self._persist_board_decision_to_ai_decisions(cur, decision, vote_results)
+
                 # Update proposal status
                 new_status = 'deferred' if decision.decision == 'deferred' else 'decided'
                 cur.execute("""
@@ -1416,6 +1419,104 @@ Output MUST be valid JSON only (no markdown) with this schema:
 
         except Exception as e:
             logger.error(f"Failed to record decision: {e}")
+
+    def _persist_board_decision_to_ai_decisions(self, cur, decision: BoardDecision, vote_results: Dict) -> None:
+        """
+        Persist board decision to the ai_decisions table for centralized visibility.
+        This ensures all AI Board governance decisions are tracked in the main AI decisions table.
+
+        Schema: id, agent_id, decision_type, input_data, output_data, confidence, timestamp
+        """
+        try:
+            # Build comprehensive input_data
+            input_data = {
+                "proposal_id": decision.proposal_id,
+                "vote_results": vote_results,
+                "consensus_level": decision.consensus_level,
+                "dissenting_opinions": decision.dissenting_opinions,
+                "decision_criteria_scores": decision.decision_criteria_scores
+            }
+
+            # Build output_data with reasoning (WHY the decision was made)
+            output_data = {
+                "decision": decision.decision,
+                "reasoning": self._generate_board_decision_reasoning(decision, vote_results),
+                "conditions": decision.conditions,
+                "implementation_plan": decision.implementation_plan,
+                "risk_assessment": decision.risk_assessment,
+                "human_escalation_required": decision.human_escalation_required,
+                "escalation_reason": decision.escalation_reason,
+                "follow_up_date": decision.follow_up_date.isoformat() if decision.follow_up_date else None
+            }
+
+            cur.execute("""
+                INSERT INTO ai_decisions
+                (agent_id, decision_type, input_data, output_data, confidence, timestamp)
+                VALUES (%s, %s, %s, %s, %s, NOW())
+            """, (
+                "AIBoard",  # agent_id
+                f"board_{decision.decision}",  # decision_type (board_approved, board_rejected, etc.)
+                Json(input_data),  # input_data
+                Json(output_data),  # output_data
+                decision.confidence_score  # confidence
+            ))
+
+            logger.debug(f"Board decision for proposal {decision.proposal_id} also logged to ai_decisions table")
+
+        except Exception as e:
+            # Don't fail the main decision logging if ai_decisions insert fails
+            logger.warning(f"Failed to persist board decision to ai_decisions: {e}")
+
+    def _generate_board_decision_reasoning(self, decision: BoardDecision, vote_results: Dict) -> str:
+        """
+        Generate human-readable reasoning explaining WHY this board decision was made.
+        This provides transparency into the AI Board's governance process.
+        """
+        reasoning_parts = []
+
+        # Decision outcome
+        reasoning_parts.append(f"DECISION: {decision.decision.upper()}")
+
+        # Consensus analysis
+        if decision.consensus_level >= 0.9:
+            reasoning_parts.append(f"STRONG CONSENSUS ({decision.consensus_level:.0%}): Near-unanimous agreement among board members")
+        elif decision.consensus_level >= 0.7:
+            reasoning_parts.append(f"GOOD CONSENSUS ({decision.consensus_level:.0%}): Clear majority with some dissent")
+        elif decision.consensus_level >= 0.5:
+            reasoning_parts.append(f"MODERATE CONSENSUS ({decision.consensus_level:.0%}): Split opinions, decision reached by majority")
+        else:
+            reasoning_parts.append(f"LOW CONSENSUS ({decision.consensus_level:.0%}): Significant disagreement, may require escalation")
+
+        # Vote breakdown
+        vote_summary = ", ".join([f"{role}: {vote}" for role, vote in vote_results.items()])
+        reasoning_parts.append(f"Votes: {vote_summary}")
+
+        # Dissenting opinions
+        if decision.dissenting_opinions:
+            reasoning_parts.append(f"Dissenting views: {len(decision.dissenting_opinions)} member(s) expressed concerns")
+
+        # Confidence
+        if decision.confidence_score >= 0.85:
+            reasoning_parts.append("HIGH CONFIDENCE in decision outcome")
+        elif decision.confidence_score >= 0.65:
+            reasoning_parts.append("GOOD CONFIDENCE in decision outcome")
+        else:
+            reasoning_parts.append("MODERATE CONFIDENCE - further review may be beneficial")
+
+        # Risk assessment
+        if decision.risk_assessment:
+            risk_level = decision.risk_assessment.get("overall_risk_level", "unknown")
+            reasoning_parts.append(f"Risk assessment: {risk_level}")
+
+        # Human escalation
+        if decision.human_escalation_required:
+            reasoning_parts.append(f"REQUIRES HUMAN REVIEW: {decision.escalation_reason or 'Governance threshold exceeded'}")
+
+        # Conditions
+        if decision.conditions:
+            reasoning_parts.append(f"Conditional approval with {len(decision.conditions)} condition(s)")
+
+        return " | ".join(reasoning_parts)
 
     def _synthesize_outcomes(self, decisions: List[BoardDecision]) -> Dict[str, Any]:
         """Synthesize meeting outcomes"""

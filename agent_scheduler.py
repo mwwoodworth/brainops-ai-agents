@@ -263,6 +263,10 @@ class AgentScheduler:
         elif agent_type == 'analytics':
             return self._execute_analytics_agent(agent, cur, conn)
 
+        # Email processor agent
+        elif agent_name == 'EmailProcessor' or 'email' in agent_type:
+            return self._execute_email_processor(agent, cur, conn)
+
         # Default: log and continue
         else:
             logger.info(f"No specific handler for agent type: {agent_type}")
@@ -763,6 +767,64 @@ class AgentScheduler:
 
         except Exception as e:
             logger.error(f"Health monitoring failed: {e}")
+            return {
+                "agent": agent['name'],
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+    def _execute_email_processor(self, agent: Dict, cur, conn) -> Dict:
+        """Execute email processor agent - processes ai_email_queue"""
+        logger.info(f"Running email processor for agent: {agent['name']}")
+
+        try:
+            # Import email sender
+            from email_sender import process_email_queue, get_queue_status
+
+            # Get queue status before processing
+            queue_status = get_queue_status()
+            logger.info(f"Email queue status: {queue_status.get('totals', {})}")
+
+            # Process the email queue
+            result = process_email_queue(batch_size=10)
+
+            # Store result in brain memory for learning
+            if self.brain:
+                try:
+                    self.brain.store(
+                        key=f"email_processing_{datetime.utcnow().isoformat()}",
+                        value={
+                            "agent": agent['name'],
+                            "processed": result.get('processed', 0),
+                            "sent": result.get('sent', 0),
+                            "failed": result.get('failed', 0),
+                            "skipped": result.get('skipped', 0),
+                            "provider": result.get('provider', 'unknown'),
+                            "timestamp": datetime.utcnow().isoformat()
+                        },
+                        category="email_processing",
+                        priority="medium",
+                        source="email_processor_agent"
+                    )
+                except Exception as mem_err:
+                    logger.warning(f"Failed to store email processing in brain: {mem_err}")
+
+            return {
+                "agent": agent['name'],
+                "queue_before": queue_status.get('totals', {}),
+                "processing_result": result,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        except ImportError as e:
+            logger.error(f"Email sender module not available: {e}")
+            return {
+                "agent": agent['name'],
+                "error": f"Email sender module not available: {e}",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Email processing failed: {e}")
             return {
                 "agent": agent['name'],
                 "error": str(e),
