@@ -8,20 +8,25 @@ Do NOT create your own psycopg2 connections!
 import logging
 import threading
 import time
+import os
 from typing import Optional, Any, Dict, List
 from queue import Queue, Empty
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
-# Configuration
+# Configuration - MUST come from environment variables
 DB_CONFIG = {
-    "host": "aws-0-us-east-2.pooler.supabase.com",
-    "database": "postgres",
-    "user": "postgres.yomagoqdmxszqtdwuhab",
-    "password": "REDACTED_SUPABASE_DB_PASSWORD",
-    "port": 5432
+    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
+    "database": os.getenv("DB_NAME", "postgres"),
+    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
+    "password": os.getenv("DB_PASSWORD"),  # No default - must be set
+    "port": int(os.getenv("DB_PORT", "5432"))
 }
+
+# Validate password is set
+if not DB_CONFIG["password"]:
+    logger.warning("⚠️ DB_PASSWORD environment variable not set - sync pool may fail")
 
 # Pool settings - CRITICAL: Keep these low to prevent MaxClientsInSessionMode
 # Supabase session mode has limited connections - sync+async pools share the limit
