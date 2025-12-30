@@ -1,0 +1,266 @@
+# Exhaustive Code Analysis Report
+
+Scope: scanned repo files excluding .venv/venv, __pycache__, .git, node_modules.
+
+## TODO/FIXME/HACK comments
+- api/revenue.py:457 # TODO: Integrate with real lead discovery service
+- app_original_backup.py:93 # TODO: Remove wildcard after confirming all origins
+- code_quality_agent.py:282 # Check for TODO/FIXME
+- meta_critic_scoring.py:409 # TODO: Implement multi-round debate with rebuttals
+
+## Stub/placeholder implementations (pass-only / NotImplemented / placeholder markers)
+### Pass-only or empty function bodies
+- agent_scheduler.py:99 return_db_connection [pass-only]
+- ai_audit_compliance.py:544 __init__ [pass-only]
+- ai_workflow_templates.py:150 execute [pass-only]
+- dependability_framework.py:150 check [pass-only]
+- dependability_framework.py:155 get_recovery_action [pass-only]
+- lead_nurturing_system.py:709 _execute_ab_test [pass-only]
+- product_generation_pipeline.py:137 generate [pass-only]
+- product_generation_pipeline.py:142 analyze [pass-only]
+- unified_brain.py:1076 close [pass-only]
+
+### Functions raising NotImplementedError
+- agent_executor.py:750 execute
+- database/async_connection.py:41 initialize
+- database/async_connection.py:44 close
+- database/async_connection.py:47 fetch
+- database/async_connection.py:50 fetchrow
+- database/async_connection.py:53 fetchval
+- database/async_connection.py:62 execute
+- database/async_connection.py:65 executemany
+- database/async_connection.py:68 test_connection
+- digital_twin_system.py:923 predict
+- revenue_pipeline_agents.py:35 execute
+
+### Placeholder/stub comments in code
+- affiliate_partnership_pipeline.py:1671 # Replace tracking link placeholder
+- ai_os_complete.py:280 # Assign real or placeholder crew (no random names)
+- automated_sop_generator.py:221 # Placeholders
+- bleeding_edge_ooda.py:1565 # Placeholder - would call actual agent in production
+- bleeding_edge_ooda.py:1602 # PHASE 5: ACT (Placeholder - would execute via agents)
+- data_pipeline_automation.py:560 # Placeholder for custom transformation logic
+- graph_context_provider.py:570 # Previously: using same placeholder range for both IN clauses with duplicated
+- graph_context_provider.py:574 # Build placeholder list for first IN clause: $1, $2, ..., $N
+- graph_context_provider.py:577 # Build placeholder list for second IN clause: $(N+1), $(N+2), ..., $(2N)
+- graph_context_provider.py:597 # Duplicate params for both IN clauses (now with separate placeholder ranges)
+- live_memory_brain.py:421 # For now, return placeholder
+- multi_model_consensus.py:255 # Placeholder - would integrate with Google AI Studio
+- predictive_scheduling.py:904 # Execute the task (placeholder - would call actual execution)
+- self_evolution.py:340 # This is a placeholder for a complex DB query across multiple tables
+- self_evolution.py:377 # Placeholder logic
+- tests/test_task_routing.py:4 # Stub test for task routing logic
+- tests/test_task_routing.py:13 # Simple rule-based routing stub
+
+## Pass statements in functions
+- affiliate_partnership_pipeline.py:523 analyze_conversion
+- agent_scheduler.py:103 return_db_connection
+- ai_audit_compliance.py:545 __init__
+- ai_board_governance.py:494 _safe_json_from_text
+- ai_board_governance.py:502 _safe_json_from_text
+- ai_board_governance.py:1220 _calculate_decision_confidence
+- ai_context_awareness.py:823 _evaluate_conditions
+- ai_core.py:188 _safe_json
+- ai_knowledge_graph.py:603 _calculate_metrics
+- ai_module_integration.py:465 _process_signals
+- ai_os_complete.py:347 _assign_crew
+- ai_self_awareness.py:288 assess_confidence
+- ai_self_awareness.py:861 _calculate_decision_confidence
+- ai_self_awareness.py:902 _calculate_post_mistake_confidence
+- ai_workflow_templates.py:157 execute
+- ai_workflow_templates.py:1145 _execute_step
+- alive_core.py:370 think
+- alive_core.py:435 change_state
+- alive_core.py:715 shutdown
+- api/ai_enhancements_api.py:168 get_alerts
+- api/background_monitoring.py:140 stop
+- api/knowledge.py:278 search_knowledge
+- api/system_orchestrator.py:90 get_orchestrator_status
+- api/ui_testing.py:269 _run_application_test_background
+- api/ui_testing.py:560 get_testing_status
+- app.py:1035 health_monitoring_loop
+- app.py:1035 lifespan
+- app.py:4528 execute_aurea_event
+- app.py:4590 emit
+- app_original_backup.py:178 validate_uuids
+- auto_executor.py:54 execute_agent_cycle
+- auto_executor.py:66 execute_agent_cycle
+- auto_executor.py:78 execute_agent_cycle
+- automated_sop_generator.py:693 _parse_json_response
+- automated_sop_generator.py:948 _parse_json_response
+- brainops_core.py:156 run_cycle
+- change_propagation_daemon.py:258 _update_codebase_graph
+- code_quality_agent.py:111 analyze_codebase
+- codebase_graph_crawler.py:261 parse_typescript
+- codebase_graph_crawler.py:324 _resolve_and_save_edges
+- codebase_graph_crawler.py:366 _resolve_and_save_edges
+- codebase_graph_crawler.py:372 _resolve_and_save_edges
+- consciousness_loop.py:175 _measure_vital_signs
+- data_pipeline_automation.py:494 _normalize
+- data_pipeline_automation.py:1050 run_pipeline
+- database/async_connection.py:412 _search_memories
+- database/sync_pool.py:145 get_connection
+- database/sync_pool.py:173 get_connection
+- database/sync_pool.py:243 close_all
+- dependability_framework.py:152 check
+- dependability_framework.py:157 get_recovery_action
+- devops_optimization_agent.py:337 scan_security_vulnerabilities
+- devops_optimization_agent.py:357 scan_security_vulnerabilities
+- devops_optimization_agent.py:474 optimize_infrastructure_costs
+- document_processor.py:438 process_document
+- e2e_system_verification.py:425 _run_single_test
+- email_scheduler_daemon.py:403 stop_email_scheduler
+- enhanced_circuit_breaker.py:716 stop
+- enhanced_circuit_breaker.py:1010 stop
+- erp_event_bridge.py:84 handle_erp_event
+- failover_redundancy_system.py:1041 test_failover_redundancy
+- final_operational_test.py:274 analyze_upgrade_value
+- graph_context_provider.py:100 _ensure_pool
+- intelligent_task_orchestrator.py:453 _enhance_task_with_ai
+- knowledge_graph_extractor.py:195 _extract_entities_from_json
+- knowledge_graph_extractor.py:211 _extract_entities_from_json
+- lead_nurturing_system.py:712 _execute_ab_test
+- main_integration.py:299 execute_task_in_background
+- main_integration.py:594 execute_task_endpoint
+- main_integration.py:1089 enforce_api_key
+- marketplace/follow_up_engine.py:31 generate_sequence
+- master_knowledge_base.py:493 _parse_json_response
+- mcp_server.py:335 build_tree
+- mcp_server.py:335 get_file_tree
+- mcp_server.py:358 monitor_logs
+- mcp_server.py:382 monitor_logs
+- monitor_deployment.py:45 check_endpoint
+- nerve_center.py:523 deactivate
+- performance_optimization_layer.py:553 close_all
+- predictive_scheduling.py:750 schedule_task
+- product_generation_pipeline.py:139 generate
+- product_generation_pipeline.py:143 analyze
+- product_generation_pipeline.py:1306 _update_status
+- system_awareness.py:374 scan_security
+- task_queue_consumer.py:247 stop_task_queue_consumer
+- test_all_endpoints.py:24 test_endpoint
+- test_paid_upgrade.py:509 analyze_upgrade_value
+- test_production_ai.py:28 wait_for_deployment
+- tests/test_health.py:34 test_db_connection
+- unified_awareness.py:190 _emit_event
+- unified_brain.py:1079 close
+- unified_memory_manager.py:341 search
+- unified_memory_manager_fix.py:190 recall
+
+## NotImplementedError occurrences
+- agent_executor.py:752 raise NotImplementedError(f"Agent {self.name} must implement execute method")
+- app.py:2482 except NotImplementedError:
+- database/async_connection.py:42 raise NotImplementedError
+- database/async_connection.py:45 raise NotImplementedError
+- database/async_connection.py:48 raise NotImplementedError
+- database/async_connection.py:51 raise NotImplementedError
+- database/async_connection.py:60 raise NotImplementedError
+- database/async_connection.py:63 raise NotImplementedError
+- database/async_connection.py:66 raise NotImplementedError
+- database/async_connection.py:69 raise NotImplementedError
+- digital_twin_system.py:924 raise NotImplementedError
+- revenue_pipeline_agents.py:36 raise NotImplementedError(f"Agent {self.name} must implement execute method")
+
+## Hardcoded credentials
+- .env:16 [DB password literal] DB_PASSWORD=REDACTED_SUPABASE_DB_PASSWORD
+- .env:18 [DB password literal] DATABASE_URL=postgresql://postgres.yomagoqdmxszqtdwuhab:REDACTED_SUPABASE_DB_PASSWORD@aws-0-us-east-2.pooler.supabase.com:5432/postgres
+- .env.local:9 [DB password literal] DB_PASSWORD=REDACTED_SUPABASE_DB_PASSWORD
+- .env.local:11 [DB password literal] DATABASE_URL=postgresql://postgres.yomagoqdmxszqtdwuhab:REDACTED_SUPABASE_DB_PASSWORD@aws-0-us-east-2.pooler.supabase.com:5432/postgres
+- .env.local:18 [API key literal] API_KEYS=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025
+- .env.local:18 [API key/hash literal] API_KEYS=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025
+- .env.local:19 [API key literal] AGENTS_API_KEY=brainops_prod_key_2025
+- .env.local:20 [API key/hash literal] BRAINOPS_API_KEY=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c
+- .env.production:8 [DB password literal] DB_PASSWORD=REDACTED_SUPABASE_DB_PASSWORD
+- .env.production:12 [API key literal] API_KEYS=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025
+- .env.production:12 [API key/hash literal] API_KEYS=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025
+- .env.production:13 [API key literal] AGENTS_API_KEY=brainops_prod_key_2025
+- .env.production:14 [API key/hash literal] BRAINOPS_API_KEY=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c
+- AGENT_ACTIVATION_REPORT.md:304 [API key literal] -H "X-API-Key: brainops_prod_key_2025"
+- AGENT_ACTIVATION_REPORT.md:310 [API key literal] -H "X-API-Key: brainops_prod_key_2025"
+- AGENT_ACTIVATION_REPORT.md:316 [API key literal] -H "X-API-Key: brainops_prod_key_2025"
+- AGENT_ACTIVATION_REPORT.md:322 [API key literal] -H "X-API-Key: brainops_prod_key_2025"
+- AGENT_ACTIVATION_REPORT.md:327 [DB password literal] PGPASSWORD=REDACTED_SUPABASE_DB_PASSWORD psql -h aws-0-us-east-2.pooler.supabase.com \
+- AUREA_INTEGRATION_PATCH.md:140 [API key literal] -H "X-API-Key: brainops_prod_key_2025" \
+- BRAIN_ENHANCEMENTS.md:354 [DB password literal] DB_PASSWORD=REDACTED_SUPABASE_DB_PASSWORD
+- BRAIN_ENHANCEMENT_SUMMARY.txt:156 [DB password literal] DB_PASSWORD=REDACTED_SUPABASE_DB_PASSWORD
+- DEPLOYMENT_STATUS.md:32 [API key literal] curl -X POST https://brainops-ai-agents.onrender.com/memory/force-sync -H "X-API-Key: brainops_prod_key_2025"
+- EMBEDDED_MEMORY_SYNC_FIX.md:186 [API key literal] -H "X-API-Key: brainops_prod_key_2025"
+- EMBEDDED_MEMORY_SYNC_FIX.md:213 [DB password literal] Password: REDACTED_SUPABASE_DB_PASSWORD
+- MCP_ENHANCEMENTS_V2.md:550 [MCP key literal] MCP_API_KEY=brainops_mcp_2025
+- SELF_HEALING_QUICK_REFERENCE.md:124 [DB password literal] export DB_PASSWORD="REDACTED_SUPABASE_DB_PASSWORD"
+- SELF_HEALING_UPGRADE_DOCS.md:360 [DB password literal] export DB_PASSWORD="REDACTED_SUPABASE_DB_PASSWORD"
+- UPGRADE_SUMMARY.md:208 [DB password literal] export DB_PASSWORD="REDACTED_SUPABASE_DB_PASSWORD"
+- always_know_brain.py:221 [API key literal] headers={"X-API-Key": os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")}
+- always_know_brain.py:298 [API key literal] headers={"X-API-Key": os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")}
+- api/affiliate.py:18 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
+- api/affiliate.py:18 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
+- api/affiliate.py:19 [API key literal] ADMIN_API_KEYS = {"brainops_prod_key_2025"}  # Only admin keys can process payouts
+- api/knowledge.py:17 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
+- api/knowledge.py:17 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
+- api/product_generation.py:17 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
+- api/product_generation.py:17 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
+- api/sop.py:19 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
+- api/sop.py:19 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
+- api/sop.py:20 [API key literal] APPROVER_API_KEYS = {"brainops_prod_key_2025"}  # Only approvers can approve SOPs
+- api/ui_testing.py:31 [DB password literal] "password": "REDACTED_SUPABASE_DB_PASSWORD",
+- aurea_orchestrator.py:98 [MCP key literal] MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "brainops_mcp_2025"
+- autonomous_cicd_management.py:184 [API key literal] self.mcp_api_key = os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+- bleeding_edge_ooda.py:729 [MCP key literal] headers={"X-API-Key": os.getenv("MCP_API_KEY", "brainops_mcp_2025")}
+- config.py:92 [test API key literal] default_local_test_key = "brainops-local-test-key"
+- database/sync_pool.py:22 [DB password literal] "password": "REDACTED_SUPABASE_DB_PASSWORD",
+- docs/BRAINOPS_DEVOPS_SOP.md:63 [API key literal] | AI Agents | brainops-ai-agents.onrender.com | /health | v9.1.1 | `curl -s <url>/health -H "X-API-Key: brainops_prod_key_2025"` |
+- docs/BRAINOPS_DEVOPS_SOP.md:74 [API key literal] | AI Agents | BRAINOPS_API_KEY | `brainops_prod_key_2025` |
+- docs/BRAINOPS_DEVOPS_SOP.md:83 [DB password literal] PGPASSWORD=REDACTED_SUPABASE_DB_PASSWORD psql \
+- docs/BRAINOPS_DEVOPS_SOP.md:105 [API key literal] -H "X-API-Key: brainops_prod_key_2025" | jq
+- docs/BRAINOPS_DEVOPS_SOP.md:197 [API key literal] -H "X-API-Key: brainops_prod_key_2025" | jq '.aurea'
+- docs/BRAINOPS_DEVOPS_SOP.md:211 [DB password literal] PGPASSWORD=REDACTED_SUPABASE_DB_PASSWORD psql -h aws-0-us-east-2.pooler.supabase.com ...
+- docs/BRAINOPS_DEVOPS_SOP.md:226 [API key literal] -H "X-API-Key: brainops_prod_key_2025" | jq
+- docs/BRAINOPS_DEVOPS_SOP.md:244 [API key literal] -H "X-API-Key: brainops_prod_key_2025" | jq '.aurea'
+- docs/BRAINOPS_DEVOPS_SOP.md:269 [API key literal] -H "X-API-Key: brainops_prod_key_2025" | jq '.next_jobs[0:5]'
+- docs/BRAINOPS_DEVOPS_SOP.md:359 [API key literal] curl -s "https://brainops-ai-agents.onrender.com/health" -H "X-API-Key: brainops_prod_key_2025" | jq '.status'
+- docs/BRAINOPS_DEVOPS_SOP.md:362 [API key literal] curl -s "https://brainops-ai-agents.onrender.com/systems/usage" -H "X-API-Key: brainops_prod_key_2025" | jq '.aurea.running'
+- docs/BRAINOPS_DEVOPS_SOP.md:365 [API key literal] curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" -H "X-API-Key: brainops_prod_key_2025" | jq '.apscheduler_jobs_count'
+- e2e_system_verification.py:34 [API key literal] API_KEY = _api_keys_list[0] if _api_keys_list else os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+- mcp_integration.py:39 [MCP key literal] MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("MCP_BRIDGE_API_KEY") or "brainops_mcp_2025"
+- render.yaml:21 [DB password literal] value: REDACTED_SUPABASE_DB_PASSWORD
+- render.yaml:27 [API key literal] value: "11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025"
+- render.yaml:27 [API key/hash literal] value: "11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025"
+- render.yaml:29 [API key literal] value: brainops_prod_key_2025
+- render.yaml:31 [API key/hash literal] value: 11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c
+- scripts/verify_ai_os.sh:66 [API key literal] AI_HEALTH=$(curl -s "https://brainops-ai-agents.onrender.com/health" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null)
+- scripts/verify_ai_os.sh:73 [API key literal] AUREA=$(curl -s "https://brainops-ai-agents.onrender.com/systems/usage" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null | jq '.aurea.running' 2>/dev/null)
+- scripts/verify_ai_os.sh:77 [API key literal] SCHEDULER=$(curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null)
+- scripts/verify_ai_os.sh:138 [API key literal] BRAIN=$(curl -s "https://brainops-ai-agents.onrender.com/brain/critical" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null | jq 'length' 2>/dev/null)
+- self_healing_recovery.py:42 [DB password literal] "password": os.getenv("DB_PASSWORD", "REDACTED_SUPABASE_DB_PASSWORD"),
+- setup_consciousness_db.py:5 [DB password literal] DB_URL = "postgresql://postgres.yomagoqdmxszqtdwuhab:REDACTED_SUPABASE_DB_PASSWORD@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
+- test_consciousness_loop.py:10 [DB password literal] os.environ["DB_PASSWORD"] = "REDACTED_SUPABASE_DB_PASSWORD"
+- test_memory_sync_production.sh:5 [API key literal] API_KEY="brainops_prod_key_2025"
+- verify_production.py:11 [DB password literal] os.environ["DB_PASSWORD"] = "REDACTED_SUPABASE_DB_PASSWORD"
+- verify_production.py:13 [DB password literal] os.environ["DATABASE_URL"] = "postgresql://postgres.yomagoqdmxszqtdwuhab:REDACTED_SUPABASE_DB_PASSWORD@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
+- verify_system.py:18 [DB password literal] 'password': os.getenv('DB_PASSWORD', 'REDACTED_SUPABASE_DB_PASSWORD'), # Using the one from context
+
+## Broken imports (not stdlib/local/not in requirements)
+- ai_context_awareness.py:18 jwt
+- app.py:3067 sentence_transformers
+- bleeding_edge_ooda.py:38 orjson
+- document_processor.py:20 PyPDF2
+- document_processor.py:21 docx
+- document_processor.py:22 openpyxl
+- document_processor.py:23 PIL
+- document_processor.py:24 pytesseract
+- integration_bridge.py:23 schedule
+- langgraph_orchestrator.py:104 supabase
+- realtime_monitor.py:19 websocket
+- revenue_automation.py:11 schedule
+- revenue_automation.py:16 stripe
+- revenue_automation_engine.py:868 twilio.rest
+- revenue_automation_engine.py:1067 stripe
+- unified_memory_manager.py:677 sentence_transformers
+
+## SQL queries with wrong column names
+See SQL_COLUMN_MISMATCHES.txt for full list (generated vs database_schema.json).
+
+## Endpoints that don't actually do anything
+- api/revenue.py: discover_leads endpoint relies on generate_realistic_leads(), which always raises 501 (TODO for real integration).
+- erp_event_bridge.py: /events/webhook NEW_JOB branch contains a pass (revenue system action stub), so no revenue-side processing happens for that event.
+
