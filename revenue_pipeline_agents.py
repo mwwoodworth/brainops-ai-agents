@@ -126,7 +126,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
             leads = await pool.fetch("""
                 SELECT DISTINCT
                     c.id as customer_id,
-                    COALESCE(c.company, c.first_name || ' ' || c.last_name) as company_name,
+                    COALESCE(c.company_name, c.first_name || ' ' || c.last_name) as company_name,
                     c.first_name || ' ' || c.last_name as contact_name,
                     c.email,
                     c.phone,
@@ -139,7 +139,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
                 WHERE c.email IS NOT NULL
                   AND c.email != ''
                   AND c.status != 'inactive'
-                GROUP BY c.id, c.company, c.first_name, c.last_name, c.email, c.phone, c.city, c.state
+                GROUP BY c.id, c.company_name, c.first_name, c.last_name, c.email, c.phone, c.city, c.state
                 HAVING MAX(j.created_at) < NOW() - INTERVAL '12 months'
                    OR MAX(j.created_at) IS NULL
                 ORDER BY avg_job_value DESC
@@ -178,7 +178,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
                 WITH customer_stats AS (
                     SELECT
                         c.id as customer_id,
-                        COALESCE(c.company, c.first_name || ' ' || c.last_name) as company_name,
+                        COALESCE(c.company_name, c.first_name || ' ' || c.last_name) as company_name,
                         c.first_name || ' ' || c.last_name as contact_name,
                         c.email,
                         c.phone,
@@ -192,7 +192,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
                     WHERE c.email IS NOT NULL
                       AND c.email != ''
                       AND j.status = 'completed'
-                    GROUP BY c.id, c.company, c.first_name, c.last_name, c.email, c.phone, c.city, c.state
+                    GROUP BY c.id, c.company_name, c.first_name, c.last_name, c.email, c.phone, c.city, c.state
                 ),
                 avg_values AS (
                     SELECT
@@ -244,7 +244,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
             leads = await pool.fetch("""
                 SELECT DISTINCT
                     c.id as customer_id,
-                    COALESCE(c.company, c.first_name || ' ' || c.last_name) as company_name,
+                    COALESCE(c.company_name, c.first_name || ' ' || c.last_name) as company_name,
                     c.first_name || ' ' || c.last_name as contact_name,
                     c.email,
                     c.phone,
@@ -257,7 +257,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
                   AND c.email != ''
                   AND j.status = 'completed'
                   AND j.created_at > NOW() - INTERVAL '6 months'
-                GROUP BY c.id, c.company, c.first_name, c.last_name, c.email, c.phone, c.city, c.state
+                GROUP BY c.id, c.company_name, c.first_name, c.last_name, c.email, c.phone, c.city, c.state
                 HAVING COUNT(j.id) >= 2
                 ORDER BY COUNT(j.id) DESC, MAX(j.created_at) DESC
                 LIMIT 30
