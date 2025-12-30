@@ -9,6 +9,7 @@ import logging
 import asyncio
 import hashlib
 import json
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
@@ -23,13 +24,13 @@ _test_results: Dict[str, Dict[str, Any]] = {}
 _running_tests: Dict[str, bool] = {}
 _scheduled_tests: Dict[str, Dict[str, Any]] = {}
 
-# Database configuration
+# Database configuration - MUST come from environment variables
 DB_CONFIG = {
-    "host": "aws-0-us-east-2.pooler.supabase.com",
-    "database": "postgres",
-    "user": "postgres.yomagoqdmxszqtdwuhab",
-    "password": "Brain0ps2O2S",
-    "port": 5432
+    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
+    "database": os.getenv("DB_NAME", "postgres"),
+    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
+    "password": os.getenv("DB_PASSWORD"),  # No default - must be set
+    "port": int(os.getenv("DB_PORT", "5432"))
 }
 
 

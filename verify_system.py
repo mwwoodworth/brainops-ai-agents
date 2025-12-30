@@ -10,14 +10,19 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SystemVerifier")
 
-# DB Credentials from context/files
+# DB Credentials MUST come from environment variables
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
     'database': os.getenv('DB_NAME', 'postgres'),
     'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('DB_PASSWORD', 'Brain0ps2O2S'), # Using the one from context
-    'port': int(os.getenv('DB_PORT', 5432))
+    'password': os.getenv('DB_PASSWORD'),  # No default - must be set
+    'port': int(os.getenv('DB_PORT', '5432'))
 }
+
+# Validate DB_PASSWORD is set
+if not DB_CONFIG['password']:
+    logger.error("❌ DB_PASSWORD environment variable not set")
+    sys.exit(1)
 
 async def verify_db():
     logger.info("--- Verifying Database Connection ---")
