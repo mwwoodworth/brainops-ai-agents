@@ -215,7 +215,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.50.0"  # UI Testing: Fixed MRG routes, added more real pages to test
+VERSION = "9.51.0"  # Fixed json import bug in UI tester visual analysis
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
