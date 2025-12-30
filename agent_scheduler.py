@@ -162,12 +162,14 @@ class AgentScheduler:
                     """, (datetime.utcnow(), datetime.utcnow(), agent_id))
 
                     # Update schedule next execution with row locking to prevent race conditions
-                    # First lock the row, then update to prevent concurrent executions from corrupting schedule
+                    # First lock the row and get frequency_minutes, then update to prevent concurrent executions
                     cur.execute("""
-                        SELECT id FROM agent_schedules
+                        SELECT id, frequency_minutes FROM agent_schedules
                         WHERE agent_id = %s AND enabled = true
                         FOR UPDATE NOWAIT
                     """, (agent_id,))
+                    schedule_row = cur.fetchone()
+                    frequency_minutes = (schedule_row['frequency_minutes'] if schedule_row else None) or 60
 
                     cur.execute("""
                         UPDATE agent_schedules
@@ -175,7 +177,7 @@ class AgentScheduler:
                             next_execution = %s,
                             updated_at = NOW()
                         WHERE agent_id = %s AND enabled = true
-                    """, (datetime.utcnow(), datetime.utcnow() + timedelta(minutes=agent.get('frequency_minutes', 60)), agent_id))
+                    """, (datetime.utcnow(), datetime.utcnow() + timedelta(minutes=frequency_minutes), agent_id))
 
                     conn.commit()
                     logger.info(f"Agent {agent_name} executed successfully")
@@ -251,8 +253,12 @@ class AgentScheduler:
         elif 'revenue' in agent_type or agent_name == 'RevenueOptimizer':
             return self._execute_revenue_agent(agent, cur, conn)
 
-        # Lead generation agents
-        elif 'lead' in agent_type or agent_name in ['LeadGenerationAgent', 'LeadScorer']:
+        # Lead generation and revenue pipeline agents
+        elif 'lead' in agent_type or 'nurture' in agent_type or agent_name in [
+            'LeadGenerationAgent', 'LeadScorer', 'LeadQualificationAgent',
+            'LeadDiscoveryAgent', 'NurtureExecutorAgent', 'DealClosingAgent',
+            'RevenueProposalAgent'
+        ]:
             return self._execute_lead_agent(agent, cur, conn)
 
         # Customer intelligence agents
