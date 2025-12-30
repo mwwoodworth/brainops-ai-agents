@@ -15,7 +15,7 @@ import logging
 import re
 import subprocess
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict, TypeVar
 
@@ -402,6 +402,7 @@ class AgentExecutor:
         # Analytics Agents
         self.agents['CustomerIntelligence'] = CustomerIntelligenceAgent()
         self.agents['PredictiveAnalyzer'] = PredictiveAnalyzerAgent()
+        self.agents['RevenueOptimizer'] = RevenueOptimizerAgent()
 
         # Generator Agents
         self.agents['ContractGenerator'] = ContractGeneratorAgent()
@@ -451,6 +452,11 @@ class AgentExecutor:
             except Exception as e:
                 logger.warning(f"Failed to initialize Deployment monitor agent: {e}")
 
+        # Revenue Pipeline Agents - REAL implementations that query customer/jobs data
+        self.agents['LeadDiscoveryAgentReal'] = LeadDiscoveryAgentReal()
+        self.agents['NurtureExecutorAgentReal'] = NurtureExecutorAgentReal()
+        logger.info("Revenue pipeline agents registered: LeadDiscoveryAgentReal, NurtureExecutorAgentReal")
+
     # Agent name aliases - maps database names to code implementations
     # This allows scheduled agents to use real implementations instead of AI fallback
     AGENT_ALIASES = {
@@ -464,19 +470,19 @@ class AgentExecutor:
         'ComplianceAgent': 'Monitor',
         'APIManagementAgent': 'Monitor',
 
-        # Revenue/Analytics agents -> CustomerIntelligence or PredictiveAnalyzer
-        'RevenueOptimizer': 'CustomerIntelligence',
+        # Revenue/Analytics agents -> Dedicated agents
+        # Note: 'RevenueOptimizer' now has its own dedicated agent (registered directly)
         'InsightsAnalyzer': 'PredictiveAnalyzer',
         'MetricsCalculator': 'PredictiveAnalyzer',
-        'BudgetingAgent': 'CustomerIntelligence',
+        'BudgetingAgent': 'RevenueOptimizer',
 
-        # Lead agents -> Outreach or Conversion (if available) or CustomerAgent
-        'LeadGenerationAgent': 'Outreach',
-        'LeadDiscoveryAgent': 'WebSearch',
+        # Lead agents -> REAL revenue pipeline agents
+        'LeadGenerationAgent': 'LeadDiscoveryAgentReal',
+        'LeadDiscoveryAgent': 'LeadDiscoveryAgentReal',  # REAL: Queries customers/jobs tables
         'LeadQualificationAgent': 'Conversion',
         'LeadScorer': 'PredictiveAnalyzer',
         'DealClosingAgent': 'Conversion',
-        'NurtureExecutorAgent': 'Outreach',
+        'NurtureExecutorAgent': 'NurtureExecutorAgentReal',  # REAL: Creates sequences, queues emails
         'RevenueProposalAgent': 'ProposalGenerator',
 
         # Workflow agents - many map to CustomerAgent
@@ -1126,16 +1132,53 @@ class MonitorAgent(BaseAgent):
             return {"status": "error", "error": str(e)}
 
     async def check_database(self) -> Dict[str, Any]:
-        """Check database health"""
+        """Check database health with REAL production business metrics"""
         try:
             pool = get_pool()
+
+            # REAL METRICS: Core business data counts from production tables
             stats = await pool.fetchrow("""
                 SELECT
                     (SELECT COUNT(*) FROM customers) as customers,
+                    (SELECT COUNT(*) FROM customers WHERE is_active = true OR status = 'active') as active_customers,
                     (SELECT COUNT(*) FROM jobs) as jobs,
-                    (SELECT COUNT(*) FROM ai_agents) as agents
+                    (SELECT COUNT(*) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days') as jobs_last_30d,
+                    (SELECT COUNT(*) FROM invoices) as invoices,
+                    (SELECT COALESCE(SUM(total_cents)/100.0, 0) FROM invoices WHERE status = 'paid') as total_revenue,
+                    (SELECT COUNT(*) FROM ai_agents) as agents,
+                    (SELECT COUNT(*) FROM ai_agents WHERE status = 'active') as active_agents,
+                    (SELECT COUNT(*) FROM ai_agent_executions WHERE created_at > NOW() - INTERVAL '24 hours') as agent_executions_24h,
+                    (SELECT COUNT(*) FROM ai_customer_health) as customer_health_records
             """)
-            return {"status": "healthy", "stats": dict(stats) if stats else {}}
+
+            # REAL METRICS: Recent agent activity
+            recent_activity = await pool.fetchrow("""
+                SELECT
+                    MAX(created_at) as last_agent_execution,
+                    COUNT(*) FILTER (WHERE status = 'completed') as completed_24h,
+                    COUNT(*) FILTER (WHERE status = 'failed') as failed_24h
+                FROM ai_agent_executions
+                WHERE created_at > NOW() - INTERVAL '24 hours'
+            """)
+
+            result = {
+                "status": "healthy",
+                "stats": dict(stats) if stats else {},
+                "agent_activity": dict(recent_activity) if recent_activity else {},
+                "data_source": "production_database"
+            }
+
+            # Add health alerts based on real metrics
+            if stats:
+                alerts = []
+                if stats['agent_executions_24h'] < 10:
+                    alerts.append("Low agent activity in last 24 hours")
+                if stats['jobs_last_30d'] == 0:
+                    alerts.append("No jobs created in last 30 days")
+                if alerts:
+                    result["alerts"] = alerts
+
+            return result
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -2181,63 +2224,283 @@ class InvoicingAgent(BaseAgent):
 # ============== ANALYTICS AGENTS ==============
 
 class CustomerIntelligenceAgent(BaseAgent):
-    """Analyzes customer data for insights"""
+    """Analyzes REAL customer data from production database for actionable insights"""
 
     def __init__(self):
         super().__init__("CustomerIntelligence", "analytics")
 
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute customer intelligence analysis"""
-        analysis_type = task.get('type', 'overview')
+        """Execute customer intelligence analysis on REAL business data"""
+        analysis_type = task.get('type', task.get('action', 'full_analysis'))
 
         if analysis_type == 'churn_risk':
             return await self.analyze_churn_risk()
+        elif analysis_type == 'upsell':
+            return await self.identify_upsell_opportunities()
         elif analysis_type == 'lifetime_value':
             return await self.calculate_lifetime_value()
         elif analysis_type == 'segmentation':
             return await self.advanced_segmentation()
+        elif analysis_type == 'full_analysis':
+            return await self.full_customer_analysis()
         else:
-            return await self.customer_overview()
+            return await self.full_customer_analysis()
+
+    async def full_customer_analysis(self) -> Dict:
+        """Run comprehensive customer analysis and store insights in ai_customer_health"""
+        try:
+            pool = get_pool()
+            results = {
+                "status": "completed",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "data_source": "production_database",
+                "analyses": {}
+            }
+
+            # 1. Get total customer/job counts
+            counts = await pool.fetchrow("""
+                SELECT
+                    (SELECT COUNT(*) FROM customers) as total_customers,
+                    (SELECT COUNT(*) FROM customers WHERE is_active = true OR status = 'active') as active_customers,
+                    (SELECT COUNT(*) FROM jobs) as total_jobs,
+                    (SELECT COUNT(*) FROM invoices) as total_invoices,
+                    (SELECT COALESCE(SUM(total_cents)/100.0, 0) FROM invoices WHERE status = 'paid') as total_revenue
+            """)
+            results["summary"] = dict(counts) if counts else {}
+
+            # 2. Churn risk analysis
+            churn_data = await self.analyze_churn_risk()
+            results["analyses"]["churn_risk"] = churn_data
+
+            # 3. Upsell opportunities
+            upsell_data = await self.identify_upsell_opportunities()
+            results["analyses"]["upsell_opportunities"] = upsell_data
+
+            # 4. Store insights in ai_customer_health for top at-risk customers
+            if churn_data.get("at_risk_customers"):
+                await self._store_customer_health_insights(churn_data["at_risk_customers"])
+
+            results["insights_stored"] = len(churn_data.get("at_risk_customers", []))
+
+            return results
+        except Exception as e:
+            self.logger.error(f"Full customer analysis failed: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def analyze_churn_risk(self) -> Dict:
-        """Analyze customer churn risk using REAL AI"""
+        """Identify customers at risk of churning - NO jobs in 12+ months"""
         try:
             pool = get_pool()
 
-            # Identify at-risk customers
-            at_risk = await pool.fetch("""
+            # REAL QUERY: Customers with no jobs in 12+ months (high churn risk)
+            high_risk = await pool.fetch("""
                 SELECT
                     c.id,
                     c.name,
                     c.email,
                     c.phone,
+                    c.org_id as tenant_id,
                     MAX(j.created_at) as last_job_date,
-                    EXTRACT(days FROM NOW() - MAX(j.created_at)) as days_since_last_job,
+                    EXTRACT(days FROM NOW() - MAX(j.created_at))::int as days_since_last_job,
                     COUNT(j.id) as total_jobs,
-                    AVG(i.amount) as avg_invoice_amount
+                    COALESCE(SUM(j.actual_revenue), 0) as total_revenue
                 FROM customers c
                 LEFT JOIN jobs j ON c.id = j.customer_id
-                LEFT JOIN invoices i ON c.id = i.customer_id
-                GROUP BY c.id, c.name, c.email, c.phone
-                HAVING MAX(j.created_at) < NOW() - INTERVAL '90 days'
+                WHERE c.is_active = true OR c.status = 'active'
+                GROUP BY c.id, c.name, c.email, c.phone, c.org_id
+                HAVING MAX(j.created_at) < NOW() - INTERVAL '12 months'
+                   OR MAX(j.created_at) IS NULL
+                ORDER BY days_since_last_job DESC NULLS FIRST
+                LIMIT 50
+            """)
+
+            # Medium risk: 6-12 months inactive
+            medium_risk = await pool.fetch("""
+                SELECT
+                    c.id,
+                    c.name,
+                    c.email,
+                    c.phone,
+                    c.org_id as tenant_id,
+                    MAX(j.created_at) as last_job_date,
+                    EXTRACT(days FROM NOW() - MAX(j.created_at))::int as days_since_last_job,
+                    COUNT(j.id) as total_jobs
+                FROM customers c
+                LEFT JOIN jobs j ON c.id = j.customer_id
+                WHERE (c.is_active = true OR c.status = 'active')
+                GROUP BY c.id, c.name, c.email, c.phone, c.org_id
+                HAVING MAX(j.created_at) BETWEEN NOW() - INTERVAL '12 months' AND NOW() - INTERVAL '6 months'
                 ORDER BY days_since_last_job DESC
-                LIMIT 10
+                LIMIT 50
             """)
 
             return {
-                "status": "completed",
-                "at_risk_customers": [dict(c) for c in at_risk],
+                "high_risk_count": len(high_risk),
+                "medium_risk_count": len(medium_risk),
+                "at_risk_customers": [dict(c) for c in high_risk],
+                "medium_risk_customers": [dict(c) for c in medium_risk],
                 "recommendations": [
-                    "Reach out to customers with no activity in 90+ days",
-                    "Offer special promotions to re-engage",
-                    "Schedule follow-up calls"
+                    f"URGENT: {len(high_risk)} customers have had no jobs in 12+ months",
+                    f"ATTENTION: {len(medium_risk)} customers inactive for 6-12 months",
+                    "Recommended actions: Re-engagement campaigns, special offers, follow-up calls",
+                    "Consider maintenance contract offers for high-value dormant customers"
                 ]
             }
         except Exception as e:
+            self.logger.error(f"Churn risk analysis failed: {e}")
             return {"status": "error", "error": str(e)}
 
+    async def identify_upsell_opportunities(self) -> Dict:
+        """Identify high-value customers for upsell opportunities"""
+        try:
+            pool = get_pool()
+
+            # REAL QUERY: Customers with high average job value (upsell candidates)
+            high_value_customers = await pool.fetch("""
+                SELECT
+                    c.id,
+                    c.name,
+                    c.email,
+                    c.phone,
+                    c.org_id as tenant_id,
+                    COUNT(j.id) as job_count,
+                    COALESCE(AVG(j.actual_revenue), AVG(j.estimated_revenue)) as avg_job_value,
+                    COALESCE(SUM(j.actual_revenue), SUM(j.estimated_revenue)) as total_revenue,
+                    MAX(j.created_at) as last_job_date
+                FROM customers c
+                JOIN jobs j ON j.customer_id = c.id
+                WHERE (c.is_active = true OR c.status = 'active')
+                  AND j.status IN ('completed', 'invoiced', 'paid')
+                GROUP BY c.id, c.name, c.email, c.phone, c.org_id
+                HAVING COALESCE(AVG(j.actual_revenue), AVG(j.estimated_revenue)) > 5000
+                ORDER BY avg_job_value DESC
+                LIMIT 30
+            """)
+
+            # Repeat customers (high loyalty, good for premium services)
+            repeat_customers = await pool.fetch("""
+                SELECT
+                    c.id,
+                    c.name,
+                    c.email,
+                    COUNT(j.id) as job_count,
+                    COALESCE(SUM(j.actual_revenue), SUM(j.estimated_revenue)) as total_revenue,
+                    EXTRACT(days FROM NOW() - MIN(c.created_at))::int as customer_tenure_days
+                FROM customers c
+                JOIN jobs j ON j.customer_id = c.id
+                WHERE (c.is_active = true OR c.status = 'active')
+                GROUP BY c.id, c.name, c.email
+                HAVING COUNT(j.id) >= 3
+                ORDER BY job_count DESC, total_revenue DESC
+                LIMIT 30
+            """)
+
+            return {
+                "high_value_count": len(high_value_customers),
+                "repeat_customer_count": len(repeat_customers),
+                "high_value_customers": [dict(c) for c in high_value_customers],
+                "repeat_customers": [dict(c) for c in repeat_customers],
+                "recommendations": [
+                    f"TARGET: {len(high_value_customers)} high-value customers (avg job >$5k) for premium services",
+                    f"LOYALTY: {len(repeat_customers)} repeat customers ideal for maintenance contracts",
+                    "Upsell strategies: Extended warranties, annual maintenance plans, premium materials",
+                    "Consider referral program for loyal customers"
+                ]
+            }
+        except Exception as e:
+            self.logger.error(f"Upsell opportunity analysis failed: {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def _store_customer_health_insights(self, customers: List[Dict]) -> int:
+        """Store customer health insights in ai_customer_health table"""
+        try:
+            pool = get_pool()
+            stored_count = 0
+
+            for customer in customers[:100]:  # Limit to 100 per run
+                try:
+                    days_inactive = customer.get('days_since_last_job') or 999
+                    total_revenue = float(customer.get('total_revenue') or 0)
+                    total_jobs = int(customer.get('total_jobs') or 0)
+
+                    # Calculate health score (0-100, higher is better)
+                    health_score = 100
+                    if days_inactive > 365:
+                        health_score -= 50
+                    elif days_inactive > 180:
+                        health_score -= 30
+                    elif days_inactive > 90:
+                        health_score -= 15
+
+                    if total_jobs == 0:
+                        health_score -= 20
+
+                    # Calculate churn probability
+                    churn_probability = min(0.95, days_inactive / 500.0) if days_inactive else 0.1
+
+                    # Determine risk category
+                    if days_inactive > 365:
+                        churn_risk = 'critical'
+                        health_category = 'at_risk'
+                    elif days_inactive > 180:
+                        churn_risk = 'high'
+                        health_category = 'declining'
+                    elif days_inactive > 90:
+                        churn_risk = 'medium'
+                        health_category = 'watch'
+                    else:
+                        churn_risk = 'low'
+                        health_category = 'healthy'
+
+                    # Determine retention strategies
+                    retention_strategies = []
+                    if churn_risk in ('critical', 'high'):
+                        retention_strategies = [
+                            'Send re-engagement email',
+                            'Offer 10% discount on next service',
+                            'Schedule follow-up call'
+                        ]
+                    elif churn_risk == 'medium':
+                        retention_strategies = [
+                            'Send maintenance reminder',
+                            'Offer loyalty reward'
+                        ]
+
+                    tenant_id = customer.get('tenant_id', '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457')
+
+                    await pool.execute("""
+                        INSERT INTO ai_customer_health (
+                            customer_id, tenant_id, health_score, health_category,
+                            churn_probability, churn_risk, lifetime_value,
+                            days_since_last_activity, health_status,
+                            retention_strategies, measured_at, created_at, updated_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW(), NOW())
+                        ON CONFLICT (id) DO NOTHING
+                    """,
+                        customer['id'],
+                        tenant_id,
+                        health_score,
+                        health_category,
+                        churn_probability,
+                        churn_risk,
+                        total_revenue,
+                        days_inactive,
+                        f"Inactive for {days_inactive} days" if days_inactive else "Unknown",
+                        retention_strategies
+                    )
+                    stored_count += 1
+                except Exception as inner_e:
+                    self.logger.warning(f"Failed to store health for customer {customer.get('id')}: {inner_e}")
+                    continue
+
+            self.logger.info(f"Stored {stored_count} customer health insights")
+            return stored_count
+        except Exception as e:
+            self.logger.error(f"Failed to store customer health insights: {e}")
+            return 0
+
     async def calculate_lifetime_value(self) -> Dict:
-        """Calculate customer lifetime value"""
+        """Calculate customer lifetime value from REAL revenue data"""
         try:
             pool = get_pool()
 
@@ -2245,39 +2508,58 @@ class CustomerIntelligenceAgent(BaseAgent):
                 SELECT
                     c.id,
                     c.name,
+                    c.email,
                     COUNT(DISTINCT j.id) as total_jobs,
-                    SUM(i.total_amount) as total_revenue,
-                    AVG(i.total_amount) as avg_transaction,
-                    EXTRACT(days FROM NOW() - MIN(c.created_at))/365.0 as customer_age_years
+                    COALESCE(SUM(j.actual_revenue), SUM(j.estimated_revenue), 0) as total_revenue,
+                    COALESCE(AVG(j.actual_revenue), AVG(j.estimated_revenue), 0) as avg_job_value,
+                    COALESCE(SUM(i.total_cents)/100.0, 0) as invoiced_amount,
+                    EXTRACT(days FROM NOW() - MIN(c.created_at))/365.0 as customer_age_years,
+                    MAX(j.created_at) as last_job_date
                 FROM customers c
                 LEFT JOIN jobs j ON c.id = j.customer_id
-                LEFT JOIN invoices i ON j.id = i.job_id
-                GROUP BY c.id, c.name
-                HAVING SUM(i.total_amount) > 0
+                LEFT JOIN invoices i ON c.id = i.customer_id
+                WHERE c.is_active = true OR c.status = 'active'
+                GROUP BY c.id, c.name, c.email
+                HAVING COUNT(DISTINCT j.id) > 0
                 ORDER BY total_revenue DESC
-                LIMIT 20
+                LIMIT 50
             """)
+
+            # Calculate aggregate stats
+            total_ltv = sum(float(c['total_revenue'] or 0) for c in ltv_data)
+            avg_ltv = total_ltv / len(ltv_data) if ltv_data else 0
 
             return {
                 "status": "completed",
+                "customer_count": len(ltv_data),
+                "total_ltv": total_ltv,
+                "average_ltv": avg_ltv,
+                "top_customers": [dict(c) for c in ltv_data[:20]],
                 "customer_lifetime_values": [dict(c) for c in ltv_data]
             }
         except Exception as e:
+            self.logger.error(f"LTV calculation failed: {e}")
             return {"status": "error", "error": str(e)}
 
     async def advanced_segmentation(self) -> Dict:
-        """Advanced customer segmentation using Real AI"""
+        """Advanced customer segmentation using Real AI on REAL data"""
         try:
             pool = get_pool()
 
-            # Fetch sample of customers with their metrics
+            # Fetch customers with their real metrics
             customers = await pool.fetch("""
-                SELECT c.id, c.name, COUNT(j.id) as jobs, SUM(i.total_amount) as revenue
+                SELECT
+                    c.id,
+                    c.name,
+                    COUNT(j.id) as jobs,
+                    COALESCE(SUM(j.actual_revenue), SUM(j.estimated_revenue), 0) as revenue,
+                    EXTRACT(days FROM NOW() - MAX(j.created_at))::int as days_inactive,
+                    EXTRACT(days FROM NOW() - MIN(c.created_at))::int as tenure_days
                 FROM customers c
                 LEFT JOIN jobs j ON c.id = j.customer_id
-                LEFT JOIN invoices i ON j.id = i.job_id
+                WHERE c.is_active = true OR c.status = 'active'
                 GROUP BY c.id, c.name
-                LIMIT 50
+                LIMIT 100
             """)
 
             if not customers:
@@ -2285,34 +2567,73 @@ class CustomerIntelligenceAgent(BaseAgent):
 
             customers_data = [dict(c) for c in customers]
 
-            prompt = f"""
-            Analyze these customer profiles and group them into meaningful segments (e.g., VIP, At-Risk, New, Steady).
-            Data: {json.dumps(customers_data, default=str)}
+            # If AI is available, use it for intelligent segmentation
+            if USE_REAL_AI and ai_core:
+                try:
+                    prompt = f"""
+                    Analyze these customer profiles and group them into meaningful segments.
+                    Data: {json.dumps(customers_data[:50], default=str)}
 
-            Return a JSON object where keys are segment names and values are objects containing:
-            - count: number of customers
-            - characteristics: list of defining traits
-            - customer_ids: list of IDs in this segment
-            """
+                    Return a JSON object where keys are segment names and values are objects containing:
+                    - count: number of customers
+                    - characteristics: list of defining traits
+                    - customer_ids: list of IDs in this segment
+                    - recommended_actions: list of actions for this segment
+                    """
 
-            response = await ai_core.generate(prompt, model="gpt-4", temperature=0.2)
+                    response = await ai_core.generate(prompt, model="gpt-4", temperature=0.2)
 
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                return {
-                    "status": "completed",
-                    "segments": json.loads(json_match.group())
-                }
+                    json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                    if json_match:
+                        return {
+                            "status": "completed",
+                            "segments": json.loads(json_match.group()),
+                            "ai_powered": True
+                        }
+                except Exception as ai_e:
+                    self.logger.warning(f"AI segmentation failed, using rule-based: {ai_e}")
 
-            return {"status": "error", "message": "Could not parse AI response"}
+            # Rule-based segmentation fallback
+            segments = {
+                "VIP": {"count": 0, "customer_ids": [], "characteristics": ["High revenue", "Multiple jobs"]},
+                "At_Risk": {"count": 0, "customer_ids": [], "characteristics": ["Long inactive period"]},
+                "New": {"count": 0, "customer_ids": [], "characteristics": ["Recent customer", "Few jobs"]},
+                "Steady": {"count": 0, "customer_ids": [], "characteristics": ["Regular activity"]}
+            }
+
+            for c in customers_data:
+                revenue = float(c.get('revenue') or 0)
+                jobs = int(c.get('jobs') or 0)
+                days_inactive = int(c.get('days_inactive') or 0) if c.get('days_inactive') else 999
+                tenure = int(c.get('tenure_days') or 0)
+
+                if revenue > 10000 and jobs >= 2:
+                    segments["VIP"]["count"] += 1
+                    segments["VIP"]["customer_ids"].append(str(c['id']))
+                elif days_inactive > 180:
+                    segments["At_Risk"]["count"] += 1
+                    segments["At_Risk"]["customer_ids"].append(str(c['id']))
+                elif tenure < 90:
+                    segments["New"]["count"] += 1
+                    segments["New"]["customer_ids"].append(str(c['id']))
+                else:
+                    segments["Steady"]["count"] += 1
+                    segments["Steady"]["customer_ids"].append(str(c['id']))
+
+            return {
+                "status": "completed",
+                "segments": segments,
+                "ai_powered": False,
+                "total_analyzed": len(customers_data)
+            }
 
         except Exception as e:
+            self.logger.error(f"Segmentation failed: {e}")
             return {"status": "error", "error": str(e)}
 
     async def customer_overview(self) -> Dict:
-        """General customer overview"""
-        customer_agent = CustomerAgent()
-        return await customer_agent.analyze_customers()
+        """General customer overview using real data"""
+        return await self.full_customer_analysis()
 
 
 class PredictiveAnalyzerAgent(BaseAgent):
@@ -2448,6 +2769,274 @@ class PredictiveAnalyzerAgent(BaseAgent):
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
+
+
+class RevenueOptimizerAgent(BaseAgent):
+    """Analyzes REAL revenue data from production jobs/invoices tables for optimization insights"""
+
+    def __init__(self):
+        super().__init__("RevenueOptimizer", "analytics")
+
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute revenue optimization analysis on REAL business data"""
+        analysis_type = task.get('type', task.get('action', 'full_analysis'))
+
+        if analysis_type == 'monthly_revenue':
+            return await self.analyze_monthly_revenue()
+        elif analysis_type == 'top_customers':
+            return await self.get_top_customers_by_revenue()
+        elif analysis_type == 'pricing':
+            return await self.analyze_pricing_optimization()
+        elif analysis_type == 'full_analysis':
+            return await self.full_revenue_analysis()
+        else:
+            return await self.full_revenue_analysis()
+
+    async def full_revenue_analysis(self) -> Dict:
+        """Run comprehensive revenue analysis from REAL production data"""
+        try:
+            pool = get_pool()
+            results = {
+                "status": "completed",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "data_source": "production_database",
+                "analyses": {}
+            }
+
+            # 1. Overall revenue summary
+            summary = await pool.fetchrow("""
+                SELECT
+                    (SELECT COUNT(*) FROM jobs) as total_jobs,
+                    (SELECT COUNT(*) FROM invoices) as total_invoices,
+                    (SELECT COALESCE(SUM(total_cents)/100.0, 0) FROM invoices) as total_invoiced,
+                    (SELECT COALESCE(SUM(total_cents)/100.0, 0) FROM invoices WHERE status = 'paid') as total_paid,
+                    (SELECT COALESCE(SUM(actual_revenue), 0) FROM jobs WHERE actual_revenue IS NOT NULL) as jobs_revenue,
+                    (SELECT AVG(actual_revenue) FROM jobs WHERE actual_revenue IS NOT NULL) as avg_job_value,
+                    (SELECT COUNT(*) FROM jobs WHERE status = 'completed') as completed_jobs
+            """)
+            results["summary"] = dict(summary) if summary else {}
+
+            # 2. Monthly revenue trends
+            monthly_data = await self.analyze_monthly_revenue()
+            results["analyses"]["monthly_trends"] = monthly_data
+
+            # 3. Top customers by revenue
+            top_customers = await self.get_top_customers_by_revenue()
+            results["analyses"]["top_customers"] = top_customers
+
+            # 4. Pricing optimization
+            pricing = await self.analyze_pricing_optimization()
+            results["analyses"]["pricing_insights"] = pricing
+
+            # 5. Generate recommendations
+            results["recommendations"] = self._generate_revenue_recommendations(results)
+
+            return results
+        except Exception as e:
+            self.logger.error(f"Full revenue analysis failed: {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def analyze_monthly_revenue(self) -> Dict:
+        """Analyze revenue by month from REAL job data"""
+        try:
+            pool = get_pool()
+
+            # REAL QUERY: Revenue by month from jobs table
+            monthly_jobs = await pool.fetch("""
+                SELECT
+                    DATE_TRUNC('month', created_at) as month,
+                    COUNT(*) as job_count,
+                    COALESCE(SUM(actual_revenue), SUM(estimated_revenue), 0) as total_revenue,
+                    COALESCE(AVG(actual_revenue), AVG(estimated_revenue), 0) as avg_job_value,
+                    COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_jobs
+                FROM jobs
+                WHERE created_at > NOW() - INTERVAL '12 months'
+                GROUP BY DATE_TRUNC('month', created_at)
+                ORDER BY month DESC
+                LIMIT 12
+            """)
+
+            # REAL QUERY: Invoice data by month
+            monthly_invoices = await pool.fetch("""
+                SELECT
+                    DATE_TRUNC('month', invoice_date) as month,
+                    COUNT(*) as invoice_count,
+                    COALESCE(SUM(total_cents)/100.0, 0) as total_invoiced,
+                    COALESCE(SUM(CASE WHEN status = 'paid' THEN total_cents END)/100.0, 0) as total_paid,
+                    COALESCE(AVG(total_cents)/100.0, 0) as avg_invoice
+                FROM invoices
+                WHERE invoice_date > NOW() - INTERVAL '12 months'
+                GROUP BY DATE_TRUNC('month', invoice_date)
+                ORDER BY month DESC
+                LIMIT 12
+            """)
+
+            # Calculate growth rate
+            if len(monthly_jobs) >= 2:
+                current_month = float(monthly_jobs[0]['total_revenue'] or 0)
+                prev_month = float(monthly_jobs[1]['total_revenue'] or 0)
+                growth_rate = ((current_month - prev_month) / prev_month * 100) if prev_month > 0 else 0
+            else:
+                growth_rate = 0
+
+            return {
+                "monthly_job_revenue": [dict(m) for m in monthly_jobs],
+                "monthly_invoices": [dict(m) for m in monthly_invoices],
+                "growth_rate_pct": round(growth_rate, 2),
+                "trend": "growing" if growth_rate > 5 else "declining" if growth_rate < -5 else "stable"
+            }
+        except Exception as e:
+            self.logger.error(f"Monthly revenue analysis failed: {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def get_top_customers_by_revenue(self) -> Dict:
+        """Get top 20 customers by total revenue"""
+        try:
+            pool = get_pool()
+
+            # REAL QUERY: Top customers by revenue from jobs
+            top_customers = await pool.fetch("""
+                SELECT
+                    c.id,
+                    c.name,
+                    c.email,
+                    c.phone,
+                    COUNT(j.id) as job_count,
+                    COALESCE(SUM(j.actual_revenue), SUM(j.estimated_revenue), 0) as total_revenue,
+                    COALESCE(AVG(j.actual_revenue), AVG(j.estimated_revenue), 0) as avg_job_value,
+                    MAX(j.created_at) as last_job_date,
+                    MIN(c.created_at) as customer_since
+                FROM customers c
+                JOIN jobs j ON j.customer_id = c.id
+                WHERE (c.is_active = true OR c.status = 'active')
+                GROUP BY c.id, c.name, c.email, c.phone
+                ORDER BY total_revenue DESC
+                LIMIT 20
+            """)
+
+            # Calculate concentration
+            total_revenue = sum(float(c['total_revenue'] or 0) for c in top_customers)
+            top_5_revenue = sum(float(c['total_revenue'] or 0) for c in top_customers[:5])
+            concentration = (top_5_revenue / total_revenue * 100) if total_revenue > 0 else 0
+
+            return {
+                "top_customers": [dict(c) for c in top_customers],
+                "total_revenue_top_20": total_revenue,
+                "top_5_concentration_pct": round(concentration, 2),
+                "risk_assessment": "HIGH" if concentration > 50 else "MEDIUM" if concentration > 30 else "LOW"
+            }
+        except Exception as e:
+            self.logger.error(f"Top customers analysis failed: {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def analyze_pricing_optimization(self) -> Dict:
+        """Analyze job pricing and identify optimization opportunities"""
+        try:
+            pool = get_pool()
+
+            # REAL QUERY: Job value distribution
+            value_distribution = await pool.fetch("""
+                SELECT
+                    CASE
+                        WHEN COALESCE(actual_revenue, estimated_revenue) < 1000 THEN 'Under $1k'
+                        WHEN COALESCE(actual_revenue, estimated_revenue) < 5000 THEN '$1k-$5k'
+                        WHEN COALESCE(actual_revenue, estimated_revenue) < 10000 THEN '$5k-$10k'
+                        WHEN COALESCE(actual_revenue, estimated_revenue) < 25000 THEN '$10k-$25k'
+                        ELSE 'Over $25k'
+                    END as value_tier,
+                    COUNT(*) as job_count,
+                    COALESCE(SUM(actual_revenue), SUM(estimated_revenue), 0) as total_revenue,
+                    COALESCE(AVG(actual_revenue), AVG(estimated_revenue), 0) as avg_value
+                FROM jobs
+                WHERE actual_revenue IS NOT NULL OR estimated_revenue IS NOT NULL
+                GROUP BY value_tier
+                ORDER BY avg_value DESC
+            """)
+
+            # REAL QUERY: Profit margin analysis (if costs available)
+            margin_analysis = await pool.fetch("""
+                SELECT
+                    CASE
+                        WHEN actual_costs > 0 AND actual_revenue > 0
+                        THEN ((actual_revenue - actual_costs)::float / actual_revenue * 100)
+                        ELSE NULL
+                    END as margin_pct,
+                    COUNT(*) as job_count,
+                    AVG(actual_revenue) as avg_revenue,
+                    AVG(actual_costs) as avg_costs
+                FROM jobs
+                WHERE actual_revenue > 0 AND actual_costs > 0
+                GROUP BY CASE
+                    WHEN actual_costs > 0 AND actual_revenue > 0
+                    THEN ROUND(((actual_revenue - actual_costs)::float / actual_revenue * 100) / 10) * 10
+                    ELSE NULL
+                END
+                ORDER BY margin_pct DESC
+                LIMIT 10
+            """)
+
+            # REAL QUERY: Underpriced jobs (estimate vs actual)
+            underpriced = await pool.fetch("""
+                SELECT
+                    COUNT(*) as count,
+                    AVG(actual_revenue - estimated_revenue) as avg_undercharge
+                FROM jobs
+                WHERE actual_revenue > estimated_revenue * 1.2
+                  AND estimated_revenue > 0
+                  AND actual_revenue > 0
+            """)
+
+            underpriced_info = dict(underpriced[0]) if underpriced else {"count": 0, "avg_undercharge": 0}
+
+            return {
+                "value_distribution": [dict(v) for v in value_distribution],
+                "margin_analysis": [dict(m) for m in margin_analysis],
+                "underpriced_jobs": underpriced_info,
+                "recommendations": [
+                    "Focus on $5k-$25k jobs for optimal revenue-to-effort ratio",
+                    f"Review {underpriced_info.get('count', 0)} potentially underpriced jobs",
+                    "Consider implementing value-based pricing for premium services"
+                ]
+            }
+        except Exception as e:
+            self.logger.error(f"Pricing analysis failed: {e}")
+            return {"status": "error", "error": str(e)}
+
+    def _generate_revenue_recommendations(self, results: Dict) -> List[str]:
+        """Generate actionable recommendations from analysis results"""
+        recommendations = []
+
+        summary = results.get("summary", {})
+        monthly = results.get("analyses", {}).get("monthly_trends", {})
+        customers = results.get("analyses", {}).get("top_customers", {})
+
+        # Revenue trend recommendations
+        if monthly.get("trend") == "declining":
+            recommendations.append("ALERT: Revenue is declining. Review sales pipeline and customer engagement.")
+        elif monthly.get("trend") == "growing":
+            recommendations.append("Revenue is growing! Consider expanding capacity or raising prices.")
+
+        # Customer concentration recommendations
+        if customers.get("risk_assessment") == "HIGH":
+            recommendations.append("HIGH RISK: Top 5 customers account for >50% of revenue. Diversify customer base.")
+
+        # Average job value recommendations
+        avg_job = summary.get("avg_job_value", 0)
+        if avg_job and avg_job < 3000:
+            recommendations.append(f"Average job value (${avg_job:.2f}) is low. Focus on higher-value projects.")
+
+        # Completed jobs ratio
+        total_jobs = summary.get("total_jobs", 0)
+        completed = summary.get("completed_jobs", 0)
+        if total_jobs > 0:
+            completion_rate = completed / total_jobs * 100
+            if completion_rate < 70:
+                recommendations.append(f"Job completion rate ({completion_rate:.1f}%) is below target. Review pipeline bottlenecks.")
+
+        if not recommendations:
+            recommendations.append("Revenue metrics are healthy. Continue monitoring for trends.")
+
+        return recommendations
 
 
 # ============== GENERATOR AGENTS ==============
@@ -3302,3 +3891,5 @@ class VisionAlignmentAgentAdapter(BaseAgent):
 # Create executor instance AFTER all classes are defined
 executor = AgentExecutor()
 executor._load_agent_implementations()  # Load agents after classes are defined
+
+
