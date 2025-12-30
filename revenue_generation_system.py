@@ -849,7 +849,7 @@ Return ONLY valid JSON array, no other text."""
                 cur.execute("""
                     SELECT DISTINCT
                         c.id::text as id,
-                        c.company as company_name,
+                        c.company_name as company_name,
                         c.first_name || ' ' || c.last_name as contact_name,
                         c.email,
                         c.phone,
