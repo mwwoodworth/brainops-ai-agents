@@ -2,6 +2,7 @@
 """
 Document Processing with Supabase Storage
 Automatically processes and understands uploaded documents
+Converted to async asyncpg for non-blocking database operations
 """
 
 import os
@@ -14,8 +15,6 @@ import mimetypes
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone
 from enum import Enum
-import psycopg2
-from psycopg2.extras import RealDictCursor, Json
 import httpx
 from openai import OpenAI
 import PyPDF2
@@ -26,18 +25,12 @@ import pytesseract
 import io
 import base64
 
+# Import async database connection
+from database.async_connection import get_pool
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD"),
-    "port": int(os.getenv("DB_PORT", 5432))
-}
 
 # Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://yomagoqdmxszqtdwuhab.supabase.co")
@@ -110,17 +103,22 @@ class DocumentProcessor:
             '.ppt': DocumentType.PRESENTATION,
             '.pptx': DocumentType.PRESENTATION
         }
-        self._init_database()
+        self._initialized = False
         self._init_storage()
 
-    def _init_database(self):
-        """Initialize database tables"""
+    async def initialize(self):
+        """Async initialization - call this after creating the instance"""
+        if not self._initialized:
+            await self._init_database()
+            self._initialized = True
+
+    async def _init_database(self):
+        """Initialize database tables using async pool"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            pool = get_pool()
 
             # Create tables
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_documents (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     filename VARCHAR(255),
@@ -139,7 +137,7 @@ class DocumentProcessor:
                 )
             """)
 
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_document_content (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     document_id UUID REFERENCES ai_documents(id),
@@ -156,7 +154,7 @@ class DocumentProcessor:
                 )
             """)
 
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_document_analysis (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     document_id UUID REFERENCES ai_documents(id),
@@ -174,7 +172,7 @@ class DocumentProcessor:
                 )
             """)
 
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_document_embeddings (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     document_id UUID REFERENCES ai_documents(id),
@@ -186,7 +184,7 @@ class DocumentProcessor:
                 )
             """)
 
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_document_relationships (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     source_document_id UUID REFERENCES ai_documents(id),
@@ -198,7 +196,7 @@ class DocumentProcessor:
                 )
             """)
 
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_document_actions (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     document_id UUID REFERENCES ai_documents(id),
@@ -213,16 +211,14 @@ class DocumentProcessor:
             """)
 
             # Create indexes
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON ai_documents(status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_type ON ai_documents(document_type)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_user ON ai_documents(user_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_content_document ON ai_document_content(document_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_analysis_document ON ai_document_analysis(document_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_document ON ai_document_embeddings(document_id)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON ai_documents(status)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_documents_type ON ai_documents(document_type)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_documents_user ON ai_documents(user_id)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_content_document ON ai_document_content(document_id)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_analysis_document ON ai_document_analysis(document_id)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_document ON ai_document_embeddings(document_id)")
 
-            conn.commit()
-            cursor.close()
-            conn.close()
+            logger.info("Database tables initialized successfully")
 
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
@@ -264,21 +260,17 @@ class DocumentProcessor:
             # Calculate file hash
             file_hash = hashlib.sha256(file_content).hexdigest()
 
-            # Check for duplicate
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            # Check for duplicate using async pool
+            pool = get_pool()
 
-            cursor.execute("""
+            existing = await pool.fetchrow("""
                 SELECT id, storage_url FROM ai_documents
-                WHERE hash_value = %s
-            """, (file_hash,))
+                WHERE hash_value = $1
+            """, file_hash)
 
-            existing = cursor.fetchone()
             if existing:
-                logger.info(f"Document already exists: {existing[0]}")
-                cursor.close()
-                conn.close()
-                return existing[0]
+                logger.info(f"Document already exists: {existing['id']}")
+                return str(existing['id'])
 
             # Determine document type
             file_ext = os.path.splitext(filename)[1].lower()
@@ -306,15 +298,14 @@ class DocumentProcessor:
                 # Fallback: Store locally
                 storage_url = f"local://{storage_path}"
 
-            # Create database record
-            cursor.execute("""
+            # Create database record using async pool
+            await pool.execute("""
                 INSERT INTO ai_documents
                 (id, filename, document_type, mime_type, file_size,
                  storage_path, storage_url, hash_value, status,
                  upload_source, user_id, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-            """, (
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            """,
                 doc_id,
                 filename,
                 doc_type.value,
@@ -326,12 +317,8 @@ class DocumentProcessor:
                 ProcessingStatus.UPLOADED.value,
                 source,
                 user_id,
-                Json(metadata or {})
-            ))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
+                json.dumps(metadata or {})
+            )
 
             # Queue for processing
             await self._queue_for_processing(doc_id)
@@ -345,18 +332,13 @@ class DocumentProcessor:
     async def _queue_for_processing(self, document_id: str):
         """Queue document for processing"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            pool = get_pool()
 
-            cursor.execute("""
+            await pool.execute("""
                 UPDATE ai_documents
-                SET status = %s
-                WHERE id = %s
-            """, (ProcessingStatus.QUEUED.value, document_id))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
+                SET status = $1
+                WHERE id = $2
+            """, ProcessingStatus.QUEUED.value, document_id)
 
             # Trigger async processing
             asyncio.create_task(self.process_document(document_id))
@@ -367,25 +349,25 @@ class DocumentProcessor:
     async def process_document(self, document_id: str) -> Dict:
         """Process a document - extract text, analyze, and create embeddings"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
             # Update status
-            cursor.execute("""
+            await pool.execute("""
                 UPDATE ai_documents
-                SET status = %s
-                WHERE id = %s
-            """, (ProcessingStatus.PROCESSING.value, document_id))
-            conn.commit()
+                SET status = $1
+                WHERE id = $2
+            """, ProcessingStatus.PROCESSING.value, document_id)
 
             # Get document info
-            cursor.execute("""
-                SELECT * FROM ai_documents WHERE id = %s
-            """, (document_id,))
+            document = await pool.fetchrow("""
+                SELECT * FROM ai_documents WHERE id = $1
+            """, document_id)
 
-            document = cursor.fetchone()
             if not document:
                 raise ValueError(f"Document not found: {document_id}")
+
+            # Convert Record to dict for easier access
+            document = dict(document)
 
             # Extract text based on document type
             extracted_text = await self._extract_text(document)
@@ -393,12 +375,12 @@ class DocumentProcessor:
             # Store extracted content
             if extracted_text:
                 content_id = str(uuid.uuid4())
-                cursor.execute("""
+                await pool.execute("""
                     INSERT INTO ai_document_content
                     (id, document_id, content_type, raw_text,
                      extraction_method, word_count, confidence_score)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, (
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
                     content_id,
                     document_id,
                     document['document_type'],
@@ -406,7 +388,7 @@ class DocumentProcessor:
                     extracted_text['method'],
                     len(extracted_text['text'].split()),
                     extracted_text.get('confidence', 1.0)
-                ))
+                )
 
                 # Analyze document
                 analysis = await self._analyze_document(
@@ -425,15 +407,11 @@ class DocumentProcessor:
                 await self._find_relationships(document_id, analysis)
 
                 # Update status
-                cursor.execute("""
+                await pool.execute("""
                     UPDATE ai_documents
-                    SET status = %s, processed_at = %s
-                    WHERE id = %s
-                """, (ProcessingStatus.COMPLETED.value, datetime.now(timezone.utc), document_id))
-
-                conn.commit()
-                cursor.close()
-                conn.close()
+                    SET status = $1, processed_at = $2
+                    WHERE id = $3
+                """, ProcessingStatus.COMPLETED.value, datetime.now(timezone.utc), document_id)
 
                 return {
                     'document_id': document_id,
@@ -450,16 +428,12 @@ class DocumentProcessor:
 
             # Update status to failed
             try:
-                conn = psycopg2.connect(**DB_CONFIG)
-                cursor = conn.cursor()
-                cursor.execute("""
+                pool = get_pool()
+                await pool.execute("""
                     UPDATE ai_documents
-                    SET status = %s
-                    WHERE id = %s
-                """, (ProcessingStatus.FAILED.value, document_id))
-                conn.commit()
-                cursor.close()
-                conn.close()
+                    SET status = $1
+                    WHERE id = $2
+                """, ProcessingStatus.FAILED.value, document_id)
             except:
                 pass
 
@@ -697,32 +671,27 @@ class DocumentProcessor:
 
             analysis = json.loads(response.choices[0].message.content)
 
-            # Store analysis
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            # Store analysis using async pool
+            pool = get_pool()
 
-            cursor.execute("""
+            await pool.execute("""
                 INSERT INTO ai_document_analysis
                 (document_id, analysis_type, category, summary,
                  key_entities, key_terms, sentiment_score,
                  topics, classifications, insights)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            """,
                 document_id,
                 'comprehensive',
                 analysis.get('category', 'unknown'),
                 analysis.get('summary'),
-                Json(analysis.get('entities', {})),
-                Json(analysis.get('terms', [])),
+                json.dumps(analysis.get('entities', {})),
+                json.dumps(analysis.get('terms', [])),
                 analysis.get('sentiment', 0),
-                Json(analysis.get('topics', [])),
-                Json(analysis.get('classifications', {})),
-                Json(analysis.get('insights', {}))
-            ))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
+                json.dumps(analysis.get('topics', [])),
+                json.dumps(analysis.get('classifications', {})),
+                json.dumps(analysis.get('insights', {}))
+            )
 
             return analysis
 
@@ -737,8 +706,7 @@ class DocumentProcessor:
             chunk_size = 1000
             chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
 
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            pool = get_pool()
 
             for idx, chunk in enumerate(chunks[:20]):  # Limit to 20 chunks
                 # Generate embedding
@@ -749,21 +717,17 @@ class DocumentProcessor:
 
                 embedding = response.data[0].embedding
 
-                # Store embedding
-                cursor.execute("""
+                # Store embedding using async pool
+                await pool.execute("""
                     INSERT INTO ai_document_embeddings
                     (document_id, chunk_index, chunk_text, embedding)
-                    VALUES (%s, %s, %s, %s)
-                """, (
+                    VALUES ($1, $2, $3, $4)
+                """,
                     document_id,
                     idx,
                     chunk,
                     embedding
-                ))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
+                )
 
         except Exception as e:
             logger.error(f"Failed to create embeddings: {e}")
@@ -771,15 +735,14 @@ class DocumentProcessor:
     async def _find_relationships(self, document_id: str, analysis: Dict):
         """Find relationships with other documents"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            pool = get_pool()
 
             # Find similar documents using embeddings
-            cursor.execute("""
+            similar_docs = await pool.fetch("""
                 WITH doc_embedding AS (
                     SELECT AVG(embedding) as avg_embedding
                     FROM ai_document_embeddings
-                    WHERE document_id = %s
+                    WHERE document_id = $1
                 )
                 SELECT
                     d.id,
@@ -788,31 +751,25 @@ class DocumentProcessor:
                 FROM ai_documents d
                 JOIN ai_document_embeddings de ON d.id = de.document_id
                 CROSS JOIN doc_embedding
-                WHERE d.id != %s
+                WHERE d.id != $2
                 GROUP BY d.id, d.filename
                 HAVING AVG(1 - (de.embedding <=> doc_embedding.avg_embedding)) > 0.8
                 ORDER BY similarity DESC
                 LIMIT 5
-            """, (document_id, document_id))
-
-            similar_docs = cursor.fetchall()
+            """, document_id, document_id)
 
             for similar_doc in similar_docs:
-                cursor.execute("""
+                await pool.execute("""
                     INSERT INTO ai_document_relationships
                     (source_document_id, target_document_id,
                      relationship_type, confidence)
-                    VALUES (%s, %s, %s, %s)
-                """, (
+                    VALUES ($1, $2, $3, $4)
+                """,
                     document_id,
-                    similar_doc[0],
+                    similar_doc['id'],
                     'similar',
-                    similar_doc[2]
-                ))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
+                    similar_doc['similarity']
+                )
 
         except Exception as e:
             logger.error(f"Failed to find relationships: {e}")
@@ -832,47 +789,47 @@ class DocumentProcessor:
             )
             query_embedding = response.data[0].embedding
 
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
             # Build filter conditions
             where_conditions = ["d.status = 'completed'"]
-            params = [query_embedding, limit]
+            params = [query_embedding]
+            param_idx = 2
 
             if filters:
                 if filters.get('document_type'):
-                    where_conditions.append("d.document_type = %s")
-                    params.insert(-1, filters['document_type'])
+                    where_conditions.append(f"d.document_type = ${param_idx}")
+                    params.append(filters['document_type'])
+                    param_idx += 1
                 if filters.get('user_id'):
-                    where_conditions.append("d.user_id = %s")
-                    params.insert(-1, filters['user_id'])
+                    where_conditions.append(f"d.user_id = ${param_idx}")
+                    params.append(filters['user_id'])
+                    param_idx += 1
                 if filters.get('category'):
-                    where_conditions.append("da.category = %s")
-                    params.insert(-1, filters['category'])
+                    where_conditions.append(f"da.category = ${param_idx}")
+                    params.append(filters['category'])
+                    param_idx += 1
 
+            params.append(limit)
             where_clause = " AND ".join(where_conditions)
 
             # Search using embeddings
-            cursor.execute(f"""
+            results = await pool.fetch(f"""
                 SELECT DISTINCT ON (d.id)
                     d.*,
                     da.summary,
                     da.category,
-                    1 - (de.embedding <=> %s) as similarity
+                    1 - (de.embedding <=> $1) as similarity
                 FROM ai_documents d
                 JOIN ai_document_embeddings de ON d.id = de.document_id
                 LEFT JOIN ai_document_analysis da ON d.id = da.document_id
                 WHERE {where_clause}
                 ORDER BY d.id, similarity DESC
-                LIMIT %s
-            """, params)
+                LIMIT ${param_idx}
+            """, *params)
 
-            results = cursor.fetchall()
-
-            cursor.close()
-            conn.close()
-
-            return results
+            # Convert Records to dicts
+            return [dict(r) for r in results]
 
         except Exception as e:
             logger.error(f"Failed to search documents: {e}")
@@ -881,53 +838,48 @@ class DocumentProcessor:
     async def get_document_insights(self, document_id: str) -> Dict:
         """Get comprehensive insights for a document"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
             # Get document info
-            cursor.execute("""
+            document = await pool.fetchrow("""
                 SELECT d.*, dc.raw_text, da.*
                 FROM ai_documents d
                 LEFT JOIN ai_document_content dc ON d.id = dc.document_id
                 LEFT JOIN ai_document_analysis da ON d.id = da.document_id
-                WHERE d.id = %s
-            """, (document_id,))
-
-            document = cursor.fetchone()
+                WHERE d.id = $1
+            """, document_id)
 
             # Get relationships
-            cursor.execute("""
+            relationships = await pool.fetch("""
                 SELECT
                     dr.*,
                     d.filename as related_filename
                 FROM ai_document_relationships dr
                 JOIN ai_documents d ON dr.target_document_id = d.id
-                WHERE dr.source_document_id = %s
+                WHERE dr.source_document_id = $1
                 ORDER BY dr.confidence DESC
-            """, (document_id,))
-
-            relationships = cursor.fetchall()
+            """, document_id)
 
             # Get actions
-            cursor.execute("""
+            actions = await pool.fetch("""
                 SELECT * FROM ai_document_actions
-                WHERE document_id = %s
+                WHERE document_id = $1
                 ORDER BY created_at DESC
-            """, (document_id,))
+            """, document_id)
 
-            actions = cursor.fetchall()
-
-            cursor.close()
-            conn.close()
+            # Convert Records to dicts
+            document_dict = dict(document) if document else None
+            relationships_list = [dict(r) for r in relationships]
+            actions_list = [dict(a) for a in actions]
 
             return {
-                'document': document,
-                'relationships': relationships,
-                'actions': actions,
+                'document': document_dict,
+                'relationships': relationships_list,
+                'actions': actions_list,
                 'metrics': {
-                    'word_count': document.get('word_count', 0) if document else 0,
-                    'sentiment': document.get('sentiment_score', 0) if document else 0,
-                    'related_documents': len(relationships)
+                    'word_count': document_dict.get('word_count', 0) if document_dict else 0,
+                    'sentiment': document_dict.get('sentiment_score', 0) if document_dict else 0,
+                    'related_documents': len(relationships_list)
                 }
             }
 
@@ -943,28 +895,24 @@ class DocumentProcessor:
     ) -> Dict:
         """Trigger an action based on document content"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            pool = get_pool()
 
             action_id = str(uuid.uuid4())
 
-            # Create action record
-            cursor.execute("""
+            # Create action record using async pool
+            await pool.execute("""
                 INSERT INTO ai_document_actions
                 (id, document_id, action_type, action_status,
                  action_data, triggered_by)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                RETURNING id
-            """, (
+                VALUES ($1, $2, $3, $4, $5, $6)
+            """,
                 action_id,
                 document_id,
                 action_type,
                 'pending',
-                Json(action_data or {}),
+                json.dumps(action_data or {}),
                 'system'
-            ))
-
-            conn.commit()
+            )
 
             # Execute action based on type
             result = await self._execute_action(
@@ -973,23 +921,19 @@ class DocumentProcessor:
                 action_data
             )
 
-            # Update action status
-            cursor.execute("""
+            # Update action status using async pool
+            await pool.execute("""
                 UPDATE ai_document_actions
-                SET action_status = %s,
-                    executed_at = %s,
-                    result = %s
-                WHERE id = %s
-            """, (
+                SET action_status = $1,
+                    executed_at = $2,
+                    result = $3
+                WHERE id = $4
+            """,
                 'completed' if result.get('success') else 'failed',
                 datetime.now(timezone.utc),
-                Json(result),
+                json.dumps(result),
                 action_id
-            ))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
+            )
 
             return result
 
@@ -1047,12 +991,15 @@ class DocumentProcessor:
         # Implementation for response generation
         return {'success': True, 'response_id': str(uuid.uuid4())}
 
+
 # Singleton instance
 _document_processor = None
 
-def get_document_processor() -> DocumentProcessor:
-    """Get or create the document processor instance"""
+
+async def get_document_processor() -> DocumentProcessor:
+    """Get or create the document processor instance (async)"""
     global _document_processor
     if _document_processor is None:
         _document_processor = DocumentProcessor()
+        await _document_processor.initialize()
     return _document_processor
