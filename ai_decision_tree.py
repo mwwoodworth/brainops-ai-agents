@@ -1354,6 +1354,9 @@ class AIDecisionTree:
                 result.escalation_reason
             ))
 
+            # ALSO persist to ai_decisions table for centralized visibility
+            self._persist_to_ai_decisions_table(cur, result, context)
+
             conn.commit()
 
         except Exception as e:
@@ -1363,6 +1366,124 @@ class AIDecisionTree:
         finally:
             if conn:
                 conn.close()
+
+    def _persist_to_ai_decisions_table(self, cur, result: DecisionResult, context: DecisionContext) -> None:
+        """
+        Persist decision to the ai_decisions table for centralized visibility.
+        This ensures all AI Decision Tree decisions are tracked in the main AI decisions table.
+
+        Schema: id, agent_id, decision_type, input_data, output_data, confidence, timestamp
+        """
+        try:
+            # Build comprehensive input_data with full context
+            input_data = {
+                "decision_id": result.decision_id,
+                "context": {
+                    "situation": context.situation,
+                    "data": context.data,
+                    "constraints": context.constraints,
+                    "goals": context.goals,
+                    "urgency_level": context.urgency_level,
+                    "risk_tolerance": context.risk_tolerance,
+                    "stakeholders": context.stakeholders,
+                    "available_resources": context.available_resources,
+                    "deadline": context.deadline.isoformat() if context.deadline else None,
+                    "priority": context.priority
+                },
+                "confidence_level": result.confidence_level.value
+            }
+
+            # Build output_data with reasoning (WHY the decision was made)
+            output_data = {
+                "selected_option": {
+                    "id": result.selected_option.id,
+                    "name": result.selected_option.name,
+                    "description": result.selected_option.description,
+                    "confidence": result.selected_option.confidence
+                },
+                "reasoning": result.reasoning,
+                "reasoning_explanation": self._generate_decision_tree_reasoning(result, context),
+                "execution_plan": result.execution_plan,
+                "success_criteria": result.success_criteria,
+                "alternative_options_count": len(result.alternative_options),
+                "human_escalation_triggered": result.human_escalation_triggered,
+                "escalation_reason": result.escalation_reason,
+                "risk_assessment": {
+                    "overall_risk_score": result.risk_assessment.overall_risk_score if result.risk_assessment else None,
+                    "escalation_required": result.risk_assessment.escalation_required if result.risk_assessment else False,
+                    "human_review_required": result.risk_assessment.human_review_required if result.risk_assessment else False
+                } if result.risk_assessment else None
+            }
+
+            cur.execute("""
+                INSERT INTO ai_decisions
+                (agent_id, decision_type, input_data, output_data, confidence, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                "AIDecisionTree",  # agent_id
+                context.decision_type.value if hasattr(context, 'decision_type') else "general",  # decision_type
+                json.dumps(input_data, default=str),  # input_data
+                json.dumps(output_data, default=str),  # output_data
+                result.selected_option.confidence,  # confidence
+                result.timestamp  # timestamp
+            ))
+
+            logger.debug(f"Decision {result.decision_id} also logged to ai_decisions table")
+
+        except Exception as e:
+            # Don't fail the main decision logging if ai_decisions insert fails
+            logger.warning(f"Failed to persist to ai_decisions: {e}")
+
+    def _generate_decision_tree_reasoning(self, result: DecisionResult, context: DecisionContext) -> str:
+        """
+        Generate human-readable reasoning explaining WHY this decision was made.
+        This provides transparency into the AI Decision Tree's decision-making process.
+        """
+        reasoning_parts = []
+
+        # Situation analysis
+        if context.situation:
+            reasoning_parts.append(f"Situation: {context.situation[:200]}")
+
+        # Selected option reasoning
+        reasoning_parts.append(f"Selected: {result.selected_option.name} - {result.selected_option.description[:150] if result.selected_option.description else 'No description'}")
+
+        # Confidence reasoning
+        confidence_pct = result.selected_option.confidence * 100
+        if confidence_pct >= 90:
+            reasoning_parts.append("HIGH CONFIDENCE: Strong historical patterns and clear indicators support this choice")
+        elif confidence_pct >= 70:
+            reasoning_parts.append("GOOD CONFIDENCE: Consistent data signals support this decision")
+        elif confidence_pct >= 50:
+            reasoning_parts.append("MODERATE CONFIDENCE: Some uncertainty exists, monitoring recommended")
+        else:
+            reasoning_parts.append("LOW CONFIDENCE: Limited data available, human review may be needed")
+
+        # Urgency and priority
+        if context.urgency_level:
+            reasoning_parts.append(f"Urgency: {context.urgency_level}")
+        if context.priority:
+            reasoning_parts.append(f"Priority: {context.priority}")
+
+        # Risk assessment
+        if result.risk_assessment:
+            risk_score = result.risk_assessment.overall_risk_score
+            if risk_score >= 0.7:
+                reasoning_parts.append(f"HIGH RISK ({risk_score:.0%}): Requires careful monitoring")
+            elif risk_score >= 0.4:
+                reasoning_parts.append(f"MODERATE RISK ({risk_score:.0%}): Standard precautions apply")
+            else:
+                reasoning_parts.append(f"LOW RISK ({risk_score:.0%}): Minimal concerns")
+
+        # Goals alignment
+        if context.goals:
+            reasoning_parts.append(f"Aligned with {len(context.goals)} goal(s)")
+
+        # Human escalation
+        if result.human_escalation_triggered:
+            reasoning_parts.append(f"ESCALATED: {result.escalation_reason or 'Manual review required'}")
+
+        return " | ".join(reasoning_parts)
 
     def _update_metrics(self, decision_type: DecisionType, result: DecisionResult):
         """Update decision metrics"""

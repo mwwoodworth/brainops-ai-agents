@@ -85,22 +85,22 @@ class UnifiedMemoryManager:
                 if expires_in_hours:
                     expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
 
-                # Store memory with ON CONFLICT handling
+                # Store memory with ON CONFLICT handling (using CANONICAL unified_ai_memory)
                 await conn.execute("""
-                    INSERT INTO unified_memory (
-                        context_type, context_id, key, value,
-                        importance, tags, expires_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (context_type, context_id, key)
+                    INSERT INTO unified_ai_memory (
+                        memory_type, content, source_system, source_agent,
+                        created_by, importance_score, tags, expires_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT (content_hash)
                     DO UPDATE SET
-                        value = $4,
-                        importance = $5,
-                        tags = $6,
-                        expires_at = $7,
+                        content = $2,
+                        importance_score = $6,
+                        tags = $7,
+                        expires_at = $8,
                         updated_at = NOW(),
-                        access_count = unified_memory.access_count + 1
-                """, context_type, context_id, key, json.dumps(value),
-                    importance, tags or [], expires_at)
+                        access_count = unified_ai_memory.access_count + 1
+                """, 'semantic', json.dumps(value), context_type, context_id, key,
+                    importance / 10.0, tags or [], expires_at)
 
                 logger.info(f"✅ Stored memory: {key} in {context_type}/{context_id}")
                 return True
@@ -123,30 +123,30 @@ class UnifiedMemoryManager:
 
         async with self.pool.acquire() as conn:
             try:
-                # Build query with proper type casting
+                # Build query with proper type casting (using CANONICAL unified_ai_memory)
                 sql = """
                     SELECT
                         id::text as id,
-                        context_type,
+                        memory_type,
                         context_id,
-                        key,
-                        value,
-                        importance,
+                        source_system,
+                        content,
+                        importance_score,
                         tags,
                         created_at,
                         updated_at,
-                        accessed_at,
+                        last_accessed,
                         access_count
-                    FROM unified_memory
-                    WHERE importance >= $1
+                    FROM unified_ai_memory
+                    WHERE importance_score >= $1
                 """
-                params = [min_importance]
+                params = [min_importance / 10.0]  # Convert 0-10 to 0-1 scale
                 param_count = 1
 
                 # Add context filters with proper string comparison
                 if context_type:
                     param_count += 1
-                    sql += f" AND context_type = ${param_count}"
+                    sql += f" AND source_system = ${param_count}"
                     params.append(context_type)
 
                 if context_id:
@@ -157,12 +157,12 @@ class UnifiedMemoryManager:
 
                 if query:
                     param_count += 1
-                    sql += f" AND (key ILIKE ${param_count} OR value::text ILIKE ${param_count})"
+                    sql += f" AND (search_text ILIKE ${param_count} OR content::text ILIKE ${param_count})"
                     params.append(f"%{query}%")
 
                 # Add ordering and limit
                 sql += """
-                    ORDER BY importance DESC, accessed_at DESC
+                    ORDER BY importance_score DESC, last_accessed DESC
                     LIMIT ${}
                 """.format(param_count + 1)
                 params.append(limit)
@@ -174,8 +174,8 @@ class UnifiedMemoryManager:
                 if rows:
                     memory_ids = [row['id'] for row in rows]
                     await conn.execute("""
-                        UPDATE unified_memory
-                        SET accessed_at = NOW(),
+                        UPDATE unified_ai_memory
+                        SET last_accessed = NOW(),
                             access_count = access_count + 1
                         WHERE id = ANY($1::uuid[])
                     """, memory_ids)
@@ -198,7 +198,7 @@ class UnifiedMemoryManager:
                 return []
 
     async def get_stats(self) -> Dict[str, Any]:
-        """Get memory statistics with proper aggregation"""
+        """Get memory statistics with proper aggregation (using CANONICAL unified_ai_memory)"""
         if not self.pool:
             await self.initialize()
 
@@ -207,12 +207,12 @@ class UnifiedMemoryManager:
                 stats = await conn.fetchrow("""
                     SELECT
                         COUNT(*) as total_memories,
-                        COUNT(DISTINCT context_type) as unique_systems,
+                        COUNT(DISTINCT source_system) as unique_systems,
                         COUNT(DISTINCT context_id) as unique_contexts,
-                        AVG(importance)::float as avg_importance,
+                        AVG(importance_score)::float as avg_importance,
                         MAX(access_count) as max_access_count,
-                        COUNT(DISTINCT tags) as unique_tags
-                    FROM unified_memory
+                        COUNT(DISTINCT memory_type) as unique_types
+                    FROM unified_ai_memory
                     WHERE expires_at IS NULL OR expires_at > NOW()
                 """)
 
@@ -223,14 +223,14 @@ class UnifiedMemoryManager:
                 return {}
 
     async def cleanup_expired(self) -> int:
-        """Clean up expired memories"""
+        """Clean up expired memories (using CANONICAL unified_ai_memory)"""
         if not self.pool:
             await self.initialize()
 
         async with self.pool.acquire() as conn:
             try:
                 result = await conn.execute("""
-                    DELETE FROM unified_memory
+                    DELETE FROM unified_ai_memory
                     WHERE expires_at IS NOT NULL
                     AND expires_at < NOW()
                 """)

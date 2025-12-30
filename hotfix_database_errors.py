@@ -48,16 +48,16 @@ def fix_database_issues():
         else:
             print("ℹ️ amount_due column already exists")
 
-        # Fix 2: Check unified_memory table structure
-        print("\n📊 Checking unified_memory table...")
+        # Fix 2: Check unified_ai_memory table structure (CANONICAL memory table)
+        print("\n📊 Checking unified_ai_memory table...")
         cur.execute("""
             SELECT
                 column_name,
                 data_type,
                 character_maximum_length
             FROM information_schema.columns
-            WHERE table_name = 'unified_memory'
-            AND column_name IN ('context_id', 'agent_id', 'system_id')
+            WHERE table_name = 'unified_ai_memory'
+            AND column_name IN ('context_id', 'source_agent', 'source_system')
         """)
 
         columns = cur.fetchall()
@@ -76,8 +76,8 @@ def fix_database_issues():
 
         # Index for memory queries with text comparison
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_unified_memory_context_text
-            ON unified_memory(context_id)
+            CREATE INDEX IF NOT EXISTS idx_unified_ai_memory_context_text
+            ON unified_ai_memory(context_id)
             WHERE context_id IS NOT NULL
         """)
 
@@ -88,10 +88,10 @@ def fix_database_issues():
         print("\n📊 Checking memory stats...")
         cur.execute("""
             SELECT COUNT(*) as total,
-                   COUNT(DISTINCT context_type) as types,
+                   COUNT(DISTINCT memory_type) as types,
                    COUNT(DISTINCT context_id) as contexts,
-                   AVG(importance) as avg_importance
-            FROM unified_memory
+                   AVG(importance_score) as avg_importance
+            FROM unified_ai_memory
         """)
 
         stats = cur.fetchone()
@@ -133,11 +133,11 @@ def test_queries():
         invoices = cur.fetchall()
         print(f"  ✅ Found {len(invoices)} invoices with amount_due > 0")
 
-        # Test 2: Memory query with proper text comparison
+        # Test 2: Memory query with proper text comparison (using CANONICAL unified_ai_memory)
         print("  Testing memory context_id query...")
         cur.execute("""
-            SELECT id, context_id, key, importance
-            FROM unified_memory
+            SELECT id, context_id, source_system, importance_score
+            FROM unified_ai_memory
             WHERE context_id::text = %s
             LIMIT 5
         """, ('system',))
