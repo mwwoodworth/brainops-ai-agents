@@ -1932,6 +1932,10 @@ class AUREA:
                 # Store the database ID on the decision for later use
                 decision.db_id = db_id
 
+                # ALSO persist to ai_decisions table for visibility
+                # This table is the central AI decisions tracking table
+                self._persist_to_ai_decisions(decision, conn, cur)
+
                 conn.commit()
                 cur.close()
 
@@ -1940,6 +1944,109 @@ class AUREA:
         except Exception as e:
             logger.error(f"Failed to log decision: {e}")
             return None
+
+    def _persist_to_ai_decisions(self, decision: Decision, conn, cur) -> None:
+        """
+        Persist decision to the ai_decisions table for centralized visibility.
+        This ensures all AUREA decisions are tracked in the main AI decisions table.
+
+        Schema: id, agent_id, decision_type, input_data, output_data, confidence, timestamp
+        """
+        try:
+            # Build comprehensive input_data with full context
+            input_data = {
+                "decision_id": decision.id,
+                "context": json_safe_serialize(decision.context),
+                "cycle_count": self.cycle_count,
+                "autonomy_level": self.autonomy_level.value,
+                "tenant_id": str(self.tenant_id) if self.tenant_id else None
+            }
+
+            # Build output_data with reasoning (WHY the decision was made)
+            output_data = {
+                "description": decision.description,
+                "reasoning": self._generate_decision_reasoning(decision),
+                "recommended_action": decision.recommended_action,
+                "alternatives": decision.alternatives,
+                "impact_assessment": decision.impact_assessment,
+                "requires_human_approval": decision.requires_human_approval,
+                "deadline": decision.deadline.isoformat() if decision.deadline else None,
+                "db_id": decision.db_id
+            }
+
+            cur.execute("""
+                INSERT INTO ai_decisions
+                (agent_id, decision_type, input_data, output_data, confidence, timestamp)
+                VALUES (%s, %s, %s, %s, %s, NOW())
+            """, (
+                "AUREA",  # agent_id
+                decision.type.value,  # decision_type
+                Json(input_data),  # input_data
+                Json(output_data),  # output_data
+                decision.confidence  # confidence
+            ))
+
+            logger.debug(f"📊 Decision {decision.id} also logged to ai_decisions table")
+
+        except Exception as e:
+            # Don't fail the main decision logging if ai_decisions insert fails
+            logger.warning(f"Failed to persist to ai_decisions: {e}")
+
+    def _generate_decision_reasoning(self, decision: Decision) -> str:
+        """
+        Generate human-readable reasoning explaining WHY this decision was made.
+        This provides transparency into AUREA's decision-making process.
+        """
+        reasoning_parts = []
+
+        # Base reasoning from decision type
+        type_reasoning = {
+            DecisionType.FINANCIAL: "Financial priority detected requiring immediate attention to revenue/cash flow",
+            DecisionType.OPERATIONAL: "Operational efficiency issue identified that impacts daily business operations",
+            DecisionType.TACTICAL: "Short-term optimization opportunity identified for immediate improvement",
+            DecisionType.EMERGENCY: "Critical situation requiring immediate emergency response",
+            DecisionType.CUSTOMER: "Customer-related risk or opportunity detected requiring action",
+            DecisionType.TECHNICAL: "Technical issue affecting system performance or user experience",
+            DecisionType.STRATEGIC: "Strategic opportunity identified with significant business impact",
+            DecisionType.LEARNING: "Self-improvement opportunity identified for system enhancement"
+        }
+        reasoning_parts.append(type_reasoning.get(decision.type, "Decision criteria met based on system analysis"))
+
+        # Add context-specific reasoning
+        context = decision.context or {}
+
+        # Priority-based reasoning
+        if "priority" in context:
+            priority = context["priority"]
+            if priority.get("urgency") == "high":
+                reasoning_parts.append(f"HIGH URGENCY: {priority.get('description', 'Immediate action required')}")
+            elif priority.get("urgency") == "critical":
+                reasoning_parts.append(f"CRITICAL: {priority.get('description', 'System stability at risk')}")
+
+        # Risk-based reasoning
+        if "risk" in context:
+            risk = context["risk"]
+            reasoning_parts.append(f"Risk identified: {risk.get('description', 'Potential negative outcome detected')}")
+
+        # Opportunity-based reasoning
+        if "opportunity" in context:
+            opportunity = context["opportunity"]
+            if "potential_value" in opportunity:
+                reasoning_parts.append(f"Revenue opportunity: ${opportunity['potential_value']:,.2f} potential value")
+
+        # Confidence level reasoning
+        if decision.confidence >= 0.90:
+            reasoning_parts.append("High confidence based on strong historical patterns and clear indicators")
+        elif decision.confidence >= 0.75:
+            reasoning_parts.append("Good confidence based on consistent data signals")
+        else:
+            reasoning_parts.append("Moderate confidence - monitoring recommended")
+
+        # Impact reasoning
+        if decision.impact_assessment:
+            reasoning_parts.append(f"Expected impact: {decision.impact_assessment}")
+
+        return " | ".join(reasoning_parts)
 
     async def _handle_orchestration_error(self, error: Exception):
         """Handle errors in orchestration loop"""
