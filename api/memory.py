@@ -1,12 +1,16 @@
 """
 Memory System API Endpoints - Production Ready
-Fixed to work with actual database schema
+CANONICAL: All operations use unified_ai_memory as the single source of truth
+Includes tenant isolation, semantic search, and backward compatibility
 """
 import logging
+import json
+import os
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, List
+from enum import Enum
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Header, Depends
 from pydantic import BaseModel, Field
 
 from database.async_connection import get_pool
@@ -14,31 +18,29 @@ from database.async_connection import get_pool
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/memory", tags=["memory"])
 
-# Table schema mappings - actual column names in each table
-TABLE_SCHEMAS = {
-    "ai_persistent_memory": {
-        "id_col": "context_key",
-        "content_col": "content",  # jsonb
-        "importance_col": "importance_score",
-        "created_col": "created_at",
-        "content_is_jsonb": True,
-    },
-    "memory_entries": {
-        "id_col": "owner_id",
-        "content_col": "content",  # text
-        "importance_col": "importance",
-        "created_col": "created_at",
-        "tags_col": "tags",
-        "content_is_jsonb": False,
-    },
-    "memories": {
-        "id_col": "entity_id",
-        "content_col": "content",  # text
-        "importance_col": None,
-        "created_col": "created_at",
-        "content_is_jsonb": False,
-    },
-}
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+# The canonical memory table - all operations go here
+CANONICAL_TABLE = "unified_ai_memory"
+
+# Default tenant for backward compatibility
+DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457")
+
+
+# =============================================================================
+# MODELS
+# =============================================================================
+
+class MemoryType(str, Enum):
+    """Valid memory types in unified_ai_memory"""
+    EPISODIC = "episodic"
+    SEMANTIC = "semantic"
+    PROCEDURAL = "procedural"
+    WORKING = "working"
+    META = "meta"
 
 
 class MemoryStatus(BaseModel):
@@ -47,90 +49,134 @@ class MemoryStatus(BaseModel):
     total_memories: int = Field(default=0, ge=0)
     unique_contexts: int = Field(default=0, ge=0)
     avg_importance: float = Field(default=0.0, ge=0.0)
-    table_used: Optional[str] = None
+    memories_with_embeddings: int = Field(default=0, ge=0)
+    table_used: str = Field(default=CANONICAL_TABLE)
+    tenant_id: Optional[str] = None
     message: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
 class MemoryEntry(BaseModel):
-    """Memory entry model"""
+    """Memory entry model for API responses"""
     id: str
-    context_key: Optional[str] = None
-    content: Any  # Can be text or jsonb
-    importance: float = Field(default=0.0, ge=0.0)
+    memory_type: str
+    content: Any
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
     category: Optional[str] = None
-    tags: list[str] = Field(default_factory=list)
+    title: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    source_system: Optional[str] = None
+    source_agent: Optional[str] = None
     created_at: Optional[datetime] = None
+    last_accessed: Optional[datetime] = None
+    access_count: int = 0
+    similarity: Optional[float] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class StoreMemoryRequest(BaseModel):
+    """Request model for storing memories"""
+    content: Any = Field(..., description="Memory content (text or JSON)")
+    memory_type: str = Field(default="semantic", description="Type: episodic, semantic, procedural, working, meta")
+    importance_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    category: Optional[str] = None
+    title: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    source_system: str = Field(default="api")
+    source_agent: str = Field(default="user")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    context_id: Optional[str] = None
+
+
+class SearchRequest(BaseModel):
+    """Request model for semantic search"""
+    query: str = Field(..., description="Search query")
+    memory_type: Optional[str] = None
+    category: Optional[str] = None
+    limit: int = Field(default=10, ge=1, le=100)
+    importance_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    use_semantic: bool = Field(default=True, description="Use vector similarity search")
+
+
+# =============================================================================
+# DEPENDENCIES
+# =============================================================================
+
+async def get_tenant_id(
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID")
+) -> str:
+    """Extract tenant ID from header or use default"""
+    return x_tenant_id or DEFAULT_TENANT_ID
+
+
+# =============================================================================
+# EMBEDDING GENERATION
+# =============================================================================
+
+async def generate_embedding(text: str) -> Optional[List[float]]:
+    """
+    Generate real embedding using OpenAI text-embedding-3-small.
+    Falls back gracefully if API unavailable.
+    """
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        logger.warning("OPENAI_API_KEY not set - semantic search unavailable")
+        return None
+
+    try:
+        import openai
+        client = openai.OpenAI(api_key=openai_key)
+
+        # Truncate if too long (8191 token limit for text-embedding-3-small)
+        text_truncated = text[:30000] if len(text) > 30000 else text
+
+        response = client.embeddings.create(
+            input=text_truncated,
+            model="text-embedding-3-small"
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        logger.error(f"Embedding generation failed: {e}")
+        return None
+
+
+# =============================================================================
+# API ENDPOINTS
+# =============================================================================
+
 @router.get("/status", response_model=MemoryStatus)
-async def get_memory_status() -> MemoryStatus:
-    """Get memory system status with proper error handling"""
+async def get_memory_status(
+    tenant_id: str = Depends(get_tenant_id)
+) -> MemoryStatus:
+    """
+    Get memory system status from canonical unified_ai_memory table.
+    Includes tenant-specific statistics.
+    """
     pool = get_pool()
 
     try:
-        # Check which memory tables exist
-        existing_tables = await pool.fetch("""
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = 'public'
-            AND table_name IN ('ai_persistent_memory', 'memory_entries', 'memories')
-        """)
-
-        if not existing_tables:
-            return MemoryStatus(
-                status="not_configured",
-                message="Memory system tables not found",
-                total_memories=0,
-                unique_contexts=0,
-                avg_importance=0.0
-            )
-
-        # Priority order: ai_persistent_memory > memory_entries > memories
-        table_priority = ["ai_persistent_memory", "memory_entries", "memories"]
-        table_names = [t["table_name"] for t in existing_tables]
-
-        table_name = None
-        for t in table_priority:
-            if t in table_names:
-                table_name = t
-                break
-
-        if not table_name:
-            table_name = table_names[0]
-
-        schema = TABLE_SCHEMAS.get(table_name, {})
-        id_col = schema.get("id_col", "id")
-        importance_col = schema.get("importance_col")
-
-        # Build stats query based on table schema
-        if importance_col:
-            stats_query = f"""
-                SELECT
-                    COUNT(*) as total_memories,
-                    COUNT(DISTINCT {id_col}) as unique_contexts,
-                    COALESCE(AVG({importance_col}::numeric), 0.0) as avg_importance
-                FROM {table_name}
-            """
-        else:
-            stats_query = f"""
-                SELECT
-                    COUNT(*) as total_memories,
-                    COUNT(DISTINCT {id_col}) as unique_contexts,
-                    0.0 as avg_importance
-                FROM {table_name}
-            """
-
-        stats = await pool.fetchrow(stats_query)
+        # Get comprehensive stats from unified_ai_memory
+        stats = await pool.fetchrow("""
+            SELECT
+                COUNT(*) as total_memories,
+                COUNT(DISTINCT context_id) as unique_contexts,
+                COALESCE(AVG(importance_score), 0.0) as avg_importance,
+                COUNT(*) FILTER (WHERE embedding IS NOT NULL) as with_embeddings,
+                COUNT(DISTINCT source_system) as unique_systems,
+                COUNT(DISTINCT memory_type) as memory_types
+            FROM unified_ai_memory
+            WHERE tenant_id = $1::uuid OR tenant_id IS NULL
+        """, tenant_id)
 
         return MemoryStatus(
             status="operational",
-            table_used=table_name,
+            table_used=CANONICAL_TABLE,
             total_memories=stats["total_memories"] or 0,
             unique_contexts=stats["unique_contexts"] or 0,
             avg_importance=float(stats["avg_importance"] or 0.0),
-            message=f"Using table: {table_name}"
+            memories_with_embeddings=stats["with_embeddings"] or 0,
+            tenant_id=tenant_id,
+            message=f"Canonical table: {CANONICAL_TABLE} | {stats['unique_systems']} systems | {stats['memory_types']} types"
         )
 
     except Exception as e:
@@ -140,52 +186,162 @@ async def get_memory_status() -> MemoryStatus:
             message=f"Unable to retrieve memory statistics: {str(e)}",
             total_memories=0,
             unique_contexts=0,
-            avg_importance=0.0
+            avg_importance=0.0,
+            memories_with_embeddings=0
         )
 
 
 @router.get("/search")
 async def search_memories(
     query: str = Query(..., description="Search query"),
-    context_key: Optional[str] = Query(None, description="Filter by context key"),
+    memory_type: Optional[str] = Query(None, description="Filter by memory type"),
+    category: Optional[str] = Query(None, description="Filter by category"),
     limit: int = Query(10, ge=1, le=100, description="Maximum results"),
-    importance_threshold: float = Query(0.0, ge=0.0, le=1.0, description="Minimum importance")
+    importance_threshold: float = Query(0.0, ge=0.0, le=1.0, description="Minimum importance"),
+    use_semantic: bool = Query(True, description="Use vector similarity search"),
+    tenant_id: str = Depends(get_tenant_id)
 ) -> dict[str, Any]:
-    """Search memory entries across available memory tables"""
+    """
+    Search memories using semantic vector search (if available) or text search.
+    All searches go to the canonical unified_ai_memory table.
+    """
     pool = get_pool()
 
     try:
-        # Determine which table to use
-        existing_tables = await pool.fetch("""
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = 'public'
-            AND table_name IN ('ai_persistent_memory', 'memory_entries', 'memories')
-        """)
+        results = []
 
-        if not existing_tables:
-            return {
-                "results": [],
-                "total": 0,
-                "query": query,
-                "message": "Memory system not initialized"
-            }
+        if use_semantic:
+            # Try semantic search first
+            query_embedding = await generate_embedding(query)
 
-        table_names = [t["table_name"] for t in existing_tables]
+            if query_embedding:
+                # Semantic vector search
+                embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
 
-        # Try memory_entries first (has better schema for searching)
-        if "memory_entries" in table_names:
-            return await _search_memory_entries(pool, query, context_key, limit, importance_threshold)
-        elif "ai_persistent_memory" in table_names:
-            return await _search_ai_persistent_memory(pool, query, context_key, limit, importance_threshold)
-        elif "memories" in table_names:
-            return await _search_memories(pool, query, context_key, limit)
+                sql = """
+                    SELECT
+                        id::text,
+                        memory_type,
+                        content,
+                        importance_score,
+                        category,
+                        title,
+                        tags,
+                        source_system,
+                        source_agent,
+                        created_at,
+                        last_accessed,
+                        access_count,
+                        metadata,
+                        1 - (embedding <=> $1::vector) as similarity
+                    FROM unified_ai_memory
+                    WHERE (tenant_id = $2::uuid OR tenant_id IS NULL)
+                        AND embedding IS NOT NULL
+                        AND importance_score >= $3
+                """
+                params = [embedding_str, tenant_id, importance_threshold]
+                param_idx = 4
+
+                if memory_type:
+                    sql += f" AND memory_type = ${param_idx}"
+                    params.append(memory_type)
+                    param_idx += 1
+
+                if category:
+                    sql += f" AND category = ${param_idx}"
+                    params.append(category)
+                    param_idx += 1
+
+                sql += f"""
+                    ORDER BY (1 - (embedding <=> $1::vector)) * importance_score DESC
+                    LIMIT ${param_idx}
+                """
+                params.append(limit)
+
+                rows = await pool.fetch(sql, *params)
+                results = [_row_to_memory_entry(r) for r in rows]
+
+                # Update access counts for retrieved memories
+                if results:
+                    memory_ids = [r["id"] for r in results]
+                    await pool.execute("""
+                        UPDATE unified_ai_memory
+                        SET access_count = access_count + 1,
+                            last_accessed = NOW()
+                        WHERE id = ANY($1::uuid[])
+                    """, memory_ids)
+
+                return {
+                    "results": results,
+                    "total": len(results),
+                    "query": query,
+                    "search_method": "semantic_vector",
+                    "table": CANONICAL_TABLE,
+                    "tenant_id": tenant_id,
+                    "filters": {
+                        "memory_type": memory_type,
+                        "category": category,
+                        "importance_threshold": importance_threshold
+                    }
+                }
+
+        # Fallback to text search
+        sql = """
+            SELECT
+                id::text,
+                memory_type,
+                content,
+                importance_score,
+                category,
+                title,
+                tags,
+                source_system,
+                source_agent,
+                created_at,
+                last_accessed,
+                access_count,
+                metadata,
+                NULL::float as similarity
+            FROM unified_ai_memory
+            WHERE (tenant_id = $1::uuid OR tenant_id IS NULL)
+                AND importance_score >= $2
+                AND (
+                    search_text ILIKE $3
+                    OR content::text ILIKE $3
+                    OR title ILIKE $3
+                )
+        """
+        params = [tenant_id, importance_threshold, f"%{query}%"]
+        param_idx = 4
+
+        if memory_type:
+            sql += f" AND memory_type = ${param_idx}"
+            params.append(memory_type)
+            param_idx += 1
+
+        if category:
+            sql += f" AND category = ${param_idx}"
+            params.append(category)
+            param_idx += 1
+
+        sql += f" ORDER BY importance_score DESC, created_at DESC LIMIT ${param_idx}"
+        params.append(limit)
+
+        rows = await pool.fetch(sql, *params)
+        results = [_row_to_memory_entry(r) for r in rows]
 
         return {
-            "results": [],
-            "total": 0,
+            "results": results,
+            "total": len(results),
             "query": query,
-            "message": "No compatible memory table found"
+            "search_method": "text_search",
+            "table": CANONICAL_TABLE,
+            "tenant_id": tenant_id,
+            "filters": {
+                "memory_type": memory_type,
+                "category": category,
+                "importance_threshold": importance_threshold
+            }
         }
 
     except Exception as e:
@@ -193,155 +349,374 @@ async def search_memories(
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}") from e
 
 
-async def _search_memory_entries(
-    pool, query: str, context_key: Optional[str], limit: int, importance_threshold: float
+@router.post("/store")
+async def store_memory(
+    request: StoreMemoryRequest,
+    tenant_id: str = Depends(get_tenant_id)
 ) -> dict[str, Any]:
-    """Search in memory_entries table"""
-    base_query = """
-        SELECT
-            id::text,
-            owner_id,
-            content,
-            importance,
-            created_at,
-            tags
-        FROM memory_entries
-        WHERE importance >= $1
     """
-    params: list[Any] = [int(importance_threshold * 100)]  # importance is integer 0-100
-
-    if context_key:
-        base_query += " AND owner_id = $2"
-        params.append(context_key)
-
-    if query:
-        param_num = len(params) + 1
-        base_query += f" AND content ILIKE ${param_num}"
-        params.append(f"%{query}%")
-
-    base_query += f" ORDER BY importance DESC, created_at DESC LIMIT {limit}"
-
-    results = await pool.fetch(base_query, *params)
-
-    return {
-        "results": [
-            {
-                "id": r["id"],
-                "context_key": r["owner_id"],
-                "content": r["content"],
-                "importance": float(r["importance"] or 0) / 100.0,
-                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                "tags": r["tags"] or []
-            }
-            for r in results
-        ],
-        "total": len(results),
-        "query": query,
-        "table": "memory_entries",
-        "filters": {
-            "context_key": context_key,
-            "importance_threshold": importance_threshold
-        }
-    }
-
-
-async def _search_ai_persistent_memory(
-    pool, query: str, context_key: Optional[str], limit: int, importance_threshold: float
-) -> dict[str, Any]:
-    """Search in ai_persistent_memory table (content is jsonb)"""
-    base_query = """
-        SELECT
-            id::text,
-            context_key,
-            content,
-            importance_score,
-            created_at
-        FROM ai_persistent_memory
-        WHERE importance_score >= $1
+    Store a new memory in the canonical unified_ai_memory table.
+    Generates real embeddings for semantic search.
     """
-    params: list[Any] = [importance_threshold]
+    pool = get_pool()
 
-    if context_key:
-        base_query += " AND context_key = $2"
-        params.append(context_key)
+    try:
+        # Prepare content as JSON
+        if isinstance(request.content, str):
+            content_json = json.dumps({"text": request.content})
+            content_text = request.content
+        else:
+            content_json = json.dumps(request.content)
+            content_text = json.dumps(request.content)
 
-    if query:
-        param_num = len(params) + 1
-        # content is jsonb, search in the text representation
-        base_query += f" AND content::text ILIKE ${param_num}"
-        params.append(f"%{query}%")
+        # Generate embedding
+        embedding = await generate_embedding(content_text)
+        embedding_str = "[" + ",".join(map(str, embedding)) + "]" if embedding else None
 
-    base_query += f" ORDER BY importance_score DESC, created_at DESC LIMIT {limit}"
+        # Generate search text
+        search_text = " ".join([
+            content_text,
+            request.title or "",
+            " ".join(request.tags),
+            request.category or ""
+        ])
 
-    results = await pool.fetch(base_query, *params)
+        # Validate memory_type
+        try:
+            mem_type = MemoryType(request.memory_type.lower())
+        except ValueError:
+            mem_type = MemoryType.SEMANTIC
 
-    return {
-        "results": [
-            {
-                "id": r["id"],
-                "context_key": r["context_key"],
-                "content": r["content"],  # jsonb
-                "importance": float(r["importance_score"] or 0.0),
-                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                "tags": []
-            }
-            for r in results
-        ],
-        "total": len(results),
-        "query": query,
-        "table": "ai_persistent_memory",
-        "filters": {
-            "context_key": context_key,
-            "importance_threshold": importance_threshold
-        }
-    }
-
-
-async def _search_memories(
-    pool, query: str, context_key: Optional[str], limit: int
-) -> dict[str, Any]:
-    """Search in memories table (no importance field)"""
-    base_query = """
-        SELECT
-            id::text,
-            entity_id,
-            content,
-            created_at,
+        # Insert into unified_ai_memory
+        result = await pool.fetchrow("""
+            INSERT INTO unified_ai_memory (
+                memory_type, content, importance_score, category, title,
+                tags, source_system, source_agent, created_by, metadata,
+                context_id, embedding, search_text, tenant_id
+            ) VALUES (
+                $1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10::jsonb,
+                $11::uuid, $12::vector, $13, $14::uuid
+            )
+            RETURNING id::text, content_hash, created_at
+        """,
+            mem_type.value,
+            content_json,
+            request.importance_score,
+            request.category,
+            request.title,
+            request.tags,
+            request.source_system,
+            request.source_agent,
+            "api_user",
+            json.dumps(request.metadata),
+            request.context_id,
+            embedding_str,
+            search_text,
             tenant_id
-        FROM memories
-        WHERE 1=1
-    """
-    params: list[Any] = []
+        )
 
-    if context_key:
-        base_query += f" AND entity_id = ${len(params) + 1}"
-        params.append(context_key)
-
-    if query:
-        base_query += f" AND content ILIKE ${len(params) + 1}"
-        params.append(f"%{query}%")
-
-    base_query += f" ORDER BY created_at DESC LIMIT {limit}"
-
-    results = await pool.fetch(base_query, *params)
-
-    return {
-        "results": [
-            {
-                "id": r["id"],
-                "context_key": r["entity_id"],
-                "content": r["content"],
-                "importance": 0.0,
-                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                "tags": [],
-                "tenant_id": r["tenant_id"]
-            }
-            for r in results
-        ],
-        "total": len(results),
-        "query": query,
-        "table": "memories",
-        "filters": {
-            "context_key": context_key
+        return {
+            "success": True,
+            "id": result["id"],
+            "content_hash": result["content_hash"],
+            "created_at": result["created_at"].isoformat() if result["created_at"] else None,
+            "has_embedding": embedding is not None,
+            "table": CANONICAL_TABLE,
+            "tenant_id": tenant_id
         }
+
+    except Exception as e:
+        logger.error(f"Failed to store memory: {e}")
+        raise HTTPException(status_code=500, detail=f"Store failed: {str(e)}") from e
+
+
+@router.post("/semantic-search")
+async def semantic_search(
+    request: SearchRequest,
+    tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
+    """
+    Dedicated semantic search endpoint using vector similarity.
+    Requires embeddings to be present in the database.
+    """
+    return await search_memories(
+        query=request.query,
+        memory_type=request.memory_type,
+        category=request.category,
+        limit=request.limit,
+        importance_threshold=request.importance_threshold,
+        use_semantic=request.use_semantic,
+        tenant_id=tenant_id
+    )
+
+
+@router.get("/by-type/{memory_type}")
+async def get_memories_by_type(
+    memory_type: str,
+    limit: int = Query(20, ge=1, le=100),
+    tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
+    """Get memories filtered by type from canonical table"""
+    pool = get_pool()
+
+    try:
+        rows = await pool.fetch("""
+            SELECT
+                id::text,
+                memory_type,
+                content,
+                importance_score,
+                category,
+                title,
+                tags,
+                source_system,
+                source_agent,
+                created_at,
+                last_accessed,
+                access_count,
+                metadata,
+                NULL::float as similarity
+            FROM unified_ai_memory
+            WHERE memory_type = $1
+                AND (tenant_id = $2::uuid OR tenant_id IS NULL)
+            ORDER BY importance_score DESC, created_at DESC
+            LIMIT $3
+        """, memory_type, tenant_id, limit)
+
+        return {
+            "results": [_row_to_memory_entry(r) for r in rows],
+            "total": len(rows),
+            "memory_type": memory_type,
+            "table": CANONICAL_TABLE,
+            "tenant_id": tenant_id
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get memories by type: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/by-category/{category}")
+async def get_memories_by_category(
+    category: str,
+    limit: int = Query(20, ge=1, le=100),
+    tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
+    """Get memories filtered by category from canonical table"""
+    pool = get_pool()
+
+    try:
+        rows = await pool.fetch("""
+            SELECT
+                id::text,
+                memory_type,
+                content,
+                importance_score,
+                category,
+                title,
+                tags,
+                source_system,
+                source_agent,
+                created_at,
+                last_accessed,
+                access_count,
+                metadata,
+                NULL::float as similarity
+            FROM unified_ai_memory
+            WHERE category = $1
+                AND (tenant_id = $2::uuid OR tenant_id IS NULL)
+            ORDER BY importance_score DESC, created_at DESC
+            LIMIT $3
+        """, category, tenant_id, limit)
+
+        return {
+            "results": [_row_to_memory_entry(r) for r in rows],
+            "total": len(rows),
+            "category": category,
+            "table": CANONICAL_TABLE,
+            "tenant_id": tenant_id
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get memories by category: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/{memory_id}")
+async def get_memory(
+    memory_id: str,
+    tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
+    """Get a specific memory by ID"""
+    pool = get_pool()
+
+    try:
+        row = await pool.fetchrow("""
+            SELECT
+                id::text,
+                memory_type,
+                content,
+                importance_score,
+                category,
+                title,
+                tags,
+                source_system,
+                source_agent,
+                created_at,
+                last_accessed,
+                access_count,
+                metadata,
+                content_hash,
+                context_id::text,
+                parent_memory_id::text,
+                related_memories,
+                embedding IS NOT NULL as has_embedding
+            FROM unified_ai_memory
+            WHERE id = $1::uuid
+                AND (tenant_id = $2::uuid OR tenant_id IS NULL)
+        """, memory_id, tenant_id)
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Memory not found")
+
+        # Update access count
+        await pool.execute("""
+            UPDATE unified_ai_memory
+            SET access_count = access_count + 1,
+                last_accessed = NOW()
+            WHERE id = $1::uuid
+        """, memory_id)
+
+        return {
+            "success": True,
+            "memory": dict(row),
+            "table": CANONICAL_TABLE,
+            "tenant_id": tenant_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get memory: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.delete("/{memory_id}")
+async def delete_memory(
+    memory_id: str,
+    tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
+    """Delete a memory by ID (soft delete by setting expires_at)"""
+    pool = get_pool()
+
+    try:
+        result = await pool.execute("""
+            UPDATE unified_ai_memory
+            SET expires_at = NOW()
+            WHERE id = $1::uuid
+                AND (tenant_id = $2::uuid OR tenant_id IS NULL)
+        """, memory_id, tenant_id)
+
+        if "UPDATE 0" in result:
+            raise HTTPException(status_code=404, detail="Memory not found")
+
+        return {
+            "success": True,
+            "message": "Memory marked for deletion",
+            "id": memory_id,
+            "table": CANONICAL_TABLE
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete memory: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/stats/by-system")
+async def get_stats_by_system(
+    tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
+    """Get memory statistics grouped by source system"""
+    pool = get_pool()
+
+    try:
+        rows = await pool.fetch("""
+            SELECT
+                source_system,
+                COUNT(*) as count,
+                AVG(importance_score) as avg_importance,
+                COUNT(*) FILTER (WHERE embedding IS NOT NULL) as with_embeddings,
+                MAX(created_at) as latest
+            FROM unified_ai_memory
+            WHERE tenant_id = $1::uuid OR tenant_id IS NULL
+            GROUP BY source_system
+            ORDER BY count DESC
+        """, tenant_id)
+
+        return {
+            "stats": [dict(r) for r in rows],
+            "table": CANONICAL_TABLE,
+            "tenant_id": tenant_id
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get stats by system: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/stats/by-type")
+async def get_stats_by_type(
+    tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
+    """Get memory statistics grouped by memory type"""
+    pool = get_pool()
+
+    try:
+        rows = await pool.fetch("""
+            SELECT
+                memory_type,
+                COUNT(*) as count,
+                AVG(importance_score) as avg_importance,
+                COUNT(*) FILTER (WHERE embedding IS NOT NULL) as with_embeddings,
+                MAX(created_at) as latest
+            FROM unified_ai_memory
+            WHERE tenant_id = $1::uuid OR tenant_id IS NULL
+            GROUP BY memory_type
+            ORDER BY count DESC
+        """, tenant_id)
+
+        return {
+            "stats": [dict(r) for r in rows],
+            "table": CANONICAL_TABLE,
+            "tenant_id": tenant_id
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get stats by type: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def _row_to_memory_entry(row) -> dict:
+    """Convert database row to memory entry dict"""
+    return {
+        "id": row["id"],
+        "memory_type": row["memory_type"],
+        "content": row["content"],
+        "importance": float(row["importance_score"] or 0.5),
+        "category": row["category"],
+        "title": row["title"],
+        "tags": row["tags"] or [],
+        "source_system": row["source_system"],
+        "source_agent": row["source_agent"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
+        "access_count": row["access_count"] or 0,
+        "similarity": float(row["similarity"]) if row["similarity"] else None,
+        "metadata": row["metadata"] or {}
     }
