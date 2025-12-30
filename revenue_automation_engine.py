@@ -681,22 +681,44 @@ class RevenueAutomationEngine:
                     "automation_history": lead.automation_history,
                     "notes": lead.notes
                 }
-                await conn.execute("""
-                    INSERT INTO revenue_leads
-                    (company_name, contact_name, email, phone, stage,
-                     score, value_estimate, source, metadata, created_at, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
-                """,
-                    lead.company or lead.name,  # company_name
-                    lead.name,  # contact_name
-                    lead.email,
-                    lead.phone,
-                    lead.status.value,  # stage
-                    float(lead.score),
-                    float(lead.estimated_value),  # value_estimate
-                    lead.source.value,
-                    json.dumps(metadata)
-                )
+                
+                # Check if lead exists
+                existing = await conn.fetchval("SELECT id FROM revenue_leads WHERE email = $1", lead.email)
+                
+                if existing:
+                     await conn.execute("""
+                        UPDATE revenue_leads
+                        SET company_name = $1, contact_name = $2, phone = $3,
+                            stage = $4, score = $5, value_estimate = $6,
+                            metadata = $7, updated_at = NOW()
+                        WHERE email = $8
+                    """,
+                        lead.company or lead.name,
+                        lead.name,
+                        lead.phone,
+                        lead.status.value,
+                        float(lead.score),
+                        float(lead.estimated_value),
+                        json.dumps(metadata),
+                        lead.email
+                    )
+                else:
+                    await conn.execute("""
+                        INSERT INTO revenue_leads
+                        (company_name, contact_name, email, phone, stage,
+                         score, value_estimate, source, metadata, created_at, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+                    """,
+                        lead.company or lead.name,  # company_name
+                        lead.name,  # contact_name
+                        lead.email,
+                        lead.phone,
+                        lead.status.value,  # stage
+                        float(lead.score),
+                        float(lead.estimated_value),  # value_estimate
+                        lead.source.value,
+                        json.dumps(metadata)
+                    )
                 logger.info(f"Lead {lead.lead_id} persisted to database")
             finally:
                 await conn.close()
