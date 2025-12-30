@@ -6,11 +6,28 @@ import logging
 from datetime import datetime
 from typing import Any, Optional, Dict, List
 
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Depends, Security
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/brain", tags=["brain"])
+
+# API Key Security - consistent with other routes
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
+
+async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
+    """Verify API key for authentication"""
+    if not api_key or api_key not in VALID_API_KEYS:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return api_key
+
+# All endpoints require API key authentication
+router = APIRouter(
+    prefix="/brain",
+    tags=["brain"],
+    dependencies=[Depends(verify_api_key)]
+)
 
 # Import unified brain with fallback
 try:
