@@ -215,7 +215,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.49.0"  # UI Testing: Timeouts, HTTP fallback, diagnostics, cancel endpoints
+VERSION = "9.50.0"  # UI Testing: Fixed MRG routes, added more real pages to test
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
