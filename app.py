@@ -184,6 +184,15 @@ except ImportError as e:
     ALWAYS_KNOW_AVAILABLE = False
     logger.warning(f"Always-Know Brain Router not available: {e}")
 
+# Learning Feedback Loop - Closes the gap between insights and action (2025-12-30)
+try:
+    from api.learning import router as learning_router
+    LEARNING_ROUTER_AVAILABLE = True
+    logger.info("🔄 Learning Feedback Loop Router loaded - insights now become actions")
+except ImportError as e:
+    LEARNING_ROUTER_AVAILABLE = False
+    logger.warning(f"Learning Router not available: {e}")
+
 # ChatGPT-Agent-Level UI Tester - Human-like testing (2025-12-29)
 try:
     from chatgpt_agent_tester import run_chatgpt_agent_tests, run_quick_health_test
@@ -215,7 +224,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.54.0"  # Added ai_decisions table persistence for AUREA, AIDecisionTree, and AIBoard decisions
+VERSION = "9.56.0"  # Knowledge Graph Extractor - 559+ nodes, 501 edges, scheduled every 30 minutes
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -1332,6 +1341,11 @@ if BG_MONITORING_AVAILABLE:
 if ALWAYS_KNOW_AVAILABLE:
     app.include_router(always_know_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("Mounted: Always-Know Brain at /always-know - continuous state awareness")
+
+# Learning Feedback Loop (2025-12-30) - Insights finally become actions
+if LEARNING_ROUTER_AVAILABLE:
+    app.include_router(learning_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: Learning Feedback Loop at /api/learning - 4,700+ insights now actionable")
 
 # Import and include analytics router
 try:
