@@ -481,13 +481,19 @@ class UnifiedMemoryManager:
         if not tenant_id:
             raise ValueError("tenant_id is required for migration")
 
+        # NOTE: These are LEGACY tables to migrate FROM.
+        # All data should migrate TO unified_ai_memory (the CANONICAL table).
+        # Do NOT add unified_ai_memory to this list!
         tables_to_migrate = [
             'ai_context_memory',
             'ai_persistent_memory',
             'agent_memory',
             'cross_ai_memory',
             'production_memory',
-            'unified_memory',  # ironic that there was already one called this
+            'unified_memory',  # Legacy table - migrate data to unified_ai_memory
+            'ai_memory',       # Legacy table with 1 row
+            'ai_memories',     # Legacy table with 3 rows
+            'ai_memory_store', # Legacy table with 3 rows
             'system_memory'
         ]
 

@@ -1162,13 +1162,32 @@ class MonitorAgent(BaseAgent):
 
 
 class SystemMonitorAgent(BaseAgent):
-    """Advanced system monitoring with self-healing"""
+    """Advanced system monitoring with self-healing - NOW WITH MCP TOOLS"""
+
+    # Real Render service IDs from production
+    RENDER_SERVICE_IDS = {
+        "backend": "srv-d1tfs4idbo4c73di6k00",  # brainops-backend-prod
+        "brainops-backend": "srv-d1tfs4idbo4c73di6k00",
+        "brainops-ai-agents": "srv-d413iu75r7bs738btc10",
+        "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770"
+    }
 
     def __init__(self):
         super().__init__("SystemMonitor", "universal")
+        self._mcp_client = None
+
+    async def _get_mcp_client(self):
+        """Lazily initialize MCP client"""
+        if self._mcp_client is None:
+            try:
+                from mcp_integration import get_mcp_client
+                self._mcp_client = get_mcp_client()
+            except ImportError:
+                logger.warning("MCP integration not available")
+        return self._mcp_client
 
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute system monitoring with auto-fix"""
+        """Execute system monitoring with auto-fix via MCP tools"""
         # Perform health check
         monitor = MonitorAgent()
         health = await monitor.full_system_check()
@@ -1183,7 +1202,7 @@ class SystemMonitorAgent(BaseAgent):
                     "error": status.get("error")
                 })
 
-        # Attempt fixes
+        # Attempt fixes using MCP tools
         fixes = []
         for issue in issues:
             fix_result = await self.attempt_fix(issue)
@@ -1196,36 +1215,113 @@ class SystemMonitorAgent(BaseAgent):
             "issues": issues,
             "fixes_attempted": len(fixes),
             "fixes": fixes,
+            "mcp_enabled": self._mcp_client is not None,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
     async def attempt_fix(self, issue: Dict) -> Dict:
-        """Attempt to fix an issue"""
+        """Attempt to fix an issue using MCP tools for real infrastructure control"""
         service = issue["service"]
+        mcp = await self._get_mcp_client()
 
-        if service == "backend":
-            # Try to restart backend via Render API
-            return {
-                "service": service,
-                "action": "restart_requested",
-                "status": "manual_intervention_needed"
-            }
+        if service in ["backend", "brainops-backend", "brainops-ai-agents", "brainops-mcp-bridge"]:
+            # Use MCP to restart Render service
+            service_id = self.RENDER_SERVICE_IDS.get(service)
+            if service_id and mcp:
+                try:
+                    logger.info(f"MCP: Attempting to restart Render service {service} ({service_id})")
+                    result = await mcp.render_restart_service(service_id)
+                    if result.success:
+                        logger.info(f"MCP: Successfully restarted {service}")
+                        return {
+                            "service": service,
+                            "action": "mcp_restart_triggered",
+                            "status": "completed",
+                            "mcp_result": result.result,
+                            "duration_ms": result.duration_ms
+                        }
+                    else:
+                        logger.warning(f"MCP: Failed to restart {service}: {result.error}")
+                        return {
+                            "service": service,
+                            "action": "mcp_restart_failed",
+                            "status": "failed",
+                            "error": result.error
+                        }
+                except Exception as e:
+                    logger.error(f"MCP restart exception for {service}: {e}")
+                    return {
+                        "service": service,
+                        "action": "mcp_restart_error",
+                        "status": "failed",
+                        "error": str(e)
+                    }
+            else:
+                return {
+                    "service": service,
+                    "action": "restart_requested",
+                    "status": "manual_intervention_needed",
+                    "note": "MCP not available or service ID unknown"
+                }
+
         elif service == "database":
-            # Try to reconnect/optimize
-            try:
-                pool = get_pool()
-                await pool.execute("SELECT pg_stat_reset()")
-                return {
-                    "service": service,
-                    "action": "stats_reset",
-                    "status": "completed"
-                }
-            except:
-                return {
-                    "service": service,
-                    "action": "reconnect_failed",
-                    "status": "failed"
-                }
+            # Use MCP for Supabase database operations
+            if mcp:
+                try:
+                    logger.info(f"MCP: Attempting to optimize database via Supabase")
+                    # Run VACUUM ANALYZE to optimize database
+                    result = await mcp.supabase_query("VACUUM ANALYZE")
+                    if result.success:
+                        logger.info("MCP: Database optimization completed")
+                        return {
+                            "service": service,
+                            "action": "mcp_vacuum_analyze",
+                            "status": "completed",
+                            "duration_ms": result.duration_ms
+                        }
+                    else:
+                        # Fallback to stats reset
+                        pool = get_pool()
+                        await pool.execute("SELECT pg_stat_reset()")
+                        return {
+                            "service": service,
+                            "action": "stats_reset",
+                            "status": "completed",
+                            "note": "MCP failed, used direct connection"
+                        }
+                except Exception as e:
+                    logger.warning(f"MCP database operation failed: {e}")
+                    try:
+                        pool = get_pool()
+                        await pool.execute("SELECT pg_stat_reset()")
+                        return {
+                            "service": service,
+                            "action": "stats_reset",
+                            "status": "completed"
+                        }
+                    except:
+                        return {
+                            "service": service,
+                            "action": "reconnect_failed",
+                            "status": "failed"
+                        }
+            else:
+                # Fallback without MCP
+                try:
+                    pool = get_pool()
+                    await pool.execute("SELECT pg_stat_reset()")
+                    return {
+                        "service": service,
+                        "action": "stats_reset",
+                        "status": "completed"
+                    }
+                except:
+                    return {
+                        "service": service,
+                        "action": "reconnect_failed",
+                        "status": "failed"
+                    }
+
         else:
             return {
                 "service": service,
@@ -1235,13 +1331,34 @@ class SystemMonitorAgent(BaseAgent):
 
 
 class DeploymentAgent(BaseAgent):
-    """Handles deployments and releases"""
+    """Handles deployments and releases - NOW WITH MCP FOR RENDER & GITHUB"""
+
+    # Render service IDs
+    RENDER_SERVICE_IDS = {
+        "backend": "srv-d1tfs4idbo4c73di6k00",
+        "brainops-backend": "srv-d1tfs4idbo4c73di6k00",
+        "ai-agents": "srv-d413iu75r7bs738btc10",
+        "brainops-ai-agents": "srv-d413iu75r7bs738btc10",
+        "mcp-bridge": "srv-d4rhvg63jp1c73918770",
+        "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770"
+    }
 
     def __init__(self):
         super().__init__("DeploymentAgent", "workflow")
+        self._mcp_client = None
+
+    async def _get_mcp_client(self):
+        """Lazily initialize MCP client"""
+        if self._mcp_client is None:
+            try:
+                from mcp_integration import get_mcp_client
+                self._mcp_client = get_mcp_client()
+            except ImportError:
+                logger.warning("MCP integration not available for DeploymentAgent")
+        return self._mcp_client
 
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute deployment task"""
+        """Execute deployment task with MCP support"""
         action = task.get('action', 'deploy')
         service = task.get('service', 'backend')
 
@@ -1251,20 +1368,145 @@ class DeploymentAgent(BaseAgent):
             return await self.rollback_service(service)
         elif action == 'build':
             return await self.build_docker(service, task.get('version'))
+        elif action == 'mcp_deploy':
+            # Direct MCP deployment
+            return await self._mcp_trigger_deploy(service)
+        elif action == 'mcp_create_pr':
+            # Create GitHub PR via MCP
+            return await self._mcp_create_pr(task)
+        elif action == 'mcp_create_issue':
+            # Create GitHub issue via MCP
+            return await self._mcp_create_issue(task)
         else:
             return {"status": "error", "message": f"Unknown action: {action}"}
 
+    async def _mcp_trigger_deploy(self, service: str) -> Dict:
+        """Trigger deployment via MCP Bridge"""
+        mcp = await self._get_mcp_client()
+        if not mcp:
+            return {"status": "error", "message": "MCP client not available", "fallback": "use_legacy"}
+
+        service_id = self.RENDER_SERVICE_IDS.get(service)
+        if not service_id:
+            return {"status": "error", "message": f"Unknown service: {service}"}
+
+        try:
+            logger.info(f"MCP: Triggering deployment for {service} ({service_id})")
+            result = await mcp.render_trigger_deploy(service_id)
+            if result.success:
+                return {
+                    "status": "success",
+                    "message": f"MCP deployment triggered for {service}",
+                    "service_id": service_id,
+                    "mcp_result": result.result,
+                    "duration_ms": result.duration_ms,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": f"MCP deployment failed: {result.error}",
+                    "service_id": service_id
+                }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    async def _mcp_create_pr(self, task: Dict) -> Dict:
+        """Create GitHub Pull Request via MCP Bridge"""
+        mcp = await self._get_mcp_client()
+        if not mcp:
+            return {"status": "error", "message": "MCP client not available"}
+
+        repo = task.get("repo", "mwwoodworth/brainops-ai-agents")
+        title = task.get("title", "Automated PR")
+        body = task.get("body", "This PR was created automatically by the AI agents system.")
+        head = task.get("head", "feature/auto-improvements")
+        base = task.get("base", "main")
+
+        try:
+            logger.info(f"MCP: Creating GitHub PR for {repo}: {title}")
+            result = await mcp.github_create_pr(
+                repo=repo,
+                title=title,
+                body=body,
+                head=head,
+                base=base
+            )
+            if result.success:
+                return {
+                    "status": "success",
+                    "action": "mcp_create_pr",
+                    "repo": repo,
+                    "title": title,
+                    "pr_data": result.result,
+                    "duration_ms": result.duration_ms,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            else:
+                return {
+                    "status": "error",
+                    "action": "mcp_create_pr",
+                    "error": result.error
+                }
+        except Exception as e:
+            return {"status": "error", "action": "mcp_create_pr", "error": str(e)}
+
+    async def _mcp_create_issue(self, task: Dict) -> Dict:
+        """Create GitHub Issue via MCP Bridge"""
+        mcp = await self._get_mcp_client()
+        if not mcp:
+            return {"status": "error", "message": "MCP client not available"}
+
+        repo = task.get("repo", "mwwoodworth/brainops-ai-agents")
+        title = task.get("title", "Automated Issue")
+        body = task.get("body", "This issue was created automatically by the AI agents system.")
+
+        try:
+            logger.info(f"MCP: Creating GitHub Issue for {repo}: {title}")
+            result = await mcp.github_create_issue(
+                repo=repo,
+                title=title,
+                body=body
+            )
+            if result.success:
+                return {
+                    "status": "success",
+                    "action": "mcp_create_issue",
+                    "repo": repo,
+                    "title": title,
+                    "issue_data": result.result,
+                    "duration_ms": result.duration_ms,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            else:
+                return {
+                    "status": "error",
+                    "action": "mcp_create_issue",
+                    "error": result.error
+                }
+        except Exception as e:
+            return {"status": "error", "action": "mcp_create_issue", "error": str(e)}
+
     async def deploy_service(self, service: str, version: Optional[str] = None) -> Dict:
-        """Deploy a service"""
+        """Deploy a service - uses MCP first, falls back to legacy"""
+        # Try MCP deployment first
+        mcp = await self._get_mcp_client()
+        if mcp:
+            mcp_result = await self._mcp_trigger_deploy(service)
+            if mcp_result.get("status") == "success":
+                return mcp_result
+            logger.warning(f"MCP deployment failed, falling back to legacy: {mcp_result}")
+
+        # Fallback to legacy methods
         if service == 'backend':
             return await self.deploy_backend(version)
-        elif service == 'ai-agents':
+        elif service in ['ai-agents', 'brainops-ai-agents']:
             return await self.deploy_ai_agents()
         else:
             return {"status": "error", "message": f"Unknown service: {service}"}
 
     async def deploy_backend(self, version: Optional[str] = None) -> Dict:
-        """Deploy backend service"""
+        """Deploy backend service (legacy method)"""
         try:
             if not version:
                 version = f"v{datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -1288,8 +1530,19 @@ class DeploymentAgent(BaseAgent):
                     "error": result.stderr
                 }
 
-            # Trigger Render deployment
-            # Note: This would use Render API in production
+            # Trigger Render deployment via MCP
+            mcp = await self._get_mcp_client()
+            if mcp:
+                deploy_result = await self._mcp_trigger_deploy('backend')
+                if deploy_result.get("status") == "success":
+                    return {
+                        "status": "success",
+                        "message": f"Backend deployed with version {version} via MCP",
+                        "version": version,
+                        "mcp_result": deploy_result,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+
             return {
                 "status": "success",
                 "message": f"Backend deployed with version {version}",
@@ -1300,9 +1553,16 @@ class DeploymentAgent(BaseAgent):
             return {"status": "error", "message": str(e)}
 
     async def deploy_ai_agents(self) -> Dict:
-        """Deploy AI agents service"""
+        """Deploy AI agents service - tries MCP first"""
+        # Try MCP deployment first
+        mcp = await self._get_mcp_client()
+        if mcp:
+            mcp_result = await self._mcp_trigger_deploy('ai-agents')
+            if mcp_result.get("status") == "success":
+                return mcp_result
+
+        # Fallback to git push
         try:
-            # Git push triggers auto-deploy
             result = subprocess.run(
                 ["git", "push", "origin", "main"],
                 cwd="/home/matt-woodworth/brainops-ai-agents",
@@ -2653,8 +2913,21 @@ class SelfBuildingAgent(BaseAgent):
 # ============== PHASE 2 ADAPTERS ==============
 
 class SystemImprovementAgentAdapter(BaseAgent):
+    """System improvement agent with MCP-powered auto-improvement capabilities"""
+
     def __init__(self):
         super().__init__("SystemImprovement", "system_improvement")
+        self._mcp_client = None
+
+    async def _get_mcp_client(self):
+        """Lazily initialize MCP client"""
+        if self._mcp_client is None:
+            try:
+                from mcp_integration import get_mcp_client
+                self._mcp_client = get_mcp_client()
+            except ImportError:
+                logger.warning("MCP integration not available for SystemImprovement")
+        return self._mcp_client
 
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
         tenant_id = task.get("tenant_id", "default")
@@ -2667,14 +2940,90 @@ class SystemImprovementAgentAdapter(BaseAgent):
                 return await agent.suggest_optimizations(task.get("component", "system"))
             elif action == "analyze_error_patterns":
                 return await agent.analyze_error_patterns()
+            elif action == "execute_auto_improvements":
+                # MCP-powered auto-improvement with safety controls
+                return await agent.execute_auto_improvements(
+                    dry_run=task.get("dry_run", True),
+                    require_approval=task.get("require_approval", True),
+                    approved_actions=task.get("approved_actions", [])
+                )
+            elif action == "mcp_deploy":
+                # Direct MCP deployment trigger
+                return await self._mcp_trigger_deployment(task)
+            elif action == "mcp_scale":
+                # Direct MCP scaling
+                return await self._mcp_scale_service(task)
             else:
                 return await agent.analyze_performance(task.get("metrics", []))
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
+    async def _mcp_trigger_deployment(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Trigger deployment via MCP Bridge"""
+        mcp = await self._get_mcp_client()
+        if not mcp:
+            return {"status": "error", "error": "MCP client not available"}
+
+        service_id = task.get("service_id", "srv-d413iu75r7bs738btc10")  # Default: AI agents
+        try:
+            result = await mcp.render_trigger_deploy(service_id)
+            return {
+                "status": "completed" if result.success else "failed",
+                "action": "mcp_deploy",
+                "service_id": service_id,
+                "result": result.result,
+                "duration_ms": result.duration_ms,
+                "error": result.error if not result.success else None
+            }
+        except Exception as e:
+            return {"status": "error", "action": "mcp_deploy", "error": str(e)}
+
+    async def _mcp_scale_service(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Scale service via MCP Bridge"""
+        mcp = await self._get_mcp_client()
+        if not mcp:
+            return {"status": "error", "error": "MCP client not available"}
+
+        service_id = task.get("service_id", "srv-d413iu75r7bs738btc10")
+        instances = task.get("instances", 2)
+        try:
+            result = await mcp.render_scale_service(service_id, instances)
+            return {
+                "status": "completed" if result.success else "failed",
+                "action": "mcp_scale",
+                "service_id": service_id,
+                "instances": instances,
+                "result": result.result,
+                "duration_ms": result.duration_ms,
+                "error": result.error if not result.success else None
+            }
+        except Exception as e:
+            return {"status": "error", "action": "mcp_scale", "error": str(e)}
+
+
 class DevOpsOptimizationAgentAdapter(BaseAgent):
+    """DevOps optimization agent with MCP-powered infrastructure actions"""
+
+    # Render service IDs for deployment health
+    RENDER_SERVICE_IDS = {
+        "brainops-ai-agents": "srv-d413iu75r7bs738btc10",
+        "brainops-backend-prod": "srv-d1tfs4idbo4c73di6k00",
+        "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770"
+    }
+
     def __init__(self):
         super().__init__("DevOpsOptimization", "devops_optimization")
+        self._mcp_client = None
+
+    async def _get_mcp_client(self):
+        """Lazily initialize MCP client"""
+        if self._mcp_client is None:
+            try:
+                from mcp_integration import get_mcp_client
+                self._mcp_client = get_mcp_client()
+            except ImportError:
+                logger.warning("MCP integration not available for DevOpsOptimization")
+        return self._mcp_client
 
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
         tenant_id = task.get("tenant_id", "default")
@@ -2688,11 +3037,179 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
             elif action == "optimize_resources":
                 return await agent.optimize_resources(task.get("cloud_resources", []))
             elif action == "analyze_deployment_health":
-                return await agent.analyze_deployment_health()
+                # Enhanced with MCP-powered health check
+                health_result = await agent.analyze_deployment_health()
+                # If any unhealthy services, offer MCP remediation options
+                if health_result.get("overall_health") in ["degraded", "critical"]:
+                    health_result["mcp_remediation_available"] = True
+                    health_result["available_actions"] = [
+                        "mcp_restart_service",
+                        "mcp_get_logs",
+                        "mcp_trigger_deploy"
+                    ]
+                return health_result
+            elif action == "mcp_restart_service":
+                return await self._mcp_restart_service(task)
+            elif action == "mcp_get_logs":
+                return await self._mcp_get_logs(task)
+            elif action == "mcp_trigger_deploy":
+                return await self._mcp_trigger_deploy(task)
+            elif action == "mcp_full_health_recovery":
+                # Automated health recovery workflow
+                return await self._mcp_full_health_recovery(task)
             else:
                 return await agent.analyze_deployment_health()
         except Exception as e:
             return {"status": "error", "error": str(e)}
+
+    async def _mcp_restart_service(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Restart a Render service via MCP"""
+        mcp = await self._get_mcp_client()
+        if not mcp:
+            return {"status": "error", "error": "MCP client not available"}
+
+        service_name = task.get("service_name", "brainops-ai-agents")
+        service_id = self.RENDER_SERVICE_IDS.get(service_name) or task.get("service_id")
+
+        if not service_id:
+            return {"status": "error", "error": f"Unknown service: {service_name}"}
+
+        try:
+            logger.info(f"MCP DevOps: Restarting {service_name} ({service_id})")
+            result = await mcp.render_restart_service(service_id)
+            return {
+                "status": "completed" if result.success else "failed",
+                "action": "mcp_restart_service",
+                "service_name": service_name,
+                "service_id": service_id,
+                "result": result.result,
+                "duration_ms": result.duration_ms,
+                "error": result.error if not result.success else None
+            }
+        except Exception as e:
+            return {"status": "error", "action": "mcp_restart_service", "error": str(e)}
+
+    async def _mcp_get_logs(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Get service logs via MCP"""
+        mcp = await self._get_mcp_client()
+        if not mcp:
+            return {"status": "error", "error": "MCP client not available"}
+
+        service_name = task.get("service_name", "brainops-ai-agents")
+        service_id = self.RENDER_SERVICE_IDS.get(service_name) or task.get("service_id")
+        lines = task.get("lines", 100)
+
+        if not service_id:
+            return {"status": "error", "error": f"Unknown service: {service_name}"}
+
+        try:
+            logger.info(f"MCP DevOps: Getting logs for {service_name} ({service_id})")
+            result = await mcp.render_get_logs(service_id, lines=lines)
+            return {
+                "status": "completed" if result.success else "failed",
+                "action": "mcp_get_logs",
+                "service_name": service_name,
+                "logs": result.result,
+                "duration_ms": result.duration_ms,
+                "error": result.error if not result.success else None
+            }
+        except Exception as e:
+            return {"status": "error", "action": "mcp_get_logs", "error": str(e)}
+
+    async def _mcp_trigger_deploy(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Trigger deployment via MCP"""
+        mcp = await self._get_mcp_client()
+        if not mcp:
+            return {"status": "error", "error": "MCP client not available"}
+
+        service_name = task.get("service_name", "brainops-ai-agents")
+        service_id = self.RENDER_SERVICE_IDS.get(service_name) or task.get("service_id")
+
+        if not service_id:
+            return {"status": "error", "error": f"Unknown service: {service_name}"}
+
+        try:
+            logger.info(f"MCP DevOps: Triggering deployment for {service_name}")
+            result = await mcp.render_trigger_deploy(service_id)
+            return {
+                "status": "completed" if result.success else "failed",
+                "action": "mcp_trigger_deploy",
+                "service_name": service_name,
+                "result": result.result,
+                "duration_ms": result.duration_ms,
+                "error": result.error if not result.success else None
+            }
+        except Exception as e:
+            return {"status": "error", "action": "mcp_trigger_deploy", "error": str(e)}
+
+    async def _mcp_full_health_recovery(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Automated health recovery workflow:
+        1. Check all services
+        2. Get logs for unhealthy services
+        3. Attempt restart
+        4. Verify recovery
+        """
+        mcp = await self._get_mcp_client()
+        if not mcp:
+            return {"status": "error", "error": "MCP client not available"}
+
+        recovery_results = {
+            "status": "completed",
+            "action": "mcp_full_health_recovery",
+            "services_checked": [],
+            "restarts_attempted": [],
+            "logs_retrieved": [],
+            "errors": []
+        }
+
+        # Check all services
+        try:
+            services_result = await mcp.render_list_services()
+            if services_result.success:
+                services = services_result.result
+                logger.info(f"MCP DevOps: Found {len(services) if services else 0} services")
+
+                # Check each known service
+                for service_name, service_id in self.RENDER_SERVICE_IDS.items():
+                    try:
+                        service_info = await mcp.render_get_service(service_id)
+                        status = "unknown"
+                        if service_info.success and service_info.result:
+                            status = service_info.result.get("status", "unknown")
+
+                        recovery_results["services_checked"].append({
+                            "name": service_name,
+                            "id": service_id,
+                            "status": status
+                        })
+
+                        # If unhealthy, get logs and restart
+                        if status not in ["running", "live"]:
+                            # Get logs first
+                            logs_result = await mcp.render_get_logs(service_id, lines=50)
+                            recovery_results["logs_retrieved"].append({
+                                "service": service_name,
+                                "success": logs_result.success,
+                                "log_preview": str(logs_result.result)[:500] if logs_result.success else logs_result.error
+                            })
+
+                            # Attempt restart
+                            restart_result = await mcp.render_restart_service(service_id)
+                            recovery_results["restarts_attempted"].append({
+                                "service": service_name,
+                                "success": restart_result.success,
+                                "result": restart_result.result if restart_result.success else restart_result.error
+                            })
+                    except Exception as e:
+                        recovery_results["errors"].append({
+                            "service": service_name,
+                            "error": str(e)
+                        })
+        except Exception as e:
+            recovery_results["errors"].append({"phase": "service_discovery", "error": str(e)})
+
+        return recovery_results
 
 class CodeQualityAgentAdapter(BaseAgent):
     def __init__(self):

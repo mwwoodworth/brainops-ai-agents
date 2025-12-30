@@ -215,7 +215,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.52.0"  # Updated Gemini model to 2.0-flash-exp for visual analysis
+VERSION = "9.54.0"  # Added ai_decisions table persistence for AUREA, AIDecisionTree, and AIBoard decisions
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -1089,6 +1089,41 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ Background Task Monitoring failed to start: {e}")
 
+    # Start Knowledge Graph Extractor - runs every 30 minutes to populate knowledge graph
+    # Target: 100+ nodes within 24 hours
+    try:
+        from knowledge_graph_extractor import get_knowledge_extractor, run_scheduled_extraction
+        knowledge_extractor = get_knowledge_extractor()
+        await knowledge_extractor.initialize()
+        app.state.knowledge_extractor = knowledge_extractor
+
+        async def knowledge_graph_extraction_loop():
+            """Periodically extract knowledge from agent executions to build knowledge graph"""
+            # Run initial extraction immediately (don't wait 30 minutes)
+            try:
+                await asyncio.sleep(10)  # Let database pool stabilize
+                logger.info("🧠 Running initial knowledge graph extraction...")
+                initial_result = await run_scheduled_extraction()
+                logger.info(f"🧠 Initial extraction: {initial_result.get('nodes_stored', 0)} nodes, {initial_result.get('edges_stored', 0)} edges")
+            except Exception as init_error:
+                logger.error(f"Initial knowledge extraction failed: {init_error}")
+
+            while True:
+                try:
+                    await asyncio.sleep(1800)  # 30 minutes = 1800 seconds
+                    logger.info("🧠 Running scheduled knowledge graph extraction...")
+                    result = await run_scheduled_extraction()
+                    logger.info(f"🧠 Knowledge extraction complete: {result.get('total_nodes', 0)} total nodes, {result.get('total_edges', 0)} total edges")
+                except Exception as e:
+                    logger.error(f"Knowledge graph extraction error: {e}")
+                    await asyncio.sleep(300)  # Back off 5 minutes on error
+
+        asyncio.create_task(knowledge_graph_extraction_loop())
+        logger.info("🧠 Knowledge Graph Extractor STARTED - building graph every 30 minutes")
+    except Exception as e:
+        logger.error(f"❌ Knowledge Graph Extractor failed to start: {e}")
+        app.state.knowledge_extractor = None
+
     yield
 
     # Shutdown
@@ -1929,6 +1964,69 @@ async def debug_scheduler(authenticated: bool = Depends(verify_api_key)):
         }
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+# =========================================================================
+# EMAIL QUEUE ENDPOINTS
+# =========================================================================
+
+@app.get("/email/status")
+async def email_queue_status(authenticated: bool = Depends(verify_api_key)):
+    """Get email queue status - shows pending, sent, failed counts."""
+    try:
+        from email_sender import get_queue_status
+        return get_queue_status()
+    except ImportError:
+        return {"error": "email_sender module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/email/process")
+async def process_email_queue_endpoint(
+    batch_size: int = Query(default=10, ge=1, le=50),
+    dry_run: bool = Query(default=False),
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Manually trigger email queue processing.
+    - batch_size: Number of emails to process (1-50)
+    - dry_run: If true, don't actually send, just report what would be sent
+    """
+    try:
+        from email_sender import process_email_queue
+        result = process_email_queue(batch_size=batch_size, dry_run=dry_run)
+        return result
+    except ImportError:
+        return {"error": "email_sender module not available"}
+    except Exception as e:
+        logger.error(f"Email processing failed: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/email/test")
+async def test_email_sending(
+    recipient: str = Query(..., description="Email address to send test to"),
+    authenticated: bool = Depends(verify_api_key)
+):
+    """Send a test email to verify email configuration is working."""
+    try:
+        from email_sender import send_email
+        success, message = send_email(
+            recipient,
+            "Test Email from BrainOps AI",
+            "<h1>Test Email</h1><p>This is a test email from the BrainOps AI email system.</p><p>If you received this, email sending is working correctly.</p>",
+            {}
+        )
+        return {
+            "success": success,
+            "message": message,
+            "recipient": recipient
+        }
+    except ImportError:
+        return {"error": "email_sender module not available", "success": False}
+    except Exception as e:
+        return {"error": str(e), "success": False}
 
 
 @app.get("/systems/usage")
@@ -3886,6 +3984,94 @@ async def api_v1_knowledge_query(
         "results": normalized,
         "count": len(normalized),
     }
+
+
+@app.get("/api/v1/knowledge/graph/stats")
+async def api_v1_knowledge_graph_stats(
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Get knowledge graph statistics - node counts, edge counts, extraction status.
+    """
+    try:
+        pool = get_pool()
+
+        # Get counts from all knowledge tables
+        nodes_count = await pool.fetchval("SELECT COUNT(*) FROM ai_knowledge_nodes") or 0
+        edges_count = await pool.fetchval("SELECT COUNT(*) FROM ai_knowledge_edges") or 0
+        graph_count = await pool.fetchval("SELECT COUNT(*) FROM ai_knowledge_graph") or 0
+
+        # Get node type distribution
+        node_types = await pool.fetch("""
+            SELECT node_type, COUNT(*) as count
+            FROM ai_knowledge_nodes
+            GROUP BY node_type
+            ORDER BY count DESC
+        """)
+
+        # Get recent extraction info
+        recent_graph = await pool.fetchrow("""
+            SELECT node_data, updated_at
+            FROM ai_knowledge_graph
+            WHERE node_type = 'graph_metadata'
+            ORDER BY updated_at DESC
+            LIMIT 1
+        """)
+
+        extraction_stats = {}
+        last_extraction = None
+        if recent_graph:
+            node_data = recent_graph.get("node_data", {})
+            if isinstance(node_data, str):
+                import json
+                node_data = json.loads(node_data)
+            extraction_stats = node_data.get("extraction_stats", {})
+            last_extraction = recent_graph.get("updated_at")
+
+        # Get extractor instance stats if available
+        extractor_stats = {}
+        if hasattr(app.state, 'knowledge_extractor') and app.state.knowledge_extractor:
+            extractor_stats = app.state.knowledge_extractor.extraction_stats
+
+        return {
+            "success": True,
+            "total_nodes": nodes_count,
+            "total_edges": edges_count,
+            "graph_entries": graph_count,
+            "node_types": [dict(row) for row in node_types],
+            "last_extraction": last_extraction.isoformat() if last_extraction else None,
+            "extraction_stats": extraction_stats or extractor_stats,
+            "extractor_active": hasattr(app.state, 'knowledge_extractor') and app.state.knowledge_extractor is not None
+        }
+    except Exception as e:
+        logger.error(f"Knowledge graph stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/knowledge/graph/extract")
+async def api_v1_knowledge_graph_extract(
+    hours_back: int = 24,
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Manually trigger knowledge graph extraction.
+    Useful for immediate extraction or catching up on historical data.
+    """
+    try:
+        from knowledge_graph_extractor import get_knowledge_extractor
+        extractor = get_knowledge_extractor()
+        await extractor.initialize()
+
+        result = await extractor.run_extraction(hours_back=hours_back)
+
+        return {
+            "success": result.get("success", False),
+            "message": f"Extracted {result.get('nodes_stored', 0)} nodes and {result.get('edges_stored', 0)} edges",
+            "details": result
+        }
+    except Exception as e:
+        logger.error(f"Knowledge graph extraction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/v1/erp/analyze")

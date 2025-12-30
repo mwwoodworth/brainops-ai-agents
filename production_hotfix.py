@@ -78,18 +78,18 @@ async def fix_database_schema():
         """)
         print("✅ Updated last_job_date from jobs data")
 
-        # Fix 4: Check unified_memory table structure
+        # Fix 4: Check unified_ai_memory table structure (CANONICAL memory table)
         result = await conn.fetchval("""
             SELECT column_name
             FROM information_schema.columns
-            WHERE table_name = 'unified_memory'
+            WHERE table_name = 'unified_ai_memory'
             AND column_name = 'related_memories'
         """)
 
         if result:
             # Fix type of related_memories column
             await conn.execute("""
-                ALTER TABLE unified_memory
+                ALTER TABLE unified_ai_memory
                 ALTER COLUMN related_memories
                 TYPE uuid[] USING related_memories::uuid[]
             """)
@@ -195,20 +195,20 @@ async def store(self, key: str, value: Any, context_type: str = "system",
 
         async with self.pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO unified_memory (
-                    context_type, context_id, key, value,
-                    importance, tags, expires_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-                ON CONFLICT (context_type, context_id, key)
+                INSERT INTO unified_ai_memory (
+                    memory_type, content, source_system, source_agent,
+                    created_by, importance_score, tags, expires_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (content_hash)
                 DO UPDATE SET
-                    value = $4,
-                    importance = $5,
-                    tags = $6,
-                    expires_at = $7,
+                    content = $2,
+                    importance_score = $6,
+                    tags = $7,
+                    expires_at = $8,
                     updated_at = NOW(),
-                    access_count = unified_memory.access_count + 1
-            """, context_type, context_id, key, json_value,
-                importance, tags or [], expires_at)
+                    access_count = unified_ai_memory.access_count + 1
+            """, 'semantic', json_value, context_type, context_id, key,
+                importance / 10.0, tags or [], expires_at)
 
         logger.info(f"✅ Stored memory: {key}")
         return True
