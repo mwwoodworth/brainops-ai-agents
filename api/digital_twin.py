@@ -339,6 +339,28 @@ async def delete_twin(twin_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/deduplicate")
+async def deduplicate_twins():
+    """
+    Remove duplicate digital twins, keeping only the most recent per source_system.
+    Use this to clean up twins created before deduplication logic was added.
+    """
+    try:
+        engine = await _get_engine()
+
+        if hasattr(engine, 'deduplicate_twins'):
+            result = await engine.deduplicate_twins()
+            return result
+
+        return {
+            "status": "unavailable",
+            "message": "Deduplication not supported by this engine version"
+        }
+    except Exception as e:
+        logger.error(f"Failed to deduplicate twins: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/dashboard")
 async def get_twin_dashboard():
     """Get a dashboard view of all digital twins"""
