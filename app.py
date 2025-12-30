@@ -236,7 +236,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.56.0"  # Knowledge Graph Extractor - 559+ nodes, 501 edges, scheduled every 30 minutes
+VERSION = "9.57.0"  # Fixed SQL column bug (c.company → c.company_name) in revenue pipeline agents
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
