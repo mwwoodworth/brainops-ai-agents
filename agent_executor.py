@@ -2,6 +2,8 @@
 """
 AI Agent Executor - Real Implementation
 Handles actual execution of AI agent tasks
+
+ASYNC VERSION: Uses asyncpg via database.async_connection pool
 """
 
 from __future__ import annotations
@@ -12,27 +14,18 @@ import os
 import logging
 import re
 import subprocess
-import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict, TypeVar
 
 import httpx
-import psycopg2
 import openai
 import anthropic
 from dataclasses import asdict
-from psycopg2.extras import RealDictCursor
-from contextlib import contextmanager
 
-# CRITICAL: Use shared connection pool to prevent MaxClientsInSessionMode
-try:
-    from database.sync_pool import get_sync_pool
-    _SYNC_POOL_AVAILABLE = True
-except ImportError:
-    _SYNC_POOL_AVAILABLE = False
-    from psycopg2.pool import ThreadedConnectionPool  # Fallback only
+# CRITICAL: Use async connection pool - NO psycopg2
+from database.async_connection import get_pool
 
 from ai_self_awareness import SelfAwareAI as SelfAwareness, get_self_aware_ai
 from unified_brain import UnifiedBrain
@@ -61,75 +54,6 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 _REPO_ROOT = Path(__file__).resolve().parent
-
-# CRITICAL: Use shared pool instead of creating our own ThreadedConnectionPool
-# This prevents MaxClientsInSessionMode errors in Supabase
-
-def _get_pooled_connection():
-    """Get connection from shared pool - ALWAYS use this instead of creating pools.
-    Returns a context manager - use with 'with' statement.
-    """
-    if _SYNC_POOL_AVAILABLE:
-        # Return the pool's context manager directly (no wrapping)
-        return get_sync_pool().get_connection()
-    else:
-        # Fallback context manager for environments without shared pool
-        @contextmanager
-        def _fallback():
-            conn = psycopg2.connect(**DB_CONFIG)
-            try:
-                yield conn
-            finally:
-                if conn and not conn.closed:
-                    conn.close()
-        return _fallback()
-
-
-def _run_psycopg2_operation(
-    operation: Callable[[RealDictCursor, psycopg2.extensions.connection], T],
-    *,
-    statement_timeout_ms: int,
-) -> T:
-    """Run a psycopg2 operation using the SHARED connection pool."""
-    with _get_pooled_connection() as conn:
-        cursor = None
-        try:
-            conn.autocommit = False
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute("SET statement_timeout TO %s", (statement_timeout_ms,))
-            result = operation(cursor, conn)
-            conn.commit()
-            return result
-        except Exception:
-            try:
-                conn.rollback()
-            except Exception as rollback_err:
-                logger.debug(f"Rollback cleanup error (non-fatal): {rollback_err}")
-            raise
-        finally:
-            if cursor is not None:
-                try:
-                    cursor.close()
-                except Exception as cursor_err:
-                    logger.debug(f"Cursor close cleanup error (non-fatal): {cursor_err}")
-            try:
-                conn.autocommit = False
-            except Exception as autocommit_err:
-                logger.debug(f"Autocommit reset error (non-fatal): {autocommit_err}")
-
-
-async def run_db(
-    operation: Callable[[RealDictCursor, psycopg2.extensions.connection], T],
-    *,
-    timeout_seconds: float = 30.0,
-) -> T:
-    """Run a psycopg2 operation in a worker thread with connection pooling."""
-    statement_timeout_ms = max(1, int(timeout_seconds * 1000))
-    return await asyncio.to_thread(
-        _run_psycopg2_operation,
-        operation,
-        statement_timeout_ms=statement_timeout_ms,
-    )
 
 
 async def _http_get(url: str, *, timeout_seconds: float = 5.0) -> httpx.Response:
@@ -198,7 +122,7 @@ except ImportError:
     DEPLOYMENT_MONITOR_AVAILABLE = False
     logger.warning("Deployment monitor agent not available")
 
-# Database configuration
+# Database configuration (for reference, pool uses config internally)
 DB_CONFIG = {
     "host": config.database.host,
     "database": config.database.database,
@@ -219,6 +143,7 @@ if ANTHROPIC_API_KEY:
     anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 else:
     anthropic_client = None
+
 
 class AgentExecutor:
     """Executes actual agent tasks"""
@@ -420,46 +345,44 @@ class AgentExecutor:
     ):
         """Persist self-awareness assessments for auditability"""
         try:
-            with _get_pooled_connection() as conn:
-                cur = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS agent_action_audits (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        agent_name TEXT NOT NULL,
-                        action TEXT,
-                        task JSONB,
-                        confidence_score DOUBLE PRECISION,
-                        confidence_level TEXT,
-                        requires_human BOOLEAN,
-                        assessment JSONB,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
+            # Ensure table exists
+            await pool.execute("""
+                CREATE TABLE IF NOT EXISTS agent_action_audits (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    agent_name TEXT NOT NULL,
+                    action TEXT,
+                    task JSONB,
+                    confidence_score DOUBLE PRECISION,
+                    confidence_level TEXT,
+                    requires_human BOOLEAN,
+                    assessment JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
 
-                cur.execute("""
-                    INSERT INTO agent_action_audits (
-                        agent_name,
-                        action,
-                        task,
-                        confidence_score,
-                        confidence_level,
-                        requires_human,
-                        assessment,
-                        created_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, NOW())
-                """, (
+            await pool.execute("""
+                INSERT INTO agent_action_audits (
                     agent_name,
-                    task.get("action"),
-                    json.dumps(task, default=str),
-                    normalized_confidence,
-                    getattr(getattr(assessment, "confidence_level", None), "value", None),
-                    getattr(assessment, "requires_human_review", False),
-                    json.dumps(asdict(assessment), default=str) if assessment else None
-                ))
+                    action,
+                    task,
+                    confidence_score,
+                    confidence_level,
+                    requires_human,
+                    assessment,
+                    created_at
+                ) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, NOW())
+            """,
+                agent_name,
+                task.get("action"),
+                json.dumps(task, default=str),
+                normalized_confidence,
+                getattr(getattr(assessment, "confidence_level", None), "value", None),
+                getattr(assessment, "requires_human_review", False),
+                json.dumps(asdict(assessment), default=str) if assessment else None
+            )
 
-                conn.commit()
-                cur.close()
         except Exception as e:
             logger.warning(f"Failed to store self-awareness audit: {e}")
 
@@ -710,7 +633,7 @@ class AgentExecutor:
                     else:
                         # Fallback to generic execution
                         result = await self._generic_execute(agent_name, task)
-                    
+
                     # If successful, break the retry loop
                     break
                 except Exception as e:
@@ -810,36 +733,24 @@ class BaseAgent:
         """Execute agent task - override in subclasses"""
         raise NotImplementedError(f"Agent {self.name} must implement execute method")
 
-    def get_db_connection(self):
-        """Get database connection from shared pool - USE WITH 'with' STATEMENT.
-        Returns a context manager - delegate directly to avoid nested generator issues.
-        """
-        return _get_pooled_connection()
-
     async def log_execution(self, task: Dict, result: Dict):
         """Log execution to database and Unified Brain"""
-        import uuid
         exec_id = str(uuid.uuid4())
 
         # 1. Log to legacy table (keep for backward compatibility)
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-
-                cursor.execute("""
-                    INSERT INTO agent_executions (
-                        id, task_execution_id, agent_type, prompt,
-                        response, status, created_at, completed_at
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
-                """, (
-                    exec_id, exec_id, self.type,
-                    json.dumps(task), json.dumps(result),
-                    result.get('status', 'completed')
-                ))
-
-                conn.commit()
-                cursor.close()
+            pool = get_pool()
+            await pool.execute("""
+                INSERT INTO agent_executions (
+                    id, task_execution_id, agent_type, prompt,
+                    response, status, created_at, completed_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+            """,
+                exec_id, exec_id, self.type,
+                json.dumps(task), json.dumps(result),
+                result.get('status', 'completed')
+            )
         except Exception as e:
             self.logger.error(f"Legacy logging failed: {e}")
 
@@ -1163,13 +1074,11 @@ class MonitorAgent(BaseAgent):
 
         # Check database
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute("SELECT COUNT(*) as customers FROM customers")
-                customer_count = cursor.fetchone()['customers']
-                cursor.execute("SELECT COUNT(*) as jobs FROM jobs")
-                job_count = cursor.fetchone()['jobs']
-                cursor.close()
+            pool = get_pool()
+            customer_row = await pool.fetchrow("SELECT COUNT(*) as customers FROM customers")
+            customer_count = customer_row['customers'] if customer_row else 0
+            job_row = await pool.fetchrow("SELECT COUNT(*) as jobs FROM jobs")
+            job_count = job_row['jobs'] if job_row else 0
 
             results["checks"]["database"] = {
                 "status": "healthy",
@@ -1219,17 +1128,14 @@ class MonitorAgent(BaseAgent):
     async def check_database(self) -> Dict[str, Any]:
         """Check database health"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute("""
-                    SELECT
-                        (SELECT COUNT(*) FROM customers) as customers,
-                        (SELECT COUNT(*) FROM jobs) as jobs,
-                        (SELECT COUNT(*) FROM ai_agents) as agents
-                """)
-                stats = cursor.fetchone()
-                cursor.close()
-            return {"status": "healthy", "stats": dict(stats)}
+            pool = get_pool()
+            stats = await pool.fetchrow("""
+                SELECT
+                    (SELECT COUNT(*) FROM customers) as customers,
+                    (SELECT COUNT(*) FROM jobs) as jobs,
+                    (SELECT COUNT(*) FROM ai_agents) as agents
+            """)
+            return {"status": "healthy", "stats": dict(stats) if stats else {}}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -1307,10 +1213,8 @@ class SystemMonitorAgent(BaseAgent):
         elif service == "database":
             # Try to reconnect/optimize
             try:
-                with self.get_db_connection() as conn:
-                    cursor = conn.cursor(cursor_factory=RealDictCursor)
-                    cursor.execute("SELECT pg_stat_reset()")
-                    cursor.close()
+                pool = get_pool()
+                await pool.execute("SELECT pg_stat_reset()")
                 return {
                     "service": service,
                     "action": "stats_reset",
@@ -1471,24 +1375,23 @@ class DatabaseOptimizerAgent(BaseAgent):
     async def analyze_performance(self) -> Dict:
         """Analyze database performance"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                # Get table sizes
-                cursor.execute("""
-                    SELECT
-                        schemaname,
-                        tablename,
-                        pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size,
-                        n_live_tup as rows
-                    FROM pg_stat_user_tables
-                    ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
-                    LIMIT 10
-                """)
-                table_sizes = cursor.fetchall()
+            # Get table sizes
+            table_sizes = await pool.fetch("""
+                SELECT
+                    schemaname,
+                    tablename,
+                    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size,
+                    n_live_tup as rows
+                FROM pg_stat_user_tables
+                ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+                LIMIT 10
+            """)
 
-                # Get slow queries
-                cursor.execute("""
+            # Get slow queries
+            try:
+                slow_queries = await pool.fetch("""
                     SELECT
                         calls,
                         total_exec_time,
@@ -1499,9 +1402,8 @@ class DatabaseOptimizerAgent(BaseAgent):
                     ORDER BY mean_exec_time DESC
                     LIMIT 5
                 """)
-                slow_queries = cursor.fetchall() if cursor.rowcount > 0 else []
-
-                cursor.close()
+            except Exception:
+                slow_queries = []
 
             return {
                 "status": "completed",
@@ -1517,33 +1419,28 @@ class DatabaseOptimizerAgent(BaseAgent):
     async def optimize_database(self) -> Dict:
         """Run optimization commands"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                optimizations = []
+            optimizations = []
 
-                # Vacuum analyze
-                cursor.execute("VACUUM ANALYZE")
-                optimizations.append("VACUUM ANALYZE completed")
+            # Vacuum analyze
+            await pool.execute("VACUUM ANALYZE")
+            optimizations.append("VACUUM ANALYZE completed")
 
-                # Reindex
-                cursor.execute("""
-                    SELECT 'REINDEX TABLE ' || tablename || ';' as cmd
-                    FROM pg_tables
-                    WHERE schemaname = 'public'
-                    LIMIT 5
-                """)
-                reindex_cmds = cursor.fetchall()
+            # Reindex
+            reindex_cmds = await pool.fetch("""
+                SELECT 'REINDEX TABLE ' || tablename || ';' as cmd
+                FROM pg_tables
+                WHERE schemaname = 'public'
+                LIMIT 5
+            """)
 
-                for cmd in reindex_cmds:
-                    try:
-                        cursor.execute(cmd['cmd'])
-                        optimizations.append(f"Reindexed: {cmd['cmd']}")
-                    except Exception as reindex_error:
-                        logger.warning(f"Reindex operation failed: {cmd.get('cmd', 'unknown')}: {reindex_error}")
-
-                conn.commit()
-                cursor.close()
+            for cmd_row in reindex_cmds:
+                try:
+                    await pool.execute(cmd_row['cmd'])
+                    optimizations.append(f"Reindexed: {cmd_row['cmd']}")
+                except Exception as reindex_error:
+                    logger.warning(f"Reindex operation failed: {cmd_row.get('cmd', 'unknown')}: {reindex_error}")
 
             return {
                 "status": "completed",
@@ -1556,20 +1453,18 @@ class DatabaseOptimizerAgent(BaseAgent):
     async def cleanup_tables(self) -> Dict:
         """Clean up unnecessary data"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                cleanups = []
+            cleanups = []
 
-                # Clean old logs
-                cursor.execute("""
-                    DELETE FROM agent_executions
-                    WHERE completed_at < NOW() - INTERVAL '30 days'
-                """)
-                cleanups.append(f"Deleted {cursor.rowcount} old agent executions")
-
-                conn.commit()
-                cursor.close()
+            # Clean old logs
+            result = await pool.execute("""
+                DELETE FROM agent_executions
+                WHERE completed_at < NOW() - INTERVAL '30 days'
+            """)
+            # asyncpg returns status string like 'DELETE 5'
+            count = result.split()[-1] if result else '0'
+            cleanups.append(f"Deleted {count} old agent executions")
 
             return {
                 "status": "completed",
@@ -1685,17 +1580,14 @@ class WorkflowEngineAgent(BaseAgent):
 
         # Fallback if no job_id provided - Try to find a recent completed job without invoice
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute("""
-                    SELECT id FROM jobs
-                    WHERE status = 'completed'
-                    AND id NOT IN (SELECT job_id FROM invoices)
-                    ORDER BY completed_at DESC
-                    LIMIT 1
-                """)
-                recent_job = cursor.fetchone()
-                cursor.close()
+            pool = get_pool()
+            recent_job = await pool.fetchrow("""
+                SELECT id FROM jobs
+                WHERE status = 'completed'
+                AND id NOT IN (SELECT job_id FROM invoices)
+                ORDER BY completed_at DESC
+                LIMIT 1
+            """)
 
             if recent_job:
                 task['job_id'] = recent_job['id']
@@ -1704,7 +1596,7 @@ class WorkflowEngineAgent(BaseAgent):
                 return await invoice_agent.execute(task)
         except Exception as e:
             self.logger.warning(f"Failed to find fallback job for invoice: {e}")
-            
+
         return {
             "status": "failed",
             "error": "No job_id provided and no pending completed jobs found for invoice generation."
@@ -1741,42 +1633,37 @@ class CustomerAgent(BaseAgent):
     async def analyze_customers(self) -> Dict:
         """Analyze customer data with AI insights"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                # Get customer statistics
-                cursor.execute("""
-                    SELECT
-                        COUNT(*) as total_customers,
-                        COUNT(CASE WHEN created_at > NOW() - INTERVAL '30 days' THEN 1 END) as new_customers,
-                        COUNT(CASE WHEN status = 'active' THEN 1 END) as active_customers
-                    FROM customers
-                """)
-                stats = cursor.fetchone()
+            # Get customer statistics
+            stats = await pool.fetchrow("""
+                SELECT
+                    COUNT(*) as total_customers,
+                    COUNT(CASE WHEN created_at > NOW() - INTERVAL '30 days' THEN 1 END) as new_customers,
+                    COUNT(CASE WHEN status = 'active' THEN 1 END) as active_customers
+                FROM customers
+            """)
 
-                # Get top customers
-                cursor.execute("""
-                    SELECT c.name, COUNT(j.id) as job_count, SUM(i.total_amount) as total_revenue
-                    FROM customers c
-                    LEFT JOIN jobs j ON c.id = j.customer_id
-                    LEFT JOIN invoices i ON j.id = i.job_id
-                    GROUP BY c.id, c.name
-                    ORDER BY total_revenue DESC NULLS LAST
-                    LIMIT 5
-                """)
-                top_customers = cursor.fetchall()
-                top_customers_list = [dict(c) for c in top_customers]
+            # Get top customers
+            top_customers = await pool.fetch("""
+                SELECT c.name, COUNT(j.id) as job_count, SUM(i.total_amount) as total_revenue
+                FROM customers c
+                LEFT JOIN jobs j ON c.id = j.customer_id
+                LEFT JOIN invoices i ON j.id = i.job_id
+                GROUP BY c.id, c.name
+                ORDER BY total_revenue DESC NULLS LAST
+                LIMIT 5
+            """)
+            top_customers_list = [dict(c) for c in top_customers]
 
-                cursor.close()
-            
             insights = "Insights not available."
             if USE_REAL_AI:
                 try:
                     prompt = f"""
                     Analyze these customer statistics for a roofing business.
-                    Stats: {json.dumps(dict(stats), default=str)}
+                    Stats: {json.dumps(dict(stats) if stats else {}, default=str)}
                     Top Customers: {json.dumps(top_customers_list, default=str)}
-                    
+
                     Provide 3 key strategic insights/recommendations.
                     """
                     insights = await ai_core.generate(prompt, model="gpt-4")
@@ -1785,7 +1672,7 @@ class CustomerAgent(BaseAgent):
 
             return {
                 "status": "completed",
-                "statistics": dict(stats),
+                "statistics": dict(stats) if stats else {},
                 "top_customers": top_customers_list,
                 "ai_insights": insights
             }
@@ -1795,44 +1682,39 @@ class CustomerAgent(BaseAgent):
     async def segment_customers(self) -> Dict:
         """Segment customers into categories with AI recommendations"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                # Segment by activity
-                cursor.execute("""
-                    SELECT
-                        CASE
-                            WHEN job_count > 10 THEN 'VIP'
-                            WHEN job_count > 5 THEN 'Regular'
-                            WHEN job_count > 0 THEN 'Occasional'
-                            ELSE 'Prospect'
-                        END as segment,
-                        COUNT(*) as count
-                    FROM (
-                        SELECT c.id, COUNT(j.id) as job_count
-                        FROM customers c
-                        LEFT JOIN jobs j ON c.id = j.customer_id
-                        GROUP BY c.id
-                    ) customer_jobs
-                    GROUP BY segment
-                """)
-                segments = cursor.fetchall()
-                segments_list = [dict(s) for s in segments]
+            # Segment by activity
+            segments = await pool.fetch("""
+                SELECT
+                    CASE
+                        WHEN job_count > 10 THEN 'VIP'
+                        WHEN job_count > 5 THEN 'Regular'
+                        WHEN job_count > 0 THEN 'Occasional'
+                        ELSE 'Prospect'
+                    END as segment,
+                    COUNT(*) as count
+                FROM (
+                    SELECT c.id, COUNT(j.id) as job_count
+                    FROM customers c
+                    LEFT JOIN jobs j ON c.id = j.customer_id
+                    GROUP BY c.id
+                ) customer_jobs
+                GROUP BY segment
+            """)
+            segments_list = [dict(s) for s in segments]
 
-                cursor.close()
-            
             recommendations = {}
             if USE_REAL_AI:
                 try:
                     prompt = f"""
                     Suggest a 1-sentence marketing action for each of these customer segments:
                     {json.dumps(segments_list, default=str)}
-                    
+
                     Return JSON where keys are segment names and values are actions.
                     """
                     response = await ai_core.generate(prompt, model="gpt-3.5-turbo")
-                    
-                    import re
+
                     json_match = re.search(r'\{.*\}', response, re.DOTALL)
                     if json_match:
                         recommendations = json.loads(json_match.group())
@@ -1851,25 +1733,24 @@ class CustomerAgent(BaseAgent):
         """Execute customer outreach campaign with AI-generated content"""
         segment = task.get('segment', 'all')
         context = task.get('context', 'general update')
-        
+
         try:
             prompt = f"""
             Write a professional customer outreach email for a roofing company.
             Target Segment: {segment}
             Context/Goal: {context}
-            
+
             Return a JSON object with:
             - subject: Email subject line
             - body: Email body text (can include placeholders like {{name}})
             - tone: Description of the tone used
             """
-            
+
             response = await ai_core.generate(prompt, model="gpt-4", temperature=0.7)
-            
-            import re
+
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             message_data = json.loads(json_match.group()) if json_match else {"body": response}
-            
+
             return {
                 "status": "completed",
                 "action": "outreach",
@@ -1908,79 +1789,70 @@ class InvoicingAgent(BaseAgent):
             return {"status": "error", "message": "job_id required"}
 
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                # Get job details
-                cursor.execute("""
-                    SELECT j.*, c.name as customer_name, c.email
-                    FROM jobs j
-                    JOIN customers c ON j.customer_id = c.id
-                    WHERE j.id = %s
-                """, (job_id,))
+            # Get job details
+            job = await pool.fetchrow("""
+                SELECT j.*, c.name as customer_name, c.email
+                FROM jobs j
+                JOIN customers c ON j.customer_id = c.id
+                WHERE j.id = $1
+            """, job_id)
 
-                job = cursor.fetchone()
-                if not job:
-                    return {"status": "error", "message": "Job not found"}
+            if not job:
+                return {"status": "error", "message": "Job not found"}
 
-                # Generate AI note for invoice
-                ai_note = ""
-                if USE_REAL_AI:
-                    try:
-                        prompt = f"""
-                        Write a short, professional 'Thank You' note for an invoice.
-                        Customer: {job['customer_name']}
-                        Job Description: {job.get('description', 'Roofing Services')}
+            # Generate AI note for invoice
+            ai_note = ""
+            if USE_REAL_AI:
+                try:
+                    prompt = f"""
+                    Write a short, professional 'Thank You' note for an invoice.
+                    Customer: {job['customer_name']}
+                    Job Description: {job.get('description', 'Roofing Services')}
 
-                        Keep it warm but professional. Max 2 sentences.
-                        """
-                        ai_note = await ai_core.generate(prompt, model="gpt-3.5-turbo", temperature=0.7)
-                    except Exception as e:
-                        self.logger.warning(f"AI note generation failed: {e}")
+                    Keep it warm but professional. Max 2 sentences.
+                    """
+                    ai_note = await ai_core.generate(prompt, model="gpt-3.5-turbo", temperature=0.7)
+                except Exception as e:
+                    self.logger.warning(f"AI note generation failed: {e}")
 
-                # Create invoice
-                invoice_number = f"INV-{datetime.now().strftime('%Y%m%d')}-{job_id[:8]}"
-                invoice_title = f"Invoice for {job.get('description', 'Roofing Services')[:180]}"
+            # Create invoice
+            invoice_number = f"INV-{datetime.now().strftime('%Y%m%d')}-{str(job_id)[:8]}"
+            invoice_title = f"Invoice for {job.get('description', 'Roofing Services')[:180]}"
 
-                cursor.execute("""
-                    INSERT INTO invoices (invoice_number, title, job_id, customer_id, total_amount, status, notes, created_at)
-                    VALUES (%s, %s, %s, %s, %s, 'pending', %s, NOW())
-                    RETURNING id
-                """, (invoice_number, invoice_title, job_id, job['customer_id'], task.get('amount', 1000), ai_note))
+            invoice_row = await pool.fetchrow("""
+                INSERT INTO invoices (invoice_number, title, job_id, customer_id, total_amount, status, notes, created_at)
+                VALUES ($1, $2, $3, $4, $5, 'pending', $6, NOW())
+                RETURNING id
+            """, invoice_number, invoice_title, job_id, job['customer_id'], task.get('amount', 1000), ai_note)
 
-                invoice_id = cursor.fetchone()['id']
+            invoice_id = invoice_row['id'] if invoice_row else None
 
-                conn.commit()
-                cursor.close()
-
-                return {
-                    "status": "completed",
-                    "invoice_id": invoice_id,
-                    "invoice_number": invoice_number,
-                    "customer": job['customer_name'],
-                    "ai_note": ai_note
-                }
+            return {
+                "status": "completed",
+                "invoice_id": invoice_id,
+                "invoice_number": invoice_number,
+                "customer": job['customer_name'],
+                "ai_note": ai_note
+            }
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     async def send_invoice(self, task: Dict) -> Dict:
         """Send invoice to customer with AI-generated email"""
         invoice_id = task.get('invoice_id')
-        
+
         email_content = None
         if USE_REAL_AI:
             try:
-                # Fetch invoice details for context (simplified here)
-                with self.get_db_connection() as conn:
-                    cursor = conn.cursor(cursor_factory=RealDictCursor)
-                    cursor.execute("""
-                        SELECT i.*, c.name as customer_name, c.email
-                        FROM invoices i
-                        JOIN customers c ON i.customer_id = c.id
-                        WHERE i.id = %s
-                    """, (invoice_id,))
-                    invoice = cursor.fetchone()
-                    cursor.close()
+                pool = get_pool()
+                invoice = await pool.fetchrow("""
+                    SELECT i.*, c.name as customer_name, c.email
+                    FROM invoices i
+                    JOIN customers c ON i.customer_id = c.id
+                    WHERE i.id = $1
+                """, invoice_id)
 
                 if invoice:
                     prompt = f"""
@@ -1988,12 +1860,11 @@ class InvoicingAgent(BaseAgent):
                     Customer: {invoice['customer_name']}
                     Invoice Amount: ${invoice['total_amount']}
                     Invoice Number: {invoice['invoice_number']}
-                    
+
                     Return JSON with 'subject' and 'body'.
                     """
                     response = await ai_core.generate(prompt, model="gpt-3.5-turbo")
-                    
-                    import re
+
                     json_match = re.search(r'\{.*\}', response, re.DOTALL)
                     if json_match:
                         email_content = json.loads(json_match.group())
@@ -2011,31 +1882,27 @@ class InvoicingAgent(BaseAgent):
     async def invoice_report(self) -> Dict:
         """Generate invoice report with AI summary"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                cursor.execute("""
-                    SELECT
-                        COUNT(*) as total_invoices,
-                        COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid,
-                        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
-                        SUM(total_amount) as total_amount
-                    FROM invoices
-                    WHERE created_at > NOW() - INTERVAL '30 days'
-                """)
+            report = await pool.fetchrow("""
+                SELECT
+                    COUNT(*) as total_invoices,
+                    COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid,
+                    COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
+                    SUM(total_amount) as total_amount
+                FROM invoices
+                WHERE created_at > NOW() - INTERVAL '30 days'
+            """)
 
-                report = cursor.fetchone()
-                report_dict = dict(report)
+            report_dict = dict(report) if report else {}
 
-                cursor.close()
-            
             summary = "Financial summary not available."
             if USE_REAL_AI:
                 try:
                     prompt = f"""
                     Summarize this monthly financial report for a roofing company executive.
                     Data: {json.dumps(report_dict, default=str)}
-                    
+
                     Provide a brief, actionable summary (2-3 sentences).
                     """
                     summary = await ai_core.generate(prompt, model="gpt-4")
@@ -2075,32 +1942,27 @@ class CustomerIntelligenceAgent(BaseAgent):
     async def analyze_churn_risk(self) -> Dict:
         """Analyze customer churn risk using REAL AI"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                # Identify at-risk customers
-                cursor.execute("""
-                    SELECT
-                        c.id,
-                        c.name,
-                        c.email,
-                        c.phone,
-                        MAX(j.created_at) as last_job_date,
-                        EXTRACT(days FROM NOW() - MAX(j.created_at)) as days_since_last_job,
-                        COUNT(j.id) as total_jobs,
-                        AVG(i.amount) as avg_invoice_amount
-                    FROM customers c
-                    LEFT JOIN jobs j ON c.id = j.customer_id
-                    LEFT JOIN invoices i ON c.id = i.customer_id
-                    GROUP BY c.id, c.name, c.email, c.phone
-                    HAVING MAX(j.created_at) < NOW() - INTERVAL '90 days'
-                    ORDER BY days_since_last_job DESC
-                    LIMIT 10
-                """)
-
-                at_risk = cursor.fetchall()
-
-                cursor.close()
+            # Identify at-risk customers
+            at_risk = await pool.fetch("""
+                SELECT
+                    c.id,
+                    c.name,
+                    c.email,
+                    c.phone,
+                    MAX(j.created_at) as last_job_date,
+                    EXTRACT(days FROM NOW() - MAX(j.created_at)) as days_since_last_job,
+                    COUNT(j.id) as total_jobs,
+                    AVG(i.amount) as avg_invoice_amount
+                FROM customers c
+                LEFT JOIN jobs j ON c.id = j.customer_id
+                LEFT JOIN invoices i ON c.id = i.customer_id
+                GROUP BY c.id, c.name, c.email, c.phone
+                HAVING MAX(j.created_at) < NOW() - INTERVAL '90 days'
+                ORDER BY days_since_last_job DESC
+                LIMIT 10
+            """)
 
             return {
                 "status": "completed",
@@ -2117,29 +1979,24 @@ class CustomerIntelligenceAgent(BaseAgent):
     async def calculate_lifetime_value(self) -> Dict:
         """Calculate customer lifetime value"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                cursor.execute("""
-                    SELECT
-                        c.id,
-                        c.name,
-                        COUNT(DISTINCT j.id) as total_jobs,
-                        SUM(i.total_amount) as total_revenue,
-                        AVG(i.total_amount) as avg_transaction,
-                        EXTRACT(days FROM NOW() - MIN(c.created_at))/365.0 as customer_age_years
-                    FROM customers c
-                    LEFT JOIN jobs j ON c.id = j.customer_id
-                    LEFT JOIN invoices i ON j.id = i.job_id
-                    GROUP BY c.id, c.name
-                    HAVING SUM(i.total_amount) > 0
-                    ORDER BY total_revenue DESC
-                    LIMIT 20
-                """)
-
-                ltv_data = cursor.fetchall()
-
-                cursor.close()
+            ltv_data = await pool.fetch("""
+                SELECT
+                    c.id,
+                    c.name,
+                    COUNT(DISTINCT j.id) as total_jobs,
+                    SUM(i.total_amount) as total_revenue,
+                    AVG(i.total_amount) as avg_transaction,
+                    EXTRACT(days FROM NOW() - MIN(c.created_at))/365.0 as customer_age_years
+                FROM customers c
+                LEFT JOIN jobs j ON c.id = j.customer_id
+                LEFT JOIN invoices i ON j.id = i.job_id
+                GROUP BY c.id, c.name
+                HAVING SUM(i.total_amount) > 0
+                ORDER BY total_revenue DESC
+                LIMIT 20
+            """)
 
             return {
                 "status": "completed",
@@ -2151,26 +2008,23 @@ class CustomerIntelligenceAgent(BaseAgent):
     async def advanced_segmentation(self) -> Dict:
         """Advanced customer segmentation using Real AI"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                # Fetch sample of customers with their metrics
-                cursor.execute("""
-                    SELECT c.id, c.name, COUNT(j.id) as jobs, SUM(i.total_amount) as revenue
-                    FROM customers c
-                    LEFT JOIN jobs j ON c.id = j.customer_id
-                    LEFT JOIN invoices i ON j.id = i.job_id
-                    GROUP BY c.id, c.name
-                    LIMIT 50
-                """)
-                customers = cursor.fetchall()
-                cursor.close()
+            # Fetch sample of customers with their metrics
+            customers = await pool.fetch("""
+                SELECT c.id, c.name, COUNT(j.id) as jobs, SUM(i.total_amount) as revenue
+                FROM customers c
+                LEFT JOIN jobs j ON c.id = j.customer_id
+                LEFT JOIN invoices i ON j.id = i.job_id
+                GROUP BY c.id, c.name
+                LIMIT 50
+            """)
 
             if not customers:
                 return {"status": "completed", "segments": {}}
 
             customers_data = [dict(c) for c in customers]
-            
+
             prompt = f"""
             Analyze these customer profiles and group them into meaningful segments (e.g., VIP, At-Risk, New, Steady).
             Data: {json.dumps(customers_data, default=str)}
@@ -2182,15 +2036,14 @@ class CustomerIntelligenceAgent(BaseAgent):
             """
 
             response = await ai_core.generate(prompt, model="gpt-4", temperature=0.2)
-            
-            import re
+
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
                 return {
-                    "status": "completed", 
+                    "status": "completed",
                     "segments": json.loads(json_match.group())
                 }
-            
+
             return {"status": "error", "message": "Could not parse AI response"}
 
         except Exception as e:
@@ -2224,24 +2077,19 @@ class PredictiveAnalyzerAgent(BaseAgent):
     async def predict_revenue(self) -> Dict:
         """Predict future revenue"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                # Get historical revenue data
-                cursor.execute("""
-                    SELECT
-                        DATE_TRUNC('month', created_at) as month,
-                        SUM(total_amount) as revenue
-                    FROM invoices
-                    WHERE status = 'paid'
-                    GROUP BY month
-                    ORDER BY month DESC
-                    LIMIT 12
-                """)
-
-                historical = cursor.fetchall()
-
-                cursor.close()
+            # Get historical revenue data
+            historical = await pool.fetch("""
+                SELECT
+                    DATE_TRUNC('month', created_at) as month,
+                    SUM(total_amount) as revenue
+                FROM invoices
+                WHERE status = 'paid'
+                GROUP BY month
+                ORDER BY month DESC
+                LIMIT 12
+            """)
 
             # Simple projection (would use ML in production)
             if historical:
@@ -2254,7 +2102,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
                         "month": i,
                         "predicted_revenue": avg_monthly * (growth_rate ** i)
                     })
-                
+
                 # Enhance with AI insights if available
                 if USE_REAL_AI:
                     try:
@@ -2262,14 +2110,13 @@ class PredictiveAnalyzerAgent(BaseAgent):
                         Analyze this revenue data and simple projection:
                         Historical: {json.dumps([dict(h) for h in historical], default=str)}
                         Simple Projection: {json.dumps(predictions, default=str)}
-                        
-                        Provide a refined revenue forecast for the next 3 months taking into account 
+
+                        Provide a refined revenue forecast for the next 3 months taking into account
                         typical seasonality for a service business.
                         Return JSON with 'refined_predictions' (list of objects with month_index, amount, reasoning).
                         """
                         response = await ai_core.generate(prompt, model="gpt-4", temperature=0.3)
-                        
-                        import re
+
                         json_match = re.search(r'\{.*\}', response, re.DOTALL)
                         if json_match:
                             data = json.loads(json_match.group())
@@ -2292,12 +2139,9 @@ class PredictiveAnalyzerAgent(BaseAgent):
     async def predict_demand(self) -> Dict:
         """Predict service demand using Real AI"""
         try:
-            # Get some context if available, otherwise ask AI for general market forecast
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute("SELECT COUNT(*) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days'")
-                recent_jobs = cursor.fetchone()['count']
-                cursor.close()
+            pool = get_pool()
+            result = await pool.fetchrow("SELECT COUNT(*) as count FROM jobs WHERE created_at > NOW() - INTERVAL '30 days'")
+            recent_jobs = result['count'] if result else 0
 
             prompt = f"""
             Predict roofing service demand for the next quarter based on:
@@ -2312,12 +2156,11 @@ class PredictiveAnalyzerAgent(BaseAgent):
             """
 
             response = await ai_core.generate(prompt, model="gpt-4", temperature=0.3)
-            
-            import re
+
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group())
-            
+
             return {"status": "error", "message": "Could not parse AI response"}
 
         except Exception as e:
@@ -2326,23 +2169,18 @@ class PredictiveAnalyzerAgent(BaseAgent):
     async def analyze_seasonality(self) -> Dict:
         """Analyze seasonal patterns"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                cursor.execute("""
-                    SELECT
-                        EXTRACT(month FROM created_at) as month,
-                        COUNT(*) as job_count,
-                        AVG(total_amount) as avg_value
-                    FROM jobs j
-                    LEFT JOIN invoices i ON j.id = i.job_id
-                    GROUP BY month
-                    ORDER BY month
-                """)
-
-                seasonal_data = cursor.fetchall()
-
-                cursor.close()
+            seasonal_data = await pool.fetch("""
+                SELECT
+                    EXTRACT(month FROM created_at) as month,
+                    COUNT(*) as job_count,
+                    AVG(total_amount) as avg_value
+                FROM jobs j
+                LEFT JOIN invoices i ON j.id = i.job_id
+                GROUP BY month
+                ORDER BY month
+            """)
 
             return {
                 "status": "completed",
@@ -2371,15 +2209,19 @@ class ContractGeneratorAgent(BaseAgent):
         customer = None
 
         try:
+            pool = get_pool()
+
             if customer_id:
-                with self.get_db_connection() as conn:
-                    cursor = conn.cursor(cursor_factory=RealDictCursor)
-                    if tenant_id:
-                        cursor.execute("SELECT * FROM customers WHERE id = %s AND tenant_id = %s", (customer_id, tenant_id))
-                    else:
-                        cursor.execute("SELECT * FROM customers WHERE id = %s", (customer_id,))
-                    customer = cursor.fetchone()
-                    cursor.close()
+                if tenant_id:
+                    customer = await pool.fetchrow(
+                        "SELECT * FROM customers WHERE id = $1 AND tenant_id = $2",
+                        customer_id, tenant_id
+                    )
+                else:
+                    customer = await pool.fetchrow(
+                        "SELECT * FROM customers WHERE id = $1",
+                        customer_id
+                    )
 
                 if not customer:
                     return {"status": "error", "message": "Customer not found"}
@@ -2387,14 +2229,10 @@ class ContractGeneratorAgent(BaseAgent):
                 customer_email = customer_data.get('email') if isinstance(customer_data, dict) else None
 
                 if customer_email and tenant_id:
-                    with self.get_db_connection() as conn:
-                        cursor = conn.cursor(cursor_factory=RealDictCursor)
-                        cursor.execute(
-                            "SELECT * FROM customers WHERE lower(email) = lower(%s) AND tenant_id = %s ORDER BY created_at DESC LIMIT 1",
-                            (customer_email, tenant_id),
-                        )
-                        customer = cursor.fetchone()
-                        cursor.close()
+                    customer = await pool.fetchrow(
+                        "SELECT * FROM customers WHERE lower(email) = lower($1) AND tenant_id = $2 ORDER BY created_at DESC LIMIT 1",
+                        customer_email, tenant_id
+                    )
 
                 if not customer:
                     if not isinstance(customer_data, dict) or not customer_data:
@@ -2603,22 +2441,18 @@ class ReportingAgent(BaseAgent):
     async def executive_report(self) -> Dict:
         """Generate executive report with AI summary"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                # Gather key metrics
-                cursor.execute("""
-                    SELECT
-                        (SELECT COUNT(*) FROM customers) as total_customers,
-                        (SELECT COUNT(*) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days') as recent_jobs,
-                        (SELECT SUM(total_amount) FROM invoices WHERE created_at > NOW() - INTERVAL '30 days') as monthly_revenue,
-                        (SELECT COUNT(*) FROM ai_agents WHERE status = 'active') as active_agents
-                """)
+            # Gather key metrics
+            metrics = await pool.fetchrow("""
+                SELECT
+                    (SELECT COUNT(*) FROM customers) as total_customers,
+                    (SELECT COUNT(*) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days') as recent_jobs,
+                    (SELECT SUM(total_amount) FROM invoices WHERE created_at > NOW() - INTERVAL '30 days') as monthly_revenue,
+                    (SELECT COUNT(*) FROM ai_agents WHERE status = 'active') as active_agents
+            """)
 
-                metrics = cursor.fetchone()
-                metrics_dict = dict(metrics)
-
-                cursor.close()
+            metrics_dict = dict(metrics) if metrics else {}
 
             summary_text = ""
             if USE_REAL_AI:
@@ -2626,7 +2460,7 @@ class ReportingAgent(BaseAgent):
                     prompt = f"""
                     Write a concise executive summary paragraph for this business performance data:
                     {json.dumps(metrics_dict, default=str)}
-                    
+
                     Focus on growth and activity.
                     """
                     summary_text = await ai_core.generate(prompt, model="gpt-4")
@@ -2641,10 +2475,10 @@ class ReportingAgent(BaseAgent):
                     "metrics": metrics_dict,
                     "summary_text": summary_text,
                     "insights": [
-                        f"Total customer base: {metrics['total_customers']}",
-                        f"Jobs this month: {metrics['recent_jobs']}",
-                        f"Monthly revenue: ${metrics['monthly_revenue'] or 0:,.2f}",
-                        f"AI agents operational: {metrics['active_agents']}"
+                        f"Total customer base: {metrics_dict.get('total_customers', 0)}",
+                        f"Jobs this month: {metrics_dict.get('recent_jobs', 0)}",
+                        f"Monthly revenue: ${metrics_dict.get('monthly_revenue') or 0:,.2f}",
+                        f"AI agents operational: {metrics_dict.get('active_agents', 0)}"
                     ]
                 }
             }
@@ -2669,7 +2503,7 @@ class ReportingAgent(BaseAgent):
         """Generate financial report with AI commentary"""
         invoice_agent = InvoicingAgent()
         invoice_report = await invoice_agent.invoice_report()
-        
+
         commentary = ""
         if USE_REAL_AI:
             try:
@@ -2677,7 +2511,7 @@ class ReportingAgent(BaseAgent):
                 prompt = f"""
                 Provide financial commentary on this invoice data:
                 {json.dumps(data, default=str)}
-                
+
                 Highlight collection efficiency and revenue trends.
                 """
                 commentary = await ai_core.generate(prompt, model="gpt-4")
@@ -2734,32 +2568,28 @@ class SelfBuildingAgent(BaseAgent):
         capabilities = task.get('capabilities', [])
 
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                # Check if agent exists
-                cursor.execute("SELECT id FROM ai_agents WHERE name = %s", (agent_name,))
-                if cursor.fetchone():
-                    return {"status": "error", "message": f"Agent {agent_name} already exists"}
+            # Check if agent exists
+            existing = await pool.fetchrow("SELECT id FROM ai_agents WHERE name = $1", agent_name)
+            if existing:
+                return {"status": "error", "message": f"Agent {agent_name} already exists"}
 
-                # Create new agent
-                cursor.execute("""
-                    INSERT INTO ai_agents (name, type, status, capabilities, created_at)
-                    VALUES (%s, %s, 'active', %s, NOW())
-                    RETURNING id
-                """, (agent_name, agent_type, json.dumps(capabilities)))
+            # Create new agent
+            new_agent = await pool.fetchrow("""
+                INSERT INTO ai_agents (name, type, status, capabilities, created_at)
+                VALUES ($1, $2, 'active', $3, NOW())
+                RETURNING id
+            """, agent_name, agent_type, json.dumps(capabilities))
 
-                agent_id = cursor.fetchone()['id']
+            agent_id = new_agent['id'] if new_agent else None
 
-                conn.commit()
-                cursor.close()
-
-                return {
-                    "status": "completed",
-                    "agent_id": agent_id,
-                    "agent_name": agent_name,
-                    "message": f"Agent {agent_name} created successfully"
-                }
+            return {
+                "status": "completed",
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "message": f"Agent {agent_name} created successfully"
+            }
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -2776,25 +2606,20 @@ class SelfBuildingAgent(BaseAgent):
     async def optimize_agents(self) -> Dict:
         """Optimize agent performance"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            pool = get_pool()
 
-                # Analyze agent performance
-                cursor.execute("""
-                    SELECT
-                        a.name,
-                        COUNT(ae.id) as executions,
-                        AVG(EXTRACT(EPOCH FROM (ae.completed_at - ae.started_at))) as avg_execution_time
-                    FROM ai_agents a
-                    LEFT JOIN agent_executions ae ON a.id = ae.agent_id
-                    WHERE ae.completed_at > NOW() - INTERVAL '7 days'
-                    GROUP BY a.id, a.name
-                    ORDER BY executions DESC
-                """)
-
-                performance = cursor.fetchall()
-
-                cursor.close()
+            # Analyze agent performance
+            performance = await pool.fetch("""
+                SELECT
+                    a.name,
+                    COUNT(ae.id) as executions,
+                    AVG(EXTRACT(EPOCH FROM (ae.completed_at - ae.started_at))) as avg_execution_time
+                FROM ai_agents a
+                LEFT JOIN agent_executions ae ON a.id = ae.agent_id
+                WHERE ae.completed_at > NOW() - INTERVAL '7 days'
+                GROUP BY a.id, a.name
+                ORDER BY executions DESC
+            """)
 
             # Generate optimization recommendations
             recommendations = []
@@ -2807,7 +2632,7 @@ class SelfBuildingAgent(BaseAgent):
                     prompt = f"""
                     Analyze this agent performance data and suggest optimizations:
                     {json.dumps([dict(p) for p in performance], default=str)}
-                    
+
                     Focus on latency reduction and resource usage.
                     Provide 3 specific technical recommendations.
                     """
@@ -2837,7 +2662,7 @@ class SystemImprovementAgentAdapter(BaseAgent):
             from system_improvement_agent import SystemImprovementAgent
             agent = SystemImprovementAgent(tenant_id)
             action = task.get("action")
-            
+
             if action == "suggest_optimizations":
                 return await agent.suggest_optimizations(task.get("component", "system"))
             elif action == "analyze_error_patterns":
@@ -2857,7 +2682,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
             from devops_optimization_agent import DevOpsOptimizationAgent
             agent = DevOpsOptimizationAgent(tenant_id)
             action = task.get("action")
-            
+
             if action == "analyze_pipeline":
                 return await agent.analyze_pipeline(task.get("pipeline_id", "unknown"))
             elif action == "optimize_resources":
@@ -2879,7 +2704,7 @@ class CodeQualityAgentAdapter(BaseAgent):
             from code_quality_agent import CodeQualityAgent
             agent = CodeQualityAgent(tenant_id)
             action = task.get("action")
-            
+
             if action == "review_pr":
                 return await agent.review_pr(task.get("pr_details", {}))
             else:
@@ -2897,7 +2722,7 @@ class CustomerSuccessAgentAdapter(BaseAgent):
             from customer_success_agent import CustomerSuccessAgent
             agent = CustomerSuccessAgent(tenant_id)
             action = task.get("action")
-            
+
             if action == "generate_onboarding_plan":
                 return await agent.generate_onboarding_plan(
                     task.get("customer_id", "unknown"),
@@ -2920,7 +2745,7 @@ class CompetitiveIntelligenceAgentAdapter(BaseAgent):
             from competitive_intelligence_agent import CompetitiveIntelligenceAgent
             agent = CompetitiveIntelligenceAgent(tenant_id)
             action = task.get("action")
-            
+
             if action == "analyze_pricing":
                 return await agent.analyze_pricing(task.get("market_data", {}))
             elif action == "analyze_market_trends":
@@ -2943,7 +2768,7 @@ class VisionAlignmentAgentAdapter(BaseAgent):
             from vision_alignment_agent import VisionAlignmentAgent
             agent = VisionAlignmentAgent(tenant_id)
             action = task.get("action")
-            
+
             if action == "check_goal_progress":
                 return await agent.check_goal_progress(task.get("goals", []))
             elif action == "generate_vision_report":
