@@ -2,6 +2,8 @@
 """
 AI Training Pipeline from Customer Interactions
 Learns and improves from every customer touchpoint
+
+Converted to async asyncpg for non-blocking database operations.
 """
 
 import os
@@ -12,23 +14,15 @@ import asyncio
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-import psycopg2
-from psycopg2.extras import RealDictCursor, Json
 import numpy as np
 from openai import OpenAI
+
+# Import async database pool
+from database.async_connection import get_pool
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD", "<DB_PASSWORD_REDACTED>"),
-    "port": int(os.getenv("DB_PORT", 5432))
-}
 
 # OpenAI configuration - lazy initialization
 openai_client = None
@@ -94,21 +88,22 @@ class AITrainingPipeline:
 
     def __init__(self):
         """Initialize the training pipeline"""
-        self.conn = None
         self.learning_rate = 0.01
         self.batch_size = 32
         self.min_samples_for_training = 100
         self.confidence_threshold = 0.75
-        self._init_database()
+        self._initialized = False
 
-    def _init_database(self):
-        """Initialize database tables"""
+    async def _init_database(self):
+        """Initialize database tables asynchronously"""
+        if self._initialized:
+            return
+
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            pool = get_pool()
 
             # Create tables if they don't exist
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_customer_interactions (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     customer_id VARCHAR(255),
@@ -125,7 +120,7 @@ class AITrainingPipeline:
                 )
             """)
 
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_training_data (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     interaction_id UUID,
@@ -139,7 +134,7 @@ class AITrainingPipeline:
                 )
             """)
 
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_trained_models (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     model_type VARCHAR(50),
@@ -158,7 +153,7 @@ class AITrainingPipeline:
                 )
             """)
 
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_learning_insights (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     insight_type VARCHAR(50),
@@ -173,7 +168,7 @@ class AITrainingPipeline:
                 )
             """)
 
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_training_jobs (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     job_type VARCHAR(50),
@@ -188,7 +183,7 @@ class AITrainingPipeline:
                 )
             """)
 
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_feedback_loop (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     model_id UUID,
@@ -202,7 +197,7 @@ class AITrainingPipeline:
             """)
 
             # Outcome patterns table
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_outcome_patterns (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     pattern_type VARCHAR(50),
@@ -216,7 +211,7 @@ class AITrainingPipeline:
             """)
 
             # Learning history table
-            cursor.execute("""
+            await pool.execute("""
                 CREATE TABLE IF NOT EXISTS ai_learning_history (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     model_type VARCHAR(50),
@@ -229,17 +224,16 @@ class AITrainingPipeline:
             """)
 
             # Create indexes
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_interactions_customer ON ai_customer_interactions(customer_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_interactions_type ON ai_customer_interactions(interaction_type)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_training_category ON ai_training_data(category)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_models_type ON ai_trained_models(model_type)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_insights_type ON ai_learning_insights(insight_type)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_outcome_patterns ON ai_outcome_patterns(pattern_type)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_learning_history ON ai_learning_history(model_type)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_interactions_customer ON ai_customer_interactions(customer_id)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_interactions_type ON ai_customer_interactions(interaction_type)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_training_category ON ai_training_data(category)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_models_type ON ai_trained_models(model_type)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_insights_type ON ai_learning_insights(insight_type)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_outcome_patterns ON ai_outcome_patterns(pattern_type)")
+            await pool.execute("CREATE INDEX IF NOT EXISTS idx_learning_history ON ai_learning_history(model_type)")
 
-            conn.commit()
-            cursor.close()
-            conn.close()
+            self._initialized = True
+            logger.info("AI Training Pipeline database tables initialized")
 
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
@@ -256,53 +250,48 @@ class AITrainingPipeline:
     ) -> str:
         """Capture a customer interaction for training"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            await self._init_database()
+            pool = get_pool()
 
             # Analyze the interaction
             analysis = await self._analyze_interaction(content, context)
 
             interaction_id = str(uuid.uuid4())
-            cursor.execute("""
+            await pool.execute("""
                 INSERT INTO ai_customer_interactions
                 (id, customer_id, interaction_type, channel, content, context,
                  sentiment_score, intent, outcome, value, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-            """, (
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            """,
                 interaction_id,
                 customer_id,
                 interaction_type.value,
                 channel,
                 content,
-                Json(context or {}),
+                json.dumps(context or {}),
                 analysis.get('sentiment_score'),
                 analysis.get('intent'),
                 outcome,
                 value,
-                Json(analysis.get('metadata', {}))
-            ))
+                json.dumps(analysis.get('metadata', {}))
+            )
 
             # Extract features for training
             features = await self._extract_features(content, context, analysis)
 
             # Store training data
             for category, feature_data in features.items():
-                cursor.execute("""
+                await pool.execute("""
                     INSERT INTO ai_training_data
                     (interaction_id, feature_vector, label, category, confidence)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (
+                    VALUES ($1, $2, $3, $4, $5)
+                """,
                     interaction_id,
-                    Json(feature_data['features']),
+                    json.dumps(feature_data['features']),
                     feature_data['label'],
                     category,
                     feature_data['confidence']
-                ))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
+                )
 
             # Trigger learning if enough data
             await self._check_and_trigger_training()
@@ -423,45 +412,39 @@ class AITrainingPipeline:
     async def _check_and_trigger_training(self):
         """Check if we have enough data to trigger training"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            await self._init_database()
+            pool = get_pool()
 
             # Check untrained data count
-            cursor.execute("""
+            categories_ready = await pool.fetch("""
                 SELECT category, COUNT(*) as count
                 FROM ai_training_data
                 WHERE used_for_training = FALSE
                 GROUP BY category
-                HAVING COUNT(*) >= %s
-            """, (self.min_samples_for_training,))
-
-            categories_ready = cursor.fetchall()
+                HAVING COUNT(*) >= $1
+            """, self.min_samples_for_training)
 
             for category_row in categories_ready:
-                category = category_row[0]
-                count = category_row[1]
+                category = category_row['category']
+                count = category_row['count']
 
                 # Queue training job
-                cursor.execute("""
+                await pool.execute("""
                     INSERT INTO ai_training_jobs
                     (job_type, model_type, status, parameters)
-                    VALUES (%s, %s, %s, %s)
-                """, (
+                    VALUES ($1, $2, $3, $4)
+                """,
                     'batch_training',
                     category,
                     'queued',
-                    Json({
+                    json.dumps({
                         'sample_count': count,
                         'learning_rate': self.learning_rate,
                         'batch_size': self.batch_size
                     })
-                ))
+                )
 
                 logger.info(f"Queued training job for {category} with {count} samples")
-
-            conn.commit()
-            cursor.close()
-            conn.close()
 
         except Exception as e:
             logger.error(f"Failed to check training triggers: {e}")
@@ -469,20 +452,18 @@ class AITrainingPipeline:
     async def train_model(self, model_type: ModelType, force: bool = False) -> Dict:
         """Train a specific model"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            await self._init_database()
+            pool = get_pool()
 
             # Get training data
-            cursor.execute("""
+            training_data = await pool.fetch("""
                 SELECT feature_vector, label
                 FROM ai_training_data
-                WHERE category = %s
+                WHERE category = $1
                   AND used_for_training = FALSE
                   AND validated = TRUE
                 LIMIT 10000
-            """, (model_type.value,))
-
-            training_data = cursor.fetchall()
+            """, model_type.value)
 
             if len(training_data) < self.min_samples_for_training and not force:
                 return {
@@ -492,22 +473,21 @@ class AITrainingPipeline:
                 }
 
             # Prepare data for training
-            X = [row[0] for row in training_data]
-            y = [row[1] for row in training_data]
+            X = [row['feature_vector'] for row in training_data]
+            y = [row['label'] for row in training_data]
 
             # Train model (simplified - would use real ML libraries)
             model_data, metrics = await self._train_sklearn_model(X, y, model_type)
 
             # Store trained model
             model_id = str(uuid.uuid4())
-            cursor.execute("""
+            await pool.execute("""
                 INSERT INTO ai_trained_models
                 (id, model_type, model_version, training_data_count,
                  accuracy, precision_score, recall_score, f1_score,
                  parameters, model_data, status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-            """, (
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            """,
                 model_id,
                 model_type.value,
                 f"v1.{datetime.now().strftime('%Y%m%d')}",
@@ -516,22 +496,18 @@ class AITrainingPipeline:
                 metrics.get('precision', 0),
                 metrics.get('recall', 0),
                 metrics.get('f1', 0),
-                Json(metrics.get('parameters', {})),
+                json.dumps(metrics.get('parameters', {})),
                 model_data,
                 'completed'
-            ))
+            )
 
             # Mark data as used for training
-            cursor.execute("""
+            await pool.execute("""
                 UPDATE ai_training_data
                 SET used_for_training = TRUE
-                WHERE category = %s
+                WHERE category = $1
                   AND used_for_training = FALSE
-            """, (model_type.value,))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
+            """, model_type.value)
 
             return {
                 'status': 'success',
@@ -603,11 +579,11 @@ class AITrainingPipeline:
                 }
             }
 
-            logger.info(f"✅ Trained {model_type.value} model with accuracy: {metrics['accuracy']:.3f}")
+            logger.info(f"Trained {model_type.value} model with accuracy: {metrics['accuracy']:.3f}")
             return model_bytes, metrics
 
         except Exception as e:
-            logger.error(f"❌ Model training failed: {e}")
+            logger.error(f"Model training failed: {e}")
             # Return minimal valid model on error
             import pickle
             fallback_model = {'type': model_type.value, 'error': str(e), 'trained_at': datetime.now(timezone.utc).isoformat()}
@@ -616,13 +592,13 @@ class AITrainingPipeline:
     async def generate_insights(self) -> List[Dict]:
         """Generate insights from interactions and training"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            await self._init_database()
+            pool = get_pool()
 
             insights = []
 
             # Sentiment trends
-            cursor.execute("""
+            sentiment_data = await pool.fetch("""
                 SELECT
                     DATE(created_at) as date,
                     AVG(sentiment_score) as avg_sentiment,
@@ -633,10 +609,9 @@ class AITrainingPipeline:
                 ORDER BY date DESC
             """)
 
-            sentiment_data = cursor.fetchall()
             if sentiment_data:
-                recent_sentiment = np.mean([row[1] for row in sentiment_data[:7] if row[1]])
-                older_sentiment = np.mean([row[1] for row in sentiment_data[7:14] if row[1]])
+                recent_sentiment = np.mean([row['avg_sentiment'] for row in sentiment_data[:7] if row['avg_sentiment']])
+                older_sentiment = np.mean([row['avg_sentiment'] for row in sentiment_data[7:14] if row['avg_sentiment']])
 
                 if recent_sentiment and older_sentiment:
                     sentiment_change = (recent_sentiment - older_sentiment) / older_sentiment * 100
@@ -654,7 +629,7 @@ class AITrainingPipeline:
                     })
 
             # Common intents
-            cursor.execute("""
+            top_intents = await pool.fetch("""
                 SELECT intent, COUNT(*) as count
                 FROM ai_customer_interactions
                 WHERE intent IS NOT NULL
@@ -664,22 +639,21 @@ class AITrainingPipeline:
                 LIMIT 5
             """)
 
-            top_intents = cursor.fetchall()
             if top_intents:
                 insights.append({
                     'type': 'top_intents',
                     'category': LearningCategory.INTENT.value,
-                    'insight': f"Top customer intent this week: {top_intents[0][0]} ({top_intents[0][1]} occurrences)",
+                    'insight': f"Top customer intent this week: {top_intents[0]['intent']} ({top_intents[0]['count']} occurrences)",
                     'confidence': 0.9,
                     'impact_score': 0.7,
                     'recommendations': [
-                        f"Optimize responses for '{top_intents[0][0]}' inquiries",
+                        f"Optimize responses for '{top_intents[0]['intent']}' inquiries",
                         'Create automated workflows for common intents'
                     ]
                 })
 
             # Model performance
-            cursor.execute("""
+            model_performance = await pool.fetch("""
                 SELECT
                     model_type,
                     AVG(accuracy) as avg_accuracy,
@@ -689,13 +663,12 @@ class AITrainingPipeline:
                 GROUP BY model_type
             """)
 
-            model_performance = cursor.fetchall()
             for model_row in model_performance:
-                if model_row[1] < 0.8:  # Accuracy below 80%
+                if model_row['avg_accuracy'] and model_row['avg_accuracy'] < 0.8:  # Accuracy below 80%
                     insights.append({
                         'type': 'model_performance',
                         'category': 'model_optimization',
-                        'insight': f"{model_row[0]} model accuracy is {model_row[1]*100:.1f}%, below target of 80%",
+                        'insight': f"{model_row['model_type']} model accuracy is {model_row['avg_accuracy']*100:.1f}%, below target of 80%",
                         'confidence': 0.95,
                         'impact_score': 0.8,
                         'recommendations': [
@@ -707,23 +680,19 @@ class AITrainingPipeline:
 
             # Store insights
             for insight in insights:
-                cursor.execute("""
+                await pool.execute("""
                     INSERT INTO ai_learning_insights
                     (insight_type, category, insight, confidence,
                      impact_score, recommendations)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, (
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                """,
                     insight['type'],
                     insight['category'],
                     insight['insight'],
                     insight['confidence'],
                     insight['impact_score'],
-                    Json(insight['recommendations'])
-                ))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
+                    json.dumps(insight['recommendations'])
+                )
 
             return insights
 
@@ -734,16 +703,15 @@ class AITrainingPipeline:
     async def apply_learning(self, insight_id: str) -> Dict:
         """Apply learning from an insight"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            await self._init_database()
+            pool = get_pool()
 
             # Get insight
-            cursor.execute("""
+            insight = await pool.fetchrow("""
                 SELECT * FROM ai_learning_insights
-                WHERE id = %s
-            """, (insight_id,))
+                WHERE id = $1
+            """, insight_id)
 
-            insight = cursor.fetchone()
             if not insight:
                 return {'status': 'error', 'message': 'Insight not found'}
 
@@ -751,19 +719,15 @@ class AITrainingPipeline:
             result = await self._apply_insight_actions(insight)
 
             # Mark as applied
-            cursor.execute("""
+            await pool.execute("""
                 UPDATE ai_learning_insights
                 SET applied = TRUE,
-                    metadata = metadata || %s
-                WHERE id = %s
-            """, (
-                Json({'applied_at': datetime.now(timezone.utc).isoformat(), 'result': result}),
+                    metadata = metadata || $1
+                WHERE id = $2
+            """,
+                json.dumps({'applied_at': datetime.now(timezone.utc).isoformat(), 'result': result}),
                 insight_id
-            ))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
+            )
 
             return {
                 'status': 'success',
@@ -775,9 +739,9 @@ class AITrainingPipeline:
             logger.error(f"Failed to apply learning: {e}")
             return {'status': 'error', 'message': str(e)}
 
-    async def _apply_insight_actions(self, insight: tuple) -> Dict:
+    async def _apply_insight_actions(self, insight: dict) -> Dict:
         """Apply specific actions based on insight"""
-        insight_type = insight[1]  # Assuming insight_type is at index 1
+        insight_type = insight['insight_type']
 
         actions = {}
 
@@ -803,8 +767,8 @@ class AITrainingPipeline:
     ) -> Dict:
         """Record feedback for continuous improvement"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            await self._init_database()
+            pool = get_pool()
 
             # Calculate accuracy delta
             accuracy_delta = 1.0 if prediction == actual_outcome else -1.0
@@ -819,46 +783,42 @@ class AITrainingPipeline:
                 }
 
             # Store feedback
-            cursor.execute("""
+            await pool.execute("""
                 INSERT INTO ai_feedback_loop
                 (model_id, prediction, actual_outcome, accuracy_delta,
                  feedback_type, adjustments)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (
+                VALUES ($1, $2, $3, $4, $5, $6)
+            """,
                 model_id,
                 prediction,
                 actual_outcome,
                 accuracy_delta,
                 'outcome_feedback',
-                Json(adjustments)
-            ))
+                json.dumps(adjustments)
+            )
 
             # Check if model needs retraining
-            cursor.execute("""
+            avg_accuracy_row = await pool.fetchrow("""
                 SELECT AVG(accuracy_delta) as avg_accuracy
                 FROM ai_feedback_loop
-                WHERE model_id = %s
+                WHERE model_id = $1
                   AND created_at > NOW() - INTERVAL '7 days'
-            """, (model_id,))
+            """, model_id)
 
-            avg_accuracy = cursor.fetchone()[0]
+            avg_accuracy = avg_accuracy_row['avg_accuracy'] if avg_accuracy_row else None
 
             if avg_accuracy and avg_accuracy < 0.7:
                 # Queue retraining
-                cursor.execute("""
+                await pool.execute("""
                     INSERT INTO ai_training_jobs
                     (job_type, model_type, status, parameters)
                     SELECT 'retrain', model_type, 'queued',
-                           jsonb_build_object('model_id', %s, 'reason', 'poor_performance')
+                           jsonb_build_object('model_id', $1, 'reason', 'poor_performance')
                     FROM ai_trained_models
-                    WHERE id = %s
-                """, (model_id, model_id))
+                    WHERE id = $2
+                """, model_id, model_id)
 
                 logger.info(f"Queued retraining for model {model_id} due to poor performance")
-
-            conn.commit()
-            cursor.close()
-            conn.close()
 
             return {
                 'status': 'success',
@@ -873,13 +833,13 @@ class AITrainingPipeline:
     async def detect_outcome_patterns(self) -> List[Dict]:
         """Detect patterns in outcomes for continuous learning"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
-            cursor = conn.cursor()
+            await self._init_database()
+            pool = get_pool()
 
             patterns = []
 
             # Detect success patterns
-            cursor.execute("""
+            outcome_patterns = await pool.fetch("""
                 SELECT
                     i.intent,
                     i.sentiment_score,
@@ -894,43 +854,53 @@ class AITrainingPipeline:
                 ORDER BY success_rate DESC
             """)
 
-            outcome_patterns = cursor.fetchall()
-
             for pattern in outcome_patterns:
-                signature = f"{pattern['intent']}_{pattern['sentiment_score']:.1f}_{pattern['outcome']}"
+                sentiment_val = pattern['sentiment_score'] if pattern['sentiment_score'] else 0
+                signature = f"{pattern['intent']}_{sentiment_val:.1f}_{pattern['outcome']}"
 
-                # Store pattern
-                cursor.execute("""
-                    INSERT INTO ai_outcome_patterns
-                    (pattern_type, pattern_signature, success_rate, occurrence_count, context)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (pattern_signature)
-                    DO UPDATE SET
-                        occurrence_count = EXCLUDED.occurrence_count,
-                        success_rate = EXCLUDED.success_rate,
-                        last_seen = NOW()
-                """, (
-                    'intent_sentiment_outcome',
-                    signature,
-                    float(pattern['success_rate']),
-                    pattern['count'],
-                    Json({
-                        'intent': pattern['intent'],
-                        'sentiment': float(pattern['sentiment_score']) if pattern['sentiment_score'] else 0,
-                        'outcome': pattern['outcome']
-                    })
-                ))
+                # Store pattern - note: asyncpg doesn't support ON CONFLICT the same way
+                # We'll use a try/except or upsert pattern
+                try:
+                    await pool.execute("""
+                        INSERT INTO ai_outcome_patterns
+                        (pattern_type, pattern_signature, success_rate, occurrence_count, context)
+                        VALUES ($1, $2, $3, $4, $5)
+                        ON CONFLICT (pattern_signature)
+                        DO UPDATE SET
+                            occurrence_count = EXCLUDED.occurrence_count,
+                            success_rate = EXCLUDED.success_rate,
+                            last_seen = NOW()
+                    """,
+                        'intent_sentiment_outcome',
+                        signature,
+                        float(pattern['success_rate']) if pattern['success_rate'] else 0.0,
+                        pattern['count'],
+                        json.dumps({
+                            'intent': pattern['intent'],
+                            'sentiment': float(sentiment_val),
+                            'outcome': pattern['outcome']
+                        })
+                    )
+                except Exception:
+                    # If conflict handling fails, just update
+                    await pool.execute("""
+                        UPDATE ai_outcome_patterns
+                        SET occurrence_count = $1,
+                            success_rate = $2,
+                            last_seen = NOW()
+                        WHERE pattern_signature = $3
+                    """,
+                        pattern['count'],
+                        float(pattern['success_rate']) if pattern['success_rate'] else 0.0,
+                        signature
+                    )
 
                 patterns.append({
                     "type": "intent_sentiment_outcome",
                     "signature": signature,
-                    "success_rate": float(pattern['success_rate']),
+                    "success_rate": float(pattern['success_rate']) if pattern['success_rate'] else 0.0,
                     "count": pattern['count']
                 })
-
-            conn.commit()
-            cursor.close()
-            conn.close()
 
             return patterns
 
@@ -941,13 +911,13 @@ class AITrainingPipeline:
     async def learn_from_outcomes(self) -> Dict:
         """Continuous learning from agent outcomes"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
-            cursor = conn.cursor()
+            await self._init_database()
+            pool = get_pool()
 
             lessons = []
 
             # Learn from model feedback
-            cursor.execute("""
+            underperforming = await pool.fetch("""
                 SELECT
                     m.model_type,
                     COUNT(f.id) as feedback_count,
@@ -959,21 +929,19 @@ class AITrainingPipeline:
                 HAVING AVG(f.accuracy_delta) < 0.5
             """)
 
-            underperforming = cursor.fetchall()
-
             for model in underperforming:
                 lesson = f"Model {model['model_type']} showing poor performance with avg accuracy delta {model['avg_accuracy_delta']:.2f}"
 
-                cursor.execute("""
+                await pool.execute("""
                     INSERT INTO ai_learning_history
                     (model_type, lesson_learned, evidence, impact_score)
-                    VALUES (%s, %s, %s, %s)
-                """, (
+                    VALUES ($1, $2, $3, $4)
+                """,
                     model['model_type'],
                     lesson,
-                    Json({'feedback_count': model['feedback_count'], 'avg_delta': float(model['avg_accuracy_delta'])}),
+                    json.dumps({'feedback_count': model['feedback_count'], 'avg_delta': float(model['avg_accuracy_delta'])}),
                     abs(float(model['avg_accuracy_delta']))
-                ))
+                )
 
                 lessons.append({
                     "model_type": model['model_type'],
@@ -982,7 +950,7 @@ class AITrainingPipeline:
                 })
 
             # Learn from successful patterns
-            cursor.execute("""
+            successful_patterns = await pool.fetch("""
                 SELECT pattern_type, pattern_signature, success_rate, occurrence_count
                 FROM ai_outcome_patterns
                 WHERE success_rate > 0.8
@@ -990,19 +958,17 @@ class AITrainingPipeline:
                 LIMIT 5
             """)
 
-            successful_patterns = cursor.fetchall()
-
             for pattern in successful_patterns:
                 lesson = f"High success pattern detected: {pattern['pattern_signature']} with {pattern['success_rate']:.1%} success rate"
 
-                cursor.execute("""
+                await pool.execute("""
                     INSERT INTO ai_learning_history
                     (model_type, lesson_learned, evidence, impact_score, applied)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (
+                    VALUES ($1, $2, $3, $4, $5)
+                """,
                     'pattern_recognition',
                     lesson,
-                    Json({
+                    json.dumps({
                         'pattern_type': pattern['pattern_type'],
                         'signature': pattern['pattern_signature'],
                         'success_rate': float(pattern['success_rate']),
@@ -1010,17 +976,13 @@ class AITrainingPipeline:
                     }),
                     float(pattern['success_rate']),
                     False
-                ))
+                )
 
                 lessons.append({
                     "type": "successful_pattern",
                     "lesson": lesson,
                     "impact": float(pattern['success_rate'])
                 })
-
-            conn.commit()
-            cursor.close()
-            conn.close()
 
             # Detect outcome patterns
             patterns = await self.detect_outcome_patterns()
@@ -1040,11 +1002,11 @@ class AITrainingPipeline:
     async def get_training_metrics(self) -> Dict:
         """Get comprehensive training metrics with learning insights"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            await self._init_database()
+            pool = get_pool()
 
             # Overall metrics
-            cursor.execute("""
+            overall = await pool.fetchrow("""
                 SELECT
                     COUNT(DISTINCT customer_id) as unique_customers,
                     COUNT(*) as total_interactions,
@@ -1052,10 +1014,9 @@ class AITrainingPipeline:
                 FROM ai_customer_interactions
                 WHERE created_at > NOW() - INTERVAL '30 days'
             """)
-            overall = cursor.fetchone()
 
             # Model performance
-            cursor.execute("""
+            models = await pool.fetch("""
                 SELECT
                     model_type,
                     COUNT(*) as model_count,
@@ -1064,10 +1025,9 @@ class AITrainingPipeline:
                 FROM ai_trained_models
                 GROUP BY model_type
             """)
-            models = cursor.fetchall()
 
             # Training queue
-            cursor.execute("""
+            queue = await pool.fetch("""
                 SELECT
                     status,
                     COUNT(*) as job_count
@@ -1075,10 +1035,9 @@ class AITrainingPipeline:
                 WHERE created_at > NOW() - INTERVAL '7 days'
                 GROUP BY status
             """)
-            queue = cursor.fetchall()
 
             # Insights generated
-            cursor.execute("""
+            insights = await pool.fetchrow("""
                 SELECT
                     COUNT(*) as total_insights,
                     COUNT(*) FILTER (WHERE applied = TRUE) as applied_insights,
@@ -1087,10 +1046,9 @@ class AITrainingPipeline:
                 FROM ai_learning_insights
                 WHERE created_at > NOW() - INTERVAL '30 days'
             """)
-            insights = cursor.fetchone()
 
             # Learning history
-            cursor.execute("""
+            learning = await pool.fetchrow("""
                 SELECT
                     COUNT(*) as total_lessons,
                     COUNT(*) FILTER (WHERE applied = TRUE) as applied_lessons,
@@ -1098,27 +1056,33 @@ class AITrainingPipeline:
                 FROM ai_learning_history
                 WHERE created_at > NOW() - INTERVAL '30 days'
             """)
-            learning = cursor.fetchone()
 
             # Outcome patterns
-            cursor.execute("""
+            patterns = await pool.fetchrow("""
                 SELECT
                     COUNT(*) as total_patterns,
                     AVG(success_rate) as avg_success_rate
                 FROM ai_outcome_patterns
             """)
-            patterns = cursor.fetchone()
 
-            cursor.close()
-            conn.close()
+            # Convert asyncpg Records to dicts for JSON serialization
+            def record_to_dict(record):
+                if record is None:
+                    return None
+                return dict(record)
+
+            def records_to_list(records):
+                if records is None:
+                    return []
+                return [dict(r) for r in records]
 
             return {
-                'overall_metrics': overall,
-                'model_performance': models,
-                'training_queue': queue,
-                'insights': insights,
-                'learning_history': learning,
-                'outcome_patterns': patterns,
+                'overall_metrics': record_to_dict(overall),
+                'model_performance': records_to_list(models),
+                'training_queue': records_to_list(queue),
+                'insights': record_to_dict(insights),
+                'learning_history': record_to_dict(learning),
+                'outcome_patterns': record_to_dict(patterns),
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
 
@@ -1129,9 +1093,10 @@ class AITrainingPipeline:
 # Singleton instance
 _training_pipeline = None
 
-def get_training_pipeline() -> AITrainingPipeline:
+async def get_training_pipeline() -> AITrainingPipeline:
     """Get or create the training pipeline instance"""
     global _training_pipeline
     if _training_pipeline is None:
         _training_pipeline = AITrainingPipeline()
+        await _training_pipeline._init_database()
     return _training_pipeline
