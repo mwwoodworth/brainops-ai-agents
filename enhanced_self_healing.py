@@ -105,19 +105,35 @@ class HealthPattern:
 
 
 
+from contextlib import asynccontextmanager
+
 # Connection pool helper - prefer shared pool, fallback to direct connection
+@asynccontextmanager
 async def _get_db_connection(db_url: str = None):
-    """Get database connection, preferring shared pool"""
+    """Get database connection context, preferring shared pool"""
+    conn = None
     try:
+        # Try shared pool first
         from database.async_connection import get_pool
         pool = get_pool()
-        return await pool.acquire()
+        # pool.acquire() returns an async context manager
+        async with pool.acquire() as conn:
+            yield conn
     except Exception:
         # Fallback to direct connection if pool unavailable
+        if not db_url:
+            db_url = os.getenv("DATABASE_URL")
+            
         if db_url:
             import asyncpg
-            return await asyncpg.connect(db_url)
-        return None
+            conn = await asyncpg.connect(db_url)
+            try:
+                yield conn
+            finally:
+                await conn.close()
+        else:
+            # If no DB URL and no pool, yield None or raise
+            yield None
 
 class EnhancedSelfHealing:
     """
@@ -168,14 +184,12 @@ class EnhancedSelfHealing:
         logger.info("Enhanced Self-Healing System initialized")
 
     async def _create_tables(self):
-        """Create database tables"""
+        """Create database tables using connection pool"""
         try:
-            import asyncpg
-            if not self.db_url:
-                return
+            async with _get_db_connection(self.db_url) as conn:
+                if conn is None:
+                    return
 
-            conn = await asyncpg.connect(self.db_url)
-            try:
                 # Incidents table
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS self_healing_incidents (
@@ -234,21 +248,16 @@ class EnhancedSelfHealing:
                         created_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
-
-            finally:
-                await conn.close()
         except Exception as e:
             logger.error(f"Error creating self-healing tables: {e}")
 
     async def _load_patterns(self):
-        """Load learned health patterns from database"""
+        """Load learned health patterns from database using connection pool"""
         try:
-            import asyncpg
-            if not self.db_url:
-                return
+            async with _get_db_connection(self.db_url) as conn:
+                if conn is None:
+                    return
 
-            conn = await asyncpg.connect(self.db_url)
-            try:
                 rows = await conn.fetch("SELECT * FROM health_patterns")
 
                 for row in rows:
@@ -261,9 +270,6 @@ class EnhancedSelfHealing:
                         last_updated=row['last_updated'].isoformat() if row['last_updated'] else ""
                     )
                     self.health_patterns[pattern.pattern_id] = pattern
-
-            finally:
-                await conn.close()
         except Exception as e:
             logger.error(f"Error loading health patterns: {e}")
 
@@ -669,14 +675,12 @@ class EnhancedSelfHealing:
         return plan
 
     async def _get_successful_actions(self, component: str, root_cause: str) -> List[Dict[str, Any]]:
-        """Get historically successful remediation actions"""
+        """Get historically successful remediation actions using connection pool"""
         try:
-            import asyncpg
-            if not self.db_url:
-                return []
+            async with _get_db_connection(self.db_url) as conn:
+                if conn is None:
+                    return []
 
-            conn = await asyncpg.connect(self.db_url)
-            try:
                 rows = await conn.fetch("""
                     SELECT action_taken, COUNT(*) as success_count,
                            AVG(recovery_time_seconds) as avg_recovery
@@ -691,9 +695,6 @@ class EnhancedSelfHealing:
                     {"action": row['action_taken'], "success_count": row['success_count']}
                     for row in rows
                 ]
-
-            finally:
-                await conn.close()
         except Exception as e:
             logger.error(f"Error getting successful actions: {e}")
             return []
@@ -1178,14 +1179,12 @@ class EnhancedSelfHealing:
             ) / self.auto_resolved_incidents
 
     async def _learn_from_remediation(self, incident: Incident, plan: RemediationPlan, success: bool):
-        """Learn from remediation outcome"""
+        """Learn from remediation outcome using connection pool"""
         try:
-            import asyncpg
-            if not self.db_url:
-                return
+            async with _get_db_connection(self.db_url) as conn:
+                if conn is None:
+                    return
 
-            conn = await asyncpg.connect(self.db_url)
-            try:
                 for action in plan.actions:
                     await conn.execute("""
                         INSERT INTO remediation_history
@@ -1198,20 +1197,16 @@ class EnhancedSelfHealing:
                         success,
                         incident.recovery_time_seconds
                     )
-            finally:
-                await conn.close()
         except Exception as e:
             logger.error(f"Error learning from remediation: {e}")
 
     async def _persist_incident(self, incident: Incident):
-        """Persist incident to database"""
+        """Persist incident to database using connection pool"""
         try:
-            import asyncpg
-            if not self.db_url:
-                return
+            async with _get_db_connection(self.db_url) as conn:
+                if conn is None:
+                    return
 
-            conn = await asyncpg.connect(self.db_url)
-            try:
                 await conn.execute("""
                     INSERT INTO self_healing_incidents
                     (incident_id, component, description, severity, status, detected_at,
@@ -1241,20 +1236,16 @@ class EnhancedSelfHealing:
                     incident.recovery_time_seconds,
                     incident.auto_resolved
                 )
-            finally:
-                await conn.close()
         except Exception as e:
             logger.error(f"Error persisting incident: {e}")
 
     async def _persist_pattern(self, pattern: HealthPattern):
-        """Persist health pattern to database"""
+        """Persist health pattern to database using connection pool"""
         try:
-            import asyncpg
-            if not self.db_url:
-                return
+            async with _get_db_connection(self.db_url) as conn:
+                if conn is None:
+                    return
 
-            conn = await asyncpg.connect(self.db_url)
-            try:
                 await conn.execute("""
                     INSERT INTO health_patterns
                     (pattern_id, component, normal_ranges, anomaly_signatures, learned_from, last_updated)
@@ -1272,8 +1263,6 @@ class EnhancedSelfHealing:
                     pattern.learned_from,
                     datetime.fromisoformat(pattern.last_updated) if pattern.last_updated else datetime.utcnow()
                 )
-            finally:
-                await conn.close()
         except Exception as e:
             logger.error(f"Error persisting pattern: {e}")
 
@@ -1455,14 +1444,12 @@ class EnhancedSelfHealing:
             return result
 
     async def _log_to_unified_brain(self, action_type: str, data: Dict[str, Any]):
-        """Log healing actions to unified_brain table"""
+        """Log healing actions to unified_brain table using connection pool"""
         try:
-            import asyncpg
-            if not self.db_url:
-                return
+            async with _get_db_connection(self.db_url) as conn:
+                if conn is None:
+                    return
 
-            conn = await asyncpg.connect(self.db_url)
-            try:
                 await conn.execute("""
                     INSERT INTO unified_brain (
                         agent_name, action_type, input_data, output_data,
@@ -1480,8 +1467,6 @@ class EnhancedSelfHealing:
                         'action': action_type
                     })
                 )
-            finally:
-                await conn.close()
         except Exception as e:
             logger.debug(f"Failed to log to unified_brain: {e}")
 
