@@ -101,6 +101,20 @@ class AutonomousRevenueSystem:
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
 
+        # Add location column if it doesn't exist (migration for existing tables)
+        cursor.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'revenue_leads' AND column_name = 'location'
+                ) THEN
+                    ALTER TABLE revenue_leads ADD COLUMN location VARCHAR(255);
+                END IF;
+            END $$;
+        """)
+        conn.commit()
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS revenue_leads (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -109,6 +123,7 @@ class AutonomousRevenueSystem:
                 email VARCHAR(255),
                 phone VARCHAR(50),
                 website VARCHAR(255),
+                location VARCHAR(255),
                 stage VARCHAR(50) DEFAULT 'new',
                 score FLOAT DEFAULT 0.0,
                 value_estimate FLOAT DEFAULT 0.0,
