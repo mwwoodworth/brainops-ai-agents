@@ -788,11 +788,15 @@ MRG_ROUTES = [
     "/register",
     "/dashboard",
     "/tools",
-    "/products",
     "/marketplace",
     "/pricing",
     "/about",
-    "/contact"
+    "/contact",
+    "/aurea",
+    "/estimator",
+    "/features",
+    "/for-contractors",
+    "/for-homeowners"
 ]
 
 ERP_ROUTES = [
