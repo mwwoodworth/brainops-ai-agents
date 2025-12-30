@@ -1213,10 +1213,14 @@ class AUREA:
                 UPDATE aurea_decisions
                 SET execution_status = $1,
                     execution_result = $2::jsonb,
-                    executed_at = NOW()
+                    outcome = $2::jsonb,
+                    status = $1,
+                    success = CASE WHEN $1 = 'completed' THEN true ELSE false END,
+                    executed_at = NOW(),
+                    updated_at = NOW()
                 WHERE id::text = $3
                 """, status, safe_json, decision_id)
-                logger.info(f"✅ Updated decision {decision_id} status to {status}")
+                logger.info(f"✅ Updated decision {decision_id} status to {status} with outcome")
             else:
                 # Sync fallback - uses shared pool
                 with _get_pooled_connection() as conn:
@@ -1225,14 +1229,25 @@ class AUREA:
                     UPDATE aurea_decisions
                     SET execution_status = %s,
                         execution_result = %s,
-                        executed_at = NOW()
+                        outcome = %s,
+                        status = %s,
+                        success = %s,
+                        executed_at = NOW(),
+                        updated_at = NOW()
                     WHERE id::text = %s
-                    """, (status, Json(safe_result) if safe_result else None, decision_id))
+                    """, (
+                        status,
+                        Json(safe_result) if safe_result else None,
+                        Json(safe_result) if safe_result else None,
+                        status,
+                        status == 'completed',
+                        decision_id
+                    ))
                     rows_updated = cur.rowcount
                     conn.commit()
                     cur.close()
                     if rows_updated > 0:
-                        logger.info(f"✅ Updated decision {decision_id} status to {status}")
+                        logger.info(f"✅ Updated decision {decision_id} status to {status} with outcome")
                     else:
                         logger.warning(f"⚠️ No decision found with id {decision_id} to update")
 
