@@ -49,6 +49,7 @@ from database.async_connection import (
 from models.agent import Agent, AgentCategory, AgentExecution, AgentList
 from pydantic import BaseModel
 from api.memory import router as memory_router
+from api.sync import router as sync_router  # Memory migration & consolidation
 from api.brain import router as brain_router
 from api.memory_coordination import router as memory_coordination_router
 from api.customer_intelligence import router as customer_intelligence_router
@@ -206,6 +207,17 @@ except ImportError as e:
 
 from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
+
+# Unified Events System (2025-12-30) - Central event bus for ERP, AI Agents, Command Center
+try:
+    from api.events.unified import router as unified_events_router, init_unified_events
+    UNIFIED_EVENTS_AVAILABLE = True
+    logger.info("Unified Events router loaded - central event bus for all systems")
+except ImportError as e:
+    UNIFIED_EVENTS_AVAILABLE = False
+    unified_events_router = None
+    init_unified_events = None
+    logger.warning(f"Unified Events router not available: {e}")
 from observability import RequestMetrics, TTLCache
 
 # Agent Health Monitoring
@@ -1260,6 +1272,7 @@ async def verify_api_key(
 SECURED_DEPENDENCIES = [Depends(verify_api_key)]
 
 app.include_router(memory_router, dependencies=SECURED_DEPENDENCIES)
+app.include_router(sync_router, dependencies=SECURED_DEPENDENCIES)  # Memory sync/migration
 app.include_router(brain_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(memory_coordination_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(customer_intelligence_router, dependencies=SECURED_DEPENDENCIES)
@@ -1267,6 +1280,11 @@ app.include_router(customer_intelligence_router, dependencies=SECURED_DEPENDENCI
 # External webhook endpoints must NOT require an internal API key; they validate their own webhook secrets/signatures.
 app.include_router(gumroad_router)
 app.include_router(erp_event_router)
+
+# Unified Events System - Central event bus for all systems
+if UNIFIED_EVENTS_AVAILABLE and unified_events_router:
+    app.include_router(unified_events_router)
+    logger.info("Mounted: Unified Events API at /events - publish, webhook/erp, recent, stats, replay")
 
 app.include_router(codebase_graph_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(state_sync_router, dependencies=SECURED_DEPENDENCIES)  # Real-time state synchronization
