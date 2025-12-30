@@ -291,7 +291,7 @@ class DigitalTwinEngine:
         sync_frequency_seconds: int = 60
     ) -> DigitalTwin:
         """
-        Create a new digital twin for a production system
+        Create a new digital twin for a production system (or return existing)
 
         Args:
             source_system: Identifier for the production system (URL or ID)
@@ -301,11 +301,32 @@ class DigitalTwinEngine:
             sync_frequency_seconds: How often to sync with production
 
         Returns:
-            Created DigitalTwin instance
+            Created or existing DigitalTwin instance
         """
         twin_id = self._generate_twin_id(source_system)
         now = datetime.utcnow().isoformat()
 
+        # DEDUPLICATION: Check if twin already exists
+        if twin_id in self.twins:
+            existing_twin = self.twins[twin_id]
+            # Update the existing twin with new state
+            existing_twin.last_sync = now
+            existing_twin.state_snapshot = initial_state
+            await self._persist_twin(existing_twin)
+            logger.info(f"Updated existing digital twin {twin_id} for {source_system}")
+            return existing_twin
+
+        # Also check database for existing twin not in memory
+        existing_db_twin = await self._get_twin_from_db(twin_id)
+        if existing_db_twin:
+            existing_db_twin.last_sync = now
+            existing_db_twin.state_snapshot = initial_state
+            self.twins[twin_id] = existing_db_twin
+            await self._persist_twin(existing_db_twin)
+            logger.info(f"Loaded and updated existing digital twin {twin_id} from DB for {source_system}")
+            return existing_db_twin
+
+        # Create new twin
         twin = DigitalTwin(
             twin_id=twin_id,
             source_system=source_system,
@@ -326,9 +347,45 @@ class DigitalTwinEngine:
         logger.info(f"Created digital twin {twin_id} for {source_system}")
         return twin
 
+    async def _get_twin_from_db(self, twin_id: str) -> Optional[DigitalTwin]:
+        """Check if a twin exists in the database"""
+        try:
+            import asyncpg
+            if not self.db_url:
+                return None
+
+            conn = await asyncpg.connect(self.db_url)
+            try:
+                row = await conn.fetchrow(
+                    "SELECT * FROM digital_twins WHERE twin_id = $1",
+                    twin_id
+                )
+                if row:
+                    return DigitalTwin(
+                        twin_id=row['twin_id'],
+                        source_system=row['source_system'],
+                        system_type=SystemType(row['system_type']),
+                        maturity_level=TwinMaturityLevel(row['maturity_level']),
+                        created_at=row['created_at'].isoformat() if row['created_at'] else "",
+                        last_sync=row['last_sync'].isoformat() if row['last_sync'] else "",
+                        sync_frequency_seconds=row['sync_frequency_seconds'],
+                        state_snapshot=row['state_snapshot'] or {},
+                        health_score=row['health_score'] or 100.0,
+                        drift_detected=row['drift_detected'] or False,
+                        drift_details=row['drift_details']
+                    )
+                return None
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.error(f"Error checking twin in DB: {e}")
+            return None
+
     def _generate_twin_id(self, source_system: str) -> str:
-        """Generate unique twin ID from source system"""
-        hash_input = f"{source_system}:{datetime.utcnow().timestamp()}"
+        """Generate deterministic twin ID from source system (same system = same ID)"""
+        # IMPORTANT: Use only source_system for deterministic IDs to prevent duplicates
+        # This ensures the same system always maps to the same twin_id
+        hash_input = f"twin:{source_system.lower().strip()}"
         return f"twin_{hashlib.sha256(hash_input.encode()).hexdigest()[:16]}"
 
     async def _persist_twin(self, twin: DigitalTwin):
@@ -369,6 +426,55 @@ class DigitalTwinEngine:
                 await conn.close()
         except Exception as e:
             logger.error(f"Error persisting twin: {e}")
+
+    async def deduplicate_twins(self) -> Dict[str, Any]:
+        """
+        Clean up duplicate twins in the database.
+        Keeps only the most recent twin per source_system.
+        Returns summary of cleanup actions.
+        """
+        try:
+            import asyncpg
+            if not self.db_url:
+                return {"error": "No database URL configured"}
+
+            conn = await asyncpg.connect(self.db_url)
+            try:
+                # Find duplicates - keep the latest by last_sync for each source_system
+                deleted_count = await conn.fetchval("""
+                    WITH ranked_twins AS (
+                        SELECT twin_id, source_system,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY source_system
+                                   ORDER BY last_sync DESC NULLS LAST
+                               ) as rn
+                        FROM digital_twins
+                    ),
+                    to_delete AS (
+                        SELECT twin_id FROM ranked_twins WHERE rn > 1
+                    )
+                    DELETE FROM digital_twins
+                    WHERE twin_id IN (SELECT twin_id FROM to_delete)
+                    RETURNING twin_id
+                """)
+
+                # Get remaining count
+                remaining = await conn.fetchval("SELECT COUNT(*) FROM digital_twins")
+
+                # Reload twins into memory
+                await self._load_twins_from_db()
+
+                logger.info(f"Deduplicated twins: deleted {deleted_count or 0} duplicates, {remaining} remaining")
+                return {
+                    "status": "success",
+                    "duplicates_removed": deleted_count or 0,
+                    "twins_remaining": remaining or 0
+                }
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.error(f"Error deduplicating twins: {e}")
+            return {"error": str(e)}
 
     async def sync_twin(self, twin_id: str, current_metrics: SystemMetrics, source: str = "external") -> Dict[str, Any]:
         """
