@@ -140,8 +140,9 @@ class AlwaysKnowBrain:
 
     async def initialize(self):
         """Initialize the brain"""
+        # Longer timeout - Render services can be slow when cold
         self._session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=10)
+            timeout=aiohttp.ClientTimeout(total=30)
         )
 
         # Try to get database pool
@@ -308,17 +309,26 @@ class AlwaysKnowBrain:
 
     async def _check_frontends(self, state: SystemState):
         """Check frontend applications"""
-        # MyRoofGenius
+        # MyRoofGenius - check API health endpoint
         try:
             start = time.time()
-            async with self._session.get("https://myroofgenius.com/") as resp:
+            async with self._session.get("https://myroofgenius.com/api/health") as resp:
                 state.mrg_response_time_ms = (time.time() - start) * 1000
-                state.mrg_healthy = resp.status == 200
+                if resp.status == 200:
+                    data = await resp.json()
+                    # Check if core services are healthy (DB must be healthy, Stripe optional)
+                    db_healthy = data.get("services", {}).get("database", {}).get("status") == "healthy"
+                    # MRG is healthy if DB is connected, even if Stripe isn't configured
+                    state.mrg_healthy = db_healthy
+                    if not state.mrg_healthy:
+                        logger.warning(f"MRG unhealthy: {data.get('services', {})}")
+                else:
+                    state.mrg_healthy = False
         except Exception as e:
             logger.warning(f"MRG check failed: {e}")
             state.mrg_healthy = False
 
-        # Weathercraft ERP
+        # Weathercraft ERP - check root (health endpoint requires secret)
         try:
             start = time.time()
             async with self._session.get("https://weathercraft-erp.vercel.app/") as resp:
