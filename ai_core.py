@@ -851,17 +851,26 @@ class RealAICore:
             conn = self.get_db_connection()
             cursor = conn.cursor()
 
+            # Use correct column names matching ai_usage_logs table schema:
+            # user_id, service, model, endpoint are required
+            # Store prompt/response in meta_data JSON, cost in total_cost
+            cost_cents = self.calculate_cost(model, tokens_used) if tokens_used else 0
             cursor.execute("""
                 INSERT INTO ai_usage_logs
-                (id, prompt, response, model, tokens_used, cost_cents, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                (id, user_id, service, model, endpoint, tokens_used, total_cost, meta_data, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
             """, (
                 str(uuid.uuid4()),
-                prompt[:1000],  # Truncate for storage
-                response[:2000],  # Truncate for storage
+                '00000000-0000-0000-0000-000000000000',  # System user
+                'ai_core',
                 model,
+                'generate',
                 tokens_used,
-                self.calculate_cost(model, tokens_used) if tokens_used else 0
+                cost_cents / 100.0 if cost_cents else 0.0,  # Convert cents to dollars
+                json.dumps({
+                    "prompt": prompt[:1000],
+                    "response": response[:2000]
+                })
             ))
 
             conn.commit()
