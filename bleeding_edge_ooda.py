@@ -1524,6 +1524,10 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[Dict[str, Any]] 
     output_validator = get_output_validator()
     decision_rag = get_decision_rag()
     speculator = get_speculative_executor()
+    
+    # Initialize Real Agent Executor
+    from agent_executor import AgentExecutor
+    real_agent_executor = AgentExecutor()
 
     # PHASE 1: OBSERVE (Parallel)
     obs_start = datetime.now()
@@ -1561,11 +1565,31 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[Dict[str, Any]] 
     spec_start = datetime.now()
     predictions = await speculator.predict_next_actions(valid_observations)
 
-    async def mock_executor(action_type: str, params: Dict) -> Any:
-        # Placeholder - would call actual agent in production
-        return {"speculated": True, "action": action_type}
+    async def real_executor_wrapper(action_type: str, params: Dict) -> Any:
+        """Execute real agent actions based on prediction"""
+        # Map action types to specific agents
+        agent_name = "SystemMonitor"  # Default safe agent
+        
+        if "analyze" in action_type or "predict" in action_type:
+            agent_name = "PredictiveAnalyzer"
+        elif "query" in action_type or "search" in action_type:
+            agent_name = "KnowledgeAgent"
+        elif "validate" in action_type:
+            agent_name = "Monitor"
+            
+        task = {
+            "action": action_type,
+            "params": params,
+            "speculative": True  # Flag to indicate this is a speculative run
+        }
+        
+        try:
+            return await real_agent_executor.execute(agent_name, task)
+        except Exception as e:
+            logger.warning(f"Speculative execution failed for {action_type}: {e}")
+            return {"status": "failed", "error": str(e)}
 
-    speculated_results = await speculator.speculate(predictions, mock_executor)
+    speculated_results = await speculator.speculate(predictions, real_executor_wrapper)
     metrics["speculated_actions"] = len(speculated_results)
     metrics["speculation_duration_ms"] = (datetime.now() - spec_start).total_seconds() * 1000
 
