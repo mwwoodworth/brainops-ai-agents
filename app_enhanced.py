@@ -260,11 +260,11 @@ async def execute_agent(
         execution_id = str(uuid.uuid4())
         started_at = datetime.utcnow()
 
-        # Log execution start
+        # Log execution start (use correct columns: task_execution_id, agent_type, prompt)
         await pool.execute("""
-            INSERT INTO agent_executions (id, agent_id, started_at, status, input_data)
+            INSERT INTO agent_executions (id, task_execution_id, agent_type, status, prompt)
             VALUES ($1, $2, $3, $4, $5)
-        """, execution_id, agent_id, started_at, "running", json.dumps(body))
+        """, execution_id, uuid.UUID(execution_id), agent.get("type", "custom"), "running", json.dumps({"body": body, "agent_name": agent.get("name", "")}))
 
         # Execute agent logic
         result = {"status": "completed", "message": "Agent executed successfully"}
@@ -283,9 +283,10 @@ async def execute_agent(
         completed_at = datetime.utcnow()
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
+        # Update with correct columns: response not output_data, latency_ms not duration_ms
         await pool.execute("""
             UPDATE agent_executions
-            SET completed_at = $1, status = $2, output_data = $3, duration_ms = $4
+            SET completed_at = $1, status = $2, response = $3, latency_ms = $4
             WHERE id = $5
         """, completed_at, "completed", json.dumps(result), duration_ms, execution_id)
 
