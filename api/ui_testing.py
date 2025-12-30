@@ -193,24 +193,33 @@ async def _run_application_test_background(
     test_id: str,
     base_url: str,
     routes: List[str],
-    app_name: str
+    app_name: str,
+    max_timeout_seconds: int = 300  # 5 minute max timeout for entire test
 ):
-    """Run full application test in background"""
+    """Run full application test in background with timeout protection"""
     from ai_ui_testing import AIUITestingEngine
 
     started_at = datetime.now(timezone.utc).isoformat()
+    engine = None
 
     try:
         _running_tests[test_id] = True
-        engine = AIUITestingEngine()
-        await engine.initialize()
 
-        try:
+        # Wrap entire test in timeout
+        async def run_test():
+            nonlocal engine
+            engine = AIUITestingEngine()
+            await engine.initialize(timeout_seconds=30)
+
             result = await engine.test_application(
                 base_url=base_url,
                 routes=routes,
                 app_name=app_name
             )
+            return result
+
+        try:
+            result = await asyncio.wait_for(run_test(), timeout=max_timeout_seconds)
             result["test_id"] = test_id
             result["started_at"] = started_at
             result["completed_at"] = datetime.now(timezone.utc).isoformat()
@@ -224,12 +233,20 @@ async def _run_application_test_background(
             result["issues_found"] = issues_count
 
             _test_results[test_id] = result
-
-            # Persist to database
             await _persist_result(test_id, result)
 
-        finally:
-            await engine.close()
+        except asyncio.TimeoutError:
+            logger.error(f"Application test {test_id} timed out after {max_timeout_seconds}s")
+            result = {
+                "test_id": test_id,
+                "application": app_name,
+                "status": "timeout",
+                "error": f"Test timed out after {max_timeout_seconds} seconds",
+                "started_at": started_at,
+                "completed_at": datetime.now(timezone.utc).isoformat()
+            }
+            _test_results[test_id] = result
+            await _persist_result(test_id, result)
 
     except Exception as e:
         logger.error(f"Application test {test_id} failed: {e}")
@@ -245,6 +262,11 @@ async def _run_application_test_background(
         await _persist_result(test_id, result)
     finally:
         _running_tests.pop(test_id, None)
+        if engine:
+            try:
+                await engine.close()
+            except Exception:
+                pass
 
 
 @router.post("/test")
@@ -695,17 +717,114 @@ async def health_check() -> Dict[str, Any]:
         db_status = f"error: {str(e)[:50]}"
 
     playwright_status = "unknown"
+    browser_installed = False
     try:
         from playwright.async_api import async_playwright
-        playwright_status = "available"
+        playwright_status = "module_available"
+        # Check if browser is actually installed
+        import os
+        chromium_path = os.path.expanduser("~/.cache/ms-playwright/chromium-*/chrome-linux/chrome")
+        import glob
+        browser_paths = glob.glob(chromium_path)
+        if browser_paths:
+            playwright_status = "browser_installed"
+            browser_installed = True
+        else:
+            playwright_status = "browser_missing"
     except ImportError:
-        playwright_status = "not installed"
+        playwright_status = "not_installed"
 
     return {
         "status": "healthy" if db_status == "connected" else "degraded",
         "database": db_status,
         "playwright": playwright_status,
+        "browser_installed": browser_installed,
         "running_tests": len(_running_tests),
+        "running_test_ids": list(_running_tests.keys()),
         "cached_results": len(_test_results),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@router.post("/cancel/{test_id}")
+async def cancel_test(test_id: str) -> Dict[str, Any]:
+    """
+    Cancel a running test and clean up its state.
+    """
+    if test_id in _running_tests:
+        del _running_tests[test_id]
+        _test_results[test_id] = {
+            "test_id": test_id,
+            "status": "cancelled",
+            "message": "Test was cancelled by user",
+            "completed_at": datetime.now(timezone.utc).isoformat()
+        }
+        return {"status": "cancelled", "test_id": test_id}
+    elif test_id in _test_results:
+        return {"status": "already_completed", "test_id": test_id}
+    else:
+        return {"status": "not_found", "test_id": test_id}
+
+
+@router.post("/cancel-all")
+async def cancel_all_tests() -> Dict[str, Any]:
+    """
+    Cancel all running tests.
+    """
+    cancelled = list(_running_tests.keys())
+    for test_id in cancelled:
+        del _running_tests[test_id]
+        _test_results[test_id] = {
+            "test_id": test_id,
+            "status": "cancelled",
+            "message": "Test was cancelled (bulk cancel)",
+            "completed_at": datetime.now(timezone.utc).isoformat()
+        }
+    return {"status": "cancelled", "count": len(cancelled), "test_ids": cancelled}
+
+
+@router.get("/diagnostics")
+async def get_diagnostics() -> Dict[str, Any]:
+    """
+    Detailed diagnostics for UI testing system.
+    """
+    import os
+    import glob
+
+    # Check Playwright
+    playwright_info = {"installed": False, "browser_paths": []}
+    try:
+        from playwright.async_api import async_playwright
+        playwright_info["installed"] = True
+
+        # Check browser installation
+        home = os.path.expanduser("~")
+        browser_paths = glob.glob(f"{home}/.cache/ms-playwright/*/")
+        playwright_info["browser_paths"] = browser_paths
+        playwright_info["browser_count"] = len(browser_paths)
+    except ImportError:
+        playwright_info["error"] = "playwright module not installed"
+
+    # Test browser launch capability
+    browser_launch_test = {"status": "not_tested"}
+    try:
+        from ai_ui_testing import AIUITestingEngine
+        engine = AIUITestingEngine()
+        await asyncio.wait_for(engine.initialize(timeout_seconds=15), timeout=20)
+        if engine._browser:
+            browser_launch_test = {"status": "success", "playwright_available": True}
+            await engine.close()
+        else:
+            browser_launch_test = {"status": "failed", "playwright_available": False, "reason": "Browser did not launch"}
+    except asyncio.TimeoutError:
+        browser_launch_test = {"status": "timeout", "reason": "Browser launch timed out"}
+    except Exception as e:
+        browser_launch_test = {"status": "error", "reason": str(e)}
+
+    return {
+        "playwright": playwright_info,
+        "browser_launch_test": browser_launch_test,
+        "running_tests": list(_running_tests.keys()),
+        "cached_results_count": len(_test_results),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
