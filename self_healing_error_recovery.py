@@ -15,8 +15,35 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 import hashlib
 
+# ============================================================================
+# SHARED CONNECTION POOL
+# ============================================================================
+try:
+    from database.sync_pool import get_sync_pool
+    _POOL_AVAILABLE = True
+except ImportError:
+    _POOL_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
+
+from contextlib import contextmanager
+
+@contextmanager
+def _get_pooled_connection(db_config):
+    """Get connection from shared pool or fallback to direct connection"""
+    if _POOL_AVAILABLE:
+        pool = get_sync_pool()
+        with pool.get_connection() as conn:
+            yield conn
+    else:
+        import psycopg2
+        conn = psycopg2.connect(**db_config)
+        try:
+            yield conn
+        finally:
+            if conn and not conn.closed:
+                conn.close()
 
 # ============================================================================
 # ERROR CLASSIFICATIONS
@@ -189,107 +216,95 @@ class SelfHealingErrorRecovery:
     async def _initialize_database(self):
         """Initialize database tables"""
         try:
-            import psycopg2
-            from psycopg2.extras import RealDictCursor
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+                # Create error events table (using ai_error_logs to match system standard)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_error_logs (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        error_id VARCHAR(255) UNIQUE NOT NULL,
+                        error_type VARCHAR(255) NOT NULL,
+                        error_message TEXT,
+                        stack_trace TEXT,
+                        component VARCHAR(255),
+                        function_name VARCHAR(255),
+                        severity VARCHAR(20),
+                        retry_count INT DEFAULT 0,
+                        metadata JSONB DEFAULT '{}'::jsonb,
+                        timestamp TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Create error events table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_error_events (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    error_id VARCHAR(255) UNIQUE NOT NULL,
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    category VARCHAR(50) NOT NULL,
-                    severity VARCHAR(20) NOT NULL,
-                    component VARCHAR(100) NOT NULL,
-                    error_type VARCHAR(255) NOT NULL,
-                    message TEXT NOT NULL,
-                    stack_trace TEXT,
-                    context JSONB DEFAULT '{}'::jsonb,
-                    correlation_id VARCHAR(255),
-                    tenant_id VARCHAR(255),
-                    user_id VARCHAR(255),
-                    request_id VARCHAR(255),
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create recovery actions table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_recovery_actions (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        action_id VARCHAR(255) UNIQUE NOT NULL,
+                        error_id VARCHAR(255) NOT NULL,
+                        strategy VARCHAR(50) NOT NULL,
+                        status VARCHAR(50) NOT NULL,
+                        started_at TIMESTAMPTZ,
+                        completed_at TIMESTAMPTZ,
+                        attempt_count INT DEFAULT 0,
+                        max_attempts INT DEFAULT 3,
+                        result JSONB,
+                        error_message TEXT,
+                        metadata JSONB DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Create recovery actions table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_recovery_actions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    action_id VARCHAR(255) UNIQUE NOT NULL,
-                    error_id VARCHAR(255) NOT NULL,
-                    strategy VARCHAR(50) NOT NULL,
-                    status VARCHAR(50) NOT NULL,
-                    started_at TIMESTAMPTZ,
-                    completed_at TIMESTAMPTZ,
-                    attempt_count INT DEFAULT 0,
-                    max_attempts INT DEFAULT 3,
-                    result JSONB,
-                    error_message TEXT,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create recovery patterns table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_recovery_patterns (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        pattern_id VARCHAR(255) UNIQUE NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        category VARCHAR(50) NOT NULL,
+                        error_pattern TEXT NOT NULL,
+                        strategy VARCHAR(50) NOT NULL,
+                        priority INT DEFAULT 0,
+                        enabled BOOLEAN DEFAULT true,
+                        success_count INT DEFAULT 0,
+                        failure_count INT DEFAULT 0,
+                        metadata JSONB DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Create recovery patterns table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_recovery_patterns (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    pattern_id VARCHAR(255) UNIQUE NOT NULL,
-                    name VARCHAR(255) NOT NULL,
-                    category VARCHAR(50) NOT NULL,
-                    error_pattern TEXT NOT NULL,
-                    strategy VARCHAR(50) NOT NULL,
-                    priority INT DEFAULT 0,
-                    enabled BOOLEAN DEFAULT true,
-                    success_count INT DEFAULT 0,
-                    failure_count INT DEFAULT 0,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create circuit breaker state table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_circuit_breakers (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        component VARCHAR(255) UNIQUE NOT NULL,
+                        state VARCHAR(20) NOT NULL DEFAULT 'closed',
+                        failure_count INT DEFAULT 0,
+                        success_count INT DEFAULT 0,
+                        last_failure TIMESTAMPTZ,
+                        opened_at TIMESTAMPTZ,
+                        half_open_at TIMESTAMPTZ,
+                        threshold INT DEFAULT 5,
+                        reset_timeout INT DEFAULT 60,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Create circuit breaker state table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_circuit_breakers (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    component VARCHAR(255) UNIQUE NOT NULL,
-                    state VARCHAR(20) NOT NULL DEFAULT 'closed',
-                    failure_count INT DEFAULT 0,
-                    success_count INT DEFAULT 0,
-                    last_failure TIMESTAMPTZ,
-                    opened_at TIMESTAMPTZ,
-                    half_open_at TIMESTAMPTZ,
-                    threshold INT DEFAULT 5,
-                    reset_timeout INT DEFAULT 60,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create indexes
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_error_logs_timestamp
+                    ON ai_error_logs(timestamp)
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_error_logs_component
+                    ON ai_error_logs(component)
+                """)
 
-            # Create indexes
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_error_events_category
-                ON ai_error_events(category)
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_error_events_timestamp
-                ON ai_error_events(timestamp)
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_error_events_component
-                ON ai_error_events(component)
-            """)
-
-            conn.commit()
-            conn.close()
-            logger.info("Self-healing database tables initialized")
+                conn.commit()
+                # Connection is automatically returned to pool or closed by context manager
+                logger.info("Self-healing database tables initialized")
 
         except Exception as e:
             logger.error(f"Database initialization error: {e}")
@@ -453,37 +468,38 @@ class SelfHealingErrorRecovery:
     async def _store_error(self, error_event: ErrorEvent):
         """Store error event in database"""
         try:
-            import psycopg2
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+                # Pack extra fields into metadata
+                metadata = error_event.metadata.copy()
+                metadata.update({
+                    'category': error_event.category.value,
+                    'context': error_event.context,
+                    'correlation_id': error_event.correlation_id,
+                    'tenant_id': error_event.tenant_id,
+                    'user_id': error_event.user_id,
+                    'request_id': error_event.request_id
+                })
 
-            cur.execute("""
-                INSERT INTO ai_error_events (
-                    error_id, timestamp, category, severity, component,
-                    error_type, message, stack_trace, context,
-                    correlation_id, tenant_id, user_id, request_id, metadata
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (error_id) DO NOTHING
-            """, (
-                error_event.error_id,
-                error_event.timestamp,
-                error_event.category.value,
-                error_event.severity.value,
-                error_event.component,
-                error_event.error_type,
-                error_event.message,
-                error_event.stack_trace,
-                json.dumps(error_event.context),
-                error_event.correlation_id,
-                error_event.tenant_id,
-                error_event.user_id,
-                error_event.request_id,
-                json.dumps(error_event.metadata)
-            ))
+                cur.execute("""
+                    INSERT INTO ai_error_logs (
+                        error_id, timestamp, severity, component,
+                        error_type, error_message, stack_trace, metadata
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (error_id) DO NOTHING
+                """, (
+                    error_event.error_id,
+                    error_event.timestamp,
+                    error_event.severity.value,
+                    error_event.component,
+                    error_event.error_type,
+                    error_event.message,
+                    error_event.stack_trace,
+                    json.dumps(metadata)
+                ))
 
-            conn.commit()
-            conn.close()
+                conn.commit()
 
         except Exception as e:
             logger.error(f"Failed to store error event: {e}")
@@ -753,39 +769,36 @@ class SelfHealingErrorRecovery:
     async def _store_recovery_action(self, action: RecoveryAction):
         """Store recovery action in database"""
         try:
-            import psycopg2
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO ai_recovery_actions (
+                        action_id, error_id, strategy, status, started_at,
+                        completed_at, attempt_count, max_attempts, result,
+                        error_message, metadata
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (action_id) DO UPDATE SET
+                        status = EXCLUDED.status,
+                        completed_at = EXCLUDED.completed_at,
+                        attempt_count = EXCLUDED.attempt_count,
+                        result = EXCLUDED.result,
+                        error_message = EXCLUDED.error_message
+                """, (
+                    action.action_id,
+                    action.error_id,
+                    action.strategy.value,
+                    action.status.value,
+                    action.started_at,
+                    action.completed_at,
+                    action.attempt_count,
+                    action.max_attempts,
+                    json.dumps(action.result) if action.result else None,
+                    action.error_message,
+                    json.dumps(action.metadata)
+                ))
 
-            cur.execute("""
-                INSERT INTO ai_recovery_actions (
-                    action_id, error_id, strategy, status, started_at,
-                    completed_at, attempt_count, max_attempts, result,
-                    error_message, metadata
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (action_id) DO UPDATE SET
-                    status = EXCLUDED.status,
-                    completed_at = EXCLUDED.completed_at,
-                    attempt_count = EXCLUDED.attempt_count,
-                    result = EXCLUDED.result,
-                    error_message = EXCLUDED.error_message
-            """, (
-                action.action_id,
-                action.error_id,
-                action.strategy.value,
-                action.status.value,
-                action.started_at,
-                action.completed_at,
-                action.attempt_count,
-                action.max_attempts,
-                json.dumps(action.result) if action.result else None,
-                action.error_message,
-                json.dumps(action.metadata)
-            ))
-
-            conn.commit()
-            conn.close()
+                conn.commit()
 
         except Exception as e:
             logger.error(f"Failed to store recovery action: {e}")
@@ -891,30 +904,29 @@ class SelfHealingErrorRecovery:
     async def get_recent_errors(self, component: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
         """Get recent errors"""
         try:
-            import psycopg2
             from psycopg2.extras import RealDictCursor
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            if component:
-                cur.execute("""
-                    SELECT * FROM ai_error_events
-                    WHERE component = %s
-                    ORDER BY timestamp DESC
-                    LIMIT %s
-                """, (component, limit))
-            else:
-                cur.execute("""
-                    SELECT * FROM ai_error_events
-                    ORDER BY timestamp DESC
-                    LIMIT %s
-                """, (limit,))
+                if component:
+                    cur.execute("""
+                        SELECT * FROM ai_error_logs
+                        WHERE component = %s
+                        ORDER BY timestamp DESC
+                        LIMIT %s
+                    """, (component, limit))
+                else:
+                    cur.execute("""
+                        SELECT * FROM ai_error_logs
+                        ORDER BY timestamp DESC
+                        LIMIT %s
+                    """, (limit,))
 
-            results = cur.fetchall()
-            conn.close()
+                results = cur.fetchall()
+                # No commit needed for SELECT
 
-            return [dict(r) for r in results]
+                return [dict(r) for r in results]
 
         except Exception as e:
             logger.error(f"Failed to get recent errors: {e}")
