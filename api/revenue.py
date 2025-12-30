@@ -8,13 +8,29 @@ import uuid
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Security
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
 from database.async_connection import get_pool
+
+# API Key Security - consistent with other routes
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
+
+async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
+    """Verify API key for authentication"""
+    if not api_key or api_key not in VALID_API_KEYS:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return api_key
 from config import config
 
-router = APIRouter(prefix="/api/v1/revenue", tags=["revenue"])
+# All endpoints require API key authentication
+router = APIRouter(
+    prefix="/api/v1/revenue",
+    tags=["revenue"],
+    dependencies=[Depends(verify_api_key)]
+)
 logger = logging.getLogger(__name__)
 
 
