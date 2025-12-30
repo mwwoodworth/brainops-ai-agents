@@ -2481,11 +2481,13 @@ async def execute_scheduled_agents(
                         result["scheduled_execution"] = True
                         logger.info(f"✅ Agent {agent_name} executed successfully")
                     except NotImplementedError:
-                        # Agent doesn't have execute method - use fallback
+                        # Agent doesn't have execute method - log as warning, NOT completed!
+                        logger.warning(f"⚠️ Agent {agent_name} has no execute method (NotImplementedError)")
                         result = {
-                            "status": "completed",
-                            "message": f"Agent {agent_name} completed (base implementation)",
-                            "scheduled_execution": True
+                            "status": "not_implemented",
+                            "message": f"Agent {agent_name} missing execute implementation",
+                            "scheduled_execution": True,
+                            "warning": "This agent needs implementation"
                         }
                     except Exception as exec_err:
                         logger.error(f"Agent {agent_name} execution error: {exec_err}")
