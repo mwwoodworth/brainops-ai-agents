@@ -215,7 +215,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.47.0"  # Fix: Always-Know timeout 30s, MRG health check uses API endpoint
+VERSION = "9.48.0"  # Fix: Accept HTTP 206 from MRG health (degraded status)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
