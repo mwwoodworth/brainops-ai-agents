@@ -675,9 +675,15 @@ class DisasterRecovery:
             
             tables = cursor.fetchall()
             backup_data = {}
-            
+
+            import re
             for table in tables:
                 table_name = table['table_name']
+                # Validate table name to prevent SQL injection even though
+                # it comes from information_schema (defense in depth)
+                if not re.match(r'^[a-z_][a-z0-9_]*$', table_name):
+                    logger.warning(f"Skipping table with invalid name: {table_name}")
+                    continue
                 cursor.execute(f"SELECT * FROM {table_name} LIMIT 1000")
                 backup_data[table_name] = cursor.fetchall()
             
