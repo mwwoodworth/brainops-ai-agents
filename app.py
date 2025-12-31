@@ -268,7 +268,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.81.0"  # TRUE Operational Validator: executes real operations, not status checks (2025-12-31)
+VERSION = "9.82.0"  # TRUE Operational Validator fixes: AI analyze + memory store API (2025-12-31)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
