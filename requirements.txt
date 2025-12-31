@@ -67,3 +67,4 @@ sendgrid>=6.10.0
 
 # Payment Processing (for affiliate pipeline and webhooks)
 stripe>=7.0.0
+# Cache bust: 1767186521
