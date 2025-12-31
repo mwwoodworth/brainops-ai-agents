@@ -32,11 +32,12 @@ async def verify_db():
         version = cur.fetchone()
         logger.info(f"✅ Database connected: {version[0]}")
         
-        # Check for key tables
+        # Check for key tables (hardcoded whitelist - no injection risk)
         tables = ["ai_agents", "agent_executions", "ai_error_logs", "ai_component_health"]
         for table in tables:
             try:
-                cur.execute(f"SELECT COUNT(*) FROM {table}")
+                # Use quoted identifier for safety
+                cur.execute(f'SELECT COUNT(*) FROM "{table}"')
                 count = cur.fetchone()[0]
                 logger.info(f"✅ Table '{table}' exists with {count} rows")
             except Exception as e:

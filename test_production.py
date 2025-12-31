@@ -163,21 +163,10 @@ async def test_agent_operations() -> bool:
     """Test agent CRUD operations"""
     logger.info("Testing agent operations...")
     try:
-        from database.async_connection import AsyncDatabasePool, PoolConfig
-        from config import config
+        from database.async_connection import get_pool
 
-        pool_config = PoolConfig(
-            host=config.database.host,
-            port=config.database.port,
-            user=config.database.user,
-            password=config.database.password,
-            database=config.database.database,
-            ssl=config.database.ssl,
-            ssl_verify=config.database.ssl_verify,
-        )
-
-        pool = AsyncDatabasePool(pool_config)
-        await pool.initialize()
+        # Use the global pool (already initialized in test_memory_endpoint)
+        pool = get_pool()
 
         # Get agents
         agents = await pool.fetch("""
@@ -194,7 +183,7 @@ async def test_agent_operations() -> bool:
         else:
             logger.warning("⚠️ No active agents found")
 
-        await pool.close()
+        # Don't close global pool - it will be reused
         return True
 
     except Exception as e:
@@ -206,21 +195,10 @@ async def test_memory_tables() -> bool:
     """Test memory table existence"""
     logger.info("Testing memory tables...")
     try:
-        from database.async_connection import AsyncDatabasePool, PoolConfig
-        from config import config
+        from database.async_connection import get_pool
 
-        pool_config = PoolConfig(
-            host=config.database.host,
-            port=config.database.port,
-            user=config.database.user,
-            password=config.database.password,
-            database=config.database.database,
-            ssl=config.database.ssl,
-            ssl_verify=config.database.ssl_verify,
-        )
-
-        pool = AsyncDatabasePool(pool_config)
-        await pool.initialize()
+        # Use the global pool (already initialized)
+        pool = get_pool()
 
         # Check for memory tables
         tables = await pool.fetch("""
@@ -243,7 +221,7 @@ async def test_memory_tables() -> bool:
         else:
             logger.warning("⚠️ No memory tables found (system will create on demand)")
 
-        await pool.close()
+        # Don't close global pool - it will be reused
         return True
 
     except Exception as e:

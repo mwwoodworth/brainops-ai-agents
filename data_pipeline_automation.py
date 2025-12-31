@@ -9,6 +9,7 @@ import json
 import logging
 import uuid
 import hashlib
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Callable
 from enum import Enum
@@ -19,6 +20,19 @@ from psycopg2.extras import RealDictCursor, Json
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# SECURITY: SQL identifier validation to prevent injection
+_VALID_IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+def _validate_sql_identifier(name: str, identifier_type: str = "identifier") -> str:
+    """Validate SQL identifier (table/column name) to prevent injection"""
+    if not name or not isinstance(name, str):
+        raise ValueError(f"Invalid {identifier_type}: must be a non-empty string")
+    if len(name) > 63:  # PostgreSQL identifier limit
+        raise ValueError(f"Invalid {identifier_type}: exceeds 63 character limit")
+    if not _VALID_IDENTIFIER_PATTERN.match(name):
+        raise ValueError(f"Invalid {identifier_type} '{name}': must start with letter/underscore and contain only alphanumeric/underscore")
+    return name
 
 # Database configuration
 DB_CONFIG = {
@@ -612,31 +626,36 @@ class DataLoader:
             )
             cursor = conn.cursor()
 
-            table = config.get('table')
+            # SECURITY: Validate table and column names to prevent SQL injection
+            table = _validate_sql_identifier(config.get('table'), 'table name')
             columns = list(data[0].keys())
+            for col in columns:
+                _validate_sql_identifier(col, 'column name')
 
             if mode == "replace":
-                cursor.execute(f"TRUNCATE TABLE {table}")
+                cursor.execute(f'TRUNCATE TABLE "{table}"')
 
             if mode == "upsert":
-                key_column = config.get('key_column', 'id')
+                key_column = _validate_sql_identifier(config.get('key_column', 'id'), 'key column')
                 for record in data:
                     values = [record.get(c) for c in columns]
                     placeholders = ', '.join(['%s'] * len(columns))
+                    col_list = ', '.join([f'"{c}"' for c in columns])
                     update_set = ', '.join([
-                        f"{c} = EXCLUDED.{c}" for c in columns if c != key_column
+                        f'"{c}" = EXCLUDED."{c}"' for c in columns if c != key_column
                     ])
                     cursor.execute(f"""
-                        INSERT INTO {table} ({', '.join(columns)})
+                        INSERT INTO "{table}" ({col_list})
                         VALUES ({placeholders})
-                        ON CONFLICT ({key_column}) DO UPDATE SET {update_set}
+                        ON CONFLICT ("{key_column}") DO UPDATE SET {update_set}
                     """, values)
             else:
                 for record in data:
                     values = [record.get(c) for c in columns]
                     placeholders = ', '.join(['%s'] * len(columns))
+                    col_list = ', '.join([f'"{c}"' for c in columns])
                     cursor.execute(f"""
-                        INSERT INTO {table} ({', '.join(columns)})
+                        INSERT INTO "{table}" ({col_list})
                         VALUES ({placeholders})
                     """, values)
 
