@@ -39,13 +39,13 @@ except ImportError:
 try:
     from config import config
     DB_CONFIG = {
-        "host": config.db_host,
-        "database": config.db_name,
-        "user": config.db_user,
-        "password": config.db_password,
-        "port": config.db_port
+        "host": config.database.host,
+        "database": config.database.database,
+        "user": config.database.user,
+        "password": config.database.password,
+        "port": config.database.port
     }
-except ImportError:
+except (ImportError, AttributeError):
     DB_CONFIG = {
         "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
         "database": os.getenv("DB_NAME", "postgres"),
