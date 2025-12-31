@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from collections import defaultdict, deque
+from unified_memory_manager import get_memory_manager
 
 # OPTIMIZATION: Ring Buffer for O(1) memory footprint
 THOUGHT_STREAM_MAX_SIZE = 500  # Constant memory regardless of runtime
@@ -1168,6 +1169,16 @@ class ConsciousnessEmergenceController:
 
                 # Mark all as persisted after successful DB write
                 self._persisted_thought_ids.update(persisted_ids)
+
+                # Log to unified brain
+                try:
+                    get_memory_manager().log_to_brain("consciousness_system", "thoughts_persisted", {
+                        "count": len(thoughts_to_persist),
+                        "ids": persisted_ids,
+                        "awareness_level": self.meta_awareness.awareness_level.value
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to log thoughts to brain: {e}")
 
                 # Cleanup old persisted IDs to prevent memory growth (keep last 1000)
                 if len(self._persisted_thought_ids) > 1000:

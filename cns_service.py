@@ -306,8 +306,11 @@ class CNSMemoryService:
             conn = self._get_connection()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-            # Prepare content
-            content_json = json.dumps(memory.content)
+            # Prepare content - include title and category in content JSON (not separate columns)
+            content_with_meta = dict(memory.content) if isinstance(memory.content, dict) else {"data": memory.content}
+            content_with_meta["title"] = memory.title
+            content_with_meta["category"] = memory.category.value if hasattr(memory.category, 'value') else str(memory.category)
+            content_json = json.dumps(content_with_meta)
             content_text = json.dumps(memory.content, sort_keys=True)
 
             # Generate REAL embedding
@@ -342,30 +345,29 @@ class CNSMemoryService:
                 return str(result['id'])
 
             # Generate search text
+            category_str = memory.category.value if hasattr(memory.category, 'value') else str(memory.category)
             search_text = " ".join([
-                memory.title,
+                memory.title or "",
                 content_text[:1000],
                 " ".join(memory.tags or []),
-                memory.category.value
+                category_str
             ])
 
-            # Insert new memory
+            # Insert new memory (category/title are in content JSON, not separate columns)
             cursor.execute("""
                 INSERT INTO unified_ai_memory (
-                    memory_type, content, importance_score, category, title,
+                    memory_type, content, importance_score,
                     tags, source_system, source_agent, created_by, metadata,
-                    embedding, search_text, tenant_id, migrated_from
+                    embedding, search_text, tenant_id
                 ) VALUES (
-                    %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s::jsonb,
-                    %s::vector, %s, %s::uuid, %s
+                    %s, %s::jsonb, %s, %s, %s, %s, %s, %s::jsonb,
+                    %s::vector, %s, %s::uuid
                 )
                 RETURNING id
             """, (
                 memory.memory_type.value,
                 content_json,
                 memory.importance_score,
-                memory.category.value,
-                memory.title,
                 memory.tags or [],
                 "cns_service",
                 "cns_memory_service",
@@ -373,8 +375,7 @@ class CNSMemoryService:
                 json.dumps(memory.metadata or {}),
                 embedding_str,
                 search_text,
-                memory.tenant_id or self.tenant_id,
-                None  # Not a migration - new memory
+                memory.tenant_id or self.tenant_id
             ))
 
             result = cursor.fetchone()
