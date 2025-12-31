@@ -114,6 +114,14 @@ except ImportError:
     UI_TESTER_AVAILABLE = False
     logger.warning("UI tester agent not available")
 
+# Playwright UI Testing Agent - AI vision + database reporting
+try:
+    from ui_testing_playwright import PlaywrightUITestingAgent
+    UI_PLAYWRIGHT_TESTING_AVAILABLE = True
+except ImportError:
+    UI_PLAYWRIGHT_TESTING_AVAILABLE = False
+    logger.warning("Playwright UI testing agent not available")
+
 # Deployment Monitor Agent - Render/Vercel deployment monitoring
 try:
     from deployment_monitor_agent import DeploymentMonitorAgent
@@ -608,6 +616,14 @@ class AgentExecutor:
             except Exception as e:
                 logger.warning(f"Failed to initialize UI tester agent: {e}")
 
+        # Playwright UI Testing Agent - AI vision + database reporting
+        if UI_PLAYWRIGHT_TESTING_AVAILABLE:
+            try:
+                self.agents['UIPlaywrightTesting'] = PlaywrightUITestingAgent()
+                logger.info("Playwright UI testing agent registered")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Playwright UI testing agent: {e}")
+
         # Deployment Monitor Agent - Deployment monitoring
         if DEPLOYMENT_MONITOR_AVAILABLE:
             try:
@@ -677,6 +693,11 @@ class AgentExecutor:
         'Elena': 'ProposalGenerator',
         'IntelligentScheduler': 'CustomerAgent',
         'Scheduler': 'CustomerAgent',
+
+        # UI Testing
+        'UITesting': 'UIPlaywrightTesting',
+        'UIUXTesting': 'UIPlaywrightTesting',
+        'PlaywrightUITesting': 'UIPlaywrightTesting',
 
         # Invoicing
         'Invoicer': 'InvoicingAgent',
