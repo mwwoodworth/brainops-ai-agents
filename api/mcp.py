@@ -221,7 +221,24 @@ async def get_render_logs(service_id: str, lines: int = 100):
 
 @router.post("/supabase/query")
 async def supabase_query(query: str, params: List[Any] = None):
-    """Execute a Supabase SQL query"""
+    """Execute a Supabase SQL query - RESTRICTED TO SELECT ONLY"""
+    # SECURITY: Only allow SELECT statements to prevent SQL injection/data modification
+    query_upper = query.strip().upper()
+    if not query_upper.startswith("SELECT"):
+        raise HTTPException(
+            status_code=403,
+            detail="Only SELECT queries are allowed. Use other MCP endpoints for data modification."
+        )
+
+    # Additional safety: block dangerous patterns
+    dangerous_patterns = ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "TRUNCATE", "EXEC", "EXECUTE", ";"]
+    for pattern in dangerous_patterns:
+        if pattern in query_upper:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Query contains forbidden keyword: {pattern}"
+            )
+
     client = _get_client()
     result = await client.supabase_query(query, params)
     return {
