@@ -268,7 +268,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.83.0"  # TRUE Validator fixes: LangGraph execute args + LiveMemoryBrain init (2025-12-31)
+VERSION = "9.84.0"  # TRUE Validator: Fix memory recall -> retrieve method name (2025-12-31)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
