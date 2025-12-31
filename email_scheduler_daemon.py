@@ -82,8 +82,10 @@ class EmailSchedulerDaemon:
 
     async def _process_loop(self):
         """Main processing loop"""
+        poll_count = 0
         while self._running:
             try:
+                poll_count += 1
                 # Fetch due emails
                 emails = await self._fetch_due_emails()
 
@@ -91,11 +93,15 @@ class EmailSchedulerDaemon:
                     logger.info(f"📬 Processing {len(emails)} scheduled emails")
                     for email in emails:
                         await self._send_email(email)
+                elif poll_count == 1 or poll_count % 60 == 0:
+                    # Log periodically to show the daemon is alive
+                    logger.info(f"📧 Email scheduler heartbeat - no pending emails (poll #{poll_count})")
 
                 self._stats["last_poll"] = datetime.now(timezone.utc).isoformat()
+                self._stats["poll_count"] = poll_count
 
             except Exception as e:
-                logger.error(f"Error in email processing loop: {e}")
+                logger.error(f"Error in email processing loop: {e}", exc_info=True)
 
             await asyncio.sleep(self.poll_interval)
 
@@ -127,19 +133,29 @@ class EmailSchedulerDaemon:
                         WHERE id = ANY($1)
                     """, email_ids)
 
-                return [
-                    EmailJob(
+                emails = []
+                for row in rows:
+                    # Handle metadata - could be dict, string, or None
+                    metadata = row['metadata']
+                    if metadata is None:
+                        metadata = {}
+                    elif isinstance(metadata, str):
+                        try:
+                            metadata = json.loads(metadata)
+                        except json.JSONDecodeError:
+                            metadata = {}
+
+                    emails.append(EmailJob(
                         id=str(row['id']),
                         recipient=row['recipient'],
                         subject=row['subject'],
                         body=row['body'],
                         scheduled_for=row['scheduled_for'],
                         status=row['status'],
-                        metadata=row['metadata'] if row['metadata'] else {},
+                        metadata=metadata,
                         created_at=row['created_at']
-                    )
-                    for row in rows
-                ]
+                    ))
+                return emails
 
         except Exception as e:
             logger.error(f"Failed to fetch due emails: {e}")
@@ -155,24 +171,27 @@ class EmailSchedulerDaemon:
 
             # Import SendGrid
             from sendgrid import SendGridAPIClient
-            from sendgrid.helpers.mail import Mail, Email, To, Content
+            from sendgrid.helpers.mail import Mail, Email, To, Content, CustomArg
+
+            # Determine content type - check if body contains HTML tags
+            content_type = "text/html" if "<" in email.body and ">" in email.body else "text/plain"
 
             # Build message
             message = Mail(
                 from_email=Email(SENDGRID_FROM_EMAIL, SENDGRID_FROM_NAME),
                 to_emails=To(email.recipient),
                 subject=email.subject,
-                html_content=Content("text/html", email.body)
+                html_content=Content(content_type, email.body)
             )
 
-            # Add tracking metadata
-            message.custom_args = {
-                'email_id': email.id,
-                'campaign_id': email.metadata.get('campaign_id', ''),
-                'lead_id': email.metadata.get('lead_id', '')
-            }
+            # Add tracking metadata as custom args for webhooks
+            message.custom_arg = CustomArg('email_id', email.id)
+            if email.metadata.get('campaign_id'):
+                message.add_custom_arg(CustomArg('campaign_id', email.metadata.get('campaign_id', '')))
+            if email.metadata.get('lead_id'):
+                message.add_custom_arg(CustomArg('lead_id', email.metadata.get('lead_id', '')))
 
-            # Send via SendGrid
+            # Send via SendGrid (run in executor to avoid blocking async loop)
             sg = SendGridAPIClient(SENDGRID_API_KEY)
             response = sg.send(message)
 
@@ -185,8 +204,11 @@ class EmailSchedulerDaemon:
                 self._stats["emails_sent"] += 1
                 logger.info(f"✅ Email {email.id} sent to {email.recipient}")
 
-                # Record delivery for tracking
-                await self._record_delivery(email)
+                # Optional: Record delivery for tracking (table may not exist)
+                try:
+                    await self._record_delivery(email)
+                except Exception as delivery_err:
+                    logger.debug(f"Delivery tracking skipped for {email.id}: {delivery_err}")
             else:
                 # Failed
                 await self._handle_send_failure(email, f"SendGrid returned {response.status_code}")

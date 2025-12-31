@@ -286,6 +286,38 @@ class Payout:
 
 
 @dataclass
+class PayoutQueueItem:
+    """Payout queue item for batch processing."""
+    queue_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    payout_id: str = ""
+    affiliate_id: str = ""
+
+    # Queue status
+    status: str = "queued"  # queued, processing, completed, failed, cancelled
+    priority: int = 0  # Higher = higher priority
+
+    # Amounts
+    amount: Decimal = Decimal("0")
+    currency: str = "USD"
+    payment_method: str = ""
+
+    # Processing
+    attempts: int = 0
+    max_attempts: int = 3
+    last_attempt_at: Optional[datetime] = None
+    next_retry_at: Optional[datetime] = None
+    error_message: str = ""
+
+    # Timing
+    queued_at: datetime = field(default_factory=datetime.utcnow)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    # Metadata
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class PartnerContent:
     """AI-generated content for affiliates."""
     content_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -383,6 +415,16 @@ TIER_THRESHOLDS = {
     PartnerTier.GOLD: Decimal("5000"),        # $5K/month
     PartnerTier.PLATINUM: Decimal("25000"),   # $25K/month
     PartnerTier.DIAMOND: Decimal("100000"),   # $100K/month
+}
+
+# Volume-based tiered commission rates (cumulative monthly sales thresholds)
+VOLUME_TIERED_COMMISSION_RATES = {
+    # (min_volume, max_volume): rate
+    (Decimal("0"), Decimal("1000")): Decimal("0.15"),         # $0-$1K: 15%
+    (Decimal("1000"), Decimal("5000")): Decimal("0.20"),      # $1K-$5K: 20%
+    (Decimal("5000"), Decimal("15000")): Decimal("0.25"),     # $5K-$15K: 25%
+    (Decimal("15000"), Decimal("50000")): Decimal("0.30"),    # $15K-$50K: 30%
+    (Decimal("50000"), Decimal("999999999")): Decimal("0.35"), # $50K+: 35%
 }
 
 
@@ -791,6 +833,275 @@ Mention affiliate link: "Link in description" at strategic points."""
 
 
 # =============================================================================
+# DATABASE SCHEMA
+# =============================================================================
+
+AFFILIATE_TABLES_SQL = """
+-- Affiliates table
+CREATE TABLE IF NOT EXISTS affiliates (
+    affiliate_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID,
+    partner_type VARCHAR(50) NOT NULL DEFAULT 'affiliate',
+    tier VARCHAR(20) NOT NULL DEFAULT 'bronze',
+    status VARCHAR(30) NOT NULL DEFAULT 'pending_approval',
+
+    -- Contact Info
+    company_name VARCHAR(255),
+    contact_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    phone VARCHAR(50),
+    website VARCHAR(500),
+
+    -- Tracking
+    affiliate_code VARCHAR(50) NOT NULL UNIQUE,
+    tracking_links JSONB DEFAULT '{}',
+    referral_source VARCHAR(255),
+
+    -- Commission Settings
+    commission_structure_id VARCHAR(50),
+    custom_commission_rate DECIMAL(10, 4),
+    payout_method VARCHAR(50) DEFAULT 'stripe',
+    payout_details JSONB DEFAULT '{}',
+
+    -- Multi-tier tracking
+    parent_affiliate_id UUID REFERENCES affiliates(affiliate_id),
+    tier_level INTEGER DEFAULT 1,
+
+    -- Performance
+    total_referrals INTEGER DEFAULT 0,
+    total_conversions INTEGER DEFAULT 0,
+    total_revenue_generated DECIMAL(15, 2) DEFAULT 0,
+    total_commissions_earned DECIMAL(15, 2) DEFAULT 0,
+    total_commissions_paid DECIMAL(15, 2) DEFAULT 0,
+    pending_commission DECIMAL(15, 2) DEFAULT 0,
+
+    -- Dates
+    joined_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_activity_date TIMESTAMP WITH TIME ZONE,
+    next_payout_date TIMESTAMP WITH TIME ZONE,
+
+    -- Metadata
+    tags TEXT[],
+    notes TEXT,
+    custom_data JSONB DEFAULT '{}',
+
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Referrals table
+CREATE TABLE IF NOT EXISTS affiliate_referrals (
+    referral_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    affiliate_id UUID NOT NULL REFERENCES affiliates(affiliate_id),
+
+    -- Visitor info
+    visitor_id VARCHAR(255) NOT NULL,
+    customer_id VARCHAR(255),
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+
+    -- Tracking
+    tracking_code VARCHAR(50) NOT NULL,
+    landing_page TEXT,
+    referrer_url TEXT,
+    utm_source VARCHAR(255),
+    utm_medium VARCHAR(255),
+    utm_campaign VARCHAR(255),
+    utm_content VARCHAR(255),
+
+    -- Conversion
+    converted BOOLEAN DEFAULT FALSE,
+    conversion_date TIMESTAMP WITH TIME ZONE,
+    product_id VARCHAR(255),
+    product_name VARCHAR(255),
+    order_id VARCHAR(255),
+    order_value DECIMAL(15, 2) DEFAULT 0,
+
+    -- Commission
+    commission_amount DECIMAL(15, 2) DEFAULT 0,
+    commission_status VARCHAR(30) DEFAULT 'pending',
+
+    -- Multi-tier
+    tier_level INTEGER DEFAULT 1,
+    parent_referral_id UUID REFERENCES affiliate_referrals(referral_id),
+
+    -- Attribution
+    attribution_model VARCHAR(30) DEFAULT 'last_click',
+    attribution_weight DECIMAL(5, 4) DEFAULT 1.0,
+    touchpoints JSONB DEFAULT '[]',
+
+    -- Dates
+    click_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    cookie_expires TIMESTAMP WITH TIME ZONE,
+
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Commissions table
+CREATE TABLE IF NOT EXISTS affiliate_commissions (
+    commission_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    affiliate_id UUID NOT NULL REFERENCES affiliates(affiliate_id),
+    referral_id UUID REFERENCES affiliate_referrals(referral_id),
+
+    -- Amounts
+    gross_amount DECIMAL(15, 2) NOT NULL DEFAULT 0,
+    adjustments DECIMAL(15, 2) DEFAULT 0,
+    net_amount DECIMAL(15, 2) NOT NULL DEFAULT 0,
+
+    -- Details
+    commission_type VARCHAR(30) NOT NULL DEFAULT 'percentage',
+    rate_applied DECIMAL(10, 4) NOT NULL,
+    tier_level INTEGER DEFAULT 1,
+    tier_rate_modifier DECIMAL(5, 4) DEFAULT 1.0,
+
+    -- Status
+    status VARCHAR(30) NOT NULL DEFAULT 'pending',
+    payout_id UUID,
+
+    -- Dates
+    earned_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    available_date TIMESTAMP WITH TIME ZONE,
+    paid_date TIMESTAMP WITH TIME ZONE,
+
+    -- Metadata
+    description TEXT,
+    metadata JSONB DEFAULT '{}',
+
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Payouts table
+CREATE TABLE IF NOT EXISTS affiliate_payouts (
+    payout_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    affiliate_id UUID NOT NULL REFERENCES affiliates(affiliate_id),
+
+    -- Amounts
+    gross_amount DECIMAL(15, 2) NOT NULL DEFAULT 0,
+    fees DECIMAL(15, 2) DEFAULT 0,
+    net_amount DECIMAL(15, 2) NOT NULL DEFAULT 0,
+
+    -- Commissions included
+    commission_ids UUID[],
+    commission_count INTEGER DEFAULT 0,
+
+    -- Payment
+    payment_method VARCHAR(50) NOT NULL,
+    payment_reference VARCHAR(255),
+    currency VARCHAR(3) DEFAULT 'USD',
+
+    -- Status
+    status VARCHAR(30) NOT NULL DEFAULT 'pending',
+    failure_reason TEXT,
+    retry_count INTEGER DEFAULT 0,
+
+    -- Dates
+    created_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    processed_date TIMESTAMP WITH TIME ZONE,
+    completed_date TIMESTAMP WITH TIME ZONE
+);
+
+-- Payout Queue table
+CREATE TABLE IF NOT EXISTS affiliate_payout_queue (
+    queue_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    payout_id UUID,
+    affiliate_id UUID NOT NULL REFERENCES affiliates(affiliate_id),
+
+    -- Queue status
+    status VARCHAR(30) NOT NULL DEFAULT 'queued',
+    priority INTEGER DEFAULT 0,
+
+    -- Amounts
+    amount DECIMAL(15, 2) NOT NULL DEFAULT 0,
+    currency VARCHAR(3) DEFAULT 'USD',
+    payment_method VARCHAR(50),
+
+    -- Processing
+    attempts INTEGER DEFAULT 0,
+    max_attempts INTEGER DEFAULT 3,
+    last_attempt_at TIMESTAMP WITH TIME ZONE,
+    next_retry_at TIMESTAMP WITH TIME ZONE,
+    error_message TEXT,
+
+    -- Timing
+    queued_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+
+    -- Metadata
+    metadata JSONB DEFAULT '{}'
+);
+
+-- Partner Content table
+CREATE TABLE IF NOT EXISTS affiliate_content (
+    content_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    affiliate_id UUID NOT NULL REFERENCES affiliates(affiliate_id),
+
+    -- Content details
+    content_type VARCHAR(50) NOT NULL,
+    title VARCHAR(500),
+    content TEXT,
+
+    -- Assets
+    images TEXT[],
+    tracking_link TEXT,
+
+    -- Performance
+    times_used INTEGER DEFAULT 0,
+    clicks_generated INTEGER DEFAULT 0,
+    conversions_generated INTEGER DEFAULT 0,
+
+    -- Metadata
+    created_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    ai_model_used VARCHAR(100),
+    generation_prompt TEXT
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_affiliates_email ON affiliates(email);
+CREATE INDEX IF NOT EXISTS idx_affiliates_code ON affiliates(affiliate_code);
+CREATE INDEX IF NOT EXISTS idx_affiliates_status ON affiliates(status);
+CREATE INDEX IF NOT EXISTS idx_affiliates_parent ON affiliates(parent_affiliate_id);
+
+CREATE INDEX IF NOT EXISTS idx_referrals_affiliate ON affiliate_referrals(affiliate_id);
+CREATE INDEX IF NOT EXISTS idx_referrals_visitor ON affiliate_referrals(visitor_id);
+CREATE INDEX IF NOT EXISTS idx_referrals_converted ON affiliate_referrals(converted);
+CREATE INDEX IF NOT EXISTS idx_referrals_click_date ON affiliate_referrals(click_date);
+
+CREATE INDEX IF NOT EXISTS idx_commissions_affiliate ON affiliate_commissions(affiliate_id);
+CREATE INDEX IF NOT EXISTS idx_commissions_status ON affiliate_commissions(status);
+CREATE INDEX IF NOT EXISTS idx_commissions_payout ON affiliate_commissions(payout_id);
+
+CREATE INDEX IF NOT EXISTS idx_payouts_affiliate ON affiliate_payouts(affiliate_id);
+CREATE INDEX IF NOT EXISTS idx_payouts_status ON affiliate_payouts(status);
+
+CREATE INDEX IF NOT EXISTS idx_queue_status ON affiliate_payout_queue(status);
+CREATE INDEX IF NOT EXISTS idx_queue_priority ON affiliate_payout_queue(priority DESC, queued_at ASC);
+
+-- Update timestamp trigger
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+DROP TRIGGER IF EXISTS update_affiliates_updated_at ON affiliates;
+CREATE TRIGGER update_affiliates_updated_at
+    BEFORE UPDATE ON affiliates
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_commissions_updated_at ON affiliate_commissions;
+CREATE TRIGGER update_commissions_updated_at
+    BEFORE UPDATE ON affiliate_commissions
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+"""
+
+
+# =============================================================================
 # MAIN PIPELINE
 # =============================================================================
 
@@ -817,6 +1128,7 @@ class AffiliatePartnershipPipeline:
         self.commissions: Dict[str, Commission] = {}
         self.payouts: Dict[str, Payout] = {}
         self.content: Dict[str, PartnerContent] = {}
+        self.payout_queue: Dict[str, PayoutQueueItem] = {}  # Payout queue for batch processing
 
         # Components
         self.fraud_detector = FraudDetector()
@@ -828,7 +1140,272 @@ class AffiliatePartnershipPipeline:
         # Commission structures
         self.commission_structures = DEFAULT_COMMISSION_STRUCTURES.copy()
 
+        # Database connection pool (lazy initialization)
+        self._db_pool = None
+
         logger.info("AffiliatePartnershipPipeline initialized")
+
+    # =========================================================================
+    # DATABASE OPERATIONS
+    # =========================================================================
+
+    async def _get_db_pool(self):
+        """Get or create database connection pool."""
+        if self._db_pool is None and self.db_url:
+            try:
+                import asyncpg
+                self._db_pool = await asyncpg.create_pool(
+                    self.db_url,
+                    min_size=2,
+                    max_size=10,
+                    command_timeout=60
+                )
+                logger.info("Database connection pool created")
+            except ImportError:
+                logger.warning("asyncpg not installed, database features disabled")
+            except Exception as e:
+                logger.error(f"Failed to create database pool: {e}")
+        return self._db_pool
+
+    async def initialize_database(self) -> bool:
+        """
+        Initialize database tables for the affiliate system.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        pool = await self._get_db_pool()
+        if not pool:
+            logger.warning("No database pool available, using in-memory storage only")
+            return False
+
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(AFFILIATE_TABLES_SQL)
+                logger.info("Affiliate database tables created/verified")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to initialize affiliate tables: {e}")
+            return False
+
+    async def sync_to_database(self) -> Dict[str, int]:
+        """
+        Sync in-memory data to database.
+
+        Returns:
+            Dict with counts of synced records
+        """
+        pool = await self._get_db_pool()
+        if not pool:
+            return {"error": "No database connection"}
+
+        counts = {
+            "affiliates": 0,
+            "referrals": 0,
+            "commissions": 0,
+            "payouts": 0,
+            "queue_items": 0,
+        }
+
+        try:
+            async with pool.acquire() as conn:
+                # Sync affiliates
+                for affiliate in self.affiliates.values():
+                    await conn.execute("""
+                        INSERT INTO affiliates (
+                            affiliate_id, partner_type, tier, status,
+                            company_name, contact_name, email, phone, website,
+                            affiliate_code, tracking_links, referral_source,
+                            commission_structure_id, custom_commission_rate,
+                            payout_method, payout_details,
+                            parent_affiliate_id, tier_level,
+                            total_referrals, total_conversions,
+                            total_revenue_generated, total_commissions_earned,
+                            total_commissions_paid, pending_commission,
+                            joined_date, last_activity_date, next_payout_date,
+                            tags, notes, custom_data
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                                  $11, $12, $13, $14, $15, $16, $17, $18,
+                                  $19, $20, $21, $22, $23, $24, $25, $26, $27,
+                                  $28, $29, $30)
+                        ON CONFLICT (affiliate_id) DO UPDATE SET
+                            tier = EXCLUDED.tier,
+                            status = EXCLUDED.status,
+                            total_referrals = EXCLUDED.total_referrals,
+                            total_conversions = EXCLUDED.total_conversions,
+                            total_revenue_generated = EXCLUDED.total_revenue_generated,
+                            total_commissions_earned = EXCLUDED.total_commissions_earned,
+                            total_commissions_paid = EXCLUDED.total_commissions_paid,
+                            pending_commission = EXCLUDED.pending_commission,
+                            last_activity_date = EXCLUDED.last_activity_date
+                    """,
+                        affiliate.affiliate_id,
+                        affiliate.partner_type.value,
+                        affiliate.tier.value,
+                        affiliate.status.value,
+                        affiliate.company_name,
+                        affiliate.contact_name,
+                        affiliate.email,
+                        affiliate.phone,
+                        affiliate.website,
+                        affiliate.affiliate_code,
+                        json.dumps(affiliate.tracking_links),
+                        affiliate.referral_source,
+                        affiliate.commission_structure_id,
+                        float(affiliate.custom_commission_rate) if affiliate.custom_commission_rate else None,
+                        affiliate.payout_method,
+                        json.dumps(affiliate.payout_details),
+                        affiliate.parent_affiliate_id,
+                        affiliate.tier_level,
+                        affiliate.total_referrals,
+                        affiliate.total_conversions,
+                        float(affiliate.total_revenue_generated),
+                        float(affiliate.total_commissions_earned),
+                        float(affiliate.total_commissions_paid),
+                        float(affiliate.pending_commission),
+                        affiliate.joined_date,
+                        affiliate.last_activity_date,
+                        affiliate.next_payout_date,
+                        affiliate.tags,
+                        affiliate.notes,
+                        json.dumps(affiliate.custom_data),
+                    )
+                    counts["affiliates"] += 1
+
+                # Sync commissions
+                for commission in self.commissions.values():
+                    await conn.execute("""
+                        INSERT INTO affiliate_commissions (
+                            commission_id, affiliate_id, referral_id,
+                            gross_amount, adjustments, net_amount,
+                            commission_type, rate_applied, tier_level, tier_rate_modifier,
+                            status, payout_id,
+                            earned_date, available_date, paid_date,
+                            description, metadata
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                                  $11, $12, $13, $14, $15, $16, $17)
+                        ON CONFLICT (commission_id) DO UPDATE SET
+                            status = EXCLUDED.status,
+                            payout_id = EXCLUDED.payout_id,
+                            paid_date = EXCLUDED.paid_date
+                    """,
+                        commission.commission_id,
+                        commission.affiliate_id,
+                        commission.referral_id,
+                        float(commission.gross_amount),
+                        float(commission.adjustments),
+                        float(commission.net_amount),
+                        commission.commission_type.value,
+                        float(commission.rate_applied),
+                        commission.tier_level,
+                        commission.tier_rate_modifier,
+                        commission.status.value,
+                        commission.payout_id,
+                        commission.earned_date,
+                        commission.available_date,
+                        commission.paid_date,
+                        commission.description,
+                        json.dumps(commission.metadata),
+                    )
+                    counts["commissions"] += 1
+
+                logger.info(f"Synced to database: {counts}")
+                return counts
+
+        except Exception as e:
+            logger.error(f"Failed to sync to database: {e}")
+            return {"error": str(e)}
+
+    async def load_from_database(self) -> Dict[str, int]:
+        """
+        Load data from database into in-memory storage.
+
+        Returns:
+            Dict with counts of loaded records
+        """
+        pool = await self._get_db_pool()
+        if not pool:
+            return {"error": "No database connection"}
+
+        counts = {
+            "affiliates": 0,
+            "referrals": 0,
+            "commissions": 0,
+            "payouts": 0,
+        }
+
+        try:
+            async with pool.acquire() as conn:
+                # Load affiliates
+                rows = await conn.fetch("SELECT * FROM affiliates")
+                for row in rows:
+                    affiliate = Affiliate(
+                        affiliate_id=str(row["affiliate_id"]),
+                        partner_type=PartnerType(row["partner_type"]),
+                        tier=PartnerTier(row["tier"]),
+                        status=AffiliateStatus(row["status"]),
+                        company_name=row["company_name"] or "",
+                        contact_name=row["contact_name"],
+                        email=row["email"],
+                        phone=row["phone"] or "",
+                        website=row["website"] or "",
+                        affiliate_code=row["affiliate_code"],
+                        tracking_links=row["tracking_links"] or {},
+                        referral_source=row["referral_source"] or "",
+                        commission_structure_id=row["commission_structure_id"] or "",
+                        custom_commission_rate=Decimal(str(row["custom_commission_rate"])) if row["custom_commission_rate"] else None,
+                        payout_method=row["payout_method"] or "stripe",
+                        payout_details=row["payout_details"] or {},
+                        parent_affiliate_id=str(row["parent_affiliate_id"]) if row["parent_affiliate_id"] else None,
+                        tier_level=row["tier_level"] or 1,
+                        total_referrals=row["total_referrals"] or 0,
+                        total_conversions=row["total_conversions"] or 0,
+                        total_revenue_generated=Decimal(str(row["total_revenue_generated"] or 0)),
+                        total_commissions_earned=Decimal(str(row["total_commissions_earned"] or 0)),
+                        total_commissions_paid=Decimal(str(row["total_commissions_paid"] or 0)),
+                        pending_commission=Decimal(str(row["pending_commission"] or 0)),
+                        joined_date=row["joined_date"],
+                        last_activity_date=row["last_activity_date"],
+                        next_payout_date=row["next_payout_date"],
+                        tags=row["tags"] or [],
+                        notes=row["notes"] or "",
+                        custom_data=row["custom_data"] or {},
+                    )
+                    self.affiliates[affiliate.affiliate_id] = affiliate
+                    self.tracking_codes[affiliate.affiliate_code] = affiliate.affiliate_id
+                    counts["affiliates"] += 1
+
+                # Load commissions
+                rows = await conn.fetch("SELECT * FROM affiliate_commissions")
+                for row in rows:
+                    commission = Commission(
+                        commission_id=str(row["commission_id"]),
+                        affiliate_id=str(row["affiliate_id"]),
+                        referral_id=str(row["referral_id"]) if row["referral_id"] else "",
+                        gross_amount=Decimal(str(row["gross_amount"] or 0)),
+                        adjustments=Decimal(str(row["adjustments"] or 0)),
+                        net_amount=Decimal(str(row["net_amount"] or 0)),
+                        commission_type=CommissionType(row["commission_type"]),
+                        rate_applied=Decimal(str(row["rate_applied"])),
+                        tier_level=row["tier_level"] or 1,
+                        tier_rate_modifier=float(row["tier_rate_modifier"] or 1.0),
+                        status=PayoutStatus(row["status"]),
+                        payout_id=str(row["payout_id"]) if row["payout_id"] else None,
+                        earned_date=row["earned_date"],
+                        available_date=row["available_date"],
+                        paid_date=row["paid_date"],
+                        description=row["description"] or "",
+                        metadata=row["metadata"] or {},
+                    )
+                    self.commissions[commission.commission_id] = commission
+                    counts["commissions"] += 1
+
+                logger.info(f"Loaded from database: {counts}")
+                return counts
+
+        except Exception as e:
+            logger.error(f"Failed to load from database: {e}")
+            return {"error": str(e)}
 
     # =========================================================================
     # AFFILIATE MANAGEMENT
@@ -1211,6 +1788,221 @@ class AffiliatePartnershipPipeline:
 
         return commission
 
+    def calculate_flat_percentage_commission(
+        self,
+        order_value: Decimal,
+        rate: Decimal
+    ) -> Decimal:
+        """
+        Calculate a flat percentage commission on an order.
+
+        Args:
+            order_value: The total value of the order
+            rate: The commission rate as a decimal (e.g., 0.25 for 25%)
+
+        Returns:
+            The commission amount
+        """
+        if order_value <= 0 or rate <= 0:
+            return Decimal("0")
+
+        commission = order_value * rate
+        # Round to 2 decimal places
+        return commission.quantize(Decimal("0.01"))
+
+    def calculate_tiered_volume_commission(
+        self,
+        order_value: Decimal,
+        affiliate_monthly_volume: Decimal,
+        custom_tiers: Dict[Tuple[Decimal, Decimal], Decimal] = None
+    ) -> Tuple[Decimal, Decimal]:
+        """
+        Calculate commission based on tiered volume thresholds.
+        Higher monthly sales volume = higher commission rate.
+
+        Args:
+            order_value: The value of the current order
+            affiliate_monthly_volume: The affiliate's total sales this month (before this order)
+            custom_tiers: Optional custom tier structure, defaults to VOLUME_TIERED_COMMISSION_RATES
+
+        Returns:
+            Tuple of (commission_amount, rate_applied)
+        """
+        if order_value <= 0:
+            return Decimal("0"), Decimal("0")
+
+        tiers = custom_tiers or VOLUME_TIERED_COMMISSION_RATES
+
+        # Determine which tier the affiliate falls into based on their monthly volume
+        applicable_rate = Decimal("0.15")  # Default base rate
+
+        for (min_vol, max_vol), rate in sorted(tiers.items(), key=lambda x: x[0][0]):
+            if min_vol <= affiliate_monthly_volume < max_vol:
+                applicable_rate = rate
+                break
+
+        commission = order_value * applicable_rate
+        return commission.quantize(Decimal("0.01")), applicable_rate
+
+    def calculate_progressive_tiered_commission(
+        self,
+        order_value: Decimal,
+        affiliate_monthly_volume: Decimal
+    ) -> Tuple[Decimal, Dict[str, Any]]:
+        """
+        Calculate commission using progressive tiers (like tax brackets).
+        Each portion of the sale is taxed at the rate for that tier.
+
+        Args:
+            order_value: The value of the current order
+            affiliate_monthly_volume: The affiliate's total sales this month (before this order)
+
+        Returns:
+            Tuple of (total_commission, breakdown_dict)
+        """
+        if order_value <= 0:
+            return Decimal("0"), {"tiers": [], "total": "0"}
+
+        total_commission = Decimal("0")
+        breakdown = []
+        remaining_value = order_value
+        current_volume = affiliate_monthly_volume
+
+        # Sort tiers by minimum volume
+        sorted_tiers = sorted(VOLUME_TIERED_COMMISSION_RATES.items(), key=lambda x: x[0][0])
+
+        for (min_vol, max_vol), rate in sorted_tiers:
+            if remaining_value <= 0:
+                break
+
+            # How much of the order falls into this tier?
+            if current_volume >= max_vol:
+                # Already past this tier
+                continue
+            elif current_volume >= min_vol:
+                # Currently in this tier
+                space_in_tier = max_vol - current_volume
+                value_in_tier = min(remaining_value, space_in_tier)
+
+                tier_commission = value_in_tier * rate
+                total_commission += tier_commission
+
+                breakdown.append({
+                    "tier": f"${min_vol}-${max_vol}",
+                    "rate": str(rate),
+                    "value": str(value_in_tier),
+                    "commission": str(tier_commission.quantize(Decimal("0.01")))
+                })
+
+                remaining_value -= value_in_tier
+                current_volume += value_in_tier
+
+        return total_commission.quantize(Decimal("0.01")), {
+            "tiers": breakdown,
+            "total": str(total_commission.quantize(Decimal("0.01")))
+        }
+
+    async def calculate_multi_level_commission(
+        self,
+        order_value: Decimal,
+        affiliate_id: str,
+        max_levels: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Calculate multi-level marketing (MLM) style commissions for an affiliate chain.
+        Up to 3 levels of upline affiliates receive a portion of the commission.
+
+        Args:
+            order_value: The value of the order
+            affiliate_id: The ID of the referring affiliate (level 1)
+            max_levels: Maximum number of levels to pay out (default 3)
+
+        Returns:
+            List of commission records for each level
+        """
+        commissions = []
+
+        affiliate = self.affiliates.get(affiliate_id)
+        if not affiliate:
+            return commissions
+
+        current_affiliate = affiliate
+        current_level = 1
+
+        while current_affiliate and current_level <= max_levels:
+            # Get the tier rate modifier for this level
+            tier_modifier = MULTI_TIER_RATES.get(current_level, Decimal("0"))
+
+            if tier_modifier <= 0:
+                break
+
+            # Get the affiliate's base rate from their commission structure
+            structure = self.commission_structures.get(current_affiliate.partner_type)
+            if not structure:
+                structure = DEFAULT_COMMISSION_STRUCTURES[PartnerType.AFFILIATE]
+
+            base_rate = structure.get_rate_for_tier(current_affiliate.tier)
+
+            # Calculate commission for this level
+            # Level 1 gets full rate, Level 2 gets modifier of Level 1's rate, etc.
+            if current_level == 1:
+                level_rate = base_rate
+            else:
+                level_rate = base_rate * tier_modifier
+
+            commission_amount = (order_value * level_rate).quantize(Decimal("0.01"))
+
+            commissions.append({
+                "level": current_level,
+                "affiliate_id": current_affiliate.affiliate_id,
+                "affiliate_code": current_affiliate.affiliate_code,
+                "affiliate_name": current_affiliate.contact_name,
+                "base_rate": str(base_rate),
+                "tier_modifier": str(tier_modifier),
+                "effective_rate": str(level_rate),
+                "order_value": str(order_value),
+                "commission_amount": str(commission_amount),
+            })
+
+            # Move up the chain
+            if current_affiliate.parent_affiliate_id:
+                current_affiliate = self.affiliates.get(current_affiliate.parent_affiliate_id)
+                current_level += 1
+            else:
+                break
+
+        return commissions
+
+    async def get_affiliate_monthly_volume(
+        self,
+        affiliate_id: str,
+        month_start: datetime = None
+    ) -> Decimal:
+        """
+        Get the total sales volume for an affiliate in the current month.
+
+        Args:
+            affiliate_id: The affiliate's ID
+            month_start: Optional start of the month (defaults to current month)
+
+        Returns:
+            Total sales volume for the month
+        """
+        if month_start is None:
+            now = datetime.utcnow()
+            month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        total_volume = Decimal("0")
+
+        for referral in self.referrals.values():
+            if (referral.affiliate_id == affiliate_id and
+                referral.converted and
+                referral.conversion_date and
+                referral.conversion_date >= month_start):
+                total_volume += referral.order_value
+
+        return total_volume
+
     async def _process_multi_tier_commissions(
         self,
         referral: Referral,
@@ -1264,7 +2056,7 @@ class AffiliatePartnershipPipeline:
             )
             tier_commission.available_date = datetime.utcnow() + timedelta(days=30)
 
-            self.commissions[tier_commission.commission_id] = tier_commissions
+            self.commissions[tier_commission.commission_id] = tier_commission
             tier_commissions.append(tier_commission)
 
             # Update parent stats
@@ -1446,6 +2238,323 @@ class AffiliatePartnershipPipeline:
                 "success": False,
                 "error": f"Unsupported payment method: {method}",
             }
+
+    # =========================================================================
+    # PAYOUT QUEUE MANAGEMENT
+    # =========================================================================
+
+    async def queue_payout(
+        self,
+        affiliate_id: str,
+        priority: int = 0,
+        force: bool = False
+    ) -> Optional[PayoutQueueItem]:
+        """
+        Queue a payout for processing.
+
+        Args:
+            affiliate_id: The affiliate's ID
+            priority: Priority level (higher = processed first)
+            force: If True, queue even if below minimum payout threshold
+
+        Returns:
+            The queue item if created, None if no payout needed
+        """
+        affiliate = self.affiliates.get(affiliate_id)
+        if not affiliate:
+            raise ValueError(f"Affiliate {affiliate_id} not found")
+
+        if affiliate.status != AffiliateStatus.ACTIVE:
+            raise ValueError(f"Affiliate {affiliate_id} is not active")
+
+        # Check if already in queue
+        existing = [
+            q for q in self.payout_queue.values()
+            if q.affiliate_id == affiliate_id and q.status in ("queued", "processing")
+        ]
+        if existing:
+            logger.info(f"Affiliate {affiliate_id} already has pending payout in queue")
+            return existing[0]
+
+        # Get available commissions
+        now = datetime.utcnow()
+        available_commissions = [
+            c for c in self.commissions.values()
+            if (c.affiliate_id == affiliate_id and
+                c.status == PayoutStatus.PENDING and
+                c.available_date and
+                c.available_date <= now)
+        ]
+
+        if not available_commissions:
+            logger.info(f"No available commissions for affiliate {affiliate_id}")
+            return None
+
+        total_amount = sum(c.net_amount for c in available_commissions)
+
+        # Check minimum payout threshold
+        structure = self.commission_structures.get(affiliate.partner_type)
+        min_payout = structure.minimum_payout if structure else Decimal("50")
+
+        if total_amount < min_payout and not force:
+            logger.info(
+                f"Affiliate {affiliate_id} below minimum payout "
+                f"(${total_amount} < ${min_payout})"
+            )
+            return None
+
+        # Calculate fees
+        fees = total_amount * Decimal("0.02")
+        net_amount = total_amount - fees
+
+        # Create queue item
+        queue_item = PayoutQueueItem(
+            affiliate_id=affiliate_id,
+            amount=net_amount,
+            currency="USD",
+            payment_method=affiliate.payout_method,
+            priority=priority,
+            metadata={
+                "gross_amount": str(total_amount),
+                "fees": str(fees),
+                "commission_count": len(available_commissions),
+                "commission_ids": [c.commission_id for c in available_commissions],
+            }
+        )
+
+        self.payout_queue[queue_item.queue_id] = queue_item
+
+        logger.info(
+            f"Queued payout for affiliate {affiliate_id}: "
+            f"${net_amount} ({len(available_commissions)} commissions)"
+        )
+
+        return queue_item
+
+    async def process_payout_queue(
+        self,
+        batch_size: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Process pending payouts from the queue.
+
+        Args:
+            batch_size: Maximum number of payouts to process in this batch
+
+        Returns:
+            List of processing results
+        """
+        results = []
+
+        # Get pending queue items, sorted by priority (highest first) then queued time
+        pending_items = sorted(
+            [q for q in self.payout_queue.values() if q.status == "queued"],
+            key=lambda x: (-x.priority, x.queued_at)
+        )[:batch_size]
+
+        for queue_item in pending_items:
+            result = await self._process_queue_item(queue_item)
+            results.append(result)
+
+        return results
+
+    async def _process_queue_item(
+        self,
+        queue_item: PayoutQueueItem
+    ) -> Dict[str, Any]:
+        """Process a single payout queue item."""
+        queue_item.status = "processing"
+        queue_item.started_at = datetime.utcnow()
+        queue_item.attempts += 1
+        queue_item.last_attempt_at = datetime.utcnow()
+
+        affiliate = self.affiliates.get(queue_item.affiliate_id)
+        if not affiliate:
+            queue_item.status = "failed"
+            queue_item.error_message = "Affiliate not found"
+            return {
+                "queue_id": queue_item.queue_id,
+                "status": "failed",
+                "error": "Affiliate not found",
+            }
+
+        try:
+            # Get commission IDs from metadata
+            commission_ids = queue_item.metadata.get("commission_ids", [])
+            commissions = [
+                self.commissions[cid] for cid in commission_ids
+                if cid in self.commissions
+            ]
+
+            # Create payout record
+            payout = Payout(
+                affiliate_id=queue_item.affiliate_id,
+                gross_amount=Decimal(queue_item.metadata.get("gross_amount", "0")),
+                fees=Decimal(queue_item.metadata.get("fees", "0")),
+                net_amount=queue_item.amount,
+                commission_ids=commission_ids,
+                commission_count=len(commissions),
+                payment_method=queue_item.payment_method,
+                currency=queue_item.currency,
+            )
+
+            # Update commission status
+            for commission in commissions:
+                commission.status = PayoutStatus.PROCESSING
+                commission.payout_id = payout.payout_id
+
+            # Process the actual payment
+            payment_result = await self._process_payment(payout, affiliate)
+
+            if payment_result["success"]:
+                payout.status = PayoutStatus.COMPLETED
+                payout.payment_reference = payment_result.get("reference", "")
+                payout.completed_date = datetime.utcnow()
+
+                # Update commissions
+                for commission in commissions:
+                    commission.status = PayoutStatus.COMPLETED
+                    commission.paid_date = datetime.utcnow()
+
+                # Update affiliate
+                affiliate.total_commissions_paid += payout.net_amount
+                affiliate.pending_commission -= payout.gross_amount
+
+                # Update queue item
+                queue_item.status = "completed"
+                queue_item.completed_at = datetime.utcnow()
+                queue_item.payout_id = payout.payout_id
+
+                self.payouts[payout.payout_id] = payout
+
+                logger.info(
+                    f"Payout completed: {payout.payout_id}, "
+                    f"affiliate={affiliate.affiliate_id}, amount=${payout.net_amount}"
+                )
+
+                return {
+                    "queue_id": queue_item.queue_id,
+                    "payout_id": payout.payout_id,
+                    "status": "completed",
+                    "amount": str(payout.net_amount),
+                    "reference": payout.payment_reference,
+                }
+
+            else:
+                # Payment failed
+                error_msg = payment_result.get("error", "Unknown error")
+
+                # Reset commissions
+                for commission in commissions:
+                    commission.status = PayoutStatus.PENDING
+                    commission.payout_id = None
+
+                # Update queue item for retry
+                if queue_item.attempts < queue_item.max_attempts:
+                    queue_item.status = "queued"
+                    queue_item.error_message = error_msg
+                    # Exponential backoff for retries
+                    retry_delay = timedelta(minutes=5 * (2 ** (queue_item.attempts - 1)))
+                    queue_item.next_retry_at = datetime.utcnow() + retry_delay
+
+                    logger.warning(
+                        f"Payout failed (attempt {queue_item.attempts}), "
+                        f"will retry at {queue_item.next_retry_at}: {error_msg}"
+                    )
+                else:
+                    queue_item.status = "failed"
+                    queue_item.error_message = f"Max retries exceeded: {error_msg}"
+
+                    logger.error(
+                        f"Payout permanently failed after {queue_item.attempts} attempts: {error_msg}"
+                    )
+
+                return {
+                    "queue_id": queue_item.queue_id,
+                    "status": queue_item.status,
+                    "error": error_msg,
+                    "attempts": queue_item.attempts,
+                    "next_retry_at": queue_item.next_retry_at.isoformat() if queue_item.next_retry_at else None,
+                }
+
+        except Exception as e:
+            logger.error(f"Error processing queue item {queue_item.queue_id}: {e}")
+            queue_item.status = "failed"
+            queue_item.error_message = str(e)
+
+            return {
+                "queue_id": queue_item.queue_id,
+                "status": "failed",
+                "error": str(e),
+            }
+
+    async def get_payout_queue_status(self) -> Dict[str, Any]:
+        """Get the current status of the payout queue."""
+        queue_items = list(self.payout_queue.values())
+
+        by_status = {}
+        for item in queue_items:
+            status = item.status
+            if status not in by_status:
+                by_status[status] = {"count": 0, "total_amount": Decimal("0")}
+            by_status[status]["count"] += 1
+            by_status[status]["total_amount"] += item.amount
+
+        # Convert Decimal to string for JSON serialization
+        for status_data in by_status.values():
+            status_data["total_amount"] = str(status_data["total_amount"])
+
+        return {
+            "total_items": len(queue_items),
+            "by_status": by_status,
+            "pending_items": [
+                {
+                    "queue_id": q.queue_id,
+                    "affiliate_id": q.affiliate_id,
+                    "amount": str(q.amount),
+                    "priority": q.priority,
+                    "queued_at": q.queued_at.isoformat(),
+                    "attempts": q.attempts,
+                }
+                for q in sorted(
+                    [q for q in queue_items if q.status == "queued"],
+                    key=lambda x: (-x.priority, x.queued_at)
+                )[:20]  # Top 20
+            ],
+        }
+
+    async def cancel_queued_payout(self, queue_id: str) -> bool:
+        """Cancel a queued payout before it's processed."""
+        queue_item = self.payout_queue.get(queue_id)
+        if not queue_item:
+            raise ValueError(f"Queue item {queue_id} not found")
+
+        if queue_item.status not in ("queued",):
+            raise ValueError(f"Cannot cancel payout in status: {queue_item.status}")
+
+        queue_item.status = "cancelled"
+        queue_item.completed_at = datetime.utcnow()
+
+        logger.info(f"Cancelled queued payout: {queue_id}")
+        return True
+
+    async def retry_failed_payout(self, queue_id: str) -> PayoutQueueItem:
+        """Retry a failed payout."""
+        queue_item = self.payout_queue.get(queue_id)
+        if not queue_item:
+            raise ValueError(f"Queue item {queue_id} not found")
+
+        if queue_item.status != "failed":
+            raise ValueError(f"Can only retry failed payouts, current status: {queue_item.status}")
+
+        # Reset for retry
+        queue_item.status = "queued"
+        queue_item.attempts = 0
+        queue_item.error_message = ""
+        queue_item.next_retry_at = None
+
+        logger.info(f"Reset failed payout for retry: {queue_id}")
+        return queue_item
 
     # =========================================================================
     # ANALYTICS
