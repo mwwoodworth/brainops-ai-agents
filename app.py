@@ -194,6 +194,15 @@ except ImportError as e:
     ULTIMATE_E2E_AVAILABLE = False
     logger.warning(f"Ultimate E2E System not available: {e}")
 
+# TRUE Operational Validation - REAL operation testing (2025-12-31)
+try:
+    from api.true_validation import router as true_validation_router
+    TRUE_VALIDATION_AVAILABLE = True
+    logger.info("✅ TRUE Operational Validator loaded - executes real operations, not status checks")
+except ImportError as e:
+    TRUE_VALIDATION_AVAILABLE = False
+    logger.warning(f"TRUE Validation not available: {e}")
+
 # Learning Feedback Loop - Closes the gap between insights and action (2025-12-30)
 try:
     from api.learning import router as learning_router
@@ -259,7 +268,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.80.0"  # Ultimate E2E System: build log monitoring, DB awareness, comprehensive testing, issue detection (2025-12-31)
+VERSION = "9.81.0"  # TRUE Operational Validator: executes real operations, not status checks (2025-12-31)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -1397,6 +1406,11 @@ if ALWAYS_KNOW_AVAILABLE:
 if ULTIMATE_E2E_AVAILABLE:
     app.include_router(ultimate_e2e_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("Mounted: Ultimate E2E System at /ultimate-e2e - build logs, DB, UI tests, issues")
+
+# TRUE Operational Validation (2025-12-31) - REAL operation testing
+if TRUE_VALIDATION_AVAILABLE:
+    app.include_router(true_validation_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: TRUE Validation at /validate - executes real operations, not status checks")
 
 # Learning Feedback Loop (2025-12-30) - Insights finally become actions
 if LEARNING_ROUTER_AVAILABLE:
