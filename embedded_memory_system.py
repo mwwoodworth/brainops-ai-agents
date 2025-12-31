@@ -4,18 +4,16 @@ Fast local memory access with bidirectional sync to master Postgres
 """
 
 import sqlite3
-import asyncpg
 import asyncio
 import json
 import os
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 import numpy as np
 # Using OpenAI text-embedding-3-small for production-quality semantic embeddings
 # Includes circuit breaker pattern for quota/rate limit handling
-import hashlib  # Kept for content hashing (not embeddings)
 
 logger = logging.getLogger(__name__)
 

@@ -23,15 +23,15 @@ import logging
 import json
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
 # Import enhanced orchestration features
 try:
     from autonomous_system_orchestrator import (
-        EventBus, EventType, SystemEvent, MessageQueue, Task,
-        CircuitBreaker, CircuitState, LoadBalancer, LoadBalancingStrategy,
+        EventBus, EventType, SystemEvent, MessageQueue,
+        CircuitBreaker, LoadBalancer, LoadBalancingStrategy,
         AgentInstance, HealthAggregator
     )
     ENHANCED_ORCHESTRATION_AVAILABLE = True

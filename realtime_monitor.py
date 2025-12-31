@@ -7,18 +7,15 @@ import json
 import asyncio
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable, Tuple
 from enum import Enum
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 import os
 from dotenv import load_dotenv
 import logging
 import uuid
 from collections import defaultdict
-import websocket
-import threading
-import time
 
 load_dotenv()
 logger = logging.getLogger(__name__)

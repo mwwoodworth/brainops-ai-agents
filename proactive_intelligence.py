@@ -17,11 +17,10 @@ import os
 import json
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 from enum import Enum
-from collections import defaultdict
 import statistics
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json

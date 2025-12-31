@@ -9,15 +9,12 @@ import json
 import logging
 import uuid
 import asyncio
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 from openai import OpenAI
-import httpx
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

@@ -6,16 +6,14 @@ Stores and retrieves all conversation context across sessions
 
 import os
 import json
-import hashlib
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from openai import OpenAI
-import numpy as np
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -539,11 +537,15 @@ class ConversationMemory:
     def _generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for text"""
         try:
-            response = openai.Embedding.create(
+            client = get_openai_client()
+            if not client:
+                logger.warning("OpenAI client unavailable; returning zero embedding")
+                return [0.0] * 1536
+            response = client.embeddings.create(
                 model="text-embedding-ada-002",
                 input=text[:8000]  # Limit to avoid token limits
             )
-            return response['data'][0]['embedding']
+            return response.data[0].embedding
         except Exception as e:
             logger.error(f"Failed to generate embedding: {e}")
             return [0.0] * 1536

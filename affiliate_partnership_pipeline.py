@@ -32,7 +32,6 @@ import stripe
 from email_sender import send_email
 from ai_core import ai_generate
 
-import httpx
 from loguru import logger
 
 
@@ -2864,7 +2863,7 @@ class AffiliatePartnershipPipeline:
 
 def create_affiliate_router():
     """Create FastAPI router for affiliate endpoints."""
-    from fastapi import APIRouter, HTTPException, Depends, Request
+    from fastapi import APIRouter, HTTPException
     from pydantic import BaseModel
 
     router = APIRouter(prefix="/affiliate", tags=["Affiliate"])

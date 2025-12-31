@@ -53,7 +53,7 @@ ALLOWED_ATTRIBUTES = {
 # Import the SOP generator with fallback
 try:
     from automated_sop_generator import (
-        AutomatedSOPGenerator, SOPType, SOPStatus, GenerationSource,
+        SOPType,
         get_sop_generator
     )
     SOP_GENERATOR_AVAILABLE = True

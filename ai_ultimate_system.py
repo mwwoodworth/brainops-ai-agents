@@ -4,12 +4,11 @@ Ultimate AI System - Integrates ALL AI providers
 100% Real AI with intelligent provider selection
 """
 
-import os
 import json
 import logging
 import time
 import asyncio
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 # Import all AI providers
@@ -29,9 +28,7 @@ from ai_config import (
     ANTHROPIC_API_KEY,
     GOOGLE_API_KEY,
     PERPLEXITY_API_KEY,
-    HUGGINGFACE_API_TOKEN,
-    AI_MODELS,
-    AI_FEATURES
+    HUGGINGFACE_API_TOKEN
 )
 
 logger = logging.getLogger(__name__)
@@ -314,7 +311,7 @@ class UltimateAISystem:
                     return str(result)
 
             except Exception as provider_error:
-                logger.debug(f"Provider {name} failed: {provider_error}")
+                logger.debug(f"Provider {model_id} failed: {provider_error}")
                 continue
 
         return None

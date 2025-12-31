@@ -8,7 +8,7 @@ import ast
 import re
 import logging
 import hashlib
-from typing import List, Dict, Set, Optional, Tuple
+from typing import List, Dict, Tuple
 from pathlib import Path
 from dataclasses import dataclass, field
 

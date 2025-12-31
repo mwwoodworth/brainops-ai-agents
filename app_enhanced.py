@@ -3,12 +3,11 @@ BrainOps AI Agents Service - Enhanced Production Version
 Type-safe, async, fully operational
 """
 import logging
-import os
 import asyncio
 import json
 import uuid
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Security, Depends
@@ -19,7 +18,7 @@ from fastapi.security import APIKeyHeader
 # Import our production-ready components
 from config import config
 from database.async_connection import init_pool, get_pool, close_pool, PoolConfig
-from models.agent import Agent, AgentCategory, AgentExecution, AgentList
+from models.agent import Agent, AgentExecution, AgentList
 from api.memory import router as memory_router
 
 # Configure logging
@@ -45,7 +44,7 @@ except ImportError as e:
 
 # Import AI Core with fallback
 try:
-    from ai_core import RealAICore, ai_generate, ai_analyze
+    from ai_core import RealAICore
     ai_core = RealAICore()
     AI_AVAILABLE = True
     logger.info("✅ Real AI Core initialized successfully")

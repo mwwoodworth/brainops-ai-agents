@@ -25,8 +25,8 @@ import logging
 import time
 import hashlib
 import aiohttp
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import traceback
@@ -839,7 +839,6 @@ async def get_alerts() -> List[Dict[str, Any]]:
 # =============================================================================
 
 if __name__ == "__main__":
-    import sys
 
     async def main():
         brain = AlwaysKnowBrain()

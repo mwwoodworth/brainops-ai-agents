@@ -926,7 +926,8 @@ class UnifiedMemoryCoordinator:
         if hasattr(obj, 'isoformat'):
             try:
                 return obj.isoformat()
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to serialize object via isoformat: %s", exc)
                 return str(obj)
         return str(obj)
 

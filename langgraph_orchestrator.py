@@ -7,17 +7,15 @@ Implements graph-based AI agent workflow orchestration
 import os
 import json
 import logging
-from typing import Dict, List, Optional, Any, TypedDict, Annotated, Sequence
+from typing import Dict, List, Any, TypedDict, Sequence
 from datetime import datetime, timezone
 from enum import Enum
-import operator
 
 # LangChain/LangGraph imports
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
-from langchain.memory import ConversationBufferWindowMemory
 from langchain.schema import Document
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_openai import OpenAIEmbeddings
@@ -25,7 +23,6 @@ from langchain_openai import OpenAIEmbeddings
 from langgraph.graph import StateGraph, END
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

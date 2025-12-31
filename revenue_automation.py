@@ -6,10 +6,8 @@ All credentials loaded from environment variables
 
 import os
 import time
-import json
 import logging
 import schedule
-import threading
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor

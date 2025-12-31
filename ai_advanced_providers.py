@@ -8,7 +8,7 @@ import os
 import json
 import logging
 import requests
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, Optional, Any
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True

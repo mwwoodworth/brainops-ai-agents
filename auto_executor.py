@@ -7,10 +7,7 @@ Ensures agents are continuously working
 import os
 import asyncio
 import httpx
-import json
 import logging
-from datetime import datetime, timezone
-import random
 import psycopg2
 from psycopg2.extras import RealDictCursor
 

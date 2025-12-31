@@ -6,12 +6,11 @@ Tracks and manages overall system state, health, and operational status
 import json
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 from enum import Enum
 import os
 from dotenv import load_dotenv
-import asyncio
 import aiohttp
 from dataclasses import dataclass, asdict
 import logging
@@ -592,7 +591,8 @@ class SystemStateManager:
                 'in_progress': result['in_progress'] or 0
             }
 
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to load task stats: %s", exc, exc_info=True)
             return {'completed': 0, 'pending': 0, 'in_progress': 0}
 
     def _get_db_connections(self) -> int:
@@ -604,7 +604,8 @@ class SystemStateManager:
             count = cur.fetchone()[0]
             conn.close()
             return count
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to get DB connection count: %s", exc, exc_info=True)
             return 0
 
     def _store_snapshot(self, snapshot: SystemSnapshot, component_states: List[ComponentState]):
@@ -738,7 +739,8 @@ class SystemStateManager:
             conn = self._get_connection()
             conn.close()
             return True
-        except Exception:
+        except Exception as exc:
+            logger.warning("Database reconnect failed: %s", exc, exc_info=True)
             return False
 
     async def _restart_component(self, component: SystemComponent) -> bool:
@@ -764,7 +766,8 @@ class SystemStateManager:
             conn.close()
             return True
 
-        except Exception:
+        except Exception as exc:
+            logger.warning("Resource cleanup failed: %s", exc, exc_info=True)
             return False
 
     async def _optimize_indexes(self) -> bool:
@@ -779,7 +782,8 @@ class SystemStateManager:
             conn.close()
             return True
 
-        except Exception:
+        except Exception as exc:
+            logger.warning("Index optimization failed: %s", exc, exc_info=True)
             return False
 
     async def _activate_circuit_breaker(self, component: SystemComponent) -> bool:

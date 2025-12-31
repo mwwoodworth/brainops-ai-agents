@@ -23,7 +23,7 @@ import asyncio
 import logging
 import httpx
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Callable, Awaitable
+from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass, asdict
 from enum import Enum
 import psycopg2
@@ -31,7 +31,7 @@ from psycopg2.extras import RealDictCursor, Json
 
 # Import our cutting-edge systems
 try:
-    from meta_critic_scoring import get_meta_critic, MetaCriticScorer
+    from meta_critic_scoring import get_meta_critic
     META_CRITIC_AVAILABLE = True
 except ImportError:
     META_CRITIC_AVAILABLE = False

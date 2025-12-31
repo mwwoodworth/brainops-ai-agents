@@ -7,15 +7,13 @@ import json
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple, Callable
+from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
 from dataclasses import dataclass, asdict, field
 import os
 from dotenv import load_dotenv
-import asyncio
 import logging
 import uuid
-import random
 from collections import defaultdict
 
 load_dotenv()

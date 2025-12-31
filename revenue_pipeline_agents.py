@@ -17,7 +17,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from database.async_connection import get_pool
 

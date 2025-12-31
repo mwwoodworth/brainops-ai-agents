@@ -12,7 +12,7 @@ import asyncio
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 import openai
 import anthropic

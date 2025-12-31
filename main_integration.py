@@ -6,7 +6,6 @@ Deployed on Render.com from Docker Hub
 """
 
 import os
-import sys
 import asyncio
 import logging
 from datetime import datetime
@@ -20,7 +19,6 @@ import uvicorn
 # Import all our components
 from unified_memory_manager import get_memory_manager, Memory, MemoryType, DB_CONFIG
 import psycopg2
-from psycopg2.extras import RealDictCursor
 from agent_activation_system import get_activation_system, BusinessEventType
 from aurea_orchestrator import get_aurea, AutonomyLevel
 from ai_board_governance import get_ai_board, Proposal, ProposalType

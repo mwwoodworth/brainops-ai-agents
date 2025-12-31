@@ -34,15 +34,15 @@ def check_endpoint(name: str, url: str) -> Dict[str, Any]:
         }
 
         # Parse JSON responses
-            if 'application/json' in response.headers.get('content-type', ''):
-                try:
-                    data = response.json()
-                    if 'health' in name.lower():
-                        result['database'] = data.get('database', 'unknown')
-                        result['version'] = data.get('version', 'unknown')
-                    result['data'] = data
-                except (json.JSONDecodeError, ValueError) as exc:
-                    result['json_error'] = str(exc)[:100]
+        if 'application/json' in response.headers.get('content-type', ''):
+            try:
+                data = response.json()
+                if 'health' in name.lower():
+                    result['database'] = data.get('database', 'unknown')
+                    result['version'] = data.get('version', 'unknown')
+                result['data'] = data
+            except (json.JSONDecodeError, ValueError) as exc:
+                result['json_error'] = str(exc)[:100]
 
         return result
     except requests.exceptions.Timeout:

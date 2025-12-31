@@ -24,7 +24,6 @@ import aiohttp
 import logging
 import json
 import subprocess
-import re
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field

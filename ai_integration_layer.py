@@ -7,8 +7,8 @@ This is the missing piece that makes all components work together as ONE system
 import logging
 import asyncio
 import json
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Union
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor

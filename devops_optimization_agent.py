@@ -10,7 +10,7 @@ import logging
 import subprocess
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -308,7 +308,6 @@ Respond with JSON only:
 
             for pattern, description, severity in security_patterns:
                 try:
-                    import re
                     grep_result = subprocess.run(
                         ["grep", "-r", "-n", "-E", pattern, repo_path, "--include=*.py"],
                         capture_output=True, text=True, timeout=30

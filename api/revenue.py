@@ -2,7 +2,6 @@
 Revenue Generation API Router
 Exposes endpoints for the autonomous revenue system
 """
-import os
 import json
 import uuid
 import logging
@@ -23,7 +22,6 @@ async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     if not api_key or api_key not in VALID_API_KEYS:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return api_key
-from config import config
 
 # All endpoints require API key authentication
 router = APIRouter(

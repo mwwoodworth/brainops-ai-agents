@@ -13,14 +13,10 @@ Enhanced with:
 """
 
 import os
-import json
 import asyncio
 import logging
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List
 from datetime import datetime, timezone
-from collections import defaultdict, deque
-from dataclasses import dataclass, field
-from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from memory_system import memory_system
@@ -33,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ============== IMPORT ENHANCED ORCHESTRATION COMPONENTS ==============
 try:
     from autonomous_system_orchestrator import (
-        EventBus, EventType, SystemEvent, MessageQueue, Task,
+        EventBus, EventType, SystemEvent, MessageQueue,
         CircuitBreaker, CircuitState, LoadBalancer, LoadBalancingStrategy,
         AgentInstance, HealthAggregator
     )

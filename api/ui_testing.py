@@ -719,8 +719,8 @@ async def health_check() -> Dict[str, Any]:
 
     playwright_status = "unknown"
     browser_installed = False
-    try:
-        from playwright.async_api import async_playwright
+    import importlib.util
+    if importlib.util.find_spec("playwright.async_api"):
         playwright_status = "module_available"
         # Check if browser is actually installed
         import os
@@ -732,7 +732,7 @@ async def health_check() -> Dict[str, Any]:
             browser_installed = True
         else:
             playwright_status = "browser_missing"
-    except ImportError:
+    else:
         playwright_status = "not_installed"
 
     return {
@@ -794,8 +794,8 @@ async def get_diagnostics() -> Dict[str, Any]:
 
     # Check Playwright
     playwright_info = {"installed": False, "browser_paths": []}
-    try:
-        from playwright.async_api import async_playwright
+    import importlib.util
+    if importlib.util.find_spec("playwright.async_api"):
         playwright_info["installed"] = True
 
         # Check browser installation
@@ -803,7 +803,7 @@ async def get_diagnostics() -> Dict[str, Any]:
         browser_paths = glob.glob(f"{home}/.cache/ms-playwright/*/")
         playwright_info["browser_paths"] = browser_paths
         playwright_info["browser_count"] = len(browser_paths)
-    except ImportError:
+    else:
         playwright_info["error"] = "playwright module not installed"
 
     # Test browser launch capability

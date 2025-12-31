@@ -5,10 +5,8 @@ Verifies all components work end-to-end
 """
 import asyncio
 import sys
-import os
 import logging
-from typing import Any, Dict, List
-import json
+from typing import List
 
 # Setup logging
 logging.basicConfig(
@@ -22,12 +20,18 @@ async def test_imports() -> bool:
     """Test all required imports"""
     logger.info("Testing imports...")
     try:
-        import asyncpg
-        import pydantic
-        import fastapi
-        from database.async_connection import AsyncDatabasePool, PoolConfig
-        from models.agent import Agent, AgentCategory, AgentExecution
-        from api.memory import MemoryStatus
+        import importlib
+
+        modules = [
+            "asyncpg",
+            "pydantic",
+            "fastapi",
+            "database.async_connection",
+            "models.agent",
+            "api.memory",
+        ]
+        for module in modules:
+            importlib.import_module(module)
         logger.info("✅ All imports successful")
         return True
     except ImportError as e:
@@ -119,7 +123,7 @@ async def test_memory_endpoint() -> bool:
     """Test memory endpoint functionality"""
     logger.info("Testing memory endpoints...")
     try:
-        from database.async_connection import AsyncDatabasePool, PoolConfig, init_pool
+        from database.async_connection import PoolConfig, init_pool
         from config import config
         from api.memory import get_memory_status
 

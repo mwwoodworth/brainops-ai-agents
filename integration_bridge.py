@@ -16,13 +16,8 @@ Version: 2.0.0
 
 import asyncio
 import httpx
-import json
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any
-import schedule
-import time
-import threading
 from memory_system import memory_system
 
 logger = logging.getLogger(__name__)
@@ -30,8 +25,8 @@ logger = logging.getLogger(__name__)
 # Import enhanced orchestration features
 try:
     from autonomous_system_orchestrator import (
-        EventBus, EventType, SystemEvent, MessageQueue, Task,
-        CircuitBreaker, CircuitState, LoadBalancer, LoadBalancingStrategy,
+        EventBus, MessageQueue,
+        CircuitBreaker, LoadBalancer, LoadBalancingStrategy,
         AgentInstance, HealthAggregator
     )
     ENHANCED_FEATURES_AVAILABLE = True
