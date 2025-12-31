@@ -2,12 +2,20 @@ import asyncio
 import os
 from consciousness_loop import ConsciousnessLoop
 
-# Set env vars for the module to pick up
-os.environ["DB_HOST"] = "aws-0-us-east-2.pooler.supabase.com"
-os.environ["DB_NAME"] = "postgres"
-os.environ["DB_USER"] = "postgres.yomagoqdmxszqtdwuhab"
-os.environ["DB_PASSWORD"] = "REDACTED_SUPABASE_DB_PASSWORD"
-os.environ["DB_PORT"] = "5432"
+# SECURITY: Load credentials from environment or .env file
+# DO NOT hardcode credentials - they must be set in environment
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed, use existing environment
+
+# Verify required environment variables are set
+required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+missing = [v for v in required_vars if not os.getenv(v)]
+if missing:
+    raise EnvironmentError(f"Required environment variables not set: {', '.join(missing)}. "
+                          "Set them in .env file or environment.")
 
 async def test_loop():
     print("Initializing ConsciousnessLoop...")
