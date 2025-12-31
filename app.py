@@ -236,7 +236,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.57.0"  # Fixed SQL column bug (c.company → c.company_name) in revenue pipeline agents
+VERSION = "9.58.0"  # SQL column fixes + stripe dependency for affiliate pipeline
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
