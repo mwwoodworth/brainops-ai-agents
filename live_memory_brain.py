@@ -69,12 +69,13 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 
+# Database configuration - NO hardcoded credentials
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
+    "host": os.getenv("DB_HOST"),  # Required - no default
     "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD"),
-    "port": int(os.getenv("DB_PORT", 5432))
+    "user": os.getenv("DB_USER"),  # Required - no default
+    "password": os.getenv("DB_PASSWORD"),  # Required - no default
+    "port": int(os.getenv("DB_PORT", "5432"))
 }
 
 # Memory configuration
@@ -418,7 +419,7 @@ class CrossSystemOmniscience:
             # Fetch from HTTP API
             try:
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                    headers = {"X-API-Key": config.get("api_key", "brainops_prod_key_2025")}
+                    headers = {"X-API-Key": config.get("api_key") or os.getenv("BRAINOPS_API_KEY")}
                     async with session.get(url, headers=headers) as resp:
                         if resp.status == 200:
                             data = await resp.json()

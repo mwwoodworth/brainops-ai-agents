@@ -1,9 +1,24 @@
 import asyncio
 import asyncpg
+import os
 
-DB_URL = "postgresql://postgres.yomagoqdmxszqtdwuhab:Brain0ps2O2S@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
+# Build DB URL from environment variables - NO hardcoded credentials
+def get_db_url() -> str:
+    host = os.getenv("DB_HOST")
+    user = os.getenv("DB_USER")
+    password = os.getenv("DB_PASSWORD")
+    port = os.getenv("DB_PORT", "5432")
+    database = os.getenv("DB_NAME", "postgres")
+
+    if not all([host, user, password]):
+        raise RuntimeError(
+            "Database credentials not configured. "
+            "Set DB_HOST, DB_USER, DB_PASSWORD environment variables."
+        )
+    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 async def setup_db():
+    DB_URL = get_db_url()
     print(f"Connecting to {DB_URL.split('@')[1]}...")
     try:
         conn = await asyncpg.connect(DB_URL)

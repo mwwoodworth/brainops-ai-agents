@@ -218,7 +218,7 @@ class AlwaysKnowBrain:
             start = time.time()
             async with self._session.get(
                 "https://brainops-ai-agents.onrender.com/health",
-                headers={"X-API-Key": os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")}
+                headers={"X-API-Key": os.getenv("BRAINOPS_API_KEY") or os.getenv("AGENTS_API_KEY")}
             ) as resp:
                 state.response_time_ms = (time.time() - start) * 1000
                 if resp.status == 200:
@@ -295,7 +295,7 @@ class AlwaysKnowBrain:
         try:
             async with self._session.get(
                 "https://brainops-ai-agents.onrender.com/aurea/status",
-                headers={"X-API-Key": os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")}
+                headers={"X-API-Key": os.getenv("BRAINOPS_API_KEY") or os.getenv("AGENTS_API_KEY")}
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()

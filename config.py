@@ -125,11 +125,24 @@ class SecurityConfig:
             self.allowed_origins = []
 
 
+class TenantConfig:
+    """Tenant configuration for multi-tenancy support"""
+
+    def __init__(self):
+        # Default tenant ID from environment (required for production)
+        self.default_tenant_id = os.getenv('DEFAULT_TENANT_ID') or os.getenv('TENANT_ID')
+        if not self.default_tenant_id:
+            logger.warning("No DEFAULT_TENANT_ID set - multi-tenancy may not work correctly")
+
+        # Per-request tenant resolution is handled via X-Tenant-ID header
+        self.header_name = os.getenv('TENANT_HEADER', 'X-Tenant-ID')
+
+
 class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.25.0')
+        self.version = os.getenv('VERSION', '9.86.0')
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
@@ -137,6 +150,7 @@ class AppConfig:
         self.environment = os.getenv('ENVIRONMENT', 'production')
         self.database = DatabaseConfig()
         self.security = SecurityConfig()
+        self.tenant = TenantConfig()
 
 
 config = AppConfig()

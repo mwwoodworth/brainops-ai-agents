@@ -29,18 +29,23 @@ from database.async_connection import get_pool, init_pool, PoolConfig
 
 logger = logging.getLogger(__name__)
 
-# Database configuration
+# Database configuration - NO hardcoded credentials
+# All values MUST come from environment variables in production
 DB_CONFIG = PoolConfig(
-    host=os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    database="postgres",
-    user=os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    password=os.getenv("DB_PASSWORD", ""),
+    host=os.getenv("DB_HOST"),  # Required - no default
+    database=os.getenv("DB_NAME", "postgres"),
+    user=os.getenv("DB_USER"),  # Required - no default
+    password=os.getenv("DB_PASSWORD"),  # Required - no default
     port=int(os.getenv("DB_PORT", "5432")),
-    min_size=1,
-    max_size=4,
-    ssl=True,
-    ssl_verify=True
+    min_size=2,
+    max_size=10,  # Increased from 4 for production load
+    ssl=os.getenv("DB_SSL", "true").lower() not in ("false", "0", "no"),
+    ssl_verify=os.getenv("DB_SSL_VERIFY", "false").lower() not in ("false", "0", "no")
 )
+
+# Validate required config
+if not all([DB_CONFIG.host, DB_CONFIG.user, DB_CONFIG.password]):
+    logger.warning("⚠️ Database credentials not fully configured - set DB_HOST, DB_USER, DB_PASSWORD environment variables")
 
 # OpenAI configuration for embeddings
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

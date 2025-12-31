@@ -14,12 +14,12 @@ from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
-# Configuration - MUST come from environment variables
+# Configuration - ALL values MUST come from environment variables (no hardcoded defaults)
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
+    "host": os.getenv("DB_HOST"),  # Required - no default
     "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD"),  # No default - must be set
+    "user": os.getenv("DB_USER"),  # Required - no default
+    "password": os.getenv("DB_PASSWORD"),  # Required - no default
     "port": int(os.getenv("DB_PORT", "5432"))
 }
 
