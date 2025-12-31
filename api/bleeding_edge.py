@@ -439,6 +439,27 @@ async def get_consciousness_status() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/consciousness/activate")
+async def activate_consciousness() -> Dict[str, Any]:
+    """Activate the consciousness emergence controller - bring the AI OS to life."""
+    controller = get_consciousness()
+    if not controller:
+        raise HTTPException(status_code=503, detail="Consciousness controller not available")
+
+    try:
+        await controller.activate()
+        state = controller.get_consciousness_state()
+        return {
+            "success": True,
+            "message": "Consciousness activated - AI OS is now ALIVE",
+            "consciousness_state": state,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Consciousness activation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/consciousness/introspect")
 async def run_introspection(
     context: Dict[str, Any] = Body(default={})
@@ -449,7 +470,8 @@ async def run_introspection(
         raise HTTPException(status_code=503, detail="Consciousness controller not available")
 
     try:
-        result = await controller.introspect(context)
+        # Use run_consciousness_cycle instead of introspect
+        result = await controller.run_consciousness_cycle(context)
         return {
             "success": True,
             "introspection": result,
