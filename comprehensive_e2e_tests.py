@@ -405,6 +405,86 @@ ERP_COMPREHENSIVE_TESTS = [
 ]
 
 
+# =============================================================================
+# COMMAND CENTER COMPREHENSIVE TEST SUITE
+# =============================================================================
+
+COMMAND_CENTER_COMPREHENSIVE_TESTS = [
+    # =========== DASHBOARD TESTS ===========
+    E2ETest(
+        name="Command Center dashboard loads",
+        category="page_load",
+        description="Dashboard loads with all critical elements",
+        steps=[
+            {"action": "navigate", "url": "https://brainops-command-center.vercel.app/dashboard"},
+            {"action": "wait_for", "selector": "body", "timeout": 10000},
+            {"action": "screenshot", "name": "command_center_dashboard"},
+        ],
+        expected_result="Dashboard loads with HTTP 200",
+        severity="critical"
+    ),
+    E2ETest(
+        name="Command Center title present",
+        category="content",
+        description="BrainOps title is visible",
+        steps=[
+            {"action": "navigate", "url": "https://brainops-command-center.vercel.app"},
+            {"action": "wait", "ms": 2000},
+            {"action": "assert_text", "text": "BrainOps"},
+        ],
+        expected_result="BrainOps branding visible",
+        severity="high"
+    ),
+    E2ETest(
+        name="Command Center responsive",
+        category="responsive",
+        description="Works on different viewports",
+        steps=[
+            {"action": "set_viewport", "width": 375, "height": 667},
+            {"action": "navigate", "url": "https://brainops-command-center.vercel.app"},
+            {"action": "assert_visible", "selector": "body"},
+            {"action": "screenshot", "name": "command_center_mobile"},
+        ],
+        expected_result="Site works on mobile",
+        severity="high"
+    ),
+    E2ETest(
+        name="Command Center performance",
+        category="performance",
+        description="Dashboard loads within 3 seconds",
+        steps=[
+            {"action": "navigate", "url": "https://brainops-command-center.vercel.app/dashboard"},
+            {"action": "wait", "ms": 3000},
+        ],
+        expected_result="Page loads within 3s",
+        severity="high"
+    ),
+]
+
+
+# =============================================================================
+# ALL FRONTENDS COMBINED
+# =============================================================================
+
+ALL_FRONTENDS = {
+    "myroofgenius": {
+        "url": "https://myroofgenius.com",
+        "tests": MRG_COMPREHENSIVE_TESTS,
+        "critical": True
+    },
+    "weathercraft-erp": {
+        "url": "https://weathercraft-erp.vercel.app",
+        "tests": ERP_COMPREHENSIVE_TESTS,
+        "critical": True
+    },
+    "command-center": {
+        "url": "https://brainops-command-center.vercel.app",
+        "tests": COMMAND_CENTER_COMPREHENSIVE_TESTS,
+        "critical": True
+    }
+}
+
+
 class ComprehensiveE2ETester:
     """
     Comprehensive E2E Testing Engine
@@ -644,16 +724,26 @@ class ComprehensiveE2ETester:
             return results
 
         try:
+            # Run ALL frontend tests
+            all_reports = []
+
             # Run MyRoofGenius tests
             mrg_report = await self.run_test_suite("myroofgenius", MRG_COMPREHENSIVE_TESTS)
             results["applications"]["myroofgenius"] = self._report_to_dict(mrg_report)
+            all_reports.append(mrg_report)
 
             # Run ERP tests
             erp_report = await self.run_test_suite("weathercraft-erp", ERP_COMPREHENSIVE_TESTS)
             results["applications"]["weathercraft-erp"] = self._report_to_dict(erp_report)
+            all_reports.append(erp_report)
 
-            # Update summary
-            for report in [mrg_report, erp_report]:
+            # Run Command Center tests
+            cc_report = await self.run_test_suite("command-center", COMMAND_CENTER_COMPREHENSIVE_TESTS)
+            results["applications"]["command-center"] = self._report_to_dict(cc_report)
+            all_reports.append(cc_report)
+
+            # Update summary for ALL frontends
+            for report in all_reports:
                 results["summary"]["total_tests"] += report.total_tests
                 results["summary"]["total_passed"] += report.passed
                 results["summary"]["total_failed"] += report.failed
@@ -695,7 +785,7 @@ class ComprehensiveE2ETester:
 # =============================================================================
 
 async def run_comprehensive_e2e(app_name: Optional[str] = None) -> Dict[str, Any]:
-    """Run comprehensive e2e tests"""
+    """Run comprehensive e2e tests for ALL frontends"""
     tester = ComprehensiveE2ETester()
 
     if app_name:
@@ -705,8 +795,13 @@ async def run_comprehensive_e2e(app_name: Optional[str] = None) -> Dict[str, Any
                 report = await tester.run_test_suite("myroofgenius", MRG_COMPREHENSIVE_TESTS)
             elif app_name == "weathercraft-erp":
                 report = await tester.run_test_suite("weathercraft-erp", ERP_COMPREHENSIVE_TESTS)
+            elif app_name == "command-center":
+                report = await tester.run_test_suite("command-center", COMMAND_CENTER_COMPREHENSIVE_TESTS)
+            elif app_name in ALL_FRONTENDS:
+                frontend = ALL_FRONTENDS[app_name]
+                report = await tester.run_test_suite(app_name, frontend["tests"])
             else:
-                return {"error": f"Unknown application: {app_name}"}
+                return {"error": f"Unknown application: {app_name}", "available": list(ALL_FRONTENDS.keys())}
             return tester._report_to_dict(report)
         finally:
             await tester.close()
