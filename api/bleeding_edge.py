@@ -93,13 +93,18 @@ def get_hallucination_controller() -> Optional[HallucinationPreventionController
     return _hallucination_controller
 
 
-def get_live_memory() -> Optional[LiveMemoryBrain]:
+async def get_live_memory() -> Optional[LiveMemoryBrain]:
     """Get or create live memory brain."""
     global _live_memory
     if not LIVE_MEMORY_AVAILABLE:
         return None
     if _live_memory is None:
         _live_memory = LiveMemoryBrain()
+        try:
+            await _live_memory.initialize()
+            logger.info("LiveMemoryBrain initialized successfully")
+        except Exception as e:
+            logger.warning(f"LiveMemoryBrain initialization partial: {e}")
     return _live_memory
 
 
@@ -322,7 +327,7 @@ async def store_memory(
     metadata: Dict[str, Any] = Body(default={})
 ) -> Dict[str, Any]:
     """Store a memory in the live brain."""
-    brain = get_live_memory()
+    brain = await get_live_memory()
     if not brain:
         raise HTTPException(status_code=503, detail="Live memory brain not available")
 
@@ -357,7 +362,7 @@ async def recall_memory(
     limit: int = Body(5)
 ) -> Dict[str, Any]:
     """Recall memories relevant to a query."""
-    brain = get_live_memory()
+    brain = await get_live_memory()
     if not brain:
         raise HTTPException(status_code=503, detail="Live memory brain not available")
 
@@ -376,7 +381,7 @@ async def recall_memory(
 @router.get("/memory/status")
 async def get_memory_status() -> Dict[str, Any]:
     """Get live memory brain status."""
-    brain = get_live_memory()
+    brain = await get_live_memory()
     if not brain:
         raise HTTPException(status_code=503, detail="Live memory brain not available")
 
@@ -568,7 +573,7 @@ async def validate_and_store(
     then store in live memory if valid.
     """
     hallucination_ctrl = get_hallucination_controller()
-    memory_brain = get_live_memory()
+    memory_brain = await get_live_memory()
     dependability = get_dependability()
 
     results = {
@@ -672,7 +677,7 @@ async def get_comprehensive_diagnostics() -> Dict[str, Any]:
 
     if LIVE_MEMORY_AVAILABLE:
         try:
-            brain = get_live_memory()
+            brain = await get_live_memory()
             if brain:
                 context = brain.get_unified_context()
                 diagnostics["modules"]["memory"] = {
@@ -810,7 +815,7 @@ async def run_bleeding_edge_smoke_test() -> Dict[str, Any]:
     # Test 3: Memory Brain
     try:
         if LIVE_MEMORY_AVAILABLE:
-            brain = get_live_memory()
+            brain = await get_live_memory()
             if brain:
                 context = brain.get_unified_context()
                 results["tests"]["memory"] = {"success": True, "working_memory": context.get("working_memory_size", 0)}
