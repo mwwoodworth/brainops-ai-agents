@@ -236,7 +236,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.58.0"  # SQL column fixes + stripe dependency for affiliate pipeline
+VERSION = "9.59.0"  # Security hardening + configurable tenant + MCP controls
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -548,14 +548,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info(f"🚀 Starting BrainOps AI Agents v{VERSION} - Build: {BUILD_TIME}")
 
-    # Main production tenant with actual data (5,298 customers, 2,487 invoices, 940 overdue)
-    # CRITICAL: This is the ONLY tenant with real business data - DO NOT CHANGE
-    PRODUCTION_TENANT = "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+    # Default production tenant with actual data (configurable via environment)
+    # Set DEFAULT_TENANT_ID or TENANT_ID in environment to override
+    # The default "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457" has production data
+    DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID") or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
 
-    # FORCE production tenant - env vars were set to wrong empty tenant
-    # The old tenant "97f82b360baefdd73400ad342562586" has ZERO data
-    tenant_id = PRODUCTION_TENANT
-    logger.info(f"🔑 Using tenant_id: {tenant_id}")
+    # Use environment-configured tenant for startup initialization
+    # Per-request tenant resolution happens via X-Tenant-ID header in API endpoints
+    tenant_id = DEFAULT_TENANT_ID
+    logger.info(f"🔑 Default tenant_id: {tenant_id} (override per-request via X-Tenant-ID header)")
 
     # Keep handles defined to avoid unbound errors when optional systems are disabled
     aurea = None
@@ -637,7 +638,7 @@ async def lifespan(app: FastAPI):
     else:
         app.state.aurea = None
         if AUREA_AVAILABLE and not tenant_id:
-            logger.warning("⚠️ Skipping AUREA initialization (TENANT_ID missing)")
+            logger.warning("⚠️ Skipping AUREA initialization (DEFAULT_TENANT_ID/TENANT_ID missing)")
 
     # Initialize Self-Healing Recovery System
     if SELF_HEALING_AVAILABLE:
@@ -999,7 +1000,7 @@ async def lifespan(app: FastAPI):
     # This enables debugging and monitoring even in degraded state
     missing_critical_systems = []
     if not tenant_id:
-        missing_critical_systems.append("TENANT_ID not provided")
+        missing_critical_systems.append("DEFAULT_TENANT_ID/TENANT_ID not provided")
     if not (os.getenv("DATABASE_URL") or (config.database.host and config.database.password)):
         missing_critical_systems.append("Database credentials")
     if using_fallback():
