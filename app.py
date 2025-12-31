@@ -185,6 +185,15 @@ except ImportError as e:
     ALWAYS_KNOW_AVAILABLE = False
     logger.warning(f"Always-Know Brain Router not available: {e}")
 
+# Ultimate E2E System - COMPLETE e2e awareness (2025-12-31)
+try:
+    from api.ultimate_e2e import router as ultimate_e2e_router
+    ULTIMATE_E2E_AVAILABLE = True
+    logger.info("🚀 Ultimate E2E System loaded - build logs, DB awareness, UI tests, issue detection")
+except ImportError as e:
+    ULTIMATE_E2E_AVAILABLE = False
+    logger.warning(f"Ultimate E2E System not available: {e}")
+
 # Learning Feedback Loop - Closes the gap between insights and action (2025-12-30)
 try:
     from api.learning import router as learning_router
@@ -250,7 +259,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.79.0"  # Major fixes: rollback_service, deployment tests, unified DB/AI, email processing (2025-12-31)
+VERSION = "9.80.0"  # Ultimate E2E System: build log monitoring, DB awareness, comprehensive testing, issue detection (2025-12-31)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -1383,6 +1392,11 @@ if BG_MONITORING_AVAILABLE:
 if ALWAYS_KNOW_AVAILABLE:
     app.include_router(always_know_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("Mounted: Always-Know Brain at /always-know - continuous state awareness")
+
+# Ultimate E2E System (2025-12-31) - COMPLETE e2e awareness
+if ULTIMATE_E2E_AVAILABLE:
+    app.include_router(ultimate_e2e_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: Ultimate E2E System at /ultimate-e2e - build logs, DB, UI tests, issues")
 
 # Learning Feedback Loop (2025-12-30) - Insights finally become actions
 if LEARNING_ROUTER_AVAILABLE:
