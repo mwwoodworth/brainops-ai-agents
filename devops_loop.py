@@ -36,6 +36,7 @@ MCP_BRIDGE = "https://brainops-mcp-bridge.onrender.com"
 MRG_URL = "https://myroofgenius.com"
 ERP_URL = "https://weathercraft-erp.vercel.app"
 COMMAND_CENTER_URL = "https://brainops-command-center.vercel.app"
+BRAINSTACK_STUDIO_URL = "https://brainstackstudio.com"
 
 API_KEY = os.getenv("AGENTS_API_KEY", "brainops_prod_key_2025")
 
@@ -62,7 +63,7 @@ BACKEND_SYSTEMS = {
     }
 }
 
-# ALL Frontend Applications
+# ALL Frontend Applications (4 total)
 FRONTEND_SYSTEMS = {
     "myroofgenius": {
         "url": MRG_URL,
@@ -77,6 +78,11 @@ FRONTEND_SYSTEMS = {
     "command-center": {
         "url": COMMAND_CENTER_URL,
         "health_endpoint": "/dashboard",
+        "critical": True
+    },
+    "brainstack-studio": {
+        "url": BRAINSTACK_STUDIO_URL,
+        "health_endpoint": "/",
         "critical": True
     }
 }
