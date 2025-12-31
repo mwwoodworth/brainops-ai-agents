@@ -180,9 +180,9 @@ class AutonomousCICDManagement:
             },
         }
 
-        # MCP Bridge integration
+        # MCP Bridge integration - NO hardcoded credentials
         self.mcp_bridge_url = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
-        self.mcp_api_key = os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+        self.mcp_api_key = os.getenv("BRAINOPS_API_KEY") or os.getenv("AGENTS_API_KEY")  # Required - no default
 
         # Metrics
         self.total_deployments = 0

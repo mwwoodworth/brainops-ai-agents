@@ -34,17 +34,29 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-# Configuration
-BASE_URL = os.getenv("BRAINOPS_URL", "https://brainops-ai-agents.onrender.com")
-API_KEY = os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+# Configuration - Load from environment or config module
+try:
+    from config import database as db_config
+    DB_CONFIG = {
+        "host": db_config.host,
+        "database": db_config.name,
+        "user": db_config.user,
+        "password": db_config.password,
+        "port": db_config.port
+    }
+except ImportError:
+    # Fallback to environment variables only (no hardcoded defaults)
+    DB_CONFIG = {
+        "host": os.getenv("DB_HOST"),
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": int(os.getenv("DB_PORT", "6543"))
+    }
 
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD", "REDACTED_SUPABASE_DB_PASSWORD"),
-    "port": int(os.getenv("DB_PORT", "6543"))
-}
+# Service configuration from environment
+BASE_URL = os.getenv("BRAINOPS_URL") or os.getenv("RENDER_EXTERNAL_URL") or "http://localhost:10000"
+API_KEY = os.getenv("BRAINOPS_API_KEY") or os.getenv("API_KEY")
 
 
 @dataclass

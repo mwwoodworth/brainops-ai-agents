@@ -31,18 +31,18 @@ from enum import Enum
 
 logger = logging.getLogger('AUREA.Power')
 
-# Configuration
+# Configuration - NO hardcoded credentials
 MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
-MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("MCP_BRIDGE_API_KEY") or "brainops_mcp_2025"
-BRAINOPS_API_KEY = os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("MCP_BRIDGE_API_KEY")  # Required - no default
+BRAINOPS_API_KEY = os.getenv("BRAINOPS_API_KEY") or os.getenv("AGENTS_API_KEY")  # Required - no default
 
-# Database Configuration
+# Database Configuration - NO hardcoded credentials
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
+    'host': os.getenv('DB_HOST'),  # Required - no default
     'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('DB_PASSWORD'),
-    'port': int(os.getenv('DB_PORT', 5432))
+    'user': os.getenv('DB_USER'),  # Required - no default
+    'password': os.getenv('DB_PASSWORD'),  # Required - no default
+    'port': int(os.getenv('DB_PORT', '5432'))
 }
 
 # Service URLs

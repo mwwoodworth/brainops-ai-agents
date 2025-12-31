@@ -268,7 +268,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.85.0"  # TRUE Validator: Fix consciousness test to use correct endpoints (2025-12-31)
+VERSION = "9.86.0"  # SECURITY: Remove hardcoded credentials, increase DB pool to 10 (2025-12-31)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -580,15 +580,17 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info(f"🚀 Starting BrainOps AI Agents v{VERSION} - Build: {BUILD_TIME}")
 
-    # Default production tenant with actual data (configurable via environment)
-    # Set DEFAULT_TENANT_ID or TENANT_ID in environment to override
-    # The default "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457" has production data
-    DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID") or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+    # Get tenant configuration from centralized config
+    from config import config as app_config
+    DEFAULT_TENANT_ID = app_config.tenant.default_tenant_id
 
     # Use environment-configured tenant for startup initialization
     # Per-request tenant resolution happens via X-Tenant-ID header in API endpoints
     tenant_id = DEFAULT_TENANT_ID
-    logger.info(f"🔑 Default tenant_id: {tenant_id} (override per-request via X-Tenant-ID header)")
+    if tenant_id:
+        logger.info(f"🔑 Default tenant_id: {tenant_id} (override per-request via {app_config.tenant.header_name} header)")
+    else:
+        logger.warning("⚠️ No DEFAULT_TENANT_ID configured - set DEFAULT_TENANT_ID environment variable")
 
     # Keep handles defined to avoid unbound errors when optional systems are disabled
     aurea = None
