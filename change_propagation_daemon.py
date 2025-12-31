@@ -254,8 +254,13 @@ class ChangePropagator:
                 try:
                     with open(change.path, 'r', errors='ignore') as f:
                         line_count = sum(1 for _ in f)
-                except:
-                    pass
+                except (OSError, UnicodeError) as exc:
+                    logger.warning(
+                        "Failed to count lines for %s: %s",
+                        change.path,
+                        exc,
+                        exc_info=True,
+                    )
                 
                 metadata_update = {
                     "timestamp": change.timestamp,

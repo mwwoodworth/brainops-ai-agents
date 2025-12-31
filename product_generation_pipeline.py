@@ -190,7 +190,8 @@ class ClaudeProvider(AIProvider):
         result = await self.generate(prompt, max_tokens=2000)
         try:
             return json.loads(result)
-        except:
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.debug("Claude analysis JSON parse failed: %s", exc)
             return {"analysis": result}
 
 
@@ -243,7 +244,8 @@ class OpenAIProvider(AIProvider):
         result = await self.generate(prompt, max_tokens=2000)
         try:
             return json.loads(result)
-        except:
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.debug("OpenAI analysis JSON parse failed: %s", exc)
             return {"analysis": result}
 
 
@@ -290,7 +292,8 @@ class GeminiProvider(AIProvider):
         result = await self.generate(prompt, max_tokens=2000)
         try:
             return json.loads(result)
-        except:
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.debug("Gemini analysis JSON parse failed: %s", exc)
             return {"analysis": result}
 
 
@@ -662,7 +665,8 @@ class ProductGenerator:
             import re
             json_match = re.search(r'\{[\s\S]*\}', outline_raw)
             outline = json.loads(json_match.group()) if json_match else {"chapters": []}
-        except:
+        except (json.JSONDecodeError, AttributeError, TypeError, ValueError) as exc:
+            logger.warning("Failed to parse outline JSON: %s", exc, exc_info=True)
             outline = {"title": spec.title, "chapters": []}
 
         # Step 2: Generate each chapter
@@ -933,7 +937,8 @@ class ProductGenerator:
             import re
             json_match = re.search(r'\{[\s\S]*\}', structure_raw)
             structure = json.loads(json_match.group()) if json_match else {}
-        except:
+        except (json.JSONDecodeError, AttributeError, TypeError, ValueError) as exc:
+            logger.warning("Failed to parse course structure JSON: %s", exc, exc_info=True)
             structure = {"title": spec.title, "modules": []}
 
         # Generate content for each lesson
@@ -1290,7 +1295,8 @@ class ProductGenerator:
             json_match = re.search(r'\{[\s\S]*\}', review_raw)
             review = json.loads(json_match.group()) if json_match else {}
             return review.get("total_score", 75)
-        except:
+        except (json.JSONDecodeError, AttributeError, TypeError, ValueError) as exc:
+            logger.warning("Failed to parse quality review JSON: %s", exc, exc_info=True)
             return 75.0  # Default score
 
     async def _update_status(self, product_id: str, status: ProductStatus):
@@ -1302,8 +1308,8 @@ class ProductGenerator:
                     UPDATE generated_products SET status = %s WHERE id = %s
                 """, (status.value, product_id))
                 conn.commit()
-        except:
-            pass
+        except psycopg2.Error as exc:
+            logger.error("Failed to update product status: %s", exc, exc_info=True)
         finally:
             conn.close()
 

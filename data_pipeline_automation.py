@@ -190,10 +190,19 @@ class DataExtractor:
             )
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-            query = config.get('query', f"SELECT * FROM {config.get('table', 'unknown')}")
+            # Validate table and column names to prevent SQL injection
+            import re
+            table_name = config.get('table', 'unknown')
+            if not re.match(r'^[a-z_][a-z0-9_]*$', table_name, re.IGNORECASE):
+                raise ValueError(f"Invalid table name: {table_name}")
+
+            if incremental_key and not re.match(r'^[a-z_][a-z0-9_]*$', incremental_key, re.IGNORECASE):
+                raise ValueError(f"Invalid incremental key column: {incremental_key}")
+
+            query = config.get('query', f'SELECT * FROM "{table_name}"')
 
             if incremental_key and last_value:
-                query += f" WHERE {incremental_key} > %s"
+                query += f' WHERE "{incremental_key}" > %s'
                 cursor.execute(query, (last_value,))
             else:
                 cursor.execute(query)
@@ -1046,8 +1055,8 @@ class DataPipelineAutomation:
                 """, (PipelineStatus.FAILED.value, str(e), run_id))
                 conn.commit()
                 cursor.close()
-            except Exception:
-                pass
+            except Exception as update_exc:
+                logger.error("Failed to update pipeline run status: %s", update_exc, exc_info=True)
 
             return PipelineRun(
                 run_id=run_id,

@@ -292,10 +292,11 @@ class CacheManager:
             self.redis_client.ping()
             self.cache_backend = 'redis'
             logger.info("Using Redis cache")
-        except:
+        except redis.RedisError as exc:
             # Fallback to in-memory
             self.cache = InMemoryCache()
             self.cache_backend = 'memory'
+            logger.warning("Redis unavailable, using in-memory cache: %s", exc)
             logger.info("Using in-memory cache")
     
     def cache_key(self, *args, **kwargs) -> str:
@@ -517,7 +518,8 @@ class ConnectionPool:
                         
                         self.in_use.add(conn)
                         return conn
-                    except:
+                    except (psycopg2.Error, AttributeError) as exc:
+                        logger.warning("Connection check failed, recreating: %s", exc)
                         # Connection is dead, create new one
                         conn = self._create_connection()
                         if conn:
@@ -549,8 +551,8 @@ class ConnectionPool:
             for conn in self.connections:
                 try:
                     conn.close()
-                except:
-                    pass
+                except (psycopg2.Error, AttributeError) as exc:
+                    logger.debug("Failed to close connection: %s", exc, exc_info=True)
             self.connections.clear()
             self.available.clear()
             self.in_use.clear()

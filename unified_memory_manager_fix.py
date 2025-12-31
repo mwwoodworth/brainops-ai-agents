@@ -186,8 +186,8 @@ class UnifiedMemoryManager:
                     memory = dict(row)
                     try:
                         memory['value'] = json.loads(memory['value'])
-                    except:
-                        pass  # Keep as string if not JSON
+                    except (json.JSONDecodeError, TypeError) as exc:
+                        logger.debug("Failed to decode memory value: %s", exc)
                     memories.append(memory)
 
                 logger.info(f"✅ Recalled {len(memories)} memories")

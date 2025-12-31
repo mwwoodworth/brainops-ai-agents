@@ -333,8 +333,8 @@ Respond with JSON only:
                                     results["medium_count"] += 1
                                 else:
                                     results["low_count"] += 1
-                except Exception:
-                    pass
+                except ValueError as exc:
+                    logger.debug("Failed to parse vulnerability line: %s", exc, exc_info=True)
 
             # Check for outdated dependencies (Python)
             try:
@@ -353,8 +353,8 @@ Respond with JSON only:
                             "latest_version": pkg.get('latest_version')
                         })
                         results["medium_count"] += 1
-            except Exception:
-                pass
+            except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as exc:
+                logger.debug("Failed to read outdated dependencies: %s", exc, exc_info=True)
 
             # Calculate risk score (0-100)
             results["risk_score"] = min(100,
@@ -470,8 +470,8 @@ Respond with JSON only:
                         savings_str = ai_analysis["potential_monthly_savings"].replace('$', '').replace(',', '')
                         try:
                             results["potential_savings"] = float(savings_str)
-                        except:
-                            pass
+                        except (ValueError, TypeError) as exc:
+                            logger.debug("Failed to parse savings value: %s", exc, exc_info=True)
 
                 except Exception as e:
                     logger.warning(f"AI cost analysis failed: {e}")

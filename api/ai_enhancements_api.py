@@ -164,8 +164,8 @@ async def get_alerts(severity: Optional[str] = None):
     if severity:
         try:
             sev = AlertSeverity(severity)
-        except ValueError:
-            pass
+        except ValueError as exc:
+            logger.debug("Invalid alert severity %s: %s", severity, exc)
 
     alerts = bridge.alerting.get_active_alerts(sev)
     return {

@@ -1596,7 +1596,8 @@ class SystemMonitorAgent(BaseAgent):
                             "action": "stats_reset",
                             "status": "completed"
                         }
-                    except:
+                    except Exception as exc:
+                        logger.error("Fallback pg_stat_reset failed: %s", exc, exc_info=True)
                         return {
                             "service": service,
                             "action": "reconnect_failed",
@@ -1612,7 +1613,8 @@ class SystemMonitorAgent(BaseAgent):
                         "action": "stats_reset",
                         "status": "completed"
                     }
-                except:
+                except Exception as exc:
+                    logger.error("Fallback pg_stat_reset failed: %s", exc, exc_info=True)
                     return {
                         "service": service,
                         "action": "reconnect_failed",
@@ -4145,5 +4147,4 @@ class VisionAlignmentAgentAdapter(BaseAgent):
 # Create executor instance AFTER all classes are defined
 executor = AgentExecutor()
 executor._load_agent_implementations()  # Load agents after classes are defined
-
 

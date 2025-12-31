@@ -266,8 +266,8 @@ async def _run_application_test_background(
         if engine:
             try:
                 await engine.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to close UI testing engine: %s", exc, exc_info=True)
 
 
 @router.post("/test")
@@ -557,8 +557,8 @@ async def get_testing_status() -> Dict[str, Any]:
         total_tests = cursor.fetchone()[0]
         cursor.close()
         conn.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to load UI test count from DB: %s", exc, exc_info=True)
 
     return {
         "status": "operational",

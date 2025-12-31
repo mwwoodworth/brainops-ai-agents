@@ -147,7 +147,7 @@ class SyncConnectionPool:
                     try:
                         conn.close()
                     except Exception:
-                        pass
+                        logger.debug("Failed to close dead connection", exc_info=True)
                     conn = self._create_connection()
                     if not conn:
                         acquired = False
@@ -175,7 +175,7 @@ class SyncConnectionPool:
                         with self._pool_lock:
                             self._size = max(0, self._size - 1)
                 except Exception:
-                    pass
+                    logger.debug("Failed to return connection to pool", exc_info=True)
 
     def execute(self, query: str, params: tuple = None) -> bool:
         """Execute a query without returning results."""
@@ -245,7 +245,7 @@ class SyncConnectionPool:
                 if conn:
                     conn.close()
             except Exception:
-                pass
+                logger.debug("Failed to close connection during pool shutdown", exc_info=True)
         self._size = 0
         logger.info("Sync connection pool closed")
 

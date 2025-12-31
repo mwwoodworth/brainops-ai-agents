@@ -250,7 +250,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.62.0"  # Email scheduler daemon fixes + SendGrid integration
+VERSION = "9.63.0"  # Security hardening: SQL injection, SSRF, exception handling
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -1059,7 +1059,7 @@ async def lifespan(app: FastAPI):
                         import psutil
                         metrics["memory_percent"] = psutil.virtual_memory().percent
                     except ImportError:
-                        pass
+                        logger.debug("psutil not available; using default metrics")
 
                     # Check for anomalies and trigger healing if needed
                     if metrics.get("memory_percent", 0) > 85:
@@ -4593,8 +4593,8 @@ async def execute_aurea_event(
                 """,
                 agent_name
             )
-        except Exception:
-            pass  # Table might not exist
+        except Exception as exc:
+            logger.debug("Failed to update agent heartbeat: %s", exc, exc_info=True)
 
         # Store in embedded memory if available
         embedded_memory = getattr(app.state, "embedded_memory", None)
@@ -4656,7 +4656,7 @@ class LogCapture(logging.Handler):
                 "line": record.lineno
             })
         except Exception:
-            pass
+            self.handleError(record)
 
 # Add log capture handler
 _log_capture = LogCapture()

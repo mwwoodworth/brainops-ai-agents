@@ -462,7 +462,7 @@ class ModuleIntegrationOrchestrator:
                             method, data = queue.get_nowait()
                             await self._dispatch_signal(module, method, data)
                     except asyncio.QueueEmpty:
-                        pass
+                        continue
                     except Exception as e:
                         logger.error(f"Error processing signal for {module}: {e}")
 

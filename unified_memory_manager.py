@@ -337,8 +337,8 @@ class UnifiedMemoryManager:
         if memory_type:
             try:
                 mem_type = MemoryType(memory_type.lower())
-            except:
-                pass
+            except ValueError as exc:
+                logger.debug("Invalid memory_type %s: %s", memory_type, exc)
         
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, lambda: self.recall(query, self.tenant_id, limit=limit, memory_type=mem_type))
@@ -587,7 +587,8 @@ class UnifiedMemoryManager:
                 """
                 cur.execute(query, (content_hash, memory.memory_type.value, memory.source_system, memory.tenant_id))
                 return cur.fetchone()
-        except:
+        except (TypeError, ValueError, psycopg2.Error) as exc:
+            logger.warning("Failed to find duplicate memory: %s", exc, exc_info=True)
             return None
 
     def _reinforce_memory(self, memory_id: str, new_memory: Memory) -> str:

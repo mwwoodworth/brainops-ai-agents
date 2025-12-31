@@ -171,8 +171,8 @@ class ConsciousnessLoop:
             try:
                 load = os.getloadavg()[0]
                 cpu = load * 10 # Rough approximation
-            except:
-                pass
+            except OSError as exc:
+                logger.debug("Failed to read load average: %s", exc, exc_info=True)
         
         # Get AI OS metrics if available
         req_rate = 0.0
