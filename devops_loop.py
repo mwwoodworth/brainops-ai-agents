@@ -563,7 +563,7 @@ class DevOpsLoop:
         return actions
 
     async def _learn(self, observations: Dict, anomalies: List, actions: List):
-        """LEARN: Store patterns for future prediction"""
+        """LEARN: Store patterns for future prediction and trigger alerts"""
         try:
             import asyncpg
             pool = await asyncpg.create_pool(
@@ -592,6 +592,36 @@ class DevOpsLoop:
                     "health_summary": self._get_health_summary()
                 })
             )
+
+            # Store metrics for observability
+            for name, status in observations.get("backends", {}).items():
+                await pool.execute("""
+                    INSERT INTO ai_observability_metrics (
+                        metric_name, metric_value, metric_type, source, tags, created_at
+                    ) VALUES ($1, $2, 'gauge', 'devops_loop', $3, NOW())
+                """,
+                    f"backend_latency_{name}",
+                    status.get("latency_ms", 0) or 0,
+                    json.dumps({"system": name, "health": status.get("health")})
+                )
+
+            # If critical anomalies, create alert
+            critical_anomalies = [a for a in anomalies if a.get("severity") == "critical"]
+            if critical_anomalies:
+                for anomaly in critical_anomalies:
+                    await pool.execute("""
+                        INSERT INTO ai_system_alerts (
+                            alert_type, severity, title, message, source,
+                            metadata, status, created_at
+                        ) VALUES (
+                            'devops_anomaly', 'critical', $1, $2, 'devops_loop',
+                            $3, 'active', NOW()
+                        )
+                    """,
+                        f"Critical: {anomaly.get('system', 'unknown')}",
+                        anomaly.get("message", "Unknown anomaly"),
+                        json.dumps(anomaly)
+                    )
 
             await pool.close()
         except Exception as e:
