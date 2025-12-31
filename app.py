@@ -250,7 +250,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.78.0"  # Added /consciousness/activate endpoint - AI OS can now be activated (2025-12-31)
+VERSION = "9.79.0"  # Major fixes: rollback_service, deployment tests, unified DB/AI, email processing (2025-12-31)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
