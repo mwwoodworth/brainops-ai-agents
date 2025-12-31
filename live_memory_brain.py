@@ -405,10 +405,72 @@ class CrossSystemOmniscience:
         return sync_results
 
     async def _fetch_system_state(self, system_id: str, config: Dict) -> Dict:
-        """Fetch state from a specific system"""
-        # Implementation depends on system type
-        # For now, return placeholder
-        return {"timestamp": datetime.now(timezone.utc).isoformat()}
+        """Fetch REAL state from a specific system via HTTP or database"""
+        import aiohttp
+
+        state = {"timestamp": datetime.now(timezone.utc).isoformat(), "system_id": system_id}
+
+        # Determine system type and fetch real data
+        system_type = config.get("type", "api")
+        url = config.get("url") or config.get("endpoint")
+
+        if system_type == "api" and url:
+            # Fetch from HTTP API
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                    headers = {"X-API-Key": config.get("api_key", "brainops_prod_key_2025")}
+                    async with session.get(url, headers=headers) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            state["data"] = data
+                            state["status"] = "healthy"
+                            state["response_time_ms"] = int(resp.headers.get("X-Response-Time", 0))
+                        else:
+                            state["status"] = "error"
+                            state["error"] = f"HTTP {resp.status}"
+            except Exception as e:
+                state["status"] = "unreachable"
+                state["error"] = str(e)
+
+        elif system_type == "database":
+            # Fetch from database
+            try:
+                from database.async_connection import get_pool
+                pool = await get_pool()
+                if pool:
+                    # Get table counts and health
+                    tables_query = """
+                        SELECT schemaname, tablename
+                        FROM pg_tables
+                        WHERE schemaname = 'public'
+                        LIMIT 50
+                    """
+                    tables = await pool.fetch(tables_query)
+                    state["data"] = {
+                        "table_count": len(tables),
+                        "tables": [t["tablename"] for t in tables[:20]]
+                    }
+                    state["status"] = "healthy"
+            except Exception as e:
+                state["status"] = "error"
+                state["error"] = str(e)
+
+        elif system_type == "internal":
+            # Fetch internal metrics
+            try:
+                state["data"] = {
+                    "working_memory_size": len(self.working_memory),
+                    "long_term_count": len(self.long_term_memory),
+                    "wisdom_count": len(self.wisdom_crystals),
+                    "systems_tracked": len(self.systems),
+                    "cross_references": len(self.cross_references)
+                }
+                state["status"] = "healthy"
+            except Exception as e:
+                state["status"] = "error"
+                state["error"] = str(e)
+
+        return state
 
     def _detect_changes(self, old_state: Dict, new_state: Dict) -> List[Dict]:
         """Detect changes between states"""
