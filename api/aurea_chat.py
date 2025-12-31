@@ -90,19 +90,26 @@ class AUREAStateProvider:
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor(cursor_factory=RealDictCursor)
 
+            # Helper for safe count extraction
+            def safe_count(result):
+                return result.get('count', 0) if result else 0
+
+            def safe_rate(result):
+                return (result.get('rate') or 0.0) if result else 0.0
+
             # Decisions last hour
             cur.execute("""
                 SELECT COUNT(*) as count FROM aurea_decisions
                 WHERE created_at > NOW() - INTERVAL '1 hour'
             """)
-            decisions_last_hour = cur.fetchone()['count']
+            decisions_last_hour = safe_count(cur.fetchone())
 
             # Pending decisions
             cur.execute("""
                 SELECT COUNT(*) as count FROM aurea_decisions
                 WHERE execution_status = 'pending'
             """)
-            decisions_pending = cur.fetchone()['count']
+            decisions_pending = safe_count(cur.fetchone())
 
             # Last 5 decisions
             cur.execute("""
@@ -119,7 +126,7 @@ class AUREAStateProvider:
             cur.execute("""
                 SELECT COUNT(*) as count FROM ai_agents WHERE status = 'active'
             """)
-            active_agents = cur.fetchone()['count']
+            active_agents = safe_count(cur.fetchone())
 
             # Success rate last 100
             cur.execute("""
@@ -131,13 +138,13 @@ class AUREAStateProvider:
                     ORDER BY created_at DESC LIMIT 100
                 ) sub
             """)
-            success_rate = cur.fetchone()['rate'] or 0.0
+            success_rate = safe_rate(cur.fetchone())
 
             # Memory utilization (from unified_brain)
             cur.execute("""
                 SELECT COUNT(*) as count FROM unified_brain
             """)
-            memory_count = cur.fetchone()['count']
+            memory_count = safe_count(cur.fetchone())
             memory_util = min(1.0, memory_count / 10000)  # Assume 10k is "full"
 
             # Recent agent executions
@@ -567,7 +574,7 @@ async def delete_session(session_id: str):
 
 
 @router.get("/work-history")
-async def get_work_history(hours: int = Query(24, description="Hours to look back")):
+async def get_work_history(hours: int = Query(24, ge=1, le=720, description="Hours to look back (1-720)")):
     """
     Get AUREA's HONEST work history - what did it actually DO?
 
@@ -588,46 +595,49 @@ async def get_work_history(hours: int = Query(24, description="Hours to look bac
         'port': int(os.getenv('DB_PORT', 5432))
     }
 
+    # Calculate cutoff time using Python (safe from SQL injection)
+    cutoff_time = datetime.now() - timedelta(hours=hours)
+
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Decision summary
-        cur.execute(f"""
+        # Decision summary - parameterized query
+        cur.execute("""
             SELECT
                 decision_type,
                 execution_status,
                 COUNT(*) as count,
                 AVG(confidence) as avg_confidence
             FROM aurea_decisions
-            WHERE created_at > NOW() - INTERVAL '{hours} hours'
+            WHERE created_at > %s
             GROUP BY decision_type, execution_status
             ORDER BY count DESC
-        """)
+        """, (cutoff_time,))
         decision_summary = [dict(row) for row in cur.fetchall()]
 
-        # Agent execution summary
-        cur.execute(f"""
+        # Agent execution summary - parameterized query
+        cur.execute("""
             SELECT
                 agent_name,
                 status,
                 COUNT(*) as count
             FROM agent_activation_log
-            WHERE created_at > NOW() - INTERVAL '{hours} hours'
+            WHERE created_at > %s
             GROUP BY agent_name, status
             ORDER BY count DESC
-        """)
+        """, (cutoff_time,))
         agent_summary = [dict(row) for row in cur.fetchall()]
 
-        # Recent failures
-        cur.execute(f"""
+        # Recent failures - parameterized query
+        cur.execute("""
             SELECT description, execution_status, created_at, context
             FROM aurea_decisions
             WHERE execution_status = 'failed'
-            AND created_at > NOW() - INTERVAL '{hours} hours'
+            AND created_at > %s
             ORDER BY created_at DESC
             LIMIT 10
-        """)
+        """, (cutoff_time,))
         recent_failures = [dict(row) for row in cur.fetchall()]
         for f in recent_failures:
             if f.get('created_at'):
