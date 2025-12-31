@@ -421,8 +421,13 @@ class E2ESystemVerification:
                 try:
                     if response.content_type and 'json' in response.content_type:
                         response_body = await response.json()
-                except:
-                    pass
+                except (aiohttp.ContentTypeError, json.JSONDecodeError, ValueError) as exc:
+                    logger.warning(
+                        "Failed to parse JSON response from %s: %s",
+                        test.url,
+                        exc,
+                        exc_info=True,
+                    )
 
                 # Check status code
                 if response.status != test.expected_status:

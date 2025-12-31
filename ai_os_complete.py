@@ -341,10 +341,10 @@ class SchedulingAgent(IntelligentAgent):
                 users = cursor.fetchall()
                 if users:
                     return [{"id": str(u[0]), "name": u[1], "role": "technician"} for u in users]
-            except Exception:
+            except Exception as exc:
                 # Table might not exist or schema differs
                 conn.rollback()
-                pass
+                logger.debug("Crew lookup failed; returning placeholder crew: %s", exc, exc_info=True)
             
             return [{"id": "pending", "name": "To Be Assigned", "role": "technician"}]
         finally:

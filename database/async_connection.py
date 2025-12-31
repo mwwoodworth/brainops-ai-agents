@@ -409,7 +409,7 @@ class InMemoryDatabasePool(BasePool):
             try:
                 limit = int(sql.rsplit("limit", 1)[1].strip())
             except ValueError:
-                pass
+                logger.debug("Failed to parse limit from SQL: %s", sql)
 
         return matches[:limit]
 

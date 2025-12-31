@@ -1141,8 +1141,8 @@ class WorkflowEngine:
                 for callback in self._on_step_complete:
                     try:
                         await callback(step, mapped_result)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning("Step completion callback failed: %s", exc, exc_info=True)
 
                 return mapped_result
 

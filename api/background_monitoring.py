@@ -137,7 +137,7 @@ class BackgroundTaskMonitor:
             try:
                 await self._monitor_task
             except asyncio.CancelledError:
-                pass
+                logger.debug("Background monitor task cancelled")
         self._started = False
 
     def get_status(self) -> Dict[str, Any]:

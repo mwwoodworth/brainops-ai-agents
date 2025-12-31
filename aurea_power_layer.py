@@ -191,6 +191,15 @@ class AUREAPowerLayer:
         """
         columns_result = await self.query_database(sql, (schema, table_name))
 
+        # Validate schema and table names to prevent SQL injection (defense in depth)
+        import re
+        if not re.match(r'^[a-z_][a-z0-9_]*$', schema, re.IGNORECASE):
+            return PowerResult(success=False, capability=PowerCapability.DATABASE,
+                operation="get_table_info", error=f"Invalid schema name: {schema}")
+        if not re.match(r'^[a-z_][a-z0-9_]*$', table_name, re.IGNORECASE):
+            return PowerResult(success=False, capability=PowerCapability.DATABASE,
+                operation="get_table_info", error=f"Invalid table name: {table_name}")
+
         count_sql = f'SELECT COUNT(*) as count FROM "{schema}"."{table_name}"'
         count_result = await self.query_database(count_sql)
 
@@ -612,8 +621,13 @@ class AUREAPowerLayer:
                             try:
                                 data = await response.json()
                                 results[name]['version'] = data.get('version', 'unknown')
-                            except:
-                                pass
+                            except (aiohttp.ContentTypeError, json.JSONDecodeError, ValueError) as exc:
+                                logger.debug(
+                                    "Failed to parse JSON from %s: %s",
+                                    health_url,
+                                    exc,
+                                    exc_info=True,
+                                )
                 except Exception as e:
                     results[name] = {
                         'url': url,
@@ -850,10 +864,11 @@ class AUREAPowerLayer:
         """Check database backup status and key metrics."""
         results = {}
 
-        # Get key table counts
-        tables = ['ai_agent_executions', 'ai_thought_stream', 'ai_system_state', 'customers', 'jobs']
-        for table in tables:
-            result = await self.query_database(f"SELECT COUNT(*) as count FROM {table}")
+        # Get key table counts - table names are hardcoded whitelist, safe from injection
+        SAFE_TABLES = {'ai_agent_executions', 'ai_thought_stream', 'ai_system_state', 'customers', 'jobs'}
+        for table in SAFE_TABLES:
+            # Table is from hardcoded set, but use identifier quoting for defense in depth
+            result = await self.query_database(f'SELECT COUNT(*) as count FROM "{table}"')
             results[table] = result.result[0]['count'] if result.success else 0
 
         return results

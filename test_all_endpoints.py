@@ -20,8 +20,8 @@ def test_endpoint(name, url, method="GET", data=None):
                 data = response.json()
                 if 'version' in data:
                     print(f"   Version: {data['version']}")
-            except:
-                pass
+            except (json.JSONDecodeError, ValueError) as exc:
+                print(f"   ⚠️ Invalid JSON from {name}: {str(exc)[:50]}")
         return response.status_code < 400
     except Exception as e:
         print(f"❌ [ERROR] {name}: {str(e)[:50]}")

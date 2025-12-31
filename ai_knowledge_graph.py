@@ -599,8 +599,8 @@ class KnowledgeGraphBuilder:
                     }
                     for node_id, score in top_nodes
                 ]
-            except:
-                pass
+            except (nx.NetworkXException, ZeroDivisionError) as exc:
+                logger.warning("Failed to compute centrality metrics: %s", exc, exc_info=True)
 
         # Component analysis
         if self.graph.number_of_nodes() > 0:

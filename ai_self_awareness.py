@@ -284,8 +284,8 @@ class SelfAwareAI:
             try:
                 # Try to map to enum, defaulting to KNOWLEDGE_GAP if unknown
                 limitations.append(getattr(LimitationType, lim.upper(), LimitationType.KNOWLEDGE_GAP))
-            except:
-                pass
+            except (AttributeError, TypeError) as exc:
+                logger.debug("Invalid limitation value %s: %s", lim, exc)
                 
         # 4. Calculate final confidence score (Blending History + Introspection)
         # We trust the AI's self-assessment heavily (70%) but weight it with past reality (30%)
@@ -858,7 +858,7 @@ Based on evidence strength, assumption reliability, and alternative quality, wha
                     confidence = float(response.strip())
                     return Decimal(str(min(100, max(0, confidence))))
                 except ValueError:
-                    pass
+                    logger.debug("AI confidence response was not numeric: %s", response)
             except Exception as e:
                 logger.warning(f"AI confidence calculation failed: {e}")
 
@@ -899,7 +899,7 @@ Reply with the new confidence percentage (0-100)."""
                     new_confidence = float(response.strip())
                     return Decimal(str(min(100, max(0, new_confidence))))
                 except ValueError:
-                    pass
+                    logger.debug("AI post-mistake response was not numeric: %s", response)
             except Exception as e:
                 logger.warning(f"AI post-mistake confidence failed: {e}")
 

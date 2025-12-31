@@ -950,12 +950,13 @@ class EnhancedSelfHealing:
                 }
             )
 
-            # Step 3: Mark primary as failed in monitoring
+            # Step 3: Mark primary as failed in monitoring (parameterized to prevent SQL injection)
             await self._execute_mcp_tool(
                 platform="supabase",
                 tool="execute_sql",
                 params={
-                    "query": f"UPDATE ai_agents SET status = 'failed_over' WHERE name = '{component}'"
+                    "query": "UPDATE ai_agents SET status = 'failed_over' WHERE name = $1",
+                    "params": [component]
                 }
             )
 

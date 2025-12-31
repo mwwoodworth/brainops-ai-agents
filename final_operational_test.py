@@ -56,8 +56,9 @@ def test_paid_tier_performance():
                     status = "✅"
                 else:
                     status = "⚠️"
-            except:
+            except requests.RequestException as exc:
                 status = "❌"
+                print(f"   ⚠️ Request failed for {endpoint}: {exc}")
                 times.append(10.0)  # Timeout
 
         avg_time = statistics.mean(times) if times else 0
@@ -171,15 +172,15 @@ def test_critical_functionality():
         (f"{AI_AGENTS_URL}/ai/status", "AI Status")
     ]
 
-    for url, name in critical_endpoints:
-        try:
-            response = requests.get(url, timeout=5)
-            if response.status_code < 400:
-                tests.append((name, True, f"Status {response.status_code}"))
-            else:
-                tests.append((name, False, f"Status {response.status_code}"))
-        except:
-            tests.append((name, False, "Timeout/Error"))
+        for url, name in critical_endpoints:
+            try:
+                response = requests.get(url, timeout=5)
+                if response.status_code < 400:
+                    tests.append((name, True, f"Status {response.status_code}"))
+                else:
+                    tests.append((name, False, f"Status {response.status_code}"))
+        except requests.RequestException as exc:
+            tests.append((name, False, f"Error: {str(exc)[:30]}"))
 
     # Print results
     passed = 0
@@ -270,8 +271,8 @@ def analyze_upgrade_value():
             response = requests.get(f"{AI_AGENTS_URL}/health", timeout=5)
             if response.status_code == 200:
                 metrics['response_time'].append(time.time() - start)
-        except:
-            pass
+        except requests.RequestException as exc:
+            print(f"   ⚠️ Health check failed: {exc}")
 
     avg_response = statistics.mean(metrics['response_time']) if metrics['response_time'] else 999
 
@@ -293,9 +294,9 @@ def analyze_upgrade_value():
                 print(f"✅ {name}: Working")
             else:
                 print(f"⚠️ {name}: Status {response.status_code}")
-        except:
+        except requests.RequestException as exc:
             metrics['features_total'] += 1
-            print(f"❌ {name}: Failed")
+            print(f"❌ {name}: Failed ({exc})")
 
     # Calculate value score
     value_score = 0

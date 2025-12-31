@@ -475,7 +475,8 @@ async def get_full_dashboard() -> Dict[str, Any]:
     try:
         from config import config
         version = getattr(config, 'version', '9.8.1')
-    except:
+    except (ImportError, AttributeError) as exc:
+        logger.debug("Config version unavailable: %s", exc)
         version = "9.8.1"
 
     return {

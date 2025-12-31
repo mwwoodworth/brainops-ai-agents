@@ -422,5 +422,5 @@ async def stop_email_scheduler():
         try:
             await _daemon_task
         except asyncio.CancelledError:
-            pass
+            logger.debug("Email scheduler task cancelled")
         _daemon_task = None

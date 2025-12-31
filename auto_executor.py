@@ -8,10 +8,13 @@ import os
 import asyncio
 import httpx
 import json
+import logging
 from datetime import datetime, timezone
 import random
 import psycopg2
 from psycopg2.extras import RealDictCursor
+
+logger = logging.getLogger(__name__)
 
 class AutoExecutor:
     def __init__(self):
@@ -50,8 +53,8 @@ class AutoExecutor:
                         json={"action": "automated_check", "source": "auto_executor"}
                     )
                     await asyncio.sleep(2)
-                except:
-                    pass
+                except httpx.RequestError as exc:
+                    logger.warning("Monitoring agent request failed: %s", exc, exc_info=True)
 
             # Execute analytics agents
             analytics_agents = [a for a in agents if 'analytics' in str(a['type']).lower()]
@@ -62,8 +65,8 @@ class AutoExecutor:
                         json={"action": "analyze", "source": "auto_executor"}
                     )
                     await asyncio.sleep(2)
-                except:
-                    pass
+                except httpx.RequestError as exc:
+                    logger.warning("Analytics agent request failed: %s", exc, exc_info=True)
 
             # Execute workflow agents
             workflow_agents = [a for a in agents if 'workflow' in str(a['type']).lower()]
@@ -74,8 +77,8 @@ class AutoExecutor:
                         json={"type": "automation", "source": "auto_executor"}
                     )
                     await asyncio.sleep(2)
-                except:
-                    pass
+                except httpx.RequestError as exc:
+                    logger.warning("Workflow agent request failed: %s", exc, exc_info=True)
 
     async def run_forever(self):
         """Run executor continuously"""

@@ -269,13 +269,13 @@ async def search_knowledge(
 
         # Map knowledge types
         knowledge_types = None
-        if request.knowledge_types:
-            knowledge_types = []
-            for kt in request.knowledge_types:
-                try:
-                    knowledge_types.append(KnowledgeType(kt))
-                except ValueError:
-                    pass
+            if request.knowledge_types:
+                knowledge_types = []
+                for kt in request.knowledge_types:
+                    try:
+                        knowledge_types.append(KnowledgeType(kt))
+                    except ValueError:
+                        logger.debug("Invalid knowledge type %s", kt)
 
         results = await kb.search(
             query=request.query,

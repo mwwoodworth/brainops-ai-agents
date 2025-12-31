@@ -362,8 +362,8 @@ class CodebaseCrawler:
                                 target_id = node_map.get((source_node.repo_name, resolved_path + ext))
                                 if target_id: break
                                 
-                    except Exception:
-                        pass
+                    except (OSError, ValueError) as exc:
+                        logger.debug("Failed to resolve import path %s: %s", target_name, exc, exc_info=True)
                 else:
                     # External library or absolute import?
                     # For now, skip external lib edges or create a "library" node?

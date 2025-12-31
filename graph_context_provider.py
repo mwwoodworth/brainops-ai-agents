@@ -96,8 +96,8 @@ class GraphContextProvider:
             if pool:
                 self._pool_initialized = True
                 return
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Shared pool unavailable, initializing new pool: %s", exc, exc_info=True)
 
         db_config = config.database
         pool_config = PoolConfig(
