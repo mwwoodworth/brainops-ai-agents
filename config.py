@@ -81,8 +81,15 @@ class SecurityConfig:
             else True
         )
         
+        # Build valid API keys from multiple sources
         api_keys_str = os.getenv('API_KEYS', '')
-        self.valid_api_keys = set(api_keys_str.split(',')) if api_keys_str else set()
+        self.valid_api_keys = set(k.strip() for k in api_keys_str.split(',') if k.strip())
+
+        # Also accept individual API key environment variables
+        for key_name in ['BRAINOPS_API_KEY', 'AGENTS_API_KEY', 'MCP_API_KEY']:
+            key_value = os.getenv(key_name)
+            if key_value:
+                self.valid_api_keys.add(key_value)
 
         test_key = (
             os.getenv('TEST_API_KEY')

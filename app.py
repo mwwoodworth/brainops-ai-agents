@@ -236,7 +236,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.60.0"  # AUREA Power Layer - full ops capability (database, deploy, git, AI, Playwright)
+VERSION = "9.61.0"  # Security fixes + code hardening (SQL injection, auth, null checks)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
