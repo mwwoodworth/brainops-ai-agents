@@ -13,9 +13,10 @@ from pydantic import BaseModel
 
 from database.async_connection import get_pool
 
-# API Key Security - consistent with other routes
+# API Key Security - use centralized config
+from config import config
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
-VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
+VALID_API_KEYS = config.security.valid_api_keys
 
 async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     """Verify API key for authentication"""
