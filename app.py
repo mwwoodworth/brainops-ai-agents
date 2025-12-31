@@ -488,6 +488,16 @@ except ImportError as e:
     AUREANLUProcessor = None
     ChatOpenAI = None
 
+# Import AI Board of Directors
+try:
+    from ai_board_governance import AIBoardOfDirectors
+    AI_BOARD_AVAILABLE = True
+    logger.info("✅ AI Board of Directors loaded")
+except ImportError as e:
+    AI_BOARD_AVAILABLE = False
+    logger.warning(f"AI Board not available: {e}")
+    AIBoardOfDirectors = None
+
 
 def _parse_capabilities(raw: Any) -> List[Dict[str, Any]]:
     """Normalize capabilities payload into the Pydantic-friendly format."""
@@ -871,6 +881,18 @@ async def lifespan(app: FastAPI):
     else:
         app.state.integration_layer = None
 
+    # Initialize AI Board of Directors
+    if AI_BOARD_AVAILABLE:
+        try:
+            ai_board = AIBoardOfDirectors()
+            app.state.ai_board = ai_board
+            logger.info("🏛️ AI Board of Directors initialized - Governance ENABLED!")
+        except Exception as e:
+            logger.error(f"❌ AI Board initialization failed: {e}")
+            app.state.ai_board = None
+    else:
+        app.state.ai_board = None
+
     # Initialize AUREA NLU Processor (Natural Language Command Interface)
     if AUREA_NLU_AVAILABLE and INTEGRATION_LAYER_AVAILABLE and AUREA_AVAILABLE:
         try:
@@ -883,7 +905,7 @@ async def lifespan(app: FastAPI):
                 llm_for_nlu,
                 app.state.integration_layer if hasattr(app.state, 'integration_layer') else None,
                 app.state.aurea if hasattr(app.state, 'aurea') else None,
-                None  # AI Board not yet initialized in app.py
+                app.state.ai_board if hasattr(app.state, 'ai_board') else None
             )
             app.state.aurea_nlu = aurea_nlu
             logger.info("🗣️ AUREA NLU Processor initialized - Natural language commands ENABLED!")
