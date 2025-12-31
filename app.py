@@ -249,7 +249,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.64.0"  # Code quality + security hardening (2025-12-31 02:35 rebuild)
+VERSION = "9.65.0"  # Async/await fixes + SQL injection prevention (2025-12-31)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
