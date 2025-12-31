@@ -12,6 +12,14 @@ import inspect
 import asyncio
 import httpx
 
+# Import Power Layer for full operational capability
+try:
+    from aurea_power_layer import get_power_layer, AUREAPowerLayer
+    POWER_LAYER_AVAILABLE = True
+except ImportError:
+    POWER_LAYER_AVAILABLE = False
+    get_power_layer = None
+
 logger = logging.getLogger(__name__)
 
 # Perplexity fallback for when OpenAI quota is exceeded
@@ -48,11 +56,21 @@ async def _perplexity_fallback(prompt: str, system_prompt: str = "") -> str:
 
 
 class AUREANLUProcessor:
-    def __init__(self, llm_model: Any, integration_layer: Any, aurea_instance: Any, ai_board_instance: Any):
+    def __init__(self, llm_model: Any, integration_layer: Any, aurea_instance: Any, ai_board_instance: Any,
+                 db_pool: Any = None, mcp_client: Any = None):
         self.llm = llm_model
         self.integration_layer = integration_layer
         self.aurea = aurea_instance
         self.ai_board = ai_board_instance
+
+        # Initialize Power Layer for full operational capability
+        self.power_layer = None
+        if POWER_LAYER_AVAILABLE:
+            try:
+                self.power_layer = get_power_layer(db_pool=db_pool, mcp_client=mcp_client)
+                logger.info("🔋 AUREA NLU initialized with Power Layer - full operational capability enabled")
+            except Exception as e:
+                logger.warning(f"Power Layer initialization failed: {e}")
 
         if self.integration_layer is None:
             logger.error("AUREA NLU initialized without integration layer; task and workflow skills will be unavailable.")
@@ -175,6 +193,12 @@ class AUREANLUProcessor:
                     },
                 }
             )
+
+        # Power Layer skills - full operational capability
+        if self.power_layer is not None:
+            power_skills = self.power_layer.get_skill_registry()
+            registry.update(power_skills)
+            logger.info(f"🔋 Added {len(power_skills)} Power Layer skills to AUREA NLU")
 
         return registry
 

@@ -681,3 +681,192 @@ async def what_are_you_doing():
         "state": asdict(state),
         "message": "This is what I'm ACTUALLY doing right now - no BS."
     }
+
+
+# =============================================================================
+# NATURAL LANGUAGE COMMAND INTERFACE - FULL POWER
+# =============================================================================
+
+class NLCommand(BaseModel):
+    """Natural language command request"""
+    command: str
+    session_id: Optional[str] = None
+    auto_confirm: bool = False  # Auto-confirm high-impact actions
+
+
+@router.post("/command")
+async def execute_natural_language_command(payload: NLCommand):
+    """
+    Execute a natural language command with FULL POWER capabilities.
+
+    This is AUREA's true power interface - you can command:
+    - Database queries and mutations
+    - Deployments to Vercel and Render
+    - Git operations (commit, push)
+    - Playwright UI tests
+    - AI model calls (Gemini, Claude, Codex, Perplexity)
+    - System health checks
+    - File operations
+    - Workflow automation
+
+    Examples:
+    - "Check the health of all services"
+    - "Query the database for customer count"
+    - "Deploy brainops-command-center to production"
+    - "Run a UI test on myroofgenius.com"
+    - "Ask Gemini to analyze the revenue pipeline"
+    - "Execute the full_deploy workflow"
+    """
+    try:
+        # Import NLU processor
+        from aurea_nlu_processor import AUREANLUProcessor
+        from langchain_openai import ChatOpenAI
+
+        # Get power layer
+        try:
+            from aurea_power_layer import get_power_layer
+            power_layer = get_power_layer()
+        except ImportError:
+            power_layer = None
+
+        # Initialize NLU with power layer
+        llm = ChatOpenAI(model="gpt-4-turbo-preview", temperature=0.1)
+        nlu = AUREANLUProcessor(
+            llm_model=llm,
+            integration_layer=None,  # We'll add this later
+            aurea_instance=None,
+            ai_board_instance=None,
+            db_pool=None,
+            mcp_client=None
+        )
+
+        # Override auto-confirm if requested
+        if payload.auto_confirm:
+            os.environ["AUREA_AUTO_CONFIRM"] = "true"
+
+        # Execute the command
+        result = await nlu.execute_natural_language_command(payload.command)
+
+        # Reset auto-confirm
+        if payload.auto_confirm:
+            os.environ.pop("AUREA_AUTO_CONFIRM", None)
+
+        return {
+            "command": payload.command,
+            "result": result,
+            "timestamp": datetime.now().isoformat(),
+            "power_layer_available": power_layer is not None
+        }
+
+    except Exception as e:
+        logger.error(f"Command execution failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "command": payload.command,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+
+@router.get("/capabilities")
+async def get_aurea_capabilities():
+    """
+    List all AUREA's operational capabilities.
+
+    Returns the full skill registry showing everything AUREA can do.
+    """
+    try:
+        from aurea_nlu_processor import AUREANLUProcessor
+        from langchain_openai import ChatOpenAI
+
+        try:
+            from aurea_power_layer import get_power_layer
+            power_layer = get_power_layer()
+            power_skills = power_layer.get_skill_registry() if power_layer else {}
+        except ImportError:
+            power_skills = {}
+
+        # Get serializable version (no action functions)
+        capabilities = {}
+        for skill_name, skill_data in power_skills.items():
+            capabilities[skill_name] = {
+                "description": skill_data.get("description", ""),
+                "parameters": skill_data.get("parameters", {})
+            }
+
+        return {
+            "total_capabilities": len(capabilities),
+            "capabilities": capabilities,
+            "categories": {
+                "database": ["query_database", "get_table_info"],
+                "deployment": ["deploy_vercel", "deploy_render"],
+                "git": ["git_status", "git_commit_and_push"],
+                "ui_testing": ["run_playwright_test", "check_ui_health"],
+                "ai_models": ["call_ai_model"],
+                "monitoring": ["check_all_services_health", "get_system_metrics"],
+                "files": ["read_file", "write_file"],
+                "automation": ["execute_workflow"]
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get capabilities: {e}")
+        return {
+            "error": str(e),
+            "capabilities": {},
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+@router.post("/power/database")
+async def power_database_query(sql: str = Query(..., description="SQL query to execute")):
+    """Direct database query via Power Layer (SELECT only by default)."""
+    try:
+        from aurea_power_layer import get_power_layer
+        power = get_power_layer()
+        result = await power.query_database(sql)
+        return {
+            "success": result.success,
+            "result": result.result,
+            "duration_ms": result.duration_ms,
+            "error": result.error
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/power/health")
+async def power_health_check():
+    """Check health of all services via Power Layer."""
+    try:
+        from aurea_power_layer import get_power_layer
+        power = get_power_layer()
+        result = await power.check_all_services_health()
+        return {
+            "success": result.success,
+            "services": result.result,
+            "duration_ms": result.duration_ms
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/power/workflow/{workflow_name}")
+async def power_execute_workflow(workflow_name: str):
+    """Execute a predefined workflow via Power Layer."""
+    try:
+        from aurea_power_layer import get_power_layer
+        power = get_power_layer()
+        result = await power.execute_workflow(workflow_name)
+        return {
+            "success": result.success,
+            "workflow": workflow_name,
+            "result": result.result,
+            "duration_ms": result.duration_ms,
+            "error": result.error
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
