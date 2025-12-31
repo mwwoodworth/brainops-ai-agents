@@ -61,11 +61,14 @@ class ManualRemediationRequest(BaseModel):
 async def get_self_healing_status():
     """Get Self-Healing system status"""
     engine = _get_engine()
+    # CRITICAL FIX: Initialize on status check to ensure system is always ready
+    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+        await engine.initialize()
     return {
         "system": "enhanced_self_healing",
         "status": "operational",
         "initialized": engine._initialized if hasattr(engine, '_initialized') else True,
-        "active_incidents": len(engine.active_incidents) if hasattr(engine, 'active_incidents') else 0,
+        "active_incidents": len(engine.incidents) if hasattr(engine, 'incidents') else 0,
         "capabilities": [
             "anomaly_detection",
             "auto_remediation",
