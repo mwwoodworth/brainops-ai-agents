@@ -364,8 +364,15 @@ class QueryOptimizer:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
             
+            # Validate query is SELECT only (prevent EXPLAIN of UPDATE/DELETE/INSERT)
+            query_upper = query.strip().upper()
+            if not query_upper.startswith('SELECT'):
+                cursor.close()
+                conn.close()
+                return {'error': 'Only SELECT queries can be analyzed', 'query': query}
+
             # Explain analyze
-            cursor.execute(f"EXPLAIN ANALYZE {query}")
+            cursor.execute("EXPLAIN ANALYZE " + query)
             plan = cursor.fetchall()
             
             cursor.close()
