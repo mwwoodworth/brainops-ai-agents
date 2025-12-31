@@ -50,7 +50,7 @@ except ImportError:
         from predictive_analytics_engine import get_predictive_analytics_engine, PredictionType, TimeHorizon
         from performance_optimization_layer import get_performance_optimizer, OptimizationStrategy
     except ImportError:
-        pass  # Handle gracefully if these specific files are missing during bootstrap
+        logging.warning("Optional analytics modules unavailable during bootstrap")
     try:
         from autonomic_controller import (
             get_metric_collector, get_event_bus, get_autonomic_manager,

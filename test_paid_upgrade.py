@@ -122,7 +122,8 @@ def test_ai_agents_performance():
         try:
             async with session.get(url) as response:
                 return response.status, time.time()
-        except:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            print(f"   ⚠️ Concurrent request failed: {exc}")
             return None, time.time()
 
     async def concurrent_test():
@@ -339,9 +340,9 @@ def test_erp_thoroughly():
                 if 'application/json' in response.headers.get('content-type', ''):
                     try:
                         response.json()
-                    except:
+                    except (json.JSONDecodeError, ValueError) as exc:
                         status = "⚠️"
-                        warnings.append(f"{name}: Invalid JSON response")
+                        warnings.append(f"{name}: Invalid JSON response ({str(exc)[:50]})")
             elif response.status_code == 404:
                 status = "⚠️"
                 warnings.append(f"{name}: Endpoint not found")
@@ -505,8 +506,8 @@ def analyze_upgrade_value():
             start = time.time()
             requests.get(f"{AI_AGENTS_URL}/health", timeout=10)
             response_times.append(time.time() - start)
-        except:
-            pass
+        except requests.RequestException as exc:
+            print(f"   ⚠️ Health check failed: {exc}")
 
     if response_times:
         metrics['paid_tier']['response_time'] = statistics.mean(response_times)

@@ -148,7 +148,8 @@ class GeoLocationService:
             first_octet = int(ip_address.split('.')[0])
             key = f"{first_octet}.0.0.0/8"
             return self.ip_locations.get(key, (0, 0))
-        except:
+        except (ValueError, AttributeError) as exc:
+            logger.debug("Invalid IP address %s: %s", ip_address, exc)
             return (0, 0)  # Default location
     
     def get_nearest_region(self, location: Tuple[float, float], regions: List[RegionInfo]) -> RegionInfo:
@@ -244,7 +245,8 @@ class EdgeNode:
                 'ttl': ttl
             }
             return True
-        except:
+        except TypeError as exc:
+            logger.warning("Failed to cache content for key %s: %s", key, exc)
             return False
     
     def get_cached_content(self, key: str) -> Optional[Any]:

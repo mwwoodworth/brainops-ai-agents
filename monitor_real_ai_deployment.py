@@ -50,8 +50,8 @@ def test_ai_endpoint():
         else:
             print(f"   ⚠️ AI endpoint status: {response.status_code}")
             return False
-    except:
-        print("   ⏳ AI endpoint not ready")
+    except requests.RequestException as exc:
+        print(f"   ⏳ AI endpoint not ready: {exc}")
         return False
 
 def main():

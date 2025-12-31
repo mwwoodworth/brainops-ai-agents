@@ -429,7 +429,8 @@ class IntelligentTaskOrchestrator:
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
-            except:
+            except (json.JSONDecodeError, TypeError) as exc:
+                logger.debug("Failed to parse task payload JSON: %s", exc)
                 payload = {"raw": payload}
 
         # AI priority analysis
@@ -449,8 +450,8 @@ class IntelligentTaskOrchestrator:
                         score_match = json.loads(analysis) if "{" in analysis else {"score": 50}
                         ai_priority_score = score_match.get("score", row.get("priority", 50))
                         ai_urgency_reason = score_match.get("reason", "AI-analyzed priority")
-                    except:
-                        pass
+                    except (json.JSONDecodeError, TypeError) as exc:
+                        logger.debug("Failed to parse AI priority JSON: %s", exc)
             except Exception as e:
                 logger.debug(f"AI priority analysis failed: {e}")
 

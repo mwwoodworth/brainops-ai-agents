@@ -342,8 +342,8 @@ try:
     process_count = int(result.stdout.strip())
     print(f"   Running processes: {process_count}")
     results['local']['processes'] = process_count
-except:
-    print("   ❌ Could not check processes")
+except (OSError, ValueError) as exc:
+    print(f"   ❌ Could not check processes: {exc}")
 
 # Check systemd service
 try:
@@ -359,8 +359,8 @@ try:
     else:
         print("   ⚠️  Automation service: Not active")
         results['local']['automation_service'] = False
-except:
-    print("   ⚠️  Could not check automation service")
+except OSError as exc:
+    print(f"   ⚠️  Could not check automation service: {exc}")
 
 # FINAL SUMMARY
 print("\n" + "="*80)

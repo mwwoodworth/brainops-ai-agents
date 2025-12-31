@@ -107,8 +107,8 @@ class CodeQualityAgent:
                     count = sum(int(line.split(':')[-1]) for line in grep_result.stdout.strip().split('\n') if ':' in line)
                     if count > 0:
                         issues.append({"pattern": pattern, "count": count, "description": description})
-                except Exception:
-                    pass
+                except (subprocess.SubprocessError, ValueError, OSError) as exc:
+                    logger.debug("Pattern scan failed for %s: %s", pattern, exc, exc_info=True)
 
             results["metrics"]["issues"] = issues
             results["metrics"]["issue_count"] = sum(i["count"] for i in issues)

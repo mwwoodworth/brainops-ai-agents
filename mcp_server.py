@@ -461,7 +461,8 @@ class MCPServer:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE
                     )
-                except Exception:
+                except (ValueError, OSError) as exc:
+                    logger.warning("Failed to execute parsed command, using shell: %s", exc, exc_info=True)
                     # Fallback to shell only if parsing fails (shouldn't happen after validation)
                     proc = await asyncio.create_subprocess_shell(
                         cmd,
@@ -578,11 +579,43 @@ class MCPServer:
                 result['status'] = 'success'
 
             elif tool == 'http_request':
-                # Make HTTP request
+                # Make HTTP request with SSRF protection
                 method = params.get('method', 'GET')
                 url = params.get('url', '')
                 headers = params.get('headers', {})
                 body = params.get('body', None)
+
+                # SSRF Protection: Validate URL
+                from urllib.parse import urlparse
+                import ipaddress
+                import socket
+
+                parsed = urlparse(url)
+                if not parsed.scheme or parsed.scheme not in ('http', 'https'):
+                    raise ValueError(f"Invalid URL scheme: {parsed.scheme}")
+                if not parsed.hostname:
+                    raise ValueError("URL must have a hostname")
+
+                # Block internal/private IP ranges and metadata endpoints
+                BLOCKED_HOSTS = {
+                    'localhost', '127.0.0.1', '0.0.0.0', '::1',
+                    'metadata.google.internal', '169.254.169.254',  # Cloud metadata
+                    'metadata.google.com', 'kubernetes.default'
+                }
+                hostname_lower = parsed.hostname.lower()
+                if hostname_lower in BLOCKED_HOSTS:
+                    raise ValueError(f"Blocked host: {parsed.hostname}")
+
+                # Resolve hostname and check for private IPs
+                try:
+                    resolved_ips = socket.getaddrinfo(parsed.hostname, parsed.port or 443, socket.AF_UNSPEC)
+                    for family, socktype, proto, canonname, sockaddr in resolved_ips:
+                        ip_str = sockaddr[0]
+                        ip = ipaddress.ip_address(ip_str)
+                        if ip.is_private or ip.is_loopback or ip.is_link_local:
+                            raise ValueError(f"Blocked private/internal IP: {ip_str}")
+                except socket.gaierror:
+                    pass  # Allow if DNS resolution fails - will fail at request time
 
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.request(

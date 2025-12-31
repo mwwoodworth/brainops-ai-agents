@@ -538,7 +538,14 @@ class NotebookLMPlus:
             updates = []
             params = []
 
+            # Whitelist of allowed columns to prevent SQL injection
+            ALLOWED_STAT_COLUMNS = {'total_interactions', 'knowledge_items_added', 'insights_generated', 'patterns_discovered'}
+
             for field, value in kwargs.items():
+                # Validate field against whitelist
+                if field not in ALLOWED_STAT_COLUMNS:
+                    logger.warning(f"Ignoring unknown stat column: {field}")
+                    continue
                 updates.append(f"{field} = {field} + %s")
                 params.append(value)
 

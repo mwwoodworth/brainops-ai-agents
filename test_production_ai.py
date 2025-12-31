@@ -24,8 +24,8 @@ def wait_for_deployment():
                     return True
                 else:
                     print(f"  Still on {version}, waiting...")
-        except:
-            pass
+        except requests.RequestException as exc:
+            print(f"  ⚠️ Health check failed: {exc}")
         time.sleep(15)
     return False
 

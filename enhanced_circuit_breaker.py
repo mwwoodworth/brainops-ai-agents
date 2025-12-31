@@ -713,7 +713,7 @@ class DeadlockDetector:
             try:
                 await self._detection_task
             except asyncio.CancelledError:
-                pass
+                logger.debug("Deadlock detector task cancelled")
         logger.info("DeadlockDetector stopped")
 
     def set_component_priority(self, component_id: str, priority: int):
@@ -1007,7 +1007,7 @@ class SidecarHealthMonitor:
             try:
                 await self._check_task
             except asyncio.CancelledError:
-                pass
+                logger.debug("Sidecar monitor task cancelled")
 
     async def _monitor_loop(self):
         """Continuous health monitoring"""

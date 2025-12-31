@@ -189,4 +189,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(core.run_forever())
     except KeyboardInterrupt:
-        pass
+        logger.info("🛑 Shutdown requested")
