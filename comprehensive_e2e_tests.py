@@ -463,7 +463,75 @@ COMMAND_CENTER_COMPREHENSIVE_TESTS = [
 
 
 # =============================================================================
-# ALL FRONTENDS COMBINED
+# BRAINSTACK STUDIO COMPREHENSIVE TEST SUITE
+# =============================================================================
+
+BRAINSTACK_STUDIO_COMPREHENSIVE_TESTS = [
+    E2ETest(
+        name="BrainStack Studio homepage loads",
+        category="page_load",
+        description="Homepage loads with all critical elements",
+        steps=[
+            {"action": "navigate", "url": "https://brainstackstudio.com"},
+            {"action": "wait_for", "selector": "body", "timeout": 10000},
+            {"action": "screenshot", "name": "brainstack_homepage"},
+        ],
+        expected_result="Page loads with HTTP 200",
+        severity="critical"
+    ),
+    E2ETest(
+        name="BrainStack Studio branding visible",
+        category="content",
+        description="BrainOps branding is visible",
+        steps=[
+            {"action": "navigate", "url": "https://brainstackstudio.com"},
+            {"action": "wait", "ms": 2000},
+            {"action": "assert_text", "text": "BrainOps"},
+        ],
+        expected_result="BrainOps branding visible",
+        severity="high"
+    ),
+    E2ETest(
+        name="BrainStack Studio AI OS messaging",
+        category="content",
+        description="AI Operating System messaging visible",
+        steps=[
+            {"action": "navigate", "url": "https://brainstackstudio.com"},
+            {"action": "wait", "ms": 2000},
+            {"action": "assert_text", "text": "AI"},
+        ],
+        expected_result="AI messaging visible",
+        severity="high"
+    ),
+    E2ETest(
+        name="BrainStack Studio responsive",
+        category="responsive",
+        description="Works on mobile viewport",
+        steps=[
+            {"action": "set_viewport", "width": 375, "height": 667},
+            {"action": "navigate", "url": "https://brainstackstudio.com"},
+            {"action": "assert_visible", "selector": "body"},
+            {"action": "screenshot", "name": "brainstack_mobile"},
+        ],
+        expected_result="Site works on mobile",
+        severity="high"
+    ),
+    E2ETest(
+        name="BrainStack Studio performance",
+        category="performance",
+        description="Page loads within 3 seconds",
+        steps=[
+            {"action": "navigate", "url": "https://brainstackstudio.com"},
+            {"action": "wait", "ms": 3000},
+        ],
+        expected_result="Page loads within 3s",
+        severity="high"
+    ),
+]
+
+
+# =============================================================================
+# ALL FRONTENDS COMBINED (4 total)
 # =============================================================================
 
 ALL_FRONTENDS = {
@@ -480,6 +548,11 @@ ALL_FRONTENDS = {
     "command-center": {
         "url": "https://brainops-command-center.vercel.app",
         "tests": COMMAND_CENTER_COMPREHENSIVE_TESTS,
+        "critical": True
+    },
+    "brainstack-studio": {
+        "url": "https://brainstackstudio.com",
+        "tests": BRAINSTACK_STUDIO_COMPREHENSIVE_TESTS,
         "critical": True
     }
 }
@@ -742,6 +815,11 @@ class ComprehensiveE2ETester:
             results["applications"]["command-center"] = self._report_to_dict(cc_report)
             all_reports.append(cc_report)
 
+            # Run BrainStack Studio tests
+            bs_report = await self.run_test_suite("brainstack-studio", BRAINSTACK_STUDIO_COMPREHENSIVE_TESTS)
+            results["applications"]["brainstack-studio"] = self._report_to_dict(bs_report)
+            all_reports.append(bs_report)
+
             # Update summary for ALL frontends
             for report in all_reports:
                 results["summary"]["total_tests"] += report.total_tests
@@ -797,6 +875,8 @@ async def run_comprehensive_e2e(app_name: Optional[str] = None) -> Dict[str, Any
                 report = await tester.run_test_suite("weathercraft-erp", ERP_COMPREHENSIVE_TESTS)
             elif app_name == "command-center":
                 report = await tester.run_test_suite("command-center", COMMAND_CENTER_COMPREHENSIVE_TESTS)
+            elif app_name == "brainstack-studio":
+                report = await tester.run_test_suite("brainstack-studio", BRAINSTACK_STUDIO_COMPREHENSIVE_TESTS)
             elif app_name in ALL_FRONTENDS:
                 frontend = ALL_FRONTENDS[app_name]
                 report = await tester.run_test_suite(app_name, frontend["tests"])
