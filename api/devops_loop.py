@@ -169,14 +169,16 @@ async def get_e2e_status():
     """Get comprehensive e2e testing capabilities"""
     return {
         "available": True,
-        "applications": ["myroofgenius", "weathercraft-erp"],
+        "applications": ["myroofgenius", "weathercraft-erp", "command-center"],
         "test_categories": [
             "page_load", "navigation", "auth", "cta",
             "layout", "content", "performance", "responsive"
         ],
         "tests_per_app": {
             "myroofgenius": 14,
-            "weathercraft-erp": 6
+            "weathercraft-erp": 6,
+            "command-center": 4
         },
-        "description": "Comprehensive e2e tests covering EVERY UI element, operation, and user flow"
+        "total_tests": 24,
+        "description": "Comprehensive e2e tests covering ALL UI elements across ALL 3 frontends"
     }
