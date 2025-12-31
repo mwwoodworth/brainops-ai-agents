@@ -117,6 +117,42 @@ def get_decision_tree():
         logger.warning("Decision tree not available")
         return None
 
+def get_a2ui_generator():
+    """Get A2UI (Agent-to-User Interface) generator"""
+    try:
+        from a2ui_protocol import A2UIGenerator
+        return A2UIGenerator()
+    except ImportError:
+        logger.warning("A2UI generator not available")
+        return None
+
+async def get_consciousness_controller():
+    """Get consciousness emergence controller"""
+    try:
+        from consciousness_emergence import get_consciousness_controller as _get_consciousness
+        return await _get_consciousness()
+    except ImportError:
+        logger.warning("Consciousness controller not available")
+        return None
+
+def get_hallucination_controller_sync():
+    """Get hallucination prevention controller (sync wrapper)"""
+    try:
+        from hallucination_prevention import get_hallucination_controller
+        return get_hallucination_controller()
+    except ImportError:
+        logger.warning("Hallucination prevention not available")
+        return None
+
+async def get_live_brain():
+    """Get live memory brain"""
+    try:
+        from live_memory_brain import get_live_brain as _get_brain
+        return await _get_brain()
+    except ImportError:
+        logger.warning("Live memory brain not available")
+        return None
+
 
 # ============== UNIFIED SYSTEM HOOKS ==============
 
@@ -137,6 +173,12 @@ class ExecutionContext:
     pricing_recommendations: Optional[Dict] = None
     confidence_score: float = 1.0
 
+    # A2UI and Consciousness integration
+    a2ui_surface: Optional[Dict[str, Any]] = None  # Generated UI for results
+    consciousness_state: Optional[Dict[str, Any]] = None  # Current consciousness
+    hallucination_validated: bool = False  # Whether output was validated
+    brain_memory_id: Optional[str] = None  # ID in brain memory
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "agent_name": self.agent_name,
@@ -148,7 +190,11 @@ class ExecutionContext:
             "graph_context": self.graph_context,
             "historical_patterns": self.historical_patterns,
             "pricing_recommendations": self.pricing_recommendations,
-            "confidence_score": self.confidence_score
+            "confidence_score": self.confidence_score,
+            "a2ui_surface": self.a2ui_surface,
+            "consciousness_state": self.consciousness_state,
+            "hallucination_validated": self.hallucination_validated,
+            "brain_memory_id": self.brain_memory_id
         }
 
 
@@ -413,6 +459,71 @@ class UnifiedSystemIntegration:
                     await revenue.track_revenue_event(ctx.task_type, result)
                 except Exception as e:
                     self.logger.warning(f"Revenue tracking failed: {e}")
+
+        # 5. Generate A2UI surface for result display
+        a2ui = get_a2ui_generator()
+        if a2ui:
+            try:
+                # Generate appropriate UI based on result type
+                if isinstance(result, dict):
+                    if "metrics" in result or "stats" in result:
+                        ctx.a2ui_surface = a2ui.dashboard_card(
+                            title=f"{ctx.agent_name} Results",
+                            metrics=[{"label": k, "value": str(v)[:50]}
+                                    for k, v in result.items() if k != "status"][:6]
+                        )
+                    elif "data" in result or "items" in result:
+                        data = result.get("data") or result.get("items", [])
+                        if isinstance(data, list) and len(data) > 0:
+                            cols = list(data[0].keys()) if isinstance(data[0], dict) else ["Value"]
+                            ctx.a2ui_surface = a2ui.data_table(
+                                title=f"{ctx.agent_name} Data",
+                                columns=cols[:5],
+                                data=[list(row.values())[:5] if isinstance(row, dict) else [row]
+                                      for row in data[:10]]
+                            )
+                self.systems_used.add("a2ui")
+            except Exception as e:
+                self.logger.warning(f"A2UI generation failed: {e}")
+
+        # 6. Record consciousness thought about execution
+        try:
+            consciousness = await get_consciousness_controller()
+            if consciousness:
+                await consciousness.record_thought({
+                    "type": "execution_reflection",
+                    "agent": ctx.agent_name,
+                    "task": ctx.task_type,
+                    "success": success,
+                    "confidence": ctx.confidence_score,
+                    "insight": f"Completed {ctx.task_type} with {success and 'success' or 'failure'}",
+                    "timestamp": ctx.timestamp.isoformat()
+                })
+                ctx.consciousness_state = {"thought_recorded": True}
+                self.systems_used.add("consciousness")
+        except Exception as e:
+            self.logger.warning(f"Consciousness recording failed: {e}")
+
+        # 7. Store in live brain memory
+        try:
+            brain = await get_live_brain()
+            if brain:
+                from live_memory_brain import MemoryType
+                memory_id = await brain.store(
+                    content={
+                        "agent": ctx.agent_name,
+                        "task": ctx.task_type,
+                        "result_summary": str(result)[:500],
+                        "success": success
+                    },
+                    memory_type=MemoryType.EPISODIC,
+                    importance=0.7 if success else 0.9,
+                    context={"execution_id": ctx.execution_id}
+                )
+                ctx.brain_memory_id = memory_id
+                self.systems_used.add("live_brain")
+        except Exception as e:
+            self.logger.warning(f"Brain memory storage failed: {e}")
 
     async def on_error(self, ctx: ExecutionContext, error: Exception) -> Dict[str, Any]:
         """

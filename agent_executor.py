@@ -122,6 +122,22 @@ except ImportError:
     UI_PLAYWRIGHT_TESTING_AVAILABLE = False
     logger.warning("Playwright UI testing agent not available")
 
+# TRUE E2E UI Testing Agent - Human-like comprehensive UI testing
+try:
+    from true_e2e_ui_testing import TrueE2EUITestingAgent
+    TRUE_E2E_UI_TESTING_AVAILABLE = True
+except ImportError:
+    TRUE_E2E_UI_TESTING_AVAILABLE = False
+    logger.warning("TRUE E2E UI testing agent not available")
+
+# AI-Human Task Management Agent - Bidirectional task coordination
+try:
+    from ai_human_task_management import AIHumanTaskAgent
+    AI_HUMAN_TASK_AVAILABLE = True
+except ImportError:
+    AI_HUMAN_TASK_AVAILABLE = False
+    logger.warning("AI-Human task management not available")
+
 # Deployment Monitor Agent - Render/Vercel deployment monitoring
 try:
     from deployment_monitor_agent import DeploymentMonitorAgent
@@ -137,6 +153,30 @@ try:
 except ImportError:
     REVENUE_PIPELINE_AVAILABLE = False
     logger.warning("Revenue pipeline agents not available")
+
+# Hallucination Prevention - SAC3 validation for all AI outputs
+try:
+    from hallucination_prevention import get_hallucination_controller
+    HALLUCINATION_PREVENTION_AVAILABLE = True
+except ImportError:
+    HALLUCINATION_PREVENTION_AVAILABLE = False
+    logger.warning("Hallucination prevention not available")
+
+# Live Memory Brain - Persistent memory storage for agent executions
+try:
+    from live_memory_brain import get_live_brain, MemoryType
+    LIVE_MEMORY_BRAIN_AVAILABLE = True
+except ImportError:
+    LIVE_MEMORY_BRAIN_AVAILABLE = False
+    logger.warning("Live memory brain not available")
+
+# MCP Bridge Client for tool execution
+try:
+    from mcp_integration import get_mcp_client
+    MCP_INTEGRATION_AVAILABLE = True
+except ImportError:
+    MCP_INTEGRATION_AVAILABLE = False
+    logger.warning("MCP integration not available")
 
 # Database configuration (for reference, pool uses config internally)
 DB_CONFIG = {
@@ -624,6 +664,22 @@ class AgentExecutor:
             except Exception as e:
                 logger.warning(f"Failed to initialize Playwright UI testing agent: {e}")
 
+        # TRUE E2E UI Testing Agent - Human-like comprehensive testing
+        if TRUE_E2E_UI_TESTING_AVAILABLE:
+            try:
+                self.agents['TrueE2EUITesting'] = TrueE2EUITestingAgent()
+                logger.info("TRUE E2E UI testing agent registered")
+            except Exception as e:
+                logger.warning(f"Failed to initialize TRUE E2E UI testing agent: {e}")
+
+        # AI-Human Task Management Agent
+        if AI_HUMAN_TASK_AVAILABLE:
+            try:
+                self.agents['AIHumanTaskManager'] = AIHumanTaskAgent()
+                logger.info("AI-Human Task Management agent registered")
+            except Exception as e:
+                logger.warning(f"Failed to initialize AI-Human Task Management agent: {e}")
+
         # Deployment Monitor Agent - Deployment monitoring
         if DEPLOYMENT_MONITOR_AVAILABLE:
             try:
@@ -698,6 +754,16 @@ class AgentExecutor:
         'UITesting': 'UIPlaywrightTesting',
         'UIUXTesting': 'UIPlaywrightTesting',
         'PlaywrightUITesting': 'UIPlaywrightTesting',
+        'TrueE2E': 'TrueE2EUITesting',
+        'E2EUITesting': 'TrueE2EUITesting',
+        'HumanLikeUITesting': 'TrueE2EUITesting',
+        'ComprehensiveUITesting': 'TrueE2EUITesting',
+
+        # AI-Human Task Management
+        'TaskManager': 'AIHumanTaskManager',
+        'HumanTasks': 'AIHumanTaskManager',
+        'AITasks': 'AIHumanTaskManager',
+        'TaskCoordinator': 'AIHumanTaskManager',
 
         # Invoicing
         'Invoicer': 'InvoicingAgent',
@@ -845,6 +911,35 @@ class AgentExecutor:
                         )
                     except Exception as e:
                         logger.warning(f"Unified post-execution failed: {e}")
+
+                # HALLUCINATION PREVENTION: Validate workflow outputs
+                if HALLUCINATION_PREVENTION_AVAILABLE and result.get("ai_generated"):
+                    try:
+                        controller = get_hallucination_controller()
+                        validation_result = await controller.validate_and_sanitize(
+                            content=result.get("result", result),
+                            content_type="workflow_execution",
+                            context={"agent_name": agent_name, "workflow": True}
+                        )
+                        result["hallucination_check"] = {
+                            "validated": validation_result.get("is_valid", True),
+                            "confidence": validation_result.get("confidence", 1.0)
+                        }
+                    except Exception as e:
+                        logger.warning(f"Workflow hallucination check failed: {e}")
+
+                # LIVE MEMORY BRAIN: Store workflow execution
+                if LIVE_MEMORY_BRAIN_AVAILABLE:
+                    try:
+                        brain = await get_live_brain()
+                        await brain.store(
+                            content={"agent": agent_name, "task": task, "result": result, "workflow": True},
+                            memory_type=MemoryType.EPISODIC,
+                            importance=0.75
+                        )
+                    except Exception as e:
+                        logger.warning(f"Workflow brain storage failed: {e}")
+
                 return result
 
         try:
@@ -925,6 +1020,55 @@ class AgentExecutor:
                     )
                 except Exception as e:
                     logger.warning(f"Unified post-execution failed: {e}")
+
+            # HALLUCINATION PREVENTION: Validate AI outputs before returning
+            if HALLUCINATION_PREVENTION_AVAILABLE and result.get("ai_generated"):
+                try:
+                    controller = get_hallucination_controller()
+                    validation_result = await controller.validate_and_sanitize(
+                        content=result.get("result", result),
+                        content_type="agent_execution",
+                        context={
+                            "agent_name": agent_name,
+                            "task_type": task.get("type", "unknown"),
+                            "execution_id": exec_logger.execution_id
+                        }
+                    )
+                    if not validation_result.get("is_valid", True):
+                        logger.warning(f"Hallucination detected in {agent_name}: {validation_result.get('issues', [])}")
+                        result["hallucination_check"] = {
+                            "validated": False,
+                            "issues": validation_result.get("issues", []),
+                            "confidence": validation_result.get("confidence", 0)
+                        }
+                    else:
+                        result["hallucination_check"] = {"validated": True, "confidence": validation_result.get("confidence", 1.0)}
+                except Exception as e:
+                    logger.warning(f"Hallucination prevention check failed: {e}")
+
+            # LIVE MEMORY BRAIN: Store execution results for learning
+            if LIVE_MEMORY_BRAIN_AVAILABLE:
+                try:
+                    brain = await get_live_brain()
+                    await brain.store(
+                        content={
+                            "agent": agent_name,
+                            "task": task,
+                            "result": result,
+                            "duration_ms": total_duration_ms,
+                            "success": result.get("status") != "failed"
+                        },
+                        memory_type=MemoryType.EPISODIC,
+                        importance=0.7 if result.get("status") != "failed" else 0.9,
+                        context={
+                            "execution_id": exec_logger.execution_id,
+                            "tenant_id": task.get("tenant_id"),
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    )
+                    logger.debug(f"Stored execution in brain memory: {agent_name}")
+                except Exception as e:
+                    logger.warning(f"Brain memory storage failed: {e}")
 
             return result
 
