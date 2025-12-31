@@ -11,17 +11,15 @@ The Nerve Center:
 - Enables true emergent intelligence
 """
 
-import os
 import json
 import asyncio
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
-from config import config
-from database.async_connection import get_pool, init_pool, PoolConfig, using_fallback
+from database.async_connection import get_pool, using_fallback
 
 # Import all alive components
 from alive_core import get_alive_core, AliveCore, ConsciousnessState, ThoughtType
@@ -30,7 +28,7 @@ from autonomic_controller import (
     EventType, MetricCollector, EventBus, AutonomicManager
 )
 from proactive_intelligence import get_proactive_intelligence, ProactiveIntelligence
-from ai_tracer import BrainOpsTracer, SpanType
+from ai_tracer import BrainOpsTracer
 
 # Try to import optional components
 try:
@@ -47,7 +45,7 @@ except ImportError:
 
 # System awareness for REAL monitoring
 try:
-    from system_awareness import get_system_awareness, SystemAwareness
+    from system_awareness import get_system_awareness
     SYSTEM_AWARENESS_AVAILABLE = True
 except ImportError:
     SYSTEM_AWARENESS_AVAILABLE = False
@@ -520,7 +518,7 @@ class NerveCenter:
             try:
                 await task
             except asyncio.CancelledError:
-                pass
+                logger.debug("Nerve center task cancelled during shutdown")
 
         await self.emit_signal(NerveSignal(
             type=SystemSignal.SHUTDOWN,

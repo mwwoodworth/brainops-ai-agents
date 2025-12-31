@@ -7,16 +7,13 @@ Advanced AI-powered predictive analytics for business intelligence and forecasti
 import os
 import json
 import logging
-import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import numpy as np
-from decimal import Decimal
-import hashlib
 from scipy import stats
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler

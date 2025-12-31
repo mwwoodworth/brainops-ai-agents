@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from ai_core import ai_core
 from ai_advanced_providers import advanced_ai
 from unified_memory_manager import get_memory_manager, Memory, MemoryType
-from agent_activation_system import get_activation_system, BusinessEventType, json_safe_serialize
+from agent_activation_system import get_activation_system, json_safe_serialize
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -520,7 +520,8 @@ class AIBoardOfDirectors:
                 for option in VoteOption:
                     if option.value == vote_int:
                         return option
-            except Exception:
+            except (ValueError, TypeError) as exc:
+                logger.debug("Invalid numeric vote %s: %s", vote_value, exc)
                 return VoteOption.ABSTAIN
 
         if isinstance(vote_value, str):
@@ -789,7 +790,8 @@ Output MUST be valid JSON only (no markdown) with this schema:
                 latest_parsed[role] = st.get("parsed") or {}
                 try:
                     latest_votes[role] = VoteOption[st.get("vote", "ABSTAIN")]
-                except Exception:
+                except KeyError as exc:
+                    logger.debug("Invalid vote key for %s: %s", role, exc)
                     latest_votes[role] = self._parse_vote((st.get("parsed") or {}).get("vote"))
 
             # CEO veto ends debate immediately

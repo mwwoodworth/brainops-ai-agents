@@ -5,8 +5,8 @@ API endpoints for the Digital Twin System - virtual replicas of production syste
 Fully operational with proper error handling and fallbacks.
 """
 
-from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, Dict, Any, List
+from fastapi import APIRouter, HTTPException
+from typing import Optional, Dict, Any
 from pydantic import BaseModel
 import logging
 

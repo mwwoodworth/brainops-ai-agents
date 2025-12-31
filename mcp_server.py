@@ -15,21 +15,17 @@ Enhancements:
 """
 
 import os
-import sys
-import json
 import asyncio
 import logging
 import re
 import shlex
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timedelta
-from fastapi import FastAPI, WebSocket, HTTPException, Depends, Request, Security, BackgroundTasks
+from typing import Any, Dict, List
+from datetime import datetime
+from fastapi import FastAPI, WebSocket, HTTPException, Depends, Request, Security
 from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import subprocess
 import httpx
 from pathlib import Path
 from config import config
@@ -614,8 +610,8 @@ class MCPServer:
                         ip = ipaddress.ip_address(ip_str)
                         if ip.is_private or ip.is_loopback or ip.is_link_local:
                             raise ValueError(f"Blocked private/internal IP: {ip_str}")
-                except socket.gaierror:
-                    pass  # Allow if DNS resolution fails - will fail at request time
+                except socket.gaierror as exc:
+                    logger.debug("DNS resolution failed for %s: %s", parsed.hostname, exc)
 
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.request(
@@ -673,8 +669,8 @@ class MCPServer:
                             'type': 'file',
                             'size': item.stat().st_size
                         })
-            except PermissionError:
-                pass
+            except PermissionError as exc:
+                logger.debug("Permission denied while reading %s: %s", dir_path, exc)
 
             return tree
 
@@ -696,8 +692,8 @@ class MCPServer:
                     )
                     if response.status_code == 200:
                         return response.json().get('logs', [])
-            except:
-                pass
+            except httpx.RequestError as exc:
+                logger.warning("Failed to fetch remote logs: %s", exc, exc_info=True)
 
         # Fallback to local logs if available
         log_files = {
@@ -721,7 +717,7 @@ class MCPServer:
                 return stdout.decode().split('\n')
             except Exception as e:
                 logger.warning(f"Failed to read log file {log_file}: {e}")
-                pass
+                return []
 
         return []
 

@@ -7,11 +7,9 @@ import asyncio
 import json
 import logging
 import os
-import sys
 import time
 import random
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from dataclasses import dataclass
 
 # Attempt to import asyncpg for async DB
@@ -22,7 +20,7 @@ except ImportError:
 
 # Import shared async pool
 try:
-    from database.async_connection import get_pool, init_pool, PoolConfig
+    from database.async_connection import get_pool
     _ASYNC_POOL_AVAILABLE = True
 except ImportError:
     _ASYNC_POOL_AVAILABLE = False
@@ -35,7 +33,7 @@ except ImportError:
 
 # Import AI OS for integration
 try:
-    from ai_operating_system import get_ai_operating_system, SystemComponent
+    from ai_operating_system import get_ai_operating_system
 except ImportError:
     get_ai_operating_system = None
 

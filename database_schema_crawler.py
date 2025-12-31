@@ -264,7 +264,8 @@ class DatabaseSchemaCrawler:
                 WHERE n.nspname = $1 AND c.relname = $2
             """, schema, table)
             return int(result) if result else 0
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to get row count for %s.%s: %s", schema, table, exc, exc_info=True)
             return 0
 
     async def _get_table_size(self, pool, schema: str, table: str) -> int:
@@ -274,7 +275,8 @@ class DatabaseSchemaCrawler:
                 SELECT pg_total_relation_size($1::regclass)
             """, f"{schema}.{table}")
             return int(result) if result else 0
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to get table size for %s.%s: %s", schema, table, exc, exc_info=True)
             return 0
 
     async def save_to_graph(self) -> Dict[str, Any]:

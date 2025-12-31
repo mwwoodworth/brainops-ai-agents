@@ -16,7 +16,6 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Qu
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List, AsyncGenerator
-import asyncio
 import json
 import logging
 import os
@@ -788,8 +787,6 @@ async def get_aurea_capabilities():
     Returns the full skill registry showing everything AUREA can do.
     """
     try:
-        from aurea_nlu_processor import AUREANLUProcessor
-        from langchain_openai import ChatOpenAI
 
         try:
             from aurea_power_layer import get_power_layer

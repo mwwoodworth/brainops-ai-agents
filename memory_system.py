@@ -11,7 +11,6 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 import logging
-import hashlib
 
 logger = logging.getLogger(__name__)
 

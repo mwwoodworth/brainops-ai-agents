@@ -7,7 +7,6 @@ Do NOT create your own psycopg2 connections!
 
 import logging
 import threading
-import time
 import os
 from typing import Optional, Any, Dict, List
 from queue import Queue, Empty
@@ -142,7 +141,8 @@ class SyncConnectionPool:
                     cursor = conn.cursor()
                     cursor.execute("SELECT 1")
                     cursor.close()
-                except Exception:
+                except Exception as exc:
+                    logger.debug("Connection check failed; recreating connection: %s", exc, exc_info=True)
                     # Connection dead, create new
                     try:
                         conn.close()

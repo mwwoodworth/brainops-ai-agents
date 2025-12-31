@@ -12,7 +12,6 @@ import requests
 import json
 import statistics
 from datetime import datetime
-from typing import Dict, List, Tuple
 
 # Configuration - use environment variables
 DB_CONFIG = {
@@ -172,13 +171,13 @@ def test_critical_functionality():
         (f"{AI_AGENTS_URL}/ai/status", "AI Status")
     ]
 
-        for url, name in critical_endpoints:
-            try:
-                response = requests.get(url, timeout=5)
-                if response.status_code < 400:
-                    tests.append((name, True, f"Status {response.status_code}"))
-                else:
-                    tests.append((name, False, f"Status {response.status_code}"))
+    for url, name in critical_endpoints:
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code < 400:
+                tests.append((name, True, f"Status {response.status_code}"))
+            else:
+                tests.append((name, False, f"Status {response.status_code}"))
         except requests.RequestException as exc:
             tests.append((name, False, f"Error: {str(exc)[:30]}"))
 

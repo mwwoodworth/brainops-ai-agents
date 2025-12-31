@@ -22,8 +22,8 @@ import json
 import uuid
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Union
-from dataclasses import dataclass, field, asdict
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass, field
 from enum import Enum
 
 logger = logging.getLogger(__name__)

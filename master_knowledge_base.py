@@ -19,7 +19,6 @@ Version: 1.0.0
 """
 
 import asyncio
-import hashlib
 import json
 import os
 import re
@@ -27,7 +26,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple
 from pathlib import Path
 
 import httpx
@@ -499,7 +498,7 @@ Return ONLY the category name that best matches, nothing else."""
             if json_match:
                 return json.loads(json_match.group())
         except json.JSONDecodeError:
-            pass
+            logger.debug("Failed to parse knowledge base JSON response")
         return {}
 
 
@@ -1222,7 +1221,7 @@ class MasterKnowledgeBase:
 
 def create_knowledge_router():
     """Create FastAPI router for knowledge base endpoints."""
-    from fastapi import APIRouter, HTTPException, Query
+    from fastapi import APIRouter, HTTPException
     from pydantic import BaseModel
 
     router = APIRouter(prefix="/knowledge", tags=["Knowledge Base"])

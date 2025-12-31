@@ -41,9 +41,6 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 from collections import defaultdict
 import threading
-from concurrent.futures import ThreadPoolExecutor
-import psycopg2
-from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
 
 # OPTIMIZATION: asyncpg for non-blocking database operations
@@ -65,14 +62,6 @@ try:
     ASYNC_POOL_AVAILABLE = True
 except ImportError:
     ASYNC_POOL_AVAILABLE = False
-
-# OPTIMIZATION: HNSW-style approximate nearest neighbor indexing
-# Using a simple locality-sensitive hashing approach for O(1) lookups
-try:
-    import numpy as np
-    NUMPY_AVAILABLE = True
-except ImportError:
-    NUMPY_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 

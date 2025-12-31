@@ -13,49 +13,44 @@ The culmination of all 28 tasks into a unified AI Operating System that provides
 
 import os
 import sys
-import time
-import json
 import asyncio
 import logging
 import psycopg2
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 import importlib.util
-from psycopg2.extras import RealDictCursor
 import warnings
 warnings.filterwarnings('ignore')
 
 # Import Enhancements
 try:
     from ai_tracer import BrainOpsTracer, SpanType
-    from self_healing_recovery import get_self_healing_recovery, RecoveryStrategy
+    from self_healing_recovery import get_self_healing_recovery
     from predictive_analytics_engine import get_predictive_analytics_engine, PredictionType, TimeHorizon
-    from performance_optimization_layer import get_performance_optimizer, OptimizationStrategy
+    from performance_optimization_layer import get_performance_optimizer
     from autonomic_controller import (
         get_metric_collector, get_event_bus, get_autonomic_manager,
-        MetricCollector, EventBus, AutonomicManager,
-        EventType, PredictiveFailureDetector, ResourceOptimizer
+        PredictiveFailureDetector, ResourceOptimizer
     )
     AUTONOMIC_AVAILABLE = True
 except ImportError:
     # Fallback for local testing if not in path
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     from ai_tracer import BrainOpsTracer, SpanType
-    from self_healing_recovery import get_self_healing_recovery, RecoveryStrategy
+    from self_healing_recovery import get_self_healing_recovery
     AUTONOMIC_AVAILABLE = False
     try:
         from predictive_analytics_engine import get_predictive_analytics_engine, PredictionType, TimeHorizon
-        from performance_optimization_layer import get_performance_optimizer, OptimizationStrategy
+        from performance_optimization_layer import get_performance_optimizer
     except ImportError:
         logging.warning("Optional analytics modules unavailable during bootstrap")
     try:
         from autonomic_controller import (
             get_metric_collector, get_event_bus, get_autonomic_manager,
-            MetricCollector, EventBus, AutonomicManager,
-            EventType, PredictiveFailureDetector, ResourceOptimizer
+            PredictiveFailureDetector, ResourceOptimizer
         )
         AUTONOMIC_AVAILABLE = True
     except ImportError:

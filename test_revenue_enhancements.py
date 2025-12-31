@@ -122,7 +122,6 @@ async def create_test_lead(system):
     """Create a test lead for testing"""
     import uuid
     import psycopg2
-    from datetime import datetime, timezone
 
     try:
         # Database config

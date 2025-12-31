@@ -16,7 +16,7 @@ Version: 1.0.0
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime, timezone
 import json
 import os

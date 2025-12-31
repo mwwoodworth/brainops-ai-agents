@@ -4,13 +4,10 @@ SESSION CONTEXT MANAGER - Perfect Session-Level Memory Management
 Ensures complete context preservation across conversations and agent handoffs
 """
 
-import os
-import json
 import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field, asdict
-import hashlib
 import logging
 
 logger = logging.getLogger(__name__)

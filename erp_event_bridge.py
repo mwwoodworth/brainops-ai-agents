@@ -12,15 +12,12 @@ Author: BrainOps AI Team
 Version: 2.0.0 - Unified Event System Integration
 """
 
-import os
-import json
 import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional, List
-from contextlib import suppress
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, Request, BackgroundTasks
 from pydantic import BaseModel, Field
 
 # Configure logging
@@ -35,10 +32,6 @@ router = APIRouter(tags=["erp-bridge"])
 try:
     from lib.events.schema import (
         UnifiedEvent,
-        EventSource,
-        EventPriority,
-        EventCategory,
-        get_agents_for_event,
     )
     from api.events.unified import store_event, mark_event_processed
     UNIFIED_EVENTS_AVAILABLE = True
@@ -60,7 +53,7 @@ except ImportError:
 
 # Revenue Generation System
 try:
-    from revenue_generation_system import get_revenue_system, RevenueAction
+    from revenue_generation_system import get_revenue_system
     REVENUE_SYSTEM_AVAILABLE = True
 except ImportError:
     REVENUE_SYSTEM_AVAILABLE = False

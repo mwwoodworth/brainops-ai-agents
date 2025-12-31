@@ -4,7 +4,7 @@ Provides comprehensive analytics for agent executions and performance
 """
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Query
 import logging
 
 logger = logging.getLogger(__name__)

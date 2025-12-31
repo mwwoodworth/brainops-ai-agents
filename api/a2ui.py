@@ -16,9 +16,6 @@ from a2ui_protocol import (
     AUREAUIGenerator,
     ComponentType,
     UsageHint,
-    generate_dashboard_ui,
-    generate_status_ui,
-    generate_table_ui,
 )
 
 logger = logging.getLogger(__name__)
@@ -233,7 +230,6 @@ async def aurea_health_dashboard() -> Dict[str, Any]:
     try:
         # Get actual health data
         from database.async_connection import get_pool
-        import asyncio
 
         # Get actual health data
         from database.async_connection import get_pool
@@ -244,7 +240,8 @@ async def aurea_health_dashboard() -> Dict[str, Any]:
             try:
                 resp = await client.get("https://brainops-ai-agents.onrender.com/health")
                 agents_up = resp.status_code == 200
-            except Exception:
+            except httpx.RequestError as exc:
+                logger.debug("Agent health request failed: %s", exc)
                 agents_up = False
 
         # 2. DB Stats
@@ -284,7 +281,6 @@ async def aurea_agent_grid(limit: int = Query(default=20, le=100)) -> Dict[str, 
     """Generate A2UI agent grid from live data"""
     try:
         from database.async_connection import get_pool
-        import asyncpg
 
         pool = get_pool()
         if pool:

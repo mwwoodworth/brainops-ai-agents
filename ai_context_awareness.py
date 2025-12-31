@@ -5,19 +5,15 @@ Build user-specific AI personalization
 """
 
 import os
-import json
 import logging
 import uuid
-import hashlib
-import asyncio
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Any
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 import jwt
 from openai import OpenAI
-import numpy as np
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

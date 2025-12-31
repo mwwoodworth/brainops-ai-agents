@@ -5,7 +5,6 @@ Diagnose AI Issues
 
 import os
 from openai import OpenAI
-import anthropic
 
 print("="*60)
 print("AI DIAGNOSTICS")

@@ -10,8 +10,8 @@ import logging
 import asyncio
 import json
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
+from typing import Dict, Any, Optional
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)

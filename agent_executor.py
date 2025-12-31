@@ -15,9 +15,9 @@ import logging
 import re
 import subprocess
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict, TypeVar
+from typing import Any, Dict, List, Optional, TypedDict, TypeVar
 
 import httpx
 import openai
@@ -1961,7 +1961,8 @@ class DatabaseOptimizerAgent(BaseAgent):
                     ORDER BY mean_exec_time DESC
                     LIMIT 5
                 """)
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to load slow queries: %s", exc, exc_info=True)
                 slow_queries = []
 
             return {
@@ -4147,4 +4148,3 @@ class VisionAlignmentAgentAdapter(BaseAgent):
 # Create executor instance AFTER all classes are defined
 executor = AgentExecutor()
 executor._load_agent_implementations()  # Load agents after classes are defined
-

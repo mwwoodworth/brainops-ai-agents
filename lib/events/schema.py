@@ -13,9 +13,12 @@ and broadcast via Supabase Realtime for live subscribers.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, validator
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -524,5 +527,6 @@ def validate_payload(event_type: str, payload: Dict[str, Any]) -> bool:
     try:
         schema(**payload)
         return True
-    except Exception:
+    except Exception as exc:
+        logger.debug("Event payload validation failed: %s", exc)
         return False

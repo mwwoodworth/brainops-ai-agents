@@ -16,7 +16,7 @@ import os
 import json
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
@@ -244,5 +244,5 @@ async def stop_task_queue_consumer():
         try:
             await _consumer_task
         except asyncio.CancelledError:
-            pass
+            logger.debug("Task queue consumer task cancelled")
         _consumer_task = None

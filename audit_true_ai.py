@@ -7,14 +7,11 @@ Identifies mock data, predefined responses, and fake AI implementations
 import os
 import sys
 import re
-import ast
 import json
 import glob
-import subprocess
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from pathlib import Path
-from typing import Dict, List, Tuple, Any
+from typing import Dict, Any
 from datetime import datetime
 
 # Database configuration

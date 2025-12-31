@@ -6,7 +6,7 @@ Tiered autonomy model: routine issues auto-remediated, complex issues require ov
 """
 
 from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from pydantic import BaseModel
 import logging
 
