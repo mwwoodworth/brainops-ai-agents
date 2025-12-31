@@ -656,3 +656,371 @@ async def get_diagnostics() -> Dict[str, Any]:
         "environment_vars": env_vars,
         "database": await _get_database_stats()
     }
+
+
+# ==================== RENDER LIVE MONITORING ====================
+
+RENDER_API_KEY = os.getenv("RENDER_API_KEY", "")
+RENDER_SERVICES = {
+    "brainops-ai-agents": "srv-d413iu75r7bs738btc10",
+    "brainops-backend": "srv-d1tfs4idbo4c73di6k00",
+    "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770"
+}
+
+
+async def _fetch_render_api(endpoint: str) -> Dict[str, Any]:
+    """Fetch from Render API"""
+    if not RENDER_API_KEY:
+        return {"error": "RENDER_API_KEY not configured"}
+
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        headers = {
+            "Authorization": f"Bearer {RENDER_API_KEY}",
+            "Accept": "application/json"
+        }
+        async with session.get(f"https://api.render.com/v1{endpoint}", headers=headers) as resp:
+            if resp.status != 200:
+                return {"error": f"HTTP {resp.status}", "status_code": resp.status}
+            return await resp.json()
+
+
+@router.get("/render/services")
+async def get_render_services() -> Dict[str, Any]:
+    """Get all Render service statuses"""
+    services = {}
+
+    for name, service_id in RENDER_SERVICES.items():
+        data = await _fetch_render_api(f"/services/{service_id}")
+        if "error" not in data:
+            services[name] = {
+                "id": service_id,
+                "status": data.get("suspended", "unknown"),
+                "type": data.get("type"),
+                "region": data.get("region"),
+                "created": data.get("createdAt"),
+                "updated": data.get("updatedAt")
+            }
+        else:
+            services[name] = data
+
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "services": services
+    }
+
+
+@router.get("/render/deploys")
+async def get_render_deploys() -> Dict[str, Any]:
+    """Get recent deployments across all Render services"""
+    deploys = {}
+
+    for name, service_id in RENDER_SERVICES.items():
+        data = await _fetch_render_api(f"/services/{service_id}/deploys?limit=5")
+        if isinstance(data, list):
+            deploys[name] = [
+                {
+                    "id": d.get("deploy", {}).get("id"),
+                    "status": d.get("deploy", {}).get("status"),
+                    "trigger": d.get("deploy", {}).get("trigger"),
+                    "created": d.get("deploy", {}).get("createdAt"),
+                    "finished": d.get("deploy", {}).get("finishedAt"),
+                    "image_sha": d.get("deploy", {}).get("image", {}).get("sha", "")[:20] if d.get("deploy", {}).get("image") else None
+                }
+                for d in data[:5]
+            ]
+        else:
+            deploys[name] = data
+
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "deploys": deploys
+    }
+
+
+@router.get("/render/logs/{service_name}")
+async def get_render_logs(service_name: str, limit: int = 100) -> Dict[str, Any]:
+    """Get live logs from a Render service"""
+    service_id = RENDER_SERVICES.get(service_name)
+    if not service_id:
+        return {"error": f"Unknown service: {service_name}", "available": list(RENDER_SERVICES.keys())}
+
+    # Render logs API endpoint
+    data = await _fetch_render_api(f"/services/{service_id}/logs?limit={limit}")
+
+    if isinstance(data, list):
+        # Parse and format logs
+        logs = []
+        errors = []
+        warnings = []
+
+        for log in data:
+            log_entry = {
+                "timestamp": log.get("timestamp"),
+                "message": log.get("message", ""),
+                "level": "info"
+            }
+
+            msg = log.get("message", "").lower()
+            if "error" in msg or "exception" in msg or "failed" in msg:
+                log_entry["level"] = "error"
+                errors.append(log_entry)
+            elif "warning" in msg or "warn" in msg:
+                log_entry["level"] = "warning"
+                warnings.append(log_entry)
+
+            logs.append(log_entry)
+
+        return {
+            "timestamp": datetime.utcnow().isoformat(),
+            "service": service_name,
+            "service_id": service_id,
+            "total_logs": len(logs),
+            "error_count": len(errors),
+            "warning_count": len(warnings),
+            "recent_errors": errors[-10:] if errors else [],
+            "logs": logs[-50:]  # Last 50 logs
+        }
+
+    return {"error": "Failed to fetch logs", "data": data}
+
+
+@router.get("/render/deploy/{service_name}")
+async def trigger_render_deploy(service_name: str) -> Dict[str, Any]:
+    """Get latest deploy status for a service (use POST to actually deploy)"""
+    service_id = RENDER_SERVICES.get(service_name)
+    if not service_id:
+        return {"error": f"Unknown service: {service_name}"}
+
+    data = await _fetch_render_api(f"/services/{service_id}/deploys?limit=1")
+
+    if isinstance(data, list) and len(data) > 0:
+        deploy = data[0].get("deploy", {})
+        return {
+            "timestamp": datetime.utcnow().isoformat(),
+            "service": service_name,
+            "latest_deploy": {
+                "id": deploy.get("id"),
+                "status": deploy.get("status"),
+                "trigger": deploy.get("trigger"),
+                "created": deploy.get("createdAt"),
+                "finished": deploy.get("finishedAt"),
+                "image": deploy.get("image", {}).get("ref") if deploy.get("image") else None
+            }
+        }
+
+    return {"error": "No deploys found"}
+
+
+# ==================== VERCEL LIVE MONITORING ====================
+
+VERCEL_TOKEN = os.getenv("VERCEL_TOKEN", "vCDh2d4AgYXPAs0089MvQcHs")
+VERCEL_PROJECTS = {
+    "weathercraft-erp": "prj_J4kZ8oQmGfU9lVWZxhYj6X7bR2nE",  # ERP project
+    "myroofgenius": "prj_abc123"  # MRG project (update with actual)
+}
+
+
+async def _fetch_vercel_api(endpoint: str) -> Dict[str, Any]:
+    """Fetch from Vercel API"""
+    if not VERCEL_TOKEN:
+        return {"error": "VERCEL_TOKEN not configured"}
+
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        headers = {
+            "Authorization": f"Bearer {VERCEL_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        async with session.get(f"https://api.vercel.com{endpoint}", headers=headers) as resp:
+            if resp.status != 200:
+                return {"error": f"HTTP {resp.status}", "status_code": resp.status}
+            return await resp.json()
+
+
+@router.get("/vercel/deployments")
+async def get_vercel_deployments(limit: int = 10) -> Dict[str, Any]:
+    """Get recent Vercel deployments"""
+    data = await _fetch_vercel_api(f"/v6/deployments?limit={limit}")
+
+    if "deployments" in data:
+        deployments = []
+        for d in data["deployments"]:
+            deployments.append({
+                "id": d.get("uid"),
+                "name": d.get("name"),
+                "url": d.get("url"),
+                "state": d.get("state"),
+                "created": d.get("createdAt"),
+                "ready": d.get("readyState"),
+                "target": d.get("target"),
+                "source": d.get("source")
+            })
+
+        return {
+            "timestamp": datetime.utcnow().isoformat(),
+            "total": len(deployments),
+            "deployments": deployments
+        }
+
+    return {"error": "Failed to fetch deployments", "data": data}
+
+
+@router.get("/vercel/project/{project_name}")
+async def get_vercel_project(project_name: str) -> Dict[str, Any]:
+    """Get Vercel project details and recent deployments"""
+    # Get project info
+    data = await _fetch_vercel_api(f"/v9/projects/{project_name}")
+
+    if "id" in data:
+        # Get recent deployments for this project
+        deploys = await _fetch_vercel_api(f"/v6/deployments?projectId={data['id']}&limit=5")
+
+        return {
+            "timestamp": datetime.utcnow().isoformat(),
+            "project": {
+                "id": data.get("id"),
+                "name": data.get("name"),
+                "framework": data.get("framework"),
+                "created": data.get("createdAt"),
+                "updated": data.get("updatedAt"),
+                "production_url": data.get("alias", [{}])[0].get("domain") if data.get("alias") else None
+            },
+            "recent_deployments": [
+                {
+                    "id": d.get("uid"),
+                    "state": d.get("state"),
+                    "url": d.get("url"),
+                    "created": d.get("createdAt")
+                }
+                for d in deploys.get("deployments", [])[:5]
+            ] if isinstance(deploys, dict) else []
+        }
+
+    return {"error": f"Project not found: {project_name}", "data": data}
+
+
+# ==================== UNIFIED SYSTEM STATUS ====================
+
+@router.get("/live")
+async def get_live_system_status() -> Dict[str, Any]:
+    """
+    MASTER ENDPOINT: Complete real-time status of ALL systems.
+    Use this for absolute visibility into every component.
+    """
+    timestamp = datetime.utcnow().isoformat()
+
+    # Gather all data in parallel
+    tasks = {
+        "database": asyncio.create_task(_get_database_stats()),
+        "aurea": asyncio.create_task(_get_aurea_stats()),
+        "agents": asyncio.create_task(_get_agent_stats()),
+        "learning": asyncio.create_task(_get_learning_stats()),
+        "healing": asyncio.create_task(_get_self_healing_stats()),
+        "memory": asyncio.create_task(_get_memory_stats()),
+        "revenue": asyncio.create_task(_get_revenue_stats()),
+        "mcp": asyncio.create_task(_get_mcp_stats()),
+    }
+
+    # Wait for all internal stats
+    results = {}
+    for name, task in tasks.items():
+        try:
+            results[name] = await task
+        except Exception as e:
+            results[name] = {"error": str(e)}
+
+    # Get Render status
+    render_status = {}
+    for service_name, service_id in RENDER_SERVICES.items():
+        deploy_data = await _fetch_render_api(f"/services/{service_id}/deploys?limit=1")
+        if isinstance(deploy_data, list) and len(deploy_data) > 0:
+            deploy = deploy_data[0].get("deploy", {})
+            render_status[service_name] = {
+                "status": deploy.get("status"),
+                "last_deploy": deploy.get("finishedAt"),
+                "trigger": deploy.get("trigger")
+            }
+        else:
+            render_status[service_name] = {"status": "unknown", "error": str(deploy_data)}
+
+    # Get Vercel status
+    vercel_deploys = await _fetch_vercel_api("/v6/deployments?limit=3")
+    vercel_status = []
+    if "deployments" in vercel_deploys:
+        for d in vercel_deploys["deployments"][:3]:
+            vercel_status.append({
+                "name": d.get("name"),
+                "state": d.get("state"),
+                "url": d.get("url")
+            })
+
+    # Calculate overall health
+    issues = []
+    critical_issues = []
+
+    if not results.get("database", {}).get("connected"):
+        critical_issues.append("Database disconnected")
+    if not results.get("aurea", {}).get("running"):
+        issues.append("AUREA not running")
+    if results.get("agents", {}).get("executions_24h", 0) < 5:
+        issues.append("Low agent activity")
+
+    for service, status in render_status.items():
+        if status.get("status") not in ["live", "update_in_progress"]:
+            issues.append(f"Render {service}: {status.get('status', 'unknown')}")
+
+    overall_health = "healthy"
+    if critical_issues:
+        overall_health = "critical"
+    elif issues:
+        overall_health = "degraded"
+
+    return {
+        "timestamp": timestamp,
+        "overall_health": overall_health,
+        "critical_issues": critical_issues,
+        "issues": issues,
+
+        "internal_systems": results,
+
+        "render_services": render_status,
+        "vercel_deployments": vercel_status,
+
+        "quick_stats": {
+            "db_connected": results.get("database", {}).get("connected", False),
+            "aurea_running": results.get("aurea", {}).get("running", False),
+            "agents_24h": results.get("agents", {}).get("executions_24h", 0),
+            "memories": results.get("memory", {}).get("total_memories", 0),
+            "active_tenants": results.get("revenue", {}).get("active_tenants", 0)
+        }
+    }
+
+
+@router.post("/webhook/render")
+async def receive_render_webhook(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Receive Render deploy webhooks for real-time notifications.
+    Configure at: https://dashboard.render.com -> Webhook settings
+    """
+    logger.info(f"Render webhook received: {payload.get('type', 'unknown')}")
+
+    event_type = payload.get("type")
+    service_id = payload.get("service", {}).get("id")
+
+    # Store webhook event for tracking
+    try:
+        from database.async_connection import get_pool
+        pool = get_pool()
+        await pool.execute("""
+            INSERT INTO render_webhook_events (event_type, service_id, payload, received_at)
+            VALUES ($1, $2, $3, NOW())
+        """, event_type, service_id, str(payload))
+    except Exception as e:
+        logger.warning(f"Could not store webhook event: {e}")
+
+    return {
+        "received": True,
+        "event_type": event_type,
+        "timestamp": datetime.utcnow().isoformat()
+    }
