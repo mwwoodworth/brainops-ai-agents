@@ -159,6 +159,46 @@ class UnifiedMemoryManager:
                 logger.error(f"❌ Query execution failed: {e}")
                 return None
 
+    def log_to_brain(self, system: str, action: str, data: Dict):
+        """Log significant events to the unified brain logs"""
+        try:
+            import uuid
+            
+            # Use shared pool if available, otherwise direct connection
+            with self._get_cursor() as cur:
+                if not cur:
+                    return
+
+                # Ensure table exists (idempotent)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS unified_brain_logs (
+                        id UUID PRIMARY KEY,
+                        system TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        data JSONB,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_unified_brain_logs_created ON unified_brain_logs(created_at DESC);
+                """)
+
+                cur.execute("""
+                    INSERT INTO unified_brain_logs (id, system, action, data, created_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                """, (
+                    str(uuid.uuid4()),
+                    system,
+                    action,
+                    json.dumps(data, cls=CustomJSONEncoder),
+                ))
+                
+                # Commit if we own the connection (in shared pool context manager handles commit usually, 
+                # but explicit commit ensures persistence if auto-commit isn't on)
+                if self.conn:
+                    self.conn.commit()
+                    
+        except Exception as e:
+            logger.warning(f"Failed to log to unified brain: {e}")
+
     def store(self, memory: Memory) -> str:
         """Store a memory with deduplication and linking"""
         if not memory.tenant_id:
@@ -173,7 +213,13 @@ class UnifiedMemoryManager:
             existing = self._find_duplicate(memory)
             if existing:
                 # Reinforce existing memory instead of creating duplicate
-                return self._reinforce_memory(existing['id'], memory)
+                mem_id = self._reinforce_memory(existing['id'], memory)
+                self.log_to_brain("memory_system", "memory_reinforced", {
+                    "memory_id": mem_id, 
+                    "type": memory.memory_type.value,
+                    "source": memory.source_system
+                })
+                return mem_id
 
             # Generate embedding if we have content
             embedding = self._generate_embedding(memory.content)
@@ -228,6 +274,14 @@ class UnifiedMemoryManager:
                 memory_id = result['id'] if result else None
 
                 logger.info(f"✅ Stored memory {memory_id} ({memory.memory_type.value})")
+                
+                self.log_to_brain("memory_system", "memory_stored", {
+                    "memory_id": memory_id,
+                    "type": memory.memory_type.value,
+                    "source": memory.source_system,
+                    "tags": memory.tags
+                })
+                
                 return memory_id
 
         except Exception as e:
@@ -322,6 +376,12 @@ class UnifiedMemoryManager:
                 if memories:
                     memory_ids = [m['id'] for m in memories]
                     self._update_access_counts(memory_ids)
+                    
+                    self.log_to_brain("memory_system", "memory_recalled", {
+                        "query": query if isinstance(query, str) else "vector",
+                        "count": len(memories),
+                        "top_score": float(memories[0]['similarity']) if 'similarity' in memories[0] else 0.0
+                    })
 
                 logger.info(f"📚 Recalled {len(memories)} relevant memories")
                 return [dict(m) for m in memories]
@@ -469,6 +529,12 @@ class UnifiedMemoryManager:
 
                 self.conn.commit()
                 logger.info(f"♻️ Consolidated {consolidated_count} memory pairs")
+                
+                if consolidated_count > 0:
+                    self.log_to_brain("memory_system", "memory_consolidated", {
+                        "count": consolidated_count,
+                        "aggressive": aggressive
+                    })
 
         except Exception as e:
             logger.error(f"❌ Failed to consolidate memories: {e}")

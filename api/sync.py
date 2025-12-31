@@ -224,9 +224,17 @@ async def migrate_memories_table(
                     break
 
                 try:
-                    # Prepare content
+                    # Prepare content - include migration metadata in content JSON
                     content_text = row["content"] or ""
-                    content_json = json.dumps({"text": content_text, "entity_type": row["entity_type"], "entity_id": row["entity_id"]})
+                    content_json = json.dumps({
+                        "text": content_text,
+                        "entity_type": row["entity_type"],
+                        "entity_id": row["entity_id"],
+                        "kind": row["kind"],
+                        "source": row["source"],
+                        "migrated_from": "memories",
+                        "original_id": row["original_id"]
+                    })
 
                     # Check for duplicate by content hash
                     content_hash = hashlib.sha256(content_json.encode()).hexdigest()
@@ -267,18 +275,16 @@ async def migrate_memories_table(
                         row["source"]
                     ]))
 
-                    # Insert
+                    # Insert (migration metadata stored in content JSON, use source_entity_* columns)
                     await pool.execute("""
                         INSERT INTO unified_ai_memory (
                             memory_type, content, source_system, source_agent, created_by,
-                            entity_type, entity_id, kind, source, metadata,
-                            embedding, search_text, tenant_id,
-                            migrated_from, original_id, migration_date, created_at
+                            source_entity_type, source_entity_id, metadata,
+                            embedding, search_text, tenant_id, created_at
                         ) VALUES (
                             $1, $2::jsonb, $3, $4, $5,
-                            $6, $7, $8, $9, $10::jsonb,
-                            $11::vector, $12, $13::uuid,
-                            $14, $15, NOW(), $16
+                            $6, $7, $8::jsonb,
+                            $9::vector, $10, $11::uuid, $12
                         )
                     """,
                         memory_type,
@@ -288,14 +294,10 @@ async def migrate_memories_table(
                         row["created_by"] or "migration",
                         row["entity_type"],
                         row["entity_id"],
-                        row["kind"],
-                        row["source"],
                         json.dumps(row["metadata"] or {}),
                         embedding_str,
                         search_text,
                         tenant_id,
-                        "memories",
-                        row["original_id"],
                         row["created_at"]
                     )
 
@@ -384,13 +386,15 @@ async def migrate_production_memory_table(
                     break
 
                 try:
-                    # Prepare content
+                    # Prepare content - include all migration metadata in content JSON
                     content_text = row["content"] or ""
                     content_data = {
                         "text": content_text,
                         "context": row["context"] or {},
                         "session_id": row["session_id"],
-                        "system_name": row["system_name"]
+                        "system_name": row["system_name"],
+                        "migrated_from": "production_memory",
+                        "original_id": row["original_id"]
                     }
                     content_json = json.dumps(content_data)
 
@@ -428,18 +432,16 @@ async def migrate_production_memory_table(
                         row["system_name"]
                     ]))
 
-                    # Insert
+                    # Insert (migration metadata in content JSON, use only valid columns)
                     await pool.execute("""
                         INSERT INTO unified_ai_memory (
                             memory_type, content, importance_score, source_system, source_agent,
-                            created_by, session_id, system_name, context, metadata,
-                            embedding, search_text, tenant_id, access_count, last_accessed,
-                            migrated_from, original_id, migration_date, created_at
+                            created_by, metadata,
+                            embedding, search_text, tenant_id, access_count, last_accessed, created_at
                         ) VALUES (
                             $1, $2::jsonb, $3, $4, $5,
-                            $6, $7, $8, $9::jsonb, $10::jsonb,
-                            $11::vector, $12, $13::uuid, $14, $15,
-                            $16, $17, NOW(), $18
+                            $6, $7::jsonb,
+                            $8::vector, $9, $10::uuid, $11, $12, $13
                         )
                     """,
                         memory_type,
@@ -448,17 +450,12 @@ async def migrate_production_memory_table(
                         "production_memory_migration",
                         "sync_service",
                         "migration",
-                        row["session_id"],
-                        row["system_name"],
-                        json.dumps(row["context"] or {}),
                         json.dumps(row["metadata"] or {}),
                         embedding_str,
                         search_text,
                         tenant_id,
                         row["access_count"] or 0,
                         row["last_accessed"],
-                        "production_memory",
-                        row["original_id"],
                         row["created_at"]
                     )
 
@@ -547,8 +544,17 @@ async def migrate_cns_memory_table(
                     break
 
                 try:
-                    # Prepare content
-                    content_json = json.dumps(row["content"]) if row["content"] else "{}"
+                    # Prepare content - include category, title, migration metadata
+                    content_base = row["content"] if row["content"] else {}
+                    if isinstance(content_base, dict):
+                        content_with_meta = dict(content_base)
+                    else:
+                        content_with_meta = {"data": content_base}
+                    content_with_meta["title"] = row["title"]
+                    content_with_meta["category"] = row["category"]
+                    content_with_meta["migrated_from"] = "cns_memory"
+                    content_with_meta["original_id"] = row["original_id"]
+                    content_json = json.dumps(content_with_meta)
                     content_text = json.dumps(row["content"], sort_keys=True) if row["content"] else ""
 
                     # Check for duplicate
@@ -585,25 +591,23 @@ async def migrate_cns_memory_table(
                         row["category"] or ""
                     ]))
 
-                    # Insert
+                    # Insert (category/title/migration metadata in content JSON)
                     await pool.execute("""
                         INSERT INTO unified_ai_memory (
-                            memory_type, content, importance_score, category, title,
+                            memory_type, content, importance_score,
                             tags, source_system, source_agent, created_by, metadata,
                             embedding, search_text, tenant_id, access_count, last_accessed, expires_at,
-                            migrated_from, original_id, migration_date, created_at, updated_at
+                            created_at, updated_at
                         ) VALUES (
-                            $1, $2::jsonb, $3, $4, $5,
-                            $6, $7, $8, $9, $10::jsonb,
-                            $11::vector, $12, $13::uuid, $14, $15, $16,
-                            $17, $18, NOW(), $19, $20
+                            $1, $2::jsonb, $3,
+                            $4, $5, $6, $7, $8::jsonb,
+                            $9::vector, $10, $11::uuid, $12, $13, $14,
+                            $15, $16
                         )
                     """,
                         memory_type,
                         content_json,
                         row["importance_score"] or 0.5,
-                        row["category"],
-                        row["title"],
                         row["tags"] or [],
                         "cns_memory_migration",
                         "sync_service",
@@ -615,8 +619,6 @@ async def migrate_cns_memory_table(
                         row["accessed_count"] or 0,
                         row["last_accessed"],
                         row["expires_at"],
-                        "cns_memory",
-                        row["original_id"],
                         row["created_at"],
                         row["updated_at"]
                     )
