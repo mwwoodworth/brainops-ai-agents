@@ -1,115 +1,161 @@
 # BrainOps AI Agents - Deployment SOP
 
-## Current Setup: Dockerfile Auto-Deploy (Recommended)
+## CURRENT SETUP: Docker Hub Image
 
-**How it works:**
-1. Push to `main` branch
-2. Render detects push via GitHub webhook
-3. Render builds from `Dockerfile`
-4. New version deployed (~5-8 min)
+**Render is configured to pull from Docker Hub, NOT build from Dockerfile.**
 
-**Config in render.yaml:**
-```yaml
-runtime: docker
-dockerfilePath: ./Dockerfile
-autoDeploy: true
-```
+- **Image URL:** `docker.io/mwwoodworth/brainops-ai-agents:latest`
+- **Docker Hub:** https://hub.docker.com/r/mwwoodworth/brainops-ai-agents
 
-### Standard Deployment Workflow
-```bash
-# 1. Make changes
-# 2. Update version in app.py
-VERSION = "X.Y.Z"
-
-# 3. Commit and push
-git add -A && git commit -m "feat: Description of change" && git push
-
-# 4. Monitor (wait 5-8 min, then check)
-curl -s https://brainops-ai-agents.onrender.com/health | jq '.version'
-```
-
-### If Auto-Deploy Isn't Working
-Check Render dashboard: https://dashboard.render.com/
-1. Go to brainops-ai-agents service
-2. Settings → Build & Deploy
-3. Verify "Auto-Deploy" is ON
-4. Verify GitHub repo is connected
-5. Verify branch is `main`
-
-**Manual deploy trigger:**
-- Go to Render dashboard → brainops-ai-agents → Manual Deploy → Deploy latest commit
+> **NOTE:** The render.yaml in this repo says `runtime: docker` but Render dashboard
+> settings override it. The actual config is `Image` mode pointing to Docker Hub.
 
 ---
 
-## Alternative: Docker Hub (Faster deploys, more manual steps)
+## Standard Deployment Workflow
 
-**When to use:** If Dockerfile builds are too slow or failing on Render.
+### Every deploy requires these steps:
 
-### Setup (one-time)
 ```bash
-# Login to Docker Hub
-docker login -u mwwoodworth
+# 1. Make your code changes
 
-# Update render.yaml to use image
-# Change: runtime: docker → runtime: image
-# Add: image.url: docker.io/mwwoodworth/brainops-ai-agents:vX.Y.Z
-```
+# 2. Update version in app.py
+VERSION = "X.Y.Z"  # Increment appropriately
 
-### Docker Hub Deployment Workflow
-```bash
-# 1. Update version in app.py
-VERSION = "X.Y.Z"
+# 3. Commit changes
+git add -A && git commit -m "feat: Description of change"
 
-# 2. Build image locally
-docker build -t mwwoodworth/brainops-ai-agents:vX.Y.Z .
+# 4. Build Docker image with BOTH tags
+docker build -t mwwoodworth/brainops-ai-agents:latest -t mwwoodworth/brainops-ai-agents:vX.Y.Z .
 
-# 3. Push to Docker Hub
+# 5. Push BOTH tags to Docker Hub
+docker push mwwoodworth/brainops-ai-agents:latest
 docker push mwwoodworth/brainops-ai-agents:vX.Y.Z
 
-# 4. Update render.yaml with new tag
-sed -i "s|brainops-ai-agents:v[0-9.]*|brainops-ai-agents:vX.Y.Z|" render.yaml
+# 6. Push to git (for version control)
+git push
 
-# 5. Commit and push (triggers Render to pull new image)
-git add -A && git commit -m "deploy: vX.Y.Z" && git push
+# 7. Trigger Render deploy (one of these methods):
+#    a) Render Dashboard → Manual Deploy → Deploy latest commit
+#    b) Or use deploy hook (see below)
 
-# 6. Verify (~30 sec)
+# 8. Verify deployment
 curl -s https://brainops-ai-agents.onrender.com/health | jq '.version'
 ```
 
-**Pros:** Fast deploys (~30 sec vs 5-8 min)
-**Cons:** Extra manual steps, easy to forget to update tag
+### Quick Deploy Script
+Save this as `deploy.sh` for convenience:
+```bash
+#!/bin/bash
+set -e
+VERSION=$(grep "^VERSION" app.py | cut -d'"' -f2)
+echo "Deploying version $VERSION..."
+docker build -t mwwoodworth/brainops-ai-agents:latest -t mwwoodworth/brainops-ai-agents:v$VERSION .
+docker push mwwoodworth/brainops-ai-agents:latest
+docker push mwwoodworth/brainops-ai-agents:v$VERSION
+git push
+echo "✅ Pushed to Docker Hub and Git. Now trigger deploy in Render dashboard."
+```
+
+---
+
+## Render Deploy Hook
+
+The deploy hook URL is in Render dashboard under Settings → Deploy Hook.
+Keep it secret. Use it to trigger deploys programmatically:
+```bash
+curl -X POST "YOUR_DEPLOY_HOOK_URL"
+```
+
+---
+
+## Why Docker Hub Instead of Dockerfile?
+
+| Aspect | Docker Hub | Dockerfile Build |
+|--------|------------|------------------|
+| Deploy time | ~30 seconds | ~8 minutes |
+| Control | Exact image you tested | Built on Render |
+| Complexity | More steps | Just git push |
+
+We use Docker Hub because:
+1. Faster deploys (critical for hotfixes)
+2. Same image tested locally = deployed to prod
+3. Tagged versions for rollback
+
+---
+
+## Rollback Procedure
+
+If a deploy breaks production:
+
+```bash
+# 1. Identify last working version
+# Check Docker Hub tags: https://hub.docker.com/r/mwwoodworth/brainops-ai-agents/tags
+
+# 2. Retag the old version as :latest
+docker pull mwwoodworth/brainops-ai-agents:v9.66.0  # example
+docker tag mwwoodworth/brainops-ai-agents:v9.66.0 mwwoodworth/brainops-ai-agents:latest
+docker push mwwoodworth/brainops-ai-agents:latest
+
+# 3. Trigger Render deploy
+# Use dashboard or deploy hook
+```
+
+---
+
+## Monitoring & Verification
+
+```bash
+# Check deployed version
+curl -s https://brainops-ai-agents.onrender.com/health | jq '.version'
+
+# Check full health
+curl -s https://brainops-ai-agents.onrender.com/health | jq '.'
+
+# Test brain endpoint
+curl -s https://brainops-ai-agents.onrender.com/brain/critical \
+  -H "X-API-Key: brainops_prod_key_2025" | jq 'length'
+```
 
 ---
 
 ## Troubleshooting
 
-### Render shows old version
-1. Check Render dashboard for build status
-2. Look for build errors in logs
-3. Try manual deploy from dashboard
-4. If all else fails, use Docker Hub approach
+### "MaxClientsInSessionMode" errors
+Database connection pool exhausted. The service has too many concurrent connections.
+- Check Supabase dashboard for connection count
+- Reduce `min_size`/`max_size` in async_connection.py
+- Or restart the service to clear stale connections
 
-### Build failing on Render
-- Check Dockerfile syntax
-- Verify requirements.txt has all deps
-- Check Render build logs for specific error
+### OpenAI 429 errors
+API quota exceeded. Check billing at https://platform.openai.com/account/billing
 
-### API token for Render (if needed)
-Generate new token at: https://dashboard.render.com/u/settings#api-keys
-Save to: `~/.render_token` or env var `RENDER_API_KEY`
+### Deploy not updating
+1. Verify `:latest` tag was pushed: `docker pull mwwoodworth/brainops-ai-agents:latest`
+2. Check Render logs for pull errors
+3. Manually trigger deploy from dashboard
 
 ---
 
-## Quick Reference
-
-| Action | Command |
-|--------|---------|
-| Check deployed version | `curl -s https://brainops-ai-agents.onrender.com/health \| jq '.version'` |
-| Check health | `curl -s https://brainops-ai-agents.onrender.com/health` |
-| Test brain endpoint | `curl -s https://brainops-ai-agents.onrender.com/brain/critical -H "X-API-Key: brainops_prod_key_2025"` |
-
 ## Service URLs
-- **Production:** https://brainops-ai-agents.onrender.com
-- **Render Dashboard:** https://dashboard.render.com
-- **GitHub Repo:** https://github.com/mwwoodworth/brainops-ai-agents
-- **Docker Hub:** https://hub.docker.com/r/mwwoodworth/brainops-ai-agents
+
+| Service | URL |
+|---------|-----|
+| Production | https://brainops-ai-agents.onrender.com |
+| Render Dashboard | https://dashboard.render.com |
+| Docker Hub | https://hub.docker.com/r/mwwoodworth/brainops-ai-agents |
+| GitHub Repo | https://github.com/mwwoodworth/brainops-ai-agents |
+
+---
+
+## Version History (Recent)
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 9.67.0 | 2025-12-31 | Disable InMemory fallback in production |
+| 9.66.0 | 2025-12-31 | Security hardening, SQL injection fixes |
+| 9.65.0 | 2025-12-31 | Async/await fixes for brain endpoints |
+
+---
+
+**IMPORTANT:** Always push both `:latest` AND `:vX.Y.Z` tags. The version tag is for rollback capability.
