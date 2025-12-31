@@ -299,7 +299,12 @@ class AlwaysKnowBrain:
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    state.aurea_operational = data.get("status") == "operational"
+                    # AUREA is operational if status is operational/idle/active AND aurea_available is True
+                    status = data.get("status", "").lower()
+                    state.aurea_operational = (
+                        status in ("operational", "idle", "active", "processing")
+                        and data.get("aurea_available", False)
+                    )
                     state.aurea_ooda_cycles = data.get("ooda_cycles_last_5min", 0)
                     state.aurea_decisions = data.get("decisions_last_hour", 0)
                     state.aurea_active_agents = data.get("active_agents", 0)

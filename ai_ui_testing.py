@@ -95,7 +95,9 @@ class AIVisionAnalyzer:
     Supports OpenAI GPT-4V, Anthropic Claude, and Google Gemini.
     """
 
-    def __init__(self, preferred_model: str = "openai"):
+    def __init__(self, preferred_model: str = "gemini"):
+        # Default to Gemini since OpenAI quota issues are common
+        # Fallback order: preferred -> gemini -> anthropic -> basic
         self.preferred_model = preferred_model
 
     async def analyze_screenshot(
@@ -615,9 +617,9 @@ class AIUITestingEngine:
             return {}
 
     async def _check_accessibility(self, page) -> List[Dict[str, Any]]:
-        """Run accessibility checks using axe-core if available"""
+        """Run accessibility checks using axe-core if available, with fallback"""
         try:
-            # Inject axe-core
+            # Try to inject axe-core (may fail due to CSP on target site)
             await page.add_script_tag(url="https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.7.2/axe.min.js")
 
             # Run axe
@@ -635,8 +637,70 @@ class AIUITestingEngine:
             """)
             return results
         except Exception as e:
+            # CSP often blocks external scripts - use basic fallback checks
+            if "Content Security Policy" in str(e) or "script" in str(e).lower():
+                logger.debug(f"axe-core blocked by CSP, using basic accessibility checks")
+                return await self._basic_accessibility_check(page)
             logger.warning(f"Accessibility check failed: {e}")
             return []
+
+    async def _basic_accessibility_check(self, page) -> List[Dict[str, Any]]:
+        """Basic accessibility checks when axe-core is blocked by CSP"""
+        issues = []
+        try:
+            # Check for images without alt text
+            missing_alt = await page.evaluate("""
+                () => document.querySelectorAll('img:not([alt]), img[alt=""]').length
+            """)
+            if missing_alt > 0:
+                issues.append({
+                    "id": "image-alt",
+                    "impact": "critical",
+                    "description": "Images must have alternate text",
+                    "help": f"{missing_alt} images missing alt text",
+                    "nodes_count": missing_alt
+                })
+
+            # Check for form inputs without labels
+            unlabeled = await page.evaluate("""
+                () => document.querySelectorAll('input:not([aria-label]):not([id])').length
+            """)
+            if unlabeled > 0:
+                issues.append({
+                    "id": "label",
+                    "impact": "critical",
+                    "description": "Form elements must have labels",
+                    "help": f"{unlabeled} inputs missing labels",
+                    "nodes_count": unlabeled
+                })
+
+            # Check for sufficient color contrast (basic check)
+            low_contrast = await page.evaluate("""
+                () => {
+                    const elements = document.querySelectorAll('*');
+                    let count = 0;
+                    elements.forEach(el => {
+                        const style = getComputedStyle(el);
+                        const color = style.color;
+                        const bg = style.backgroundColor;
+                        // Very basic check - just count very light text
+                        if (color && color.includes('rgb') && color.includes('200')) count++;
+                    });
+                    return count > 10 ? 1 : 0;
+                }
+            """)
+            if low_contrast:
+                issues.append({
+                    "id": "color-contrast",
+                    "impact": "serious",
+                    "description": "Elements may have insufficient color contrast",
+                    "help": "Review color contrast ratios",
+                    "nodes_count": 1
+                })
+
+        except Exception as e:
+            logger.debug(f"Basic accessibility check error: {e}")
+        return issues
 
     def _evaluate_results(
         self,
