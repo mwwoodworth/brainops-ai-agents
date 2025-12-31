@@ -33,10 +33,11 @@ except ImportError as e:
     logging.warning(f"HallucinationPrevention not available: {e}")
 
 try:
-    from live_memory_brain import LiveMemoryBrain
+    from live_memory_brain import LiveMemoryBrain, MemoryType
     LIVE_MEMORY_AVAILABLE = True
 except ImportError as e:
     LIVE_MEMORY_AVAILABLE = False
+    MemoryType = None  # Fallback
     logging.warning(f"LiveMemoryBrain not available: {e}")
 
 try:
@@ -326,7 +327,20 @@ async def store_memory(
         raise HTTPException(status_code=503, detail="Live memory brain not available")
 
     try:
-        memory_id = await brain.store(content, memory_type, metadata)
+        # Convert string memory_type to MemoryType enum
+        memory_type_enum = MemoryType.EPISODIC  # Default
+        if MemoryType:
+            type_mapping = {
+                "observation": MemoryType.EPISODIC,
+                "episodic": MemoryType.EPISODIC,
+                "semantic": MemoryType.SEMANTIC,
+                "procedural": MemoryType.PROCEDURAL,
+                "meta": MemoryType.META,
+                "crystallized": MemoryType.CRYSTALLIZED,
+            }
+            memory_type_enum = type_mapping.get(memory_type.lower(), MemoryType.EPISODIC)
+
+        memory_id = await brain.store(content, memory_type_enum, context=metadata)
         return {
             "success": True,
             "memory_id": memory_id,
