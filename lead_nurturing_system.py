@@ -885,8 +885,20 @@ class DeliveryManager:
             return {'success': False, 'error': str(e)}
 
     async def _deliver_email(self, lead_id: str, content: Dict) -> Dict:
-        """Deliver email (simplified - would integrate with email service)"""
+        """Deliver email via queue for scheduler daemon to process"""
         try:
+            # Get recipient email from lead_data in content, fallback to lead_id if it looks like an email
+            lead_data = content.get('lead_data', {})
+            recipient = lead_data.get('email')
+
+            # If no email in lead_data, check if lead_id is an email
+            if not recipient:
+                if '@' in str(lead_id):
+                    recipient = lead_id
+                else:
+                    logger.warning(f"Cannot deliver email: no recipient found for lead {lead_id}")
+                    return {'success': False, 'error': 'No email address found'}
+
             # Store in email queue
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
@@ -896,20 +908,24 @@ class DeliveryManager:
                 (recipient, subject, body, status, metadata)
                 VALUES (%s, %s, %s, %s, %s)
             """, (
-                lead_id,
+                recipient,
                 content.get('subject', 'Update'),
                 content.get('content', ''),
                 'queued',
-                Json({'source': 'nurture_system'})
+                Json({
+                    'source': 'nurture_system',
+                    'lead_id': str(lead_id)
+                })
             ))
 
             conn.commit()
             cursor.close()
             conn.close()
 
-            return {'success': True, 'channel': 'email', 'status': 'queued'}
+            return {'success': True, 'channel': 'email', 'status': 'queued', 'recipient': recipient}
 
         except Exception as e:
+            logger.error(f"Failed to queue email for {lead_id}: {e}")
             return {'success': False, 'error': str(e)}
 
     async def _deliver_sms(self, lead_id: str, content: Dict) -> Dict:

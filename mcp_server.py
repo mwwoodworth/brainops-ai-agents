@@ -19,6 +19,8 @@ import sys
 import json
 import asyncio
 import logging
+import re
+import shlex
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 from fastapi import FastAPI, WebSocket, HTTPException, Depends, Request, Security, BackgroundTasks
@@ -47,48 +49,218 @@ DANGEROUS_TOOLS_ENABLED = ENVIRONMENT in ("development", "local", "dev")
 # Admin API key for dangerous operations (separate from regular API key)
 ADMIN_API_KEY = os.getenv("MCP_ADMIN_API_KEY", "")
 
-# Allowlists for dangerous operations
+# Allowlists for dangerous operations - STRICT command validation
+# Only these exact commands (first word) are allowed
 ALLOWED_BASH_COMMANDS = {
     "ls", "pwd", "whoami", "date", "cat", "head", "tail", "grep", "wc",
-    "ps", "df", "du", "uptime", "free", "git status", "git log", "git diff",
-    "npm", "node", "python3", "pip", "curl -I"
+    "ps", "df", "du", "uptime", "free", "git", "npm", "node", "python3",
+    "python", "pip", "curl"
 }
 
+# Dangerous shell operators and characters that indicate command chaining/injection
+DANGEROUS_SHELL_PATTERNS = [
+    r';',           # Command separator
+    r'\|',          # Pipe (can chain to dangerous commands)
+    r'&&',          # AND operator
+    r'\|\|',        # OR operator
+    r'`',           # Backtick command substitution
+    r'\$\(',        # $() command substitution
+    r'>',           # Output redirection
+    r'<',           # Input redirection
+    r'\n',          # Newline (command separator)
+    r'\r',          # Carriage return
+    r'\x00',        # Null byte
+]
+
+# Allowed read paths (for read_file tool)
+ALLOWED_READ_PATHS = {
+    "/home/matt-woodworth/dev/",
+    "/tmp/",
+    "/var/log/",
+}
+
+# Allowed write paths (for write_file tool)
 ALLOWED_WRITE_PATHS = {
     "/tmp/",
     "/home/matt-woodworth/dev/brainops-ai-agents/logs/",
     "/home/matt-woodworth/dev/analysis/"
 }
 
-BLOCKED_SQL_KEYWORDS = {
-    "DROP", "TRUNCATE", "DELETE FROM", "ALTER", "CREATE", "GRANT", "REVOKE",
-    "INSERT INTO agents", "UPDATE agents", "DELETE agents"
-}
+# SQL: Only SELECT queries are allowed (read-only)
+# This is an ALLOWLIST approach - much more secure than blocklist
 
-def is_safe_bash_command(cmd: str) -> bool:
-    """Check if bash command is in allowlist"""
-    cmd_lower = cmd.lower().strip()
-    # Check if starts with an allowed command
-    for allowed in ALLOWED_BASH_COMMANDS:
-        if cmd_lower.startswith(allowed.lower()):
-            return True
-    return False
 
-def is_safe_write_path(path: str) -> bool:
+def sanitize_input(value: str, max_length: int = 10000) -> str:
+    """Sanitize input string by removing null bytes and limiting length"""
+    if not isinstance(value, str):
+        value = str(value)
+    # Remove null bytes
+    value = value.replace('\x00', '')
+    # Limit length to prevent DoS
+    return value[:max_length]
+
+
+def is_safe_bash_command(cmd: str) -> tuple:
+    """
+    Check if bash command is safe to execute.
+    Returns (is_safe: bool, reason: str)
+
+    Security measures:
+    1. Only allow specific commands from allowlist
+    2. Block all shell operators that could enable command injection
+    3. Validate command structure
+    """
+    if not cmd or not isinstance(cmd, str):
+        return False, "Empty or invalid command"
+
+    cmd = sanitize_input(cmd, max_length=1000)
+    cmd_stripped = cmd.strip()
+
+    if not cmd_stripped:
+        return False, "Empty command after sanitization"
+
+    # Check for dangerous shell patterns (command injection)
+    for pattern in DANGEROUS_SHELL_PATTERNS:
+        if re.search(pattern, cmd_stripped):
+            return False, f"Dangerous shell pattern detected: {pattern}"
+
+    # Parse the command to get the base command
+    try:
+        # Use shlex to properly parse the command
+        tokens = shlex.split(cmd_stripped)
+        if not tokens:
+            return False, "Could not parse command"
+
+        base_command = tokens[0].lower()
+
+        # Handle path-based commands (e.g., /usr/bin/ls -> ls)
+        base_command = os.path.basename(base_command)
+
+    except ValueError as e:
+        return False, f"Invalid command syntax: {e}"
+
+    # Check if base command is in allowlist
+    if base_command not in ALLOWED_BASH_COMMANDS:
+        return False, f"Command '{base_command}' not in allowlist. Allowed: {', '.join(sorted(ALLOWED_BASH_COMMANDS))}"
+
+    # Additional validation for specific commands
+    if base_command == "curl":
+        # Only allow curl for safe operations (no -X POST, no -d data, etc.)
+        dangerous_curl_flags = ['-X', '--request', '-d', '--data', '-F', '--form', '-T', '--upload-file']
+        for flag in dangerous_curl_flags:
+            if flag in tokens:
+                return False, f"Curl flag '{flag}' not allowed"
+
+    if base_command == "git":
+        # Only allow read-only git operations
+        allowed_git_subcommands = ['status', 'log', 'diff', 'show', 'branch', 'remote', 'tag', 'ls-files', 'ls-tree']
+        if len(tokens) > 1:
+            git_subcommand = tokens[1].lower()
+            if git_subcommand not in allowed_git_subcommands:
+                return False, f"Git subcommand '{git_subcommand}' not allowed. Allowed: {', '.join(allowed_git_subcommands)}"
+
+    return True, "Command is safe"
+
+
+def is_safe_path(path: str, allowed_prefixes: set) -> tuple:
+    """
+    Check if a path is safe (within allowed directories).
+    Returns (is_safe: bool, reason: str)
+
+    Security measures:
+    1. Resolve to absolute path
+    2. Prevent path traversal attacks (../)
+    3. Check against allowlist
+    """
+    if not path or not isinstance(path, str):
+        return False, "Empty or invalid path"
+
+    path = sanitize_input(path, max_length=500)
+
+    try:
+        # Resolve to absolute path (handles ../ traversal)
+        abs_path = os.path.abspath(os.path.normpath(path))
+
+        # Additional check: ensure no '..' remains after normalization
+        # This catches edge cases
+        if '..' in abs_path:
+            return False, "Path traversal detected"
+
+        # Check if path starts with any allowed prefix
+        for allowed_prefix in allowed_prefixes:
+            # Normalize the allowed prefix too
+            normalized_prefix = os.path.abspath(os.path.normpath(allowed_prefix))
+            if abs_path.startswith(normalized_prefix):
+                return True, f"Path is within allowed directory: {normalized_prefix}"
+
+        return False, f"Path not in allowed directories. Allowed: {', '.join(sorted(allowed_prefixes))}"
+
+    except Exception as e:
+        return False, f"Path validation error: {e}"
+
+
+def is_safe_read_path(path: str) -> tuple:
+    """Check if read path is in allowlist"""
+    return is_safe_path(path, ALLOWED_READ_PATHS)
+
+
+def is_safe_write_path(path: str) -> tuple:
     """Check if write path is in allowlist"""
-    path_resolved = os.path.abspath(path)
-    for allowed_prefix in ALLOWED_WRITE_PATHS:
-        if path_resolved.startswith(allowed_prefix):
-            return True
-    return False
+    return is_safe_path(path, ALLOWED_WRITE_PATHS)
 
-def is_safe_sql_query(query: str) -> bool:
-    """Check if SQL query is safe (no destructive operations)"""
-    query_upper = query.upper()
-    for blocked in BLOCKED_SQL_KEYWORDS:
-        if blocked in query_upper:
-            return False
-    return True
+
+def is_safe_sql_query(query: str) -> tuple:
+    """
+    Check if SQL query is safe (read-only SELECT only).
+    Returns (is_safe: bool, reason: str)
+
+    Security measures:
+    1. ALLOWLIST approach - only SELECT queries permitted
+    2. Block all write/DDL operations
+    3. Prevent SQL injection patterns
+    """
+    if not query or not isinstance(query, str):
+        return False, "Empty or invalid query"
+
+    query = sanitize_input(query, max_length=5000)
+    query_stripped = query.strip()
+    query_upper = query_stripped.upper()
+
+    if not query_stripped:
+        return False, "Empty query after sanitization"
+
+    # ALLOWLIST: Only SELECT queries are permitted
+    if not query_upper.startswith('SELECT'):
+        return False, "Only SELECT queries are allowed (read-only mode)"
+
+    # Block dangerous SQL patterns even in SELECT queries
+    dangerous_sql_patterns = [
+        r'\bINTO\s+OUTFILE\b',      # SELECT INTO OUTFILE
+        r'\bINTO\s+DUMPFILE\b',     # SELECT INTO DUMPFILE
+        r'\bLOAD_FILE\b',           # LOAD_FILE() function
+        r';\s*\w',                   # Multiple statements (SQL injection)
+        r'--\s*$',                   # SQL comment at end (potential injection)
+        r'/\*.*\*/',                 # Block comments (potential injection)
+        r'\bUNION\b.*\bSELECT\b',   # UNION SELECT (SQL injection pattern)
+        r'\bEXEC\b',                 # EXEC command
+        r'\bEXECUTE\b',             # EXECUTE command
+        r'\bxp_\w+',                 # SQL Server extended procedures
+        r'\bDROP\b',                 # DROP (should never appear in SELECT)
+        r'\bALTER\b',               # ALTER
+        r'\bCREATE\b',              # CREATE
+        r'\bTRUNCATE\b',            # TRUNCATE
+        r'\bDELETE\b',              # DELETE
+        r'\bUPDATE\b',              # UPDATE
+        r'\bINSERT\b',              # INSERT
+        r'\bGRANT\b',               # GRANT
+        r'\bREVOKE\b',              # REVOKE
+    ]
+
+    for pattern in dangerous_sql_patterns:
+        if re.search(pattern, query_upper, re.IGNORECASE):
+            return False, f"Dangerous SQL pattern detected: {pattern}"
+
+    return True, "Query is safe (SELECT only)"
 
 # API Key authentication
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -258,7 +430,10 @@ class MCPServer:
             if tool == 'bash':
                 # Execute bash command - WITH SECURITY CONTROLS
                 cmd = params.get('command', '')
-                timeout = params.get('timeout', 30)
+                timeout = min(params.get('timeout', 30), 60)  # Cap timeout at 60s
+
+                # SECURITY: Sanitize input
+                cmd = sanitize_input(cmd, max_length=1000)
 
                 # SECURITY: Check if dangerous tools are enabled
                 if not DANGEROUS_TOOLS_ENABLED:
@@ -267,19 +442,32 @@ class MCPServer:
                     logger.warning(f"SECURITY: Blocked bash command in production: {cmd[:100]}")
                     return result
 
-                # SECURITY: Check allowlist
-                if not is_safe_bash_command(cmd):
-                    result['error'] = f"Command not in allowlist. Allowed prefixes: {', '.join(sorted(ALLOWED_BASH_COMMANDS))}"
+                # SECURITY: Check allowlist with detailed validation
+                is_safe, reason = is_safe_bash_command(cmd)
+                if not is_safe:
+                    result['error'] = f"Command blocked: {reason}"
                     result['status'] = 'blocked'
-                    logger.warning(f"SECURITY: Blocked non-allowlisted bash command: {cmd[:100]}")
+                    logger.warning(f"SECURITY: Blocked bash command - {reason}: {cmd[:100]}")
                     return result
 
                 logger.info(f"Executing allowed bash command: {cmd[:100]}")
-                proc = await asyncio.create_subprocess_shell(
-                    cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
+
+                # SECURITY: Use subprocess with args list when possible to prevent injection
+                # For simple commands, parse and use exec instead of shell
+                try:
+                    tokens = shlex.split(cmd)
+                    proc = await asyncio.create_subprocess_exec(
+                        *tokens,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                except Exception:
+                    # Fallback to shell only if parsing fails (shouldn't happen after validation)
+                    proc = await asyncio.create_subprocess_shell(
+                        cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
 
                 stdout, stderr = await asyncio.wait_for(
                     proc.communicate(),
@@ -294,12 +482,32 @@ class MCPServer:
                 result['status'] = 'success' if proc.returncode == 0 else 'failed'
 
             elif tool == 'read_file':
-                # Read file contents
+                # Read file contents - WITH SECURITY CONTROLS
                 file_path = params.get('path', '')
+
+                # SECURITY: Sanitize input
+                file_path = sanitize_input(file_path, max_length=500)
+
+                # SECURITY: Check path allowlist
+                is_safe, reason = is_safe_read_path(file_path)
+                if not is_safe:
+                    result['error'] = f"Read blocked: {reason}"
+                    result['status'] = 'blocked'
+                    logger.warning(f"SECURITY: Blocked file read - {reason}: {file_path}")
+                    return result
+
                 if os.path.exists(file_path):
+                    # SECURITY: Limit file size to prevent DoS
+                    file_size = os.path.getsize(file_path)
+                    max_size = 10 * 1024 * 1024  # 10MB limit
+                    if file_size > max_size:
+                        result['error'] = f"File too large: {file_size} bytes (max: {max_size})"
+                        result['status'] = 'blocked'
+                        return result
+
                     with open(file_path, 'r') as f:
                         content = f.read()
-                    result['result'] = {'content': content}
+                    result['result'] = {'content': content, 'size': len(content)}
                     result['status'] = 'success'
                 else:
                     result['error'] = f"File not found: {file_path}"
@@ -310,6 +518,10 @@ class MCPServer:
                 file_path = params.get('path', '')
                 content = params.get('content', '')
 
+                # SECURITY: Sanitize inputs
+                file_path = sanitize_input(file_path, max_length=500)
+                content = sanitize_input(content, max_length=1024 * 1024)  # 1MB max
+
                 # SECURITY: Check if dangerous tools are enabled
                 if not DANGEROUS_TOOLS_ENABLED:
                     result['error'] = "File write disabled in production. Set ENVIRONMENT=development to enable."
@@ -317,11 +529,12 @@ class MCPServer:
                     logger.warning(f"SECURITY: Blocked file write in production: {file_path}")
                     return result
 
-                # SECURITY: Check path allowlist
-                if not is_safe_write_path(file_path):
-                    result['error'] = f"Path not in allowlist. Allowed prefixes: {', '.join(sorted(ALLOWED_WRITE_PATHS))}"
+                # SECURITY: Check path allowlist with detailed validation
+                is_safe, reason = is_safe_write_path(file_path)
+                if not is_safe:
+                    result['error'] = f"Write blocked: {reason}"
                     result['status'] = 'blocked'
-                    logger.warning(f"SECURITY: Blocked non-allowlisted file write: {file_path}")
+                    logger.warning(f"SECURITY: Blocked file write - {reason}: {file_path}")
                     return result
 
                 logger.info(f"Writing to allowed path: {file_path}")
@@ -333,35 +546,32 @@ class MCPServer:
                 result['status'] = 'success'
 
             elif tool == 'database_query':
-                # Execute database query - WITH SECURITY CONTROLS
+                # Execute database query - WITH SECURITY CONTROLS (READ-ONLY)
                 query = params.get('query', '')
 
-                # SECURITY: Check for destructive operations
-                if not is_safe_sql_query(query):
-                    result['error'] = f"Query contains blocked keywords. Blocked: {', '.join(sorted(BLOCKED_SQL_KEYWORDS))}"
+                # SECURITY: Sanitize input
+                query = sanitize_input(query, max_length=5000)
+
+                # SECURITY: Validate query with comprehensive checks
+                is_safe, reason = is_safe_sql_query(query)
+                if not is_safe:
+                    result['error'] = f"Query blocked: {reason}"
                     result['status'] = 'blocked'
-                    logger.warning(f"SECURITY: Blocked dangerous SQL query: {query[:100]}")
+                    logger.warning(f"SECURITY: Blocked SQL query - {reason}: {query[:100]}")
                     return result
 
-                # SECURITY: Only allow SELECT in production
-                if not DANGEROUS_TOOLS_ENABLED and not query.strip().upper().startswith('SELECT'):
-                    result['error'] = "Only SELECT queries allowed in production. Set ENVIRONMENT=development for write operations."
-                    result['status'] = 'blocked'
-                    logger.warning(f"SECURITY: Blocked non-SELECT query in production: {query[:100]}")
-                    return result
-
-                logger.info(f"Executing allowed SQL query: {query[:100]}")
+                logger.info(f"Executing allowed SQL query (SELECT only): {query[:100]}")
                 conn = psycopg2.connect(**DB_CONFIG)
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
 
+                # SECURITY: Set statement timeout to prevent long-running queries
+                cursor.execute("SET statement_timeout = '30s'")
+
                 cursor.execute(query)
 
-                if query.strip().upper().startswith('SELECT'):
-                    rows = cursor.fetchall()
-                    result['result'] = {'rows': rows, 'count': len(rows)}
-                else:
-                    conn.commit()
-                    result['result'] = {'affected': cursor.rowcount}
+                # Only SELECT is allowed, so always fetch results
+                rows = cursor.fetchall()
+                result['result'] = {'rows': rows, 'count': len(rows)}
 
                 cursor.close()
                 conn.close()

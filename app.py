@@ -230,13 +230,27 @@ except ImportError:
 
 # Minimal schema bootstrap - all tables pre-created in database
 # This just ensures pgcrypto extension exists (fast, single query)
+# Also ensures ai_email_deliveries table exists for email tracking
 SCHEMA_BOOTSTRAP_SQL = [
     "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
+    """
+    CREATE TABLE IF NOT EXISTS ai_email_deliveries (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        email_id TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        status TEXT DEFAULT 'delivered',
+        delivered_at TIMESTAMPTZ DEFAULT NOW(),
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_email_deliveries_email_id ON ai_email_deliveries(email_id);",
+    "CREATE INDEX IF NOT EXISTS idx_email_deliveries_recipient ON ai_email_deliveries(recipient);",
 ]
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.61.0"  # Security fixes + code hardening (SQL injection, auth, null checks)
+VERSION = "9.62.0"  # Email scheduler daemon fixes + SendGrid integration
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -2060,6 +2074,39 @@ async def test_email_sending(
         return {"error": "email_sender module not available", "success": False}
     except Exception as e:
         return {"error": str(e), "success": False}
+
+
+@app.get("/email/scheduler-stats")
+async def email_scheduler_stats(authenticated: bool = Depends(verify_api_key)):
+    """Get email scheduler daemon statistics."""
+    try:
+        from email_scheduler_daemon import get_email_scheduler
+        daemon = get_email_scheduler()
+        stats = daemon.get_stats()
+
+        # Also get queue counts from database
+        pool = get_pool()
+        queue_counts = await pool.fetchrow("""
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'queued') as queued,
+                COUNT(*) FILTER (WHERE status = 'processing') as processing,
+                COUNT(*) FILTER (WHERE status = 'sent') as sent,
+                COUNT(*) FILTER (WHERE status = 'failed') as failed,
+                COUNT(*) FILTER (WHERE status = 'skipped') as skipped,
+                COUNT(*) as total
+            FROM ai_email_queue
+        """)
+
+        return {
+            "daemon_stats": stats,
+            "queue_counts": dict(queue_counts) if queue_counts else {},
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except ImportError:
+        return {"error": "email_scheduler_daemon module not available"}
+    except Exception as e:
+        logger.error(f"Failed to get email scheduler stats: {e}")
+        return {"error": str(e)}
 
 
 @app.get("/systems/usage")
