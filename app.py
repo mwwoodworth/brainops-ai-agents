@@ -250,7 +250,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.76.0"  # ALL 4 frontends (MRG, ERP, CC, BSS), 40+ subsystems, 59 agents (2025-12-31)
+VERSION = "9.77.0"  # Fixed stubbed compliance checks - now REAL verification (2025-12-31)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
