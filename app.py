@@ -268,7 +268,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.86.0"  # SECURITY: Remove hardcoded credentials, increase DB pool to 10 (2025-12-31)
+VERSION = config.version  # Use centralized config - never hardcode version
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
