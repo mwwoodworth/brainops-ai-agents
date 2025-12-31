@@ -367,7 +367,7 @@ async def recall_memory(
         raise HTTPException(status_code=503, detail="Live memory brain not available")
 
     try:
-        memories = await brain.recall(query, limit)
+        memories = await brain.retrieve(query, limit)
         return {
             "memories": memories,
             "count": len(memories),
