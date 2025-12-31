@@ -9,9 +9,9 @@ import json
 import asyncio
 import logging
 import traceback
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Callable, Awaitable
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
 import hashlib
 
@@ -704,7 +704,8 @@ class SelfHealingErrorRecovery:
             action.result = {"circuit_state": cb.state}
             return True
 
-        except Exception:
+        except Exception as exc:
+            logger.warning("Circuit breaker operation failed: %s", exc, exc_info=True)
             cb.failure_count += 1
 
             if cb.failure_count >= cb.threshold:

@@ -18,12 +18,9 @@ Capabilities:
 import os
 import json
 import logging
-import time
 import hashlib
-from typing import Dict, Any, List, Optional, Union
-from datetime import datetime, timedelta
-import uuid
-import traceback
+from typing import Dict, Any, List, Optional
+from datetime import datetime
 
 # Internal imports
 try:
@@ -189,7 +186,8 @@ class SelfEvolution:
                 if json_match:
                     return json.loads(json_match.group())
                 return {"suggestions": [], "raw_response": response_text}
-            except Exception:
+            except (json.JSONDecodeError, TypeError, re.error) as exc:
+                logger.debug("Failed to parse improvement JSON: %s", exc)
                 return {"suggestions": [], "raw_response": response_text}
 
         except Exception as e:

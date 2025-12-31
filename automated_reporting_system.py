@@ -7,14 +7,12 @@ Real-time business intelligence and automated report generation
 import os
 import json
 import logging
-import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import hashlib
 from decimal import Decimal
 
 # Configure logging

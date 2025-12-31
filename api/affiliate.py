@@ -35,7 +35,7 @@ router = APIRouter(prefix="/affiliate", tags=["Affiliate & Partnerships"])
 # Import the affiliate pipeline with fallback
 try:
     from affiliate_partnership_pipeline import (
-        AffiliatePartnershipPipeline, PartnerType, PartnerTier,
+        PartnerType,
         get_affiliate_pipeline
     )
     AFFILIATE_PIPELINE_AVAILABLE = True

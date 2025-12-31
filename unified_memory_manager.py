@@ -11,11 +11,10 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Union
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from enum import Enum
-import numpy as np
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json, execute_values
+from psycopg2.extras import RealDictCursor, Json
 import warnings
 warnings.filterwarnings('ignore')
 

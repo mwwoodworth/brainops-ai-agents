@@ -2,7 +2,6 @@
 import sys
 import os
 import asyncio
-import logging
 
 # Add current directory to path
 sys.path.append(os.getcwd())

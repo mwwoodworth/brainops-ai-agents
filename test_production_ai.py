@@ -4,7 +4,6 @@ Test REAL AI in Production - Both GPT-4 and Claude
 """
 
 import requests
-import json
 import time
 from datetime import datetime
 

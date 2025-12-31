@@ -18,8 +18,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, HTTPException, Body
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, Body
 
 logger = logging.getLogger(__name__)
 
@@ -459,7 +458,8 @@ async def broadcast_event(event: Dict[str, Any]):
     for client in _websocket_clients:
         try:
             await client.send_text(message)
-        except Exception:
+        except Exception as exc:
+            logger.debug("WebSocket send failed: %s", exc, exc_info=True)
             disconnected.append(client)
 
     # Clean up disconnected clients

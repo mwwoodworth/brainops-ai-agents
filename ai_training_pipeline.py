@@ -10,9 +10,8 @@ import os
 import json
 import logging
 import uuid
-import asyncio
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Tuple
+from datetime import datetime, timezone
 from enum import Enum
 import numpy as np
 from openai import OpenAI
@@ -881,7 +880,8 @@ class AITrainingPipeline:
                             'outcome': pattern['outcome']
                         })
                     )
-                except Exception:
+                except Exception as exc:
+                    logger.warning("Upsert failed, falling back to update: %s", exc, exc_info=True)
                     # If conflict handling fails, just update
                     await pool.execute("""
                         UPDATE ai_outcome_patterns

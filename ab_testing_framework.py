@@ -7,17 +7,13 @@ Test and optimize AI decisions with real experiments
 import os
 import json
 import logging
-import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from decimal import Decimal
-import random
 import hashlib
-from scipy import stats
 import numpy as np
 
 # Configure logging

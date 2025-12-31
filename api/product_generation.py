@@ -4,7 +4,7 @@ Secure, authenticated endpoints for the Multi-AI Product Generation Pipeline
 """
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, Security, BackgroundTasks
 from fastapi.security import APIKeyHeader
@@ -27,8 +27,8 @@ router = APIRouter(prefix="/products", tags=["Product Generation"])
 # Import the product generator with fallback
 try:
     from product_generation_pipeline import (
-        ProductGenerator, ProductSpec, ProductType,
-        QualityTier, ProductStatus, get_product_generator
+        ProductSpec, ProductType,
+        QualityTier, get_product_generator
     )
     PRODUCT_GENERATOR_AVAILABLE = True
     logger.info("Product Generation Pipeline loaded")

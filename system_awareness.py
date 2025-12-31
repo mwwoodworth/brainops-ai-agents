@@ -21,8 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 import httpx
 
-from config import config
-from database.async_connection import get_pool, init_pool, PoolConfig, using_fallback
+from database.async_connection import get_pool, using_fallback
 
 logger = logging.getLogger("SYSTEM_AWARENESS")
 
@@ -369,9 +368,9 @@ class SystemAwareness:
                         action_recommended="Review failed auth attempts for potential attack"
                     ))
 
-        except Exception:
+        except Exception as exc:
             # Table might not exist; ignore to avoid alert spam.
-            pass
+            logger.debug("Security scan skipped: %s", exc, exc_info=True)
 
         return insights
 

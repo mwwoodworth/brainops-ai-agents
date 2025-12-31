@@ -1,12 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List, Optional
+from fastapi import APIRouter, HTTPException
+from typing import List
 from pydantic import BaseModel
 from datetime import datetime
-import random
 import logging
 
 from database.async_connection import get_pool
-from config import config
 
 router = APIRouter(prefix="/api/v1/ai", tags=["customer-intelligence"])
 logger = logging.getLogger(__name__)
@@ -191,7 +189,8 @@ async def batch_customer_intelligence(payload: BatchAnalysisRequest):
         try:
             # Reuse the logic (in a real app, optimize this loop)
             results[cid] = await get_customer_intelligence(cid)
-        except Exception:
+        except Exception as exc:
+            logger.debug("Customer intelligence failed for %s: %s", cid, exc, exc_info=True)
             results[cid] = {"error": "Failed to analyze"}
             
     return results

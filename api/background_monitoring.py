@@ -7,10 +7,9 @@ No more fire-and-forget - we know if tasks are alive.
 
 import logging
 import asyncio
-import time
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)

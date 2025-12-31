@@ -7,7 +7,7 @@ Tests all new proactive recovery capabilities
 import asyncio
 import sys
 from datetime import datetime
-from self_healing_recovery import SelfHealingRecovery, get_self_healing_recovery
+from self_healing_recovery import get_self_healing_recovery
 
 def test_proactive_health_monitoring():
     """Test proactive health monitoring"""

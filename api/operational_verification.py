@@ -10,7 +10,7 @@ import asyncio
 import time
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)
 
@@ -388,7 +388,6 @@ async def full_verification():
     Run complete operational verification of all systems.
     Actually TESTS each system, doesn't just check flags.
     """
-    from fastapi import Request
     from app import app
 
     verifier = get_verifier()

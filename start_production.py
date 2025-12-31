@@ -5,7 +5,6 @@ Ensures the new integrated system runs
 """
 
 import os
-import sys
 import uvicorn
 
 # Set environment variables

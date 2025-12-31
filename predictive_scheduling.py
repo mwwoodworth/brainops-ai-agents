@@ -5,13 +5,10 @@ AI-powered predictive scheduling for optimal task execution and resource allocat
 """
 
 import os
-import json
 import logging
-import asyncio
 import uuid
-import math
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Tuple
 from enum import Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -747,7 +744,7 @@ class PredictiveSchedulingSystem:
                 try:
                     resource_reqs[ResourceType(key)] = value
                 except ValueError:
-                    pass
+                    logger.debug("Invalid resource type %s", key)
 
             task = SchedulableTask(
                 task_id=task_id,

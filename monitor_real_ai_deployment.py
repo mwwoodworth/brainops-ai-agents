@@ -5,7 +5,6 @@ Monitor Real AI Deployment Progress
 
 import requests
 import time
-import json
 from datetime import datetime
 
 BASE_URL = "https://brainops-ai-agents.onrender.com"

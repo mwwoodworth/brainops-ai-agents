@@ -1,5 +1,4 @@
 import pytest
-import os
 
 # Stub test for task routing logic
 # In a real scenario, this would import the orchestrator and test routing rules

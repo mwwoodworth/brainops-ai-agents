@@ -3,7 +3,6 @@ import os
 import sys
 import asyncio
 import psycopg2
-from psycopg2.extras import RealDictCursor
 import logging
 
 # Configure logging

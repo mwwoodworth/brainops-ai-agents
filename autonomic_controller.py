@@ -16,7 +16,7 @@ import asyncio
 import logging
 import collections
 import psycopg2
-from datetime import datetime, timedelta
+from datetime import datetime
 from contextlib import contextmanager
 
 # ============================================================================
@@ -48,7 +48,6 @@ from typing import Dict, List, Callable, Any, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 from statistics import mean, stdev
-from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 

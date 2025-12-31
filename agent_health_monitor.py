@@ -7,10 +7,9 @@ Provides automatic restart and healing capabilities
 import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from typing import Dict, Any
+from datetime import datetime
 import os
-import json
 
 logger = logging.getLogger(__name__)
 

@@ -9,9 +9,9 @@ import json
 import logging
 import uuid
 import numpy as np
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timezone
-from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional, Any
+from datetime import datetime
+from dataclasses import dataclass
 
 import openai
 import psycopg2

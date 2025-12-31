@@ -10,11 +10,10 @@ Creates and maintains virtual replicas of production systems for:
 Based on 2025 best practices from IBM, Siemens, and Microsoft Azure Digital Twins.
 """
 
-import asyncio
 import json
 import hashlib
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import os
@@ -31,7 +30,8 @@ async def _get_db_connection(db_url: str = None):
         from database.async_connection import get_pool
         pool = get_pool()
         return await pool.acquire()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Shared pool unavailable, falling back to direct connection: %s", exc, exc_info=True)
         # Fallback to direct connection if pool unavailable
         if db_url:
             import asyncpg

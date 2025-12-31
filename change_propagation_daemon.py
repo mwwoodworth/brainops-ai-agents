@@ -89,7 +89,8 @@ class ChangeDetector:
             try:
                 with open(checksum_file) as f:
                     self.file_checksums = json.load(f)
-            except Exception:
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning("Failed to load checksum file: %s", exc, exc_info=True)
                 self.file_checksums = {}
 
     def _save_checksums(self):
@@ -106,7 +107,8 @@ class ChangeDetector:
         try:
             with open(path, 'rb') as f:
                 return hashlib.md5(f.read()).hexdigest()
-        except Exception:
+        except OSError as exc:
+            logger.debug("Failed to compute checksum for %s: %s", path, exc)
             return ""
 
     def _get_codebase(self, path: str) -> str:

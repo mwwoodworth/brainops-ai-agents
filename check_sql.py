@@ -3,6 +3,9 @@ import json
 import os
 import re
 import glob
+import logging
+
+logger = logging.getLogger(__name__)
 
 def load_schema(schema_path):
     with open(schema_path, 'r') as f:
@@ -26,7 +29,8 @@ def find_sql_mismatches(schema, root_dir):
         try:
             with open(filepath, 'r') as f:
                 content = f.read()
-        except Exception:
+        except OSError as exc:
+            logger.debug("Failed to read %s: %s", filepath, exc)
             continue
             
         for match in insert_pattern.finditer(content):

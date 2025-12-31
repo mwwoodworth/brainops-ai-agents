@@ -5,7 +5,6 @@ This file ensures the correct service runs in production
 """
 
 import os
-import sys
 from datetime import datetime
 
 # Force app.py to be used

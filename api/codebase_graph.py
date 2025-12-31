@@ -1,8 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from typing import List, Optional
 from database.async_connection import get_pool
-import json
 
 router = APIRouter(prefix="/api/codebase-graph", tags=["codebase-graph"])
 

@@ -5,9 +5,9 @@ Comprehensive AI system self-awareness and introspection endpoints.
 Provides real-time insights into the AI OS's "consciousness" state.
 """
 
-from fastapi import APIRouter, HTTPException
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from fastapi import APIRouter
+from datetime import datetime
+from typing import Dict, Any, List
 import logging
 import os
 

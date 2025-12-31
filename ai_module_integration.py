@@ -17,23 +17,17 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
-import json
-import time
 import asyncio
 import logging
-from typing import Dict, Any, List, Optional, Callable, Tuple
+from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
 from collections import defaultdict, deque
 import threading
 
 from ai_observability import (
-    EventBus, EventType, Event, MetricsRegistry,
-    ObservabilityController, CorrelationContext,
-    get_observability, get_event_bus, publish_event, publish_event_async,
-    traced_operation, get_current_context, set_current_context
+    EventType, Event, get_observability, get_event_bus, publish_event
 )
 
 logger = logging.getLogger(__name__)

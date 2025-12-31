@@ -1,6 +1,5 @@
 import asyncio
 import asyncpg
-import os
 
 DB_URL = "postgresql://postgres.yomagoqdmxszqtdwuhab:REDACTED_SUPABASE_DB_PASSWORD@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
 

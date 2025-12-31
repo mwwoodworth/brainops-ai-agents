@@ -7,14 +7,11 @@ Build comprehensive knowledge graph from all system interactions
 import os
 import json
 import logging
-import asyncio
-import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Tuple, Set
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from decimal import Decimal
 import hashlib
 import networkx as nx
 from collections import defaultdict
@@ -672,7 +669,6 @@ class KnowledgeQueryEngine:
 
         # Initialize OpenAI for semantic queries
         try:
-            import openai
             api_key = os.getenv("OPENAI_API_KEY")
             if api_key:
                 from openai import OpenAI

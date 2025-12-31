@@ -24,14 +24,14 @@ import asyncio
 import hashlib
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple, Set, Callable, Awaitable
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
 from collections import defaultdict
 import aiohttp
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from psycopg2.extras import RealDictCursor
 
 # OPTIMIZATION: Use orjson for 10-20x faster JSON serialization
 try:
@@ -42,7 +42,6 @@ except ImportError:
     logging.warning("orjson not available, falling back to standard json")
 
 # ENHANCEMENT: LRU cache for embeddings and frequent lookups
-from functools import lru_cache
 
 # ENHANCEMENT: Retry logic with exponential backoff
 MAX_RETRIES = 3
@@ -186,7 +185,8 @@ class InputIntegrityValidator:
                     checks_passed.append(f"timestamp_acceptable:{age:.0f}s")
                 else:
                     checks_failed.append(f"timestamp_stale:{age:.0f}s")
-            except Exception:
+            except (ValueError, AttributeError, TypeError) as exc:
+                logger.debug("Timestamp parse error: %s", exc)
                 checks_failed.append("timestamp_parse_error")
         else:
             checks_failed.append("timestamp_missing")
