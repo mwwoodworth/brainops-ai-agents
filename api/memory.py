@@ -361,12 +361,19 @@ async def store_memory(
     pool = get_pool()
 
     try:
-        # Prepare content as JSON
+        # Prepare content as JSON - include category and title in content (not separate columns)
         if isinstance(request.content, str):
-            content_json = json.dumps({"text": request.content})
+            content_json = json.dumps({
+                "text": request.content,
+                "category": request.category,
+                "title": request.title
+            })
             content_text = request.content
         else:
-            content_json = json.dumps(request.content)
+            content_dict = dict(request.content) if isinstance(request.content, dict) else {"data": request.content}
+            content_dict["category"] = request.category
+            content_dict["title"] = request.title
+            content_json = json.dumps(content_dict)
             content_text = json.dumps(request.content)
 
         # Generate embedding
@@ -387,23 +394,21 @@ async def store_memory(
         except ValueError:
             mem_type = MemoryType.SEMANTIC
 
-        # Insert into unified_ai_memory
+        # Insert into unified_ai_memory (category/title are in content JSON, not separate columns)
         result = await pool.fetchrow("""
             INSERT INTO unified_ai_memory (
-                memory_type, content, importance_score, category, title,
+                memory_type, content, importance_score,
                 tags, source_system, source_agent, created_by, metadata,
                 context_id, embedding, search_text, tenant_id
             ) VALUES (
-                $1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10::jsonb,
-                $11::uuid, $12::vector, $13, $14::uuid
+                $1, $2::jsonb, $3, $4, $5, $6, $7, $8::jsonb,
+                $9::uuid, $10::vector, $11, $12::uuid
             )
             RETURNING id::text, content_hash, created_at
         """,
             mem_type.value,
             content_json,
             request.importance_score,
-            request.category,
-            request.title,
             request.tags,
             request.source_system,
             request.source_agent,

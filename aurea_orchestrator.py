@@ -1955,6 +1955,15 @@ class AUREA:
                 # This table is the central AI decisions tracking table
                 self._persist_to_ai_decisions(decision, conn, cur)
 
+                # Log to unified brain
+                self.memory.log_to_brain("aurea_orchestrator", "decision_made", {
+                    "decision_id": decision.id,
+                    "db_id": db_id,
+                    "type": decision.type.value,
+                    "description": decision.description,
+                    "confidence": decision.confidence
+                })
+
                 conn.commit()
                 cur.close()
 
