@@ -290,12 +290,15 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> Dict[s
                         WHERE id = %s
                     """, (json.dumps({'send_message': message, 'sent_at': datetime.now(timezone.utc).isoformat()}), email_id))
 
-                    # Record delivery
-                    cursor.execute("""
-                        INSERT INTO ai_email_deliveries
-                        (email_id, recipient, status, delivered_at)
-                        VALUES (%s, %s, 'delivered', NOW())
-                    """, (email_id, recipient))
+                    # Record delivery (optional - table may not exist yet)
+                    try:
+                        cursor.execute("""
+                            INSERT INTO ai_email_deliveries
+                            (email_id, recipient, status, delivered_at)
+                            VALUES (%s, %s, 'delivered', NOW())
+                        """, (email_id, recipient))
+                    except Exception as delivery_err:
+                        logger.debug(f"Delivery tracking skipped for {email_id}: {delivery_err}")
 
                     conn.commit()
 
