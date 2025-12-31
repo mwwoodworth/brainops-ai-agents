@@ -86,8 +86,8 @@ async def get_orchestrator_status():
                         managed_count = result or 0
                     finally:
                         await conn.close()
-                except Exception:
-                    pass  # Fallback silently
+                except Exception as exc:
+                    logger.warning("DB fallback failed in status check: %s", exc, exc_info=True)
 
         return {
             "system": "autonomous_system_orchestrator",

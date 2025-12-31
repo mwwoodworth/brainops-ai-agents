@@ -336,7 +336,8 @@ class ChatGPTAgentTester:
                     };
                 }
             """)
-        except:
+        except Exception as exc:
+            logger.debug("Failed to collect performance metrics: %s", exc, exc_info=True)
             return {}
 
     # =========================================================================

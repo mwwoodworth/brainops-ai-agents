@@ -1189,7 +1189,13 @@ class RevenueAutomationEngine:
                 if tx.completed_at:
                     try:
                         completed_at = datetime.fromisoformat(tx.completed_at.replace('Z', '+00:00'))
-                    except:
+                    except (ValueError, AttributeError, TypeError) as exc:
+                        logger.warning(
+                            "Invalid completed_at value for transaction %s: %s",
+                            tx.transaction_id,
+                            exc,
+                            exc_info=True,
+                        )
                         completed_at = datetime.utcnow()
 
                 await conn.execute("""
@@ -1301,7 +1307,8 @@ class RevenueAutomationEngine:
         try:
             dt = datetime.fromisoformat(iso_date.replace('Z', '+00:00'))
             return (datetime.utcnow() - dt.replace(tzinfo=None)).days
-        except:
+        except (ValueError, AttributeError, TypeError) as exc:
+            logger.warning("Invalid ISO date value: %s", exc, exc_info=True)
             return 0
 
 

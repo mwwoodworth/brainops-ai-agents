@@ -1000,7 +1000,8 @@ if __name__ == "__main__":
                 cursor.close()
                 conn.close()
                 return True
-            except:
+            except psycopg2.Error as exc:
+                logger.debug("DB health check failed: %s", exc, exc_info=True)
                 return False
         
         # Use a file-based health check for deterministic testing
@@ -1037,8 +1038,8 @@ if __name__ == "__main__":
         for i in range(3):
             try:
                 breaker.call("test_service", lambda: 1/0)  # Will fail
-            except:
-                pass
+            except ZeroDivisionError as exc:
+                logger.debug("Expected test failure in circuit breaker: %s", exc)
         
         status = breaker.get_status("test_service")
         print(f"✅ Circuit breaker test: {status['failures']} failures recorded")
@@ -1085,4 +1086,3 @@ if __name__ == "__main__":
         # Cleanup
         if Path(HEALTH_FILE).exists():
             Path(HEALTH_FILE).unlink()
-

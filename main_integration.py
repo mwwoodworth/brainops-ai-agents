@@ -296,7 +296,7 @@ async def execute_task_in_background(task_request: TaskExecutionRequest, tenant_
             try:
                 cur.close()
             except Exception:
-                pass
+                logger.debug("Failed to close cursor after task execution update", exc_info=True)
             conn.close()
 
 
@@ -589,9 +589,9 @@ async def execute_task_endpoint(task_request: TaskExecutionRequest, background_t
                 raise HTTPException(status_code=401, detail="Unauthorized")
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
         # Do not block if headers/env are not available
-        pass
+        logger.debug("API key validation skipped: %s", exc, exc_info=True)
 
     background_tasks.add_task(execute_task_in_background, task_request, tenant_id)
 

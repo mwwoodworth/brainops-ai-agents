@@ -490,22 +490,23 @@ class AIBoardOfDirectors:
             return {}
         try:
             return json.loads(text)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.debug("Failed to parse JSON text: %s", exc)
 
         cleaned = text.strip()
         cleaned = re.sub(r"^```(?:json)?", "", cleaned, flags=re.IGNORECASE).strip()
         cleaned = re.sub(r"```$", "", cleaned, flags=re.IGNORECASE).strip()
         try:
             return json.loads(cleaned)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.debug("Failed to parse cleaned JSON text: %s", exc)
 
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group())
-            except Exception:
+            except (json.JSONDecodeError, TypeError) as exc:
+                logger.debug("Failed to parse matched JSON text: %s", exc)
                 return {}
         return {}
 
@@ -1217,7 +1218,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
                 try:
                     member_confidences.append(float(parsed['confidence']))
                 except (ValueError, TypeError):
-                    pass
+                    logger.debug("Invalid member confidence for %s", role)
 
         if member_confidences:
             avg_member_confidence = sum(member_confidences) / len(member_confidences)

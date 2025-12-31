@@ -728,18 +728,41 @@ class MCPClient:
             "params": params or []
         })
 
-    async def supabase_select(self, table: str, columns: str = "*", where: str = None) -> MCPToolResult:
-        """Select from a Supabase table"""
-        sql = f"SELECT {columns} FROM {table}"
+    async def supabase_select(self, table: str, columns: str = "*", where: str = None, params: list = None) -> MCPToolResult:
+        """Select from a Supabase table with SQL injection protection"""
+        import re
+        # Validate table name
+        if not re.match(r'^[a-z_][a-z0-9_]*$', table, re.IGNORECASE):
+            return MCPToolResult(success=False, error=f"Invalid table name: {table}")
+
+        # Validate columns (only allow *, or comma-separated alphanumeric identifiers)
+        if columns != "*":
+            for col in columns.split(','):
+                col = col.strip()
+                if not re.match(r'^[a-z_][a-z0-9_]*$', col, re.IGNORECASE):
+                    return MCPToolResult(success=False, error=f"Invalid column name: {col}")
+
+        sql = f'SELECT {columns} FROM "{table}"'
         if where:
+            # Where clause should use parameterized queries - caller must pass params
             sql += f" WHERE {where}"
-        return await self.supabase_query(sql)
+        return await self.supabase_query(sql, params)
 
     async def supabase_insert(self, table: str, data: Dict[str, Any]) -> MCPToolResult:
-        """Insert a row into Supabase"""
-        columns = ", ".join(data.keys())
+        """Insert a row into Supabase with SQL injection protection"""
+        import re
+        # Validate table name
+        if not re.match(r'^[a-z_][a-z0-9_]*$', table, re.IGNORECASE):
+            return MCPToolResult(success=False, error=f"Invalid table name: {table}")
+
+        # Validate column names
+        for col in data.keys():
+            if not re.match(r'^[a-z_][a-z0-9_]*$', col, re.IGNORECASE):
+                return MCPToolResult(success=False, error=f"Invalid column name: {col}")
+
+        columns = ", ".join([f'"{k}"' for k in data.keys()])
         placeholders = ", ".join([f"${i+1}" for i in range(len(data))])
-        sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders}) RETURNING *"
+        sql = f'INSERT INTO "{table}" ({columns}) VALUES ({placeholders}) RETURNING *'
         return await self.supabase_query(sql, list(data.values()))
 
     async def supabase_get_tables(self) -> MCPToolResult:

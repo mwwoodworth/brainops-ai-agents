@@ -191,8 +191,8 @@ class KnowledgeGraphExtractor:
                                 properties={"metric_type": key, "value": value},
                                 importance_score=0.6 if value > 10000 else 0.4
                             ))
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as exc:
+                        logger.debug("Invalid monetary value for %s: %s", key, exc)
 
             # Extract metrics
             for key in ["total_jobs", "total_customers", "total_invoices", "jobs_analyzed",
@@ -207,8 +207,8 @@ class KnowledgeGraphExtractor:
                                 name=f"{key}: {value:,}",
                                 properties={"metric_type": key, "value": value}
                             ))
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as exc:
+                        logger.debug("Invalid metric value for %s: %s", key, exc)
 
             # Extract actions taken
             if "actions_taken" in data and isinstance(data["actions_taken"], list):

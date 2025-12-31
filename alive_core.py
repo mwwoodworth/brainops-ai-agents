@@ -367,7 +367,7 @@ class AliveCore:
             loop.create_task(self._emit_event('thought', thought))
         except RuntimeError:
             # No running event loop - skip async callback
-            pass
+            logger.debug("No running event loop; skipped thought event emission")
 
         return thought
 
@@ -432,7 +432,7 @@ class AliveCore:
             }))
         except RuntimeError:
             # No running event loop - skip async callback
-            pass
+            logger.debug("No running event loop; skipped state change emission")
 
     def focus_attention(self, target: str, reason: str, priority: int = 5):
         """Shift attention to a new target"""
@@ -712,7 +712,7 @@ class AliveCore:
             try:
                 await task
             except asyncio.CancelledError:
-                pass
+                logger.debug("Task cancelled during shutdown")
 
         # Final state save
         self.change_state(ConsciousnessState.DREAMING, "Entering dormant state")

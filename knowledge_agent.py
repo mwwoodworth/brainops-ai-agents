@@ -16,13 +16,15 @@ import os
 try:
     from openai import OpenAI
     OPENAI_AVAILABLE = True
-except:
+except ImportError as exc:
+    logging.warning("OpenAI SDK not available: %s", exc)
     OPENAI_AVAILABLE = False
 
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
-except:
+except ImportError as exc:
+    logging.warning("Gemini SDK not available: %s", exc)
     GEMINI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
@@ -466,7 +468,8 @@ Include actionable recommendations if applicable."""
         # Generate contextual recommendations
         try:
             recommendations = await self.generate_recommendations({'question': question})
-        except:
+        except Exception as exc:
+            logger.warning("Failed to generate recommendations: %s", exc, exc_info=True)
             recommendations = []
 
         return {

@@ -178,14 +178,15 @@ class RealAICore:
         """Parse JSON content without failing the caller."""
         try:
             return json.loads(text)
-        except Exception:
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.debug("Failed to parse JSON response: %s", exc)
             try:
                 import re
                 match = re.search(r"\{.*\}", text, re.DOTALL)
                 if match:
                     return json.loads(match.group())
-            except Exception:
-                pass
+            except (json.JSONDecodeError, TypeError, re.error) as exc:
+                logger.debug("Failed to parse extracted JSON: %s", exc)
         return {}
 
     async def generate(

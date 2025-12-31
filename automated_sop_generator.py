@@ -613,7 +613,7 @@ Return optimized content in the same JSON format with:
             if json_match:
                 return json.loads(json_match.group())
         except json.JSONDecodeError:
-            pass
+            logger.debug("Failed to parse SOP JSON response")
         return {}
 
     def _build_sop_from_content(
@@ -868,7 +868,7 @@ Return as JSON:
             if json_match:
                 return json.loads(json_match.group())
         except json.JSONDecodeError:
-            pass
+            logger.debug("Failed to parse SOP JSON response")
         return {}
 
 

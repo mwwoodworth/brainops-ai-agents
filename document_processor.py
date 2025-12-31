@@ -434,8 +434,13 @@ class DocumentProcessor:
                     SET status = $1
                     WHERE id = $2
                 """, ProcessingStatus.FAILED.value, document_id)
-            except:
-                pass
+            except Exception as update_error:
+                logger.error(
+                    "Failed to mark document %s as failed: %s",
+                    document_id,
+                    update_error,
+                    exc_info=True,
+                )
 
             return {
                 'document_id': document_id,
@@ -480,7 +485,8 @@ class DocumentProcessor:
                         'method': ExtractionMethod.NATIVE.value,
                         'confidence': 0.8
                     }
-                except:
+                except (AttributeError, TypeError) as exc:
+                    logger.debug("Text decode failed, falling back to vision: %s", exc, exc_info=True)
                     # Fall back to AI vision
                     return await self._extract_with_ai_vision(file_content)
 
@@ -591,7 +597,8 @@ class DocumentProcessor:
                 'method': ExtractionMethod.OCR.value,
                 'confidence': 0.8
             }
-        except:
+        except (OSError, pytesseract.TesseractError, ValueError) as exc:
+            logger.warning("OCR extraction failed: %s", exc, exc_info=True)
             return None
 
     async def _extract_with_ai_vision(self, content: bytes) -> Dict:

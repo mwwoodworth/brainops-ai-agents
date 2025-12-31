@@ -38,7 +38,8 @@ except (ImportError, RuntimeError, Exception) as e:
     # Try to import RealAICore separately if config failed
     try:
         from ai_core import RealAICore
-    except:
+    except ImportError as exc:
+        logging.warning("RealAICore import failed: %s", exc)
         RealAICore = None
 
 logger = logging.getLogger(__name__)

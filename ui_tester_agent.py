@@ -18,7 +18,7 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 try:
-    from playwright.async_api import async_playwright, Browser, Page, BrowserContext
+    from playwright.async_api import async_playwright, Browser, Page, BrowserContext, TimeoutError as PlaywrightTimeoutError
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
@@ -176,9 +176,10 @@ class UITesterAgent:
                     else:
                         result["status"] = TestStatus.PASS.value
 
-            except:
+            except PlaywrightTimeoutError as exc:
                 result["found"] = False
                 result["error"] = f"Element not found: {selector}"
+                logger.debug("Selector timeout for %s: %s", selector, exc)
 
             await page.close()
 

@@ -25,8 +25,8 @@ for i in range(30):
             if version == "4.0.4":
                 print("✅ v4.0.4 is live!")
                 break
-    except:
-        pass
+    except requests.RequestException as exc:
+        print(f"⚠️ Health check failed: {exc}")
     time.sleep(10)
 
 print("\nTesting AI endpoints...")
