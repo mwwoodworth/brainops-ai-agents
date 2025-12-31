@@ -74,7 +74,7 @@ async def get_full_context():
         }
 
     try:
-        context = brain.get_full_context()
+        context = await brain.get_full_context()
         return {
             "status": "ok",
             "context": context,
@@ -103,7 +103,7 @@ async def get_critical_context():
         }
 
     try:
-        critical_items = brain.get_all_critical()
+        critical_items = await brain.get_all_critical()
         return {
             "status": "ok",
             "critical_items": critical_items,
@@ -130,7 +130,7 @@ async def get_by_category(
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        return brain.get_by_category(category, limit)
+        return await brain.get_by_category(category, limit)
     except Exception as e:
         logger.error(f"Failed to get category: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -146,7 +146,7 @@ async def get_context(
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        result = brain.get(key, include_related=include_related)
+        result = await brain.get(key, include_related=include_related)
         if not result:
             raise HTTPException(status_code=404, detail=f"Key not found: {key}")
         return result
@@ -164,7 +164,7 @@ async def store_context(entry: BrainEntry):
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        entry_id = brain.store(
+        entry_id = await brain.store(
             key=entry.key,
             value=entry.value,
             category=entry.category,
@@ -186,7 +186,7 @@ async def search_context(query: BrainQuery):
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        return brain.search(query.query, query.limit, use_semantic=query.use_semantic)
+        return await brain.search(query.query, query.limit, use_semantic=query.use_semantic)
     except Exception as e:
         logger.error(f"Failed to search: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -202,7 +202,7 @@ async def record_session(
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        brain.record_session_summary(session_id, summary)
+        await brain.record_session_summary(session_id, summary)
         return {"session_id": session_id, "status": "recorded"}
     except Exception as e:
         logger.error(f"Failed to record session: {e}")
@@ -221,7 +221,7 @@ async def record_deployment(
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        brain.record_deployment(service, version, status, metadata)
+        await brain.record_deployment(service, version, status, metadata)
         return {"service": service, "version": version, "status": "recorded"}
     except Exception as e:
         logger.error(f"Failed to record deployment: {e}")
@@ -238,7 +238,7 @@ async def update_system_state(
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        brain.update_system_state(component, state)
+        await brain.update_system_state(component, state)
         return {"component": component, "status": "updated"}
     except Exception as e:
         logger.error(f"Failed to update system state: {e}")
@@ -262,7 +262,7 @@ async def get_statistics():
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        stats = brain.get_statistics()
+        stats = await brain.get_statistics()
         return stats
     except Exception as e:
         logger.error(f"Failed to get statistics: {e}")
@@ -279,7 +279,7 @@ async def find_similar(
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        results = brain.find_similar(key, limit)
+        results = await brain.find_similar(key, limit)
         return results
     except Exception as e:
         logger.error(f"Failed to find similar entries: {e}")
@@ -296,7 +296,7 @@ async def get_related(
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        results = brain.get_related_entries(key, max_depth)
+        results = await brain.get_related_entries(key, max_depth)
         return results
     except Exception as e:
         logger.error(f"Failed to get related entries: {e}")
@@ -310,7 +310,7 @@ async def cleanup_expired():
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        count = brain.cleanup_expired()
+        count = await brain.cleanup_expired()
         return {
             "status": "ok",
             "deleted_count": count,
@@ -333,7 +333,7 @@ async def add_reference(
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        brain._add_reference(from_key, to_key, reference_type, strength)
+        await brain._add_reference(from_key, to_key, reference_type, strength)
         return {
             "status": "ok",
             "from_key": from_key,

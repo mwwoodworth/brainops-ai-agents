@@ -4,16 +4,24 @@ import json
 import logging
 from datetime import datetime
 
-# Set environment variables for DB connection
-os.environ["DB_HOST"] = "aws-0-us-east-2.pooler.supabase.com"
-os.environ["DB_USER"] = "postgres.yomagoqdmxszqtdwuhab"
-os.environ["DB_PASSWORD"] = "REDACTED_SUPABASE_DB_PASSWORD"
-os.environ["DB_PORT"] = "5432"
-os.environ["DATABASE_URL"] = "postgresql://postgres.yomagoqdmxszqtdwuhab:REDACTED_SUPABASE_DB_PASSWORD@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
+# SECURITY: Load credentials from environment or .env file
+# DO NOT hardcode credentials - they must be set in environment
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed, use existing environment
 
-# Set Auth Bypass for Testing
-os.environ["ALLOW_TEST_KEY"] = "true"
-os.environ["API_KEYS"] = '["test-key"]'
+# Verify required environment variables are set
+required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+missing = [v for v in required_vars if not os.getenv(v)]
+if missing:
+    raise EnvironmentError(f"Required environment variables not set: {', '.join(missing)}. "
+                          "Set them in .env file or environment.")
+
+# Set Auth Bypass for Testing (only for local test runs)
+os.environ.setdefault("ALLOW_TEST_KEY", "true")
+os.environ.setdefault("API_KEYS", '["test-key"]')
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
