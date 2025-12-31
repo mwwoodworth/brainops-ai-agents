@@ -13,24 +13,26 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
+      # SECURITY: Database credentials must be set in Render dashboard, NOT in this file
       - key: DB_HOST
-        value: aws-0-us-east-2.pooler.supabase.com
+        sync: false  # Set in Render dashboard
       - key: DB_NAME
         value: postgres
       - key: DB_USER
-        value: postgres.yomagoqdmxszqtdwuhab
+        sync: false  # Set in Render dashboard
       - key: DB_PASSWORD
-        value: REDACTED_SUPABASE_DB_PASSWORD
+        sync: false  # REQUIRED - Set in Render dashboard
       - key: DATABASE_URL
         sync: false
       - key: DB_PORT
         value: "6543"  # Transaction mode - higher connection limits than Session mode (5432)
+      # SECURITY: API keys must be set in Render dashboard, NOT in this file
       - key: API_KEYS
-        value: "11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025"
+        sync: false  # Set in Render dashboard
       - key: AGENTS_API_KEY
-        value: brainops_prod_key_2025
+        sync: false  # Set in Render dashboard
       - key: BRAINOPS_API_KEY
-        value: 11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c
+        sync: false  # Set in Render dashboard
       - key: AUTH_REQUIRED
         value: "true"
       - key: DEV_MODE

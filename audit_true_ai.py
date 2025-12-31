@@ -14,13 +14,13 @@ from psycopg2.extras import RealDictCursor
 from typing import Dict, Any
 from datetime import datetime
 
-# Database configuration
+# Database configuration - NO hardcoded credentials
 DB_CONFIG = {
-    'host': 'aws-0-us-east-2.pooler.supabase.com',
-    'database': 'postgres',
-    'user': 'postgres.yomagoqdmxszqtdwuhab',
-    'password': '<DB_PASSWORD_REDACTED>',
-    'port': 5432
+    'host': os.getenv('DB_HOST'),  # Required - no default
+    'database': os.getenv('DB_NAME', 'postgres'),
+    'user': os.getenv('DB_USER'),  # Required - no default
+    'password': os.getenv('DB_PASSWORD'),  # Required - no default
+    'port': int(os.getenv('DB_PORT', '5432'))
 }
 
 class AISystemAuditor:

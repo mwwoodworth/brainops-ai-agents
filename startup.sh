@@ -24,16 +24,26 @@ if [ -n "$DATABASE_URL" ] && [ -z "$DB_PASSWORD" ]; then
     echo "✅ Extracted: host=$DB_HOST, db=$DB_NAME, user=$DB_USER"
 fi
 
-# Fallback to defaults if still not set (for local development)
-export DB_HOST=${DB_HOST:-"aws-0-us-east-2.pooler.supabase.com"}
+# Fallback for non-sensitive values only (port and database name)
 export DB_NAME=${DB_NAME:-"postgres"}
-export DB_USER=${DB_USER:-"postgres.yomagoqdmxszqtdwuhab"}
 export DB_PORT=${DB_PORT:-5432}
 
-# Password is REQUIRED - fail if not set after all fallbacks
+# SECURITY: Host, User, and Password are REQUIRED - fail if not set
+if [ -z "$DB_HOST" ]; then
+    echo "❌ ERROR: DB_HOST not set!"
+    echo "   Set DATABASE_URL or DB_HOST environment variable"
+    exit 1
+fi
+
+if [ -z "$DB_USER" ]; then
+    echo "❌ ERROR: DB_USER not set!"
+    echo "   Set DATABASE_URL or DB_USER environment variable"
+    exit 1
+fi
+
 if [ -z "$DB_PASSWORD" ]; then
-    echo "❌ ERROR: No database password found!"
-    echo "   Set either DATABASE_URL or DB_PASSWORD environment variable"
+    echo "❌ ERROR: DB_PASSWORD not set!"
+    echo "   Set DATABASE_URL or DB_PASSWORD environment variable"
     exit 1
 fi
 
