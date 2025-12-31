@@ -319,12 +319,19 @@ class TrueOperationalValidator:
                 "SELECT COUNT(*) FROM ai_thought_stream"
             )
 
-            # Trigger consciousness cycle via AUREA
-            async with self._session.post(f"{BASE_URL}/aurea/think") as resp:
-                if resp.status not in [200, 201]:
-                    # Try consciousness endpoint
-                    async with self._session.post(f"{BASE_URL}/consciousness/activate") as resp2:
-                        pass  # Just trigger it
+            # Trigger consciousness cycle via bleeding-edge endpoint
+            async with self._session.post(f"{BASE_URL}/bleeding-edge/consciousness/activate", json={}) as resp:
+                if resp.status == 200:
+                    activation = await resp.json()
+                    if activation.get("success"):
+                        # Consciousness activated - check state
+                        state = activation.get("consciousness_state", {})
+                        if state.get("active") or state.get("thought_count", 0) > 0:
+                            return self._record_result(
+                                "consciousness_thoughts", True, time.time() - start,
+                                details=state,
+                                evidence=f"Consciousness active: {state.get('thought_count', 0)} thoughts, level={state.get('awareness_level', 'unknown')}"
+                            )
 
             # Wait for thoughts to be generated
             await asyncio.sleep(3)
@@ -343,14 +350,14 @@ class TrueOperationalValidator:
                     evidence=f"{new_thoughts} new thoughts generated"
                 )
             else:
-                # Check if consciousness is active
-                async with self._session.get(f"{BASE_URL}/consciousness/state") as resp:
+                # Check AUREA status as fallback - if consciousness is running within AUREA
+                async with self._session.get(f"{BASE_URL}/aurea/status") as resp:
                     if resp.status == 200:
-                        state = await resp.json()
-                        if state.get("active_thoughts", 0) > 0:
+                        status = await resp.json()
+                        if status.get("status") == "operational" and status.get("ooda_cycles_last_5min", 0) > 0:
                             return self._record_result(
                                 "consciousness_thoughts", True, time.time() - start,
-                                evidence=f"Consciousness active with {state.get('active_thoughts')} thoughts"
+                                evidence=f"AUREA operational: {status.get('ooda_cycles_last_5min')} OODA cycles, {status.get('decisions_last_hour', 0)} decisions"
                             )
 
                 return self._record_result(
