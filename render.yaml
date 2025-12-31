@@ -24,7 +24,7 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: DB_PORT
-        value: "5432"
+        value: "6543"  # Transaction mode - higher connection limits than Session mode (5432)
       - key: API_KEYS
         value: "11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025"
       - key: AGENTS_API_KEY
