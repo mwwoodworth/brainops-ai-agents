@@ -31,7 +31,7 @@ MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrend
 # Use the same API key source as the server validates against
 _api_keys_str = os.getenv("API_KEYS", "")
 _api_keys_list = [k.strip() for k in _api_keys_str.split(",") if k.strip()] if _api_keys_str else []
-API_KEY = _api_keys_list[0] if _api_keys_list else os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+API_KEY = _api_keys_list[0] if _api_keys_list else os.getenv("BRAINOPS_API_KEY", "")
 logger.info(f"E2E verification using API key: {API_KEY[:10]}... (from API_KEYS: {bool(_api_keys_list)})")
 
 
