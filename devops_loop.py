@@ -38,7 +38,7 @@ ERP_URL = "https://weathercraft-erp.vercel.app"
 COMMAND_CENTER_URL = "https://brainops-command-center.vercel.app"
 BRAINSTACK_STUDIO_URL = "https://brainstackstudio.com"
 
-API_KEY = os.getenv("AGENTS_API_KEY", "brainops_prod_key_2025")
+API_KEY = os.getenv("AGENTS_API_KEY") or os.getenv("BRAINOPS_API_KEY")  # Required - no hardcoded default
 
 # =============================================================================
 # COMPREHENSIVE MONITORING CONFIG - ALL SYSTEMS
@@ -137,13 +137,13 @@ SUBSYSTEMS = {
     "product-generator": {"endpoint": "/products/health", "critical": False},
 }
 
-# Database
+# Database - NO hardcoded credentials
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
+    'host': os.getenv('DB_HOST'),  # Required - no default
     'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('DB_PASSWORD', 'Brain0ps2O2S'),
-    'port': int(os.getenv('DB_PORT', 6543)),
+    'user': os.getenv('DB_USER'),  # Required - no default
+    'password': os.getenv('DB_PASSWORD'),  # Required - no default
+    'port': int(os.getenv('DB_PORT', '6543')),
 }
 
 
