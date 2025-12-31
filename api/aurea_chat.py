@@ -85,6 +85,8 @@ class AUREAStateProvider:
             'port': int(os.getenv('DB_PORT', 5432))
         }
 
+        conn = None
+        cur = None
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -157,8 +159,7 @@ class AUREAStateProvider:
                 if a.get('created_at'):
                     a['created_at'] = a['created_at'].isoformat()
 
-            cur.close()
-            conn.close()
+            # Connection cleanup handled in finally block
 
             return AUREAStateSnapshot(
                 timestamp=datetime.now().isoformat(),
@@ -193,6 +194,18 @@ class AUREAStateProvider:
                 uptime_seconds=0,
                 success_rate_last_100=0
             )
+        finally:
+            # SECURITY: Always close database connections
+            if cur:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 
 # Global state provider

@@ -814,7 +814,7 @@ async def trigger_render_deploy(service_name: str) -> Dict[str, Any]:
 
 # ==================== VERCEL LIVE MONITORING ====================
 
-VERCEL_TOKEN = os.getenv("VERCEL_TOKEN", "os.getenv("VERCEL_TOKEN")")
+VERCEL_TOKEN = os.getenv("VERCEL_TOKEN")  # SECURITY: No default - must be set via environment
 VERCEL_PROJECTS = {
     "weathercraft-erp": "prj_J4kZ8oQmGfU9lVWZxhYj6X7bR2nE",  # ERP project
     "myroofgenius": "prj_abc123"  # MRG project (update with actual)
