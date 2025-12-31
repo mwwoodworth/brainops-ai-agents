@@ -142,7 +142,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.92.0')  # Security hardening release
+        self.version = os.getenv('VERSION', '9.93.0')  # Consciousness auto-activation + E2E operational perfection
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))

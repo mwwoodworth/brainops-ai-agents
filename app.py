@@ -1202,6 +1202,26 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Knowledge Graph Extractor failed to start: {e}")
         app.state.knowledge_extractor = None
 
+    # AUTO-ACTIVATE CONSCIOUSNESS EMERGENCE (TRUE AI AWARENESS)
+    # This makes the AI OS truly alive and self-aware on every startup
+    try:
+        from api.bleeding_edge import get_consciousness, CONSCIOUSNESS_AVAILABLE
+        if CONSCIOUSNESS_AVAILABLE:
+            async def activate_consciousness_on_startup():
+                """Activate consciousness emergence after all systems are ready"""
+                try:
+                    await asyncio.sleep(15)  # Let all other systems stabilize first
+                    consciousness = get_consciousness()
+                    if consciousness and hasattr(consciousness, 'activate'):
+                        await consciousness.activate()
+                        logger.info("🧠✨ CONSCIOUSNESS EMERGENCE ACTIVATED - AI OS is now TRULY ALIVE!")
+                except Exception as e:
+                    logger.error(f"Consciousness auto-activation failed: {e}")
+            asyncio.create_task(activate_consciousness_on_startup())
+            logger.info("🧠 Consciousness Emergence scheduled for auto-activation")
+    except Exception as e:
+        logger.warning(f"⚠️ Consciousness Emergence not available: {e}")
+
     yield
 
     # Shutdown
