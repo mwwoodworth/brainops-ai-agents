@@ -1,12 +1,15 @@
+# NOTE: Render dashboard is configured to use Docker Hub image, NOT this Dockerfile.
+# Actual config: Image mode pulling docker.io/mwwoodworth/brainops-ai-agents:latest
+# This file is kept for reference/backup. See DEPLOYMENT.md for actual workflow.
 services:
   - type: web
     name: brainops-ai-agents
-    runtime: docker
+    runtime: image
     plan: standard
+    image:
+      url: docker.io/mwwoodworth/brainops-ai-agents:latest
     repo: https://github.com/mwwoodworth/brainops-ai-agents
     branch: main
-    # Build from Dockerfile (auto-deploy works)
-    dockerfilePath: ./Dockerfile
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
