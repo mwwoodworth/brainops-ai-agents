@@ -160,16 +160,16 @@ class AgentHealthMonitor:
             for agent in agents:
                 health_status = self._calculate_health_status(agent)
 
-                # Update or insert health status
+                # Update or insert health status (use checked_at, not last_check - column name fix)
                 cur.execute("""
                     INSERT INTO agent_health_status (
                         agent_id, agent_name, health_status, last_execution,
                         last_success, last_failure, consecutive_failures,
                         total_executions, total_successes, total_failures,
                         average_execution_time_ms, error_rate, uptime_percentage,
-                        last_check, updated_at
+                        checked_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                     ON CONFLICT (agent_id) DO UPDATE SET
                         health_status = EXCLUDED.health_status,
                         last_execution = EXCLUDED.last_execution,
@@ -182,8 +182,7 @@ class AgentHealthMonitor:
                         average_execution_time_ms = EXCLUDED.average_execution_time_ms,
                         error_rate = EXCLUDED.error_rate,
                         uptime_percentage = EXCLUDED.uptime_percentage,
-                        last_check = NOW(),
-                        updated_at = NOW()
+                        checked_at = NOW()
                 """, (
                     agent['agent_id'],
                     agent['agent_name'],
