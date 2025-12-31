@@ -3,7 +3,6 @@
 Verify complete operational status - final test
 """
 
-import os
 import sys
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -11,7 +10,7 @@ import requests
 import json
 import uuid
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Tuple
 
 # Database config
 DB_CONFIG = {

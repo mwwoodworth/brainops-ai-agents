@@ -4,7 +4,7 @@ MEMORY COORDINATION API - Endpoints for Perfect E2E Context Management
 """
 
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
 import logging

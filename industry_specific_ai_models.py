@@ -7,15 +7,11 @@ Specialized AI models for roofing and construction industry
 import os
 import json
 import logging
-import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Tuple
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 from enum import Enum
 import psycopg2
-from psycopg2.extras import RealDictCursor
-from decimal import Decimal
-import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

@@ -7,7 +7,6 @@ and autonomous content optimization.
 Based on 2025 best practices from Gartner, RTInsights, and leading market research.
 """
 
-import asyncio
 import json
 import hashlib
 from datetime import datetime, timedelta
@@ -16,7 +15,6 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 import os
 import logging
-import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +105,8 @@ async def _get_db_connection(db_url: str = None):
         from database.async_connection import get_pool
         pool = get_pool()
         return await pool.acquire()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Shared pool unavailable, falling back to direct connection: %s", exc, exc_info=True)
         # Fallback to direct connection if pool unavailable
         if db_url:
             import asyncpg

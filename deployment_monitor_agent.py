@@ -8,9 +8,8 @@ Real-time monitoring of Render and Vercel deployments with log access
 import os
 import asyncio
 import aiohttp
-import json
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from datetime import datetime
+from typing import Dict, Any, List
 from enum import Enum
 
 class DeploymentStatus(Enum):

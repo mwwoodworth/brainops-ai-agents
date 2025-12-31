@@ -5,13 +5,10 @@ Comprehensive audit trail and compliance tracking for AI operations
 """
 
 import os
-import json
 import logging
-import asyncio
 import uuid
-import hashlib
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional
 from enum import Enum
 from dataclasses import dataclass, field
 import psycopg2

@@ -7,14 +7,11 @@ import os
 import json
 import uuid
 import logging
-import asyncio
-import traceback
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from enum import Enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import psycopg2
-from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 

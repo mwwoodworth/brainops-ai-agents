@@ -15,7 +15,6 @@ Provides:
 import logging
 from fastapi import APIRouter, Query
 from fastapi.responses import PlainTextResponse
-from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)

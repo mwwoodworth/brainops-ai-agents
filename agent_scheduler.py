@@ -6,12 +6,11 @@ Schedules and executes AI agents based on configured intervals
 import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 import asyncio
 import uuid
 import json

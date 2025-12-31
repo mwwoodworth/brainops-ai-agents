@@ -9,17 +9,16 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
 import json
 import asyncio
 import logging
 import threading
 import psutil
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional, Callable
-from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
+from typing import Dict, Any, List, Callable
+from dataclasses import dataclass, field
 from enum import Enum
-from collections import deque, defaultdict
+from collections import deque
 
 logger = logging.getLogger("UNIFIED_AWARENESS")
 
@@ -187,7 +186,7 @@ class UnifiedAwareness:
                         loop = asyncio.get_running_loop()
                         loop.create_task(callback(data))
                     except RuntimeError:
-                        pass
+                        logger.debug("No running event loop; skipped async callback")
                 else:
                     callback(data)
             except Exception as e:

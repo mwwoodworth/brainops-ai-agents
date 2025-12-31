@@ -12,8 +12,6 @@ import logging
 from autonomous_cicd_management import (
     get_cicd_engine,
     DeploymentPlatform,
-    Service,
-    Deployment,
 )
 
 logger = logging.getLogger(__name__)

@@ -23,12 +23,12 @@ import json
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Callable, Awaitable
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
 from decimal import Decimal
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from psycopg2.extras import Json
 import httpx
 from contextlib import contextmanager
 
@@ -577,7 +577,8 @@ class SelfHealingReconciler:
                 response = await client.get(f"{url}/health")
                 return response.status_code == 200
 
-        except Exception:
+        except Exception as exc:
+            logger.warning("Health check failed for %s: %s", component_id, exc, exc_info=True)
             return False
 
     async def _escalate_to_human(self, incident: Incident):

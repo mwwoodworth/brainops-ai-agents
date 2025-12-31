@@ -4,7 +4,6 @@ AI Integration Layer
 Safely integrates all AI providers without breaking on missing dependencies
 """
 
-import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,7 +27,7 @@ except ImportError as e:
 
 # Try to import smart fallback
 try:
-    from ai_smart_fallback import smart_ai, ai_generate_smart
+    from ai_smart_fallback import smart_ai
     AI_SYSTEMS["smart_fallback"] = True
     logger.info("✅ Smart Fallback loaded")
 except ImportError as e:
@@ -40,8 +39,7 @@ try:
     from ai_advanced_providers import (
         advanced_ai,
         generate_with_gemini_endpoint,
-        search_with_perplexity_endpoint,
-        notebook_lm_analyze_endpoint
+        search_with_perplexity_endpoint
     )
     AI_SYSTEMS["advanced"] = True
     logger.info("✅ Advanced Providers loaded")
@@ -53,9 +51,7 @@ except ImportError as e:
 try:
     from ai_ultimate_system import (
         ultimate_ai,
-        ai_generate_ultimate,
-        ai_consensus,
-        ai_roofing
+        ai_generate_ultimate
     )
     AI_SYSTEMS["ultimate"] = True
     logger.info("✅ Ultimate System loaded")

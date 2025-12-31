@@ -9,13 +9,12 @@ Integrates:
 5. Revenue System (Engine)
 """
 
-import os
 import asyncio
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional
 
 # Import Core Systems
-from aurea_orchestrator import AUREA, AutonomyLevel, Decision, DecisionType
+from aurea_orchestrator import AUREA, AutonomyLevel, DecisionType
 from ai_board_governance import AIBoardOfDirectors, Proposal, ProposalType
 from ai_self_awareness import get_self_aware_ai, SelfAwareAI
 from ai_knowledge_graph import get_knowledge_graph, AIKnowledgeGraph

@@ -5,24 +5,20 @@ Full LangGraph orchestration with 50+ agents for comprehensive business automati
 """
 
 import os
-import sys
 import json
 import asyncio
 import uuid
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, TypedDict, Annotated
+from typing import Dict, Any, List, TypedDict
 from enum import Enum
 # random removed to ensure deterministic, real logic
 
 # Core dependencies
-import psycopg2
 from psycopg2.pool import ThreadedConnectionPool
-from openai import OpenAI as OpenAIClient
 try:
-    from langchain_openai import OpenAI, ChatOpenAI
+    from langchain_openai import ChatOpenAI
 except ImportError:
-    from langchain.llms import OpenAI
     from langchain.chat_models import ChatOpenAI
 try:
     from langchain.agents import initialize_agent, Tool
@@ -40,7 +36,6 @@ except ImportError:
     ToolExecutor = None
 import redis
 import websockets
-import httpx
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

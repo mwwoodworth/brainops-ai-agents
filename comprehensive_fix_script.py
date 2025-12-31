@@ -7,12 +7,10 @@ Fixes database schema, dependencies, and API errors
 import os
 import sys
 import subprocess
-import time
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import requests
 import json
-from typing import Dict, List, Tuple
 from datetime import datetime
 
 # Database configuration

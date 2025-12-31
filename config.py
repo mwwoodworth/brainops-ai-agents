@@ -3,7 +3,7 @@ Configuration Management for AI Agents Service
 Centralizes all configuration with environment variable support
 """
 import os
-from typing import Optional, List
+from typing import Optional
 import logging
 from urllib.parse import urlparse
 

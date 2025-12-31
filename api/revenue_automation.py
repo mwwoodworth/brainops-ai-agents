@@ -5,8 +5,8 @@ REAL revenue generation endpoints. No placeholders.
 """
 
 from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, EmailStr
+from typing import Optional, Dict, Any
+from pydantic import BaseModel
 import logging
 
 logger = logging.getLogger(__name__)

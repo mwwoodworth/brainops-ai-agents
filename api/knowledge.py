@@ -27,7 +27,7 @@ router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base"])
 # Import the knowledge base with fallback
 try:
     from master_knowledge_base import (
-        MasterKnowledgeBase, KnowledgeType, AccessLevel,
+        KnowledgeType, AccessLevel,
         get_knowledge_base
     )
     KNOWLEDGE_BASE_AVAILABLE = True
@@ -269,13 +269,13 @@ async def search_knowledge(
 
         # Map knowledge types
         knowledge_types = None
-            if request.knowledge_types:
-                knowledge_types = []
-                for kt in request.knowledge_types:
-                    try:
-                        knowledge_types.append(KnowledgeType(kt))
-                    except ValueError:
-                        logger.debug("Invalid knowledge type %s", kt)
+        if request.knowledge_types:
+            knowledge_types = []
+            for kt in request.knowledge_types:
+                try:
+                    knowledge_types.append(KnowledgeType(kt))
+                except ValueError:
+                    logger.debug("Invalid knowledge type %s", kt)
 
         results = await kb.search(
             query=request.query,

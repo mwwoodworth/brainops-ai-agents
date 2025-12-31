@@ -9,7 +9,6 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import requests
 import json
-import time
 from datetime import datetime
 import uuid
 import subprocess

@@ -9,7 +9,7 @@ Based on 2025 research showing 60-70% incident resolution time reduction.
 
 import asyncio
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -119,7 +119,8 @@ async def _get_db_connection(db_url: str = None):
         # pool.acquire() returns an async context manager
         async with pool.acquire() as conn:
             yield conn
-    except Exception:
+    except Exception as exc:
+        logger.warning("Shared pool unavailable, falling back to direct connection: %s", exc, exc_info=True)
         # Fallback to direct connection if pool unavailable
         if not db_url:
             db_url = os.getenv("DATABASE_URL")

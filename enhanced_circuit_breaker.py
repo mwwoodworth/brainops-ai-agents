@@ -18,22 +18,20 @@ Author: BrainOps AI System
 Version: 1.0.0 (2025-12-27)
 """
 
-import os
 import json
 import asyncio
 import logging
 import time
 import random  # ENHANCEMENT: For jitter in recovery timeouts
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Callable, Awaitable, Set, Tuple
-from dataclasses import dataclass, field, asdict
+from typing import Dict, List, Any, Optional, Callable, Awaitable, Set
+from dataclasses import dataclass, field
 from enum import Enum
 from collections import deque
 import threading
 import statistics
 
 # OPTIMIZATION: Sliding window counters for O(1) memory and updates
-from dataclasses import dataclass as dc_dataclass
 
 logger = logging.getLogger(__name__)
 

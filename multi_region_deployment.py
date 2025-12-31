@@ -14,22 +14,17 @@ A comprehensive multi-region deployment orchestrator that provides:
 
 import os
 import time
-import json
 import asyncio
 import hashlib
 import logging
 import psycopg2
 import threading
-import socket
-import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, field
 from enum import Enum
 from collections import defaultdict, deque
-import random
 # GeoIP and distance calculation implemented locally
-from psycopg2.extras import RealDictCursor
 import warnings
 warnings.filterwarnings('ignore')
 

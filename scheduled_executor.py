@@ -9,7 +9,6 @@ import asyncio
 import httpx
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger(__name__)

@@ -7,13 +7,10 @@ Uses actual API keys from production environment
 import os
 import json
 import asyncio
-from typing import Optional, List, Dict, Any, AsyncGenerator
-import openai
+from typing import Optional, List, Dict, Any
 from openai import OpenAI, AsyncOpenAI
-import anthropic
 from anthropic import Anthropic, AsyncAnthropic
 import psycopg2
-from psycopg2.extras import RealDictCursor
 from datetime import datetime
 import uuid
 import logging
@@ -483,7 +480,8 @@ class RealAICore:
         if not isinstance(draft, str):
             try:
                 draft = json.dumps(draft)
-            except Exception:
+            except (TypeError, ValueError) as exc:
+                logger.debug("Failed to JSON-encode draft: %s", exc)
                 draft = str(draft)
         current = draft
 
@@ -562,7 +560,8 @@ class RealAICore:
         if not isinstance(output, str):
             try:
                 output = json.dumps(output)
-            except Exception:
+            except (TypeError, ValueError) as exc:
+                logger.debug("Failed to JSON-encode output: %s", exc)
                 output = str(output)
 
         criteria = criteria or [

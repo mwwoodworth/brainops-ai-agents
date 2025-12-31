@@ -5,11 +5,9 @@ Fixed version of unified_memory_manager with proper type handling
 
 import os
 import json
-import asyncpg
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
-import hashlib
 import logging
 
 logger = logging.getLogger(__name__)

@@ -5,7 +5,6 @@ Final test of v4.0.4 with synchronous AI
 
 import requests
 import time
-import json
 
 BASE_URL = "https://brainops-ai-agents.onrender.com"
 

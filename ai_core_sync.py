@@ -4,12 +4,10 @@ Synchronous AI Core - Alternative implementation
 """
 
 import os
-import json
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional
 from openai import OpenAI
 from anthropic import Anthropic
-import psycopg2
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

@@ -1,9 +1,8 @@
 import json
 import logging
 import os
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -14,7 +13,7 @@ import httpx
 
 # Import Power Layer for full operational capability
 try:
-    from aurea_power_layer import get_power_layer, AUREAPowerLayer
+    from aurea_power_layer import get_power_layer
     POWER_LAYER_AVAILABLE = True
 except ImportError:
     POWER_LAYER_AVAILABLE = False

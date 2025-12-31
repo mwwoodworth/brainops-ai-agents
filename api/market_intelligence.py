@@ -6,7 +6,7 @@ Fully operational with proper error handling and fallbacks.
 """
 
 from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from pydantic import BaseModel
 import logging
 from enum import Enum

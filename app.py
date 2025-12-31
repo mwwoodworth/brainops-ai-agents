@@ -9,7 +9,6 @@ import json
 import time
 import uuid
 import inspect
-import random
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
 from contextlib import asynccontextmanager
@@ -1693,7 +1692,8 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
         if EMBEDDED_MEMORY_AVAILABLE and getattr(app.state, "embedded_memory", None):
             try:
                 embedded_memory_stats = app.state.embedded_memory.get_stats()
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to read embedded memory stats: %s", exc, exc_info=True)
                 embedded_memory_stats = {"status": "error"}
 
         return {
@@ -2100,7 +2100,7 @@ async def email_scheduler_stats(authenticated: bool = Depends(verify_api_key)):
         return {
             "daemon_stats": stats,
             "queue_counts": dict(queue_counts) if queue_counts else {},
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
     except ImportError:
         return {"error": "email_scheduler_daemon module not available"}
@@ -4016,7 +4016,8 @@ async def api_v1_knowledge_query(
 
                 try:
                     memory_type_enum = MemoryType(payload.memory_type)
-                except Exception:
+                except Exception as exc:
+                    logger.debug("Invalid memory type %s: %s", payload.memory_type, exc)
                     memory_type_enum = None
 
             results = app.state.memory.recall(
@@ -4037,7 +4038,8 @@ async def api_v1_knowledge_query(
         if isinstance(content, str):
             try:
                 content_parsed = json.loads(content)
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                logger.debug("Failed to parse memory content JSON: %s", exc)
                 content_parsed = content
         else:
             content_parsed = content

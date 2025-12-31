@@ -5,7 +5,6 @@ Using Inference API for when OpenAI/Anthropic have issues
 """
 
 import os
-import json
 import requests
 import logging
 

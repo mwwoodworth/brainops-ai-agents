@@ -1,6 +1,5 @@
 import asyncio
 import os
-import asyncpg
 from consciousness_loop import ConsciousnessLoop
 
 # Set env vars for the module to pick up

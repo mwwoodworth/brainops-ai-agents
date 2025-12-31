@@ -4,7 +4,6 @@ Comprehensive test of upgraded paid AI agents service
 Tests performance improvements, consistency, and identifies any runtime errors
 """
 
-import os
 import sys
 import time
 import psycopg2
@@ -15,7 +14,6 @@ import uuid
 import asyncio
 import aiohttp
 from datetime import datetime
-from typing import Dict, List, Tuple
 import statistics
 
 # Configuration

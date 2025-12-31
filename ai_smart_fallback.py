@@ -5,11 +5,10 @@ Automatically switches between OpenAI, Anthropic, and Hugging Face
 """
 
 import os
-import json
 import logging
 import time
 import requests
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, Optional, Any
 from openai import OpenAI
 from anthropic import Anthropic
 

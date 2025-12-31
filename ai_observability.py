@@ -23,9 +23,8 @@ import time
 import asyncio
 import logging
 import threading
-import statistics
 from typing import Dict, Any, List, Optional, Callable, Set, Tuple
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 from collections import defaultdict, deque
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 # Database persistence (optional)
 try:
     import psycopg2
-    from psycopg2.extras import RealDictCursor, execute_values
+    from psycopg2.extras import execute_values
     DB_AVAILABLE = True
 except ImportError:
     DB_AVAILABLE = False

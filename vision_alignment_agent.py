@@ -9,7 +9,7 @@ import json
 import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 from datetime import datetime
 
 logger = logging.getLogger(__name__)

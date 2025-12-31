@@ -47,10 +47,10 @@ def _get_pooled_connection():
 
 from unified_memory_manager import get_memory_manager, Memory, MemoryType
 from agent_activation_system import (
-    get_activation_system, BusinessEventType, AgentActivationSystem
+    get_activation_system, BusinessEventType
 )
 from ai_core import RealAICore
-from ai_board_governance import get_ai_board, Proposal, ProposalType
+from ai_board_governance import get_ai_board
 from ai_self_awareness import get_self_aware_ai, SelfAwareAI
 from revenue_generation_system import get_revenue_system, AutonomousRevenueSystem
 from ai_knowledge_graph import get_knowledge_graph, AIKnowledgeGraph
@@ -254,7 +254,8 @@ class AUREA:
         try:
             from database.async_connection import get_pool
             return get_pool()
-        except Exception:
+        except Exception as exc:
+            logger.debug("Shared pool unavailable: %s", exc, exc_info=True)
             return None
 
     @property
@@ -389,12 +390,14 @@ class AUREA:
         s = re.sub(r"\\s*```$", "", s)
         try:
             return json.loads(s)
-        except Exception:
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.debug("Failed to parse JSON payload: %s", exc)
             match = re.search(r"(\\{.*\\}|\\[.*\\])", s, flags=re.DOTALL)
             if match:
                 try:
                     return json.loads(match.group(1))
-                except Exception:
+                except (json.JSONDecodeError, TypeError) as exc:
+                    logger.debug("Failed to parse extracted JSON payload: %s", exc)
                     return {}
         return {}
 
@@ -475,7 +478,8 @@ class AUREA:
             if value is None:
                 return None
             return float(value)
-        except Exception:
+        except (TypeError, ValueError) as exc:
+            logger.debug("Failed to coerce float from %s: %s", value, exc)
             return None
 
     def _extract_keywords(self, signals: List[Dict[str, Any]]) -> List[str]:

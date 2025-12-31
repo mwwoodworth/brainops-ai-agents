@@ -2,7 +2,6 @@ import asyncio
 import os
 import json
 import logging
-import sys
 from datetime import datetime
 
 # Set environment variables for DB connection

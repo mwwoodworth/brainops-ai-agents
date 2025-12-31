@@ -14,18 +14,15 @@ This is NOT theoretical - this generates REAL revenue through:
 Designed for scale: Handle 100s to 100,000s of leads across industries.
 """
 
-import asyncio
 import json
 import os
 import uuid
-import hashlib
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field, asdict
+from datetime import datetime
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass, field
 from enum import Enum
 from decimal import Decimal
-import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +54,8 @@ async def _get_db_connection(db_url: str = None):
         from database.async_connection import get_pool
         pool = get_pool()
         return await pool.acquire()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Shared pool unavailable, falling back to direct connection: %s", exc, exc_info=True)
         # Fallback to direct connection if pool unavailable
         if db_url:
             import asyncpg

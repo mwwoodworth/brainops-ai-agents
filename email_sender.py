@@ -22,7 +22,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Tuple
 import psycopg2
 from psycopg2.extras import RealDictCursor
 

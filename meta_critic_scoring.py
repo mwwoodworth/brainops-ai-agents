@@ -14,17 +14,15 @@ Based on Perplexity research on AI agent orchestration patterns 2025.
 """
 
 import os
-import json
-import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Tuple
-from dataclasses import dataclass, asdict, field
+from typing import Dict, List, Any, Optional
+from dataclasses import dataclass
 from enum import Enum
 
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from psycopg2.extras import Json
 
 logger = logging.getLogger(__name__)
 

@@ -7,16 +7,12 @@ Intelligent, personalized customer onboarding with automated workflows and progr
 import os
 import json
 import logging
-import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Tuple
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
 from enum import Enum
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import hashlib
-import aiohttp
-from decimal import Decimal
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

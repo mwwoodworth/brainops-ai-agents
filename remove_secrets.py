@@ -3,7 +3,6 @@
 Remove all hardcoded secrets from Python files
 """
 
-import os
 import re
 from pathlib import Path
 

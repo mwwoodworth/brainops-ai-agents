@@ -8,7 +8,6 @@ import os
 import json
 import logging
 import uuid
-import numpy as np
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from enum import Enum

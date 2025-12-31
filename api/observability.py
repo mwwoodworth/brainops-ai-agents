@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
