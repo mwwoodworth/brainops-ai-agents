@@ -1,13 +1,12 @@
 services:
   - type: web
     name: brainops-ai-agents
-    runtime: image
+    runtime: docker
     plan: standard
-    # Use pre-built Docker Hub image for faster deploys (no build time)
-    image:
-      url: docker.io/mwwoodworth/brainops-ai-agents:v9.66.0
     repo: https://github.com/mwwoodworth/brainops-ai-agents
     branch: main
+    # Build from Dockerfile (auto-deploy works)
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
