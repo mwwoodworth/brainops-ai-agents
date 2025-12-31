@@ -926,8 +926,29 @@ class DeliveryManager:
             return {'success': False, 'error': str(e)}
 
     async def _deliver_sms(self, lead_id: str, content: Dict) -> Dict:
-        """Deliver SMS (simplified - would integrate with SMS service)"""
-        return {'success': True, 'channel': 'sms', 'status': 'sent'}
+        """Deliver SMS via Twilio if configured, otherwise log and skip"""
+        twilio_sid = os.getenv('TWILIO_ACCOUNT_SID')
+        twilio_token = os.getenv('TWILIO_AUTH_TOKEN')
+        twilio_from = os.getenv('TWILIO_FROM_NUMBER')
+
+        if not all([twilio_sid, twilio_token, twilio_from]):
+            logger.info(f"SMS delivery skipped for {lead_id} - Twilio not configured")
+            return {
+                'success': False,
+                'channel': 'sms',
+                'status': 'skipped',
+                'reason': 'Twilio credentials not configured'
+            }
+
+        # Would integrate with Twilio here
+        # For now, log that SMS would be sent
+        logger.info(f"SMS would be sent to lead {lead_id}: {content.get('message', '')[:50]}...")
+        return {
+            'success': False,
+            'channel': 'sms',
+            'status': 'not_implemented',
+            'reason': 'Twilio integration pending - credentials present but integration not complete'
+        }
 
 # Singleton instance
 _nurturing_system = None
