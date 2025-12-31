@@ -439,9 +439,9 @@ class EmbeddedMemorySystem:
                         last_accessed = EXCLUDED.last_accessed
                 """,
                     row['id'], row['memory_type'],
-                    row.get('source_system', 'embedded_memory'),
+                    dict(row).get('source_system', 'embedded_memory'),
                     row['source_agent'],
-                    row.get('created_by', 'embedded_memory'),
+                    dict(row).get('created_by', 'embedded_memory'),
                     row['content'], row['metadata'], row['importance_score'],
                     row['created_at'], row['last_accessed']
                 )

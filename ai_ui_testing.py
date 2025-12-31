@@ -213,7 +213,7 @@ class AIVisionAnalyzer:
             import google.generativeai as genai
             genai.configure(api_key=GEMINI_API_KEY)
 
-            model = genai.GenerativeModel("gemini-1.5-pro-latest")
+            model = genai.GenerativeModel("gemini-2.0-flash")
             prompt = self._build_analysis_prompt(context)
 
             # Decode base64 to bytes for Gemini
