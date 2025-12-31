@@ -69,3 +69,4 @@ sendgrid>=6.10.0
 stripe>=7.0.0
 # Cache bust: 1767186521
 # Deploy v9.67.0 1767190388
+supabase>=2.0.0
