@@ -250,7 +250,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.68.0"  # Switch to Transaction mode DB pooler (port 6543) (2025-12-31)
+VERSION = "9.69.0"  # Add DevOps Loop + Comprehensive E2E testing (2025-12-31)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -1355,6 +1355,14 @@ if KNOWLEDGE_BASE_ROUTER_AVAILABLE:
 
 if SOP_ROUTER_AVAILABLE:
     app.include_router(sop_router, dependencies=SECURED_DEPENDENCIES)
+
+# DevOps Loop API (2025-12-31) - Ultimate self-healing DevOps orchestrator
+try:
+    from api.devops_loop import router as devops_loop_router
+    app.include_router(devops_loop_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: DevOps Loop API at /devops-loop - continuous self-healing")
+except ImportError as e:
+    logger.warning(f"DevOps Loop Router not available: {e}")
 
 # Operational Verification API (2025-12-29) - PROVES systems work, doesn't assume
 if VERIFICATION_AVAILABLE:
