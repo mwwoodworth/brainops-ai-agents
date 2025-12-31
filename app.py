@@ -268,7 +268,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
-VERSION = "9.82.0"  # TRUE Operational Validator fixes: AI analyze + memory store API (2025-12-31)
+VERSION = "9.83.0"  # TRUE Validator fixes: LangGraph execute args + LiveMemoryBrain init (2025-12-31)
 LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
@@ -3724,8 +3724,9 @@ async def ai_analyze(
         if hasattr(app.state, 'langgraph_orchestrator') and app.state.langgraph_orchestrator:
             orchestrator = app.state.langgraph_orchestrator
             result = await orchestrator.execute(
-                task_description=task_description,
-                context={**context, "agent": agent_name, "action": action, "data": data}
+                agent_name=agent_name,
+                prompt=task_description,
+                context={**context, "action": action, "data": data}
             )
             return {
                 "success": True,
