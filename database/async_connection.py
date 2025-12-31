@@ -582,6 +582,15 @@ async def init_pool(config: PoolConfig) -> BasePool:
             last_error = exc
             logger.error("❌ Failed to initialize database pool on port %s: %s", port, exc)
 
+    # In production, hard fail instead of using in-memory fallback
+    # This prevents silent data loss and amnesia
+    import os
+    if os.getenv('ENVIRONMENT', 'development') == 'production':
+        logger.critical("❌ FATAL: Database connection failed in PRODUCTION. Refusing to use in-memory fallback.")
+        if last_error:
+            logger.critical("Database error: %s", last_error)
+        raise RuntimeError(f"Database connection required in production. Error: {last_error}")
+
     logger.warning("Falling back to in-memory store so critical APIs remain available.")
     fallback = InMemoryDatabasePool()
     await fallback.initialize()
