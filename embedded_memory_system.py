@@ -426,19 +426,22 @@ class EmbeddedMemorySystem:
             if not row:
                 return
 
-            # Write to master
+            # Write to master (include required source_system and created_by)
             async with self.pg_pool.acquire() as conn:
                 await conn.execute("""
                     INSERT INTO unified_ai_memory (
-                        id, memory_type, source_agent, content,
+                        id, memory_type, source_system, source_agent, created_by, content,
                         metadata, importance_score, created_at, last_accessed
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                     ON CONFLICT (id) DO UPDATE SET
                         content = EXCLUDED.content,
                         importance_score = EXCLUDED.importance_score,
                         last_accessed = EXCLUDED.last_accessed
                 """,
-                    row['id'], row['memory_type'], row['source_agent'],
+                    row['id'], row['memory_type'],
+                    row.get('source_system', 'embedded_memory'),
+                    row['source_agent'],
+                    row.get('created_by', 'embedded_memory'),
                     row['content'], row['metadata'], row['importance_score'],
                     row['created_at'], row['last_accessed']
                 )
