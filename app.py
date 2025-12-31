@@ -1287,6 +1287,11 @@ async def record_request_metrics(request: Request, call_next):
 # API Key authentication
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
+# Rate limit 403 error logging to avoid log flooding
+from collections import defaultdict
+_api_key_error_log_times: Dict[str, float] = defaultdict(float)
+_API_KEY_ERROR_LOG_INTERVAL = 60  # Only log same path/error once per minute
+
 
 async def verify_api_key(
     request: Request,
@@ -1317,9 +1322,23 @@ async def verify_api_key(
         )
 
     if not provided:
+        # Rate-limit logging of missing API key errors
+        path = request.url.path
+        error_key = f"missing:{path}"
+        now = time.time()
+        if now - _api_key_error_log_times[error_key] > _API_KEY_ERROR_LOG_INTERVAL:
+            _api_key_error_log_times[error_key] = now
+            logger.warning(f"API key missing for {path} (rate-limited)")
         raise HTTPException(status_code=403, detail="API key required")
 
     if provided not in config.security.valid_api_keys:
+        # Rate-limit logging of invalid API key errors
+        path = request.url.path
+        error_key = f"invalid:{path}"
+        now = time.time()
+        if now - _api_key_error_log_times[error_key] > _API_KEY_ERROR_LOG_INTERVAL:
+            _api_key_error_log_times[error_key] = now
+            logger.warning(f"Invalid API key for {path} (rate-limited)")
         raise HTTPException(status_code=403, detail="Invalid API key")
 
     return True
