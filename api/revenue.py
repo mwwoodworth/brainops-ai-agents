@@ -39,6 +39,7 @@ class LeadDiscoveryRequest(BaseModel):
     location: Optional[str] = "USA"
     limit: int = 10
     source: str = "ai_discovery"
+    tenant_id: Optional[str] = None  # SECURITY: Required for tenant isolation
 
 
 class LeadCreateRequest(BaseModel):
@@ -127,7 +128,8 @@ async def discover_leads(request: LeadDiscoveryRequest):
     try:
         # Generate realistic roofing contractor leads using AI patterns
         # In production, this would use Perplexity/web scraping
-        leads_data = await generate_realistic_leads(request.industry, request.location, request.limit)
+        # SECURITY: Pass tenant_id for proper tenant isolation
+        leads_data = await generate_realistic_leads(request.industry, request.location, request.limit, request.tenant_id)
 
         created_leads = []
         for lead_data in leads_data:
@@ -464,7 +466,7 @@ async def get_pipeline():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def generate_realistic_leads(industry: str, location: str, count: int) -> List[Dict[str, Any]]:
+async def generate_realistic_leads(industry: str, location: str, count: int, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Generate/discover leads using configured lead sources and ERP data.
 
@@ -472,6 +474,8 @@ async def generate_realistic_leads(industry: str, location: str, count: int) -> 
     1. Query existing high-potential customers from ERP who haven't been contacted recently
     2. Query configured lead sources (Storm Tracker, Referral Network, Website Forms)
     3. Use AI to score and prioritize leads
+
+    SECURITY: tenant_id is required for proper tenant isolation
     """
     pool = get_pool()
     leads = []
@@ -479,29 +483,36 @@ async def generate_realistic_leads(industry: str, location: str, count: int) -> 
     try:
         # Strategy 1: Find existing high-potential customers from ERP
         # These are customers with recent job history or high engagement
-        erp_leads = await pool.fetch("""
-            SELECT DISTINCT
-                c.id,
-                c.first_name || ' ' || c.last_name as contact_name,
-                COALESCE(c.company_name, c.first_name || ' ' || c.last_name || ' Property') as company_name,
-                c.email,
-                c.phone,
-                c.address,
-                c.city,
-                c.state,
-                COUNT(j.id) as job_count,
-                MAX(j.created_at) as last_job_date,
-                SUM(CASE WHEN j.status = 'completed' THEN COALESCE(j.total_amount, 0) ELSE 0 END) as lifetime_value
-            FROM customers c
-            LEFT JOIN jobs j ON j.customer_id = c.id
-            WHERE c.email IS NOT NULL
-            AND c.email != ''
-            AND (c.state ILIKE $1 OR c.city ILIKE $1 OR $1 = 'USA' OR $1 IS NULL)
-            GROUP BY c.id, c.first_name, c.last_name, c.company_name, c.email, c.phone, c.address, c.city, c.state
-            HAVING COUNT(j.id) = 0 OR MAX(j.created_at) < NOW() - INTERVAL '6 months'
-            ORDER BY lifetime_value DESC NULLS LAST, c.created_at DESC
-            LIMIT $2
-        """, location, count)
+        # SECURITY: Now includes tenant_id filter to prevent cross-tenant data access
+        if tenant_id:
+            erp_leads = await pool.fetch("""
+                SELECT DISTINCT
+                    c.id,
+                    c.first_name || ' ' || c.last_name as contact_name,
+                    COALESCE(c.company_name, c.first_name || ' ' || c.last_name || ' Property') as company_name,
+                    c.email,
+                    c.phone,
+                    c.address,
+                    c.city,
+                    c.state,
+                    COUNT(j.id) as job_count,
+                    MAX(j.created_at) as last_job_date,
+                    SUM(CASE WHEN j.status = 'completed' THEN COALESCE(j.total_amount, 0) ELSE 0 END) as lifetime_value
+                FROM customers c
+                LEFT JOIN jobs j ON j.customer_id = c.id AND j.tenant_id = $3
+                WHERE c.email IS NOT NULL
+                AND c.email != ''
+                AND c.tenant_id = $3
+                AND (c.state ILIKE $1 OR c.city ILIKE $1 OR $1 = 'USA' OR $1 IS NULL)
+                GROUP BY c.id, c.first_name, c.last_name, c.company_name, c.email, c.phone, c.address, c.city, c.state
+                HAVING COUNT(j.id) = 0 OR MAX(j.created_at) < NOW() - INTERVAL '6 months'
+                ORDER BY lifetime_value DESC NULLS LAST, c.created_at DESC
+                LIMIT $2
+            """, location, count, tenant_id)
+        else:
+            # Without tenant_id, only query from AI-specific revenue_leads table (no ERP customer access)
+            logger.warning("generate_realistic_leads called without tenant_id - skipping ERP customer query for security")
+            erp_leads = []
 
         for row in erp_leads:
             leads.append({
