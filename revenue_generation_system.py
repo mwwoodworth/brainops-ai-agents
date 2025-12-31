@@ -14,8 +14,6 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 from dataclasses import dataclass
 
-import openai
-import anthropic
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -23,18 +21,70 @@ from psycopg2.extras import RealDictCursor
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD"),
-    "port": int(os.getenv("DB_PORT", 5432))
-}
+# Use unified AI core instead of direct clients
+try:
+    from ai_core import ai_generate, ai_analyze, RealAICore
+    _ai_core = RealAICore()
+    AI_CORE_AVAILABLE = True
+    logger.info("Revenue System using unified AI Core")
+except ImportError:
+    AI_CORE_AVAILABLE = False
+    import openai
+    import anthropic
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+    anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    logger.warning("AI Core not available - using direct clients")
 
-# AI Configuration
-openai.api_key = os.getenv("OPENAI_API_KEY")
-anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+# Database configuration - use config module for consistency
+try:
+    from config import config
+    DB_CONFIG = {
+        "host": config.db_host,
+        "database": config.db_name,
+        "user": config.db_user,
+        "password": config.db_password,
+        "port": config.db_port
+    }
+except ImportError:
+    DB_CONFIG = {
+        "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": int(os.getenv("DB_PORT", 5432))
+    }
+
+# Connection pool for sync operations (reuse connections)
+_sync_connection_pool = []
+_MAX_POOL_SIZE = 5
+
+def get_sync_connection():
+    """Get a connection from pool or create new one"""
+    global _sync_connection_pool
+    if _sync_connection_pool:
+        conn = _sync_connection_pool.pop()
+        try:
+            # Test if connection is still valid
+            conn.cursor().execute("SELECT 1")
+            return conn
+        except:
+            pass  # Connection dead, create new one
+    return psycopg2.connect(**DB_CONFIG)
+
+def return_sync_connection(conn):
+    """Return connection to pool for reuse"""
+    global _sync_connection_pool
+    if len(_sync_connection_pool) < _MAX_POOL_SIZE:
+        try:
+            conn.rollback()  # Reset any uncommitted state
+            _sync_connection_pool.append(conn)
+        except:
+            try:
+                conn.close()
+            except:
+                pass
+    else:
+        conn.close()
 
 class LeadStage(Enum):
     """Lead progression stages"""
