@@ -37,6 +37,59 @@ from collections import defaultdict, deque
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# SECURITY CONTROLS FOR DANGEROUS TOOLS
+# =============================================================================
+# Environment check - dangerous tools only in development
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
+DANGEROUS_TOOLS_ENABLED = ENVIRONMENT in ("development", "local", "dev")
+
+# Admin API key for dangerous operations (separate from regular API key)
+ADMIN_API_KEY = os.getenv("MCP_ADMIN_API_KEY", "")
+
+# Allowlists for dangerous operations
+ALLOWED_BASH_COMMANDS = {
+    "ls", "pwd", "whoami", "date", "cat", "head", "tail", "grep", "wc",
+    "ps", "df", "du", "uptime", "free", "git status", "git log", "git diff",
+    "npm", "node", "python3", "pip", "curl -I"
+}
+
+ALLOWED_WRITE_PATHS = {
+    "/tmp/",
+    "/home/matt-woodworth/dev/brainops-ai-agents/logs/",
+    "/home/matt-woodworth/dev/analysis/"
+}
+
+BLOCKED_SQL_KEYWORDS = {
+    "DROP", "TRUNCATE", "DELETE FROM", "ALTER", "CREATE", "GRANT", "REVOKE",
+    "INSERT INTO agents", "UPDATE agents", "DELETE agents"
+}
+
+def is_safe_bash_command(cmd: str) -> bool:
+    """Check if bash command is in allowlist"""
+    cmd_lower = cmd.lower().strip()
+    # Check if starts with an allowed command
+    for allowed in ALLOWED_BASH_COMMANDS:
+        if cmd_lower.startswith(allowed.lower()):
+            return True
+    return False
+
+def is_safe_write_path(path: str) -> bool:
+    """Check if write path is in allowlist"""
+    path_resolved = os.path.abspath(path)
+    for allowed_prefix in ALLOWED_WRITE_PATHS:
+        if path_resolved.startswith(allowed_prefix):
+            return True
+    return False
+
+def is_safe_sql_query(query: str) -> bool:
+    """Check if SQL query is safe (no destructive operations)"""
+    query_upper = query.upper()
+    for blocked in BLOCKED_SQL_KEYWORDS:
+        if blocked in query_upper:
+            return False
+    return True
+
 # API Key authentication
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -203,10 +256,25 @@ class MCPServer:
 
         try:
             if tool == 'bash':
-                # Execute bash command
+                # Execute bash command - WITH SECURITY CONTROLS
                 cmd = params.get('command', '')
                 timeout = params.get('timeout', 30)
 
+                # SECURITY: Check if dangerous tools are enabled
+                if not DANGEROUS_TOOLS_ENABLED:
+                    result['error'] = "Bash execution disabled in production. Set ENVIRONMENT=development to enable."
+                    result['status'] = 'blocked'
+                    logger.warning(f"SECURITY: Blocked bash command in production: {cmd[:100]}")
+                    return result
+
+                # SECURITY: Check allowlist
+                if not is_safe_bash_command(cmd):
+                    result['error'] = f"Command not in allowlist. Allowed prefixes: {', '.join(sorted(ALLOWED_BASH_COMMANDS))}"
+                    result['status'] = 'blocked'
+                    logger.warning(f"SECURITY: Blocked non-allowlisted bash command: {cmd[:100]}")
+                    return result
+
+                logger.info(f"Executing allowed bash command: {cmd[:100]}")
                 proc = await asyncio.create_subprocess_shell(
                     cmd,
                     stdout=asyncio.subprocess.PIPE,
@@ -238,10 +306,25 @@ class MCPServer:
                     result['status'] = 'failed'
 
             elif tool == 'write_file':
-                # Write file contents
+                # Write file contents - WITH SECURITY CONTROLS
                 file_path = params.get('path', '')
                 content = params.get('content', '')
 
+                # SECURITY: Check if dangerous tools are enabled
+                if not DANGEROUS_TOOLS_ENABLED:
+                    result['error'] = "File write disabled in production. Set ENVIRONMENT=development to enable."
+                    result['status'] = 'blocked'
+                    logger.warning(f"SECURITY: Blocked file write in production: {file_path}")
+                    return result
+
+                # SECURITY: Check path allowlist
+                if not is_safe_write_path(file_path):
+                    result['error'] = f"Path not in allowlist. Allowed prefixes: {', '.join(sorted(ALLOWED_WRITE_PATHS))}"
+                    result['status'] = 'blocked'
+                    logger.warning(f"SECURITY: Blocked non-allowlisted file write: {file_path}")
+                    return result
+
+                logger.info(f"Writing to allowed path: {file_path}")
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 with open(file_path, 'w') as f:
                     f.write(content)
@@ -250,8 +333,24 @@ class MCPServer:
                 result['status'] = 'success'
 
             elif tool == 'database_query':
-                # Execute database query
+                # Execute database query - WITH SECURITY CONTROLS
                 query = params.get('query', '')
+
+                # SECURITY: Check for destructive operations
+                if not is_safe_sql_query(query):
+                    result['error'] = f"Query contains blocked keywords. Blocked: {', '.join(sorted(BLOCKED_SQL_KEYWORDS))}"
+                    result['status'] = 'blocked'
+                    logger.warning(f"SECURITY: Blocked dangerous SQL query: {query[:100]}")
+                    return result
+
+                # SECURITY: Only allow SELECT in production
+                if not DANGEROUS_TOOLS_ENABLED and not query.strip().upper().startswith('SELECT'):
+                    result['error'] = "Only SELECT queries allowed in production. Set ENVIRONMENT=development for write operations."
+                    result['status'] = 'blocked'
+                    logger.warning(f"SECURITY: Blocked non-SELECT query in production: {query[:100]}")
+                    return result
+
+                logger.info(f"Executing allowed SQL query: {query[:100]}")
                 conn = psycopg2.connect(**DB_CONFIG)
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
 
