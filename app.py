@@ -68,6 +68,7 @@ from api.a2ui import router as a2ui_router  # Google A2UI Protocol - Agent-to-Us
 from api.aurea_chat import router as aurea_chat_router  # AUREA Live Conversational Interface
 from api.observability import router as full_observability_router  # Comprehensive Observability Dashboard
 from api.self_awareness import router as self_awareness_router  # Self-Awareness Dashboard
+from api.ai_awareness import router as ai_awareness_router  # Complete AI Awareness - THE endpoint for AI context
 
 # Operational Verification API - PROVES systems work, doesn't assume
 try:
@@ -1317,6 +1318,7 @@ app.include_router(a2ui_router, dependencies=SECURED_DEPENDENCIES)  # Google A2U
 app.include_router(aurea_chat_router, dependencies=SECURED_DEPENDENCIES)  # AUREA Live Conversational AI
 app.include_router(full_observability_router, dependencies=SECURED_DEPENDENCIES)  # Comprehensive Observability Dashboard
 app.include_router(self_awareness_router, dependencies=SECURED_DEPENDENCIES)  # Self-Awareness Dashboard
+app.include_router(ai_awareness_router, dependencies=SECURED_DEPENDENCIES)  # Complete AI Awareness - THE endpoint
 
 # AI-Powered UI Testing System (2025-12-29) - Automated visual testing with AI vision
 if UI_TESTING_AVAILABLE:
