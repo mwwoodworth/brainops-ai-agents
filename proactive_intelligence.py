@@ -232,14 +232,21 @@ class ProactiveIntelligence:
             conn = self._get_connection()
             cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            # Analyze error patterns
+            # Analyze error patterns - use subquery for window function
             cur.execute("""
+                WITH error_intervals AS (
+                    SELECT
+                        error_type,
+                        occurred_at,
+                        EXTRACT(EPOCH FROM occurred_at - LAG(occurred_at) OVER (PARTITION BY error_type ORDER BY occurred_at)) as interval_seconds
+                    FROM ai_error_logs
+                    WHERE occurred_at > NOW() - INTERVAL '24 hours'
+                )
                 SELECT
                     error_type,
                     COUNT(*) as count,
-                    AVG(EXTRACT(EPOCH FROM occurred_at - LAG(occurred_at) OVER (ORDER BY occurred_at))) as avg_interval
-                FROM ai_error_logs
-                WHERE occurred_at > NOW() - INTERVAL '24 hours'
+                    AVG(interval_seconds) as avg_interval
+                FROM error_intervals
                 GROUP BY error_type
                 HAVING COUNT(*) > 3
             """)
