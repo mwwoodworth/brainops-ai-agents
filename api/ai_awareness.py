@@ -242,12 +242,13 @@ async def get_complete_awareness() -> Dict[str, Any]:
     # ============================================
     revenue_health = {"status": "unknown"}
     try:
+        # FIX: Query revenue_leads table (not ai_revenue_leads) with correct column names
         revenue_stats = await _safe_query(pool, """
             SELECT
                 COUNT(*) as total_leads,
-                COUNT(CASE WHEN stage = 'WON' THEN 1 END) as won,
-                COALESCE(SUM(CASE WHEN stage = 'WON' THEN estimated_value ELSE 0 END), 0) as won_value
-            FROM ai_revenue_leads
+                COUNT(CASE WHEN stage = 'won' THEN 1 END) as won,
+                COALESCE(SUM(CASE WHEN stage = 'won' THEN value_estimate ELSE 0 END), 0) as won_value
+            FROM revenue_leads
         """)
 
         rev = revenue_stats[0] if revenue_stats else {}
