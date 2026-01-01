@@ -1977,6 +1977,87 @@ async def get_system_pulse():
         return {"available": False, "error": str(e)}
 
 
+# ============================================================================
+# TELEMETRY INGESTION - Neural System Event Collection
+# ============================================================================
+
+@app.post("/api/v1/telemetry/events")
+async def receive_telemetry_events(request: Request):
+    """
+    Receive telemetry events from external systems (ERP, MRG, etc.).
+    This connects the 'nervous system' - allowing external apps to send
+    events to the AI brain for processing and awareness.
+    """
+    try:
+        body = await request.json()
+        events = body.get("events", [body])  # Support single event or array
+
+        # Log receipt
+        logger.info(f"Received {len(events)} telemetry events")
+
+        # Store events in database if available
+        stored_count = 0
+        if DATABASE_AVAILABLE:
+            try:
+                pool = get_database_pool()
+                async with pool.acquire() as conn:
+                    for event in events:
+                        await conn.execute("""
+                            INSERT INTO ai_nerve_signals (
+                                source, event_type, payload, metadata, created_at
+                            ) VALUES ($1, $2, $3, $4, NOW())
+                            ON CONFLICT DO NOTHING
+                        """,
+                            event.get("source", "unknown"),
+                            event.get("type", "telemetry"),
+                            json.dumps(event.get("data", {})),
+                            json.dumps(event.get("metadata", {}))
+                        )
+                        stored_count += 1
+            except Exception as db_err:
+                logger.warning(f"Failed to store telemetry: {db_err}")
+
+        return {
+            "success": True,
+            "received": len(events),
+            "stored": stored_count,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Telemetry ingestion error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/v1/knowledge/store")
+async def store_knowledge(request: Request):
+    """
+    Store knowledge/insights from external systems.
+    Allows ERP and other apps to contribute to the AI's knowledge base.
+    """
+    try:
+        body = await request.json()
+        key = body.get("key", "")
+        value = body.get("value", {})
+        category = body.get("category", "external")
+
+        if not key:
+            return {"success": False, "error": "Key required"}
+
+        # Store in brain context
+        if BRAIN_AVAILABLE:
+            try:
+                from api.brain import brain_store
+                await brain_store(key=key, value=value, category=category)
+                return {"success": True, "key": key}
+            except Exception as brain_err:
+                logger.warning(f"Brain store failed: {brain_err}")
+
+        return {"success": False, "error": "Brain not available"}
+    except Exception as e:
+        logger.error(f"Knowledge store error: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @app.get("/observability/metrics", dependencies=[Depends(verify_api_key)])
 async def observability_metrics():
     """Lightweight monitoring endpoint for request, cache, DB, and orchestrator health.
