@@ -100,25 +100,13 @@ class SystemStateManager:
             conn = self._get_connection()
             cur = conn.cursor()
 
-            # Create system state table
+            # Create system state table (aligns with production schema)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS ai_system_state (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    snapshot_id VARCHAR(255) UNIQUE NOT NULL,
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    overall_status VARCHAR(50) NOT NULL,
-                    health_score FLOAT DEFAULT 0.0,
-                    active_components INT DEFAULT 0,
-                    failed_components INT DEFAULT 0,
-                    warning_count INT DEFAULT 0,
-                    error_count INT DEFAULT 0,
-                    performance_metrics JSONB DEFAULT '{}'::jsonb,
-                    resource_usage JSONB DEFAULT '{}'::jsonb,
-                    active_sessions INT DEFAULT 0,
-                    pending_tasks INT DEFAULT 0,
-                    completed_tasks INT DEFAULT 0,
-                    snapshot_data JSONB NOT NULL,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
+                    id SERIAL PRIMARY KEY,
+                    state JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    last_updated TIMESTAMPTZ DEFAULT NOW(),
+                    snapshot_id UUID DEFAULT gen_random_uuid()
                 )
             """)
 
@@ -614,29 +602,19 @@ class SystemStateManager:
             conn = self._get_connection()
             cur = conn.cursor()
 
-            # Store main snapshot
+            # Store main snapshot in JSONB state (production schema)
+            snapshot_payload = {
+                "snapshot": asdict(snapshot),
+                "components": [asdict(state) for state in component_states]
+            }
+
             cur.execute("""
-                INSERT INTO ai_system_state (
-                    snapshot_id, overall_status, health_score,
-                    active_components, failed_components, warning_count,
-                    error_count, performance_metrics, resource_usage,
-                    active_sessions, pending_tasks, completed_tasks,
-                    snapshot_data
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO ai_system_state (state, last_updated, snapshot_id)
+                VALUES (%s, %s, %s)
             """, (
-                snapshot.snapshot_id,
-                snapshot.overall_status.value,
-                snapshot.health_score,
-                snapshot.active_components,
-                snapshot.failed_components,
-                snapshot.warning_count,
-                snapshot.error_count,
-                json.dumps(snapshot.performance_metrics),
-                json.dumps(snapshot.resource_usage),
-                snapshot.active_sessions,
-                snapshot.pending_tasks,
-                snapshot.completed_tasks,
-                json.dumps(asdict(snapshot), default=str)
+                json.dumps(snapshot_payload, default=str),
+                datetime.utcnow(),
+                snapshot.snapshot_id
             ))
 
             # Store component states

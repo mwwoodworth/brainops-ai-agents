@@ -119,27 +119,41 @@ class AIMemorySystem:
         cursor = conn.cursor()
 
         try:
-            # Get current value
-            cursor.execute("""
-                SELECT current_value FROM ai_system_state
-                WHERE component = %s AND state_key = %s
-            """, (component, state_key))
+            payload = {
+                "value": value,
+                "reason": reason,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
 
-            current = cursor.fetchone()
-            previous_value = current['current_value'] if current else None
-
-            # Update or insert
             cursor.execute("""
-                INSERT INTO ai_system_state (component, state_key, current_value, previous_value, change_reason)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (component, state_key) DO UPDATE
-                SET previous_value = ai_system_state.current_value,
-                    current_value = %s,
-                    change_reason = %s,
-                    created_at = NOW()
-            """, (component, state_key, json.dumps(value),
-                  json.dumps(previous_value) if previous_value else None, reason,
-                  json.dumps(value), reason))
+                WITH target AS (
+                    SELECT id FROM ai_system_state
+                    ORDER BY last_updated DESC NULLS LAST
+                    LIMIT 1
+                ),
+                updated AS (
+                    UPDATE ai_system_state
+                    SET state = jsonb_set(
+                        COALESCE(state, '{}'::jsonb),
+                        ARRAY[%s, %s],
+                        %s::jsonb,
+                        true
+                    ),
+                    last_updated = NOW()
+                    WHERE id IN (SELECT id FROM target)
+                    RETURNING id
+                )
+                INSERT INTO ai_system_state (state, last_updated)
+                SELECT jsonb_build_object(%s, jsonb_build_object(%s, %s::jsonb)), NOW()
+                WHERE NOT EXISTS (SELECT 1 FROM updated)
+            """, (
+                component,
+                state_key,
+                json.dumps(payload),
+                component,
+                state_key,
+                json.dumps(payload)
+            ))
 
             conn.commit()
 

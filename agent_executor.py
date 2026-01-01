@@ -30,6 +30,22 @@ from database.async_connection import get_pool
 from ai_self_awareness import SelfAwareAI as SelfAwareness, get_self_aware_ai
 from unified_brain import UnifiedBrain
 
+logger = logging.getLogger(__name__)
+
+STRICT_STARTUP = os.getenv("BRAINOPS_STRICT_STARTUP", "").lower() in ("1", "true", "yes")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
+if ENVIRONMENT == "production":
+    STRICT_STARTUP = True
+STRICT_AGENT_EXECUTION = os.getenv("BRAINOPS_STRICT_AGENT_EXECUTION", "").lower() in ("1", "true", "yes")
+if STRICT_STARTUP:
+    STRICT_AGENT_EXECUTION = True
+
+
+def _handle_optional_import(feature: str, exc: Exception) -> None:
+    if STRICT_STARTUP:
+        raise RuntimeError(f"{feature} failed to load in strict mode: {exc}") from exc
+    logger.warning("%s not available: %s", feature, exc)
+
 # Graph Context Provider for Phase 2 enhancements
 try:
     from graph_context_provider import (
@@ -37,8 +53,9 @@ try:
         get_graph_context_provider
     )
     GRAPH_CONTEXT_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     GRAPH_CONTEXT_AVAILABLE = False
+    _handle_optional_import("Graph context provider", exc)
 
 # Unified System Integration - wires ALL systems together
 try:
@@ -46,10 +63,9 @@ try:
         get_unified_integration
     )
     UNIFIED_INTEGRATION_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     UNIFIED_INTEGRATION_AVAILABLE = False
-
-logger = logging.getLogger(__name__)
+    _handle_optional_import("Unified system integration", exc)
 
 T = TypeVar("T")
 
@@ -71,17 +87,18 @@ try:
     from ai_core import RealAICore
     ai_core = RealAICore()
     USE_REAL_AI = True
-except ImportError:
+except Exception as exc:
     USE_REAL_AI = False
     ai_core = None
-    logger.warning("AI Core not available - using fallback")
+    _handle_optional_import("AI Core", exc)
 
 # LangGraph (optional)
 try:
     from langgraph.graph import StateGraph, END
     LANGGRAPH_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     LANGGRAPH_AVAILABLE = False
+    _handle_optional_import("LangGraph", exc)
 
 from config import config
 
@@ -94,89 +111,89 @@ try:
         ConversionAgent as AcqConversionAgent
     )
     ACQUISITION_AGENTS_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     ACQUISITION_AGENTS_AVAILABLE = False
-    logger.warning("Customer acquisition agents not available")
+    _handle_optional_import("Customer acquisition agents", exc)
 
 # Knowledge Agent - Permanent memory and context management
 try:
     from knowledge_agent import KnowledgeAgent
     KNOWLEDGE_AGENT_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     KNOWLEDGE_AGENT_AVAILABLE = False
-    logger.warning("Knowledge agent not available")
+    _handle_optional_import("Knowledge agent", exc)
 
 # UI Tester Agent - Automated UI testing with Playwright
 try:
     from ui_tester_agent import UITesterAgent
     UI_TESTER_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     UI_TESTER_AVAILABLE = False
-    logger.warning("UI tester agent not available")
+    _handle_optional_import("UI tester agent", exc)
 
 # Playwright UI Testing Agent - AI vision + database reporting
 try:
     from ui_testing_playwright import PlaywrightUITestingAgent
     UI_PLAYWRIGHT_TESTING_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     UI_PLAYWRIGHT_TESTING_AVAILABLE = False
-    logger.warning("Playwright UI testing agent not available")
+    _handle_optional_import("Playwright UI testing agent", exc)
 
 # TRUE E2E UI Testing Agent - Human-like comprehensive UI testing
 try:
     from true_e2e_ui_testing import TrueE2EUITestingAgent
     TRUE_E2E_UI_TESTING_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     TRUE_E2E_UI_TESTING_AVAILABLE = False
-    logger.warning("TRUE E2E UI testing agent not available")
+    _handle_optional_import("TRUE E2E UI testing agent", exc)
 
 # AI-Human Task Management Agent - Bidirectional task coordination
 try:
     from ai_human_task_management import AIHumanTaskAgent
     AI_HUMAN_TASK_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     AI_HUMAN_TASK_AVAILABLE = False
-    logger.warning("AI-Human task management not available")
+    _handle_optional_import("AI-Human task management", exc)
 
 # Deployment Monitor Agent - Render/Vercel deployment monitoring
 try:
     from deployment_monitor_agent import DeploymentMonitorAgent
     DEPLOYMENT_MONITOR_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     DEPLOYMENT_MONITOR_AVAILABLE = False
-    logger.warning("Deployment monitor agent not available")
+    _handle_optional_import("Deployment monitor agent", exc)
 
 # Revenue Pipeline Agents - REAL implementations
 try:
     from revenue_pipeline_agents import LeadDiscoveryAgentReal, NurtureExecutorAgentReal
     REVENUE_PIPELINE_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     REVENUE_PIPELINE_AVAILABLE = False
-    logger.warning("Revenue pipeline agents not available")
+    _handle_optional_import("Revenue pipeline agents", exc)
 
 # Hallucination Prevention - SAC3 validation for all AI outputs
 try:
     from hallucination_prevention import get_hallucination_controller
     HALLUCINATION_PREVENTION_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     HALLUCINATION_PREVENTION_AVAILABLE = False
-    logger.warning("Hallucination prevention not available")
+    _handle_optional_import("Hallucination prevention", exc)
 
 # Live Memory Brain - Persistent memory storage for agent executions
 try:
     from live_memory_brain import get_live_brain, MemoryType
     LIVE_MEMORY_BRAIN_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     LIVE_MEMORY_BRAIN_AVAILABLE = False
-    logger.warning("Live memory brain not available")
+    _handle_optional_import("Live memory brain", exc)
 
 # MCP Bridge Client for tool execution
 try:
     from mcp_integration import get_mcp_client
     MCP_INTEGRATION_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     MCP_INTEGRATION_AVAILABLE = False
-    logger.warning("MCP integration not available")
+    _handle_optional_import("MCP integration", exc)
 
 # Database configuration (for reference, pool uses config internally)
 DB_CONFIG = {
@@ -1099,6 +1116,10 @@ class AgentExecutor:
         Returns 'ai_simulated' status to make it clear this is NOT a real agent execution.
         Callers should check the status and handle appropriately.
         """
+        if STRICT_AGENT_EXECUTION:
+            raise RuntimeError(
+                f"Agent '{agent_name}' is not implemented. Strict execution forbids AI simulation fallback."
+            )
         if USE_REAL_AI:
             try:
                 prompt = f"""
