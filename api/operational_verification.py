@@ -131,10 +131,13 @@ class OperationalVerifier:
 
             # Get list of available agents
             agents = list(executor.agents.keys())
+            agents_lower = [a.lower() for a in agents]
 
-            # Try to execute a safe agent (monitor agent)
-            if "monitor" in agents:
-                result = await executor.execute("monitor", {"action": "status"})
+            # Try to execute a safe agent (Monitor agent - case insensitive check)
+            if "monitor" in agents_lower:
+                # Find the actual agent name with correct case
+                monitor_name = agents[agents_lower.index("monitor")]
+                result = await executor.execute(monitor_name, {"action": "status"})
                 execution_verified = "error" not in str(result).lower()
             else:
                 execution_verified = False
@@ -270,25 +273,28 @@ class OperationalVerifier:
         start = time.time()
         results = {}
 
+        # Agent configs with their primary method names
         agent_configs = [
-            ("system_improvement", "System Improvement Agent"),
-            ("devops_agent", "DevOps Optimization Agent"),
-            ("code_quality", "Code Quality Agent"),
-            ("customer_success", "Customer Success Agent"),
-            ("competitive_intel", "Competitive Intelligence Agent"),
-            ("vision_alignment", "Vision Alignment Agent"),
+            ("system_improvement", "System Improvement Agent", ["analyze_performance", "execute", "run"]),
+            ("devops_agent", "DevOps Optimization Agent", ["analyze_pipeline", "analyze_deployment_health", "execute", "run"]),
+            ("code_quality", "Code Quality Agent", ["analyze_code", "execute", "run"]),
+            ("customer_success", "Customer Success Agent", ["analyze_customer", "execute", "run"]),
+            ("competitive_intel", "Competitive Intelligence Agent", ["analyze_competitor", "execute", "run"]),
+            ("vision_alignment", "Vision Alignment Agent", ["analyze_alignment", "execute", "run"]),
         ]
 
-        for attr_name, display_name in agent_configs:
+        for attr_name, display_name, methods in agent_configs:
             try:
                 agent = getattr(app_state, attr_name, None)
                 if agent:
-                    # Check if agent has execute method
-                    has_execute = hasattr(agent, "execute") or hasattr(agent, "run")
+                    # Check if agent has any of its expected methods
+                    available_methods = [m for m in methods if hasattr(agent, m)]
+                    has_capability = len(available_methods) > 0
                     results[attr_name] = {
-                        "status": "operational" if has_execute else "degraded",
+                        "status": "operational" if has_capability else "degraded",
                         "initialized": True,
-                        "has_execute": has_execute
+                        "has_capability": has_capability,
+                        "methods": available_methods[:3] if available_methods else []
                     }
                 else:
                     results[attr_name] = {
