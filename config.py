@@ -142,7 +142,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.95.0')  # Fix operational verification - schema and memory
+        self.version = os.getenv('VERSION', '9.96.0')  # Fix verification: add event_id/source, tenant_id
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
