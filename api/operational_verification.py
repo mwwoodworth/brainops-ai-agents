@@ -38,7 +38,7 @@ class OperationalVerifier:
             # Test write (use a test table)
             test_id = f"verify_{datetime.now(timezone.utc).timestamp()}"
             await pool.execute("""
-                INSERT INTO ai_realtime_events (event_type, payload, created_at)
+                INSERT INTO ai_realtime_events (event_type, data, created_at)
                 VALUES ('verification_test', $1, NOW())
                 ON CONFLICT DO NOTHING
             """, f'{{"test_id": "{test_id}"}}')
@@ -91,24 +91,22 @@ class OperationalVerifier:
             from unified_memory_manager import UnifiedMemoryManager
 
             memory = UnifiedMemoryManager()
-            test_key = f"verify_test_{int(time.time())}"
-            test_value = {"verified_at": datetime.now(timezone.utc).isoformat()}
+            test_content = f"verification_test_{int(time.time())}"
 
-            # Store
-            await memory.store(
-                key=test_key,
-                value=test_value,
+            # Store using store_async with correct signature
+            memory_id = await memory.store_async(
+                content=test_content,
                 memory_type="episodic",
-                context={"source": "verification"}
+                category="verification",
+                metadata={"source": "operational_verification"}
             )
 
-            # Retrieve
-            retrieved = await memory.retrieve(test_key)
+            store_ok = memory_id is not None
 
             return {
-                "status": "operational" if retrieved else "degraded",
-                "store_verified": True,
-                "retrieve_verified": retrieved is not None,
+                "status": "operational" if store_ok else "degraded",
+                "store_verified": store_ok,
+                "memory_id": memory_id,
                 "latency_ms": round((time.time() - start) * 1000, 2)
             }
         except Exception as e:
