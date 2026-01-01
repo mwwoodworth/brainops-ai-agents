@@ -1211,16 +1211,26 @@ async def initialize_brain_with_current_state():
 
 
 if __name__ == "__main__":
+    import argparse
+
     async def main():
-        # Initialize with current state
-        await initialize_brain_with_current_state()
+        parser = argparse.ArgumentParser(description="Unified Brain CLI")
+        parser.add_argument("--dump-context", action="store_true", help="Dump full context as JSON")
+        parser.add_argument("--output", type=str, help="Write output JSON to file")
+        parser.add_argument("--init", action="store_true", help="Initialize baseline context before dumping")
+        args = parser.parse_args()
 
-        # Optional: Consolidate legacy tables
-        # await brain.consolidate_from_legacy_tables()
+        if args.init:
+            await initialize_brain_with_current_state()
 
-        # Test retrieval
-        context = await brain.get_full_context()
-        print(json.dumps(context, indent=2, default=str))
+        if args.dump_context:
+            context = await brain.get_full_context()
+            payload = json.dumps(context, indent=2, default=str)
+            if args.output:
+                with open(args.output, "w", encoding="utf-8") as handle:
+                    handle.write(payload)
+            else:
+                print(payload)
 
         await brain.close()
 
