@@ -35,13 +35,13 @@ class OperationalVerifier:
             result = await pool.fetchval("SELECT 1 as test")
             read_ok = result == 1
 
-            # Test write (use a test table)
+            # Test write (use a test table with all required columns)
             test_id = f"verify_{datetime.now(timezone.utc).timestamp()}"
             await pool.execute("""
-                INSERT INTO ai_realtime_events (event_type, data, created_at)
-                VALUES ('verification_test', $1, NOW())
+                INSERT INTO ai_realtime_events (event_id, event_type, source, data, created_at)
+                VALUES ($1, 'verification_test', 'operational_verification', $2, NOW())
                 ON CONFLICT DO NOTHING
-            """, f'{{"test_id": "{test_id}"}}')
+            """, test_id, f'{{"test_id": "{test_id}"}}')
             write_ok = True
 
             return {
@@ -89,8 +89,11 @@ class OperationalVerifier:
         start = time.time()
         try:
             from unified_memory_manager import UnifiedMemoryManager
+            from config import config
 
-            memory = UnifiedMemoryManager()
+            # Use default tenant_id from config (required for multi-tenancy)
+            tenant_id = config.tenant.default_tenant_id or "system_verification"
+            memory = UnifiedMemoryManager(tenant_id=tenant_id)
             test_content = f"verification_test_{int(time.time())}"
 
             # Store using store_async with correct signature
@@ -107,6 +110,7 @@ class OperationalVerifier:
                 "status": "operational" if store_ok else "degraded",
                 "store_verified": store_ok,
                 "memory_id": memory_id,
+                "tenant_id": tenant_id,
                 "latency_ms": round((time.time() - start) * 1000, 2)
             }
         except Exception as e:
