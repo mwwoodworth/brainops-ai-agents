@@ -49,3 +49,5 @@ credentials/
 tmp/
 temp/
 .venv/
+*.findings*.txt
+findings_*.txt
