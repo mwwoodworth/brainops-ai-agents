@@ -1982,11 +1982,12 @@ async def get_system_pulse():
 # ============================================================================
 
 @app.post("/api/v1/telemetry/events")
-async def receive_telemetry_events(request: Request):
+async def receive_telemetry_events(request: Request, authenticated: bool = Depends(verify_api_key)):
     """
     Receive telemetry events from external systems (ERP, MRG, etc.).
     This connects the 'nervous system' - allowing external apps to send
     events to the AI brain for processing and awareness.
+    Requires API key authentication.
     """
     try:
         body = await request.json()
@@ -2029,10 +2030,11 @@ async def receive_telemetry_events(request: Request):
 
 
 @app.post("/api/v1/knowledge/store")
-async def store_knowledge(request: Request):
+async def store_knowledge(request: Request, authenticated: bool = Depends(verify_api_key)):
     """
     Store knowledge/insights from external systems.
     Allows ERP and other apps to contribute to the AI's knowledge base.
+    Requires API key authentication.
     """
     try:
         body = await request.json()
