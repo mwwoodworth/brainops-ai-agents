@@ -159,11 +159,13 @@ class OperationalVerifier:
             if not scheduler:
                 return {"status": "not_initialized", "error": "Scheduler not found in app state"}
 
-            # Check if scheduler is running
-            is_running = getattr(scheduler, "_running", False) or getattr(scheduler, "running", False)
+            # Check if scheduler is running - AgentScheduler wraps BackgroundScheduler in .scheduler
+            inner_scheduler = getattr(scheduler, "scheduler", None)
+            is_running = getattr(inner_scheduler, "running", False) if inner_scheduler else False
 
-            # Get job count
-            job_count = len(getattr(scheduler, "jobs", []))
+            # Get job count from registered_jobs dict (AgentScheduler uses this, not .jobs)
+            registered_jobs = getattr(scheduler, "registered_jobs", {})
+            job_count = len(registered_jobs)
 
             return {
                 "status": "operational" if is_running else "stopped",

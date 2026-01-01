@@ -33,8 +33,11 @@ logger = logging.getLogger(__name__)
 
 # MCP Bridge Configuration
 # The MCP_API_KEY must match the key set on the MCP Bridge Render service
+# SECURITY: No fallback default - must be set via environment
 MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
-MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("MCP_BRIDGE_API_KEY") or "brainops_mcp_2025"
+MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("MCP_BRIDGE_API_KEY")
+if not MCP_API_KEY:
+    logger.warning("⚠️ MCP_API_KEY not configured - MCP integration will be disabled")
 
 
 class MCPServer(Enum):
