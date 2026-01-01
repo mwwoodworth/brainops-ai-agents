@@ -273,13 +273,13 @@ class OperationalVerifier:
         start = time.time()
         results = {}
 
-        # Agent configs with their primary method names
+        # Agent configs with their primary method names (based on actual implementations)
         agent_configs = [
             ("system_improvement", "System Improvement Agent", ["analyze_performance", "execute", "run"]),
-            ("devops_agent", "DevOps Optimization Agent", ["analyze_pipeline", "analyze_deployment_health", "execute", "run"]),
-            ("code_quality", "Code Quality Agent", ["analyze_code", "execute", "run"]),
-            ("customer_success", "Customer Success Agent", ["analyze_customer", "execute", "run"]),
-            ("competitive_intel", "Competitive Intelligence Agent", ["analyze_competitor", "execute", "run"]),
+            ("devops_agent", "DevOps Optimization Agent", ["analyze_pipeline", "analyze_deployment_health", "optimize_resources"]),
+            ("code_quality", "Code Quality Agent", ["analyze_codebase", "review_pr", "automated_code_review"]),
+            ("customer_success", "Customer Success Agent", ["analyze_customer_health", "analyze_churn_risk", "calculate_health_score"]),
+            ("competitive_intel", "Competitive Intelligence Agent", ["monitor_competitors", "analyze_pricing", "analyze_market_trends"]),
             ("vision_alignment", "Vision Alignment Agent", ["analyze_alignment", "execute", "run"]),
         ]
 

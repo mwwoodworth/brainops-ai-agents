@@ -142,7 +142,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.97.0')  # Enhanced verification: case-insensitive agents, method detection
+        self.version = os.getenv('VERSION', '9.98.0')  # Correct method names for all specialized agents
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
