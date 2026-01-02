@@ -83,9 +83,13 @@ def get_sync_connection():
             # Test if connection is still valid
             conn.cursor().execute("SELECT 1")
             return conn
-        except:
-            pass  # Connection dead, create new one
-    return psycopg2.connect(**DB_CONFIG)
+        except Exception as e:
+            logger.warning(f"Stale connection in pool, creating new: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass  # Already closed
+    return psycopg2.connect(**DB_CONFIG, connect_timeout=10)
 
 def return_sync_connection(conn):
     """Return connection to pool for reuse"""
@@ -94,13 +98,17 @@ def return_sync_connection(conn):
         try:
             conn.rollback()  # Reset any uncommitted state
             _sync_connection_pool.append(conn)
-        except:
+        except Exception as e:
+            logger.warning(f"Failed to return connection to pool: {e}")
             try:
                 conn.close()
-            except:
-                pass
+            except Exception as close_err:
+                logger.debug(f"Error closing connection: {close_err}")
     else:
-        conn.close()
+        try:
+            conn.close()
+        except Exception as e:
+            logger.debug(f"Error closing excess connection: {e}")
 
 class LeadStage(Enum):
     """Lead progression stages"""
