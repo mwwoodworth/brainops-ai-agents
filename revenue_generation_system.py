@@ -21,6 +21,22 @@ from psycopg2.extras import RealDictCursor
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Test data safeguards
+TEST_EMAIL_SUFFIXES = (".test", ".example", ".invalid")
+TEST_EMAIL_TOKENS = ("@example.", "@test.", "@demo.", "@invalid.")
+TEST_EMAIL_DOMAINS = ("test.com", "example.com", "localhost", "demo@roofing.com")
+
+
+def _is_test_email(email: str | None) -> bool:
+    if not email:
+        return True
+    lowered = email.lower().strip()
+    if any(lowered.endswith(suffix) for suffix in TEST_EMAIL_SUFFIXES):
+        return True
+    if any(token in lowered for token in TEST_EMAIL_TOKENS):
+        return True
+    return any(domain in lowered for domain in TEST_EMAIL_DOMAINS)
+
 # Use unified AI core instead of direct clients
 try:
     from ai_core import ai_generate, ai_analyze, RealAICore
@@ -984,6 +1000,15 @@ Return ONLY valid JSON array, no other text."""
     async def _schedule_email(self, email_data: Dict):
         """Schedule email for sending"""
         try:
+            recipient = email_data.get('to')
+            metadata = email_data.get('metadata') or {}
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except json.JSONDecodeError:
+                    metadata = {}
+            metadata['is_test'] = bool(email_data.get('is_test')) or _is_test_email(recipient)
+
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
 
@@ -994,12 +1019,12 @@ Return ONLY valid JSON array, no other text."""
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (
                 str(uuid.uuid4()),
-                email_data.get('to'),
+                recipient,
                 email_data.get('subject'),
                 email_data.get('body'),
                 datetime.now(timezone.utc),
                 'queued',
-                json.dumps(email_data.get('metadata', {}))
+                json.dumps(metadata)
             ))
 
             conn.commit()

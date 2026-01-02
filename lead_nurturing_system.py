@@ -20,6 +20,23 @@ from openai import OpenAI
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Test data safeguards
+TEST_EMAIL_SUFFIXES = (".test", ".example", ".invalid")
+TEST_EMAIL_TOKENS = ("@example.", "@test.", "@demo.", "@invalid.")
+TEST_EMAIL_DOMAINS = ("test.com", "example.com", "localhost", "demo@roofing.com")
+
+
+def _is_test_email(email: str | None) -> bool:
+    if not email:
+        return True
+    lowered = email.lower().strip()
+    if any(lowered.endswith(suffix) for suffix in TEST_EMAIL_SUFFIXES):
+        return True
+    if any(token in lowered for token in TEST_EMAIL_TOKENS):
+        return True
+    return any(domain in lowered for domain in TEST_EMAIL_DOMAINS)
+
+
 # Database configuration
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
@@ -896,6 +913,8 @@ class DeliveryManager:
                     logger.warning(f"Cannot deliver email: no recipient found for lead {lead_id}")
                     return {'success': False, 'error': 'No email address found'}
 
+            is_test = bool(lead_data.get('is_test')) or _is_test_email(recipient)
+
             # Store in email queue
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
@@ -911,7 +930,8 @@ class DeliveryManager:
                 'queued',
                 Json({
                     'source': 'nurture_system',
-                    'lead_id': str(lead_id)
+                    'lead_id': str(lead_id),
+                    'is_test': is_test
                 })
             ))
 
