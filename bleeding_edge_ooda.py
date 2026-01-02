@@ -71,15 +71,22 @@ async def retry_with_backoff(
                 await asyncio.sleep(wait_time)
     raise last_error
 
-# Database configuration with hardcoded fallback
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-    'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('DB_PASSWORD') or os.getenv('SUPABASE_DB_PASSWORD'),
-    'port': int(os.getenv('DB_PORT', 5432)),
-    'sslmode': 'require'
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        'host': os.getenv('DB_HOST'),
+        'database': os.getenv('DB_NAME', 'postgres'),
+        'user': os.getenv('DB_USER'),
+        'password': os.getenv('DB_PASSWORD'),
+        'port': int(os.getenv('DB_PORT', '5432')),
+        'sslmode': 'require'
+    }
 
 # Connection pool for efficient DB usage
 _db_pool = None
@@ -88,10 +95,8 @@ _pool_lock = asyncio.Lock() if hasattr(asyncio, 'Lock') else None
 
 def get_db_connection():
     """Get a database connection with proper config"""
-    if not DB_CONFIG.get('password'):
-        return None
     try:
-        return psycopg2.connect(**DB_CONFIG)
+        return psycopg2.connect(**_get_db_config())
     except Exception as e:
         logger.debug(f"DB connection failed: {e}")
         return None

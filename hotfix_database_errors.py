@@ -5,17 +5,48 @@ Fixes critical errors found in production logs
 """
 
 import os
+import sys
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-# Database connection
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD", "<DB_PASSWORD_REDACTED>"),
-    "port": os.getenv("DB_PORT", 5432)
-}
+# Database connection - NO hardcoded credentials
+def get_db_config():
+    """Get database configuration from environment variables."""
+    db_host = os.getenv('DB_HOST')
+    db_name = os.getenv('DB_NAME')
+    db_user = os.getenv('DB_USER')
+    db_password = os.getenv('DB_PASSWORD')
+    db_port = os.getenv('DB_PORT', '5432')
+
+    missing = []
+    if not db_host:
+        missing.append('DB_HOST')
+    if not db_name:
+        missing.append('DB_NAME')
+    if not db_user:
+        missing.append('DB_USER')
+    if not db_password:
+        missing.append('DB_PASSWORD')
+
+    if missing:
+        raise RuntimeError(
+            f"Required environment variables not set: {', '.join(missing)}. "
+            "Set these variables before running this hotfix."
+        )
+
+    return {
+        'host': db_host,
+        'database': db_name,
+        'user': db_user,
+        'password': db_password,
+        'port': int(db_port)
+    }
+
+try:
+    DB_CONFIG = get_db_config()
+except RuntimeError as e:
+    print(f"ERROR: {e}")
+    sys.exit(1)
 
 def fix_database_issues():
     """Apply hotfixes for database issues"""

@@ -19,14 +19,21 @@ from psycopg2.extras import RealDictCursor, Json
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD"),
-    "port": os.getenv("DB_PORT", "5432")
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        "host": os.getenv("DB_HOST"),
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": int(os.getenv("DB_PORT", "5432"))
+    }
 
 
 class TaskPriority(Enum):
@@ -132,7 +139,7 @@ class LoadPredictor:
     async def learn_from_history(self, lookback_days: int = 30):
         """Learn load patterns from historical data"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get historical execution data
@@ -550,7 +557,7 @@ class PredictiveSchedulingSystem:
     def _get_connection(self):
         """Get database connection"""
         if not self.conn or self.conn.closed:
-            self.conn = psycopg2.connect(**DB_CONFIG)
+            self.conn = psycopg2.connect(**_get_db_config())
         return self.conn
 
     def _init_database(self):

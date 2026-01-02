@@ -20,10 +20,10 @@ def _build_database_url():
     database_url = os.environ.get('DATABASE_URL') or os.environ.get('SUPABASE_DB_URL')
     if database_url:
         return database_url
-    # Fallback to individual vars (Render uses these)
-    host = os.environ.get('DB_HOST', '')
-    user = os.environ.get('DB_USER', '')
-    password = os.environ.get('DB_PASSWORD', '')
+    # All credentials MUST come from environment variables - no hardcoded defaults
+    host = os.environ.get('DB_HOST')
+    user = os.environ.get('DB_USER')
+    password = os.environ.get('DB_PASSWORD')
     database = os.environ.get('DB_NAME', 'postgres')
     port = os.environ.get('DB_PORT', '5432')
     if host and user and password:

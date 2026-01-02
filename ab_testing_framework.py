@@ -20,13 +20,21 @@ import numpy as np
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD")
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        "host": os.getenv("DB_HOST"),
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": int(os.getenv("DB_PORT", "5432"))
+    }
 
 class ExperimentStatus(Enum):
     """Experiment status"""
@@ -76,7 +84,7 @@ class ExperimentDesigner:
     ) -> str:
         """Create a new A/B test experiment"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             experiment_id = str(uuid.uuid4())
@@ -181,7 +189,7 @@ class TrafficSplitter:
             if cache_key in self.assignment_cache:
                 return self.assignment_cache[cache_key]
 
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Check existing assignment
@@ -274,7 +282,7 @@ class MetricsCollector:
     ) -> bool:
         """Track an event for an experiment"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get user's variant
@@ -323,7 +331,7 @@ class MetricsCollector:
     ) -> Dict:
         """Calculate current metrics for experiment"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get variant metrics
@@ -380,7 +388,7 @@ class StatisticalAnalyzer:
     ) -> Dict:
         """Perform statistical analysis on experiment results"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get experiment data
@@ -521,7 +529,7 @@ class ExperimentManager:
     async def start_experiment(self, experiment_id: str) -> bool:
         """Start an experiment"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -551,7 +559,7 @@ class ExperimentManager:
             analyzer = StatisticalAnalyzer()
             final_results = await analyzer.analyze_experiment(experiment_id)
 
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             # Update experiment status

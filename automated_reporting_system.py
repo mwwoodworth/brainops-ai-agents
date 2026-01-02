@@ -26,14 +26,40 @@ class DecimalEncoder(json.JSONEncoder):
             return float(obj)
         return super(DecimalEncoder, self).default(obj)
 
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD"),
-    "port": os.getenv("DB_PORT", "5432")
-}
+# Database configuration - NO hardcoded fallback credentials
+def _get_db_config():
+    """Get database configuration from environment variables."""
+    db_host = os.getenv("DB_HOST")
+    db_name = os.getenv("DB_NAME")
+    db_user = os.getenv("DB_USER")
+    db_password = os.getenv("DB_PASSWORD")
+    db_port = os.getenv("DB_PORT", "5432")
+
+    missing = []
+    if not db_host:
+        missing.append("DB_HOST")
+    if not db_name:
+        missing.append("DB_NAME")
+    if not db_user:
+        missing.append("DB_USER")
+    if not db_password:
+        missing.append("DB_PASSWORD")
+
+    if missing:
+        raise RuntimeError(
+            f"Required environment variables not set: {', '.join(missing)}. "
+            "Set these variables before using automated reporting system."
+        )
+
+    return {
+        "host": db_host,
+        "database": db_name,
+        "user": db_user,
+        "password": db_password,
+        "port": db_port
+    }
+
+
 
 class ReportType(Enum):
     DAILY_SUMMARY = "daily_summary"
@@ -89,7 +115,7 @@ class AutomatedReportingSystem:
     def _get_connection(self):
         """Get database connection"""
         if not self.conn or self.conn.closed:
-            self.conn = psycopg2.connect(**DB_CONFIG)
+            self.conn = psycopg2.connect(**_get_db_config())
         return self.conn
 
     async def create_report(

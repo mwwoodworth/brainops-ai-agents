@@ -41,13 +41,23 @@ RENDER_SERVICES = {
     "mcp-bridge": "srv-d4rhvg63jp1c73918770"
 }
 
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD", os.environ.get('SUPABASE_DB_PASSWORD', os.environ.get('PGPASSWORD', ''))),
-    "port": int(os.getenv("DB_PORT", "6543"))
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        "host": os.getenv("DB_HOST"),
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": int(os.getenv("DB_PORT", "5432"))
+    }
+
+DB_CONFIG = None  # Lazy initialization - use _get_db_config() instead
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
@@ -135,12 +145,13 @@ class UltimateE2ESystem:
         # Initialize database connection
         try:
             import asyncpg
+            db_config = _get_db_config()
             self._db_conn = await asyncpg.connect(
-                host=DB_CONFIG["host"],
-                database=DB_CONFIG["database"],
-                user=DB_CONFIG["user"],
-                password=DB_CONFIG["password"],
-                port=DB_CONFIG["port"],
+                host=db_config["host"],
+                database=db_config["database"],
+                user=db_config["user"],
+                password=db_config["password"],
+                port=db_config["port"],
                 ssl="require"
             )
             logger.info("Database connected")

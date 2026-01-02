@@ -34,14 +34,21 @@ warnings.filterwarnings('ignore')
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-    'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv("DB_PASSWORD"),
-    'port': int(os.getenv('DB_PORT', 5432))
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        'host': os.getenv('DB_HOST'),
+        'database': os.getenv('DB_NAME', 'postgres'),
+        'user': os.getenv('DB_USER'),
+        'password': os.getenv("DB_PASSWORD"),
+        'port': int(os.getenv('DB_PORT', '5432'))
+    }
 
 # Redis configuration (using local in-memory cache as fallback)
 REDIS_CONFIG = {
@@ -186,7 +193,7 @@ class MetricsCollector:
             return
         
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
             
             # Batch insert metrics
@@ -361,7 +368,7 @@ class QueryOptimizer:
     async def analyze_query(self, query: str) -> Dict:
         """Analyze query performance"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
             
             # Validate query is SELECT only (prevent EXPLAIN of UPDATE/DELETE/INSERT)
@@ -403,7 +410,7 @@ class QueryOptimizer:
         suggestions = []
         
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             # Check for missing indexes on foreign keys
@@ -445,7 +452,7 @@ class QueryOptimizer:
         optimizations = []
         
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             # Get slow queries from pg_stat_statements (if available)
@@ -501,7 +508,7 @@ class ConnectionPool:
     def _create_connection(self):
         """Create new database connection"""
         try:
-            return psycopg2.connect(**DB_CONFIG)
+            return psycopg2.connect(**_get_db_config())
         except Exception as e:
             logger.error(f"Failed to create connection: {e}")
             return None
@@ -712,7 +719,7 @@ class PerformanceOptimizer:
     async def analyze_performance(self) -> Dict:
         """Analyze current performance"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             # Get recent metrics
@@ -820,7 +827,7 @@ class PerformanceOptimizer:
     async def _warm_cache(self):
         """Warm cache with frequently accessed data"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             # Get frequently accessed items
@@ -925,7 +932,7 @@ class PerformanceOptimizer:
 async def setup_database():
     """Create necessary database tables"""
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = psycopg2.connect(**_get_db_config())
         cursor = conn.cursor()
         
         # Performance metrics table

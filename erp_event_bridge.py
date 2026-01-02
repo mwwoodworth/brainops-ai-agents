@@ -657,6 +657,32 @@ async def process_system_anomaly(event: ERPSystemEvent, unified_event: Optional[
 # MAIN WEBHOOK ENDPOINT
 # =============================================================================
 
+async def verify_erp_webhook_signature(request: Request) -> bool:
+    """Verify HMAC signature from ERP webhook"""
+    import hmac
+    import hashlib
+
+    signature = request.headers.get("X-ERP-Signature") or request.headers.get("X-Webhook-Signature")
+    secret = os.getenv("ERP_WEBHOOK_SECRET", "")
+
+    if not secret:
+        logger.warning("ERP_WEBHOOK_SECRET not configured - webhook verification disabled")
+        return True  # Allow in dev if no secret set
+
+    if not signature:
+        logger.error("Missing ERP webhook signature header")
+        return False
+
+    body = await request.body()
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(signature, expected):
+        logger.error("Invalid ERP webhook signature")
+        return False
+
+    return True
+
+
 @router.post("/events/webhook", response_model=ERPEventResponse, summary="Receive events from ERP SystemEventBus")
 async def handle_erp_event(
     event: ERPSystemEvent,
@@ -667,13 +693,18 @@ async def handle_erp_event(
     Webhook endpoint to receive real-time events from the ERP SystemEventBus.
 
     This endpoint:
-    1. Transforms ERP events to unified event format
-    2. Stores them in the unified_events table
-    3. Routes them to appropriate AI agents
-    4. Broadcasts via Supabase Realtime
+    1. Verifies webhook signature for security
+    2. Transforms ERP events to unified event format
+    3. Stores them in the unified_events table
+    4. Routes them to appropriate AI agents
+    5. Broadcasts via Supabase Realtime
 
-    Returns 200 OK even on processing errors to prevent ERP from retrying indefinitely.
+    Returns 500 on processing errors (ERP should retry with backoff).
     """
+    # Verify signature first
+    if not await verify_erp_webhook_signature(request):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
     logger.info(f"Received ERP event: {event.type} - {event.id or 'no-id'}")
 
     response = ERPEventResponse(

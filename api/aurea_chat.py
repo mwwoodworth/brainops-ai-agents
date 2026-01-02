@@ -77,13 +77,16 @@ class AUREAStateProvider:
         import psycopg2
         from psycopg2.extras import RealDictCursor
 
+        # All credentials MUST come from environment variables - no hardcoded defaults
         DB_CONFIG = {
-            'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-            'database': os.getenv('DB_NAME', 'postgres'),
-            'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-            'password': os.getenv('DB_PASSWORD', ''),
-            'port': int(os.getenv('DB_PORT', 5432))
+            'host': os.getenv('DB_HOST'),
+            'database': os.getenv('DB_NAME'),
+            'user': os.getenv('DB_USER'),
+            'password': os.getenv('DB_PASSWORD'),
+            'port': int(os.getenv('DB_PORT', '5432'))
         }
+        if not all([DB_CONFIG['host'], DB_CONFIG['database'], DB_CONFIG['user'], DB_CONFIG['password']]):
+            raise RuntimeError("DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD environment variables are required")
 
         conn = None
         cur = None
@@ -599,13 +602,16 @@ async def get_work_history(hours: int = Query(24, ge=1, le=720, description="Hou
     import psycopg2
     from psycopg2.extras import RealDictCursor
 
+    # All credentials MUST come from environment variables - no hardcoded defaults
     DB_CONFIG = {
-        'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-        'database': os.getenv('DB_NAME', 'postgres'),
-        'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-        'password': os.getenv('DB_PASSWORD', ''),
-        'port': int(os.getenv('DB_PORT', 5432))
+        'host': os.getenv('DB_HOST'),
+        'database': os.getenv('DB_NAME'),
+        'user': os.getenv('DB_USER'),
+        'password': os.getenv('DB_PASSWORD'),
+        'port': int(os.getenv('DB_PORT', '5432'))
     }
+    if not all([DB_CONFIG['host'], DB_CONFIG['database'], DB_CONFIG['user'], DB_CONFIG['password']]):
+        raise HTTPException(status_code=500, detail="Database configuration incomplete - required environment variables not set")
 
     # Calculate cutoff time using Python (safe from SQL injection)
     cutoff_time = datetime.now() - timedelta(hours=hours)

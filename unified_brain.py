@@ -1152,7 +1152,7 @@ async def initialize_brain_with_current_state():
             'weathercraft': {'url': 'https://weathercraft-erp.vercel.app', 'status': 'healthy'},
             'backend': {'url': 'https://brainops-backend-prod.onrender.com', 'status': 'healthy', 'version': '163.0.8'},
             'ai_agents': {'url': 'https://brainops-ai-agents.onrender.com', 'status': 'healthy', 'version': '6.0.0'},
-            'database': {'host': 'aws-0-us-east-2.pooler.supabase.com', 'status': 'connected'}
+            'database': {'host': 'supabase-pooler', 'status': 'connected'}
         },
         category='system',
         priority='critical',

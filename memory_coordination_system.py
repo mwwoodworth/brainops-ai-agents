@@ -1295,13 +1295,21 @@ class UnifiedMemoryCoordinator:
 # GLOBAL INSTANCE
 # ============================================================================
 
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": "postgres",
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD", "<DB_PASSWORD_REDACTED>"),
-    "port": int(os.getenv("DB_PORT", "5432"))
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        "host": os.getenv("DB_HOST"),
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": int(os.getenv("DB_PORT", "5432"))
+    }
 
 _coordinator_instance = None
 
@@ -1309,7 +1317,7 @@ def get_memory_coordinator() -> UnifiedMemoryCoordinator:
     """Get singleton memory coordinator instance"""
     global _coordinator_instance
     if _coordinator_instance is None:
-        _coordinator_instance = UnifiedMemoryCoordinator(DB_CONFIG)
+        _coordinator_instance = UnifiedMemoryCoordinator(_get_db_config())
     return _coordinator_instance
 
 
