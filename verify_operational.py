@@ -5,6 +5,7 @@ Verify complete operational status - final test
 
 import json
 import os
+from urllib.parse import urlparse as _urlparse
 import sys
 import uuid
 from datetime import datetime

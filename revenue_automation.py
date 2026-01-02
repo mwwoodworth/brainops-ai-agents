@@ -6,6 +6,7 @@ All credentials loaded from environment variables
 
 import logging
 import os
+from urllib.parse import urlparse as _urlparse
 import time
 from datetime import datetime, timedelta
 
