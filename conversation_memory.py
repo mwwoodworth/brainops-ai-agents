@@ -34,35 +34,16 @@ def get_openai_client():
 
 # Database configuration - NO hardcoded credentials
 # All values MUST come from environment variables
-# Supports both individual vars and DATABASE_URL fallback
-from urllib.parse import urlparse as _urlparse
-
 _DB_HOST = os.getenv("DB_HOST")
 _DB_NAME = os.getenv("DB_NAME")
 _DB_USER = os.getenv("DB_USER")
 _DB_PASSWORD = os.getenv("DB_PASSWORD")
 _DB_PORT = os.getenv("DB_PORT", "5432")
 
-# Fallback to DATABASE_URL if individual vars not set
-if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
-    _database_url = os.getenv('DATABASE_URL', '')
-    if _database_url:
-        try:
-            _parsed = _urlparse(_database_url)
-            _DB_HOST = _parsed.hostname or ''
-            _DB_NAME = _parsed.path.lstrip('/') if _parsed.path else ''
-            _DB_USER = _parsed.username or ''
-            _DB_PASSWORD = _parsed.password or ''
-            _DB_PORT = str(_parsed.port or 5432)
-            logger.info(f"Parsed DATABASE_URL: host={_DB_HOST}, db={_DB_NAME}")
-        except Exception as e:
-            logger.error(f"Failed to parse DATABASE_URL: {e}")
-
 if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
     raise RuntimeError(
         "Database configuration is incomplete. "
-        "Ensure DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD environment variables are set, "
-        "or provide DATABASE_URL."
+        "Ensure DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD environment variables are set."
     )
 
 DB_CONFIG = {
