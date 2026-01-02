@@ -32,14 +32,28 @@ def get_openai_client():
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD", "<DB_PASSWORD_REDACTED>"),
-    "port": int(os.getenv("DB_PORT", 5432))
-}
+# Database configuration - uses centralized config
+from config import config as app_config
+
+def get_db_config():
+    """Get database config from centralized config module"""
+    db = app_config.database
+    return {
+        "host": db.host,
+        "database": db.database,
+        "user": db.user,
+        "password": db.password,
+        "port": db.port
+    }
+
+# Lazy-loaded for backward compatibility
+DB_CONFIG = None
+
+def _get_db_config():
+    global DB_CONFIG
+    if DB_CONFIG is None:
+        DB_CONFIG = get_db_config()
+    return DB_CONFIG
 
 # OpenAI configuration handled by get_openai_client() function above
 
@@ -113,7 +127,7 @@ class NotebookLMPlus:
     def _ensure_tables(self):
         """Create necessary database tables"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             # Knowledge nodes table
@@ -235,7 +249,7 @@ class NotebookLMPlus:
     def start_learning_session(self, topics: List[str] = None) -> str:
         """Start a new learning session"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -369,7 +383,7 @@ class NotebookLMPlus:
     def _find_related_knowledge(self, embedding: List[float], limit: int = 5) -> List[Dict]:
         """Find related knowledge using vector similarity"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
             # Convert to string format for pgvector
@@ -398,7 +412,7 @@ class NotebookLMPlus:
     def _store_knowledge(self, **kwargs) -> str:
         """Store knowledge in the database"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
             embedding_str = None
@@ -436,7 +450,7 @@ class NotebookLMPlus:
     def _attempt_synthesis(self, node_ids: List[str]):
         """Attempt to synthesize insights from multiple knowledge nodes"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
             # Get the nodes
@@ -507,7 +521,7 @@ class NotebookLMPlus:
             if not related:
                 return
 
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             for r in related:
@@ -535,7 +549,7 @@ class NotebookLMPlus:
             return
 
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             updates = []
@@ -574,7 +588,7 @@ class NotebookLMPlus:
             # Generate query embedding
             embedding = self._generate_embedding(query)
 
-            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
             embedding_str = '[' + ','.join(map(str, embedding)) + ']'
@@ -615,7 +629,7 @@ class NotebookLMPlus:
     def get_insights(self, category: str = None, min_impact: float = 0.5) -> List[Dict]:
         """Get synthesized insights"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
             query = """
@@ -646,7 +660,7 @@ class NotebookLMPlus:
     def recognize_patterns(self, timeframe_days: int = 7) -> List[Dict]:
         """Recognize patterns across historical data"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
             # Identify recurring knowledge types
@@ -729,7 +743,7 @@ class NotebookLMPlus:
     def track_outcome(self, knowledge_id: str, action: str, expected: str, actual: str, success: bool) -> None:
         """Track outcome of applied knowledge for continuous learning"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             # Calculate feedback score
@@ -773,7 +787,7 @@ class NotebookLMPlus:
     def generate_recommendations(self) -> List[Dict]:
         """Generate actionable recommendations from learned knowledge"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
             recommendations = []
@@ -853,7 +867,7 @@ class NotebookLMPlus:
             return {"error": "No active session"}
 
         try:
-            conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+            conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
             # Get session stats
