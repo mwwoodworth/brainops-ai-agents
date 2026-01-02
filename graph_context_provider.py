@@ -569,7 +569,7 @@ class GraphContextProvider:
         # Limit node_ids to prevent parameter explosion (max 20 IDs = 20 params)
         # Previously: using same placeholder range for both IN clauses with duplicated
         # params caused "expects X args, got 2X" errors when node_ids > 10
-        limited_node_ids = node_ids[:20]
+        limited_node_ids = [str(node_id) for node_id in node_ids[:20]]
 
         # Build placeholder list for first IN clause: $1, $2, ..., $N
         first_placeholders = ", ".join(f"${i+1}" for i in range(len(limited_node_ids)))
