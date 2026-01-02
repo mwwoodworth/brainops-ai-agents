@@ -4,12 +4,13 @@ AI agent for monitoring competitors and market trends.
 Uses OpenAI for real analysis and persists results to database.
 """
 
-import os
 import json
 import logging
-import psycopg2
-from typing import Dict, Any, Optional, List
+import os
 from datetime import datetime
+from typing import Any, Optional
+
+import psycopg2
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class CompetitiveIntelligenceAgent:
             logger.error(f"Database connection failed: {e}")
             return None
 
-    async def monitor_competitors(self, competitors: List[str]) -> Dict[str, Any]:
+    async def monitor_competitors(self, competitors: list[str]) -> dict[str, Any]:
         """Monitor competitor activities using AI analysis"""
         try:
             results = {
@@ -117,7 +118,7 @@ Respond with JSON only:
             logger.error(f"Competitor monitoring failed: {e}")
             return {"error": str(e), "competitors_tracked": 0}
 
-    async def analyze_pricing(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def analyze_pricing(self, market_data: dict[str, Any]) -> dict[str, Any]:
         """Analyze pricing positioning using AI"""
         try:
             results = {
@@ -172,7 +173,7 @@ Respond with JSON only:
             logger.error(f"Pricing analysis failed: {e}")
             return {"error": str(e)}
 
-    async def analyze_market_trends(self, industry: str, timeframe: str = "quarterly") -> Dict[str, Any]:
+    async def analyze_market_trends(self, industry: str, timeframe: str = "quarterly") -> dict[str, Any]:
         """Analyze market trends for an industry"""
         try:
             results = {
@@ -225,9 +226,9 @@ Respond with JSON only:
 
     async def benchmark_competitors(
         self,
-        competitors: List[Dict[str, Any]],
-        metrics: List[str] = None
-    ) -> Dict[str, Any]:
+        competitors: list[dict[str, Any]],
+        metrics: list[str] = None
+    ) -> dict[str, Any]:
         """
         Comprehensive competitive benchmarking across multiple metrics
 
@@ -329,10 +330,10 @@ Respond with JSON only:
 
     async def calculate_competitive_score(
         self,
-        our_metrics: Dict[str, float],
-        competitor_metrics: List[Dict[str, float]],
-        weights: Optional[Dict[str, float]] = None
-    ) -> Dict[str, Any]:
+        our_metrics: dict[str, float],
+        competitor_metrics: list[dict[str, float]],
+        weights: Optional[dict[str, float]] = None
+    ) -> dict[str, Any]:
         """
         Calculate competitive score based on weighted metrics
 
@@ -418,7 +419,7 @@ Respond with JSON only:
             logger.error(f"Competitive score calculation failed: {e}")
             return {"error": str(e)}
 
-    async def _save_analysis(self, analysis_type: str, results: Dict[str, Any]):
+    async def _save_analysis(self, analysis_type: str, results: dict[str, Any]):
         """Save analysis results to database"""
         conn = self._get_db_connection()
         if not conn:

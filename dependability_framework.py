@@ -33,15 +33,15 @@ Author: BrainOps AI System
 Version: 1.0.0 - Safety Critical
 """
 
-import json
 import asyncio
+import json
 import logging
 import time
-from typing import Dict, Any, List, Optional, Tuple, Callable, Set
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from abc import ABC, abstractmethod
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class SafetyProperty:
     expression: str     # Formal expression of the property
     severity: str       # critical, high, medium, low
     enforceable: bool   # Can we automatically enforce this?
-    verified_by: List[str] = field(default_factory=list)  # What verifies this
+    verified_by: list[str] = field(default_factory=list)  # What verifies this
 
 
 @dataclass
@@ -100,7 +100,7 @@ class GuardResult:
     message: str
     severity: str
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    violations: List[Dict] = field(default_factory=list)
+    violations: list[dict] = field(default_factory=list)
     recovery_action: Optional[str] = None
 
 
@@ -110,11 +110,11 @@ class DependabilityReport:
     timestamp: datetime
     overall_state: SystemState
     confidence: ConfidenceLevel
-    guard_results: List[GuardResult]
-    safety_properties_status: Dict[str, bool]
-    anomalies_detected: List[Dict]
-    recovery_actions_taken: List[Dict]
-    metrics: Dict[str, Any]
+    guard_results: list[GuardResult]
+    safety_properties_status: dict[str, bool]
+    anomalies_detected: list[dict]
+    recovery_actions_taken: list[dict]
+    metrics: dict[str, Any]
 
 
 # =============================================================================
@@ -143,16 +143,16 @@ class Guard(ABC):
         self.last_violation: Optional[datetime] = None
 
     @abstractmethod
-    async def check(self, context: Dict[str, Any]) -> GuardResult:
+    async def check(self, context: dict[str, Any]) -> GuardResult:
         """Perform the guard check"""
         pass
 
     @abstractmethod
-    def get_recovery_action(self, violation: Dict) -> Optional[str]:
+    def get_recovery_action(self, violation: dict) -> Optional[str]:
         """Get the recommended recovery action for a violation"""
         pass
 
-    def get_metrics(self) -> Dict:
+    def get_metrics(self) -> dict:
         """Get guard metrics"""
         return {
             "guard_id": self.guard_id,
@@ -177,8 +177,8 @@ class InputValidationGuard(Guard):
 
     def __init__(self, guard_id: str = "input_validation"):
         super().__init__(guard_id, GuardType.INPUT)
-        self.validators: Dict[str, Callable] = {}
-        self.blocked_patterns: List[str] = [
+        self.validators: dict[str, Callable] = {}
+        self.blocked_patterns: list[str] = [
             "DROP TABLE", "DELETE FROM", "TRUNCATE",  # SQL injection
             "<script>", "javascript:",  # XSS
             "../", "..\\",  # Path traversal
@@ -188,7 +188,7 @@ class InputValidationGuard(Guard):
         """Add a custom validator for a field"""
         self.validators[field] = validator
 
-    async def check(self, context: Dict[str, Any]) -> GuardResult:
+    async def check(self, context: dict[str, Any]) -> GuardResult:
         """Validate all inputs in context"""
         self.check_count += 1
         self.last_check = datetime.now(timezone.utc)
@@ -238,7 +238,7 @@ class InputValidationGuard(Guard):
             recovery_action=self.get_recovery_action(violations[0]) if violations else None
         )
 
-    def get_recovery_action(self, violation: Dict) -> Optional[str]:
+    def get_recovery_action(self, violation: dict) -> Optional[str]:
         """Get recovery action for input violation"""
         if violation.get("severity") == "critical":
             return "REJECT_REQUEST"
@@ -256,12 +256,12 @@ class OutputValidationGuard(Guard):
     def __init__(self, guard_id: str = "output_validation"):
         super().__init__(guard_id, GuardType.OUTPUT)
         self.max_response_length = 100000  # 100KB
-        self.required_fields: Set[str] = set()
-        self.forbidden_in_output: List[str] = [
+        self.required_fields: set[str] = set()
+        self.forbidden_in_output: list[str] = [
             "password", "secret", "api_key", "token",  # Sensitive data
         ]
 
-    async def check(self, context: Dict[str, Any]) -> GuardResult:
+    async def check(self, context: dict[str, Any]) -> GuardResult:
         """Validate output before sending"""
         self.check_count += 1
         self.last_check = datetime.now(timezone.utc)
@@ -313,7 +313,7 @@ class OutputValidationGuard(Guard):
             recovery_action=self.get_recovery_action(violations[0]) if violations else None
         )
 
-    def get_recovery_action(self, violation: Dict) -> Optional[str]:
+    def get_recovery_action(self, violation: dict) -> Optional[str]:
         """Get recovery action for output violation"""
         vtype = violation.get("type")
         if vtype == "sensitive_data_leak":
@@ -331,13 +331,13 @@ class InvariantGuard(Guard):
 
     def __init__(self, guard_id: str = "invariant_checker"):
         super().__init__(guard_id, GuardType.INVARIANT)
-        self.invariants: Dict[str, Callable[[], bool]] = {}
+        self.invariants: dict[str, Callable[[], bool]] = {}
 
     def register_invariant(self, name: str, check_fn: Callable[[], bool]):
         """Register an invariant that must always be true"""
         self.invariants[name] = check_fn
 
-    async def check(self, context: Dict[str, Any]) -> GuardResult:
+    async def check(self, context: dict[str, Any]) -> GuardResult:
         """Check all registered invariants"""
         self.check_count += 1
         self.last_check = datetime.now(timezone.utc)
@@ -374,7 +374,7 @@ class InvariantGuard(Guard):
             recovery_action="RESTORE_INVARIANT" if violations else None
         )
 
-    def get_recovery_action(self, violation: Dict) -> Optional[str]:
+    def get_recovery_action(self, violation: dict) -> Optional[str]:
         return "RESTORE_INVARIANT"
 
 
@@ -386,9 +386,9 @@ class TemporalGuard(Guard):
 
     def __init__(self, guard_id: str = "temporal_checker"):
         super().__init__(guard_id, GuardType.TEMPORAL)
-        self.max_latency_ms: Dict[str, float] = {}
-        self.min_interval_ms: Dict[str, float] = {}
-        self.last_occurrence: Dict[str, datetime] = {}
+        self.max_latency_ms: dict[str, float] = {}
+        self.min_interval_ms: dict[str, float] = {}
+        self.last_occurrence: dict[str, datetime] = {}
 
     def set_max_latency(self, operation: str, max_ms: float):
         """Set maximum allowed latency for an operation"""
@@ -398,7 +398,7 @@ class TemporalGuard(Guard):
         """Set minimum interval between occurrences"""
         self.min_interval_ms[operation] = min_ms
 
-    async def check(self, context: Dict[str, Any]) -> GuardResult:
+    async def check(self, context: dict[str, Any]) -> GuardResult:
         """Check timing constraints"""
         self.check_count += 1
         self.last_check = datetime.now(timezone.utc)
@@ -448,7 +448,7 @@ class TemporalGuard(Guard):
             recovery_action=self.get_recovery_action(violations[0]) if violations else None
         )
 
-    def get_recovery_action(self, violation: Dict) -> Optional[str]:
+    def get_recovery_action(self, violation: dict) -> Optional[str]:
         if violation.get("type") == "latency_exceeded":
             return "TIMEOUT_AND_RETRY"
         elif violation.get("type") == "interval_violation":
@@ -468,7 +468,7 @@ class ResourceGuard(Guard):
         self.cpu_threshold_percent = 90
         self.connection_limit = 100
 
-    async def check(self, context: Dict[str, Any]) -> GuardResult:
+    async def check(self, context: dict[str, Any]) -> GuardResult:
         """Check resource usage"""
         self.check_count += 1
         self.last_check = datetime.now(timezone.utc)
@@ -519,7 +519,7 @@ class ResourceGuard(Guard):
             recovery_action=self.get_recovery_action(violations[0]) if violations else None
         )
 
-    def get_recovery_action(self, violation: Dict) -> Optional[str]:
+    def get_recovery_action(self, violation: dict) -> Optional[str]:
         vtype = violation.get("type")
         if vtype == "memory_exceeded":
             return "TRIGGER_GC"
@@ -539,12 +539,12 @@ class BehavioralGuard(Guard):
 
     def __init__(self, guard_id: str = "behavioral_guard"):
         super().__init__(guard_id, GuardType.BEHAVIORAL)
-        self.normal_patterns: Dict[str, Dict] = {}
+        self.normal_patterns: dict[str, dict] = {}
         self.anomaly_threshold = 3.0  # Standard deviations
         # OPTIMIZATION: Welford's Algorithm state for each behavior
-        self._welford_state: Dict[str, Dict] = {}
+        self._welford_state: dict[str, dict] = {}
 
-    def learn_normal_pattern(self, behavior_id: str, samples: List[float]):
+    def learn_normal_pattern(self, behavior_id: str, samples: list[float]):
         """Learn what normal behavior looks like (batch mode for initialization)"""
         if len(samples) < 2:
             return
@@ -606,7 +606,7 @@ class BehavioralGuard(Guard):
                 "sample_count": state["count"]
             }
 
-    async def check(self, context: Dict[str, Any]) -> GuardResult:
+    async def check(self, context: dict[str, Any]) -> GuardResult:
         """Check for behavioral anomalies"""
         self.check_count += 1
         self.last_check = datetime.now(timezone.utc)
@@ -643,7 +643,7 @@ class BehavioralGuard(Guard):
             recovery_action=self.get_recovery_action(violations[0]) if violations else None
         )
 
-    def get_recovery_action(self, violation: Dict) -> Optional[str]:
+    def get_recovery_action(self, violation: dict) -> Optional[str]:
         z_score = violation.get("z_score", 0)
         if z_score > 5:
             return "ISOLATE_AND_INVESTIGATE"
@@ -664,8 +664,8 @@ class UncertaintyQuantifier:
     """
 
     def __init__(self):
-        self.uncertainty_sources: Dict[str, Dict] = {}
-        self.propagation_rules: Dict[str, Callable] = {}
+        self.uncertainty_sources: dict[str, dict] = {}
+        self.propagation_rules: dict[str, Callable] = {}
 
     def register_uncertainty_source(
         self,
@@ -698,9 +698,9 @@ class UncertaintyQuantifier:
 
     def calculate_combined_uncertainty(
         self,
-        source_ids: List[str],
+        source_ids: list[str],
         combination_method: str = "max"
-    ) -> Tuple[float, ConfidenceLevel]:
+    ) -> tuple[float, ConfidenceLevel]:
         """Calculate combined uncertainty from multiple sources"""
         uncertainties = []
         for source_id in source_ids:
@@ -739,7 +739,7 @@ class UncertaintyQuantifier:
 
         return combined, confidence
 
-    def get_uncertainty_report(self) -> Dict:
+    def get_uncertainty_report(self) -> dict:
         """Get comprehensive uncertainty report"""
         return {
             "sources": {
@@ -770,16 +770,16 @@ class GracefulDegradationController:
     """
 
     def __init__(self):
-        self.degradation_levels: Dict[str, int] = {}  # 0 = full, higher = more degraded
-        self.feature_dependencies: Dict[str, List[str]] = {}
-        self.fallback_handlers: Dict[str, List[Callable]] = {}
+        self.degradation_levels: dict[str, int] = {}  # 0 = full, higher = more degraded
+        self.feature_dependencies: dict[str, list[str]] = {}
+        self.fallback_handlers: dict[str, list[Callable]] = {}
         self.current_level = 0  # Global degradation level
 
     def register_feature(
         self,
         feature_id: str,
-        dependencies: List[str] = None,
-        fallbacks: List[Callable] = None
+        dependencies: list[str] = None,
+        fallbacks: list[Callable] = None
     ):
         """Register a feature with its dependencies and fallbacks"""
         self.degradation_levels[feature_id] = 0
@@ -825,7 +825,7 @@ class GracefulDegradationController:
         primary_handler: Callable,
         *args,
         **kwargs
-    ) -> Tuple[Any, bool]:
+    ) -> tuple[Any, bool]:
         """
         Execute a feature with automatic fallback.
         Returns (result, used_fallback)
@@ -855,7 +855,7 @@ class GracefulDegradationController:
         # All fallbacks exhausted
         raise RuntimeError(f"All handlers exhausted for {feature_id}")
 
-    def get_degradation_status(self) -> Dict:
+    def get_degradation_status(self) -> dict:
         """Get current degradation status"""
         return {
             "current_global_level": self.current_level,
@@ -894,7 +894,7 @@ class DependabilityFramework:
 
     def __init__(self):
         # Initialize all guards
-        self.guards: Dict[str, Guard] = {
+        self.guards: dict[str, Guard] = {
             "input": InputValidationGuard(),
             "output": OutputValidationGuard(),
             "invariant": InvariantGuard(),
@@ -919,8 +919,8 @@ class DependabilityFramework:
 
         # State tracking
         self.current_state = SystemState.OK
-        self.state_history: List[Tuple[datetime, SystemState]] = []
-        self.safety_properties: Dict[str, SafetyProperty] = {}
+        self.state_history: list[tuple[datetime, SystemState]] = []
+        self.safety_properties: dict[str, SafetyProperty] = {}
 
         # Metrics
         self.metrics = {
@@ -935,10 +935,10 @@ class DependabilityFramework:
             "avg_guard_latency_ms": 0.0
         }
         self._start_time = datetime.now(timezone.utc)
-        self._guard_latencies: List[float] = []
+        self._guard_latencies: list[float] = []
 
         # Recovery actions
-        self.recovery_handlers: Dict[str, Callable] = {}
+        self.recovery_handlers: dict[str, Callable] = {}
 
         logger.info("DependabilityFramework initialized with enhanced parallel execution")
 
@@ -951,7 +951,7 @@ class DependabilityFramework:
         """Register a recovery handler for an action"""
         self.recovery_handlers[action_name] = handler
 
-    async def run_all_guards(self, context: Dict[str, Any]) -> List[GuardResult]:
+    async def run_all_guards(self, context: dict[str, Any]) -> list[GuardResult]:
         """
         Run all guards and return results.
         ENHANCED: Parallel execution with timeout protection.
@@ -1017,7 +1017,7 @@ class DependabilityFramework:
 
         return list(results)
 
-    async def run_guards_sequential(self, context: Dict[str, Any]) -> List[GuardResult]:
+    async def run_guards_sequential(self, context: dict[str, Any]) -> list[GuardResult]:
         """
         ENHANCEMENT: Run guards sequentially in priority order.
         Use this when you need to fail fast on critical guards.
@@ -1054,7 +1054,7 @@ class DependabilityFramework:
                     passed=False,
                     guard_id=guard.guard_id,
                     guard_type=guard.guard_type,
-                    message=f"Guard timeout",
+                    message="Guard timeout",
                     severity="high",
                     violations=[{"type": "guard_timeout"}]
                 ))
@@ -1083,7 +1083,7 @@ class DependabilityFramework:
         if result.recovery_action:
             await self._execute_recovery(result.recovery_action, result.violations)
 
-    async def _execute_recovery(self, action: str, violations: List[Dict]):
+    async def _execute_recovery(self, action: str, violations: list[dict]):
         """Execute a recovery action"""
         if action in self.recovery_handlers:
             try:
@@ -1120,7 +1120,7 @@ class DependabilityFramework:
             if new_state == SystemState.FAILURE:
                 self.degradation.current_level += 1
 
-    def check_safety_properties(self) -> Dict[str, bool]:
+    def check_safety_properties(self) -> dict[str, bool]:
         """Check all registered safety properties"""
         results = {}
         for prop_id, prop in self.safety_properties.items():
@@ -1161,7 +1161,7 @@ class DependabilityFramework:
             metrics=self.metrics
         )
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get current status"""
         report = self.get_dependability_report()
 

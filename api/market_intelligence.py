@@ -5,11 +5,12 @@ API endpoints for market intelligence, trend analysis, and autonomous content op
 Fully operational with proper error handling and fallbacks.
 """
 
-from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, Dict, Any
-from pydantic import BaseModel
 import logging
 from enum import Enum
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +58,14 @@ async def _get_engine():
 class MarketSignalRequest(BaseModel):
     signal_type: str  # TREND, COMPETITOR, PRICING, DEMAND, SENTIMENT, NEWS, REGULATORY, TECHNOLOGY
     source: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     confidence: float = 0.8
 
 
 class ContentOptimizationRequest(BaseModel):
     campaign_id: str
     target_audience: str
-    current_metrics: Dict[str, float]
+    current_metrics: dict[str, float]
 
 
 class CompetitorAnalysisRequest(BaseModel):

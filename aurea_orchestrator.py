@@ -5,20 +5,21 @@ The Master Orchestration Brain for BrainOps AI OS
 Coordinates all 59 agents to work as one unified intelligence
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict
-from enum import Enum
-import uuid
+import os
 import re
-from decimal import Decimal
-import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+import uuid
 from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
+from decimal import Decimal
+from enum import Enum
+from typing import Any, Optional
+
+import psycopg2
+from psycopg2.extras import Json, RealDictCursor
 
 # ============================================================================
 # SHARED CONNECTION POOL - CRITICAL for preventing MaxClientsInSessionMode
@@ -45,19 +46,20 @@ def _get_pooled_connection():
                 conn.close()
 
 
-from unified_memory_manager import get_memory_manager, Memory, MemoryType
-from agent_activation_system import (
-    get_activation_system, BusinessEventType
-)
-from ai_core import RealAICore
-from ai_board_governance import get_ai_board
-from ai_self_awareness import get_self_aware_ai, SelfAwareAI
-from revenue_generation_system import get_revenue_system, AutonomousRevenueSystem
-from ai_knowledge_graph import get_knowledge_graph, AIKnowledgeGraph
-from mcp_integration import get_mcp_client, MCPClient, MCPServer, MCPToolResult
-from unified_brain import get_brain, UnifiedBrain
-import aiohttp
 import warnings
+
+import aiohttp
+
+from agent_activation_system import BusinessEventType, get_activation_system
+from ai_board_governance import get_ai_board
+from ai_core import RealAICore
+from ai_knowledge_graph import AIKnowledgeGraph, get_knowledge_graph
+from ai_self_awareness import SelfAwareAI, get_self_aware_ai
+from mcp_integration import MCPClient, MCPServer, MCPToolResult, get_mcp_client
+from revenue_generation_system import AutonomousRevenueSystem, get_revenue_system
+from unified_brain import UnifiedBrain, get_brain
+from unified_memory_manager import Memory, MemoryType, get_memory_manager
+
 warnings.filterwarnings('ignore')
 
 
@@ -155,10 +157,10 @@ class Decision:
     confidence: float
     impact_assessment: str
     recommended_action: str
-    alternatives: List[str]
+    alternatives: list[str]
     requires_human_approval: bool
     deadline: Optional[datetime]
-    context: Dict[str, Any]
+    context: dict[str, Any]
     db_id: Optional[str] = None  # Database UUID after logging
 
 
@@ -166,13 +168,13 @@ class Decision:
 class SystemHealth:
     """Overall system health metrics"""
     overall_score: float  # 0-100
-    component_health: Dict[str, float]
+    component_health: dict[str, float]
     active_agents: int
     memory_utilization: float
     decision_backlog: int
     error_rate: float
     performance_score: float
-    alerts: List[str]
+    alerts: list[str]
 
 
 @dataclass
@@ -189,7 +191,7 @@ class CycleMetrics:
     learning_insights_generated: int
     health_score: float
     autonomy_level: int
-    patterns_detected: List[str]
+    patterns_detected: list[str]
     goals_achieved: int
     goals_set: int
 
@@ -242,14 +244,14 @@ class AUREA:
         self.system_health = None
         self.decision_queue = asyncio.Queue()
         self.learning_insights = []
-        self.cycle_metrics_history: List[CycleMetrics] = []
-        self.autonomous_goals: List[AutonomousGoal] = []
-        self.pattern_history: List[Dict[str, Any]] = []
+        self.cycle_metrics_history: list[CycleMetrics] = []
+        self.autonomous_goals: list[AutonomousGoal] = []
+        self.pattern_history: list[dict[str, Any]] = []
         self.confidence_thresholds = self._default_confidence_thresholds()
-        self._last_observation_bundle: Dict[str, Any] = {}
-        self._last_orientation_bundle: Dict[str, Any] = {}
-        self._decision_success_rate_history: List[float] = []
-        self._performance_trends: Dict[str, List[float]] = {}
+        self._last_observation_bundle: dict[str, Any] = {}
+        self._last_orientation_bundle: dict[str, Any] = {}
+        self._decision_success_rate_history: list[float] = []
+        self._performance_trends: dict[str, list[float]] = {}
         self._init_database()
 
         logger.info(f"🧠 AUREA initialized for tenant {tenant_id} at autonomy level: {autonomy_level.name}")
@@ -273,7 +275,7 @@ class AUREA:
             self._mcp_client = get_mcp_client()
         return self._mcp_client
 
-    async def _async_fetch(self, query: str, *args) -> List[Dict]:
+    async def _async_fetch(self, query: str, *args) -> list[dict]:
         """Execute query and return results using async pool"""
         pool = self.db_pool
         if pool is None:
@@ -286,7 +288,7 @@ class AUREA:
             logger.warning(f"Async fetch failed, falling back to sync: {e}")
             return self._sync_fetch(query, *args)
 
-    async def _async_fetchrow(self, query: str, *args) -> Optional[Dict]:
+    async def _async_fetchrow(self, query: str, *args) -> Optional[dict]:
         """Execute query and return single row using async pool"""
         pool = self.db_pool
         if pool is None:
@@ -310,7 +312,7 @@ class AUREA:
             logger.warning(f"Async execute failed, falling back to sync: {e}")
             return self._sync_execute(query, *args)
 
-    def _sync_fetch(self, query: str, *args) -> List[Dict]:
+    def _sync_fetch(self, query: str, *args) -> list[dict]:
         """Sync fallback for fetch - uses shared pool"""
         try:
             with _get_pooled_connection() as conn:
@@ -323,7 +325,7 @@ class AUREA:
             logger.error(f"Sync fetch failed: {e}")
             return []
 
-    def _sync_fetchrow(self, query: str, *args) -> Optional[Dict]:
+    def _sync_fetchrow(self, query: str, *args) -> Optional[dict]:
         """Sync fallback for fetchrow - uses shared pool"""
         try:
             with _get_pooled_connection() as conn:
@@ -379,7 +381,7 @@ class AUREA:
                 logger.warning(f"Knowledge Graph unavailable: {e}")
                 self.knowledge_ref = None
 
-    def _default_confidence_thresholds(self) -> Dict[int, float]:
+    def _default_confidence_thresholds(self) -> dict[int, float]:
         """Default confidence thresholds (0-100) for autonomous execution."""
         # MANUAL/ASSISTED are handled by policy (always require approval).
         return {
@@ -413,7 +415,7 @@ class AUREA:
         """Get connection from shared pool"""
         return _get_pooled_connection()
 
-    def _db_fetchall(self, query: str, params: Tuple[Any, ...] = ()) -> List[Dict[str, Any]]:
+    def _db_fetchall(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         try:
             with self._db_connect() as conn:
                 if not conn:
@@ -427,7 +429,7 @@ class AUREA:
             logger.debug(f"DB fetchall failed: {e}")
             return []
 
-    def _db_fetchone(self, query: str, params: Tuple[Any, ...] = ()) -> Optional[Dict[str, Any]]:
+    def _db_fetchone(self, query: str, params: tuple[Any, ...] = ()) -> Optional[dict[str, Any]]:
         try:
             with self._db_connect() as conn:
                 if not conn:
@@ -441,7 +443,7 @@ class AUREA:
             logger.debug(f"DB fetchone failed: {e}")
             return None
 
-    def _db_execute(self, query: str, params: Tuple[Any, ...] = ()) -> bool:
+    def _db_execute(self, query: str, params: tuple[Any, ...] = ()) -> bool:
         try:
             with self._db_connect() as conn:
                 if not conn:
@@ -463,14 +465,14 @@ class AUREA:
 
     def _compact_rows(
         self,
-        rows: List[Dict[str, Any]],
+        rows: list[dict[str, Any]],
         *,
         max_rows: int = 30,
         max_field_len: int = 600
-    ) -> List[Dict[str, Any]]:
-        compacted: List[Dict[str, Any]] = []
+    ) -> list[dict[str, Any]]:
+        compacted: list[dict[str, Any]] = []
         for row in (rows or [])[:max_rows]:
-            cleaned: Dict[str, Any] = {}
+            cleaned: dict[str, Any] = {}
             for k, v in dict(row).items():
                 if isinstance(v, (datetime,)):
                     cleaned[k] = v.isoformat()
@@ -490,8 +492,8 @@ class AUREA:
             logger.debug("Failed to coerce float from %s: %s", value, exc)
             return None
 
-    def _extract_keywords(self, signals: List[Dict[str, Any]]) -> List[str]:
-        keywords: List[str] = []
+    def _extract_keywords(self, signals: list[dict[str, Any]]) -> list[str]:
+        keywords: list[str] = []
         for s in signals or []:
             for key in ("affected_components", "components", "component", "metric_name", "agent_name"):
                 v = s.get(key)
@@ -506,7 +508,7 @@ class AUREA:
                     keywords.extend(words[:12])
         # de-dupe while preserving order
         seen = set()
-        out: List[str] = []
+        out: list[str] = []
         for k in keywords:
             kl = k.strip()
             if not kl:
@@ -518,7 +520,7 @@ class AUREA:
             out.append(kl)
         return out[:25]
 
-    def _store_state_snapshot(self, state_type: str, state_data: Dict[str, Any]):
+    def _store_state_snapshot(self, state_type: str, state_data: dict[str, Any]):
         """Persist OODA snapshots for audit/debug."""
         try:
             # Sanitize state_data to ensure JSON-serializable
@@ -795,7 +797,7 @@ class AUREA:
                 await self._handle_orchestration_error(e)
                 await asyncio.sleep(30)  # Longer sleep on error
 
-    async def _observe(self) -> List[Dict[str, Any]]:
+    async def _observe(self) -> list[dict[str, Any]]:
         """
         Observe the environment and gather all relevant data (ASYNC)
         Enhanced with comprehensive metrics, pattern detection, and trend analysis
@@ -974,7 +976,7 @@ class AUREA:
 
         return observations
 
-    async def _orient(self, observations: List[Dict]) -> Dict[str, Any]:
+    async def _orient(self, observations: list[dict]) -> dict[str, Any]:
         """
         Analyze observations and build context
         Enhanced with autonomous goal setting and multi-criteria analysis
@@ -1043,7 +1045,7 @@ class AUREA:
 
         return context
 
-    async def _decide(self, context: Dict[str, Any]) -> List[Decision]:
+    async def _decide(self, context: dict[str, Any]) -> list[Decision]:
         """Make decisions based on context and autonomy level"""
         decisions = []
 
@@ -1143,7 +1145,7 @@ class AUREA:
 
         return decisions
 
-    async def _act(self, decisions: List[Decision]) -> List[Dict[str, Any]]:
+    async def _act(self, decisions: list[Decision]) -> list[dict[str, Any]]:
         """Execute decisions through agent activation"""
         results = []
 
@@ -1211,7 +1213,7 @@ class AUREA:
 
         return results
 
-    async def _update_decision_status(self, decision_id: str, status: str, result: Dict = None):
+    async def _update_decision_status(self, decision_id: str, status: str, result: dict = None):
         """Update decision execution status in database (ASYNC)"""
         try:
             # Serialize result to ensure all datetime/Decimal objects are converted
@@ -1266,7 +1268,7 @@ class AUREA:
         except Exception as e:
             logger.error(f"Failed to update decision status: {e}")
 
-    async def _execute_decision(self, decision: Decision) -> Dict[str, Any]:
+    async def _execute_decision(self, decision: Decision) -> dict[str, Any]:
         """Execute a specific decision - now with MCP integration"""
         action_map = {
             "activate_collection_agents": self._activate_collection_agents,
@@ -1285,7 +1287,7 @@ class AUREA:
             # Default: activate relevant agents based on decision type
             return await self._activate_agents_for_decision(decision)
 
-    async def _trigger_frontend_investigation(self, context: Dict) -> Dict:
+    async def _trigger_frontend_investigation(self, context: dict) -> dict:
         """Investigate frontend issues using MCP tools (Vercel integration)"""
         try:
             mcp = self.mcp
@@ -1297,7 +1299,7 @@ class AUREA:
             logger.error(f"MCP frontend investigation failed: {e}")
             return {"action": "frontend_investigation", "error": str(e), "mode": "fallback"}
 
-    async def _trigger_deploy_via_mcp(self, context: Dict) -> Dict:
+    async def _trigger_deploy_via_mcp(self, context: dict) -> dict:
         """Trigger deployment using MCP Render integration"""
         try:
             mcp = self.mcp
@@ -1309,7 +1311,7 @@ class AUREA:
             logger.error(f"MCP deploy trigger failed: {e}")
             return {"action": "trigger_deploy", "error": str(e), "mode": "fallback"}
 
-    async def _restart_service_via_mcp(self, context: Dict) -> Dict:
+    async def _restart_service_via_mcp(self, context: dict) -> dict:
         """Restart service using MCP Render integration"""
         try:
             mcp = self.mcp
@@ -1321,7 +1323,7 @@ class AUREA:
             logger.error(f"MCP service restart failed: {e}")
             return {"action": "restart_service", "error": str(e), "mode": "fallback"}
 
-    async def _activate_collection_agents(self, context: Dict) -> Dict:
+    async def _activate_collection_agents(self, context: dict) -> dict:
         """Activate agents for collections (Active, outreach protected for seeded data)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.INVOICE_OVERDUE,
@@ -1329,7 +1331,7 @@ class AUREA:
         )
         return {"action": "collection_agents", "result": result, "mode": "active", "outreach_protected": True}
 
-    async def _activate_scheduling_optimization(self, context: Dict) -> Dict:
+    async def _activate_scheduling_optimization(self, context: dict) -> dict:
         """Activate scheduling optimization (Fully active - internal operation)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.SCHEDULING_CONFLICT,
@@ -1337,7 +1339,7 @@ class AUREA:
         )
         return {"action": "scheduling_optimization", "result": result, "mode": "active"}
 
-    async def _activate_retention_campaign(self, context: Dict) -> Dict:
+    async def _activate_retention_campaign(self, context: dict) -> dict:
         """Activate customer retention campaign (Active, outreach protected for seeded data)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.CUSTOMER_CHURN_RISK,
@@ -1345,7 +1347,7 @@ class AUREA:
         )
         return {"action": "retention_campaign", "result": result, "mode": "active", "outreach_protected": True}
 
-    async def _activate_sales_acceleration(self, context: Dict) -> Dict:
+    async def _activate_sales_acceleration(self, context: dict) -> dict:
         """Activate sales acceleration (Active, outreach protected for seeded data)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.QUOTE_REQUESTED,
@@ -1353,7 +1355,7 @@ class AUREA:
         )
         return {"action": "sales_acceleration", "result": result, "mode": "active", "outreach_protected": True}
 
-    async def _activate_agents_for_decision(self, decision: Decision) -> Dict:
+    async def _activate_agents_for_decision(self, decision: Decision) -> dict:
         """Generic agent activation based on decision type (ACTIVE mode)"""
         event_type_map = {
             DecisionType.FINANCIAL: BusinessEventType.PAYMENT_RECEIVED,
@@ -1377,7 +1379,7 @@ class AUREA:
         return {"action": "generic_activation", "event_type": event_type.value, "result": result,
                 "mode": "active", "outreach_protected": requires_outreach}
 
-    async def _learn(self, results: List[Dict[str, Any]]):
+    async def _learn(self, results: list[dict[str, Any]]):
         """
         Learn from ALL execution results and continuously improve
         Enhanced with pattern recognition, self-improvement, and unified brain integration
@@ -1473,7 +1475,7 @@ class AUREA:
                 except Exception as e:
                     logger.warning(f"Failed to store pattern in brain: {e}")
 
-    async def _apply_learning(self, insight: Dict):
+    async def _apply_learning(self, insight: dict):
         """Apply learning insights to improve performance - ALWAYS stores learning data"""
         try:
             with _get_pooled_connection() as conn:
@@ -1514,7 +1516,7 @@ class AUREA:
                             WHERE name = %s AND tenant_id = %s
                         """, (insight["data"]["agent_name"], self.tenant_id))
 
-                    logger.info(f"📚 Learning applied: Adjusted confidence thresholds for low-performing agents")
+                    logger.info("📚 Learning applied: Adjusted confidence thresholds for low-performing agents")
 
                 elif insight["type"] == "pattern" and insight.get("pattern_confidence", 0) > 0.8:
                     # Store high-confidence patterns for future decision making
@@ -1695,7 +1697,7 @@ class AUREA:
             # Execute MCP tool action (e.g., "mcp:render:restart_service")
             await self._execute_mcp_action(action)
 
-    async def _execute_mcp_action(self, action: str) -> Dict[str, Any]:
+    async def _execute_mcp_action(self, action: str) -> dict[str, Any]:
         """Execute an action via MCP Bridge - uses centralized MCPClient (345 tools)"""
         try:
             # Parse action: "mcp:server:tool" or "mcp:tool"
@@ -1776,7 +1778,7 @@ class AUREA:
         else:
             return "render"  # Default to Render for infrastructure
 
-    async def execute_external_tool(self, server: str, tool: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def execute_external_tool(self, server: str, tool: str, params: dict[str, Any] = None) -> dict[str, Any]:
         """Public method for AUREA to execute any MCP tool - uses centralized MCPClient"""
         try:
             server_enum = self._get_mcp_server_enum(server)
@@ -2116,7 +2118,7 @@ class AUREA:
         else:
             return int(base_interval * 1.5)  # Normal activity: 90s
 
-    async def _detect_patterns(self) -> List[Dict[str, Any]]:
+    async def _detect_patterns(self) -> list[dict[str, Any]]:
         """Detect patterns from historical data and system behavior"""
         patterns = []
 
@@ -2183,7 +2185,7 @@ class AUREA:
 
         return patterns
 
-    async def _check_goal_progress(self) -> List[Dict[str, Any]]:
+    async def _check_goal_progress(self) -> list[dict[str, Any]]:
         """Check progress on autonomous goals and update status"""
         goal_updates = []
 
@@ -2267,7 +2269,7 @@ class AUREA:
         except Exception as e:
             logger.error(f"Goal update error: {e}")
 
-    async def _analyze_performance_trends(self) -> Dict[str, Any]:
+    async def _analyze_performance_trends(self) -> dict[str, Any]:
         """Analyze performance trends and detect anomalies"""
         trends = {
             "anomalies": [],
@@ -2311,7 +2313,7 @@ class AUREA:
 
         return trends
 
-    async def _set_autonomous_goals(self, observations: List[Dict]) -> List[AutonomousGoal]:
+    async def _set_autonomous_goals(self, observations: list[dict]) -> list[AutonomousGoal]:
         """Set autonomous goals based on system state and observations"""
         new_goals = []
 
@@ -2401,7 +2403,7 @@ class AUREA:
         except Exception as e:
             logger.error(f"Goal storage error: {e}")
 
-    async def _self_improve_from_failures(self, failures: List[Dict[str, Any]]):
+    async def _self_improve_from_failures(self, failures: list[dict[str, Any]]):
         """Analyze failures and adjust system parameters to improve"""
         try:
             for failure in failures:
@@ -2531,7 +2533,7 @@ class AUREA:
         self.running = False
         logger.info("🛑 AUREA orchestration stopped")
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         """Get current AUREA status with comprehensive metrics"""
         # Calculate current averages
         recent_success_rate = 0.0

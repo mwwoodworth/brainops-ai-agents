@@ -18,17 +18,19 @@ References:
 - MCP November 2025 Specification
 """
 
-import os
-import json
 import asyncio
 import hashlib
+import json
 import logging
+import os
 import uuid
-from datetime import datetime
-from typing import Dict, List, Any, Optional, Tuple, Set, Callable, Awaitable
-from dataclasses import dataclass, field
-from enum import Enum
 from collections import defaultdict
+from collections.abc import Awaitable
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Optional
+
 import aiohttp
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -137,12 +139,12 @@ class IntegrityReport:
     """Report from integrity validation"""
     valid: bool
     level: IntegrityLevel
-    checks_passed: List[str]
-    checks_failed: List[str]
+    checks_passed: list[str]
+    checks_failed: list[str]
     confidence_score: float  # 0-100
     timestamp: datetime = field(default_factory=datetime.now)
     hash_value: Optional[str] = None
-    signatures: List[str] = field(default_factory=list)
+    signatures: list[str] = field(default_factory=list)
 
 
 class InputIntegrityValidator:
@@ -152,15 +154,15 @@ class InputIntegrityValidator:
     """
 
     def __init__(self):
-        self.known_sources: Set[str] = {
+        self.known_sources: set[str] = {
             "database", "api_health", "frontend_health",
             "agent_status", "customer_data", "system_metrics"
         }
-        self.validation_cache: Dict[str, IntegrityReport] = {}
+        self.validation_cache: dict[str, IntegrityReport] = {}
 
     async def validate_observation(
         self,
-        observation: Dict[str, Any],
+        observation: dict[str, Any],
         required_level: IntegrityLevel = IntegrityLevel.MEDIUM
     ) -> IntegrityReport:
         """Validate an observation's integrity before processing"""
@@ -242,7 +244,7 @@ class InputIntegrityValidator:
             hash_value=self._compute_hash(observation)
         )
 
-    def _compute_hash(self, data: Dict[str, Any]) -> str:
+    def _compute_hash(self, data: dict[str, Any]) -> str:
         """Compute SHA-256 hash of observation data (OPTIMIZED with orjson)"""
         # Exclude integrity fields from hash
         clean_data = {k: v for k, v in data.items()
@@ -257,8 +259,8 @@ class InputIntegrityValidator:
 
     def _determine_validity(
         self,
-        passed: List[str],
-        failed: List[str],
+        passed: list[str],
+        failed: list[str],
         level: IntegrityLevel
     ) -> bool:
         """Determine if observation passes integrity check"""
@@ -286,13 +288,13 @@ class ProcessingIntegrityValidator:
     """
 
     def __init__(self):
-        self.decision_history: List[Dict[str, Any]] = []
-        self.conflict_patterns: Dict[str, List[str]] = {}
+        self.decision_history: list[dict[str, Any]] = []
+        self.conflict_patterns: dict[str, list[str]] = {}
 
     async def validate_decision_chain(
         self,
-        decisions: List[Dict[str, Any]],
-        context: Dict[str, Any]
+        decisions: list[dict[str, Any]],
+        context: dict[str, Any]
     ) -> IntegrityReport:
         """Validate a chain of decisions for logical consistency"""
         checks_passed = []
@@ -343,7 +345,7 @@ class ProcessingIntegrityValidator:
             confidence_score=confidence
         )
 
-    def _detect_conflicts(self, action_types: List[str]) -> List[str]:
+    def _detect_conflicts(self, action_types: list[str]) -> list[str]:
         """Detect conflicting action types"""
         conflicts = []
         # Define mutually exclusive actions
@@ -362,8 +364,8 @@ class ProcessingIntegrityValidator:
 
     def _validate_resources(
         self,
-        resources: Set[str],
-        context: Dict[str, Any]
+        resources: set[str],
+        context: dict[str, Any]
     ) -> bool:
         """Validate required resources are available"""
         available = set(context.get("available_resources", []))
@@ -377,13 +379,13 @@ class OutputIntegrityValidator:
     """
 
     def __init__(self):
-        self.expected_outcomes: Dict[str, Callable] = {}
+        self.expected_outcomes: dict[str, Callable] = {}
 
     async def validate_action_result(
         self,
-        action: Dict[str, Any],
-        result: Dict[str, Any],
-        expected: Optional[Dict[str, Any]] = None
+        action: dict[str, Any],
+        result: dict[str, Any],
+        expected: Optional[dict[str, Any]] = None
     ) -> IntegrityReport:
         """Validate an action result against expectations"""
         checks_passed = []
@@ -456,10 +458,10 @@ class ParallelObserver:
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
         self.timeout = 5.0  # Per-observation timeout
-        self.cache: Dict[str, Tuple[Any, datetime]] = {}
+        self.cache: dict[str, tuple[Any, datetime]] = {}
         self.cache_ttl = 30  # seconds
 
-    async def observe_all(self) -> List[Dict[str, Any]]:
+    async def observe_all(self) -> list[dict[str, Any]]:
         """Execute all observations in parallel"""
         start_time = datetime.now()
 
@@ -494,8 +496,8 @@ class ParallelObserver:
     async def _observe_with_integrity(
         self,
         obs_type: str,
-        coroutine: Awaitable[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+        coroutine: Awaitable[dict[str, Any]]
+    ) -> Optional[dict[str, Any]]:
         """Wrap observation with integrity validation"""
         try:
             # Check cache first
@@ -537,7 +539,7 @@ class ParallelObserver:
             logger.error(f"Observation {obs_type} failed: {e}")
             return None
 
-    async def _observe_new_customers(self) -> Dict[str, Any]:
+    async def _observe_new_customers(self) -> dict[str, Any]:
         """Observe new customers in last 5 minutes"""
         rows = execute_with_connection("""
             SELECT id, name, email, created_at
@@ -557,7 +559,7 @@ class ParallelObserver:
             "observation": "new_customers_detected" if rows else "no_new_customers"
         }
 
-    async def _observe_pending_estimates(self) -> Dict[str, Any]:
+    async def _observe_pending_estimates(self) -> dict[str, Any]:
         """Observe pending estimates with age tracking"""
         rows = execute_with_connection("""
             SELECT id, customer_id, created_at,
@@ -580,7 +582,7 @@ class ParallelObserver:
             "observation": "urgent_estimates" if urgent else "estimates_pending"
         }
 
-    async def _observe_overdue_invoices(self) -> Dict[str, Any]:
+    async def _observe_overdue_invoices(self) -> dict[str, Any]:
         """Observe overdue invoices with debt totals"""
         rows = execute_with_connection("""
             SELECT i.id, i.customer_id, i.total, i.due_date,
@@ -606,7 +608,7 @@ class ParallelObserver:
             "observation": "overdue_invoices" if rows else "no_overdue"
         }
 
-    async def _observe_scheduling_conflicts(self) -> Dict[str, Any]:
+    async def _observe_scheduling_conflicts(self) -> dict[str, Any]:
         """Observe crew scheduling conflicts"""
         rows = execute_with_connection("""
             SELECT j1.id as job1_id, j2.id as job2_id,
@@ -631,7 +633,7 @@ class ParallelObserver:
             "observation": "scheduling_conflicts" if rows else "no_conflicts"
         }
 
-    async def _observe_churn_risks(self) -> Dict[str, Any]:
+    async def _observe_churn_risks(self) -> dict[str, Any]:
         """Observe customers at risk of churning (90+ days inactive)"""
         rows = execute_with_connection("""
             SELECT c.id, c.name, c.email,
@@ -656,7 +658,7 @@ class ParallelObserver:
             "observation": "churn_risks" if rows else "no_churn_risks"
         }
 
-    async def _observe_system_health(self) -> Dict[str, Any]:
+    async def _observe_system_health(self) -> dict[str, Any]:
         """Observe backend system health"""
         services = {
             "ai_agents": "https://brainops-ai-agents.onrender.com/health",
@@ -691,7 +693,7 @@ class ParallelObserver:
             "observation": "system_degraded" if unhealthy else "system_healthy"
         }
 
-    async def _observe_frontend_health(self) -> Dict[str, Any]:
+    async def _observe_frontend_health(self) -> dict[str, Any]:
         """Observe frontend application health"""
         frontends = {
             "erp": "https://weathercraft-erp.vercel.app",
@@ -725,7 +727,7 @@ class ParallelObserver:
             "observation": "frontend_issues" if unhealthy else "frontends_healthy"
         }
 
-    async def _observe_agent_status(self) -> Dict[str, Any]:
+    async def _observe_agent_status(self) -> dict[str, Any]:
         """Observe AI agent execution status"""
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
@@ -763,7 +765,7 @@ class A2AMessage:
     from_agent: str
     to_agent: str
     message_type: str  # request, response, broadcast, handoff
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     priority: int = 5  # 1-10, 10 highest
     timestamp: datetime = field(default_factory=datetime.now)
     expires_at: Optional[datetime] = None
@@ -776,7 +778,7 @@ class AgentCapability:
     """Describes what an agent can do"""
     agent_id: str
     agent_name: str
-    capabilities: List[str]
+    capabilities: list[str]
     load: float  # 0-1, current load
     available: bool
     latency_avg_ms: float
@@ -798,9 +800,9 @@ class A2AProtocol:
 
     def __init__(self):
         self.message_queue: asyncio.Queue = asyncio.Queue()
-        self.pending_responses: Dict[str, asyncio.Future] = {}
-        self.agent_registry: Dict[str, AgentCapability] = {}
-        self.message_handlers: Dict[str, Callable] = {}
+        self.pending_responses: dict[str, asyncio.Future] = {}
+        self.agent_registry: dict[str, AgentCapability] = {}
+        self.message_handlers: dict[str, Callable] = {}
         self.running = False
 
     async def start(self):
@@ -834,7 +836,7 @@ class A2AProtocol:
         from_agent: str,
         to_agent: str,
         message_type: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         priority: int = 5,
         timeout: float = 30.0,
         wait_response: bool = False
@@ -875,7 +877,7 @@ class A2AProtocol:
         self,
         from_agent: str,
         message_type: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         filter_capability: Optional[str] = None
     ) -> int:
         """Broadcast message to all agents (optionally filtered by capability)"""
@@ -923,8 +925,8 @@ class A2AProtocol:
         self,
         from_agent: str,
         to_agent: str,
-        task: Dict[str, Any],
-        context: Dict[str, Any]
+        task: dict[str, Any],
+        context: dict[str, Any]
     ) -> Optional[A2AMessage]:
         """Hand off a task from one agent to another"""
         return await self.send_message(
@@ -992,9 +994,9 @@ class PredictedAction:
     """A predicted next action"""
     action_type: str
     probability: float
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     estimated_duration_ms: int
-    dependencies: List[str] = field(default_factory=list)
+    dependencies: list[str] = field(default_factory=list)
 
 
 class SpeculativeExecutor:
@@ -1020,9 +1022,9 @@ class SpeculativeExecutor:
     """
 
     def __init__(self):
-        self.pattern_history: List[Dict[str, Any]] = []
-        self.action_sequences: Dict[str, List[str]] = defaultdict(list)
-        self.speculation_results: Dict[str, Any] = {}
+        self.pattern_history: list[dict[str, Any]] = []
+        self.action_sequences: dict[str, list[str]] = defaultdict(list)
+        self.speculation_results: dict[str, Any] = {}
         self.confidence_threshold = 0.70
         self.max_speculation_depth = 2
         self.safe_action_types = {
@@ -1031,8 +1033,8 @@ class SpeculativeExecutor:
         }
         # OPTIMIZATION: Markov Chain transition matrix for O(1) lookups
         # Structure: {observation_type: {action: count}}
-        self.markov_transitions: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        self.markov_totals: Dict[str, int] = defaultdict(int)  # Total transitions per observation
+        self.markov_transitions: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        self.markov_totals: dict[str, int] = defaultdict(int)  # Total transitions per observation
 
     async def learn_pattern(
         self,
@@ -1059,8 +1061,8 @@ class SpeculativeExecutor:
 
     async def predict_next_actions(
         self,
-        current_observations: List[Dict[str, Any]]
-    ) -> List[PredictedAction]:
+        current_observations: list[dict[str, Any]]
+    ) -> list[PredictedAction]:
         """Predict likely next actions based on observations (OPTIMIZED with Markov Chain O(1))"""
         predictions = []
 
@@ -1094,9 +1096,9 @@ class SpeculativeExecutor:
 
     async def speculate(
         self,
-        predictions: List[PredictedAction],
-        executor: Callable[[str, Dict], Awaitable[Any]]
-    ) -> Dict[str, Any]:
+        predictions: list[PredictedAction],
+        executor: Callable[[str, dict], Awaitable[Any]]
+    ) -> dict[str, Any]:
         """Execute predicted actions speculatively"""
         results = {}
 
@@ -1165,8 +1167,8 @@ class SpeculativeExecutor:
     def _infer_parameters(
         self,
         action: str,
-        observation: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        observation: dict[str, Any]
+    ) -> dict[str, Any]:
         """Infer action parameters from observation context"""
         params = {}
 
@@ -1226,8 +1228,8 @@ class DecisionRAG:
 
     # ENHANCEMENT: Class-level LRU cache for embeddings
     _embedding_cache_size = 10000
-    _embedding_cache: Dict[str, List[float]] = {}
-    _cache_order: List[str] = []  # For LRU eviction
+    _embedding_cache: dict[str, list[float]] = {}
+    _cache_order: list[str] = []  # For LRU eviction
 
     def __init__(self):
         self.embedding_cache = DecisionRAG._embedding_cache  # Use class-level cache
@@ -1237,9 +1239,9 @@ class DecisionRAG:
 
     async def find_similar_decisions(
         self,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         limit: int = 5
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Find historical decisions similar to current context"""
         try:
             # Generate embedding for current context
@@ -1279,7 +1281,7 @@ class DecisionRAG:
         self,
         decision_type: str,
         min_success_rate: float = 0.7
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Get patterns from successful decisions of a given type"""
         try:
             conn = psycopg2.connect(**DB_CONFIG)
@@ -1308,8 +1310,8 @@ class DecisionRAG:
 
     async def boost_confidence(
         self,
-        decision: Dict[str, Any],
-        similar_decisions: List[Dict[str, Any]]
+        decision: dict[str, Any],
+        similar_decisions: list[dict[str, Any]]
     ) -> float:
         """Boost decision confidence based on similar successful decisions"""
         if not similar_decisions:
@@ -1330,7 +1332,7 @@ class DecisionRAG:
 
         return min(1.0, base_confidence + boost)
 
-    async def _get_embedding(self, text: str) -> List[float]:
+    async def _get_embedding(self, text: str) -> list[float]:
         """
         Get embedding from OpenAI with LRU caching and retry logic.
         ENHANCED: Uses class-level LRU cache, exponential backoff, and proper async execution.
@@ -1378,7 +1380,7 @@ class DecisionRAG:
 
         return embedding
 
-    def get_cache_stats(self) -> Dict[str, Any]:
+    def get_cache_stats(self) -> dict[str, Any]:
         """ENHANCEMENT: Get embedding cache statistics"""
         total = self._cache_hits + self._cache_misses
         return {
@@ -1393,7 +1395,7 @@ class DecisionRAG:
         self,
         context_text: str,
         limit: int
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fallback keyword-based search"""
         try:
             # Extract keywords
@@ -1410,7 +1412,7 @@ class DecisionRAG:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     # Build ILIKE query
                     conditions = " OR ".join([
-                        f"description ILIKE %s" for _ in keywords
+                        "description ILIKE %s" for _ in keywords
                     ])
                     params = [f"%{kw}%" for kw in keywords]
                     params.append(limit)
@@ -1499,7 +1501,7 @@ def get_output_validator() -> OutputIntegrityValidator:
 # INTEGRATION EXAMPLE
 # =============================================================================
 
-async def enhanced_ooda_cycle(tenant_id: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """
     Enhanced OODA cycle with all bleeding-edge patterns.
 
@@ -1529,7 +1531,7 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[Dict[str, Any]] 
     output_validator = get_output_validator()
     decision_rag = get_decision_rag()
     speculator = get_speculative_executor()
-    
+
     # Initialize Real Agent Executor
     from agent_executor import AgentExecutor
     real_agent_executor = AgentExecutor()
@@ -1570,24 +1572,24 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[Dict[str, Any]] 
     spec_start = datetime.now()
     predictions = await speculator.predict_next_actions(valid_observations)
 
-    async def real_executor_wrapper(action_type: str, params: Dict) -> Any:
+    async def real_executor_wrapper(action_type: str, params: dict) -> Any:
         """Execute real agent actions based on prediction"""
         # Map action types to specific agents
         agent_name = "SystemMonitor"  # Default safe agent
-        
+
         if "analyze" in action_type or "predict" in action_type:
             agent_name = "PredictiveAnalyzer"
         elif "query" in action_type or "search" in action_type:
             agent_name = "KnowledgeAgent"
         elif "validate" in action_type:
             agent_name = "Monitor"
-            
+
         task = {
             "action": action_type,
             "params": params,
             "speculative": True  # Flag to indicate this is a speculative run
         }
-        
+
         try:
             return await real_agent_executor.execute(agent_name, task)
         except Exception as e:
@@ -1683,27 +1685,27 @@ class BleedingEdgeOODAController:
 
         logger.info(f"BleedingEdgeOODAController initialized for tenant {tenant_id}")
 
-    async def run_enhanced_cycle(self, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def run_enhanced_cycle(self, context: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         """Run a complete enhanced OODA cycle with all optimizations."""
         return await enhanced_ooda_cycle(self.tenant_id, context or {})
 
-    async def validate_input(self, data: Dict[str, Any], level: IntegrityLevel = IntegrityLevel.MEDIUM) -> IntegrityReport:
+    async def validate_input(self, data: dict[str, Any], level: IntegrityLevel = IntegrityLevel.MEDIUM) -> IntegrityReport:
         """Validate input data integrity."""
         return await self.input_validator.validate_observation(data, level)
 
-    async def validate_processing(self, decisions: List[Dict[str, Any]], context: Dict[str, Any]) -> IntegrityReport:
+    async def validate_processing(self, decisions: list[dict[str, Any]], context: dict[str, Any]) -> IntegrityReport:
         """Validate processing integrity."""
         return await self.processing_validator.validate_decision_chain(decisions, context)
 
-    async def validate_output(self, action: Dict[str, Any], result: Dict[str, Any], expected: Optional[Dict] = None) -> IntegrityReport:
+    async def validate_output(self, action: dict[str, Any], result: dict[str, Any], expected: Optional[dict] = None) -> IntegrityReport:
         """Validate output integrity."""
         return await self.output_validator.validate_action_result(action, result, expected)
 
-    async def query_similar_decisions(self, decision_context: Dict[str, Any], limit: int = 5) -> List[Dict[str, Any]]:
+    async def query_similar_decisions(self, decision_context: dict[str, Any], limit: int = 5) -> list[dict[str, Any]]:
         """Query RAG for similar historical decisions."""
         return await self.decision_rag.find_similar_decisions(decision_context, limit)
 
-    async def register_agent(self, agent_id: str, capabilities: List[Dict[str, Any]]) -> bool:
+    async def register_agent(self, agent_id: str, capabilities: list[dict[str, Any]]) -> bool:
         """Register an agent with the A2A protocol."""
         # Create proper AgentCapability with correct field names
         agent_cap = AgentCapability(
@@ -1723,7 +1725,7 @@ class BleedingEdgeOODAController:
         source_agent: str,
         target_agent: str,
         message_type: str,
-        payload: Dict[str, Any]
+        payload: dict[str, Any]
     ) -> Optional[A2AMessage]:
         """Send a message between agents via A2A protocol."""
         return await self.a2a_protocol.send_message(
@@ -1732,9 +1734,9 @@ class BleedingEdgeOODAController:
 
     async def speculate_actions(
         self,
-        likely_actions: List[Dict[str, Any]],
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        likely_actions: list[dict[str, Any]],
+        context: dict[str, Any]
+    ) -> dict[str, Any]:
         """Pre-execute likely actions speculatively."""
         # Convert actions to PredictedAction format
         predictions = [
@@ -1747,13 +1749,13 @@ class BleedingEdgeOODAController:
             for action in likely_actions
         ]
 
-        async def mock_executor(action_type: str, params: Dict) -> Any:
+        async def mock_executor(action_type: str, params: dict) -> Any:
             return {"status": "speculated", "action_type": action_type, "params": params}
 
         # Call speculate with correct signature
         return await self.speculative_executor.speculate(predictions, mock_executor)
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """Get all controller metrics."""
         return {
             "parallel_observer": {

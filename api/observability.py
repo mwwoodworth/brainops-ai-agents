@@ -8,7 +8,7 @@ import logging
 import os
 import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import aiohttp
 from fastapi import APIRouter
@@ -41,7 +41,7 @@ class AgentStatus(BaseModel):
     total_scheduled: int
     executions_last_hour: int
     success_rate: float
-    top_agents: List[Dict[str, Any]]
+    top_agents: list[dict[str, Any]]
 
 
 class MemoryStatus(BaseModel):
@@ -64,22 +64,22 @@ class FullDashboard(BaseModel):
     """Complete system dashboard"""
     timestamp: str
     overall_status: str
-    systems: Dict[str, Dict[str, Any]]
-    aurea: Dict[str, Any]
-    agents: Dict[str, Any]
-    memory: Dict[str, Any]
-    learning: Dict[str, Any]
-    self_healing: Dict[str, Any]
-    revenue: Dict[str, Any]
-    database: Dict[str, Any]
-    mcp: Dict[str, Any]
+    systems: dict[str, dict[str, Any]]
+    aurea: dict[str, Any]
+    agents: dict[str, Any]
+    memory: dict[str, Any]
+    learning: dict[str, Any]
+    self_healing: dict[str, Any]
+    revenue: dict[str, Any]
+    database: dict[str, Any]
+    mcp: dict[str, Any]
 
 
 # Track startup time
 _startup_time = time.time()
 
 
-async def _get_database_stats() -> Dict[str, Any]:
+async def _get_database_stats() -> dict[str, Any]:
     """Get database connection and table stats"""
     try:
         from database.async_connection import get_pool, using_fallback
@@ -129,7 +129,7 @@ async def _get_database_stats() -> Dict[str, Any]:
         }
 
 
-async def _get_aurea_stats() -> Dict[str, Any]:
+async def _get_aurea_stats() -> dict[str, Any]:
     """Get AUREA orchestrator stats"""
     try:
         from database.async_connection import get_pool, using_fallback
@@ -181,7 +181,7 @@ async def _get_aurea_stats() -> Dict[str, Any]:
         return {"status": "error", "error": str(e), "running": False}
 
 
-async def _get_agent_stats() -> Dict[str, Any]:
+async def _get_agent_stats() -> dict[str, Any]:
     """Get agent execution stats"""
     try:
         from database.async_connection import get_pool, using_fallback
@@ -235,7 +235,7 @@ async def _get_agent_stats() -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
-async def _get_learning_stats() -> Dict[str, Any]:
+async def _get_learning_stats() -> dict[str, Any]:
     """Get learning system stats"""
     try:
         from database.async_connection import get_pool, using_fallback
@@ -272,7 +272,7 @@ async def _get_learning_stats() -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
-async def _get_self_healing_stats() -> Dict[str, Any]:
+async def _get_self_healing_stats() -> dict[str, Any]:
     """Get self-healing system stats"""
     try:
         from database.async_connection import get_pool, using_fallback
@@ -307,7 +307,7 @@ async def _get_self_healing_stats() -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
-async def _get_memory_stats() -> Dict[str, Any]:
+async def _get_memory_stats() -> dict[str, Any]:
     """Get memory system stats"""
     try:
         from database.async_connection import get_pool, using_fallback
@@ -343,7 +343,7 @@ async def _get_memory_stats() -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
-async def _get_revenue_stats() -> Dict[str, Any]:
+async def _get_revenue_stats() -> dict[str, Any]:
     """Get revenue pipeline stats"""
     try:
         from database.async_connection import get_pool, using_fallback
@@ -352,7 +352,7 @@ async def _get_revenue_stats() -> Dict[str, Any]:
 
         pool = get_pool()
 
-        async def _fetch_leads(table: str, include_status: bool) -> Dict[str, Any]:
+        async def _fetch_leads(table: str, include_status: bool) -> dict[str, Any]:
             stage_expr = "LOWER(COALESCE(stage, status, ''))" if include_status else "LOWER(COALESCE(stage, ''))"
             return await pool.fetchrow(f"""
                 SELECT
@@ -403,7 +403,7 @@ async def _get_revenue_stats() -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
-async def _get_mcp_stats() -> Dict[str, Any]:
+async def _get_mcp_stats() -> dict[str, Any]:
     """Get MCP integration stats"""
     try:
         mcp_url = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
@@ -427,7 +427,7 @@ async def _get_mcp_stats() -> Dict[str, Any]:
 
 
 @router.get("/dashboard")
-async def get_full_dashboard() -> Dict[str, Any]:
+async def get_full_dashboard() -> dict[str, Any]:
     """
     Get COMPLETE system dashboard with real-time metrics.
     This is THE endpoint for full system observability.
@@ -523,7 +523,7 @@ async def get_full_dashboard() -> Dict[str, Any]:
 
 
 @router.get("/health/deep")
-async def deep_health_check() -> Dict[str, Any]:
+async def deep_health_check() -> dict[str, Any]:
     """
     Deep health check that verifies ALL system components.
     Use for monitoring and alerting.
@@ -572,7 +572,7 @@ async def deep_health_check() -> Dict[str, Any]:
 
 
 @router.get("/alerts")
-async def get_active_alerts() -> Dict[str, Any]:
+async def get_active_alerts() -> dict[str, Any]:
     """
     Get active system alerts based on health checks.
     """
@@ -630,12 +630,12 @@ async def get_active_alerts() -> Dict[str, Any]:
 
 
 @router.get("/diagnostics")
-async def get_diagnostics() -> Dict[str, Any]:
+async def get_diagnostics() -> dict[str, Any]:
     """
     Get detailed diagnostics for debugging.
     """
-    import sys
     import platform
+    import sys
 
     # Get environment info
     env_vars = {
@@ -668,7 +668,7 @@ RENDER_SERVICES = {
 }
 
 
-async def _fetch_render_api(endpoint: str) -> Dict[str, Any]:
+async def _fetch_render_api(endpoint: str) -> dict[str, Any]:
     """Fetch from Render API"""
     if not RENDER_API_KEY:
         return {"error": "RENDER_API_KEY not configured"}
@@ -686,7 +686,7 @@ async def _fetch_render_api(endpoint: str) -> Dict[str, Any]:
 
 
 @router.get("/render/services")
-async def get_render_services() -> Dict[str, Any]:
+async def get_render_services() -> dict[str, Any]:
     """Get all Render service statuses"""
     services = {}
 
@@ -711,7 +711,7 @@ async def get_render_services() -> Dict[str, Any]:
 
 
 @router.get("/render/deploys")
-async def get_render_deploys() -> Dict[str, Any]:
+async def get_render_deploys() -> dict[str, Any]:
     """Get recent deployments across all Render services"""
     deploys = {}
 
@@ -739,7 +739,7 @@ async def get_render_deploys() -> Dict[str, Any]:
 
 
 @router.get("/render/logs/{service_name}")
-async def get_render_logs(service_name: str, limit: int = 100) -> Dict[str, Any]:
+async def get_render_logs(service_name: str, limit: int = 100) -> dict[str, Any]:
     """Get live logs from a Render service"""
     service_id = RENDER_SERVICES.get(service_name)
     if not service_id:
@@ -786,7 +786,7 @@ async def get_render_logs(service_name: str, limit: int = 100) -> Dict[str, Any]
 
 
 @router.get("/render/deploy/{service_name}")
-async def trigger_render_deploy(service_name: str) -> Dict[str, Any]:
+async def trigger_render_deploy(service_name: str) -> dict[str, Any]:
     """Get latest deploy status for a service (use POST to actually deploy)"""
     service_id = RENDER_SERVICES.get(service_name)
     if not service_id:
@@ -821,7 +821,7 @@ VERCEL_PROJECTS = {
 }
 
 
-async def _fetch_vercel_api(endpoint: str) -> Dict[str, Any]:
+async def _fetch_vercel_api(endpoint: str) -> dict[str, Any]:
     """Fetch from Vercel API"""
     if not VERCEL_TOKEN:
         return {"error": "VERCEL_TOKEN not configured"}
@@ -839,7 +839,7 @@ async def _fetch_vercel_api(endpoint: str) -> Dict[str, Any]:
 
 
 @router.get("/vercel/deployments")
-async def get_vercel_deployments(limit: int = 10) -> Dict[str, Any]:
+async def get_vercel_deployments(limit: int = 10) -> dict[str, Any]:
     """Get recent Vercel deployments"""
     data = await _fetch_vercel_api(f"/v6/deployments?limit={limit}")
 
@@ -867,7 +867,7 @@ async def get_vercel_deployments(limit: int = 10) -> Dict[str, Any]:
 
 
 @router.get("/vercel/project/{project_name}")
-async def get_vercel_project(project_name: str) -> Dict[str, Any]:
+async def get_vercel_project(project_name: str) -> dict[str, Any]:
     """Get Vercel project details and recent deployments"""
     # Get project info
     data = await _fetch_vercel_api(f"/v9/projects/{project_name}")
@@ -903,7 +903,7 @@ async def get_vercel_project(project_name: str) -> Dict[str, Any]:
 # ==================== UNIFIED SYSTEM STATUS ====================
 
 @router.get("/live")
-async def get_live_system_status() -> Dict[str, Any]:
+async def get_live_system_status() -> dict[str, Any]:
     """
     MASTER ENDPOINT: Complete real-time status of ALL systems.
     Use this for absolute visibility into every component.
@@ -998,7 +998,7 @@ async def get_live_system_status() -> Dict[str, Any]:
 
 
 @router.post("/webhook/render")
-async def receive_render_webhook(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def receive_render_webhook(payload: dict[str, Any]) -> dict[str, Any]:
     """
     Receive Render deploy webhooks for real-time notifications.
     Configure at: https://dashboard.render.com -> Webhook settings

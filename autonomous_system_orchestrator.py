@@ -14,18 +14,19 @@ Based on 2025 best practices from ServiceNow AI Control Tower, Kubiya, and Circl
 """
 
 import asyncio
-import json
 import hashlib
-from datetime import datetime
-from typing import Dict, List, Optional, Any, Set, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-import os
+import json
 import logging
-import aiohttp
-from collections import defaultdict, deque
+import os
 import random
-from asyncio import Queue, PriorityQueue
+from asyncio import PriorityQueue, Queue
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Optional
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ class SystemEvent:
     """Event data structure"""
     event_type: EventType
     source: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     timestamp: datetime = field(default_factory=lambda: datetime.utcnow())
     priority: int = 5  # 1=highest, 10=lowest
     event_id: str = field(default_factory=lambda: hashlib.sha256(str(datetime.utcnow().timestamp()).encode()).hexdigest()[:12])
@@ -62,7 +63,7 @@ class EventBus:
     """Central event bus for pub/sub communication"""
 
     def __init__(self):
-        self._subscribers: Dict[EventType, List[Callable]] = defaultdict(list)
+        self._subscribers: dict[EventType, list[Callable]] = defaultdict(list)
         self._event_queue: Queue = Queue()
         self._event_history: deque = deque(maxlen=1000)
         self._running = False
@@ -112,7 +113,7 @@ class EventBus:
         """Stop event processing"""
         self._running = False
 
-    def get_recent_events(self, event_type: Optional[EventType] = None, limit: int = 100) -> List[SystemEvent]:
+    def get_recent_events(self, event_type: Optional[EventType] = None, limit: int = 100) -> list[SystemEvent]:
         """Get recent events"""
         events = list(self._event_history)
         if event_type:
@@ -128,7 +129,7 @@ class Task:
     task_id: str
     task_type: str
     agent_name: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     priority: int = 5
     created_at: datetime = field(default_factory=lambda: datetime.utcnow())
     retries: int = 0
@@ -144,11 +145,11 @@ class MessageQueue:
 
     def __init__(self, max_workers: int = 10):
         self._queue: PriorityQueue = PriorityQueue()
-        self._workers: List[asyncio.Task] = []
+        self._workers: list[asyncio.Task] = []
         self._max_workers = max_workers
         self._running = False
         self._task_history: deque = deque(maxlen=1000)
-        self._active_tasks: Dict[str, Task] = {}
+        self._active_tasks: dict[str, Task] = {}
 
     async def enqueue(self, task: Task):
         """Add task to queue"""
@@ -190,7 +191,7 @@ class MessageQueue:
             worker.cancel()
         self._workers.clear()
 
-    def get_queue_stats(self) -> Dict[str, Any]:
+    def get_queue_stats(self) -> dict[str, Any]:
         """Get queue statistics"""
         return {
             "queue_size": self._queue.qsize(),
@@ -279,7 +280,7 @@ class CircuitBreaker:
         else:  # HALF_OPEN
             return True
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get circuit breaker statistics"""
         return {
             "name": self.name,
@@ -322,8 +323,8 @@ class LoadBalancer:
 
     def __init__(self, strategy: LoadBalancingStrategy = LoadBalancingStrategy.LEAST_LOADED):
         self.strategy = strategy
-        self._instances: Dict[str, List[AgentInstance]] = defaultdict(list)
-        self._round_robin_index: Dict[str, int] = defaultdict(int)
+        self._instances: dict[str, list[AgentInstance]] = defaultdict(list)
+        self._round_robin_index: dict[str, int] = defaultdict(int)
 
     def register_instance(self, instance: AgentInstance):
         """Register an agent instance"""
@@ -368,7 +369,7 @@ class LoadBalancer:
                 if instance.instance_id == instance_id:
                     instance.current_load = max(0, instance.current_load + load_delta)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get load balancer statistics"""
         stats = {}
         for agent_name, instances in self._instances.items():
@@ -388,10 +389,10 @@ class HealthAggregator:
     """Aggregates health across all systems and modules"""
 
     def __init__(self):
-        self._health_data: Dict[str, Dict[str, Any]] = {}
-        self._module_health: Dict[str, float] = {}
+        self._health_data: dict[str, dict[str, Any]] = {}
+        self._module_health: dict[str, float] = {}
 
-    def update_system_health(self, system_id: str, health_data: Dict[str, Any]):
+    def update_system_health(self, system_id: str, health_data: dict[str, Any]):
         """Update health data for a system"""
         self._health_data[system_id] = {
             **health_data,
@@ -402,7 +403,7 @@ class HealthAggregator:
         """Update health score for a module"""
         self._module_health[module_name] = health_score
 
-    def get_aggregated_health(self) -> Dict[str, Any]:
+    def get_aggregated_health(self) -> dict[str, Any]:
         """Get aggregated health across all systems"""
         if not self._health_data:
             return {
@@ -455,7 +456,7 @@ class HealthAggregator:
             "last_updated": datetime.utcnow().isoformat()
         }
 
-    def get_unhealthy_systems(self, threshold: float = 80.0) -> List[Dict[str, Any]]:
+    def get_unhealthy_systems(self, threshold: float = 80.0) -> list[dict[str, Any]]:
         """Get systems below health threshold"""
         unhealthy = []
         for system_id, data in self._health_data.items():
@@ -515,12 +516,12 @@ class ManagedSystem:
     status: SystemStatus
     health_score: float
     last_health_check: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    resources: Dict[str, float] = field(default_factory=dict)
-    dependencies: List[str] = field(default_factory=list)
-    deployments: List[str] = field(default_factory=list)
-    alerts: List[Dict[str, Any]] = field(default_factory=list)
-    tags: List[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    resources: dict[str, float] = field(default_factory=dict)
+    dependencies: list[str] = field(default_factory=list)
+    deployments: list[str] = field(default_factory=list)
+    alerts: list[dict[str, Any]] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -534,8 +535,8 @@ class Deployment:
     completed_at: Optional[str]
     triggered_by: str  # user, auto, schedule
     commit_sha: Optional[str]
-    changes: List[str]
-    test_results: Dict[str, Any] = field(default_factory=dict)
+    changes: list[str]
+    test_results: dict[str, Any] = field(default_factory=dict)
     rollback_available: bool = True
 
 
@@ -557,11 +558,11 @@ class ResourceAllocation:
 class MaintenanceWindow:
     """Scheduled maintenance window"""
     window_id: str
-    system_ids: List[str]
+    system_ids: list[str]
     scheduled_start: str
     scheduled_end: str
     maintenance_type: str
-    tasks: List[str]
+    tasks: list[str]
     status: str  # scheduled, in_progress, completed, cancelled
 
 
@@ -597,10 +598,10 @@ class AutonomousSystemOrchestrator:
 
     def __init__(self):
         self.db_url = os.getenv("DATABASE_URL")
-        self.systems: Dict[str, ManagedSystem] = {}
-        self.deployments: Dict[str, Deployment] = {}
-        self.resource_allocations: List[ResourceAllocation] = []
-        self.maintenance_windows: Dict[str, MaintenanceWindow] = []
+        self.systems: dict[str, ManagedSystem] = {}
+        self.deployments: dict[str, Deployment] = {}
+        self.resource_allocations: list[ResourceAllocation] = []
+        self.maintenance_windows: dict[str, MaintenanceWindow] = []
         self._initialized = False
 
         # Configuration
@@ -610,7 +611,7 @@ class AutonomousSystemOrchestrator:
         self.deployment_approval_threshold = 0.85  # Auto-approve if confidence > 85%
 
         # System groups for bulk operations
-        self.system_groups: Dict[str, Set[str]] = defaultdict(set)
+        self.system_groups: dict[str, set[str]] = defaultdict(set)
 
         # CI/CD integrations
         self.ci_cd_providers = {
@@ -626,13 +627,13 @@ class AutonomousSystemOrchestrator:
         self.message_queue = MessageQueue(max_workers=20)
 
         # NEW: Circuit breakers for each system
-        self.circuit_breakers: Dict[str, CircuitBreaker] = {}
+        self.circuit_breakers: dict[str, CircuitBreaker] = {}
 
         # NEW: Load balancer for agent distribution
         self.load_balancer = LoadBalancer(strategy=LoadBalancingStrategy.LEAST_LOADED)
 
         # NEW: Priority routing
-        self.priority_routes: Dict[str, int] = {
+        self.priority_routes: dict[str, int] = {
             "critical_alert": 1,
             "deployment": 2,
             "health_check": 3,
@@ -872,9 +873,9 @@ class AutonomousSystemOrchestrator:
         url: str,
         region: str = "us-east",
         provider: str = "render",
-        metadata: Dict[str, Any] = None,
-        tags: List[str] = None,
-        dependencies: List[str] = None
+        metadata: dict[str, Any] = None,
+        tags: list[str] = None,
+        dependencies: list[str] = None
     ) -> ManagedSystem:
         """
         Register a new system for management
@@ -973,7 +974,7 @@ class AutonomousSystemOrchestrator:
         except Exception as e:
             logger.error(f"Error persisting system: {e}")
 
-    async def _check_system_health(self, system_id: str) -> Dict[str, Any]:
+    async def _check_system_health(self, system_id: str) -> dict[str, Any]:
         """Check health of a single system with circuit breaker protection"""
         if system_id not in self.systems:
             return {"error": f"System {system_id} not found"}
@@ -1082,7 +1083,7 @@ class AutonomousSystemOrchestrator:
             "circuit_state": circuit.state.value if circuit else "unknown"
         }
 
-    async def check_all_systems_health(self) -> Dict[str, Any]:
+    async def check_all_systems_health(self) -> dict[str, Any]:
         """Check health of all registered systems"""
         results = []
         tasks = []
@@ -1135,7 +1136,7 @@ class AutonomousSystemOrchestrator:
 
         return remediation_steps
 
-    async def _restart_render_service(self, system: ManagedSystem) -> Dict[str, Any]:
+    async def _restart_render_service(self, system: ManagedSystem) -> dict[str, Any]:
         """Restart a Render service"""
         api_key = self.ci_cd_providers.get("render")
         if not api_key:
@@ -1158,7 +1159,7 @@ class AutonomousSystemOrchestrator:
         except Exception as e:
             return {"error": str(e)}
 
-    async def _scale_system(self, system_id: str, direction: str = "up") -> Dict[str, Any]:
+    async def _scale_system(self, system_id: str, direction: str = "up") -> dict[str, Any]:
         """Scale a system's resources"""
         system = self.systems.get(system_id)
         if not system:
@@ -1195,7 +1196,7 @@ class AutonomousSystemOrchestrator:
             "direction": direction
         }
 
-    async def _log_remediation(self, system_id: str, steps: List[Dict[str, Any]]):
+    async def _log_remediation(self, system_id: str, steps: list[dict[str, Any]]):
         """Log remediation attempt to database"""
         try:
             import asyncpg
@@ -1226,7 +1227,7 @@ class AutonomousSystemOrchestrator:
         system_id: str,
         version: str,
         commit_sha: str = None,
-        changes: List[str] = None,
+        changes: list[str] = None,
         triggered_by: str = "manual"
     ) -> Deployment:
         """
@@ -1322,7 +1323,7 @@ class AutonomousSystemOrchestrator:
         await self._persist_deployment(deployment)
         await self._persist_system(self.systems[deployment.system_id])
 
-    async def _run_tests(self, deployment: Deployment) -> Dict[str, Any]:
+    async def _run_tests(self, deployment: Deployment) -> dict[str, Any]:
         """Run tests for a deployment"""
         # This would integrate with actual test runners
         return {
@@ -1407,7 +1408,7 @@ class AutonomousSystemOrchestrator:
         except Exception as e:
             logger.error(f"Error persisting deployment: {e}")
 
-    async def rollback(self, deployment_id: str) -> Dict[str, Any]:
+    async def rollback(self, deployment_id: str) -> dict[str, Any]:
         """Rollback a deployment"""
         if deployment_id not in self.deployments:
             return {"error": f"Deployment {deployment_id} not found"}
@@ -1428,11 +1429,11 @@ class AutonomousSystemOrchestrator:
 
     async def schedule_maintenance(
         self,
-        system_ids: List[str],
+        system_ids: list[str],
         start_time: datetime,
         end_time: datetime,
         maintenance_type: str,
-        tasks: List[str]
+        tasks: list[str]
     ) -> MaintenanceWindow:
         """Schedule a maintenance window"""
         window_id = self._generate_id("maint")
@@ -1492,9 +1493,9 @@ class AutonomousSystemOrchestrator:
         self,
         command: str,
         target_group: str = None,
-        target_systems: List[str] = None,
-        parameters: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        target_systems: list[str] = None,
+        parameters: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """
         Execute a command across multiple systems
 
@@ -1551,9 +1552,9 @@ class AutonomousSystemOrchestrator:
         self,
         task_type: str,
         agent_name: str,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         priority: Optional[int] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Execute a task with priority routing and load balancing
 
@@ -1633,7 +1634,7 @@ class AutonomousSystemOrchestrator:
 
         return result
 
-    def get_command_center_dashboard(self) -> Dict[str, Any]:
+    def get_command_center_dashboard(self) -> dict[str, Any]:
         """Get the command center dashboard data with all new features"""
         systems_by_status = defaultdict(list)
         systems_by_provider = defaultdict(list)
@@ -1709,9 +1710,9 @@ async def register_managed_system(
     url: str,
     region: str = "us-east",
     provider: str = "render",
-    metadata: Dict[str, Any] = None,
-    tags: List[str] = None
-) -> Dict[str, Any]:
+    metadata: dict[str, Any] = None,
+    tags: list[str] = None
+) -> dict[str, Any]:
     """Register a new system for management"""
     await system_orchestrator.initialize()
     system = await system_orchestrator.register_system(
@@ -1731,13 +1732,13 @@ async def register_managed_system(
     }
 
 
-async def get_orchestrator_dashboard() -> Dict[str, Any]:
+async def get_orchestrator_dashboard() -> dict[str, Any]:
     """Get command center dashboard"""
     await system_orchestrator.initialize()
     return system_orchestrator.get_command_center_dashboard()
 
 
-async def check_all_health() -> Dict[str, Any]:
+async def check_all_health() -> dict[str, Any]:
     """Check health of all managed systems"""
     await system_orchestrator.initialize()
     return await system_orchestrator.check_all_systems_health()
@@ -1747,7 +1748,7 @@ async def trigger_deployment(
     system_id: str,
     version: str,
     commit_sha: str = None
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Trigger a deployment"""
     await system_orchestrator.initialize()
     deployment = await system_orchestrator.deploy(
@@ -1766,9 +1767,9 @@ async def trigger_deployment(
 async def execute_bulk_command(
     command: str,
     target_group: str = None,
-    target_systems: List[str] = None,
-    parameters: Dict[str, Any] = None
-) -> Dict[str, Any]:
+    target_systems: list[str] = None,
+    parameters: dict[str, Any] = None
+) -> dict[str, Any]:
     """Execute a bulk command across systems"""
     await system_orchestrator.initialize()
     return await system_orchestrator.bulk_command(

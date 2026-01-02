@@ -1,5 +1,6 @@
 import asyncio
 import os
+
 from consciousness_loop import ConsciousnessLoop
 
 # SECURITY: Load credentials from environment or .env file
@@ -14,23 +15,23 @@ except ImportError:
 required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
 missing = [v for v in required_vars if not os.getenv(v)]
 if missing:
-    raise EnvironmentError(f"Required environment variables not set: {', '.join(missing)}. "
+    raise OSError(f"Required environment variables not set: {', '.join(missing)}. "
                           "Set them in .env file or environment.")
 
 async def test_loop():
     print("Initializing ConsciousnessLoop...")
     loop = ConsciousnessLoop()
-    
+
     # Run the loop in a background task
     task = asyncio.create_task(loop.start())
-    
+
     print("Running loop for 10 seconds...")
     await asyncio.sleep(10)
-    
+
     print("Stopping loop...")
     loop.running = False
     await task
-    
+
     # Verify data in DB
     print("Verifying DB records...")
     # Use pool from consciousness loop instead of direct connection

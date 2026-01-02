@@ -12,15 +12,17 @@ Enhanced with:
 - System-wide health aggregation
 """
 
-import os
 import asyncio
 import logging
-from typing import Dict, Any, List
+import os
 from datetime import datetime, timezone
+from typing import Any
+
+import httpx
 import psycopg2
 from psycopg2.extras import RealDictCursor
+
 from memory_system import memory_system
-import httpx
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,9 +31,16 @@ logger = logging.getLogger(__name__)
 # ============== IMPORT ENHANCED ORCHESTRATION COMPONENTS ==============
 try:
     from autonomous_system_orchestrator import (
-        EventBus, EventType, SystemEvent, MessageQueue,
-        CircuitBreaker, CircuitState, LoadBalancer, LoadBalancingStrategy,
-        AgentInstance, HealthAggregator
+        AgentInstance,
+        CircuitBreaker,
+        CircuitState,
+        EventBus,
+        EventType,
+        HealthAggregator,
+        LoadBalancer,
+        LoadBalancingStrategy,
+        MessageQueue,
+        SystemEvent,
     )
     ENHANCED_FEATURES_AVAILABLE = True
 except ImportError:
@@ -63,7 +72,7 @@ class SystemOrchestrator:
             self.message_queue = MessageQueue(max_workers=15)
             self.load_balancer = LoadBalancer(strategy=LoadBalancingStrategy.LEAST_LOADED)
             self.health_aggregator = HealthAggregator()
-            self.circuit_breakers: Dict[str, CircuitBreaker] = {}
+            self.circuit_breakers: dict[str, CircuitBreaker] = {}
             self._initialize_circuit_breakers()
             self._initialized_enhanced = False
         else:
@@ -94,7 +103,7 @@ class SystemOrchestrator:
                 timeout=30
             )
 
-    def _load_service_config(self) -> Dict:
+    def _load_service_config(self) -> dict:
         """Load service configuration from memory"""
         config = self.memory.get_context('service_endpoints')
         if not config:
@@ -159,7 +168,7 @@ class SystemOrchestrator:
         self.event_bus.subscribe(EventType.CIRCUIT_OPENED, handle_circuit_event)
         self.event_bus.subscribe(EventType.CIRCUIT_CLOSED, handle_circuit_event)
 
-    async def health_check_all(self) -> Dict:
+    async def health_check_all(self) -> dict:
         """Check health of all systems with circuit breaker protection"""
         results = {
             'timestamp': datetime.now(timezone.utc).isoformat(),
@@ -284,7 +293,7 @@ class SystemOrchestrator:
 
         return results
 
-    async def execute_workflow(self, workflow_type: str, params: Dict) -> Dict:
+    async def execute_workflow(self, workflow_type: str, params: dict) -> dict:
         """
         Execute a multi-step workflow with priority routing and event publishing
 
@@ -369,7 +378,7 @@ class SystemOrchestrator:
 
         return result
 
-    async def _check_services(self) -> Dict:
+    async def _check_services(self) -> dict:
         """Check all service health"""
         health = await self.health_check_all()
         return {
@@ -378,7 +387,7 @@ class SystemOrchestrator:
             'services': health['services']
         }
 
-    async def _check_database(self) -> Dict:
+    async def _check_database(self) -> dict:
         """Check database health and stats"""
         conn = psycopg2.connect(**self.db_config, cursor_factory=RealDictCursor)
         cursor = conn.cursor()
@@ -400,7 +409,7 @@ class SystemOrchestrator:
             'database': stats
         }
 
-    async def _check_agents(self) -> Dict:
+    async def _check_agents(self) -> dict:
         """Check AI agents status"""
         async with httpx.AsyncClient(timeout=10) as client:
             try:
@@ -421,7 +430,7 @@ class SystemOrchestrator:
                     'error': str(e)
                 }
 
-    async def _sync_databases(self) -> Dict:
+    async def _sync_databases(self) -> dict:
         """Synchronize database states"""
         # This would sync between different databases/environments
         return {
@@ -430,7 +439,7 @@ class SystemOrchestrator:
             'message': 'Database sync completed'
         }
 
-    async def _update_memory(self) -> Dict:
+    async def _update_memory(self) -> dict:
         """Update AI memory with latest context"""
         overview = self.memory.get_system_overview()
         self.memory.store_context('system', 'latest_overview', overview)
@@ -441,7 +450,7 @@ class SystemOrchestrator:
             'entries_updated': len(overview.get('services', {}))
         }
 
-    async def _refresh_cache(self) -> Dict:
+    async def _refresh_cache(self) -> dict:
         """Refresh system caches"""
         return {
             'step': 'refresh_cache',
@@ -449,7 +458,7 @@ class SystemOrchestrator:
             'message': 'Caches refreshed'
         }
 
-    async def _prepare_deployment(self, params: Dict) -> Dict:
+    async def _prepare_deployment(self, params: dict) -> dict:
         """Prepare for deployment"""
         return {
             'step': 'prepare_deployment',
@@ -458,7 +467,7 @@ class SystemOrchestrator:
             'version': params.get('version')
         }
 
-    async def _execute_deployment(self, params: Dict) -> Dict:
+    async def _execute_deployment(self, params: dict) -> dict:
         """Execute deployment"""
         # Trigger actual deployment via agent
         async with httpx.AsyncClient(timeout=30) as client:
@@ -483,7 +492,7 @@ class SystemOrchestrator:
                     'error': str(e)
                 }
 
-    async def _verify_deployment(self, params: Dict) -> Dict:
+    async def _verify_deployment(self, params: dict) -> dict:
         """Verify deployment success"""
         await asyncio.sleep(5)  # Wait for deployment to settle
 
@@ -513,7 +522,7 @@ class SystemOrchestrator:
             'message': 'Service not found'
         }
 
-    async def _create_customer(self, params: Dict) -> Dict:
+    async def _create_customer(self, params: dict) -> dict:
         """Create new customer"""
         return {
             'step': 'create_customer',
@@ -521,7 +530,7 @@ class SystemOrchestrator:
             'customer': params.get('customer_data')
         }
 
-    async def _setup_workflows(self, params: Dict) -> Dict:
+    async def _setup_workflows(self, params: dict) -> dict:
         """Setup customer workflows"""
         return {
             'step': 'setup_workflows',
@@ -529,7 +538,7 @@ class SystemOrchestrator:
             'workflows': ['invoice_automation', 'job_tracking', 'ai_analysis']
         }
 
-    async def _send_welcome(self, params: Dict) -> Dict:
+    async def _send_welcome(self, params: dict) -> dict:
         """Send welcome communications"""
         return {
             'step': 'send_welcome',
@@ -537,7 +546,7 @@ class SystemOrchestrator:
             'message': 'Welcome email sent'
         }
 
-    async def coordinate_agents(self, agents: List[str], task: Dict) -> Dict:
+    async def coordinate_agents(self, agents: list[str], task: dict) -> dict:
         """Coordinate multiple agents for complex tasks"""
         results = {
             'coordination_id': f"coord_{datetime.now().strftime('%Y%m%d%H%M%S')}",
@@ -572,7 +581,7 @@ class SystemOrchestrator:
         results['status'] = 'completed'
         return results
 
-    async def _execute_agent(self, client: httpx.AsyncClient, agent: str, task: Dict) -> Dict:
+    async def _execute_agent(self, client: httpx.AsyncClient, agent: str, task: dict) -> dict:
         """Execute single agent"""
         response = await client.post(
             f"{self.services['ai_agents']}/agents/{agent}/execute",
@@ -580,7 +589,7 @@ class SystemOrchestrator:
         )
         return response.json()
 
-    def get_orchestrator_stats(self) -> Dict[str, Any]:
+    def get_orchestrator_stats(self) -> dict[str, Any]:
         """Get comprehensive orchestrator statistics"""
         stats = {
             "services": list(self.services.keys()),

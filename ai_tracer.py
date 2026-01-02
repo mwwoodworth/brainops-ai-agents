@@ -3,14 +3,15 @@ BrainOps AI Tracer - Deep Observability for Autonomous Agents
 Captures thoughts, actions, observations, and state transitions.
 """
 
-import os
 import json
-import uuid
 import logging
-from datetime import datetime
-from typing import Dict, Any, Optional
-from enum import Enum
+import os
+import uuid
 from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
 import psycopg2
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ class Span:
     span_type: SpanType
     name: str
     content: str
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     start_time: float
     end_time: Optional[float] = None
     status: str = "running"  # running, success, failed
@@ -57,7 +58,7 @@ class BrainOpsTracer:
             'password': os.getenv('DB_PASSWORD'),
             'port': int(os.getenv('DB_PORT', '5432'))
         }
-        self.active_spans: Dict[str, Span] = {}
+        self.active_spans: dict[str, Span] = {}
         # Schema is pre-created in database - skip blocking init
         # self._ensure_schema() - tables already exist
 
@@ -69,7 +70,7 @@ class BrainOpsTracer:
         try:
             conn = self._get_connection()
             cur = conn.cursor()
-            
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS ai_traces (
                     trace_id UUID PRIMARY KEY,
@@ -81,7 +82,7 @@ class BrainOpsTracer:
                     summary TEXT,
                     metadata JSONB DEFAULT '{}'::jsonb
                 );
-                
+
                 CREATE TABLE IF NOT EXISTS ai_trace_spans (
                     span_id UUID PRIMARY KEY,
                     trace_id UUID REFERENCES ai_traces(trace_id),
@@ -102,16 +103,16 @@ class BrainOpsTracer:
                 CREATE INDEX IF NOT EXISTS idx_spans_trace_id ON ai_trace_spans(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_spans_type ON ai_trace_spans(span_type);
             """)
-            
+
             conn.commit()
             conn.close()
         except Exception as e:
             logger.error(f"Failed to init tracer schema: {e}")
 
-    def start_trace(self, session_id: str, agent_id: str, metadata: Dict = None) -> str:
+    def start_trace(self, session_id: str, agent_id: str, metadata: dict = None) -> str:
         """Start a new high-level trace (e.g., a user request or cron job)."""
         trace_id = str(uuid.uuid4())
-        
+
         try:
             conn = self._get_connection()
             cur = conn.cursor()
@@ -123,7 +124,7 @@ class BrainOpsTracer:
             conn.close()
         except Exception as e:
             logger.error(f"Failed to start trace: {e}")
-            
+
         return trace_id
 
     def end_trace(self, trace_id: str, status: str = "completed", summary: str = None):
@@ -132,7 +133,7 @@ class BrainOpsTracer:
             conn = self._get_connection()
             cur = conn.cursor()
             cur.execute("""
-                UPDATE ai_traces 
+                UPDATE ai_traces
                 SET status = %s, end_time = NOW(), summary = %s
                 WHERE trace_id = %s
             """, (status, summary, trace_id))
@@ -141,13 +142,13 @@ class BrainOpsTracer:
         except Exception as e:
             logger.error(f"Failed to end trace: {e}")
 
-    def start_span(self, trace_id: str, name: str, span_type: SpanType, 
-                   parent_id: Optional[str] = None, content: str = "", 
-                   inputs: Dict = None) -> str:
+    def start_span(self, trace_id: str, name: str, span_type: SpanType,
+                   parent_id: Optional[str] = None, content: str = "",
+                   inputs: dict = None) -> str:
         """Start a granular unit of work (thought, tool call, etc)."""
         span_id = str(uuid.uuid4())
         start_time = datetime.now()
-        
+
         span = Span(
             trace_id=trace_id,
             span_id=span_id,
@@ -159,15 +160,15 @@ class BrainOpsTracer:
             start_time=start_time.timestamp()
         )
         self.active_spans[span_id] = span
-        
-        # Async persist to DB to not block execution? 
+
+        # Async persist to DB to not block execution?
         # For reliability in this environment, we'll do sync blocking insert for now.
         try:
             conn = self._get_connection()
             cur = conn.cursor()
             cur.execute("""
                 INSERT INTO ai_trace_spans (
-                    span_id, trace_id, parent_id, span_type, name, content, 
+                    span_id, trace_id, parent_id, span_type, name, content,
                     input_data, start_time, status
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'running')
             """, (
@@ -178,10 +179,10 @@ class BrainOpsTracer:
             conn.close()
         except Exception as e:
             logger.error(f"Failed to start span: {e}")
-            
+
         return span_id
 
-    def end_span(self, span_id: str, output: Any = None, status: str = "success", 
+    def end_span(self, span_id: str, output: Any = None, status: str = "success",
                  error: str = None):
         """Complete a span with results."""
         if span_id not in self.active_spans:
@@ -191,18 +192,18 @@ class BrainOpsTracer:
         span = self.active_spans.pop(span_id)
         end_time = datetime.now()
         duration_ms = (end_time.timestamp() - span.start_time) * 1000
-        
+
         try:
             conn = self._get_connection()
             cur = conn.cursor()
             cur.execute("""
-                UPDATE ai_trace_spans 
-                SET end_time = %s, duration_ms = %s, status = %s, 
+                UPDATE ai_trace_spans
+                SET end_time = %s, duration_ms = %s, status = %s,
                     output_data = %s, error_message = %s
                 WHERE span_id = %s
             """, (
-                end_time, duration_ms, status, 
-                json.dumps(output) if output else None, 
+                end_time, duration_ms, status,
+                json.dumps(output) if output else None,
                 error, span_id
             ))
             conn.commit()
@@ -215,7 +216,7 @@ class BrainOpsTracer:
         return TraceContext(self, trace_id, name, span_type, parent_id, **kwargs)
 
 class TraceContext:
-    def __init__(self, tracer: BrainOpsTracer, trace_id: str, name: str, 
+    def __init__(self, tracer: BrainOpsTracer, trace_id: str, name: str,
                  span_type: SpanType, parent_id: str = None, **kwargs):
         self.tracer = tracer
         self.trace_id = trace_id

@@ -8,12 +8,12 @@ Integrates with the codebase graph for comprehensive system visualization.
 import asyncio
 import json
 import logging
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from typing import Any, Optional
 
 from config import config
-from database.async_connection import init_pool, get_pool, PoolConfig, close_pool
+from database.async_connection import PoolConfig, close_pool, get_pool, init_pool
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -49,7 +49,7 @@ class Index:
     """Database index metadata"""
     name: str
     table_name: str
-    columns: List[str]
+    columns: list[str]
     is_unique: bool
     is_primary: bool
 
@@ -59,9 +59,9 @@ class Table:
     """Database table metadata"""
     name: str
     schema_name: str
-    columns: List[Column] = field(default_factory=list)
-    foreign_keys: List[ForeignKey] = field(default_factory=list)
-    indexes: List[Index] = field(default_factory=list)
+    columns: list[Column] = field(default_factory=list)
+    foreign_keys: list[ForeignKey] = field(default_factory=list)
+    indexes: list[Index] = field(default_factory=list)
     row_count: int = 0
     size_bytes: int = 0
     description: Optional[str] = None
@@ -70,7 +70,7 @@ class Table:
 @dataclass
 class DatabaseSchema:
     """Complete database schema"""
-    tables: List[Table] = field(default_factory=list)
+    tables: list[Table] = field(default_factory=list)
     total_tables: int = 0
     total_columns: int = 0
     total_relationships: int = 0
@@ -124,7 +124,7 @@ class DatabaseSchemaCrawler:
 
         return self.schema
 
-    async def _get_tables(self, pool) -> List[Table]:
+    async def _get_tables(self, pool) -> list[Table]:
         """Get all user tables from database"""
         rows = await pool.fetch("""
             SELECT
@@ -146,7 +146,7 @@ class DatabaseSchemaCrawler:
             for row in rows
         ]
 
-    async def _get_columns(self, pool, schema: str, table: str) -> List[Column]:
+    async def _get_columns(self, pool, schema: str, table: str) -> list[Column]:
         """Get columns for a table"""
         rows = await pool.fetch("""
             SELECT
@@ -171,7 +171,7 @@ class DatabaseSchemaCrawler:
             for row in rows
         ]
 
-    async def _get_foreign_keys(self, pool, schema: str, table: str) -> List[ForeignKey]:
+    async def _get_foreign_keys(self, pool, schema: str, table: str) -> list[ForeignKey]:
         """Get foreign key relationships for a table"""
         rows = await pool.fetch("""
             SELECT
@@ -209,7 +209,7 @@ class DatabaseSchemaCrawler:
             for row in rows
         ]
 
-    async def _get_indexes(self, pool, schema: str, table: str) -> List[Index]:
+    async def _get_indexes(self, pool, schema: str, table: str) -> list[Index]:
         """Get indexes for a table"""
         rows = await pool.fetch("""
             SELECT
@@ -238,7 +238,7 @@ class DatabaseSchemaCrawler:
             for row in rows
         ]
 
-    async def _get_primary_key_columns(self, pool, schema: str, table: str) -> List[str]:
+    async def _get_primary_key_columns(self, pool, schema: str, table: str) -> list[str]:
         """Get primary key columns for a table"""
         rows = await pool.fetch("""
             SELECT kcu.column_name
@@ -279,7 +279,7 @@ class DatabaseSchemaCrawler:
             logger.warning("Failed to get table size for %s.%s: %s", schema, table, exc, exc_info=True)
             return 0
 
-    async def save_to_graph(self) -> Dict[str, Any]:
+    async def save_to_graph(self) -> dict[str, Any]:
         """Save schema to codebase graph tables"""
         pool = get_pool()
 
@@ -505,14 +505,14 @@ async def main():
         print(f"JSON schema saved to: {json_path}")
 
         # Print summary
-        print(f"\n=== Database Schema Summary ===")
+        print("\n=== Database Schema Summary ===")
         print(f"Tables: {schema.total_tables}")
         print(f"Columns: {schema.total_columns}")
         print(f"Foreign Keys: {schema.total_relationships}")
 
         # Print largest tables
         largest = sorted(schema.tables, key=lambda t: t.row_count, reverse=True)[:10]
-        print(f"\nLargest Tables:")
+        print("\nLargest Tables:")
         for t in largest:
             print(f"  {t.name}: ~{t.row_count:,} rows ({crawler._format_bytes(t.size_bytes)})")
 

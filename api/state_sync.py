@@ -14,13 +14,14 @@ Author: Claude Opus 4.5 + BrainOps AI Team
 Version: 1.0.0
 """
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse
-from typing import Optional
-from datetime import datetime, timezone
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import HTMLResponse, JSONResponse
 
 router = APIRouter(prefix="/api/state-sync", tags=["state-sync"])
 

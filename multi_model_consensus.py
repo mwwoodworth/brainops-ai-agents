@@ -4,16 +4,17 @@ Multi-Model Consensus System - Task 16
 System for getting consensus from multiple AI models for improved accuracy and reliability
 """
 
-import os
-import logging
 import asyncio
+import logging
+import os
 import uuid
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Callable
-from enum import Enum
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Callable, Optional
+
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from psycopg2.extras import Json, RealDictCursor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -78,7 +79,7 @@ class ModelResponse:
     reasoning: Optional[str] = None
     latency_ms: float = 0.0
     tokens_used: int = 0
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -89,11 +90,11 @@ class ConsensusResult:
     confidence: float
     strategy_used: ConsensusStrategy
     status: ConsensusStatus
-    participating_models: List[ModelType]
-    model_responses: List[ModelResponse]
+    participating_models: list[ModelType]
+    model_responses: list[ModelResponse]
     agreement_score: float
-    dissenting_opinions: List[Dict]
-    metadata: Dict = field(default_factory=dict)
+    dissenting_opinions: list[dict]
+    metadata: dict = field(default_factory=dict)
 
 
 class ModelProvider:
@@ -274,7 +275,7 @@ class ConsensusEngine:
 
     def __init__(self, model_provider: ModelProvider):
         self.model_provider = model_provider
-        self.strategies: Dict[ConsensusStrategy, Callable] = {
+        self.strategies: dict[ConsensusStrategy, Callable] = {
             ConsensusStrategy.MAJORITY_VOTE: self._majority_vote,
             ConsensusStrategy.WEIGHTED_AVERAGE: self._weighted_average,
             ConsensusStrategy.HIGHEST_CONFIDENCE: self._highest_confidence,
@@ -286,7 +287,7 @@ class ConsensusEngine:
     async def reach_consensus(
         self,
         prompt: str,
-        models: List[ModelType],
+        models: list[ModelType],
         strategy: ConsensusStrategy = ConsensusStrategy.WEIGHTED_AVERAGE,
         system_prompt: Optional[str] = None,
         max_tokens: int = 1000,
@@ -366,7 +367,7 @@ class ConsensusEngine:
 
     async def _majority_vote(
         self,
-        responses: List[ModelResponse],
+        responses: list[ModelResponse],
         prompt: str
     ) -> ConsensusResult:
         """Simple majority vote consensus"""
@@ -390,7 +391,7 @@ class ConsensusEngine:
 
     async def _weighted_average(
         self,
-        responses: List[ModelResponse],
+        responses: list[ModelResponse],
         prompt: str
     ) -> ConsensusResult:
         """Weighted average based on model reliability and confidence"""
@@ -422,7 +423,7 @@ class ConsensusEngine:
 
     async def _highest_confidence(
         self,
-        responses: List[ModelResponse],
+        responses: list[ModelResponse],
         prompt: str
     ) -> ConsensusResult:
         """Select response with highest confidence"""
@@ -445,7 +446,7 @@ class ConsensusEngine:
 
     async def _ensemble(
         self,
-        responses: List[ModelResponse],
+        responses: list[ModelResponse],
         prompt: str
     ) -> ConsensusResult:
         """Combine responses into ensemble answer"""
@@ -475,7 +476,7 @@ class ConsensusEngine:
 
     async def _debate(
         self,
-        responses: List[ModelResponse],
+        responses: list[ModelResponse],
         prompt: str
     ) -> ConsensusResult:
         """Have models debate and refine answers"""
@@ -521,7 +522,7 @@ class ConsensusEngine:
 
     async def _hierarchical(
         self,
-        responses: List[ModelResponse],
+        responses: list[ModelResponse],
         prompt: str
     ) -> ConsensusResult:
         """Hierarchical consensus with verification"""
@@ -563,7 +564,7 @@ class ConsensusEngine:
             dissenting_opinions=self._find_dissenters(responses, primary)
         )
 
-    def _calculate_agreement(self, responses: List[ModelResponse]) -> float:
+    def _calculate_agreement(self, responses: list[ModelResponse]) -> float:
         """Calculate agreement score between responses"""
         if len(responses) < 2:
             return 1.0
@@ -595,9 +596,9 @@ class ConsensusEngine:
 
     def _find_dissenters(
         self,
-        responses: List[ModelResponse],
+        responses: list[ModelResponse],
         consensus: ModelResponse
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Find responses that disagree with consensus"""
         dissenters = []
         for response in responses:
@@ -696,7 +697,7 @@ class MultiModelConsensusSystem:
     async def get_consensus(
         self,
         prompt: str,
-        models: Optional[List[ModelType]] = None,
+        models: Optional[list[ModelType]] = None,
         strategy: ConsensusStrategy = ConsensusStrategy.WEIGHTED_AVERAGE,
         system_prompt: Optional[str] = None,
         max_tokens: int = 1000,
@@ -737,7 +738,7 @@ class MultiModelConsensusSystem:
         request_id: str,
         prompt: str,
         strategy: ConsensusStrategy,
-        models: List[ModelType]
+        models: list[ModelType]
     ):
         """Log consensus request"""
         try:
@@ -852,7 +853,7 @@ class MultiModelConsensusSystem:
         except Exception as e:
             logger.error(f"Failed to update model performance: {e}")
 
-    async def get_model_statistics(self) -> Dict[str, Any]:
+    async def get_model_statistics(self) -> dict[str, Any]:
         """Get performance statistics for all models"""
         try:
             conn = self._get_connection()
@@ -879,7 +880,7 @@ class MultiModelConsensusSystem:
         self,
         limit: int = 50,
         status: Optional[ConsensusStatus] = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Get history of consensus requests"""
         try:
             conn = self._get_connection()

@@ -17,17 +17,18 @@ Integrates with:
 - AI Board for strategic task approval
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-import httpx
+import os
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Callable
-from dataclasses import dataclass, asdict
 from enum import Enum
+from typing import Any, Callable, Optional
+
+import httpx
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from psycopg2.extras import Json, RealDictCursor
 
 # Import our cutting-edge systems
 try:
@@ -107,8 +108,8 @@ class TaskNotification:
     event_type: str
     severity: str
     message: str
-    details: Dict[str, Any]
-    channels: List[str]
+    details: dict[str, Any]
+    channels: list[str]
     sent_at: datetime
     acknowledged: bool = False
 
@@ -120,7 +121,7 @@ class IntelligentTask:
     title: str
     description: str
     task_type: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     priority: int
     status: str
     created_at: datetime
@@ -128,17 +129,17 @@ class IntelligentTask:
     ai_priority_score: float
     ai_urgency_reason: str
     estimated_duration_mins: int
-    required_capabilities: List[str]
-    dependencies: List[str]
+    required_capabilities: list[str]
+    dependencies: list[str]
     retry_count: int
     max_retries: int
     # Execution tracking
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     assigned_agent: Optional[str] = None
-    execution_result: Optional[Dict[str, Any]] = None
+    execution_result: Optional[dict[str, Any]] = None
     # Enhanced decision-making fields
-    risk_assessment: Optional[Dict[str, Any]] = None
+    risk_assessment: Optional[dict[str, Any]] = None
     confidence_score: float = 0.0
     human_escalation_required: bool = False
     escalation_reason: Optional[str] = None
@@ -283,8 +284,8 @@ class IntelligentTaskOrchestrator:
         self.enable_auto_retry = os.getenv("ENABLE_AUTO_RETRY", "true").lower() == "true"
 
         # State
-        self.running_tasks: Dict[str, IntelligentTask] = {}
-        self.task_executors: Dict[str, Callable] = {}
+        self.running_tasks: dict[str, IntelligentTask] = {}
+        self.task_executors: dict[str, Callable] = {}
         self.running = False
 
         self._init_database()
@@ -432,7 +433,7 @@ class IntelligentTaskOrchestrator:
             logger.error(f"Failed to get next task: {e}")
             return None
 
-    async def _enhance_task_with_ai(self, row: Dict[str, Any]) -> IntelligentTask:
+    async def _enhance_task_with_ai(self, row: dict[str, Any]) -> IntelligentTask:
         """Enhance task with AI-driven insights"""
         payload = row.get("payload", {})
         if isinstance(payload, str):
@@ -545,7 +546,7 @@ class IntelligentTaskOrchestrator:
             if task.id in self.running_tasks:
                 del self.running_tasks[task.id]
 
-    async def _route_task_execution(self, task: IntelligentTask) -> Dict[str, Any]:
+    async def _route_task_execution(self, task: IntelligentTask) -> dict[str, Any]:
         """Route task to appropriate executor"""
         task_type = task.task_type
 
@@ -564,7 +565,7 @@ class IntelligentTaskOrchestrator:
             # Default: log and mark complete
             return {"status": "completed", "message": f"Task type '{task_type}' handled"}
 
-    async def _execute_ai_analysis(self, task: IntelligentTask) -> Dict[str, Any]:
+    async def _execute_ai_analysis(self, task: IntelligentTask) -> dict[str, Any]:
         """Execute AI analysis task"""
         if not self.ai_core:
             return {"error": "AI Core not available"}
@@ -577,7 +578,7 @@ class IntelligentTaskOrchestrator:
         )
         return {"analysis": result}
 
-    async def _execute_data_sync(self, task: IntelligentTask) -> Dict[str, Any]:
+    async def _execute_data_sync(self, task: IntelligentTask) -> dict[str, Any]:
         """Execute data sync task"""
         # Count records to verify sync scope
         try:
@@ -588,8 +589,8 @@ class IntelligentTaskOrchestrator:
             cur.close()
             conn.close()
             return {
-                "synced": True, 
-                "records_verified": count, 
+                "synced": True,
+                "records_verified": count,
                 "timestamp": datetime.now().isoformat(),
                 "sync_type": "full_verification"
             }
@@ -597,11 +598,11 @@ class IntelligentTaskOrchestrator:
             logger.error(f"Data sync failed: {e}")
             return {"synced": False, "records": 0, "error": str(e)}
 
-    async def _execute_revenue_action(self, task: IntelligentTask) -> Dict[str, Any]:
+    async def _execute_revenue_action(self, task: IntelligentTask) -> dict[str, Any]:
         """Execute revenue-related action"""
         action = task.payload.get("action", "unknown")
         amount = task.payload.get("amount", 0)
-        
+
         # Log the revenue event to audit table
         try:
             conn = psycopg2.connect(**DB_CONFIG)
@@ -616,7 +617,7 @@ class IntelligentTaskOrchestrator:
                 )
             """)
             cur.execute(
-                "INSERT INTO revenue_audit_log (action, amount, task_id) VALUES (%s, %s, %s)", 
+                "INSERT INTO revenue_audit_log (action, amount, task_id) VALUES (%s, %s, %s)",
                 (action, amount, task.id)
             )
             conn.commit()
@@ -627,14 +628,14 @@ class IntelligentTaskOrchestrator:
 
         return {"action": action, "status": "processed", "audit_logged": True}
 
-    async def _execute_health_check(self, task: IntelligentTask) -> Dict[str, Any]:
+    async def _execute_health_check(self, task: IntelligentTask) -> dict[str, Any]:
         """Execute health check"""
         if self.reconciler:
             result = await self.reconciler.reconcile()
             return {"health_check": asdict(result)}
         return {"health_check": "reconciler_not_available"}
 
-    async def _execute_notification_task(self, task: IntelligentTask) -> Dict[str, Any]:
+    async def _execute_notification_task(self, task: IntelligentTask) -> dict[str, Any]:
         """Execute notification task"""
         notification = TaskNotification(
             task_id=task.id,
@@ -738,7 +739,7 @@ class IntelligentTaskOrchestrator:
         except Exception as e:
             logger.debug(f"Failed to store priority adjustment: {e}")
 
-    async def _update_task_status(self, task_id: str, status: str, result: Dict = None):
+    async def _update_task_status(self, task_id: str, status: str, result: dict = None):
         """Update task status in database"""
         try:
             conn = psycopg2.connect(**DB_CONFIG)
@@ -763,7 +764,7 @@ class IntelligentTaskOrchestrator:
         except Exception as e:
             logger.error(f"Failed to update task status: {e}")
 
-    def _assess_task_risk(self, task: IntelligentTask) -> Dict[str, Any]:
+    def _assess_task_risk(self, task: IntelligentTask) -> dict[str, Any]:
         """Assess risk level of a task"""
         risk_assessment = {
             'overall_risk': 0.0,
@@ -860,7 +861,7 @@ class IntelligentTaskOrchestrator:
 
         return human_escalation, escalation_reason
 
-    async def _store_execution_history(self, task: IntelligentTask, status: str, result: Dict):
+    async def _store_execution_history(self, task: IntelligentTask, status: str, result: dict):
         """Store task execution history with enhanced fields"""
         try:
             duration_ms = 0
@@ -931,7 +932,7 @@ class IntelligentTaskOrchestrator:
         self,
         title: str,
         task_type: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         priority: int = 50
     ) -> str:
         """Submit a new task to the orchestrator"""
@@ -957,7 +958,7 @@ class IntelligentTaskOrchestrator:
             logger.error(f"Failed to submit task: {e}")
             raise
 
-    async def get_status(self) -> Dict[str, Any]:
+    async def get_status(self) -> dict[str, Any]:
         """Get orchestrator status"""
         try:
             conn = psycopg2.connect(**DB_CONFIG)

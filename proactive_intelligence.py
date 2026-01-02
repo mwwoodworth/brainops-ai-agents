@@ -13,17 +13,18 @@ Features:
 - Business intelligence predictions
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-from datetime import datetime
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, field
-from enum import Enum
+import os
 import statistics
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from psycopg2.extras import Json, RealDictCursor
 
 logger = logging.getLogger("PROACTIVE_INTELLIGENCE")
 
@@ -98,8 +99,8 @@ class Prediction:
     confidence: float  # 0-1
     time_horizon: str  # "1h", "6h", "24h"
     predicted_impact: str
-    recommended_actions: List[str]
-    data: Dict[str, Any]
+    recommended_actions: list[str]
+    data: dict[str, Any]
     created_at: datetime = field(default_factory=datetime.utcnow)
     validated: bool = False
     was_accurate: Optional[bool] = None
@@ -129,9 +130,9 @@ class AutonomousAction:
     priority: ActionPriority
     trigger: str  # What triggered this action
     confidence: float
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     status: str = "pending"  # pending, executing, completed, failed
-    result: Optional[Dict] = None
+    result: Optional[dict] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     executed_at: Optional[datetime] = None
 
@@ -142,10 +143,10 @@ class ProactiveIntelligence:
     """
 
     def __init__(self):
-        self.predictions: List[Prediction] = []
-        self.action_queue: List[AutonomousAction] = []
-        self.pattern_cache: Dict[str, Any] = {}
-        self.learning_history: List[Dict] = []
+        self.predictions: list[Prediction] = []
+        self.action_queue: list[AutonomousAction] = []
+        self.pattern_cache: dict[str, Any] = {}
+        self.learning_history: list[dict] = []
         self.action_counter = 0
         self.prediction_counter = 0
         # Schema is pre-created in database - skip blocking init
@@ -238,7 +239,7 @@ class ProactiveIntelligence:
         except Exception as e:
             logger.error(f"Failed to init schema: {e}")
 
-    async def analyze_patterns(self, data_source: str = "all") -> List[Dict]:
+    async def analyze_patterns(self, data_source: str = "all") -> list[dict]:
         """Analyze historical data for patterns"""
         patterns = []
 
@@ -315,7 +316,7 @@ class ProactiveIntelligence:
             logger.error(f"Pattern analysis error: {e}")
             return []
 
-    async def _store_pattern(self, pattern: Dict):
+    async def _store_pattern(self, pattern: dict):
         """Store or update a detected pattern"""
         try:
             conn = self._get_connection()
@@ -338,7 +339,7 @@ class ProactiveIntelligence:
         except Exception as e:
             logger.warning(f"Failed to store pattern: {e}")
 
-    async def anticipate_issues(self) -> List[Prediction]:
+    async def anticipate_issues(self) -> list[Prediction]:
         """Predict potential issues before they happen"""
         predictions = []
 
@@ -457,7 +458,7 @@ class ProactiveIntelligence:
         except Exception as e:
             logger.warning(f"Failed to store prediction: {e}")
 
-    async def recommend_actions(self, context: str = "general") -> List[Dict]:
+    async def recommend_actions(self, context: str = "general") -> list[dict]:
         """Generate action recommendations based on current state"""
         recommendations = []
 
@@ -475,7 +476,7 @@ class ProactiveIntelligence:
 
         return sorted(recommendations, key=lambda x: x['priority'])
 
-    async def execute_autonomous_task(self, action: AutonomousAction) -> Dict:
+    async def execute_autonomous_task(self, action: AutonomousAction) -> dict:
         """Execute an autonomous action"""
         action.status = "executing"
         action.executed_at = datetime.utcnow()
@@ -548,7 +549,7 @@ class ProactiveIntelligence:
         except Exception as e:
             logger.error(f"Learning error: {e}")
 
-    async def generate_daily_briefing(self) -> Dict:
+    async def generate_daily_briefing(self) -> dict:
         """Generate a daily briefing for humans"""
         try:
             conn = self._get_connection()

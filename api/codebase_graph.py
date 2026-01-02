@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
+
 from database.async_connection import get_pool
 
 router = APIRouter(prefix="/api/codebase-graph", tags=["codebase-graph"])
@@ -341,8 +342,8 @@ async def visualize_graph():
             try {
                 const response = await fetch('/api/codebase-graph/data?limit=1000');
                 const data = await response.json();
-                
-                document.getElementById('stats').innerText = 
+
+                document.getElementById('stats').innerText =
                     `Nodes: ${data.nodes.length}, Edges: ${data.edges.length}`;
 
                 // Color mapping
@@ -394,13 +395,13 @@ async def visualize_graph():
                     }
                 };
                 const network = new vis.Network(container, networkData, options);
-                
+
             } catch (err) {
                 console.error(err);
                 document.getElementById('stats').innerText = "Error loading graph data.";
             }
         }
-        
+
         window.onload = loadGraph;
     </script>
     </body>

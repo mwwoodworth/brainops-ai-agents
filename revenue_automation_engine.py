@@ -15,14 +15,14 @@ Designed for scale: Handle 100s to 100,000s of leads across industries.
 """
 
 import json
+import logging
 import os
 import uuid
-import logging
-from datetime import datetime
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
-from enum import Enum
+from datetime import datetime
 from decimal import Decimal
+from enum import Enum
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -141,10 +141,10 @@ class Lead:
     updated_at: str
     contacted_at: Optional[str] = None
     converted_at: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
-    custom_fields: Dict[str, Any] = field(default_factory=dict)
-    automation_history: List[Dict[str, Any]] = field(default_factory=list)
-    notes: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    custom_fields: dict[str, Any] = field(default_factory=dict)
+    automation_history: list[dict[str, Any]] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -161,7 +161,7 @@ class RevenueTransaction:
     completed_at: Optional[str]
     industry: Industry
     product_service: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -171,7 +171,7 @@ class AutomationSequence:
     name: str
     industry: Industry
     trigger: str  # new_lead, no_response_3d, proposal_viewed, etc.
-    steps: List[Dict[str, Any]]
+    steps: list[dict[str, Any]]
     active: bool
     success_rate: float
     total_sent: int
@@ -190,9 +190,9 @@ class RevenueMetrics:
     leads_generated: int
     leads_qualified: int
     leads_converted: int
-    by_industry: Dict[str, Decimal]
-    by_source: Dict[str, Decimal]
-    by_product: Dict[str, Decimal]
+    by_industry: dict[str, Decimal]
+    by_source: dict[str, Decimal]
+    by_product: dict[str, Decimal]
 
 
 class RevenueAutomationEngine:
@@ -209,10 +209,10 @@ class RevenueAutomationEngine:
     """
 
     def __init__(self):
-        self.leads: Dict[str, Lead] = {}
-        self.transactions: Dict[str, RevenueTransaction] = {}
-        self.sequences: Dict[str, AutomationSequence] = {}
-        self.industry_configs: Dict[Industry, Dict[str, Any]] = {}
+        self.leads: dict[str, Lead] = {}
+        self.transactions: dict[str, RevenueTransaction] = {}
+        self.sequences: dict[str, AutomationSequence] = {}
+        self.industry_configs: dict[Industry, dict[str, Any]] = {}
         self._initialized = False
         self._db_url = DATABASE_URL
 
@@ -555,8 +555,8 @@ class RevenueAutomationEngine:
         source: str,
         phone: Optional[str] = None,
         company: Optional[str] = None,
-        custom_fields: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        custom_fields: Optional[dict[str, Any]] = None
+    ) -> dict[str, Any]:
         """
         Capture a new lead and start automation
 
@@ -633,7 +633,7 @@ class RevenueAutomationEngine:
         email: str,
         phone: Optional[str],
         company: Optional[str],
-        custom_fields: Optional[Dict]
+        custom_fields: Optional[dict]
     ) -> int:
         """Calculate initial lead score (0-100)"""
         score = 30  # Base score
@@ -679,10 +679,10 @@ class RevenueAutomationEngine:
                     "automation_history": lead.automation_history,
                     "notes": lead.notes
                 }
-                
+
                 # Check if lead exists
                 existing = await conn.fetchval("SELECT id FROM revenue_leads WHERE email = $1", lead.email)
-                
+
                 if existing:
                      await conn.execute("""
                         UPDATE revenue_leads
@@ -751,7 +751,7 @@ class RevenueAutomationEngine:
 
             sequence.total_sent += 1
 
-    async def _execute_automation_step(self, lead: Lead, step: Dict[str, Any]):
+    async def _execute_automation_step(self, lead: Lead, step: dict[str, Any]):
         """Execute a single automation step"""
         action = step.get("action")
 
@@ -783,7 +783,7 @@ class RevenueAutomationEngine:
 
         try:
             import sendgrid
-            from sendgrid.helpers.mail import Mail, Email, To, Content
+            from sendgrid.helpers.mail import Content, Email, Mail, To
 
             # Get template content based on template name
             template_content = self._get_email_template(template, lead)
@@ -792,7 +792,7 @@ class RevenueAutomationEngine:
             message = Mail(
                 from_email=Email("noreply@brainops.ai", "BrainOps AI"),
                 to_emails=To(lead.email, f"{lead.first_name} {lead.last_name}"),
-                subject=template_content.get("subject", f"Message from BrainOps"),
+                subject=template_content.get("subject", "Message from BrainOps"),
                 html_content=Content("text/html", template_content.get("body", ""))
             )
 
@@ -824,7 +824,7 @@ class RevenueAutomationEngine:
                 "timestamp": datetime.utcnow().isoformat()
             })
 
-    def _get_email_template(self, template: str, lead: Lead) -> Dict[str, str]:
+    def _get_email_template(self, template: str, lead: Lead) -> dict[str, str]:
         """Get email template content with personalization"""
         templates = {
             "welcome": {
@@ -846,7 +846,7 @@ class RevenueAutomationEngine:
                 """
             },
             "proposal": {
-                "subject": f"Your Custom Proposal from BrainOps",
+                "subject": "Your Custom Proposal from BrainOps",
                 "body": f"""
                 <h1>Hi {lead.first_name},</h1>
                 <p>Based on our conversation, we've prepared a custom proposal for your {lead.industry.value} business.</p>
@@ -855,7 +855,7 @@ class RevenueAutomationEngine:
                 """
             },
             "default": {
-                "subject": f"Message from BrainOps",
+                "subject": "Message from BrainOps",
                 "body": f"<p>Hi {lead.first_name}, we have an update for you.</p>"
             }
         }
@@ -943,7 +943,7 @@ class RevenueAutomationEngine:
     # QUALIFICATION & SCORING
     # =========================================
 
-    async def qualify_lead(self, lead_id: str, qualification_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def qualify_lead(self, lead_id: str, qualification_data: dict[str, Any]) -> dict[str, Any]:
         """Qualify a lead with additional data"""
         if lead_id not in self.leads:
             return {"error": "Lead not found"}
@@ -976,7 +976,7 @@ class RevenueAutomationEngine:
             "qualified": lead.status == LeadStatus.QUALIFIED
         }
 
-    def _calculate_qualification_score(self, lead: Lead, data: Dict[str, Any]) -> int:
+    def _calculate_qualification_score(self, lead: Lead, data: dict[str, Any]) -> int:
         """Calculate qualification score based on BANT criteria"""
         score = lead.score
 
@@ -1017,7 +1017,7 @@ class RevenueAutomationEngine:
         amount: float,
         product_service: str,
         description: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a payment link for a lead"""
         if lead_id not in self.leads:
             return {"error": "Lead not found"}
@@ -1124,7 +1124,7 @@ class RevenueAutomationEngine:
             # Return a fallback URL that will show an error page
             return f"https://pay.brainops.ai/error/{transaction_id}"
 
-    async def process_payment_webhook(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def process_payment_webhook(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Process payment webhook from Stripe"""
         event_type = payload.get("type")
         transaction_id = payload.get("metadata", {}).get("transaction_id")
@@ -1219,7 +1219,7 @@ class RevenueAutomationEngine:
     # REVENUE METRICS
     # =========================================
 
-    def get_revenue_metrics(self) -> Dict[str, Any]:
+    def get_revenue_metrics(self) -> dict[str, Any]:
         """Get current revenue metrics"""
         now = datetime.utcnow()
 
@@ -1267,7 +1267,7 @@ class RevenueAutomationEngine:
             "timestamp": now.isoformat()
         }
 
-    def get_pipeline_dashboard(self) -> Dict[str, Any]:
+    def get_pipeline_dashboard(self) -> dict[str, Any]:
         """Get pipeline dashboard data"""
         stages = {
             "new": [],
@@ -1325,8 +1325,8 @@ async def capture_lead(
     source: str,
     phone: Optional[str] = None,
     company: Optional[str] = None,
-    custom_fields: Optional[Dict] = None
-) -> Dict[str, Any]:
+    custom_fields: Optional[dict] = None
+) -> dict[str, Any]:
     """Capture a new lead"""
     await revenue_engine.initialize()
     return await revenue_engine.capture_lead(
@@ -1340,19 +1340,19 @@ async def capture_lead(
     )
 
 
-async def get_revenue_metrics() -> Dict[str, Any]:
+async def get_revenue_metrics() -> dict[str, Any]:
     """Get revenue metrics"""
     await revenue_engine.initialize()
     return revenue_engine.get_revenue_metrics()
 
 
-async def get_pipeline_dashboard() -> Dict[str, Any]:
+async def get_pipeline_dashboard() -> dict[str, Any]:
     """Get pipeline dashboard"""
     await revenue_engine.initialize()
     return revenue_engine.get_pipeline_dashboard()
 
 
-async def qualify_lead(lead_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+async def qualify_lead(lead_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """Qualify a lead"""
     await revenue_engine.initialize()
     return await revenue_engine.qualify_lead(lead_id, data)
@@ -1362,13 +1362,13 @@ async def create_payment_link(
     lead_id: str,
     amount: float,
     product_service: str
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Create payment link"""
     await revenue_engine.initialize()
     return await revenue_engine.create_payment_link(lead_id, amount, product_service)
 
 
-async def process_payment_webhook(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def process_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:
     """Process payment webhook"""
     await revenue_engine.initialize()
     return await revenue_engine.process_payment_webhook(payload)

@@ -4,13 +4,14 @@ AI agent for handling customer onboarding, support, and success metrics.
 Uses OpenAI for real analysis and persists results to database.
 """
 
-import os
 import json
 import logging
+import os
+from datetime import datetime
+from typing import Any
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from typing import Dict, Any, List
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class CustomerSuccessAgent:
             logger.error(f"Database connection failed: {e}")
             return None
 
-    async def analyze_customer_health(self, customer_id: str) -> Dict[str, Any]:
+    async def analyze_customer_health(self, customer_id: str) -> dict[str, Any]:
         """Analyze health score for a specific customer using real data and AI"""
         try:
             results = {
@@ -179,7 +180,7 @@ Respond with JSON only:
             logger.error(f"Customer health analysis failed: {e}")
             return {"error": str(e), "customer_id": customer_id, "health_score": 0}
 
-    async def generate_onboarding_plan(self, customer_id: str, plan_type: str = "standard") -> Dict[str, Any]:
+    async def generate_onboarding_plan(self, customer_id: str, plan_type: str = "standard") -> dict[str, Any]:
         """Generate personalized onboarding plan using AI"""
         try:
             results = {
@@ -270,7 +271,7 @@ Respond with JSON only:
             logger.error(f"Onboarding plan generation failed: {e}")
             return {"error": str(e), "customer_id": customer_id}
 
-    async def analyze_churn_risk(self) -> Dict[str, Any]:
+    async def analyze_churn_risk(self) -> dict[str, Any]:
         """Analyze churn risk across all customers"""
         try:
             results = {
@@ -370,7 +371,7 @@ Respond with JSON only:
             logger.error(f"Churn risk analysis failed: {e}")
             return {"error": str(e)}
 
-    async def calculate_health_score(self, customer_id: str) -> Dict[str, Any]:
+    async def calculate_health_score(self, customer_id: str) -> dict[str, Any]:
         """Calculate comprehensive customer health score with multiple factors"""
         try:
             conn = self._get_db_connection()
@@ -533,7 +534,7 @@ Respond with JSON only:
             logger.error(f"Error calculating health score: {e}")
             return {"error": str(e), "health_score": 0}
 
-    async def predict_churn_risk(self, customer_id: str) -> Dict[str, Any]:
+    async def predict_churn_risk(self, customer_id: str) -> dict[str, Any]:
         """Predict churn risk with AI-powered analysis and proactive prevention recommendations"""
         try:
             # Get health score first
@@ -669,10 +670,10 @@ Respond with JSON only:
     def _generate_prevention_strategies(
         self,
         risk_level: str,
-        risk_factors: List[str],
-        health_data: Dict,
-        churn_data: Dict
-    ) -> List[Dict[str, Any]]:
+        risk_factors: list[str],
+        health_data: dict,
+        churn_data: dict
+    ) -> list[dict[str, Any]]:
         """Generate personalized churn prevention strategies"""
         strategies = []
 
@@ -752,7 +753,7 @@ Respond with JSON only:
 
         return strategies
 
-    def _get_churn_prevention_actions(self, risk_level: str) -> List[Dict[str, str]]:
+    def _get_churn_prevention_actions(self, risk_level: str) -> list[dict[str, str]]:
         """Get immediate churn prevention actions based on risk level"""
         actions_map = {
             "critical": [
@@ -783,7 +784,7 @@ Respond with JSON only:
 
         return actions_map.get(risk_level, actions_map["medium"])
 
-    async def predict_satisfaction(self, customer_id: str) -> Dict[str, Any]:
+    async def predict_satisfaction(self, customer_id: str) -> dict[str, Any]:
         """Predict customer satisfaction using AI-powered sentiment and behavior analysis"""
         try:
             # Get health and churn data
@@ -944,10 +945,10 @@ Respond with JSON only:
     def _generate_satisfaction_improvements(
         self,
         satisfaction_score: float,
-        factors: Dict[str, str],
-        health_data: Dict,
-        churn_data: Dict
-    ) -> List[Dict[str, Any]]:
+        factors: dict[str, str],
+        health_data: dict,
+        churn_data: dict
+    ) -> list[dict[str, Any]]:
         """Generate satisfaction improvement recommendations"""
         recommendations = []
 
@@ -1022,7 +1023,7 @@ Respond with JSON only:
 
         return recommendations
 
-    async def _save_analysis(self, analysis_type: str, results: Dict[str, Any]):
+    async def _save_analysis(self, analysis_type: str, results: dict[str, Any]):
         """Save analysis results to database"""
         conn = self._get_db_connection()
         if not conn:

@@ -19,12 +19,12 @@ implemented in weathercraft-erp or myroofgenius-app.
 """
 
 import json
-import uuid
 import logging
-from datetime import datetime
-from typing import Dict, List, Optional, Any
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -103,10 +103,10 @@ class A2UIComponent:
     """A single A2UI component in the flat list structure"""
     id: str
     type: str  # ComponentType value
-    properties: Dict[str, Any] = field(default_factory=dict)
-    children: List[str] = field(default_factory=list)  # IDs of child components
+    properties: dict[str, Any] = field(default_factory=dict)
+    children: list[str] = field(default_factory=list)  # IDs of child components
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to A2UI JSON format"""
         result = {
             "id": self.id,
@@ -123,11 +123,11 @@ class A2UIComponent:
 class A2UISurface:
     """An A2UI surface containing components"""
     surface_id: str
-    components: List[A2UIComponent] = field(default_factory=list)
+    components: list[A2UIComponent] = field(default_factory=list)
     root_component_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to A2UI surfaceUpdate format"""
         return {
             "surfaceUpdate": {
@@ -151,7 +151,7 @@ class A2UIBuilder:
 
     def __init__(self, surface_id: Optional[str] = None):
         self.surface_id = surface_id or f"surface_{uuid.uuid4().hex[:8]}"
-        self.components: Dict[str, A2UIComponent] = {}
+        self.components: dict[str, A2UIComponent] = {}
         self.root_id: Optional[str] = None
 
     def _gen_id(self, prefix: str = "comp") -> str:
@@ -161,8 +161,8 @@ class A2UIBuilder:
     def add_component(
         self,
         component_type: ComponentType,
-        properties: Dict[str, Any] = None,
-        children: List[str] = None,
+        properties: dict[str, Any] = None,
+        children: list[str] = None,
         component_id: str = None,
     ) -> str:
         """Add a component and return its ID"""
@@ -247,7 +247,7 @@ class A2UIBuilder:
             component_id=component_id,
         )
 
-    def card(self, children: List[str], title: str = None, component_id: str = None) -> str:
+    def card(self, children: list[str], title: str = None, component_id: str = None) -> str:
         """Add a card container"""
         props = {}
         if title:
@@ -259,7 +259,7 @@ class A2UIBuilder:
             component_id=component_id,
         )
 
-    def column(self, children: List[str], spacing: int = 8, component_id: str = None) -> str:
+    def column(self, children: list[str], spacing: int = 8, component_id: str = None) -> str:
         """Add a vertical layout container"""
         return self.add_component(
             ComponentType.COLUMN,
@@ -268,7 +268,7 @@ class A2UIBuilder:
             component_id=component_id,
         )
 
-    def row(self, children: List[str], spacing: int = 8, component_id: str = None) -> str:
+    def row(self, children: list[str], spacing: int = 8, component_id: str = None) -> str:
         """Add a horizontal layout container"""
         return self.add_component(
             ComponentType.ROW,
@@ -279,8 +279,8 @@ class A2UIBuilder:
 
     def table(
         self,
-        columns: List[Dict[str, str]],
-        rows: List[Dict[str, Any]],
+        columns: list[dict[str, str]],
+        rows: list[dict[str, Any]],
         component_id: str = None,
     ) -> str:
         """Add a data table"""
@@ -296,7 +296,7 @@ class A2UIBuilder:
     def chart(
         self,
         chart_type: str,
-        data: List[Dict[str, Any]],
+        data: list[dict[str, Any]],
         title: str = None,
         component_id: str = None,
     ) -> str:
@@ -369,7 +369,7 @@ class A2UIBuilder:
         """Build and convert to JSON string"""
         return json.dumps(self.build().to_dict(), indent=2)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Build and convert to dictionary"""
         return self.build().to_dict()
 
@@ -389,9 +389,9 @@ class A2UIGenerator:
     @staticmethod
     def dashboard_card(
         title: str,
-        metrics: List[Dict[str, Any]],
-        actions: List[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+        metrics: list[dict[str, Any]],
+        actions: list[dict[str, str]] = None,
+    ) -> dict[str, Any]:
         """Generate a dashboard metrics card"""
         builder = A2UIBuilder()
 
@@ -428,10 +428,10 @@ class A2UIGenerator:
     @staticmethod
     def data_table(
         title: str,
-        columns: List[str],
-        data: List[List[Any]],
-        row_actions: List[str] = None,
-    ) -> Dict[str, Any]:
+        columns: list[str],
+        data: list[list[Any]],
+        row_actions: list[str] = None,
+    ) -> dict[str, Any]:
         """Generate a data table UI"""
         builder = A2UIBuilder()
 
@@ -459,9 +459,9 @@ class A2UIGenerator:
     def status_display(
         title: str,
         status: str,
-        details: Dict[str, Any],
+        details: dict[str, Any],
         severity: str = "info",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate a status display UI"""
         builder = A2UIBuilder()
 
@@ -495,7 +495,7 @@ class A2UIGenerator:
         message: str,
         confirm_action: str,
         cancel_action: str = "cancel",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate a confirmation dialog UI"""
         builder = A2UIBuilder()
 
@@ -514,9 +514,9 @@ class A2UIGenerator:
     @staticmethod
     def form(
         title: str,
-        fields: List[Dict[str, Any]],
+        fields: list[dict[str, Any]],
         submit_action: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate a form UI"""
         builder = A2UIBuilder()
 
@@ -553,7 +553,7 @@ class A2UIGenerator:
 
 
 # Convenience functions for agents
-def generate_dashboard_ui(metrics: Dict[str, Any]) -> Dict[str, Any]:
+def generate_dashboard_ui(metrics: dict[str, Any]) -> dict[str, Any]:
     """Generate a dashboard UI from agent metrics"""
     metric_list = [
         {"label": k, "value": v}
@@ -566,9 +566,9 @@ def generate_dashboard_ui(metrics: Dict[str, Any]) -> Dict[str, Any]:
 def generate_status_ui(
     title: str,
     status: str,
-    details: Dict[str, Any],
+    details: dict[str, Any],
     is_healthy: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate a status display UI"""
     return A2UIGenerator.status_display(
         title,
@@ -580,9 +580,9 @@ def generate_status_ui(
 
 def generate_table_ui(
     title: str,
-    headers: List[str],
-    rows: List[List[Any]],
-) -> Dict[str, Any]:
+    headers: list[str],
+    rows: list[list[Any]],
+) -> dict[str, Any]:
     """Generate a data table UI"""
     return A2UIGenerator.data_table(title, headers, rows)
 
@@ -600,7 +600,7 @@ class AUREAUIGenerator:
     """
 
     @staticmethod
-    def decision_display(decision: Dict[str, Any]) -> Dict[str, Any]:
+    def decision_display(decision: dict[str, Any]) -> dict[str, Any]:
         """Generate UI for an AUREA decision"""
         builder = A2UIBuilder()
 
@@ -634,7 +634,7 @@ class AUREAUIGenerator:
         return builder.to_dict()
 
     @staticmethod
-    def health_dashboard(health: Dict[str, Any]) -> Dict[str, Any]:
+    def health_dashboard(health: dict[str, Any]) -> dict[str, Any]:
         """Generate UI for system health display"""
         builder = A2UIBuilder()
 
@@ -668,7 +668,7 @@ class AUREAUIGenerator:
         return builder.to_dict()
 
     @staticmethod
-    def agent_grid(agents: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def agent_grid(agents: list[dict[str, Any]]) -> dict[str, Any]:
         """Generate UI for agent status grid"""
         columns = ["Name", "Type", "Status", "Executions", "Last Active"]
         rows = []

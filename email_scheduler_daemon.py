@@ -14,13 +14,13 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List
+import os
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class EmailJob:
     body: str
     scheduled_for: datetime
     status: str
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     created_at: datetime
 
 
@@ -129,7 +129,7 @@ class EmailSchedulerDaemon:
 
             await asyncio.sleep(self.poll_interval)
 
-    async def _fetch_due_emails(self) -> List[EmailJob]:
+    async def _fetch_due_emails(self) -> list[EmailJob]:
         """Fetch emails that are due to be sent"""
         try:
             from database.async_connection import get_pool
@@ -209,7 +209,7 @@ class EmailSchedulerDaemon:
 
             # Import SendGrid
             from sendgrid import SendGridAPIClient
-            from sendgrid.helpers.mail import Mail, Email, To, Content, CustomArg
+            from sendgrid.helpers.mail import Content, CustomArg, Email, Mail, To
 
             # Determine content type - check if body contains HTML tags
             content_type = "text/html" if "<" in email.body and ">" in email.body else "text/plain"
@@ -287,7 +287,7 @@ class EmailSchedulerDaemon:
         self,
         email_id: str,
         status: str,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         scheduled_for: Optional[datetime] = None
     ):
         """Update email status in database"""
@@ -342,7 +342,7 @@ class EmailSchedulerDaemon:
         except Exception as e:
             logger.warning(f"Failed to record delivery for email {email.id}: {e}")
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get daemon statistics"""
         return {
             **self._stats,
@@ -361,7 +361,7 @@ async def schedule_nurture_email(
     subject: str,
     body: str,
     delay_minutes: int = 0,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
 ) -> str:
     """Schedule an email for a nurture campaign"""
     try:
@@ -391,8 +391,8 @@ async def schedule_campaign_sequence(
     recipient: str,
     campaign_id: str,
     lead_id: str,
-    sequence: List[Dict[str, Any]]
-) -> List[str]:
+    sequence: list[dict[str, Any]]
+) -> list[str]:
     """Schedule a sequence of emails for a nurture campaign"""
     email_ids = []
     cumulative_delay = 0

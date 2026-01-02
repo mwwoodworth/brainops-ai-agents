@@ -4,26 +4,27 @@ Unified Memory Manager - Enterprise Grade Memory System
 Consolidates 53 chaotic memory tables into one intelligent system
 """
 
-import os
-import json
-import hashlib
 import asyncio
+import hashlib
+import json
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Union
-from dataclasses import dataclass
-from enum import Enum
-import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+import os
 import warnings
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from decimal import Decimal
+from enum import Enum
+from typing import Any, ContextManager, Optional, Union
+
+import psycopg2
+from psycopg2 import sql
+from psycopg2.extras import Json, RealDictCursor
+
 warnings.filterwarnings('ignore')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Custom JSON encoder for datetime, Decimal, and Enum types
-from decimal import Decimal
 
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -59,16 +60,16 @@ class MemoryType(Enum):
 class Memory:
     """Unified memory structure"""
     memory_type: MemoryType
-    content: Dict[str, Any]
+    content: dict[str, Any]
     source_system: str
     source_agent: str
     created_by: str
     importance_score: float = 0.5
-    tags: List[str] = None
-    metadata: Dict[str, Any] = None
+    tags: Optional[list[str]] = None
+    metadata: Optional[dict[str, Any]] = None
     context_id: Optional[str] = None
     parent_memory_id: Optional[str] = None
-    related_memories: List[str] = None
+    related_memories: Optional[list[str]] = None
     expires_at: Optional[datetime] = None
     tenant_id: Optional[str] = None
 
@@ -76,39 +77,39 @@ class Memory:
 class UnifiedMemoryManager:
     """Enterprise-grade unified memory management system"""
 
-    def __init__(self, tenant_id: str = None):
+    def __init__(self, tenant_id: Optional[str] = None):
         self.embedding_cache = {}
         self.consolidation_threshold = 0.85  # Similarity threshold for consolidation
         self.tenant_id = tenant_id or os.getenv('TENANT_ID')
         self._pool = None
         self._init_pool()
 
-    def _init_pool(self):
+    def _init_pool(self) -> None:
         """Initialize shared connection pool"""
         if USING_SHARED_POOL:
             try:
                 self._pool = get_sync_pool()
                 logger.info("✅ Unified memory using SHARED connection pool")
-            except Exception as e:
-                logger.error(f"❌ Failed to get shared pool: {e}")
+            except Exception as exc:
+                logger.error("❌ Failed to get shared pool: %s", exc, exc_info=True)
                 self._pool = None
         else:
             logger.warning("⚠️ Running without shared pool - connection exhaustion risk")
 
-    def _get_connection(self):
+    def _get_connection(self) -> Optional[psycopg2.extensions.connection]:
         """Get connection from shared pool"""
         if self._pool:
             return self._pool.get_connection()
         return None
 
     @property
-    def conn(self):
+    def conn(self) -> Optional[psycopg2.extensions.connection]:
         """Backward compatibility - get connection from pool for current operation"""
         if hasattr(self, '_current_conn') and self._current_conn:
             return self._current_conn
         return None
 
-    def _get_cursor(self):
+    def _get_cursor(self) -> ContextManager[Optional[RealDictCursor]]:
         """Get cursor from shared pool - backward compatible context manager"""
         from contextlib import contextmanager
 
@@ -134,7 +135,13 @@ class UnifiedMemoryManager:
 
         return cursor_context()
 
-    def _execute_query(self, query: str, params: tuple = None, fetch_one: bool = False, fetch_all: bool = False):
+    def _execute_query(
+        self,
+        query: str,
+        params: Optional[tuple[Any, ...]] = None,
+        fetch_one: bool = False,
+        fetch_all: bool = False,
+    ) -> Optional[Union[bool, dict[str, Any], list[dict[str, Any]]]]:
         """Execute query using shared pool - returns results or None"""
         if not self._pool:
             logger.error("❌ No connection pool available")
@@ -155,15 +162,15 @@ class UnifiedMemoryManager:
                     result = True
                 cursor.close()
                 return result
-            except Exception as e:
-                logger.error(f"❌ Query execution failed: {e}")
+            except Exception as exc:
+                logger.error("❌ Query execution failed: %s", exc, exc_info=True)
                 return None
 
-    def log_to_brain(self, system: str, action: str, data: Dict):
+    def log_to_brain(self, system: str, action: str, data: dict[str, Any]) -> None:
         """Log significant events to the unified brain logs"""
         try:
             import uuid
-            
+
             # Use shared pool if available, otherwise direct connection
             with self._get_cursor() as cur:
                 if not cur:
@@ -190,14 +197,14 @@ class UnifiedMemoryManager:
                     action,
                     json.dumps(data, cls=CustomJSONEncoder),
                 ))
-                
-                # Commit if we own the connection (in shared pool context manager handles commit usually, 
+
+                # Commit if we own the connection (in shared pool context manager handles commit usually,
                 # but explicit commit ensures persistence if auto-commit isn't on)
                 if self.conn:
                     self.conn.commit()
-                    
-        except Exception as e:
-            logger.warning(f"Failed to log to unified brain: {e}")
+
+        except Exception as exc:
+            logger.warning("Failed to log to unified brain: %s", exc, exc_info=True)
 
     def store(self, memory: Memory) -> str:
         """Store a memory with deduplication and linking"""
@@ -215,7 +222,7 @@ class UnifiedMemoryManager:
                 # Reinforce existing memory instead of creating duplicate
                 mem_id = self._reinforce_memory(existing['id'], memory)
                 self.log_to_brain("memory_system", "memory_reinforced", {
-                    "memory_id": mem_id, 
+                    "memory_id": mem_id,
                     "type": memory.memory_type.value,
                     "source": memory.source_system
                 })
@@ -224,7 +231,7 @@ class UnifiedMemoryManager:
             # Generate embedding if we have content
             embedding = self._generate_embedding(memory.content)
             if embedding is None:
-                logger.warning(f"Memory will be stored without embedding - semantic search unavailable for this memory")
+                logger.warning("Memory will be stored without embedding - semantic search unavailable for this memory")
 
             # Find related memories
             related = self._find_related_memories(memory.content, memory.tenant_id, limit=5)
@@ -274,21 +281,21 @@ class UnifiedMemoryManager:
                 memory_id = result['id'] if result else None
 
                 logger.info(f"✅ Stored memory {memory_id} ({memory.memory_type.value})")
-                
+
                 self.log_to_brain("memory_system", "memory_stored", {
                     "memory_id": memory_id,
                     "type": memory.memory_type.value,
                     "source": memory.source_system,
                     "tags": memory.tags
                 })
-                
+
                 return memory_id
 
         except Exception as e:
             logger.error(f"❌ Failed to store memory: {e}")
             return None
 
-    async def store_async(self, content: str, memory_type: str = "operational", category: str = None, metadata: Dict = None) -> str:
+    async def store_async(self, content: str, memory_type: str = "operational", category: str = None, metadata: dict = None) -> str:
         """Async wrapper for store to match app.py interface"""
         # Map string memory_type to Enum
         try:
@@ -308,17 +315,17 @@ class UnifiedMemoryManager:
             metadata=metadata or {},
             tenant_id=self.tenant_id
         )
-        
+
         # Run sync store in thread pool
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.store, mem)
 
-    def recall(self, query: Union[str, Dict], tenant_id: str = None, context: Optional[str] = None,
-               limit: int = 10, memory_type: Optional[MemoryType] = None) -> List[Dict]:
+    def recall(self, query: Union[str, dict], tenant_id: str = None, context: Optional[str] = None,
+               limit: int = 10, memory_type: Optional[MemoryType] = None) -> list[dict]:
         """Recall relevant memories with semantic search"""
         # Use instance tenant_id if not provided
         tenant_id = tenant_id or self.tenant_id
-        
+
         if not tenant_id:
             raise ValueError("tenant_id is required for memory recall")
 
@@ -376,7 +383,7 @@ class UnifiedMemoryManager:
                 if memories:
                     memory_ids = [m['id'] for m in memories]
                     self._update_access_counts(memory_ids)
-                    
+
                     self.log_to_brain("memory_system", "memory_recalled", {
                         "query": query if isinstance(query, str) else "vector",
                         "count": len(memories),
@@ -390,7 +397,7 @@ class UnifiedMemoryManager:
             logger.error(f"❌ Failed to recall memories: {e}")
             return []
 
-    async def search(self, query: str, limit: int = 10, memory_type: str = None) -> List[Dict]:
+    async def search(self, query: str, limit: int = 10, memory_type: str = None) -> list[dict]:
         """Async wrapper for recall"""
         mem_type = None
         if memory_type:
@@ -398,11 +405,11 @@ class UnifiedMemoryManager:
                 mem_type = MemoryType(memory_type.lower())
             except ValueError as exc:
                 logger.debug("Invalid memory_type %s: %s", memory_type, exc)
-        
+
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, lambda: self.recall(query, self.tenant_id, limit=limit, memory_type=mem_type))
 
-    def synthesize(self, tenant_id: str = None, time_window: timedelta = timedelta(hours=24)) -> List[Dict]:
+    def synthesize(self, tenant_id: str = None, time_window: timedelta = timedelta(hours=24)) -> list[dict]:
         """Synthesize insights from recent memories"""
         tenant_id = tenant_id or self.tenant_id
         if not tenant_id:
@@ -529,7 +536,7 @@ class UnifiedMemoryManager:
 
                 self.conn.commit()
                 logger.info(f"♻️ Consolidated {consolidated_count} memory pairs")
-                
+
                 if consolidated_count > 0:
                     self.log_to_brain("memory_system", "memory_consolidated", {
                         "count": consolidated_count,
@@ -617,14 +624,14 @@ class UnifiedMemoryManager:
                             importance_score=old_mem.get('importance', 0.5),
                             tags=['migrated', table_name],
                             metadata={'original_id': str(old_mem.get('id', ''))},
-                            # created_at=old_mem.get('created_at'), # Memory dataclass doesn't have created_at in __init__? 
+                            # created_at=old_mem.get('created_at'), # Memory dataclass doesn't have created_at in __init__?
                             # Wait, checking Memory dataclass... it doesn't have created_at in the definition above!
                             # It has expires_at.
                             tenant_id=tenant_id
                         )
                         self.store(memory)
                         migrated += 1
-                    except Exception as e:
+                    except Exception:
                         # logger.warning(f"Failed to migrate a record: {e}")
                         continue
 
@@ -634,7 +641,7 @@ class UnifiedMemoryManager:
             logger.error(f"Migration error for {table_name}: {e}")
             return 0
 
-    def _find_duplicate(self, memory: Memory) -> Optional[Dict]:
+    def _find_duplicate(self, memory: Memory) -> Optional[dict]:
         """Find duplicate memory using content hash"""
         try:
             content_str = json.dumps(memory.content, sort_keys=True, cls=CustomJSONEncoder)
@@ -673,7 +680,7 @@ class UnifiedMemoryManager:
             logger.info(f"💪 Reinforced existing memory {memory_id}")
             return memory_id
 
-    def _find_related_memories(self, content: Dict, tenant_id: str, limit: int = 5) -> List[Dict]:
+    def _find_related_memories(self, content: dict, tenant_id: str, limit: int = 5) -> list[dict]:
         """Find memories related to the given content"""
         embedding = self._generate_embedding(content)
 
@@ -690,7 +697,7 @@ class UnifiedMemoryManager:
             cur.execute(query, (embedding, tenant_id, embedding, limit))
             return cur.fetchall()
 
-    def _generate_embedding(self, content: Dict) -> Optional[List[float]]:
+    def _generate_embedding(self, content: dict) -> Optional[list[float]]:
         """Generate real embedding with intelligent provider fallback chain.
 
         Fallback order:
@@ -714,7 +721,7 @@ class UnifiedMemoryManager:
                 return response.data[0].embedding
             except Exception as e:
                 if "429" in str(e) or "quota" in str(e).lower():
-                    logger.warning(f"⚠️ OpenAI rate limited/quota exceeded, trying Gemini fallback")
+                    logger.warning("⚠️ OpenAI rate limited/quota exceeded, trying Gemini fallback")
                 else:
                     logger.warning(f"⚠️ OpenAI embedding failed: {e}, trying fallback")
 
@@ -781,7 +788,7 @@ class UnifiedMemoryManager:
 
         return ' '.join(parts)
 
-    def _update_access_counts(self, memory_ids: List[str]):
+    def _update_access_counts(self, memory_ids: list[str]):
         """Update access counts for recalled memories"""
         with self._get_cursor() as cur:
             query = """
@@ -793,7 +800,7 @@ class UnifiedMemoryManager:
             cur.execute(query, (memory_ids,))
             self.conn.commit()
 
-    def _identify_patterns(self, memories: List[Dict]) -> List[Dict]:
+    def _identify_patterns(self, memories: list[dict]) -> list[dict]:
         """Identify patterns in memories (simplified version)"""
         patterns = []
 
@@ -820,7 +827,7 @@ class UnifiedMemoryManager:
 
         return patterns
 
-    def _merge_memories(self, content1: Dict, content2: Dict) -> Dict:
+    def _merge_memories(self, content1: dict, content2: dict) -> dict:
         """Merge two similar memories"""
         merged = content1.copy()
 
@@ -837,7 +844,7 @@ class UnifiedMemoryManager:
 
         return merged
 
-    def apply_retention_policy(self, tenant_id: str = None, aggressive: bool = False) -> Dict[str, int]:
+    def apply_retention_policy(self, tenant_id: str = None, aggressive: bool = False) -> dict[str, int]:
         """
         Apply importance-based retention policy
         Returns: statistics about retained/removed memories
@@ -922,7 +929,7 @@ class UnifiedMemoryManager:
             self.conn.rollback()
             return {'error': str(e)}
 
-    def auto_garbage_collect(self, tenant_id: str = None, dry_run: bool = False) -> Dict[str, int]:
+    def auto_garbage_collect(self, tenant_id: str = None, dry_run: bool = False) -> dict[str, int]:
         """
         Automatically garbage collect old, low-value memories
         """
@@ -990,7 +997,7 @@ class UnifiedMemoryManager:
                 self.conn.rollback()
             return {'error': str(e)}
 
-    def get_stats(self, tenant_id: str = None) -> Dict:
+    def get_stats(self, tenant_id: str = None) -> dict:
         """Get memory system statistics"""
         tenant_id = tenant_id or self.tenant_id
         if not tenant_id:
@@ -1030,7 +1037,7 @@ def get_memory_manager() -> UnifiedMemoryManager:
 if __name__ == "__main__":
     # Test the memory system
     manager = get_memory_manager()
-    
+
     # Test with a dummy tenant ID for local execution
     TEST_TENANT = "test-tenant-id"
     manager.tenant_id = TEST_TENANT # Ensure tenant ID is set for test

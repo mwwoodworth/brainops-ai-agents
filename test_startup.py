@@ -1,7 +1,7 @@
 
-import sys
-import os
 import asyncio
+import os
+import sys
 
 # Add current directory to path
 sys.path.append(os.getcwd())
@@ -11,6 +11,7 @@ sys.path.append(os.getcwd())
 # We will try to import app and run the lifespan startup.
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 async def test_startup():
@@ -18,17 +19,17 @@ async def test_startup():
     try:
         from app import app
         from config import config
-        
+
         print(f"Config Environment: {config.environment}")
         print(f"DB Host: {config.database.host}")
-        
+
         # Manually trigger lifespan
         async with app.router.lifespan_context(app) as state:
             print("--- Startup Successful ---")
             print(f"State keys: {state.keys()}")
-            
+
     except Exception as e:
-        print(f"--- Startup FAILED ---")
+        print("--- Startup FAILED ---")
         print(f"Error: {e}")
         import traceback
         traceback.print_exc()

@@ -19,20 +19,26 @@ Purpose: MAKE ALL SYSTEMS POWERFUL AND USED!
 """
 
 import asyncio
-import logging
 import json
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 # Import enhanced orchestration features
 try:
     from autonomous_system_orchestrator import (
-        EventBus, EventType, SystemEvent, MessageQueue,
-        CircuitBreaker, LoadBalancer, LoadBalancingStrategy,
-        AgentInstance, HealthAggregator
+        AgentInstance,
+        CircuitBreaker,
+        EventBus,
+        EventType,
+        HealthAggregator,
+        LoadBalancer,
+        LoadBalancingStrategy,
+        MessageQueue,
+        SystemEvent,
     )
     ENHANCED_ORCHESTRATION_AVAILABLE = True
 except ImportError:
@@ -161,25 +167,25 @@ class ExecutionContext:
     """Context passed through all systems during execution"""
     agent_name: str
     task_type: str
-    task_data: Dict[str, Any]
+    task_data: dict[str, Any]
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     execution_id: str = ""
     tenant_id: Optional[str] = None
     user_id: Optional[str] = None
 
     # System enrichment
-    graph_context: Optional[Dict[str, Any]] = None
-    historical_patterns: Optional[List[Dict]] = None
-    pricing_recommendations: Optional[Dict] = None
+    graph_context: Optional[dict[str, Any]] = None
+    historical_patterns: Optional[list[dict]] = None
+    pricing_recommendations: Optional[dict] = None
     confidence_score: float = 1.0
 
     # A2UI and Consciousness integration
-    a2ui_surface: Optional[Dict[str, Any]] = None  # Generated UI for results
-    consciousness_state: Optional[Dict[str, Any]] = None  # Current consciousness
+    a2ui_surface: Optional[dict[str, Any]] = None  # Generated UI for results
+    consciousness_state: Optional[dict[str, Any]] = None  # Current consciousness
     hallucination_validated: bool = False  # Whether output was validated
     brain_memory_id: Optional[str] = None  # ID in brain memory
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "agent_name": self.agent_name,
             "task_type": self.task_type,
@@ -237,7 +243,7 @@ class UnifiedSystemIntegration:
             self.message_queue = MessageQueue(max_workers=10)
             self.load_balancer = LoadBalancer(strategy=LoadBalancingStrategy.LEAST_LOADED)
             self.health_aggregator = HealthAggregator()
-            self.circuit_breakers: Dict[str, CircuitBreaker] = {}
+            self.circuit_breakers: dict[str, CircuitBreaker] = {}
             self._enhanced_initialized = False
         else:
             self.event_bus = None
@@ -309,7 +315,7 @@ class UnifiedSystemIntegration:
         self._enhanced_initialized = True
         self.logger.info("Enhanced features initialized in UnifiedSystemIntegration")
 
-    async def pre_execution(self, agent_name: str, task_type: str, task_data: Dict[str, Any]) -> ExecutionContext:
+    async def pre_execution(self, agent_name: str, task_type: str, task_data: dict[str, Any]) -> ExecutionContext:
         """
         Called BEFORE any agent execution.
         Enriches context with data from all available systems.
@@ -389,7 +395,7 @@ class UnifiedSystemIntegration:
 
         return ctx
 
-    async def enrich_context(self, ctx: ExecutionContext, additional_data: Dict[str, Any]) -> ExecutionContext:
+    async def enrich_context(self, ctx: ExecutionContext, additional_data: dict[str, Any]) -> ExecutionContext:
         """
         Called during execution to add more context.
         """
@@ -405,7 +411,7 @@ class UnifiedSystemIntegration:
 
         return ctx
 
-    async def post_execution(self, ctx: ExecutionContext, result: Dict[str, Any], success: bool) -> None:
+    async def post_execution(self, ctx: ExecutionContext, result: dict[str, Any], success: bool) -> None:
         """
         Called AFTER agent execution completes.
         Updates all systems with the outcome.
@@ -525,7 +531,7 @@ class UnifiedSystemIntegration:
         except Exception as e:
             self.logger.warning(f"Brain memory storage failed: {e}")
 
-    async def on_error(self, ctx: ExecutionContext, error: Exception) -> Dict[str, Any]:
+    async def on_error(self, ctx: ExecutionContext, error: Exception) -> dict[str, Any]:
         """
         Called when an agent fails.
         Captures error for learning and potentially triggers recovery.
@@ -564,7 +570,7 @@ class UnifiedSystemIntegration:
             "systems_consulted": list(self.systems_used)
         }
 
-    def get_integration_stats(self) -> Dict[str, Any]:
+    def get_integration_stats(self) -> dict[str, Any]:
         """Get statistics about system integration usage"""
         return {
             "total_executions": self.execution_count,
@@ -605,7 +611,7 @@ def with_unified_integration(agent_name: str, task_type: str):
             ...
     """
     def decorator(func):
-        async def wrapper(task_data: Dict[str, Any], *args, **kwargs):
+        async def wrapper(task_data: dict[str, Any], *args, **kwargs):
             integration = get_unified_integration()
             ctx = await integration.pre_execution(agent_name, task_type, task_data)
 
@@ -698,11 +704,11 @@ async def initialize_all_systems():
 
     if ENHANCED_ORCHESTRATION_AVAILABLE:
         logger.info("\nEnhanced Features:")
-        logger.info(f"  - Event Bus: ACTIVE")
-        logger.info(f"  - Message Queue: ACTIVE (10 workers)")
-        logger.info(f"  - Load Balancer: ACTIVE (LEAST_LOADED strategy)")
+        logger.info("  - Event Bus: ACTIVE")
+        logger.info("  - Message Queue: ACTIVE (10 workers)")
+        logger.info("  - Load Balancer: ACTIVE (LEAST_LOADED strategy)")
         logger.info(f"  - Circuit Breakers: {len(integration.circuit_breakers)} configured")
-        logger.info(f"  - Health Aggregator: ACTIVE")
+        logger.info("  - Health Aggregator: ACTIVE")
 
     # Run initial state scan
     state_sync = get_state_sync()

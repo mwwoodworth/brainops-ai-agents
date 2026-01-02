@@ -11,15 +11,15 @@ is actually working.
 from __future__ import annotations
 
 import logging
-from typing import Dict, Any
+from typing import Any
 
-from ai_smart_fallback import SmartAISystem
 from ai_advanced_providers import advanced_ai
+from ai_smart_fallback import SmartAISystem
 
 logger = logging.getLogger(__name__)
 
 
-def _check_openai(system: SmartAISystem) -> Dict[str, Any]:
+def _check_openai(system: SmartAISystem) -> dict[str, Any]:
     configured = bool(system.openai_key)
     if not system.openai_client:
         return {"configured": configured, "reachable": False, "last_error": None}
@@ -36,7 +36,7 @@ def _check_openai(system: SmartAISystem) -> Dict[str, Any]:
         return {"configured": configured, "reachable": False, "last_error": str(exc)}
 
 
-def _check_anthropic(system: SmartAISystem) -> Dict[str, Any]:
+def _check_anthropic(system: SmartAISystem) -> dict[str, Any]:
     configured = bool(system.anthropic_key)
     if not system.anthropic_client:
         return {"configured": configured, "reachable": False, "last_error": None}
@@ -53,7 +53,7 @@ def _check_anthropic(system: SmartAISystem) -> Dict[str, Any]:
         return {"configured": configured, "reachable": False, "last_error": str(exc)}
 
 
-def _check_huggingface(system: SmartAISystem) -> Dict[str, Any]:
+def _check_huggingface(system: SmartAISystem) -> dict[str, Any]:
     configured = bool(system.hf_token)
     try:
         text = system._try_huggingface("ping", max_tokens=8)
@@ -67,7 +67,7 @@ def _check_huggingface(system: SmartAISystem) -> Dict[str, Any]:
         return {"configured": configured, "reachable": False, "last_error": str(exc)}
 
 
-def _check_gemini() -> Dict[str, Any]:
+def _check_gemini() -> dict[str, Any]:
     configured = bool(getattr(advanced_ai, "gemini_key", None))
     model_loaded = bool(getattr(advanced_ai, "gemini_model", None))
     if not (configured and model_loaded):
@@ -85,7 +85,7 @@ def _check_gemini() -> Dict[str, Any]:
         return {"configured": configured, "reachable": False, "last_error": str(exc)}
 
 
-def _check_perplexity() -> Dict[str, Any]:
+def _check_perplexity() -> dict[str, Any]:
     configured = bool(getattr(advanced_ai, "perplexity_key", None))
     try:
         result = advanced_ai.search_with_perplexity("ping", citations=False)
@@ -99,13 +99,13 @@ def _check_perplexity() -> Dict[str, Any]:
         return {"configured": configured, "reachable": False, "last_error": str(exc)}
 
 
-def get_provider_status() -> Dict[str, Any]:
+def get_provider_status() -> dict[str, Any]:
     """
     Return a snapshot of AI provider status.
     """
     system = SmartAISystem()
 
-    status: Dict[str, Any] = {
+    status: dict[str, Any] = {
         "openai": _check_openai(system),
         "anthropic": _check_anthropic(system),
         "huggingface": _check_huggingface(system),

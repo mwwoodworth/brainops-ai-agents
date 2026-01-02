@@ -6,10 +6,11 @@ Remove all hardcoded secrets from Python files
 import re
 from pathlib import Path
 
+
 def remove_secrets_from_file(filepath):
     """Remove hardcoded secrets from a Python file"""
 
-    with open(filepath, 'r') as f:
+    with open(filepath) as f:
         content = f.read()
 
     original_content = content

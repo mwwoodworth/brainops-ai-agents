@@ -3,19 +3,20 @@ Supabase Realtime Monitor for Live AI Updates
 Provides real-time subscriptions and monitoring of AI activity
 """
 
-import json
 import asyncio
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from datetime import datetime
-from typing import Dict, List, Optional, Any, Callable, Tuple
-from enum import Enum
-from dataclasses import dataclass
-import os
-from dotenv import load_dotenv
+import json
 import logging
+import os
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Optional
+
+import psycopg2
+from dotenv import load_dotenv
+from psycopg2.extras import RealDictCursor
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -51,8 +52,8 @@ class RealtimeEvent:
     event_type: EventType
     timestamp: datetime
     source: str
-    data: Dict[str, Any]
-    metadata: Dict[str, Any]
+    data: dict[str, Any]
+    metadata: dict[str, Any]
     priority: int = 5
 
 @dataclass
@@ -61,7 +62,7 @@ class Subscription:
     subscription_id: str
     client_id: str
     subscription_type: SubscriptionType
-    filters: Dict[str, Any]
+    filters: dict[str, Any]
     callback: Optional[Callable]
     created_at: datetime
     is_active: bool = True
@@ -396,7 +397,7 @@ class RealtimeMonitor:
         except Exception as e:
             logger.error(f"Error handling notification: {e}")
 
-    def _calculate_priority(self, event_data: Dict) -> int:
+    def _calculate_priority(self, event_data: dict) -> int:
         """Calculate event priority"""
         # High priority for errors and critical alerts
         if event_data.get('severity') == 'critical':
@@ -568,7 +569,7 @@ class RealtimeMonitor:
             if conn:
                 conn.close()
 
-    def _format_activity(self, event: RealtimeEvent) -> Tuple[str, str, str]:
+    def _format_activity(self, event: RealtimeEvent) -> tuple[str, str, str]:
         """Format event for activity feed"""
         if event.event_type == EventType.AGENT_EXECUTION:
             title = f"Agent {event.data.get('agent_type', 'Unknown')} executed"
@@ -586,7 +587,7 @@ class RealtimeMonitor:
             severity = event.data.get('severity', 'warning')
 
         elif event.event_type == EventType.TASK_COMPLETED:
-            title = f"Task completed"
+            title = "Task completed"
             description = f"Task: {event.data.get('task_name', 'Unknown')}"
             severity = 'success'
 
@@ -675,7 +676,7 @@ class RealtimeMonitor:
             if conn:
                 conn.close()
 
-    async def _get_recent_events(self, minutes: int = 5) -> List[Dict]:
+    async def _get_recent_events(self, minutes: int = 5) -> list[dict]:
         """Get recent events from database"""
         try:
             conn = self._get_connection()
@@ -697,7 +698,7 @@ class RealtimeMonitor:
             if conn:
                 conn.close()
 
-    def _aggregate_events(self, events: List[Dict]) -> List[Dict]:
+    def _aggregate_events(self, events: list[dict]) -> list[dict]:
         """Aggregate events for activity feed"""
         aggregated = defaultdict(lambda: {'count': 0, 'events': []})
 
@@ -713,13 +714,13 @@ class RealtimeMonitor:
                 activities.append({
                     'type': event_type,
                     'title': f"{data['count']} {event_type} events",
-                    'description': f"In the last 5 minutes",
+                    'description': "In the last 5 minutes",
                     'severity': 'info'
                 })
 
         return activities
 
-    def _add_to_activity_feed(self, activity: Dict):
+    def _add_to_activity_feed(self, activity: dict):
         """Add aggregated activity to feed"""
         try:
             conn = self._get_connection()
@@ -748,7 +749,7 @@ class RealtimeMonitor:
 
     # Public methods for managing subscriptions
     def subscribe(self, client_id: str, subscription_type: SubscriptionType,
-                 filters: Optional[Dict] = None,
+                 filters: Optional[dict] = None,
                  callback: Optional[Callable] = None) -> str:
         """Subscribe to real-time events"""
         subscription_id = f"sub_{uuid.uuid4().hex[:8]}"
@@ -775,7 +776,7 @@ class RealtimeMonitor:
             logger.info(f"Deactivated subscription {subscription_id}")
 
     def emit_event(self, event_type: EventType, source: str,
-                  data: Dict[str, Any], metadata: Optional[Dict] = None):
+                  data: dict[str, Any], metadata: Optional[dict] = None):
         """Manually emit an event"""
         event = RealtimeEvent(
             event_id=f"evt_{uuid.uuid4().hex[:8]}",
@@ -790,7 +791,7 @@ class RealtimeMonitor:
         # Add to queue
         asyncio.create_task(self.event_queue.put(event))
 
-    def get_activity_feed(self, limit: int = 50) -> List[Dict]:
+    def get_activity_feed(self, limit: int = 50) -> list[dict]:
         """Get recent activity feed"""
         try:
             conn = self._get_connection()
@@ -815,7 +816,7 @@ class RealtimeMonitor:
                 conn.close()
 
     def get_event_history(self, event_type: Optional[EventType] = None,
-                         limit: int = 100) -> List[Dict]:
+                         limit: int = 100) -> list[dict]:
         """Get event history"""
         try:
             conn = self._get_connection()
@@ -846,7 +847,7 @@ class RealtimeMonitor:
             if conn:
                 conn.close()
 
-    def get_subscription_stats(self) -> Dict[str, Any]:
+    def get_subscription_stats(self) -> dict[str, Any]:
         """Get subscription statistics"""
         try:
             conn = self._get_connection()
@@ -926,7 +927,7 @@ class RealtimeMonitor:
                 logger.error(f"Digital twin monitor error: {e}")
                 await asyncio.sleep(60)
 
-    def get_digital_twin_events(self, twin_id: Optional[str] = None, limit: int = 50) -> List[Dict]:
+    def get_digital_twin_events(self, twin_id: Optional[str] = None, limit: int = 50) -> list[dict]:
         """Get events related to digital twins"""
         try:
             conn = self._get_connection()

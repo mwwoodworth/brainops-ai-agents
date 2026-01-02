@@ -7,15 +7,15 @@ Scheduled to run every 30 minutes to continuously build the knowledge graph.
 Target: 100+ nodes within 24 hours of deployment.
 """
 
-import json
-import logging
 import asyncio
 import hashlib
+import json
+import logging
 import re
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Tuple, Set
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -59,7 +59,7 @@ class ExtractedNode:
     node_id: str
     node_type: str
     name: str
-    properties: Dict[str, Any]
+    properties: dict[str, Any]
     importance_score: float = 0.5
     source_execution_id: Optional[str] = None
 
@@ -72,7 +72,7 @@ class ExtractedEdge:
     target_id: str
     edge_type: str
     weight: float = 1.0
-    properties: Dict[str, Any] = None
+    properties: dict[str, Any] = None
 
 
 class KnowledgeGraphExtractor:
@@ -118,7 +118,7 @@ class KnowledgeGraphExtractor:
         unique_str = f"{source_id}:{target_id}:{edge_type}"
         return hashlib.md5(unique_str.encode()).hexdigest()
 
-    def _calculate_importance(self, agent_name: str, status: str, output_data: Dict) -> float:
+    def _calculate_importance(self, agent_name: str, status: str, output_data: dict) -> float:
         """Calculate importance score for a node"""
         base_score = 0.5
 
@@ -148,7 +148,7 @@ class KnowledgeGraphExtractor:
 
         return min(base_score, 1.0)  # Cap at 1.0
 
-    def _extract_entities_from_json(self, data: Any, prefix: str = "") -> List[ExtractedNode]:
+    def _extract_entities_from_json(self, data: Any, prefix: str = "") -> list[ExtractedNode]:
         """Extract entities from JSON output data"""
         nodes = []
 
@@ -261,7 +261,7 @@ class KnowledgeGraphExtractor:
         self,
         hours_back: int = 24,
         limit: int = 500
-    ) -> Tuple[List[ExtractedNode], List[ExtractedEdge]]:
+    ) -> tuple[list[ExtractedNode], list[ExtractedEdge]]:
         """
         Extract knowledge from recent agent executions.
 
@@ -275,9 +275,9 @@ class KnowledgeGraphExtractor:
         if not self.pool:
             await self.initialize()
 
-        nodes: List[ExtractedNode] = []
-        edges: List[ExtractedEdge] = []
-        seen_node_ids: Set[str] = set()
+        nodes: list[ExtractedNode] = []
+        edges: list[ExtractedEdge] = []
+        seen_node_ids: set[str] = set()
 
         try:
             # Get recent executions
@@ -405,7 +405,7 @@ class KnowledgeGraphExtractor:
             logger.error(f"Error extracting from executions: {e}")
             raise
 
-    async def store_nodes(self, nodes: List[ExtractedNode]) -> int:
+    async def store_nodes(self, nodes: list[ExtractedNode]) -> int:
         """Store extracted nodes in ai_knowledge_nodes table"""
         if not self.pool:
             await self.initialize()
@@ -440,7 +440,7 @@ class KnowledgeGraphExtractor:
             logger.error(f"Error storing nodes: {e}")
             raise
 
-    async def store_edges(self, edges: List[ExtractedEdge]) -> int:
+    async def store_edges(self, edges: list[ExtractedEdge]) -> int:
         """Store extracted edges in ai_knowledge_edges table"""
         if not self.pool:
             await self.initialize()
@@ -507,7 +507,7 @@ class KnowledgeGraphExtractor:
         except Exception as e:
             logger.error(f"Error updating graph metadata: {e}")
 
-    async def run_extraction(self, hours_back: int = 24) -> Dict[str, Any]:
+    async def run_extraction(self, hours_back: int = 24) -> dict[str, Any]:
         """
         Run full extraction pipeline.
 
@@ -576,7 +576,7 @@ def get_knowledge_extractor() -> KnowledgeGraphExtractor:
     return _extractor_instance
 
 
-async def run_scheduled_extraction() -> Dict[str, Any]:
+async def run_scheduled_extraction() -> dict[str, Any]:
     """
     Scheduled task to extract knowledge graph data.
     Called every 30 minutes by the scheduler.

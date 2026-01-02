@@ -7,14 +7,14 @@ and autonomous content optimization.
 Based on 2025 best practices from Gartner, RTInsights, and leading market research.
 """
 
-import json
 import hashlib
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field, asdict
-from enum import Enum
-import os
+import json
 import logging
+import os
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +47,12 @@ class MarketSignal:
     signal_id: str
     signal_type: MarketSignalType
     source: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     strength: float  # 0-1
     confidence: float  # 0-1
     timestamp: str
     expires_at: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -62,10 +62,10 @@ class MarketPrediction:
     prediction_type: str
     target_metric: str
     predicted_value: float
-    confidence_interval: Tuple[float, float]
+    confidence_interval: tuple[float, float]
     confidence: float
     time_horizon: str  # e.g., "24h", "7d", "30d"
-    contributing_signals: List[str]
+    contributing_signals: list[str]
     created_at: str
     expires_at: str
 
@@ -78,10 +78,10 @@ class ContentOptimization:
     target: str  # e.g., campaign ID, content ID
     old_value: Any
     new_value: Any
-    expected_impact: Dict[str, float]
+    expected_impact: dict[str, float]
     confidence: float
     executed_at: Optional[str] = None
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -89,9 +89,9 @@ class CompetitorIntelligence:
     """Intelligence about a competitor"""
     competitor_id: str
     name: str
-    recent_actions: List[Dict[str, Any]]
-    pricing_changes: List[Dict[str, Any]]
-    product_launches: List[Dict[str, Any]]
+    recent_actions: list[dict[str, Any]]
+    pricing_changes: list[dict[str, Any]]
+    product_launches: list[dict[str, Any]]
     market_share_estimate: float
     threat_level: str  # low, medium, high, critical
     last_updated: str
@@ -127,10 +127,10 @@ class PredictiveMarketIntelligence:
 
     def __init__(self):
         self.db_url = os.getenv("DATABASE_URL")
-        self.signals: Dict[str, MarketSignal] = {}
-        self.predictions: Dict[str, MarketPrediction] = {}
-        self.optimizations: List[ContentOptimization] = []
-        self.competitors: Dict[str, CompetitorIntelligence] = {}
+        self.signals: dict[str, MarketSignal] = {}
+        self.predictions: dict[str, MarketPrediction] = {}
+        self.optimizations: list[ContentOptimization] = []
+        self.competitors: dict[str, CompetitorIntelligence] = {}
         self._initialized = False
 
         # External data source configurations
@@ -310,10 +310,10 @@ class PredictiveMarketIntelligence:
         self,
         signal_type: MarketSignalType,
         source: str,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         strength: float = 0.5,
         confidence: float = 0.7,
-        tags: List[str] = None
+        tags: list[str] = None
     ) -> MarketSignal:
         """
         Ingest a market signal from an external source
@@ -406,7 +406,7 @@ class PredictiveMarketIntelligence:
         elif signal.signal_type == MarketSignalType.COMPETITOR:
             await self._update_competitor_intelligence(signal)
 
-    async def _generate_trend_prediction(self, trend_signals: List[MarketSignal]):
+    async def _generate_trend_prediction(self, trend_signals: list[MarketSignal]):
         """Generate trend-based predictions"""
         if len(trend_signals) < 3:
             return
@@ -431,7 +431,7 @@ class PredictiveMarketIntelligence:
         self.predictions[prediction.prediction_id] = prediction
         await self._persist_prediction(prediction)
 
-    async def _generate_demand_prediction(self, demand_signals: List[MarketSignal]):
+    async def _generate_demand_prediction(self, demand_signals: list[MarketSignal]):
         """Generate demand predictions"""
         if len(demand_signals) < 2:
             return
@@ -581,8 +581,8 @@ class PredictiveMarketIntelligence:
     async def generate_content_optimization(
         self,
         target: str,
-        current_performance: Dict[str, float],
-        context: Dict[str, Any] = None
+        current_performance: dict[str, float],
+        context: dict[str, Any] = None
     ) -> ContentOptimization:
         """
         Generate an autonomous content optimization recommendation
@@ -663,7 +663,7 @@ class PredictiveMarketIntelligence:
         except Exception as e:
             logger.error(f"Error persisting optimization: {e}")
 
-    async def execute_optimization(self, optimization_id: str) -> Dict[str, Any]:
+    async def execute_optimization(self, optimization_id: str) -> dict[str, Any]:
         """Execute a content optimization"""
         for opt in self.optimizations:
             if opt.optimization_id == optimization_id:
@@ -688,7 +688,7 @@ class PredictiveMarketIntelligence:
 
         return {"error": f"Optimization {optimization_id} not found"}
 
-    async def get_market_insights(self, category: str = None) -> Dict[str, Any]:
+    async def get_market_insights(self, category: str = None) -> dict[str, Any]:
         """Get current market insights and predictions"""
         await self.initialize()
 
@@ -749,7 +749,7 @@ class PredictiveMarketIntelligence:
 
         return insights
 
-    async def fetch_external_signals(self) -> List[MarketSignal]:
+    async def fetch_external_signals(self) -> list[MarketSignal]:
         """Fetch signals from configured external data sources"""
         signals = []
 
@@ -762,7 +762,7 @@ class PredictiveMarketIntelligence:
 
         return signals
 
-    async def _fetch_news_signals(self) -> List[MarketSignal]:
+    async def _fetch_news_signals(self) -> list[MarketSignal]:
         """Fetch news-based market signals"""
         # This would integrate with a real news API
         # For now, return mock data structure
@@ -770,9 +770,9 @@ class PredictiveMarketIntelligence:
 
     async def generate_seo_recommendations(
         self,
-        current_keywords: List[str],
+        current_keywords: list[str],
         industry: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate SEO recommendations based on market trends"""
         # Analyze trend signals for keywords
         trend_signals = [
@@ -798,8 +798,8 @@ class PredictiveMarketIntelligence:
 
     async def score_opportunity(
         self,
-        opportunity_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        opportunity_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Score a market opportunity using multi-factor analysis
 
@@ -945,9 +945,9 @@ class PredictiveMarketIntelligence:
     def _generate_opportunity_next_steps(
         self,
         recommendation: str,
-        weaknesses: List[str],
-        opportunity_data: Dict[str, Any]
-    ) -> List[str]:
+        weaknesses: list[str],
+        opportunity_data: dict[str, Any]
+    ) -> list[str]:
         """Generate actionable next steps based on opportunity analysis"""
         next_steps = []
 
@@ -992,8 +992,8 @@ class PredictiveMarketIntelligence:
 
     async def _persist_opportunity_score(
         self,
-        opportunity_data: Dict[str, Any],
-        score_result: Dict[str, Any]
+        opportunity_data: dict[str, Any],
+        score_result: dict[str, Any]
     ):
         """Persist opportunity score to database"""
         try:
@@ -1049,10 +1049,10 @@ market_intelligence = PredictiveMarketIntelligence()
 async def ingest_market_signal(
     signal_type: str,
     source: str,
-    data: Dict[str, Any],
+    data: dict[str, Any],
     strength: float = 0.5,
     confidence: float = 0.7
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Ingest a new market signal"""
     await market_intelligence.initialize()
     signal = await market_intelligence.ingest_signal(
@@ -1065,15 +1065,15 @@ async def ingest_market_signal(
     return asdict(signal)
 
 
-async def get_market_insights(category: str = None) -> Dict[str, Any]:
+async def get_market_insights(category: str = None) -> dict[str, Any]:
     """Get current market insights"""
     return await market_intelligence.get_market_insights(category)
 
 
 async def generate_optimization(
     target: str,
-    performance: Dict[str, float]
-) -> Dict[str, Any]:
+    performance: dict[str, float]
+) -> dict[str, Any]:
     """Generate content optimization recommendation"""
     await market_intelligence.initialize()
     opt = await market_intelligence.generate_content_optimization(target, performance)
@@ -1086,12 +1086,12 @@ async def generate_optimization(
     }
 
 
-async def execute_market_optimization(optimization_id: str) -> Dict[str, Any]:
+async def execute_market_optimization(optimization_id: str) -> dict[str, Any]:
     """Execute a pending optimization"""
     return await market_intelligence.execute_optimization(optimization_id)
 
 
-async def get_competitor_intelligence() -> List[Dict[str, Any]]:
+async def get_competitor_intelligence() -> list[dict[str, Any]]:
     """Get competitor intelligence overview"""
     await market_intelligence.initialize()
     return [
@@ -1108,8 +1108,8 @@ async def get_competitor_intelligence() -> List[Dict[str, Any]]:
 
 
 async def score_market_opportunity(
-    opportunity_data: Dict[str, Any]
-) -> Dict[str, Any]:
+    opportunity_data: dict[str, Any]
+) -> dict[str, Any]:
     """
     Score a market opportunity based on multiple factors
 

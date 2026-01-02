@@ -4,13 +4,14 @@ AI agent for analyzing system performance and suggesting improvements.
 Uses OpenAI for real analysis and persists results to database.
 """
 
-import os
 import json
 import logging
+import os
+from datetime import datetime
+from typing import Any, Optional
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from typing import Dict, Any, Optional, List
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class SystemImprovementAgent:
             logger.error(f"Database connection failed: {e}")
             return None
 
-    async def analyze_performance(self, metrics: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def analyze_performance(self, metrics: list[dict[str, Any]]) -> dict[str, Any]:
         """Analyze system performance metrics using real data and AI"""
         try:
             results = {
@@ -169,7 +170,7 @@ Respond with JSON only:
             logger.error(f"Performance analysis failed: {e}")
             return {"error": str(e), "status": "error"}
 
-    async def suggest_optimizations(self, component: str) -> Dict[str, Any]:
+    async def suggest_optimizations(self, component: str) -> dict[str, Any]:
         """Suggest optimizations for a specific component using AI"""
         try:
             results = {
@@ -222,7 +223,7 @@ Respond with JSON only:
             logger.error(f"Optimization suggestion failed: {e}")
             return {"error": str(e), "component": component}
 
-    async def analyze_error_patterns(self) -> Dict[str, Any]:
+    async def analyze_error_patterns(self) -> dict[str, Any]:
         """Analyze error patterns in the system"""
         try:
             results = {
@@ -294,7 +295,7 @@ Respond with JSON only:
             logger.error(f"Error pattern analysis failed: {e}")
             return {"error": str(e)}
 
-    async def _save_analysis(self, analysis_type: str, results: Dict[str, Any]):
+    async def _save_analysis(self, analysis_type: str, results: dict[str, Any]):
         """Save analysis results to database"""
         conn = self._get_db_connection()
         if not conn:
@@ -322,8 +323,8 @@ Respond with JSON only:
         self,
         dry_run: bool = True,
         require_approval: bool = True,
-        approved_actions: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
+        approved_actions: Optional[list[str]] = None
+    ) -> dict[str, Any]:
         """
         FORCE MULTIPLIER: The AI OS uses its own MCP Bridge to implement improvements.
 
@@ -460,7 +461,7 @@ Respond with JSON only:
             logger.error(f"Auto-improvement failed: {e}")
             return {"error": str(e), **results}
 
-    def _map_recommendations_to_mcp_actions(self, recommendations: List[Dict]) -> List[Dict]:
+    def _map_recommendations_to_mcp_actions(self, recommendations: list[dict]) -> list[dict]:
         """
         Map AI-generated recommendations to concrete MCP Bridge actions.
 
@@ -542,7 +543,7 @@ Respond with JSON only:
         # Limit to 5 actions per cycle to avoid runaway automation
         return actionable[:5]
 
-    def _log_improvement_to_db(self, results: Dict[str, Any]):
+    def _log_improvement_to_db(self, results: dict[str, Any]):
         """Log improvement execution to database for audit trail"""
         conn = self._get_db_connection()
         if not conn:

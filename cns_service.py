@@ -15,14 +15,14 @@ Author: BrainOps AI Team
 Date: 2025-12-30
 """
 
-import os
+import hashlib
 import json
 import logging
-import hashlib
-from datetime import datetime
-from typing import Dict, List, Optional, Any
+import os
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
+from typing import Any, Optional
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -94,10 +94,10 @@ class CNSMemory:
     memory_type: MemoryType
     category: MemoryCategory
     title: str
-    content: Dict[str, Any]
+    content: dict[str, Any]
     importance_score: float = 0.5
-    tags: List[str] = None
-    metadata: Dict[str, Any] = None
+    tags: list[str] = None
+    metadata: dict[str, Any] = None
     tenant_id: Optional[str] = None
 
 
@@ -170,7 +170,7 @@ class EmbeddingService:
                 logger.warning("sentence-transformers package not installed")
         return self._local_model
 
-    def generate_embedding(self, text: str) -> Optional[List[float]]:
+    def generate_embedding(self, text: str) -> Optional[list[float]]:
         """
         Generate REAL embedding for text using fallback chain.
 
@@ -211,7 +211,7 @@ class EmbeddingService:
         logger.error("All embedding providers failed - NO random vectors will be used")
         return None
 
-    def _try_openai(self, text: str) -> Optional[List[float]]:
+    def _try_openai(self, text: str) -> Optional[list[float]]:
         """Try OpenAI embedding API"""
         client = self._init_openai()
         if not client:
@@ -229,7 +229,7 @@ class EmbeddingService:
             logger.warning(f"OpenAI embedding failed: {e}")
             return None
 
-    def _try_gemini(self, text: str) -> Optional[List[float]]:
+    def _try_gemini(self, text: str) -> Optional[list[float]]:
         """Try Gemini embedding API with zero-padding to 1536d"""
         if not self._init_gemini():
             return None
@@ -256,7 +256,7 @@ class EmbeddingService:
             logger.warning(f"Gemini embedding failed: {e}")
             return None
 
-    def _try_local(self, text: str) -> Optional[List[float]]:
+    def _try_local(self, text: str) -> Optional[list[float]]:
         """Try local sentence-transformer model with zero-padding to 1536d"""
         model = self._init_local_model()
         if not model:
@@ -277,7 +277,7 @@ class EmbeddingService:
             logger.warning(f"Local embedding failed: {e}")
             return None
 
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> dict[str, int]:
         """Get embedding generation statistics"""
         return self._stats.copy()
 
@@ -412,7 +412,7 @@ class CNSMemoryService:
         memory_type: Optional[MemoryType] = None,
         category: Optional[MemoryCategory] = None,
         threshold: float = 0.5
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Recall relevant memories using semantic similarity search.
 
@@ -499,7 +499,7 @@ class CNSMemoryService:
         limit: int,
         memory_type: Optional[MemoryType],
         category: Optional[MemoryCategory]
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Fallback text search when embedding generation fails"""
         try:
             conn = self._get_connection()
@@ -542,7 +542,7 @@ class CNSMemoryService:
             logger.error(f"Fallback text search failed: {e}")
             return []
 
-    def backfill_embeddings(self, batch_size: int = 100, dry_run: bool = False) -> Dict[str, int]:
+    def backfill_embeddings(self, batch_size: int = 100, dry_run: bool = False) -> dict[str, int]:
         """
         Backfill missing embeddings in unified_ai_memory.
 
@@ -621,7 +621,7 @@ class CNSMemoryService:
             stats["error"] = str(e)
             return stats
 
-    def migrate_from_cns_memory(self, limit: int = 1000) -> Dict[str, int]:
+    def migrate_from_cns_memory(self, limit: int = 1000) -> dict[str, int]:
         """
         Migrate records from legacy cns_memory table to unified_ai_memory.
         Generates real embeddings for all migrated records.
@@ -752,7 +752,7 @@ class CNSMemoryService:
             stats["error"] = str(e)
             return stats
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get CNS memory system statistics"""
         try:
             conn = self._get_connection()

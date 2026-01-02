@@ -18,15 +18,16 @@ Architecture:
 - Revenue integration
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-from datetime import datetime
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field
-from enum import Enum
+import os
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
 import aiohttp
 
 # Database
@@ -104,12 +105,12 @@ class ProductSpec:
     style: str = "professional"
     tone: str = "authoritative"
     industry: str = "general"
-    keywords: List[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
     include_visuals: bool = True
     include_templates: bool = True
     include_examples: bool = True
     custom_instructions: str = ""
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -117,14 +118,14 @@ class GenerationResult:
     """Result of product generation"""
     product_id: str
     status: ProductStatus
-    content: Dict[str, Any] = field(default_factory=dict)
-    assets: List[Dict] = field(default_factory=list)
+    content: dict[str, Any] = field(default_factory=dict)
+    assets: list[dict] = field(default_factory=list)
     quality_score: float = 0.0
     generation_time_seconds: float = 0.0
-    models_used: List[str] = field(default_factory=list)
+    models_used: list[str] = field(default_factory=list)
     tokens_used: int = 0
     cost_estimate: float = 0.0
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 
@@ -137,7 +138,7 @@ class AIProvider(ABC):
         pass
 
     @abstractmethod
-    async def analyze(self, content: str, instruction: str) -> Dict:
+    async def analyze(self, content: str, instruction: str) -> dict:
         pass
 
 
@@ -183,7 +184,7 @@ class ClaudeProvider(AIProvider):
                 logger.error(f"Claude generation failed: {e}")
                 return ""
 
-    async def analyze(self, content: str, instruction: str) -> Dict:
+    async def analyze(self, content: str, instruction: str) -> dict:
         prompt = f"{instruction}\n\nContent to analyze:\n{content}"
         result = await self.generate(prompt, max_tokens=2000)
         try:
@@ -237,7 +238,7 @@ class OpenAIProvider(AIProvider):
                 logger.error(f"OpenAI generation failed: {e}")
                 return ""
 
-    async def analyze(self, content: str, instruction: str) -> Dict:
+    async def analyze(self, content: str, instruction: str) -> dict:
         prompt = f"{instruction}\n\nContent:\n{content}"
         result = await self.generate(prompt, max_tokens=2000)
         try:
@@ -285,7 +286,7 @@ class GeminiProvider(AIProvider):
                 logger.error(f"Gemini generation failed: {e}")
                 return ""
 
-    async def analyze(self, content: str, instruction: str) -> Dict:
+    async def analyze(self, content: str, instruction: str) -> dict:
         prompt = f"{instruction}\n\nContent:\n{content}"
         result = await self.generate(prompt, max_tokens=2000)
         try:
@@ -618,7 +619,7 @@ class ProductGenerator:
             result.errors.append(str(e))
             return result
 
-    async def _generate_ebook(self, spec: ProductSpec) -> Dict:
+    async def _generate_ebook(self, spec: ProductSpec) -> dict:
         """Generate a complete eBook"""
 
         # Step 1: Generate outline
@@ -753,7 +754,7 @@ class ProductGenerator:
             }
         }
 
-    async def _generate_guide(self, spec: ProductSpec) -> Dict:
+    async def _generate_guide(self, spec: ProductSpec) -> dict:
         """Generate a comprehensive guide"""
 
         prompt = f"""Create a comprehensive, actionable guide on: "{spec.title}"
@@ -789,7 +790,7 @@ class ProductGenerator:
             "metadata": spec.metadata
         }
 
-    async def _generate_business_template(self, spec: ProductSpec) -> Dict:
+    async def _generate_business_template(self, spec: ProductSpec) -> dict:
         """Generate business templates (proposals, contracts, etc.)"""
 
         prompt = f"""Create a professional business template for: "{spec.title}"
@@ -818,7 +819,7 @@ class ProductGenerator:
             "metadata": spec.metadata
         }
 
-    async def _generate_code_template(self, spec: ProductSpec) -> Dict:
+    async def _generate_code_template(self, spec: ProductSpec) -> dict:
         """Generate code templates and boilerplates"""
 
         prompt = f"""Create a professional code template/boilerplate for: "{spec.title}"
@@ -852,7 +853,7 @@ class ProductGenerator:
             "metadata": spec.metadata
         }
 
-    async def _generate_checklist(self, spec: ProductSpec) -> Dict:
+    async def _generate_checklist(self, spec: ProductSpec) -> dict:
         """Generate comprehensive checklists"""
 
         prompt = f"""Create a comprehensive, actionable checklist for: "{spec.title}"
@@ -886,7 +887,7 @@ class ProductGenerator:
             "metadata": spec.metadata
         }
 
-    async def _generate_course(self, spec: ProductSpec) -> Dict:
+    async def _generate_course(self, spec: ProductSpec) -> dict:
         """Generate a complete course curriculum"""
 
         # Generate course structure
@@ -985,7 +986,7 @@ class ProductGenerator:
             "metadata": spec.metadata
         }
 
-    async def _generate_sop(self, spec: ProductSpec) -> Dict:
+    async def _generate_sop(self, spec: ProductSpec) -> dict:
         """Generate Standard Operating Procedure"""
 
         prompt = f"""Create a comprehensive Standard Operating Procedure (SOP) for: "{spec.title}"
@@ -1048,7 +1049,7 @@ class ProductGenerator:
             "metadata": spec.metadata
         }
 
-    async def _generate_playbook(self, spec: ProductSpec) -> Dict:
+    async def _generate_playbook(self, spec: ProductSpec) -> dict:
         """Generate strategic playbook"""
 
         prompt = f"""Create a comprehensive strategic playbook for: "{spec.title}"
@@ -1108,7 +1109,7 @@ class ProductGenerator:
             "metadata": spec.metadata
         }
 
-    async def _generate_email_sequence(self, spec: ProductSpec) -> Dict:
+    async def _generate_email_sequence(self, spec: ProductSpec) -> dict:
         """Generate email marketing sequence"""
 
         prompt = f"""Create a high-converting email sequence for: "{spec.title}"
@@ -1153,7 +1154,7 @@ class ProductGenerator:
             "metadata": spec.metadata
         }
 
-    async def _generate_prompt_pack(self, spec: ProductSpec) -> Dict:
+    async def _generate_prompt_pack(self, spec: ProductSpec) -> dict:
         """Generate AI prompt collection"""
 
         prompt = f"""Create a comprehensive AI prompt pack for: "{spec.title}"
@@ -1196,7 +1197,7 @@ class ProductGenerator:
             "metadata": spec.metadata
         }
 
-    async def _generate_micro_tool(self, spec: ProductSpec) -> Dict:
+    async def _generate_micro_tool(self, spec: ProductSpec) -> dict:
         """Generate a micro-tool or calculator"""
 
         prompt = f"""Create a complete micro-tool/calculator for: "{spec.title}"
@@ -1239,7 +1240,7 @@ class ProductGenerator:
             "metadata": spec.metadata
         }
 
-    async def _generate_generic(self, spec: ProductSpec) -> Dict:
+    async def _generate_generic(self, spec: ProductSpec) -> dict:
         """Fallback generic generator"""
 
         prompt = f"""Create comprehensive content for: "{spec.title}"
@@ -1266,7 +1267,7 @@ class ProductGenerator:
             "metadata": spec.metadata
         }
 
-    async def _quality_review(self, content: Dict, spec: ProductSpec) -> float:
+    async def _quality_review(self, content: dict, spec: ProductSpec) -> float:
         """Review and score content quality"""
 
         review_prompt = f"""Evaluate this content for quality (score 0-100):
@@ -1341,12 +1342,12 @@ class ProductGenerator:
         finally:
             conn.close()
 
-    def _extract_variables(self, content: str) -> List[str]:
+    def _extract_variables(self, content: str) -> list[str]:
         """Extract template variables from content"""
         import re
         return list(set(re.findall(r'\[([A-Z_]+)\]', content)))
 
-    def _parse_code_files(self, content: str) -> List[Dict]:
+    def _parse_code_files(self, content: str) -> list[dict]:
         """Parse code blocks into files"""
         import re
         files = []
@@ -1360,7 +1361,7 @@ class ProductGenerator:
             })
         return files
 
-    def _parse_checklist_items(self, content: str) -> List[Dict]:
+    def _parse_checklist_items(self, content: str) -> list[dict]:
         """Parse checklist items"""
         import re
         items = []
@@ -1370,7 +1371,7 @@ class ProductGenerator:
             items.append({"item": match, "completed": False})
         return items
 
-    def _parse_email_sequence(self, content: str) -> List[Dict]:
+    def _parse_email_sequence(self, content: str) -> list[dict]:
         """Parse email sequence"""
         # Simple parsing - in production would be more sophisticated
         emails = []
@@ -1379,7 +1380,7 @@ class ProductGenerator:
             emails.append({"content": part.strip()})
         return emails
 
-    def _parse_prompts(self, content: str) -> List[Dict]:
+    def _parse_prompts(self, content: str) -> list[dict]:
         """Parse prompts from content"""
         prompts = []
         parts = content.split("**Prompt")
@@ -1387,7 +1388,7 @@ class ProductGenerator:
             prompts.append({"content": part.strip()})
         return prompts
 
-    def _extract_code_blocks(self, content: str) -> Dict:
+    def _extract_code_blocks(self, content: str) -> dict:
         """Extract code blocks"""
         import re
         code = {}
@@ -1399,7 +1400,7 @@ class ProductGenerator:
             code[lang or 'text'].append(block.strip())
         return code
 
-    async def get_status(self, product_id: str) -> Optional[Dict]:
+    async def get_status(self, product_id: str) -> Optional[dict]:
         """Get status of a product generation job"""
         try:
             conn = self._get_connection()
@@ -1432,7 +1433,7 @@ class ProductGenerator:
             return None
 
     async def list_products(self, tenant_id: str = "default", status: str = None,
-                           product_type: str = None, limit: int = 50, offset: int = 0) -> List[Dict]:
+                           product_type: str = None, limit: int = 50, offset: int = 0) -> list[dict]:
         """List products with optional filters"""
         try:
             conn = self._get_connection()
@@ -1475,7 +1476,7 @@ class ProductGenerator:
             logger.error(f"Failed to list products: {e}")
             return []
 
-    async def get_product(self, product_id: str) -> Optional[Dict]:
+    async def get_product(self, product_id: str) -> Optional[dict]:
         """Get full product data including content"""
         try:
             conn = self._get_connection()
@@ -1671,7 +1672,7 @@ class ProductPipelineScheduler:
         finally:
             conn.close()
 
-    async def get_queue_status(self) -> Dict:
+    async def get_queue_status(self) -> dict:
         """Get queue status"""
         conn = self._get_connection()
         try:

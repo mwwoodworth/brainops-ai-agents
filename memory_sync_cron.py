@@ -6,6 +6,7 @@ Runs every 5 minutes to sync bidirectionally
 import asyncio
 import logging
 import sys
+
 from embedded_memory_system import get_embedded_memory
 
 logging.basicConfig(

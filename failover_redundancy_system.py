@@ -11,23 +11,25 @@ A comprehensive high-availability system that provides:
 - Zero-downtime deployment capabilities
 """
 
-import os
-import time
-import json
 import asyncio
 import hashlib
+import json
 import logging
-import psycopg2
-import threading
-from datetime import datetime
-from typing import Dict, List, Optional, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-from collections import deque
+import os
 import pickle
-from pathlib import Path
-from psycopg2.extras import RealDictCursor
+import threading
+import time
 import warnings
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Callable, Optional
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
 warnings.filterwarnings('ignore')
 
 # Configure logging
@@ -112,8 +114,8 @@ class ServiceHealth:
     response_time: float
     error_count: int
     success_rate: float
-    metadata: Dict = field(default_factory=dict)
-    
+    metadata: dict = field(default_factory=dict)
+
     def to_dict(self):
         return {
             'service_name': self.service_name,
@@ -142,7 +144,7 @@ class FailoverEvent:
 
 class HealthMonitor:
     """Monitor service health"""
-    
+
     def __init__(self):
         self.services = {}
         self.health_checks = {}
@@ -150,7 +152,7 @@ class HealthMonitor:
         self.failure_threshold = 3
         self.monitoring_thread = None
         self.is_monitoring = False
-        
+
     def register_service(
         self,
         service_name: str,
@@ -166,7 +168,7 @@ class HealthMonitor:
             'history': deque(maxlen=100)
         }
         logger.info(f"Registered service: {service_name}")
-    
+
     def start_monitoring(self):
         """Start health monitoring"""
         if not self.is_monitoring:
@@ -175,14 +177,14 @@ class HealthMonitor:
             self.monitoring_thread.daemon = True
             self.monitoring_thread.start()
             logger.info("Started health monitoring")
-    
+
     def stop_monitoring(self):
         """Stop health monitoring"""
         self.is_monitoring = False
         if self.monitoring_thread:
             self.monitoring_thread.join(timeout=5)
         logger.info("Stopped health monitoring")
-    
+
     def _monitoring_loop(self):
         """Main monitoring loop"""
         while self.is_monitoring:
@@ -190,32 +192,32 @@ class HealthMonitor:
                 for service_name, service_info in self.services.items():
                     health = self._check_service_health(service_name, service_info)
                     service_info['history'].append(health)
-                    
+
                     # Update failure count
                     if health.status in [ServiceStatus.UNHEALTHY, ServiceStatus.FAILED]:
                         service_info['failures'] += 1
                     else:
                         service_info['failures'] = 0
-                    
+
                     service_info['last_status'] = health.status
-                    
+
                     # Store in database
                     asyncio.run(self._store_health_status(health))
-                
+
                 time.sleep(self.check_interval)
-                
+
             except Exception as e:
                 logger.error(f"Monitoring error: {e}")
-    
-    def _check_service_health(self, service_name: str, service_info: Dict) -> ServiceHealth:
+
+    def _check_service_health(self, service_name: str, service_info: dict) -> ServiceHealth:
         """Check individual service health"""
         start_time = time.time()
-        
+
         try:
             # Run health check
             is_healthy = service_info['health_check']()
             response_time = time.time() - start_time
-            
+
             # Calculate success rate from history
             history = service_info['history']
             if history:
@@ -223,9 +225,9 @@ class HealthMonitor:
                 success_rate = success_count / len(history)
             else:
                 success_rate = 1.0 if is_healthy else 0.0
-            
+
             status = ServiceStatus.HEALTHY if is_healthy else ServiceStatus.UNHEALTHY
-            
+
             return ServiceHealth(
                 service_name=service_name,
                 status=status,
@@ -234,7 +236,7 @@ class HealthMonitor:
                 error_count=service_info['failures'],
                 success_rate=success_rate
             )
-            
+
         except Exception as e:
             logger.error(f"Health check failed for {service_name}: {e}")
             return ServiceHealth(
@@ -246,7 +248,7 @@ class HealthMonitor:
                 success_rate=0.0,
                 metadata={'error': str(e)}
             )
-    
+
     async def _store_health_status(self, health: ServiceHealth):
         """Store health status in database"""
         conn = None
@@ -254,7 +256,7 @@ class HealthMonitor:
         try:
             conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
-            
+
             cursor.execute("""
                 INSERT INTO service_health (
                     service_name, status, response_time,
@@ -270,9 +272,9 @@ class HealthMonitor:
                 json.dumps(health.metadata),
                 health.last_check
             ))
-            
+
             conn.commit()
-            
+
         except Exception as e:
             logger.error(f"Failed to store health status: {e}")
         finally:
@@ -286,14 +288,14 @@ class HealthMonitor:
                     conn.close()
                 except Exception as conn_err:
                     logger.debug(f"Connection close cleanup error (non-fatal): {conn_err}")
-    
+
     def get_service_status(self, service_name: str) -> Optional[ServiceHealth]:
         """Get current service status"""
         if service_name in self.services:
             history = self.services[service_name]['history']
             return history[-1] if history else None
         return None
-    
+
     def is_service_healthy(self, service_name: str) -> bool:
         """Check if service is healthy"""
         status = self.get_service_status(service_name)
@@ -302,13 +304,13 @@ class HealthMonitor:
 
 class CircuitBreaker:
     """Circuit breaker for fault isolation"""
-    
+
     def __init__(self, failure_threshold=5, recovery_timeout=60):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.circuits = {}
         self.lock = threading.Lock()
-    
+
     def call(self, service_name: str, func: Callable, *args, **kwargs):
         """Call function with circuit breaker protection"""
         with self.lock:
@@ -319,9 +321,9 @@ class CircuitBreaker:
                     'last_failure': None,
                     'success_count': 0
                 }
-            
+
             circuit = self.circuits[service_name]
-            
+
             # Check circuit state
             if circuit['state'] == 'open':
                 # Check if recovery timeout has passed
@@ -332,11 +334,11 @@ class CircuitBreaker:
                         logger.info(f"Circuit half-open for {service_name}")
                     else:
                         raise Exception(f"Circuit open for {service_name}")
-        
+
         try:
             # Attempt call
             result = func(*args, **kwargs)
-            
+
             # Success - update circuit
             with self.lock:
                 if circuit['state'] == 'half_open':
@@ -348,32 +350,32 @@ class CircuitBreaker:
                         logger.info(f"Circuit closed for {service_name}")
                 elif circuit['state'] == 'closed':
                     circuit['failures'] = 0
-            
+
             return result
-            
+
         except Exception as e:
             # Failure - update circuit
             with self.lock:
                 circuit['failures'] += 1
                 circuit['last_failure'] = time.time()
-                
+
                 if circuit['failures'] >= self.failure_threshold:
                     circuit['state'] = 'open'
                     logger.warning(f"Circuit open for {service_name} after {circuit['failures']} failures")
-                
+
                 if circuit['state'] == 'half_open':
                     circuit['state'] = 'open'
                     circuit['success_count'] = 0
-            
+
             raise e
-    
-    def get_status(self, service_name: str) -> Dict:
+
+    def get_status(self, service_name: str) -> dict:
         """Get circuit status"""
         with self.lock:
             if service_name in self.circuits:
                 return self.circuits[service_name].copy()
             return {'state': 'closed', 'failures': 0}
-    
+
     def reset(self, service_name: str):
         """Reset circuit breaker"""
         with self.lock:
@@ -389,13 +391,13 @@ class CircuitBreaker:
 
 class DataReplicator:
     """Handle data replication for redundancy"""
-    
+
     def __init__(self):
         self.replication_queue = deque(maxlen=10000)
         self.is_replicating = False
         self.replication_thread = None
         self.replication_lag = 0
-    
+
     def start_replication(self):
         """Start data replication"""
         if not self.is_replicating:
@@ -404,14 +406,14 @@ class DataReplicator:
             self.replication_thread.daemon = True
             self.replication_thread.start()
             logger.info("Started data replication")
-    
+
     def stop_replication(self):
         """Stop data replication"""
         self.is_replicating = False
         if self.replication_thread:
             self.replication_thread.join(timeout=5)
         logger.info("Stopped data replication")
-    
+
     def _replication_loop(self):
         """Main replication loop"""
         while self.is_replicating:
@@ -420,21 +422,21 @@ class DataReplicator:
                     batch = []
                     while self.replication_queue and len(batch) < 100:
                         batch.append(self.replication_queue.popleft())
-                    
+
                     if batch:
                         asyncio.run(self._replicate_batch(batch))
-                
+
                 time.sleep(1)
-                
+
             except Exception as e:
                 logger.error(f"Replication error: {e}")
-    
-    async def _replicate_batch(self, batch: List[Dict]):
+
+    async def _replicate_batch(self, batch: list[dict]):
         """Replicate a batch of data"""
         try:
             # Try primary first
             success = await self._write_to_database(batch, _get_db_config())
-            
+
             if success:
                 # Also write to backup
                 await self._write_to_database(batch, BACKUP__get_db_config())
@@ -442,27 +444,27 @@ class DataReplicator:
                 # Primary failed, write to backup only
                 logger.warning("Primary database unavailable, using backup")
                 await self._write_to_database(batch, BACKUP__get_db_config())
-            
+
         except Exception as e:
             logger.error(f"Batch replication failed: {e}")
-    
-    async def _write_to_database(self, batch: List[Dict], config: Dict) -> bool:
+
+    async def _write_to_database(self, batch: list[dict], config: dict) -> bool:
         """Write batch to database"""
         conn = None
         cursor = None
         try:
             conn = psycopg2.connect(**config)
             cursor = conn.cursor()
-            
+
             for item in batch:
                 if item['type'] == 'insert':
                     cursor.execute(item['query'], item['params'])
                 elif item['type'] == 'update':
                     cursor.execute(item['query'], item['params'])
-            
+
             conn.commit()
             return True
-            
+
         except Exception as e:
             logger.error(f"Database write failed: {e}")
             return False
@@ -477,7 +479,7 @@ class DataReplicator:
                     conn.close()
                 except Exception as conn_err:
                     logger.debug(f"Connection close cleanup error (non-fatal): {conn_err}")
-    
+
     def queue_replication(self, operation_type: str, query: str, params: tuple):
         """Queue data for replication"""
         self.replication_queue.append({
@@ -486,7 +488,7 @@ class DataReplicator:
             'params': params,
             'timestamp': datetime.utcnow()
         })
-    
+
     def get_replication_lag(self) -> float:
         """Get current replication lag in seconds"""
         if self.replication_queue:
@@ -497,18 +499,18 @@ class DataReplicator:
 
 class FailoverManager:
     """Manage service failover"""
-    
+
     def __init__(self):
         self.services = {}
         self.active_instances = {}
         self.standby_instances = {}
         self.failover_history = deque(maxlen=1000)
-    
+
     def register_service(
         self,
         service_name: str,
         primary_endpoint: str,
-        backup_endpoints: List[str],
+        backup_endpoints: list[str],
         strategy: FailoverStrategy = FailoverStrategy.ACTIVE_PASSIVE
     ):
         """Register service for failover"""
@@ -520,7 +522,7 @@ class FailoverManager:
             'failed_endpoints': set()
         }
         logger.info(f"Registered {service_name} with {len(backup_endpoints)} backup(s)")
-    
+
     async def failover(
         self,
         service_name: str,
@@ -530,31 +532,31 @@ class FailoverManager:
         if service_name not in self.services:
             logger.error(f"Service {service_name} not registered")
             return False
-        
+
         service = self.services[service_name]
         current = service['current']
-        
+
         # Find next available endpoint
         next_endpoint = None
         for backup in service['backups']:
             if backup not in service['failed_endpoints']:
                 next_endpoint = backup
                 break
-        
+
         if not next_endpoint:
             logger.error(f"No available backups for {service_name}")
             return False
-        
+
         # Perform failover
         start_time = time.time()
-        
+
         try:
             # Mark current as failed
             service['failed_endpoints'].add(current)
-            
+
             # Switch to backup
             service['current'] = next_endpoint
-            
+
             # Record event
             event = FailoverEvent(
                 event_id=hashlib.md5(f"{service_name}{time.time()}".encode()).hexdigest(),
@@ -567,17 +569,17 @@ class FailoverManager:
                 success=True,
                 duration=time.time() - start_time
             )
-            
+
             self.failover_history.append(event)
             await self._store_failover_event(event)
-            
+
             logger.info(f"Failover completed: {service_name} from {current} to {next_endpoint}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failover failed for {service_name}: {e}")
             return False
-    
+
     async def _store_failover_event(self, event: FailoverEvent):
         """Store failover event in database"""
         conn = None
@@ -585,7 +587,7 @@ class FailoverManager:
         try:
             conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
-            
+
             cursor.execute("""
                 INSERT INTO failover_events (
                     event_id, service_name, from_instance, to_instance,
@@ -602,9 +604,9 @@ class FailoverManager:
                 event.duration,
                 event.timestamp
             ))
-            
+
             conn.commit()
-            
+
         except Exception as e:
             logger.error(f"Failed to store failover event: {e}")
         finally:
@@ -618,13 +620,13 @@ class FailoverManager:
                     conn.close()
                 except Exception as conn_err:
                     logger.debug(f"Connection close cleanup error (non-fatal): {conn_err}")
-    
+
     def get_current_endpoint(self, service_name: str) -> Optional[str]:
         """Get current active endpoint for service"""
         if service_name in self.services:
             return self.services[service_name]['current']
         return None
-    
+
     async def recover_service(self, service_name: str, endpoint: str):
         """Mark endpoint as recovered"""
         if service_name in self.services:
@@ -634,25 +636,25 @@ class FailoverManager:
 
 class DisasterRecovery:
     """Disaster recovery procedures"""
-    
+
     def __init__(self):
         self.backup_location = Path("/tmp/disaster_recovery")
         self.backup_location.mkdir(exist_ok=True)
         self.recovery_points = deque(maxlen=10)
-    
-    async def create_backup(self, service_name: str) -> Dict:
+
+    async def create_backup(self, service_name: str) -> dict:
         """Create backup for service"""
         try:
             backup_id = hashlib.md5(f"{service_name}{time.time()}".encode()).hexdigest()[:8]
             backup_path = self.backup_location / f"{service_name}_{backup_id}"
             backup_path.mkdir(exist_ok=True)
-            
+
             # Backup database state
             db_backup = await self._backup_database(service_name, backup_path)
-            
+
             # Backup configuration
             config_backup = await self._backup_configuration(service_name, backup_path)
-            
+
             # Create recovery point
             recovery_point = {
                 'id': backup_id,
@@ -662,24 +664,24 @@ class DisasterRecovery:
                 'database': db_backup,
                 'config': config_backup
             }
-            
+
             self.recovery_points.append(recovery_point)
-            
+
             logger.info(f"Created backup {backup_id} for {service_name}")
             return recovery_point
-            
+
         except Exception as e:
             logger.error(f"Backup creation failed: {e}")
             return {'error': str(e)}
-    
-    async def _backup_database(self, service_name: str, backup_path: Path) -> Dict:
+
+    async def _backup_database(self, service_name: str, backup_path: Path) -> dict:
         """Backup database state"""
         conn = None
         cursor = None
         try:
             conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
-            
+
             # Get critical data
             cursor.execute("""
                 SELECT table_name
@@ -687,7 +689,7 @@ class DisasterRecovery:
                 WHERE table_schema = 'public'
                   AND table_name LIKE %s
             """, (f"{service_name}_%",))
-            
+
             tables = cursor.fetchall()
             backup_data = {}
 
@@ -702,18 +704,18 @@ class DisasterRecovery:
                 # Use quoted identifier for additional safety
                 cursor.execute(f'SELECT * FROM "{table_name}" LIMIT 1000')
                 backup_data[table_name] = cursor.fetchall()
-            
+
             # Save to file
             backup_file = backup_path / "database.pkl"
             with open(backup_file, 'wb') as f:
                 pickle.dump(backup_data, f)
-            
+
             return {
                 'tables': len(tables),
                 'size': backup_file.stat().st_size,
                 'path': str(backup_file)
             }
-            
+
         except Exception as e:
             logger.error(f"Database backup failed: {e}")
             return {'error': str(e)}
@@ -728,8 +730,8 @@ class DisasterRecovery:
                     conn.close()
                 except Exception as conn_err:
                     logger.debug(f"Connection close cleanup error (non-fatal): {conn_err}")
-    
-    async def _backup_configuration(self, service_name: str, backup_path: Path) -> Dict:
+
+    async def _backup_configuration(self, service_name: str, backup_path: Path) -> dict:
         """Backup service configuration"""
         try:
             config = {
@@ -737,20 +739,20 @@ class DisasterRecovery:
                 'environment': dict(os.environ),
                 'timestamp': datetime.utcnow().isoformat()
             }
-            
+
             config_file = backup_path / "config.json"
             with open(config_file, 'w') as f:
                 json.dump(config, f, indent=2, default=str)
-            
+
             return {
                 'path': str(config_file),
                 'size': config_file.stat().st_size
             }
-            
+
         except Exception as e:
             logger.error(f"Config backup failed: {e}")
             return {'error': str(e)}
-    
+
     async def restore_from_backup(self, backup_id: str) -> bool:
         """Restore from backup"""
         try:
@@ -759,73 +761,73 @@ class DisasterRecovery:
                 (rp for rp in self.recovery_points if rp['id'] == backup_id),
                 None
             )
-            
+
             if not recovery_point:
                 logger.error(f"Recovery point {backup_id} not found")
                 return False
-            
+
             backup_path = Path(recovery_point['path'])
-            
+
             # Restore database
             db_restored = await self._restore_database(backup_path)
-            
+
             # Restore configuration
             config_restored = await self._restore_configuration(backup_path)
-            
+
             logger.info(f"Restored from backup {backup_id}")
             return db_restored and config_restored
-            
+
         except Exception as e:
             logger.error(f"Restore failed: {e}")
             return False
-    
+
     async def _restore_database(self, backup_path: Path) -> bool:
         """Restore database from backup"""
         try:
             backup_file = backup_path / "database.pkl"
-            
+
             if not backup_file.exists():
                 return False
-            
+
             with open(backup_file, 'rb') as f:
                 backup_data = pickle.load(f)
-            
+
             # Restore to database
             # In a real scenario, this would execute INSERT/UPDATE statements
             # For this implementation, we will verify the data integrity
             table_count = len(backup_data)
             total_records = sum(len(records) for records in backup_data.values())
-            
+
             logger.info(f"Database restore executed from {backup_file}")
             logger.info(f"Restored {table_count} tables with {total_records} total records")
             return True
-            
+
         except Exception as e:
             logger.error(f"Database restore failed: {e}")
             return False
-    
+
     async def _restore_configuration(self, backup_path: Path) -> bool:
         """Restore configuration from backup"""
         try:
             config_file = backup_path / "config.json"
-            
+
             if not config_file.exists():
                 return False
-            
-            with open(config_file, 'r') as f:
+
+            with open(config_file) as f:
                 config = json.load(f)
-            
+
             # Apply configuration
             # In a real scenario, this would update environment variables or config files
             service_name = config.get('service')
             timestamp = config.get('timestamp')
             env_vars = config.get('environment', {})
-            
+
             logger.info(f"Configuration restore executed from {config_file}")
             logger.info(f"Restored configuration for {service_name} from {timestamp}")
             logger.info(f"Restored {len(env_vars)} environment variables")
             return True
-            
+
         except Exception as e:
             logger.error(f"Config restore failed: {e}")
             return False
@@ -833,7 +835,7 @@ class DisasterRecovery:
 
 class RedundancyOrchestrator:
     """Main redundancy and failover orchestrator"""
-    
+
     def __init__(self):
         self.health_monitor = HealthMonitor()
         self.circuit_breaker = CircuitBreaker()
@@ -841,13 +843,13 @@ class RedundancyOrchestrator:
         self.failover_manager = FailoverManager()
         self.disaster_recovery = DisasterRecovery()
         self.is_running = False
-    
+
     def register_critical_service(
         self,
         service_name: str,
         health_check: Callable,
         primary_endpoint: str,
-        backup_endpoints: List[str]
+        backup_endpoints: list[str]
     ):
         """Register a critical service"""
         # Register for health monitoring
@@ -856,41 +858,41 @@ class RedundancyOrchestrator:
             health_check,
             critical=True
         )
-        
+
         # Register for failover
         self.failover_manager.register_service(
             service_name,
             primary_endpoint,
             backup_endpoints
         )
-        
+
         logger.info(f"Registered critical service: {service_name}")
-    
+
     async def handle_service_failure(self, service_name: str):
         """Handle service failure with automatic recovery"""
         logger.warning(f"Handling failure for {service_name}")
-        
+
         # Check circuit breaker
         circuit_status = self.circuit_breaker.get_status(service_name)
-        
+
         if circuit_status['state'] == 'open':
             # Circuit is open, perform failover
             success = await self.failover_manager.failover(
                 service_name,
                 f"Circuit breaker opened after {circuit_status['failures']} failures"
             )
-            
+
             if success:
                 # Reset circuit for new endpoint
                 self.circuit_breaker.reset(service_name)
-                
+
                 # Create backup for recovery
                 await self.disaster_recovery.create_backup(service_name)
-            
+
             return success
-        
+
         return False
-    
+
     def start(self):
         """Start redundancy orchestrator"""
         if not self.is_running:
@@ -898,7 +900,7 @@ class RedundancyOrchestrator:
             self.health_monitor.start_monitoring()
             self.data_replicator.start_replication()
             logger.info("Redundancy orchestrator started")
-    
+
     def stop(self):
         """Stop redundancy orchestrator"""
         if self.is_running:
@@ -906,8 +908,8 @@ class RedundancyOrchestrator:
             self.health_monitor.stop_monitoring()
             self.data_replicator.stop_replication()
             logger.info("Redundancy orchestrator stopped")
-    
-    async def get_system_status(self) -> Dict:
+
+    async def get_system_status(self) -> dict:
         """Get overall system redundancy status"""
         status = {
             'timestamp': datetime.utcnow().isoformat(),
@@ -916,19 +918,19 @@ class RedundancyOrchestrator:
             'recovery_points': len(self.disaster_recovery.recovery_points),
             'failover_history': len(self.failover_manager.failover_history)
         }
-        
+
         # Get service statuses
         for service_name in self.health_monitor.services:
             health = self.health_monitor.get_service_status(service_name)
             circuit = self.circuit_breaker.get_status(service_name)
             endpoint = self.failover_manager.get_current_endpoint(service_name)
-            
+
             status['services'][service_name] = {
                 'health': health.to_dict() if health else None,
                 'circuit_breaker': circuit,
                 'current_endpoint': endpoint
             }
-        
+
         return status
 
 
@@ -938,7 +940,7 @@ async def setup_database():
     try:
         conn = psycopg2.connect(**_get_db_config())
         cursor = conn.cursor()
-        
+
         # Service health table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS service_health (
@@ -953,7 +955,7 @@ async def setup_database():
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         # Failover events table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS failover_events (
@@ -968,24 +970,24 @@ async def setup_database():
                 occurred_at TIMESTAMPTZ NOT NULL
             )
         """)
-        
+
         # Create indexes
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_health_service 
+            CREATE INDEX IF NOT EXISTS idx_health_service
             ON service_health(service_name, checked_at DESC)
         """)
-        
+
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_failover_service 
+            CREATE INDEX IF NOT EXISTS idx_failover_service
             ON failover_events(service_name, occurred_at DESC)
         """)
-        
+
         conn.commit()
         cursor.close()
         conn.close()
-        
+
         logger.info("Database tables created successfully")
-        
+
     except Exception as e:
         logger.error(f"Database setup error: {e}")
 
@@ -1000,13 +1002,13 @@ if __name__ == "__main__":
         """Test failover and redundancy system"""
         print("\n🔄 Testing Failover & Redundancy System...")
         print("="*50)
-        
+
         # Setup database
         await setup_database()
-        
+
         # Initialize orchestrator
         orchestrator = get_redundancy_orchestrator()
-        
+
         # Define test health checks
         def db_health_check():
             try:
@@ -1019,15 +1021,15 @@ if __name__ == "__main__":
             except psycopg2.Error as exc:
                 logger.debug("DB health check failed: %s", exc, exc_info=True)
                 return False
-        
+
         # Use a file-based health check for deterministic testing
         HEALTH_FILE = "/tmp/api_health.lock"
         # Create health file initially (healthy)
         Path(HEALTH_FILE).touch()
-        
+
         def api_health_check():
             return Path(HEALTH_FILE).exists()
-        
+
         # Register services
         orchestrator.register_critical_service(
             "database",
@@ -1035,20 +1037,20 @@ if __name__ == "__main__":
             "primary.db.com",
             ["backup1.db.com", "backup2.db.com"]
         )
-        
+
         orchestrator.register_critical_service(
             "api",
             api_health_check,
             "api1.service.com",
             ["api2.service.com", "api3.service.com"]
         )
-        
+
         print("✅ Registered 2 critical services")
-        
+
         # Start orchestrator
         orchestrator.start()
         print("✅ Started redundancy orchestrator")
-        
+
         # Test circuit breaker
         breaker = orchestrator.circuit_breaker
         for i in range(3):
@@ -1056,10 +1058,10 @@ if __name__ == "__main__":
                 breaker.call("test_service", lambda: 1/0)  # Will fail
             except ZeroDivisionError as exc:
                 logger.debug("Expected test failure in circuit breaker: %s", exc)
-        
+
         status = breaker.get_status("test_service")
         print(f"✅ Circuit breaker test: {status['failures']} failures recorded")
-        
+
         # Test data replication
         replicator = orchestrator.data_replicator
         replicator.queue_replication(
@@ -1068,37 +1070,37 @@ if __name__ == "__main__":
             (1, "test_data")
         )
         print("✅ Data replication queue tested")
-        
+
         # Test backup creation
         backup = await orchestrator.disaster_recovery.create_backup("api")
         if 'id' in backup:
             print(f"✅ Created backup: {backup['id']}")
-        
+
         # Simulate failure by removing health file
         if Path(HEALTH_FILE).exists():
             Path(HEALTH_FILE).unlink()
             print("⚠️ Simulating API failure (removed health lock file)...")
-        
+
         # Wait for monitor to pick it up
         await asyncio.sleep(2)
-        
+
         # Simulate failure and failover manually to ensure it triggers
         await orchestrator.handle_service_failure("api")
         endpoint = orchestrator.failover_manager.get_current_endpoint("api")
         print(f"✅ Failover test: Current endpoint is {endpoint}")
-        
+
         # Restore health
         Path(HEALTH_FILE).touch()
         print("✅ API health restored")
-        
+
         # Get system status
         await asyncio.sleep(1)
         status = await orchestrator.get_system_status()
         print(f"✅ System status: {len(status['services'])} services monitored")
-        
+
         # Stop orchestrator
         orchestrator.stop()
-        
+
         # Cleanup
         if Path(HEALTH_FILE).exists():
             Path(HEALTH_FILE).unlink()

@@ -4,17 +4,18 @@ Provides decision-making framework for independent agent actions
 """
 
 import json
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from enum import Enum
-from dataclasses import dataclass, asdict, field
-import os
-from dotenv import load_dotenv
 import logging
+import os
 import uuid
 from collections import defaultdict
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Optional
+
+import psycopg2
+from dotenv import load_dotenv
+from psycopg2.extras import RealDictCursor
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -48,14 +49,14 @@ class ConfidenceLevel(Enum):
 @dataclass
 class DecisionContext:
     """Context information for decision making"""
-    current_state: Dict[str, Any]
-    historical_data: List[Dict]
-    constraints: Dict[str, Any]
-    objectives: List[str]
-    available_resources: Dict[str, float]
+    current_state: dict[str, Any]
+    historical_data: list[dict]
+    constraints: dict[str, Any]
+    objectives: list[str]
+    available_resources: dict[str, float]
     time_constraints: Optional[timedelta]
     risk_tolerance: float = 0.5
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 @dataclass
 class DecisionOption:
@@ -64,9 +65,9 @@ class DecisionOption:
     action: ActionType
     description: str
     confidence: float
-    expected_outcome: Dict[str, Any]
-    risks: List[str]
-    requirements: List[str]
+    expected_outcome: dict[str, Any]
+    risks: list[str]
+    requirements: list[str]
     estimated_duration: timedelta
     cost_estimate: float
     success_probability: float
@@ -78,30 +79,30 @@ class DecisionNode:
     node_id: str
     node_type: DecisionType
     question: str
-    options: List[DecisionOption]
+    options: list[DecisionOption]
     parent_id: Optional[str]
-    children: List[str]
-    evaluation_criteria: Dict[str, float]
+    children: list[str]
+    evaluation_criteria: dict[str, float]
     threshold: float
-    metadata: Dict
+    metadata: dict
 
 @dataclass
 class RiskAssessment:
     """Risk assessment for a decision"""
     overall_risk_score: float  # 0-1 (0=no risk, 1=critical risk)
-    risk_categories: Dict[str, float]  # category -> score
-    mitigation_strategies: List[str]
+    risk_categories: dict[str, float]  # category -> score
+    mitigation_strategies: list[str]
     escalation_required: bool
     human_review_required: bool
-    risk_factors: List[str]
+    risk_factors: list[str]
 
 @dataclass
 class MultiCriteriaScore:
     """Multi-criteria decision analysis result"""
-    criteria_scores: Dict[str, float]  # criterion -> normalized score (0-1)
-    weighted_scores: Dict[str, float]  # criterion -> weighted score
+    criteria_scores: dict[str, float]  # criterion -> normalized score (0-1)
+    weighted_scores: dict[str, float]  # criterion -> weighted score
     total_score: float
-    sensitivity_analysis: Dict[str, Any]
+    sensitivity_analysis: dict[str, Any]
     pareto_efficient: bool
 
 @dataclass
@@ -113,8 +114,8 @@ class DecisionAuditEntry:
     event_type: str  # 'created', 'evaluated', 'executed', 'outcome_recorded', 'learned'
     actor: str  # 'system', 'human', 'agent_name'
     action: str
-    context: Dict[str, Any]
-    changes: Dict[str, Any]
+    context: dict[str, Any]
+    changes: dict[str, Any]
 
 @dataclass
 class DecisionResult:
@@ -124,15 +125,15 @@ class DecisionResult:
     selected_option: DecisionOption
     confidence_level: ConfidenceLevel
     reasoning: str
-    alternative_options: List[DecisionOption]
-    execution_plan: List[Dict]
-    monitoring_plan: Dict
-    success_criteria: List[str]
-    rollback_plan: Optional[Dict]
+    alternative_options: list[DecisionOption]
+    execution_plan: list[dict]
+    monitoring_plan: dict
+    success_criteria: list[str]
+    rollback_plan: Optional[dict]
     # Enhanced fields
     multi_criteria_analysis: Optional[MultiCriteriaScore] = None
     risk_assessment: Optional[RiskAssessment] = None
-    audit_trail: List[DecisionAuditEntry] = field(default_factory=list)
+    audit_trail: list[DecisionAuditEntry] = field(default_factory=list)
     human_escalation_triggered: bool = False
     escalation_reason: Optional[str] = None
 
@@ -344,7 +345,7 @@ class AIDecisionTree:
         # Technical decision tree
         self.decision_trees['technical'] = self._create_technical_tree()
 
-    def _create_revenue_tree(self) -> Dict:
+    def _create_revenue_tree(self) -> dict:
         """Create revenue optimization decision tree"""
         return {
             'root': DecisionNode(
@@ -398,7 +399,7 @@ class AIDecisionTree:
             )
         }
 
-    def _create_customer_tree(self) -> Dict:
+    def _create_customer_tree(self) -> dict:
         """Create customer service decision tree"""
         return {
             'root': DecisionNode(
@@ -441,7 +442,7 @@ class AIDecisionTree:
             )
         }
 
-    def _create_operational_tree(self) -> Dict:
+    def _create_operational_tree(self) -> dict:
         """Create operational decision tree"""
         return {
             'root': DecisionNode(
@@ -484,7 +485,7 @@ class AIDecisionTree:
             )
         }
 
-    def _create_emergency_tree(self) -> Dict:
+    def _create_emergency_tree(self) -> dict:
         """Create emergency response decision tree"""
         return {
             'root': DecisionNode(
@@ -527,7 +528,7 @@ class AIDecisionTree:
             )
         }
 
-    def _create_technical_tree(self) -> Dict:
+    def _create_technical_tree(self) -> dict:
         """Create technical decision tree"""
         return {
             'root': DecisionNode(
@@ -690,7 +691,7 @@ class AIDecisionTree:
             return self._create_fallback_decision(decision_id, context, str(e))
 
     def _select_decision_tree(self, decision_type: DecisionType,
-                             context: DecisionContext) -> Dict:
+                             context: DecisionContext) -> dict:
         """Select appropriate decision tree"""
         if decision_type == DecisionType.FINANCIAL:
             return self.decision_trees['revenue']
@@ -706,8 +707,8 @@ class AIDecisionTree:
             # Default to operational tree
             return self.decision_trees['operational']
 
-    async def _traverse_tree(self, tree: Dict,
-                            context: DecisionContext) -> Tuple[DecisionOption, List[DecisionOption]]:
+    async def _traverse_tree(self, tree: dict,
+                            context: DecisionContext) -> tuple[DecisionOption, list[DecisionOption]]:
         """Traverse decision tree to find best option"""
         current_node = tree['root']
         selected_option = None
@@ -889,7 +890,7 @@ class AIDecisionTree:
             return ConfidenceLevel.UNCERTAIN
 
     def _generate_reasoning(self, option: DecisionOption, context: DecisionContext,
-                          tree: Dict) -> str:
+                          tree: dict) -> str:
         """Generate reasoning for decision"""
         reasoning = f"Selected '{option.description}' based on: "
 
@@ -909,7 +910,7 @@ class AIDecisionTree:
         return reasoning
 
     def _create_execution_plan(self, option: DecisionOption,
-                              context: DecisionContext) -> List[Dict]:
+                              context: DecisionContext) -> list[dict]:
         """Create execution plan for selected option"""
         plan = []
 
@@ -959,7 +960,7 @@ class AIDecisionTree:
 
         return plan
 
-    def _create_sequential_steps(self, option: DecisionOption) -> List[Dict]:
+    def _create_sequential_steps(self, option: DecisionOption) -> list[dict]:
         """Create sequential execution steps"""
         # Simplified sequential step creation
         return [
@@ -971,7 +972,7 @@ class AIDecisionTree:
              'duration': timedelta(minutes=15)}
         ]
 
-    def _create_parallel_branches(self, option: DecisionOption) -> List[Dict]:
+    def _create_parallel_branches(self, option: DecisionOption) -> list[dict]:
         """Create parallel execution branches"""
         # Simplified parallel branch creation
         branches = []
@@ -986,7 +987,7 @@ class AIDecisionTree:
             })
         return branches
 
-    def _create_monitoring_plan(self, option: DecisionOption) -> Dict:
+    def _create_monitoring_plan(self, option: DecisionOption) -> dict:
         """Create monitoring plan for decision execution"""
         return {
             'monitoring_interval': timedelta(minutes=30),
@@ -1003,7 +1004,7 @@ class AIDecisionTree:
             'reporting_frequency': timedelta(hours=1)
         }
 
-    def _define_success_criteria(self, option: DecisionOption) -> List[str]:
+    def _define_success_criteria(self, option: DecisionOption) -> list[str]:
         """Define success criteria for decision"""
         criteria = []
 
@@ -1015,7 +1016,7 @@ class AIDecisionTree:
 
         return criteria
 
-    def _create_rollback_plan(self, option: DecisionOption) -> Dict:
+    def _create_rollback_plan(self, option: DecisionOption) -> dict:
         """Create rollback plan in case of failure"""
         return {
             'trigger_conditions': [
@@ -1071,7 +1072,7 @@ class AIDecisionTree:
     def _perform_multi_criteria_analysis(
         self,
         selected_option: DecisionOption,
-        alternatives: List[DecisionOption],
+        alternatives: list[DecisionOption],
         context: DecisionContext
     ) -> MultiCriteriaScore:
         """Perform multi-criteria decision analysis"""
@@ -1220,7 +1221,7 @@ class AIDecisionTree:
         risk_assessment: RiskAssessment,
         confidence_level: ConfidenceLevel,
         context: DecisionContext
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, Optional[str]]:
         """Determine if human escalation is needed"""
         escalation_reasons = []
 
@@ -1259,8 +1260,8 @@ class AIDecisionTree:
         event_type: str,
         actor: str,
         action: str,
-        context: Dict[str, Any],
-        changes: Dict[str, Any] = None
+        context: dict[str, Any],
+        changes: dict[str, Any] = None
     ) -> DecisionAuditEntry:
         """Create an audit trail entry"""
         return DecisionAuditEntry(
@@ -1274,7 +1275,7 @@ class AIDecisionTree:
             changes=changes or {}
         )
 
-    def _store_audit_trail(self, audit_trail: List[DecisionAuditEntry]):
+    def _store_audit_trail(self, audit_trail: list[DecisionAuditEntry]):
         """Store audit trail entries in database"""
         try:
             conn = self._get_connection()
@@ -1306,7 +1307,7 @@ class AIDecisionTree:
             if conn:
                 conn.close()
 
-    def _store_decision(self, result: DecisionResult, tree: Dict,
+    def _store_decision(self, result: DecisionResult, tree: dict,
                        context: DecisionContext):
         """Store decision in database with enhanced fields"""
         try:
@@ -1533,11 +1534,11 @@ class AIDecisionTree:
             ActionType.CONDITIONAL: 0.68,
             ActionType.RETRY: 0.6
         }
-        
+
         try:
             conn = self._get_connection()
             cur = conn.cursor()
-            
+
             # Query real historical performance
             cur.execute("""
                 SELECT AVG(CASE WHEN success THEN 1.0 ELSE 0.0 END)
@@ -1545,19 +1546,19 @@ class AIDecisionTree:
                 WHERE selected_option->>'action' = %s
                 AND timestamp > NOW() - INTERVAL '30 days'
             """, (action.value,))
-            
+
             result = cur.fetchone()
             real_rate = result[0] if result and result[0] is not None else None
-            
+
             cur.close()
             conn.close()
-            
+
             if real_rate is not None:
                 return float(real_rate)
-                
+
         except Exception as e:
             logger.warning(f"Failed to fetch historical rates for {action}: {e}")
-            
+
         return default_rates.get(action, 0.7)
 
     # Handler methods for different decision types
@@ -1596,7 +1597,7 @@ class AIDecisionTree:
     def record_decision_outcome(
         self,
         decision_id: str,
-        actual_outcome: Dict[str, Any],
+        actual_outcome: dict[str, Any],
         success_score: float = None
     ):
         """Record the actual outcome of a decision for learning and optimization"""
@@ -1701,9 +1702,9 @@ class AIDecisionTree:
 
     def _analyze_outcome_variance(
         self,
-        expected: Dict[str, Any],
-        actual: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        expected: dict[str, Any],
+        actual: dict[str, Any]
+    ) -> dict[str, Any]:
         """Analyze variance between expected and actual outcomes"""
         variance = {
             'matched_expectations': [],
@@ -1767,9 +1768,9 @@ class AIDecisionTree:
 
     def _extract_lessons_learned(
         self,
-        variance_analysis: Dict[str, Any],
+        variance_analysis: dict[str, Any],
         success_score: float
-    ) -> List[str]:
+    ) -> list[str]:
         """Extract lessons learned from outcome variance"""
         lessons = []
 
@@ -1797,9 +1798,9 @@ class AIDecisionTree:
 
     def _generate_improvement_suggestions(
         self,
-        variance_analysis: Dict[str, Any],
-        lessons_learned: List[str]
-    ) -> List[str]:
+        variance_analysis: dict[str, Any],
+        lessons_learned: list[str]
+    ) -> list[str]:
         """Generate actionable improvement suggestions"""
         suggestions = []
 
@@ -1823,8 +1824,8 @@ class AIDecisionTree:
 
     def _calculate_success_score(
         self,
-        expected: Dict[str, Any],
-        actual: Dict[str, Any]
+        expected: dict[str, Any],
+        actual: dict[str, Any]
     ) -> float:
         """Calculate a 0-1 success score based on outcomes"""
         if not expected:
@@ -1859,7 +1860,7 @@ class AIDecisionTree:
     def _trigger_decision_optimization(
         self,
         decision_id: str,
-        variance_analysis: Dict[str, Any]
+        variance_analysis: dict[str, Any]
     ):
         """Trigger automatic optimization based on poor outcomes"""
         try:
@@ -1906,7 +1907,7 @@ class AIDecisionTree:
             if conn:
                 conn.close()
 
-    def learn_from_outcome(self, decision_id: str, outcome: Dict, success: bool):
+    def learn_from_outcome(self, decision_id: str, outcome: dict, success: bool):
         """Legacy method - redirects to enhanced outcome recording"""
         success_score = 1.0 if success else 0.0
         self.record_decision_outcome(decision_id, outcome, success_score)
@@ -2005,7 +2006,7 @@ class AIDecisionTree:
             )
         """)
 
-    def _summarize_failure_patterns(self, buffer: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _summarize_failure_patterns(self, buffer: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Summarize recurring failure reasons for prompt improvements"""
         failure_counts = defaultdict(int)
 
@@ -2034,7 +2035,7 @@ class AIDecisionTree:
         cur,
         success_rate: float,
         sample_size: int,
-        failure_patterns: List[Dict[str, Any]]
+        failure_patterns: list[dict[str, Any]]
     ):
         """Update aggregate agent performance metrics"""
         performance_payload = json.dumps({
@@ -2074,7 +2075,7 @@ class AIDecisionTree:
                 performance_payload
             ))
 
-    def get_decision_stats(self) -> Dict[str, Any]:
+    def get_decision_stats(self) -> dict[str, Any]:
         """Get decision statistics"""
         try:
             conn = self._get_connection()
@@ -2110,8 +2111,8 @@ class AIDecisionTree:
         self,
         agent_name: str,
         task_type: str,
-        task_data: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        task_data: Optional[dict[str, Any]] = None
+    ) -> dict[str, Any]:
         """
         Get execution guidance for an agent task.
 
@@ -2228,7 +2229,7 @@ class AIDecisionTree:
         self,
         agent_name: str,
         error_message: str
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Get suggested recovery actions for an agent error.
 

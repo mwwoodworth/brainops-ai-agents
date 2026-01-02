@@ -3,9 +3,10 @@
 Test REAL AI in Production - Both GPT-4 and Claude
 """
 
-import requests
 import time
 from datetime import datetime
+
+import requests
 
 BASE_URL = "https://brainops-ai-agents.onrender.com"
 
@@ -19,7 +20,7 @@ def wait_for_deployment():
                 data = r.json()
                 version = data.get('version')
                 if version == "4.0.2":
-                    print(f"✅ v4.0.2 is live!")
+                    print("✅ v4.0.2 is live!")
                     return True
                 else:
                     print(f"  Still on {version}, waiting...")
@@ -94,7 +95,7 @@ def test_ai():
             data = r.json()
             result = data.get('result', '')
             if len(result) > 20 and ("metal" in result.lower() or "tile" in result.lower()):
-                print(f"   ✅ GPT-4 WORKS!")
+                print("   ✅ GPT-4 WORKS!")
                 print(f"      Response: {result[:150]}...")
                 results.append(("GPT-4", True))
             else:
@@ -147,7 +148,7 @@ def test_ai():
         if r.status_code == 200:
             data = r.json()
             score = data.get('score', 0)
-            print(f"   ✅ Lead Scoring WORKS!")
+            print("   ✅ Lead Scoring WORKS!")
             print(f"      Score: {score}/100")
             print(f"      Analysis: {str(data.get('reasoning', 'N/A'))[:100]}...")
             results.append(("Lead Scoring", True))

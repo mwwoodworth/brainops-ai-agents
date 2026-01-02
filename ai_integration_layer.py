@@ -4,16 +4,17 @@ AI Integration Layer - The Brain that connects everything
 This is the missing piece that makes all components work together as ONE system
 """
 
-import logging
 import asyncio
 import json
-from datetime import datetime
-from typing import Dict, List, Optional, Any
-from enum import Enum
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import logging
 import os
 from contextlib import contextmanager
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 # ============================================================================
 # SHARED CONNECTION POOL - CRITICAL for preventing MaxClientsInSessionMode
@@ -279,7 +280,7 @@ class AIIntegrationLayer:
             logger.error(f"❌ Error fetching tasks: {e}")
             return []
 
-    async def _execute_task(self, task: Dict[str, Any]):
+    async def _execute_task(self, task: dict[str, Any]):
         """
         Execute a single task with FULL AI integration:
         1. Load relevant memories
@@ -342,7 +343,7 @@ class AIIntegrationLayer:
 
                     # Check if we should proceed
                     if confidence_assessment.confidence_score < 30:
-                        logger.warning(f"   ⚠️ Low confidence, escalating to human")
+                        logger.warning("   ⚠️ Low confidence, escalating to human")
                         await self._escalate_to_human(task, confidence_assessment)
                         return
 
@@ -385,7 +386,7 @@ class AIIntegrationLayer:
                         tags=[task_type, "task_execution", "success"]
                     )
                     self.memory_manager.store(learning)
-                    logger.info(f"   💾 Stored learning to memory")
+                    logger.info("   💾 Stored learning to memory")
                 except Exception as e:
                     logger.warning(f"   ⚠️ Memory storage failed: {e}")
 
@@ -410,7 +411,7 @@ class AIIntegrationLayer:
                 except Exception as learn_error:
                     logger.warning(f"   ⚠️ Learning from mistake failed: {learn_error}")
 
-    async def _select_agent(self, task: Dict[str, Any], confidence_assessment=None) -> Optional[Dict]:
+    async def _select_agent(self, task: dict[str, Any], confidence_assessment=None) -> Optional[dict]:
         """Select the best agent for this task"""
         # For now, simple selection - can be enhanced with ML
         task_type = task['task_type']
@@ -446,9 +447,9 @@ class AIIntegrationLayer:
 
         return None
 
-    async def _execute_with_langgraph(self, task: Dict, agent: Dict, memories: List) -> Dict:
+    async def _execute_with_langgraph(self, task: dict, agent: dict, memories: list) -> dict:
         """Execute complex task using LangGraph orchestration"""
-        logger.info(f"   🌐 Using LangGraph for complex workflow")
+        logger.info("   🌐 Using LangGraph for complex workflow")
 
         try:
             # Build context from memories
@@ -480,7 +481,7 @@ class AIIntegrationLayer:
             # Fallback to simple execution
             return await self._execute_simple(task, agent)
 
-    async def _execute_simple(self, task: Dict, agent: Dict) -> Dict:
+    async def _execute_simple(self, task: dict, agent: dict) -> dict:
         """Execute simple task directly with REAL database operations"""
         logger.info(f"   ⚡ Simple execution for {task['task_type']}")
 
@@ -581,7 +582,7 @@ class AIIntegrationLayer:
             'success': True,
             'method': 'simple',
             'result': {
-                'status': 'completed', 
+                'status': 'completed',
                 'message': f'Task {task["task_type"]} executed',
                 'data': result_data,
                 'duration_ms': duration_ms
@@ -638,7 +639,7 @@ class AIIntegrationLayer:
         except Exception as e:
             logger.error(f"❌ Failed to update task status in Postgres: {e}")
 
-    async def _store_task_result(self, task_id: str, result: Dict):
+    async def _store_task_result(self, task_id: str, result: dict):
         """Store task execution result"""
         try:
             with self._get_cursor() as cur:
@@ -659,7 +660,7 @@ class AIIntegrationLayer:
         except Exception as e:
             logger.error(f"❌ Failed to store task result: {e}")
 
-    async def _escalate_to_human(self, task: Dict, confidence: Any):
+    async def _escalate_to_human(self, task: dict, confidence: Any):
         """Escalate low-confidence task to human"""
         logger.warning(f"⚠️ Escalating task {task['id']} to human (confidence: {confidence.confidence_score}%)")
 
@@ -691,8 +692,8 @@ class AIIntegrationLayer:
     async def create_task(self,
                          task_type: str,
                          priority: TaskPriority = TaskPriority.MEDIUM,
-                         trigger_condition: Dict = None,
-                         execution_plan: Dict = None,
+                         trigger_condition: dict = None,
+                         execution_plan: dict = None,
                          scheduled_at: datetime = None) -> str:
         """
         Create a new AI task
@@ -726,7 +727,7 @@ class AIIntegrationLayer:
             logger.error(f"❌ Failed to create task: {e}")
             raise
 
-    async def get_task_status(self, task_id: str) -> Dict:
+    async def get_task_status(self, task_id: str) -> dict:
         """Get current status of a task"""
         try:
             with self._get_cursor() as cur:
@@ -746,7 +747,7 @@ class AIIntegrationLayer:
             logger.error(f"❌ Failed to get task status: {e}")
             return None
 
-    async def list_tasks(self, status: Optional[TaskStatus] = None, limit: int = 100) -> List[Dict]:
+    async def list_tasks(self, status: Optional[TaskStatus] = None, limit: int = 100) -> list[dict]:
         """List tasks with optional status filter"""
         try:
             with self._get_cursor() as cur:
@@ -773,7 +774,7 @@ class AIIntegrationLayer:
             logger.error(f"❌ Failed to list tasks: {e}")
             return []
 
-    async def get_task_stats(self, limit: int = 1000) -> Dict[str, Any]:
+    async def get_task_stats(self, limit: int = 1000) -> dict[str, Any]:
         """
         Compute basic statistics about the AI autonomous task system.
 
@@ -789,7 +790,7 @@ class AIIntegrationLayer:
         try:
             tasks = await self.list_tasks(limit=limit)
 
-            stats: Dict[str, Any] = {
+            stats: dict[str, Any] = {
                 "total": len(tasks),
                 "by_status": {},
                 "by_priority": {},
@@ -819,8 +820,8 @@ class AIIntegrationLayer:
     async def orchestrate_complex_workflow(
         self,
         task_description: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        context: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """
         High-level entry point for complex, multi-stage workflows using LangGraph.
 
@@ -837,7 +838,7 @@ class AIIntegrationLayer:
             context=ctx,
         )
 
-    async def execute_ai_task(self, task_id: str) -> Dict[str, Any]:
+    async def execute_ai_task(self, task_id: str) -> dict[str, Any]:
         """
         Public entry point to execute an AI task by ID.
         This is used by AUREA NLU and the API surface instead of calling

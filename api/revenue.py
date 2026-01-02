@@ -3,18 +3,19 @@ Revenue Generation API Router
 Exposes endpoints for the autonomous revenue system
 """
 import json
-import uuid
 import logging
-from typing import Dict, Any, List, Optional
+import uuid
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Depends, Query, Security
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
-from database.async_connection import get_pool
-
 # API Key Security - use centralized config
 from config import config
+from database.async_connection import get_pool
+
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 VALID_API_KEYS = config.security.valid_api_keys
 
@@ -466,7 +467,7 @@ async def get_pipeline():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def generate_realistic_leads(industry: str, location: str, count: int, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+async def generate_realistic_leads(industry: str, location: str, count: int, tenant_id: Optional[str] = None) -> list[dict[str, Any]]:
     """
     Generate/discover leads using configured lead sources and ERP data.
 

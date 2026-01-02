@@ -4,13 +4,14 @@ Industry-Specific AI Models - Task 23
 Specialized AI models for roofing and construction industry
 """
 
-import os
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
 from enum import Enum
+from typing import Optional
+
 import psycopg2
 
 # Configure logging
@@ -97,7 +98,7 @@ class RoofingEstimator:
         project_type: RoofingProjectType,
         complexity: str = "moderate",
         location: Optional[str] = None
-    ) -> Dict:
+    ) -> dict:
         """Estimate roofing project cost"""
         try:
             # Calculate squares (100 sq ft units)
@@ -231,7 +232,7 @@ class RoofingEstimator:
 
         return min(max(confidence, 0.5), 0.95)
 
-    async def _store_estimate(self, estimate: Dict):
+    async def _store_estimate(self, estimate: dict):
         """Store estimate in database"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -294,8 +295,8 @@ class DamageAssessmentModel:
         damage_type: str,
         affected_area: float,
         total_area: float,
-        observations: List[str]
-    ) -> Dict:
+        observations: list[str]
+    ) -> dict:
         """Assess roof damage and recommend action"""
         try:
             # Calculate damage percentage
@@ -367,7 +368,7 @@ class DamageAssessmentModel:
         severity: str,
         damage_percentage: float,
         damage_type: str
-    ) -> Dict:
+    ) -> dict:
         """Generate repair/replacement recommendation"""
         if severity == "severe" or damage_percentage > 40:
             return {
@@ -403,7 +404,7 @@ class DamageAssessmentModel:
         affected_area: float,
         severity: str,
         damage_type: str
-    ) -> Dict:
+    ) -> dict:
         """Estimate repair cost based on damage"""
         # Base repair costs per square foot
         base_costs = {
@@ -456,7 +457,7 @@ class DamageAssessmentModel:
         self,
         damage_type: str,
         severity: str
-    ) -> Dict:
+    ) -> dict:
         """Check warranty implications"""
         if damage_type in ["hail", "wind"]:
             return {
@@ -471,7 +472,7 @@ class DamageAssessmentModel:
                 "deductible_applies": severity == "severe"
             }
 
-    async def _store_assessment(self, assessment: Dict):
+    async def _store_assessment(self, assessment: dict):
         """Store damage assessment in database"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -515,8 +516,8 @@ class MaterialRecommendationEngine:
         climate: str,
         budget_per_sqft: float,
         building_type: str = "residential",
-        preferences: Optional[List[str]] = None
-    ) -> Dict:
+        preferences: Optional[list[str]] = None
+    ) -> dict:
         """Recommend optimal roofing material"""
         recommendations = []
 
@@ -563,9 +564,9 @@ class MaterialRecommendationEngine:
     def _calculate_material_score(
         self,
         material: RoofingMaterialType,
-        climate_suitable: List,
+        climate_suitable: list,
         building_type: str,
-        preferences: List[str]
+        preferences: list[str]
     ) -> float:
         """Calculate material suitability score"""
         score = 50.0  # Base score
@@ -589,7 +590,7 @@ class MaterialRecommendationEngine:
 
         return min(score, 100.0)
 
-    def _get_material_pros(self, material: RoofingMaterialType) -> List[str]:
+    def _get_material_pros(self, material: RoofingMaterialType) -> list[str]:
         """Get material advantages"""
         pros = {
             RoofingMaterialType.ASPHALT_SHINGLE: ["Affordable", "Easy installation", "Wide variety"],
@@ -600,7 +601,7 @@ class MaterialRecommendationEngine:
         }
         return pros.get(material, ["Good value"])
 
-    def _get_material_cons(self, material: RoofingMaterialType) -> List[str]:
+    def _get_material_cons(self, material: RoofingMaterialType) -> list[str]:
         """Get material disadvantages"""
         cons = {
             RoofingMaterialType.ASPHALT_SHINGLE: ["Shorter lifespan", "Weather vulnerable"],
@@ -645,8 +646,8 @@ class IndustrySpecificAIModels:
     async def process_roofing_request(
         self,
         request_type: str,
-        parameters: Dict
-    ) -> Dict:
+        parameters: dict
+    ) -> dict:
         """Process industry-specific request"""
         try:
             if request_type == "estimate":

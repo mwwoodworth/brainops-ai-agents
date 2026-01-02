@@ -10,24 +10,25 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import logging
+import os
 import re
 import subprocess
 import uuid
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TypedDict, TypeVar
+from typing import Any, Optional, TypedDict, TypeVar
 
+import anthropic
 import httpx
 import openai
-import anthropic
-from dataclasses import asdict
+
+from ai_self_awareness import SelfAwareAI as SelfAwareness
+from ai_self_awareness import get_self_aware_ai
 
 # CRITICAL: Use async connection pool - NO psycopg2
 from database.async_connection import get_pool
-
-from ai_self_awareness import SelfAwareAI as SelfAwareness, get_self_aware_ai
 from unified_brain import UnifiedBrain
 
 logger = logging.getLogger(__name__)
@@ -48,10 +49,7 @@ def _handle_optional_import(feature: str, exc: Exception) -> None:
 
 # Graph Context Provider for Phase 2 enhancements
 try:
-    from graph_context_provider import (
-        GraphContextProvider,
-        get_graph_context_provider
-    )
+    from graph_context_provider import GraphContextProvider, get_graph_context_provider
     GRAPH_CONTEXT_AVAILABLE = True
 except Exception as exc:
     GRAPH_CONTEXT_AVAILABLE = False
@@ -59,9 +57,7 @@ except Exception as exc:
 
 # Unified System Integration - wires ALL systems together
 try:
-    from unified_system_integration import (
-        get_unified_integration
-    )
+    from unified_system_integration import get_unified_integration
     UNIFIED_INTEGRATION_AVAILABLE = True
 except Exception as exc:
     UNIFIED_INTEGRATION_AVAILABLE = False
@@ -94,7 +90,7 @@ except Exception as exc:
 
 # LangGraph (optional)
 try:
-    from langgraph.graph import StateGraph, END
+    from langgraph.graph import END, StateGraph
     LANGGRAPH_AVAILABLE = True
 except Exception as exc:
     LANGGRAPH_AVAILABLE = False
@@ -104,12 +100,10 @@ from config import config
 
 # Customer Acquisition Agents
 try:
-    from customer_acquisition_agents import (
-        WebSearchAgent as AcqWebSearchAgent,
-        SocialMediaAgent as AcqSocialMediaAgent,
-        OutreachAgent as AcqOutreachAgent,
-        ConversionAgent as AcqConversionAgent
-    )
+    from customer_acquisition_agents import ConversionAgent as AcqConversionAgent
+    from customer_acquisition_agents import OutreachAgent as AcqOutreachAgent
+    from customer_acquisition_agents import SocialMediaAgent as AcqSocialMediaAgent
+    from customer_acquisition_agents import WebSearchAgent as AcqWebSearchAgent
     ACQUISITION_AGENTS_AVAILABLE = True
 except Exception as exc:
     ACQUISITION_AGENTS_AVAILABLE = False
@@ -181,7 +175,7 @@ except Exception as exc:
 
 # Live Memory Brain - Persistent memory storage for agent executions
 try:
-    from live_memory_brain import get_live_brain, MemoryType
+    from live_memory_brain import MemoryType, get_live_brain
     LIVE_MEMORY_BRAIN_AVAILABLE = True
 except Exception as exc:
     LIVE_MEMORY_BRAIN_AVAILABLE = False
@@ -189,7 +183,6 @@ except Exception as exc:
 
 # MCP Bridge Client for tool execution
 try:
-    from mcp_integration import get_mcp_client
     MCP_INTEGRATION_AVAILABLE = True
 except Exception as exc:
     MCP_INTEGRATION_AVAILABLE = False
@@ -233,14 +226,14 @@ class AgentExecutionLogger:
         self.agent_name = agent_name
         self.agent_id = agent_id
         self.task_id = task_id
-        self.memory_operations: List[Dict[str, Any]] = []
-        self._phase_start_times: Dict[str, datetime] = {}
+        self.memory_operations: list[dict[str, Any]] = []
+        self._phase_start_times: dict[str, datetime] = {}
         self._logger = logging.getLogger(__name__)
 
     async def log_phase(
         self,
         phase: str,
-        phase_data: Optional[Dict[str, Any]] = None,
+        phase_data: Optional[dict[str, Any]] = None,
         duration_ms: Optional[float] = None
     ) -> None:
         """Log an execution phase to the agent_execution_logs table."""
@@ -271,7 +264,7 @@ class AgentExecutionLogger:
     async def end_phase(
         self,
         phase: str,
-        phase_data: Optional[Dict[str, Any]] = None
+        phase_data: Optional[dict[str, Any]] = None
     ) -> None:
         """End a phase and log it with calculated duration."""
         duration_ms = None
@@ -286,7 +279,7 @@ class AgentExecutionLogger:
         operation: str,
         key: str,
         success: bool,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[dict[str, Any]] = None
     ) -> None:
         """Record a memory operation for this execution."""
         self.memory_operations.append({
@@ -297,7 +290,7 @@ class AgentExecutionLogger:
             "details": details or {}
         })
 
-    async def log_started(self, task: Dict[str, Any]) -> None:
+    async def log_started(self, task: dict[str, Any]) -> None:
         """Log execution start."""
         await self.log_phase("started", {
             "task_type": task.get("action", task.get("type", "generic")),
@@ -308,7 +301,7 @@ class AgentExecutionLogger:
     async def log_context_enrichment(
         self,
         enriched: bool,
-        context_info: Optional[Dict[str, Any]] = None
+        context_info: Optional[dict[str, Any]] = None
     ) -> None:
         """Log context enrichment phase."""
         await self.log_phase("context_enrichment", {
@@ -349,7 +342,7 @@ class AgentExecutionLogger:
 
     async def log_completed(
         self,
-        result: Dict[str, Any],
+        result: dict[str, Any],
         total_duration_ms: float
     ) -> None:
         """Log successful completion."""
@@ -378,7 +371,7 @@ class AgentExecutor:
     """Executes actual agent tasks"""
 
     def __init__(self):
-        self.agents: Dict[str, BaseAgent] = {}
+        self.agents: dict[str, BaseAgent] = {}
         self._agents_loaded = False
         self._agents_lock = asyncio.Lock()
         self._audit_bootstrapped = False
@@ -412,9 +405,9 @@ class AgentExecutor:
 
     async def _enrich_task_with_codebase_context(
         self,
-        task: Dict[str, Any],
+        task: dict[str, Any],
         agent_name: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Enrich task with relevant codebase context from the graph.
         Phase 2 Enhancement: Agents now receive intelligent codebase context.
@@ -465,7 +458,7 @@ class AgentExecutor:
 
         return task
 
-    def _get_repos_for_agent(self, agent_name: str) -> Optional[List[str]]:
+    def _get_repos_for_agent(self, agent_name: str) -> Optional[list[str]]:
         """Determine which repos are relevant for a given agent type"""
         agent_lower = agent_name.lower()
 
@@ -493,7 +486,7 @@ class AgentExecutor:
             self.self_awareness = None
         return self.self_awareness
 
-    def _is_high_stakes_action(self, agent_name: str, task: Dict[str, Any]) -> bool:
+    def _is_high_stakes_action(self, agent_name: str, task: dict[str, Any]) -> bool:
         """Determine if a task requires confidence gating"""
         action = str(task.get("action") or "").lower()
         agent_label = (task.get("agent") or agent_name or "").lower()
@@ -514,8 +507,8 @@ class AgentExecutor:
         return agent_matches or type_matches or action_matches
 
     async def _run_confidence_assessment(
-        self, agent_name: str, task: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, agent_name: str, task: dict[str, Any]
+    ) -> dict[str, Any]:
         """Assess confidence before executing high-stakes actions"""
         assessment = None
         precheck_block = None
@@ -568,7 +561,7 @@ class AgentExecutor:
     async def _store_assessment_audit(
         self,
         agent_name: str,
-        task: Dict[str, Any],
+        task: dict[str, Any],
         assessment: Any,
         normalized_confidence: float,
     ):
@@ -838,7 +831,7 @@ class AgentExecutor:
             )
         return self.workflow_runner
 
-    async def execute(self, agent_name: str, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
         """Execute task with specific agent - NOW WITH UNIFIED SYSTEM INTEGRATION"""
         await self._ensure_agents_loaded()
 
@@ -1123,7 +1116,7 @@ class AgentExecutor:
                     logger.warning(f"Unified error handler failed: {ue}")
             raise
 
-    async def _generic_execute(self, agent_name: str, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def _generic_execute(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
         """Generic execution using Real AI when no specific agent exists.
 
         IMPORTANT: This is a fallback for unimplemented agents.
@@ -1189,11 +1182,11 @@ class BaseAgent:
         self.type = agent_type
         self.logger = logging.getLogger(f"Agent.{name}")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute agent task - override in subclasses"""
         raise NotImplementedError(f"Agent {self.name} must implement execute method")
 
-    async def log_execution(self, task: Dict, result: Dict):
+    async def log_execution(self, task: dict, result: dict):
         """Log execution to database and Unified Brain"""
         exec_id = str(uuid.uuid4())
 
@@ -1242,15 +1235,15 @@ class BaseAgent:
 
 class LangGraphWorkflowState(TypedDict):
     """Shared state for LangGraph-enabled executions with review loops."""
-    task: Dict[str, Any]
+    task: dict[str, Any]
     default_agent: str
     selected_agent: str
     attempt: int
     result: Any
-    review_feedback: List[Dict[str, Any]]
-    quality_report: Dict[str, Any]
+    review_feedback: list[dict[str, Any]]
+    quality_report: dict[str, Any]
     status: str
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
 
 class LangGraphWorkflowRunner:
@@ -1263,7 +1256,7 @@ class LangGraphWorkflowRunner:
 
     def __init__(
         self,
-        executor: "AgentExecutor",
+        executor: AgentExecutor,
         ai_core_instance: Optional[Any],
         max_review_cycles: int = 2,
         quality_threshold: int = 75
@@ -1458,7 +1451,7 @@ class LangGraphWorkflowRunner:
         state["task"]["quality_feedback"] = gate.get("issues", [])
         return "fix"
 
-    async def run(self, agent_name: str, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def run(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
         """Public entrypoint for LangGraph-enhanced execution."""
         if not self.workflow:
             return await self.executor._generic_execute(agent_name, task)
@@ -1499,7 +1492,7 @@ class MonitorAgent(BaseAgent):
     def __init__(self):
         super().__init__("Monitor", "MonitoringAgent")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute monitoring task"""
         action = task.get('action', 'full_check')
 
@@ -1514,7 +1507,7 @@ class MonitorAgent(BaseAgent):
         else:
             return await self.full_system_check()
 
-    async def full_system_check(self) -> Dict[str, Any]:
+    async def full_system_check(self) -> dict[str, Any]:
         """Perform complete system health check"""
         results = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1574,7 +1567,7 @@ class MonitorAgent(BaseAgent):
         await self.log_execution({"action": "full_check"}, results)
         return results
 
-    async def check_backend(self) -> Dict[str, Any]:
+    async def check_backend(self) -> dict[str, Any]:
         """Check backend health"""
         try:
             response = await _http_get(f"{BACKEND_URL}/api/v1/health", timeout_seconds=5.0)
@@ -1585,7 +1578,7 @@ class MonitorAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def check_database(self) -> Dict[str, Any]:
+    async def check_database(self) -> dict[str, Any]:
         """Check database health with REAL production business metrics"""
         try:
             pool = get_pool()
@@ -1636,7 +1629,7 @@ class MonitorAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def check_frontends(self) -> Dict[str, Any]:
+    async def check_frontends(self) -> dict[str, Any]:
         """Check frontend sites"""
         sites = {
             "MyRoofGenius": "https://myroofgenius.com",
@@ -1683,7 +1676,7 @@ class SystemMonitorAgent(BaseAgent):
                 logger.warning("MCP integration not available")
         return self._mcp_client
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute system monitoring with auto-fix via MCP tools"""
         # Perform health check
         monitor = MonitorAgent()
@@ -1716,7 +1709,7 @@ class SystemMonitorAgent(BaseAgent):
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
-    async def attempt_fix(self, issue: Dict) -> Dict:
+    async def attempt_fix(self, issue: dict) -> dict:
         """Attempt to fix an issue using MCP tools for real infrastructure control"""
         service = issue["service"]
         mcp = await self._get_mcp_client()
@@ -1765,7 +1758,7 @@ class SystemMonitorAgent(BaseAgent):
             # Use MCP for Supabase database operations
             if mcp:
                 try:
-                    logger.info(f"MCP: Attempting to optimize database via Supabase")
+                    logger.info("MCP: Attempting to optimize database via Supabase")
                     # Run VACUUM ANALYZE to optimize database
                     result = await mcp.supabase_query("VACUUM ANALYZE")
                     if result.success:
@@ -1856,7 +1849,7 @@ class DeploymentAgent(BaseAgent):
                 logger.warning("MCP integration not available for DeploymentAgent")
         return self._mcp_client
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute deployment task with MCP support"""
         action = task.get('action', 'deploy')
         service = task.get('service', 'backend')
@@ -1879,7 +1872,7 @@ class DeploymentAgent(BaseAgent):
         else:
             return {"status": "error", "message": f"Unknown action: {action}"}
 
-    async def _mcp_trigger_deploy(self, service: str) -> Dict:
+    async def _mcp_trigger_deploy(self, service: str) -> dict:
         """Trigger deployment via MCP Bridge"""
         mcp = await self._get_mcp_client()
         if not mcp:
@@ -1910,7 +1903,7 @@ class DeploymentAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    async def _mcp_create_pr(self, task: Dict) -> Dict:
+    async def _mcp_create_pr(self, task: dict) -> dict:
         """Create GitHub Pull Request via MCP Bridge"""
         mcp = await self._get_mcp_client()
         if not mcp:
@@ -1950,7 +1943,7 @@ class DeploymentAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "action": "mcp_create_pr", "error": str(e)}
 
-    async def _mcp_create_issue(self, task: Dict) -> Dict:
+    async def _mcp_create_issue(self, task: dict) -> dict:
         """Create GitHub Issue via MCP Bridge"""
         mcp = await self._get_mcp_client()
         if not mcp:
@@ -1986,7 +1979,7 @@ class DeploymentAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "action": "mcp_create_issue", "error": str(e)}
 
-    async def deploy_service(self, service: str, version: Optional[str] = None) -> Dict:
+    async def deploy_service(self, service: str, version: Optional[str] = None) -> dict:
         """Deploy a service - uses MCP first, falls back to legacy"""
         # Try MCP deployment first
         mcp = await self._get_mcp_client()
@@ -2004,7 +1997,7 @@ class DeploymentAgent(BaseAgent):
         else:
             return {"status": "error", "message": f"Unknown service: {service}"}
 
-    async def deploy_backend(self, version: Optional[str] = None) -> Dict:
+    async def deploy_backend(self, version: Optional[str] = None) -> dict:
         """Deploy backend service (legacy method)"""
         try:
             if not version:
@@ -2051,7 +2044,7 @@ class DeploymentAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    async def deploy_ai_agents(self) -> Dict:
+    async def deploy_ai_agents(self) -> dict:
         """Deploy AI agents service - tries MCP first"""
         # Try MCP deployment first
         mcp = await self._get_mcp_client()
@@ -2079,7 +2072,7 @@ class DeploymentAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    async def build_docker(self, service: str, version: str) -> Dict:
+    async def build_docker(self, service: str, version: str) -> dict:
         """Build Docker image"""
         try:
             if not validate_version(version):
@@ -2103,7 +2096,7 @@ class DeploymentAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    async def rollback_service(self, service: str) -> Dict:
+    async def rollback_service(self, service: str) -> dict:
         """Rollback a service to previous version using Render API"""
         import aiohttp
 
@@ -2177,7 +2170,7 @@ class DatabaseOptimizerAgent(BaseAgent):
     def __init__(self):
         super().__init__("DatabaseOptimizer", "optimizer")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute database optimization"""
         action = task.get('action', 'analyze')
 
@@ -2190,7 +2183,7 @@ class DatabaseOptimizerAgent(BaseAgent):
         else:
             return await self.analyze_performance()
 
-    async def analyze_performance(self) -> Dict:
+    async def analyze_performance(self) -> dict:
         """Analyze database performance"""
         try:
             pool = get_pool()
@@ -2235,7 +2228,7 @@ class DatabaseOptimizerAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def optimize_database(self) -> Dict:
+    async def optimize_database(self) -> dict:
         """Run optimization commands"""
         try:
             pool = get_pool()
@@ -2269,7 +2262,7 @@ class DatabaseOptimizerAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def cleanup_tables(self) -> Dict:
+    async def cleanup_tables(self) -> dict:
         """Clean up unnecessary data"""
         try:
             pool = get_pool()
@@ -2292,7 +2285,7 @@ class DatabaseOptimizerAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    def generate_recommendations(self, tables, queries) -> List[str]:
+    def generate_recommendations(self, tables, queries) -> list[str]:
         """Generate optimization recommendations"""
         recommendations = []
 
@@ -2316,7 +2309,7 @@ class WorkflowEngineAgent(BaseAgent):
     def __init__(self):
         super().__init__("WorkflowEngine", "WorkflowEngine")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute workflow"""
         workflow_type = task.get('workflow_type', 'custom')
 
@@ -2329,7 +2322,7 @@ class WorkflowEngineAgent(BaseAgent):
         else:
             return await self.custom_workflow(task)
 
-    async def deployment_pipeline(self, task: Dict) -> Dict:
+    async def deployment_pipeline(self, task: dict) -> dict:
         """Run complete deployment pipeline"""
         steps = []
 
@@ -2359,7 +2352,7 @@ class WorkflowEngineAgent(BaseAgent):
             "success": all(s.get('result', {}).get('status') in ['success', 'healthy', 'skipped'] for s in steps)
         }
 
-    async def _run_tests(self, service: str) -> Dict:
+    async def _run_tests(self, service: str) -> dict:
         """Run actual tests for a service"""
         import aiohttp
 
@@ -2423,7 +2416,7 @@ class WorkflowEngineAgent(BaseAgent):
             "details": tests_run
         }
 
-    async def customer_onboarding(self, task: Dict) -> Dict:
+    async def customer_onboarding(self, task: dict) -> dict:
         """Customer onboarding workflow"""
         customer_data = task.get('customer', {})
         steps = []
@@ -2453,7 +2446,7 @@ class WorkflowEngineAgent(BaseAgent):
             "steps": steps
         }
 
-    async def invoice_generation(self, task: Dict) -> Dict:
+    async def invoice_generation(self, task: dict) -> dict:
         """Invoice generation workflow"""
         # Use InvoicingAgent for real execution
         if 'job_id' in task:
@@ -2486,7 +2479,7 @@ class WorkflowEngineAgent(BaseAgent):
             "error": "No job_id provided and no pending completed jobs found for invoice generation."
         }
 
-    async def custom_workflow(self, task: Dict) -> Dict:
+    async def custom_workflow(self, task: dict) -> dict:
         """Execute custom workflow"""
         return {
             "status": "completed",
@@ -2501,7 +2494,7 @@ class CustomerAgent(BaseAgent):
     def __init__(self):
         super().__init__("CustomerAgent", "workflow")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute customer workflow"""
         action = task.get('action', 'analyze')
 
@@ -2514,7 +2507,7 @@ class CustomerAgent(BaseAgent):
         else:
             return await self.analyze_customers()
 
-    async def analyze_customers(self) -> Dict:
+    async def analyze_customers(self) -> dict:
         """Analyze customer data with AI insights"""
         try:
             pool = get_pool()
@@ -2563,7 +2556,7 @@ class CustomerAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def segment_customers(self) -> Dict:
+    async def segment_customers(self) -> dict:
         """Segment customers into categories with AI recommendations"""
         try:
             pool = get_pool()
@@ -2613,7 +2606,7 @@ class CustomerAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def customer_outreach(self, task: Dict) -> Dict:
+    async def customer_outreach(self, task: dict) -> dict:
         """Execute customer outreach campaign with AI-generated content"""
         segment = task.get('segment', 'all')
         context = task.get('context', 'general update')
@@ -2652,7 +2645,7 @@ class InvoicingAgent(BaseAgent):
     def __init__(self):
         super().__init__("InvoicingAgent", "workflow")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute invoicing task"""
         action = task.get('action', 'generate')
 
@@ -2665,7 +2658,7 @@ class InvoicingAgent(BaseAgent):
         else:
             return {"status": "error", "message": f"Unknown action: {action}"}
 
-    async def generate_invoice(self, task: Dict) -> Dict:
+    async def generate_invoice(self, task: dict) -> dict:
         """Generate invoice with AI-enhanced content"""
         job_id = task.get('job_id')
 
@@ -2723,7 +2716,7 @@ class InvoicingAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def send_invoice(self, task: Dict) -> Dict:
+    async def send_invoice(self, task: dict) -> dict:
         """Send invoice to customer with AI-generated email"""
         invoice_id = task.get('invoice_id')
 
@@ -2763,7 +2756,7 @@ class InvoicingAgent(BaseAgent):
             "generated_email": email_content
         }
 
-    async def invoice_report(self) -> Dict:
+    async def invoice_report(self) -> dict:
         """Generate invoice report with AI summary"""
         try:
             pool = get_pool()
@@ -2810,7 +2803,7 @@ class CustomerIntelligenceAgent(BaseAgent):
     def __init__(self):
         super().__init__("CustomerIntelligence", "analytics")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute customer intelligence analysis on REAL business data"""
         analysis_type = task.get('type', task.get('action', 'full_analysis'))
 
@@ -2827,7 +2820,7 @@ class CustomerIntelligenceAgent(BaseAgent):
         else:
             return await self.full_customer_analysis()
 
-    async def full_customer_analysis(self) -> Dict:
+    async def full_customer_analysis(self) -> dict:
         """Run comprehensive customer analysis and store insights in ai_customer_health"""
         try:
             pool = get_pool()
@@ -2868,7 +2861,7 @@ class CustomerIntelligenceAgent(BaseAgent):
             self.logger.error(f"Full customer analysis failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def analyze_churn_risk(self) -> Dict:
+    async def analyze_churn_risk(self) -> dict:
         """Identify customers at risk of churning - NO jobs in 12+ months"""
         try:
             pool = get_pool()
@@ -2931,7 +2924,7 @@ class CustomerIntelligenceAgent(BaseAgent):
             self.logger.error(f"Churn risk analysis failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def identify_upsell_opportunities(self) -> Dict:
+    async def identify_upsell_opportunities(self) -> dict:
         """Identify high-value customers for upsell opportunities"""
         try:
             pool = get_pool()
@@ -2992,7 +2985,7 @@ class CustomerIntelligenceAgent(BaseAgent):
             self.logger.error(f"Upsell opportunity analysis failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def _store_customer_health_insights(self, customers: List[Dict]) -> int:
+    async def _store_customer_health_insights(self, customers: list[dict]) -> int:
         """Store customer health insights in ai_customer_health table"""
         try:
             pool = get_pool()
@@ -3080,7 +3073,7 @@ class CustomerIntelligenceAgent(BaseAgent):
             self.logger.error(f"Failed to store customer health insights: {e}")
             return 0
 
-    async def calculate_lifetime_value(self) -> Dict:
+    async def calculate_lifetime_value(self) -> dict:
         """Calculate customer lifetime value from REAL revenue data"""
         try:
             pool = get_pool()
@@ -3122,7 +3115,7 @@ class CustomerIntelligenceAgent(BaseAgent):
             self.logger.error(f"LTV calculation failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def advanced_segmentation(self) -> Dict:
+    async def advanced_segmentation(self) -> dict:
         """Advanced customer segmentation using Real AI on REAL data"""
         try:
             pool = get_pool()
@@ -3212,7 +3205,7 @@ class CustomerIntelligenceAgent(BaseAgent):
             self.logger.error(f"Segmentation failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def customer_overview(self) -> Dict:
+    async def customer_overview(self) -> dict:
         """General customer overview using real data"""
         return await self.full_customer_analysis()
 
@@ -3223,7 +3216,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
     def __init__(self):
         super().__init__("PredictiveAnalyzer", "analyzer")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute predictive analysis"""
         prediction_type = task.get('type', 'revenue')
 
@@ -3236,7 +3229,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
         else:
             return {"status": "error", "message": f"Unknown prediction type: {prediction_type}"}
 
-    async def predict_revenue(self) -> Dict:
+    async def predict_revenue(self) -> dict:
         """Predict future revenue"""
         try:
             pool = get_pool()
@@ -3298,7 +3291,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def predict_demand(self) -> Dict:
+    async def predict_demand(self) -> dict:
         """Predict service demand using Real AI"""
         try:
             pool = get_pool()
@@ -3328,7 +3321,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def analyze_seasonality(self) -> Dict:
+    async def analyze_seasonality(self) -> dict:
         """Analyze seasonal patterns"""
         try:
             pool = get_pool()
@@ -3358,7 +3351,7 @@ class RevenueOptimizerAgent(BaseAgent):
     def __init__(self):
         super().__init__("RevenueOptimizer", "analytics")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute revenue optimization analysis on REAL business data"""
         analysis_type = task.get('type', task.get('action', 'full_analysis'))
 
@@ -3373,7 +3366,7 @@ class RevenueOptimizerAgent(BaseAgent):
         else:
             return await self.full_revenue_analysis()
 
-    async def full_revenue_analysis(self) -> Dict:
+    async def full_revenue_analysis(self) -> dict:
         """Run comprehensive revenue analysis from REAL production data"""
         try:
             pool = get_pool()
@@ -3417,7 +3410,7 @@ class RevenueOptimizerAgent(BaseAgent):
             self.logger.error(f"Full revenue analysis failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def analyze_monthly_revenue(self) -> Dict:
+    async def analyze_monthly_revenue(self) -> dict:
         """Analyze revenue by month from REAL job data"""
         try:
             pool = get_pool()
@@ -3470,7 +3463,7 @@ class RevenueOptimizerAgent(BaseAgent):
             self.logger.error(f"Monthly revenue analysis failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def get_top_customers_by_revenue(self) -> Dict:
+    async def get_top_customers_by_revenue(self) -> dict:
         """Get top 20 customers by total revenue"""
         try:
             pool = get_pool()
@@ -3510,7 +3503,7 @@ class RevenueOptimizerAgent(BaseAgent):
             self.logger.error(f"Top customers analysis failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def analyze_pricing_optimization(self) -> Dict:
+    async def analyze_pricing_optimization(self) -> dict:
         """Analyze job pricing and identify optimization opportunities"""
         try:
             pool = get_pool()
@@ -3583,7 +3576,7 @@ class RevenueOptimizerAgent(BaseAgent):
             self.logger.error(f"Pricing analysis failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    def _generate_revenue_recommendations(self, results: Dict) -> List[str]:
+    def _generate_revenue_recommendations(self, results: dict) -> list[str]:
         """Generate actionable recommendations from analysis results"""
         recommendations = []
 
@@ -3628,7 +3621,7 @@ class ContractGeneratorAgent(BaseAgent):
     def __init__(self):
         super().__init__("ContractGenerator", "generator")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Generate contract"""
         contract_type = task.get('type', 'service')
         tenant_id = task.get('tenant_id') or task.get('tenantId')
@@ -3798,7 +3791,7 @@ class ProposalGeneratorAgent(BaseAgent):
     def __init__(self):
         super().__init__("ProposalGenerator", "generator")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Generate proposal using REAL AI"""
         proposal_type = task.get('type', 'roofing')
         customer_data = task.get('customer', {})
@@ -3855,7 +3848,7 @@ class ReportingAgent(BaseAgent):
     def __init__(self):
         super().__init__("ReportingAgent", "generator")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Generate report"""
         report_type = task.get('type', 'summary')
 
@@ -3868,7 +3861,7 @@ class ReportingAgent(BaseAgent):
         else:
             return await self.summary_report()
 
-    async def executive_report(self) -> Dict:
+    async def executive_report(self) -> dict:
         """Generate executive report with AI summary"""
         try:
             pool = get_pool()
@@ -3915,7 +3908,7 @@ class ReportingAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def performance_report(self) -> Dict:
+    async def performance_report(self) -> dict:
         """Generate performance report"""
         monitor = MonitorAgent()
         health = await monitor.full_system_check()
@@ -3929,7 +3922,7 @@ class ReportingAgent(BaseAgent):
             }
         }
 
-    async def financial_report(self) -> Dict:
+    async def financial_report(self) -> dict:
         """Generate financial report with AI commentary"""
         invoice_agent = InvoicingAgent()
         invoice_report = await invoice_agent.invoice_report()
@@ -3958,7 +3951,7 @@ class ReportingAgent(BaseAgent):
             }
         }
 
-    async def summary_report(self) -> Dict:
+    async def summary_report(self) -> dict:
         """Generate summary report"""
         return {
             "status": "completed",
@@ -3978,7 +3971,7 @@ class SelfBuildingAgent(BaseAgent):
     def __init__(self):
         super().__init__("SelfBuilder", "meta")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute self-building task"""
         action = task.get('action', 'create')
 
@@ -3991,7 +3984,7 @@ class SelfBuildingAgent(BaseAgent):
         else:
             return {"status": "error", "message": f"Unknown action: {action}"}
 
-    async def create_agent(self, task: Dict) -> Dict:
+    async def create_agent(self, task: dict) -> dict:
         """Create a new agent"""
         agent_name = task.get('name', f"Agent_{datetime.now().strftime('%Y%m%d%H%M%S')}")
         agent_type = task.get('type', 'workflow')
@@ -4023,7 +4016,7 @@ class SelfBuildingAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def deploy_agents(self) -> Dict:
+    async def deploy_agents(self) -> dict:
         """Deploy all agents to production"""
         deploy_agent = DeploymentAgent()
         result = await deploy_agent.deploy_ai_agents()
@@ -4033,7 +4026,7 @@ class SelfBuildingAgent(BaseAgent):
             "deployment": result
         }
 
-    async def optimize_agents(self) -> Dict:
+    async def optimize_agents(self) -> dict:
         """Optimize agent performance"""
         try:
             pool = get_pool()
@@ -4089,7 +4082,7 @@ class LeadScorerAgent(BaseAgent):
     def __init__(self):
         super().__init__("LeadScorer", "analytics")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Score leads based on real database data"""
         action = task.get('action', task.get('type', 'score_all'))
 
@@ -4102,7 +4095,7 @@ class LeadScorerAgent(BaseAgent):
         else:
             return await self.score_all_leads()
 
-    async def score_all_leads(self) -> Dict:
+    async def score_all_leads(self) -> dict:
         """Score all leads and return summary with REAL data"""
         try:
             pool = get_pool()
@@ -4173,7 +4166,7 @@ class LeadScorerAgent(BaseAgent):
             self.logger.error(f"Lead scoring failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def score_single_lead(self, lead_id: str) -> Dict:
+    async def score_single_lead(self, lead_id: str) -> dict:
         """Score a specific lead"""
         try:
             pool = get_pool()
@@ -4218,7 +4211,7 @@ class LeadScorerAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def get_top_leads(self, limit: int = 20) -> Dict:
+    async def get_top_leads(self, limit: int = 20) -> dict:
         """Get top scoring leads"""
         try:
             pool = get_pool()
@@ -4249,7 +4242,7 @@ class LeadScorerAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def get_tier_distribution(self) -> Dict:
+    async def get_tier_distribution(self) -> dict:
         """Get distribution of leads by tier"""
         try:
             pool = get_pool()
@@ -4281,7 +4274,7 @@ class CampaignAgent(BaseAgent):
     def __init__(self):
         super().__init__("CampaignAgent", "marketing")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute campaign management tasks"""
         action = task.get('action', task.get('type', 'overview'))
 
@@ -4294,7 +4287,7 @@ class CampaignAgent(BaseAgent):
         else:
             return await self.get_campaign_overview()
 
-    async def get_campaign_overview(self) -> Dict:
+    async def get_campaign_overview(self) -> dict:
         """Get overview of all campaigns with REAL data"""
         try:
             pool = get_pool()
@@ -4348,7 +4341,7 @@ class CampaignAgent(BaseAgent):
             self.logger.error(f"Campaign overview failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def get_active_campaigns(self) -> Dict:
+    async def get_active_campaigns(self) -> dict:
         """Get currently active campaigns"""
         try:
             pool = get_pool()
@@ -4377,7 +4370,7 @@ class CampaignAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def get_campaign_performance(self, campaign_id: str) -> Dict:
+    async def get_campaign_performance(self, campaign_id: str) -> dict:
         """Get detailed performance for a specific campaign"""
         try:
             pool = get_pool()
@@ -4431,7 +4424,7 @@ class CampaignAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def create_campaign(self, task: Dict) -> Dict:
+    async def create_campaign(self, task: dict) -> dict:
         """Create a new nurture campaign"""
         try:
             pool = get_pool()
@@ -4461,7 +4454,7 @@ class EmailMarketingAgent(BaseAgent):
     def __init__(self):
         super().__init__("EmailMarketingAgent", "marketing")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute email marketing tasks"""
         action = task.get('action', task.get('type', 'overview'))
 
@@ -4476,7 +4469,7 @@ class EmailMarketingAgent(BaseAgent):
         else:
             return await self.get_email_overview()
 
-    async def get_email_overview(self) -> Dict:
+    async def get_email_overview(self) -> dict:
         """Get overview of email marketing with REAL data"""
         try:
             pool = get_pool()
@@ -4537,7 +4530,7 @@ class EmailMarketingAgent(BaseAgent):
             self.logger.error(f"Email overview failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def get_pending_emails(self) -> Dict:
+    async def get_pending_emails(self) -> dict:
         """Get pending/scheduled emails"""
         try:
             pool = get_pool()
@@ -4566,7 +4559,7 @@ class EmailMarketingAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def get_engagement_report(self) -> Dict:
+    async def get_engagement_report(self) -> dict:
         """Get email engagement metrics"""
         try:
             pool = get_pool()
@@ -4605,7 +4598,7 @@ class EmailMarketingAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def get_sequence_status(self, sequence_id: str) -> Dict:
+    async def get_sequence_status(self, sequence_id: str) -> dict:
         """Get status of a specific email sequence"""
         try:
             pool = get_pool()
@@ -4626,7 +4619,7 @@ class EmailMarketingAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def queue_email(self, task: Dict) -> Dict:
+    async def queue_email(self, task: dict) -> dict:
         """Queue an email for sending"""
         try:
             pool = get_pool()
@@ -4658,7 +4651,7 @@ class InventoryAgent(BaseAgent):
     def __init__(self):
         super().__init__("InventoryAgent", "operations")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute inventory management tasks"""
         action = task.get('action', task.get('type', 'overview'))
 
@@ -4671,7 +4664,7 @@ class InventoryAgent(BaseAgent):
         else:
             return await self.get_inventory_overview()
 
-    async def get_inventory_overview(self) -> Dict:
+    async def get_inventory_overview(self) -> dict:
         """Get overview of inventory/materials usage from REAL job data"""
         try:
             pool = get_pool()
@@ -4747,7 +4740,7 @@ class InventoryAgent(BaseAgent):
             self.logger.error(f"Inventory overview failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def check_low_stock(self) -> Dict:
+    async def check_low_stock(self) -> dict:
         """Check for jobs with cost overruns (proxy for potential material issues)"""
         try:
             pool = get_pool()
@@ -4780,7 +4773,7 @@ class InventoryAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def get_usage_report(self) -> Dict:
+    async def get_usage_report(self) -> dict:
         """Get material usage report based on job costs"""
         try:
             pool = get_pool()
@@ -4807,7 +4800,7 @@ class InventoryAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def forecast_demand(self) -> Dict:
+    async def forecast_demand(self) -> dict:
         """Forecast material demand based on historical job patterns"""
         try:
             pool = get_pool()
@@ -4853,7 +4846,7 @@ class SchedulingAgent(BaseAgent):
     def __init__(self):
         super().__init__("SchedulingAgent", "operations")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute scheduling tasks"""
         action = task.get('action', task.get('type', 'overview'))
 
@@ -4868,7 +4861,7 @@ class SchedulingAgent(BaseAgent):
         else:
             return await self.get_scheduling_overview()
 
-    async def get_scheduling_overview(self) -> Dict:
+    async def get_scheduling_overview(self) -> dict:
         """Get overview of job scheduling with REAL data"""
         try:
             pool = get_pool()
@@ -4936,7 +4929,7 @@ class SchedulingAgent(BaseAgent):
             self.logger.error(f"Scheduling overview failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def analyze_capacity(self) -> Dict:
+    async def analyze_capacity(self) -> dict:
         """Analyze current capacity vs workload"""
         try:
             pool = get_pool()
@@ -4973,7 +4966,7 @@ class SchedulingAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def get_upcoming_jobs(self) -> Dict:
+    async def get_upcoming_jobs(self) -> dict:
         """Get upcoming/pending jobs"""
         try:
             pool = get_pool()
@@ -5000,7 +4993,7 @@ class SchedulingAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def analyze_workload(self) -> Dict:
+    async def analyze_workload(self) -> dict:
         """Analyze workload by tenant/team"""
         try:
             pool = get_pool()
@@ -5027,7 +5020,7 @@ class SchedulingAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def suggest_optimization(self) -> Dict:
+    async def suggest_optimization(self) -> dict:
         """Suggest scheduling optimizations"""
         try:
             pool = get_pool()
@@ -5074,7 +5067,7 @@ class NotificationAgent(BaseAgent):
     def __init__(self):
         super().__init__("NotificationAgent", "communications")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute notification tasks"""
         action = task.get('action', task.get('type', 'overview'))
 
@@ -5087,7 +5080,7 @@ class NotificationAgent(BaseAgent):
         else:
             return await self.get_notification_overview()
 
-    async def get_notification_overview(self) -> Dict:
+    async def get_notification_overview(self) -> dict:
         """Get overview of notifications from REAL system data"""
         try:
             pool = get_pool()
@@ -5144,7 +5137,7 @@ class NotificationAgent(BaseAgent):
             self.logger.error(f"Notification overview failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def get_pending_notifications(self) -> Dict:
+    async def get_pending_notifications(self) -> dict:
         """Get pending/unresolved notifications"""
         try:
             pool = get_pool()
@@ -5164,7 +5157,7 @@ class NotificationAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def get_notification_history(self) -> Dict:
+    async def get_notification_history(self) -> dict:
         """Get notification history"""
         try:
             pool = get_pool()
@@ -5182,7 +5175,7 @@ class NotificationAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def send_notification(self, task: Dict) -> Dict:
+    async def send_notification(self, task: dict) -> dict:
         """Create/send a notification"""
         try:
             pool = get_pool()
@@ -5212,7 +5205,7 @@ class OnboardingAgent(BaseAgent):
     def __init__(self):
         super().__init__("OnboardingAgent", "customer_success")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute onboarding tasks"""
         action = task.get('action', task.get('type', 'overview'))
 
@@ -5223,7 +5216,7 @@ class OnboardingAgent(BaseAgent):
         else:
             return await self.get_onboarding_overview()
 
-    async def get_onboarding_overview(self) -> Dict:
+    async def get_onboarding_overview(self) -> dict:
         """Get overview of customer onboarding with REAL data"""
         try:
             pool = get_pool()
@@ -5283,7 +5276,7 @@ class OnboardingAgent(BaseAgent):
             self.logger.error(f"Onboarding overview failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def get_new_customers(self) -> Dict:
+    async def get_new_customers(self) -> dict:
         """Get recently added customers"""
         try:
             pool = get_pool()
@@ -5309,7 +5302,7 @@ class OnboardingAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def analyze_engagement(self) -> Dict:
+    async def analyze_engagement(self) -> dict:
         """Analyze new customer engagement"""
         try:
             pool = get_pool()
@@ -5342,7 +5335,7 @@ class ComplianceAgent(BaseAgent):
     def __init__(self):
         super().__init__("ComplianceAgent", "security")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute compliance tasks"""
         action = task.get('action', task.get('type', 'overview'))
 
@@ -5353,7 +5346,7 @@ class ComplianceAgent(BaseAgent):
         else:
             return await self.get_compliance_overview()
 
-    async def get_compliance_overview(self) -> Dict:
+    async def get_compliance_overview(self) -> dict:
         """Get compliance overview with REAL data"""
         try:
             pool = get_pool()
@@ -5406,7 +5399,7 @@ class ComplianceAgent(BaseAgent):
             self.logger.error(f"Compliance overview failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    def _calculate_compliance_score(self, data_quality: Dict) -> float:
+    def _calculate_compliance_score(self, data_quality: dict) -> float:
         """Calculate a compliance score based on data quality"""
         if not data_quality:
             return 0.0
@@ -5419,7 +5412,7 @@ class ComplianceAgent(BaseAgent):
         # Score from 0-100, with fewer issues = higher score
         return max(0, 100 - min(issues, 100))
 
-    async def run_audit(self) -> Dict:
+    async def run_audit(self) -> dict:
         """Run a compliance audit"""
         try:
             pool = get_pool()
@@ -5441,7 +5434,7 @@ class ComplianceAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def _check_access_logs(self, pool) -> Dict:
+    async def _check_access_logs(self, pool) -> dict:
         """Check access logging"""
         try:
             count = await pool.fetchrow("""
@@ -5456,7 +5449,7 @@ class ComplianceAgent(BaseAgent):
         except Exception:
             return {"status": "error"}
 
-    async def check_data_integrity(self) -> Dict:
+    async def check_data_integrity(self) -> dict:
         """Check data integrity"""
         try:
             pool = get_pool()
@@ -5484,7 +5477,7 @@ class MetricsCalculatorAgent(BaseAgent):
     def __init__(self):
         super().__init__("MetricsCalculator", "analytics")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute metrics calculation tasks"""
         action = task.get('action', task.get('type', 'overview'))
 
@@ -5497,7 +5490,7 @@ class MetricsCalculatorAgent(BaseAgent):
         else:
             return await self.get_metrics_overview()
 
-    async def get_metrics_overview(self) -> Dict:
+    async def get_metrics_overview(self) -> dict:
         """Get overview of key metrics with REAL data"""
         try:
             pool = get_pool()
@@ -5555,7 +5548,7 @@ class MetricsCalculatorAgent(BaseAgent):
             self.logger.error(f"Metrics overview failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def calculate_kpis(self) -> Dict:
+    async def calculate_kpis(self) -> dict:
         """Calculate key performance indicators"""
         try:
             pool = get_pool()
@@ -5586,7 +5579,7 @@ class MetricsCalculatorAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def calculate_trends(self) -> Dict:
+    async def calculate_trends(self) -> dict:
         """Calculate trend metrics over time"""
         try:
             pool = get_pool()
@@ -5611,7 +5604,7 @@ class MetricsCalculatorAgent(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def calculate_custom_metric(self, task: Dict) -> Dict:
+    async def calculate_custom_metric(self, task: dict) -> dict:
         """Calculate a custom metric based on query"""
         metric_name = task.get('metric_name', 'custom')
         try:
@@ -5661,7 +5654,7 @@ class SystemImprovementAgentAdapter(BaseAgent):
                 logger.warning("MCP integration not available for SystemImprovement")
         return self._mcp_client
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         tenant_id = task.get("tenant_id", "default")
         try:
             from system_improvement_agent import SystemImprovementAgent
@@ -5690,7 +5683,7 @@ class SystemImprovementAgentAdapter(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def _mcp_trigger_deployment(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def _mcp_trigger_deployment(self, task: dict[str, Any]) -> dict[str, Any]:
         """Trigger deployment via MCP Bridge"""
         mcp = await self._get_mcp_client()
         if not mcp:
@@ -5710,7 +5703,7 @@ class SystemImprovementAgentAdapter(BaseAgent):
         except Exception as e:
             return {"status": "error", "action": "mcp_deploy", "error": str(e)}
 
-    async def _mcp_scale_service(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def _mcp_scale_service(self, task: dict[str, Any]) -> dict[str, Any]:
         """Scale service via MCP Bridge"""
         mcp = await self._get_mcp_client()
         if not mcp:
@@ -5757,7 +5750,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
                 logger.warning("MCP integration not available for DevOpsOptimization")
         return self._mcp_client
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         tenant_id = task.get("tenant_id", "default")
         try:
             from devops_optimization_agent import DevOpsOptimizationAgent
@@ -5794,7 +5787,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def _mcp_restart_service(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def _mcp_restart_service(self, task: dict[str, Any]) -> dict[str, Any]:
         """Restart a Render service via MCP"""
         mcp = await self._get_mcp_client()
         if not mcp:
@@ -5821,7 +5814,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
         except Exception as e:
             return {"status": "error", "action": "mcp_restart_service", "error": str(e)}
 
-    async def _mcp_get_logs(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def _mcp_get_logs(self, task: dict[str, Any]) -> dict[str, Any]:
         """Get service logs via MCP"""
         mcp = await self._get_mcp_client()
         if not mcp:
@@ -5848,7 +5841,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
         except Exception as e:
             return {"status": "error", "action": "mcp_get_logs", "error": str(e)}
 
-    async def _mcp_trigger_deploy(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def _mcp_trigger_deploy(self, task: dict[str, Any]) -> dict[str, Any]:
         """Trigger deployment via MCP"""
         mcp = await self._get_mcp_client()
         if not mcp:
@@ -5874,7 +5867,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
         except Exception as e:
             return {"status": "error", "action": "mcp_trigger_deploy", "error": str(e)}
 
-    async def _mcp_full_health_recovery(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def _mcp_full_health_recovery(self, task: dict[str, Any]) -> dict[str, Any]:
         """
         Automated health recovery workflow:
         1. Check all services
@@ -5947,7 +5940,7 @@ class CodeQualityAgentAdapter(BaseAgent):
     def __init__(self):
         super().__init__("CodeQuality", "code_quality")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         tenant_id = task.get("tenant_id", "default")
         try:
             from code_quality_agent import CodeQualityAgent
@@ -5965,7 +5958,7 @@ class CustomerSuccessAgentAdapter(BaseAgent):
     def __init__(self):
         super().__init__("CustomerSuccess", "customer_success")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         tenant_id = task.get("tenant_id", "default")
         try:
             from customer_success_agent import CustomerSuccessAgent
@@ -5988,7 +5981,7 @@ class CompetitiveIntelligenceAgentAdapter(BaseAgent):
     def __init__(self):
         super().__init__("CompetitiveIntelligence", "competitive_intelligence")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         tenant_id = task.get("tenant_id", "default")
         try:
             from competitive_intelligence_agent import CompetitiveIntelligenceAgent
@@ -6011,7 +6004,7 @@ class VisionAlignmentAgentAdapter(BaseAgent):
     def __init__(self):
         super().__init__("VisionAlignment", "vision_alignment")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         tenant_id = task.get("tenant_id", "default")
         try:
             from vision_alignment_agent import VisionAlignmentAgent

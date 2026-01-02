@@ -21,16 +21,17 @@ Usage:
             )
 """
 
-import os
 import json
 import logging
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from typing import Dict, Any, Optional, List
+import os
+import uuid
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-import uuid
+from typing import Any, Optional
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
@@ -113,12 +114,12 @@ class AUREAIntegration:
     async def record_decision(
         self,
         decision_type: str,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         decision: str,
         rationale: str,
         confidence: float = 0.5,
-        outcome: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        outcome: Optional[dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None
     ) -> Optional[str]:
         """
         Record an agent decision to the AUREA memory system.
@@ -137,7 +138,7 @@ class AUREAIntegration:
         """
         conn = self._get_db_connection()
         if not conn:
-            logger.warning(f"Cannot record decision - DB connection failed")
+            logger.warning("Cannot record decision - DB connection failed")
             return None
 
         decision_id = str(uuid.uuid4())
@@ -194,7 +195,7 @@ class AUREAIntegration:
     async def update_decision_outcome(
         self,
         decision_id: str,
-        outcome: Dict[str, Any],
+        outcome: dict[str, Any],
         success: bool = True
     ) -> bool:
         """
@@ -247,7 +248,7 @@ class AUREAIntegration:
         self,
         decision_type: Optional[str] = None,
         limit: int = 10
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Query historical decisions for learning context.
 
@@ -301,7 +302,7 @@ class AUREAIntegration:
     async def store_observation(
         self,
         observation_type: str,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         importance: float = 0.5
     ) -> bool:
         """
@@ -354,10 +355,10 @@ class AUREAIntegration:
 
     async def get_learning_context(
         self,
-        observation_types: Optional[List[str]] = None,
+        observation_types: Optional[list[str]] = None,
         min_importance: float = 0.3,
         limit: int = 20
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Get historical observations for learning context.
 

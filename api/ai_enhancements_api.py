@@ -13,12 +13,13 @@ Features:
 - Enhanced learning predictions
 """
 
-import logging
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, Body
+from typing import Any, Optional
+
+from fastapi import APIRouter, Body, Query, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/ai/enhanced", tags=["AI Enhanced Systems"])
 
 # Lazy imports
 _wiring_bridge = None
-_websocket_clients: List[WebSocket] = []
+_websocket_clients: list[WebSocket] = []
 
 
 def get_wiring_bridge():
@@ -115,7 +116,7 @@ async def update_module_health(
     latency_p95_ms: float = Body(default=0.0),
     request_count: int = Body(default=0),
     success_count: int = Body(default=0),
-    custom_metrics: Dict[str, float] = Body(default={})
+    custom_metrics: dict[str, float] = Body(default={})
 ):
     """Update health metrics for a module"""
     bridge = get_wiring_bridge()
@@ -311,7 +312,7 @@ async def get_recovery_history(limit: int = Query(default=100, le=500)):
 @router.post("/recovery/trigger/{module}")
 async def trigger_recovery_check(
     module: str,
-    metrics: Dict[str, float] = Body(...)
+    metrics: dict[str, float] = Body(...)
 ):
     """Manually trigger recovery check for a module"""
     bridge = get_wiring_bridge()
@@ -348,7 +349,7 @@ async def register_recovery_rule(
     if not bridge:
         return {"error": "Enhancement system not available"}
 
-    from ai_system_enhancements import RecoveryRule, RecoveryAction
+    from ai_system_enhancements import RecoveryAction, RecoveryRule
 
     try:
         recovery_action = RecoveryAction(action)
@@ -384,7 +385,7 @@ async def get_learning_stats():
 @router.post("/learning/predict")
 async def predict_outcome(
     operation_type: str = Body(...),
-    context: Dict[str, Any] = Body(...)
+    context: dict[str, Any] = Body(...)
 ):
     """Predict outcome for an operation"""
     bridge = get_wiring_bridge()
@@ -412,7 +413,7 @@ async def predict_outcome(
 @router.post("/learning/record")
 async def record_learning(
     operation_type: str = Body(...),
-    context: Dict[str, Any] = Body(...),
+    context: dict[str, Any] = Body(...),
     outcome: str = Body(...),
     success: bool = Body(...)
 ):
@@ -448,7 +449,7 @@ async def get_system_status():
 # WEBSOCKET STREAMING
 # =============================================================================
 
-async def broadcast_event(event: Dict[str, Any]):
+async def broadcast_event(event: dict[str, Any]):
     """Broadcast event to all connected WebSocket clients"""
     global _websocket_clients
     event["timestamp"] = datetime.now(timezone.utc).isoformat()

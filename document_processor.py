@@ -5,25 +5,25 @@ Automatically processes and understands uploaded documents
 Converted to async asyncpg for non-blocking database operations
 """
 
-import os
+import asyncio
+import base64
+import hashlib
+import io
 import json
 import logging
-import uuid
-import hashlib
-import asyncio
 import mimetypes
-from typing import Dict, List
+import os
+import uuid
 from datetime import datetime, timezone
 from enum import Enum
-import httpx
-from openai import OpenAI
-import PyPDF2
+
 import docx
+import httpx
 import openpyxl
-from PIL import Image
+import PyPDF2
 import pytesseract
-import io
-import base64
+from openai import OpenAI
+from PIL import Image
 
 # Import async database connection
 from database.async_connection import get_pool
@@ -243,7 +243,7 @@ class DocumentProcessor:
         filename: str = None,
         user_id: str = None,
         source: str = "manual",
-        metadata: Dict = None
+        metadata: dict = None
     ) -> str:
         """Upload a document to storage and create database record"""
         try:
@@ -346,7 +346,7 @@ class DocumentProcessor:
         except Exception as e:
             logger.error(f"Failed to queue document: {e}")
 
-    async def process_document(self, document_id: str) -> Dict:
+    async def process_document(self, document_id: str) -> dict:
         """Process a document - extract text, analyze, and create embeddings"""
         try:
             pool = get_pool()
@@ -448,7 +448,7 @@ class DocumentProcessor:
                 'error': str(e)
             }
 
-    async def _extract_text(self, document: Dict) -> Dict:
+    async def _extract_text(self, document: dict) -> dict:
         """Extract text from document based on type"""
         try:
             doc_type = document['document_type']
@@ -507,7 +507,7 @@ class DocumentProcessor:
                 response = await client.get(storage_url)
                 return response.content
 
-    async def _extract_pdf_text(self, content: bytes) -> Dict:
+    async def _extract_pdf_text(self, content: bytes) -> dict:
         """Extract text from PDF"""
         try:
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
@@ -526,7 +526,7 @@ class DocumentProcessor:
             # Fall back to OCR
             return await self._extract_with_ocr(content)
 
-    async def _extract_word_text(self, content: bytes) -> Dict:
+    async def _extract_word_text(self, content: bytes) -> dict:
         """Extract text from Word document"""
         try:
             doc = docx.Document(io.BytesIO(content))
@@ -547,7 +547,7 @@ class DocumentProcessor:
             logger.error(f"Word extraction failed: {e}")
             return None
 
-    async def _extract_excel_text(self, content: bytes) -> Dict:
+    async def _extract_excel_text(self, content: bytes) -> dict:
         """Extract text from Excel"""
         try:
             workbook = openpyxl.load_workbook(io.BytesIO(content))
@@ -569,7 +569,7 @@ class DocumentProcessor:
             logger.error(f"Excel extraction failed: {e}")
             return None
 
-    async def _extract_image_text(self, content: bytes) -> Dict:
+    async def _extract_image_text(self, content: bytes) -> dict:
         """Extract text from image using OCR"""
         try:
             image = Image.open(io.BytesIO(content))
@@ -585,7 +585,7 @@ class DocumentProcessor:
             # Fall back to AI vision
             return await self._extract_with_ai_vision(content)
 
-    async def _extract_with_ocr(self, content: bytes) -> Dict:
+    async def _extract_with_ocr(self, content: bytes) -> dict:
         """Extract text using OCR"""
         try:
             # Convert to image first if needed
@@ -601,7 +601,7 @@ class DocumentProcessor:
             logger.warning("OCR extraction failed: %s", exc, exc_info=True)
             return None
 
-    async def _extract_with_ai_vision(self, content: bytes) -> Dict:
+    async def _extract_with_ai_vision(self, content: bytes) -> dict:
         """Extract text using AI vision API"""
         try:
             # Convert to base64
@@ -642,8 +642,8 @@ class DocumentProcessor:
         self,
         document_id: str,
         text: str,
-        document: Dict
-    ) -> Dict:
+        document: dict
+    ) -> dict:
         """Analyze document content using AI"""
         try:
             # Prepare analysis prompt
@@ -739,7 +739,7 @@ class DocumentProcessor:
         except Exception as e:
             logger.error(f"Failed to create embeddings: {e}")
 
-    async def _find_relationships(self, document_id: str, analysis: Dict):
+    async def _find_relationships(self, document_id: str, analysis: dict):
         """Find relationships with other documents"""
         try:
             pool = get_pool()
@@ -784,9 +784,9 @@ class DocumentProcessor:
     async def search_documents(
         self,
         query: str,
-        filters: Dict = None,
+        filters: dict = None,
         limit: int = 10
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Search documents using semantic search"""
         try:
             # Generate query embedding
@@ -842,7 +842,7 @@ class DocumentProcessor:
             logger.error(f"Failed to search documents: {e}")
             return []
 
-    async def get_document_insights(self, document_id: str) -> Dict:
+    async def get_document_insights(self, document_id: str) -> dict:
         """Get comprehensive insights for a document"""
         try:
             pool = get_pool()
@@ -898,8 +898,8 @@ class DocumentProcessor:
         self,
         document_id: str,
         action_type: str,
-        action_data: Dict = None
-    ) -> Dict:
+        action_data: dict = None
+    ) -> dict:
         """Trigger an action based on document content"""
         try:
             pool = get_pool()
@@ -952,8 +952,8 @@ class DocumentProcessor:
         self,
         document_id: str,
         action_type: str,
-        action_data: Dict
-    ) -> Dict:
+        action_data: dict
+    ) -> dict:
         """Execute specific action based on document"""
         try:
             if action_type == 'extract_invoice_data':
@@ -978,22 +978,22 @@ class DocumentProcessor:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
-    async def _extract_invoice_data(self, document_id: str) -> Dict:
+    async def _extract_invoice_data(self, document_id: str) -> dict:
         """Extract structured invoice data"""
         # Implementation for invoice extraction
         return {'success': True, 'invoice_data': {}}
 
-    async def _create_task_from_document(self, document_id: str, data: Dict) -> Dict:
+    async def _create_task_from_document(self, document_id: str, data: dict) -> dict:
         """Create task based on document content"""
         # Implementation for task creation
         return {'success': True, 'task_id': str(uuid.uuid4())}
 
-    async def _notify_team(self, document_id: str, data: Dict) -> Dict:
+    async def _notify_team(self, document_id: str, data: dict) -> dict:
         """Send notification about document"""
         # Implementation for notifications
         return {'success': True, 'notified': data.get('recipients', [])}
 
-    async def _generate_response(self, document_id: str, data: Dict) -> Dict:
+    async def _generate_response(self, document_id: str, data: dict) -> dict:
         """Generate response document"""
         # Implementation for response generation
         return {'success': True, 'response_id': str(uuid.uuid4())}

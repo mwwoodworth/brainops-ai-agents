@@ -10,16 +10,17 @@ This module:
 4. Reports execution results back to the board
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Optional
+
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from psycopg2.extras import Json, RealDictCursor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -71,12 +72,12 @@ class BoardAction:
     title: str
     description: str
     workflow_type: str
-    workflow_params: Dict[str, Any]
+    workflow_params: dict[str, Any]
     priority: int
     status: ActionStatus
     created_at: datetime
     executed_at: Optional[datetime] = None
-    result: Optional[Dict] = None
+    result: Optional[dict] = None
 
 
 class BoardActionPipeline:
@@ -98,7 +99,7 @@ class BoardActionPipeline:
             self.conn = psycopg2.connect(**_get_db_config())
         return self.conn
 
-    def _build_workflow_mapping(self) -> Dict[str, Dict]:
+    def _build_workflow_mapping(self) -> dict[str, dict]:
         """
         Map decision categories to appropriate LangGraph workflows.
         This defines what workflow to run for each type of board decision.
@@ -190,7 +191,7 @@ class BoardActionPipeline:
         finally:
             cur.close()
 
-    async def poll_approved_decisions(self) -> List[Dict]:
+    async def poll_approved_decisions(self) -> list[dict]:
         """
         Poll for approved board decisions that haven't been converted to actions yet.
         """
@@ -233,7 +234,7 @@ class BoardActionPipeline:
         finally:
             cur.close()
 
-    async def convert_decision_to_action(self, decision: Dict) -> Optional[BoardAction]:
+    async def convert_decision_to_action(self, decision: dict) -> Optional[BoardAction]:
         """
         Convert an approved board decision into an executable action.
         """
@@ -312,7 +313,7 @@ class BoardActionPipeline:
         finally:
             cur.close()
 
-    async def get_pending_actions(self, limit: int = 5) -> List[Dict]:
+    async def get_pending_actions(self, limit: int = 5) -> list[dict]:
         """
         Get pending actions ready for execution.
         """
@@ -337,7 +338,7 @@ class BoardActionPipeline:
         finally:
             cur.close()
 
-    async def execute_action(self, action: Dict) -> Dict:
+    async def execute_action(self, action: dict) -> dict:
         """
         Execute a board action by triggering the appropriate LangGraph workflow.
         """
@@ -365,7 +366,7 @@ class BoardActionPipeline:
             await self._update_action_result(action_id, 'failed', None, str(e))
             return {"status": "failed", "error": str(e)}
 
-    async def _trigger_workflow(self, workflow_type: str, params: Dict, action: Dict) -> Dict:
+    async def _trigger_workflow(self, workflow_type: str, params: dict, action: dict) -> dict:
         """
         Trigger the appropriate LangGraph workflow based on type.
         """
@@ -417,7 +418,7 @@ class BoardActionPipeline:
         finally:
             cur.close()
 
-    async def _update_action_result(self, action_id: str, status: str, result: Optional[Dict], error: str = None):
+    async def _update_action_result(self, action_id: str, status: str, result: Optional[dict], error: str = None):
         """Update action with result"""
         conn = self._get_connection()
         cur = conn.cursor()
@@ -474,7 +475,7 @@ class BoardActionPipeline:
             "results": results
         }
 
-    def get_pipeline_status(self) -> Dict:
+    def get_pipeline_status(self) -> dict:
         """Get current pipeline status"""
         conn = self._get_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)

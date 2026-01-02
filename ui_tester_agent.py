@@ -7,18 +7,19 @@ Enhanced with Gemini Vision for AI-powered visual analysis
 """
 
 import asyncio
-import os
 import base64
-import logging
 import json
-from typing import Dict, Any, List, Optional
+import logging
+import os
 from datetime import datetime
 from enum import Enum
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 try:
-    from playwright.async_api import async_playwright, Browser, BrowserContext, TimeoutError as PlaywrightTimeoutError
+    from playwright.async_api import Browser, BrowserContext, async_playwright
+    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
@@ -107,7 +108,7 @@ class UITesterAgent:
         if self.browser:
             await self.browser.close()
 
-    async def test_page_load(self, url: str, timeout: int = 30000) -> Dict[str, Any]:
+    async def test_page_load(self, url: str, timeout: int = 30000) -> dict[str, Any]:
         """Test if a page loads successfully"""
         result = {
             "url": url,
@@ -142,7 +143,7 @@ class UITesterAgent:
 
         return result
 
-    async def test_element_presence(self, url: str, selector: str, text: str = None, timeout: int = 10000) -> Dict[str, Any]:
+    async def test_element_presence(self, url: str, selector: str, text: str = None, timeout: int = 10000) -> dict[str, Any]:
         """Test if specific elements are present on the page"""
         result = {
             "url": url,
@@ -189,7 +190,7 @@ class UITesterAgent:
 
         return result
 
-    async def test_interaction(self, url: str, actions: List[Dict]) -> Dict[str, Any]:
+    async def test_interaction(self, url: str, actions: list[dict]) -> dict[str, Any]:
         """Test user interactions (clicks, form fills, etc.)"""
         result = {
             "url": url,
@@ -245,7 +246,7 @@ class UITesterAgent:
 
         return result
 
-    async def test_responsive_design(self, url: str) -> Dict[str, Any]:
+    async def test_responsive_design(self, url: str) -> dict[str, Any]:
         """Test page on different screen sizes"""
         viewports = [
             {"name": "mobile", "width": 375, "height": 667},
@@ -290,7 +291,7 @@ class UITesterAgent:
 
         return results
 
-    async def test_performance(self, url: str) -> Dict[str, Any]:
+    async def test_performance(self, url: str) -> dict[str, Any]:
         """Test page performance metrics"""
         result = {
             "url": url,
@@ -331,7 +332,7 @@ class UITesterAgent:
 
         return result
 
-    async def test_accessibility(self, url: str) -> Dict[str, Any]:
+    async def test_accessibility(self, url: str) -> dict[str, Any]:
         """Basic accessibility testing"""
         result = {
             "url": url,
@@ -393,7 +394,7 @@ class UITesterAgent:
 
         return result
 
-    async def test_api_integration(self, url: str) -> Dict[str, Any]:
+    async def test_api_integration(self, url: str) -> dict[str, Any]:
         """Test if API endpoints are being called correctly"""
         result = {
             "url": url,
@@ -437,7 +438,7 @@ class UITesterAgent:
 
         return result
 
-    async def test_visual_ai_analysis(self, url: str, app_name: str = "unknown") -> Dict[str, Any]:
+    async def test_visual_ai_analysis(self, url: str, app_name: str = "unknown") -> dict[str, Any]:
         """
         AI-powered visual analysis using Gemini Vision.
         Analyzes screenshots for:
@@ -558,7 +559,7 @@ Return your analysis in this exact JSON format:
 
         return result
 
-    async def test_visual_regression(self, url: str, baseline_path: Optional[str] = None) -> Dict[str, Any]:
+    async def test_visual_regression(self, url: str, baseline_path: Optional[str] = None) -> dict[str, Any]:
         """
         Visual regression testing - compare current screenshot to baseline.
         Uses Gemini Vision to detect meaningful visual changes.
@@ -661,7 +662,7 @@ Return JSON:
 
         return result
 
-    async def run_full_test_suite(self, app_name: str) -> Dict[str, Any]:
+    async def run_full_test_suite(self, app_name: str) -> dict[str, Any]:
         """Run complete test suite for an application"""
         if app_name not in self.test_urls:
             return {"error": f"Unknown application: {app_name}"}
@@ -761,7 +762,7 @@ Return JSON:
 
         return test_results
 
-    def format_test_report(self, results: Dict) -> str:
+    def format_test_report(self, results: dict) -> str:
         """Format test results as a readable report"""
         report = []
         report.append("=" * 60)

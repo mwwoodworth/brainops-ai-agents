@@ -17,17 +17,18 @@ Enhancements:
 - Seamless AUREA orchestrator integration
 """
 
-import os
 import asyncio
-import aiohttp
-import logging
 import hashlib
 import json
-from typing import Dict, Any, List, Optional, Callable, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
-from datetime import datetime, timedelta
+import logging
+import os
 from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Callable, Optional
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ class ToolRegistration:
     server: str
     tool_name: str
     description: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     discovered_at: datetime = field(default_factory=datetime.utcnow)
     last_used: Optional[datetime] = None
     use_count: int = 0
@@ -167,25 +168,25 @@ class MCPClient:
         self._execution_count = 0
 
         # Tool discovery and registration
-        self._registered_tools: Dict[str, ToolRegistration] = {}
+        self._registered_tools: dict[str, ToolRegistration] = {}
         self._discovery_complete = False
 
         # Caching system
-        self._cache: Dict[str, CacheEntry] = {}
+        self._cache: dict[str, CacheEntry] = {}
         self._cache_enabled = True
         self._default_cache_ttl = 300  # 5 minutes
 
         # Performance metrics
-        self._metrics: Dict[str, ToolMetrics] = defaultdict(lambda: ToolMetrics(tool_name="", server=""))
+        self._metrics: dict[str, ToolMetrics] = defaultdict(lambda: ToolMetrics(tool_name="", server=""))
         self._execution_history: deque = deque(maxlen=1000)  # Keep last 1000 executions
 
         # Retry and fallback configuration
         self._max_retries = 3
         self._retry_delay_base = 1.0  # seconds
-        self._fallback_handlers: Dict[str, Callable] = {}
+        self._fallback_handlers: dict[str, Callable] = {}
 
         # Tool chaining
-        self._chain_history: List[Dict[str, Any]] = []
+        self._chain_history: list[dict[str, Any]] = []
 
         logger.info(f"Enhanced MCPClient initialized with bridge: {self.base_url}")
 
@@ -209,7 +210,7 @@ class MCPClient:
     # ENHANCEMENT 1: TOOL DISCOVERY AND AUTO-REGISTRATION
     # =========================================================================
 
-    async def discover_tools(self, force_refresh: bool = False) -> Dict[str, List[ToolRegistration]]:
+    async def discover_tools(self, force_refresh: bool = False) -> dict[str, list[ToolRegistration]]:
         """
         Discover all available tools from the MCP Bridge
 
@@ -256,7 +257,7 @@ class MCPClient:
 
         return dict(discovered)
 
-    def _get_registered_tools_by_server(self) -> Dict[str, List[ToolRegistration]]:
+    def _get_registered_tools_by_server(self) -> dict[str, list[ToolRegistration]]:
         """Get registered tools grouped by server"""
         by_server = defaultdict(list)
         for tool in self._registered_tools.values():
@@ -278,7 +279,7 @@ class MCPClient:
     # ENHANCEMENT 2 & 3: CACHING AND EXECUTION LOGGING
     # =========================================================================
 
-    def _generate_cache_key(self, server: str, tool: str, params: Dict[str, Any]) -> str:
+    def _generate_cache_key(self, server: str, tool: str, params: dict[str, Any]) -> str:
         """Generate a cache key from execution parameters"""
         # Create a deterministic hash from server, tool, and params
         key_data = {
@@ -365,7 +366,7 @@ class MCPClient:
         self,
         server: MCPServer,
         tool: str,
-        params: Dict[str, Any],
+        params: dict[str, Any],
         cache_key: str
     ) -> MCPToolResult:
         """Execute tool with retry logic and fallback"""
@@ -468,9 +469,9 @@ class MCPClient:
     async def execute_chain(
         self,
         chain_name: str,
-        steps: List[Tuple[MCPServer, str, Dict[str, Any]]],
+        steps: list[tuple[MCPServer, str, dict[str, Any]]],
         fail_fast: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Execute a chain of MCP tools in sequence
 
@@ -530,7 +531,7 @@ class MCPClient:
 
         return chain_result
 
-    def _resolve_chain_params(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    def _resolve_chain_params(self, params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         """Resolve parameter references to chain context"""
         if not params:
             return {}
@@ -550,7 +551,7 @@ class MCPClient:
     # METRICS AND MONITORING
     # =========================================================================
 
-    def get_metrics(self, server: str = None, tool: str = None) -> Dict[str, Any]:
+    def get_metrics(self, server: str = None, tool: str = None) -> dict[str, Any]:
         """
         Get performance metrics
 
@@ -601,12 +602,12 @@ class MCPClient:
             "tools": sorted(all_metrics, key=lambda x: x["total_calls"], reverse=True)
         }
 
-    def get_execution_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_execution_history(self, limit: int = 100) -> list[dict[str, Any]]:
         """Get recent execution history"""
         history_list = list(self._execution_history)
         return history_list[-limit:] if len(history_list) > limit else history_list
 
-    def get_chain_history(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_chain_history(self, limit: int = 10) -> list[dict[str, Any]]:
         """Get recent chain execution history"""
         return self._chain_history[-limit:] if len(self._chain_history) > limit else self._chain_history
 
@@ -629,7 +630,7 @@ class MCPClient:
         self,
         server: MCPServer,
         tool: str,
-        params: Dict[str, Any] = None,
+        params: dict[str, Any] = None,
         use_cache: bool = True,
         cache_ttl: int = None
     ) -> MCPToolResult:
@@ -722,7 +723,7 @@ class MCPClient:
     # SUPABASE OPERATIONS (40 tools)
     # =========================================================================
 
-    async def supabase_query(self, sql: str, params: List[Any] = None) -> MCPToolResult:
+    async def supabase_query(self, sql: str, params: list[Any] = None) -> MCPToolResult:
         """Execute a raw SQL query on Supabase"""
         return await self.execute_tool(MCPServer.SUPABASE, "sql_query", {
             "query": sql,
@@ -749,7 +750,7 @@ class MCPClient:
             sql += f" WHERE {where}"
         return await self.supabase_query(sql, params)
 
-    async def supabase_insert(self, table: str, data: Dict[str, Any]) -> MCPToolResult:
+    async def supabase_insert(self, table: str, data: dict[str, Any]) -> MCPToolResult:
         """Insert a row into Supabase with SQL injection protection"""
         import re
         # Validate table name
@@ -890,7 +891,7 @@ class MCPClient:
     # AI OPERATIONS (OpenAI + Anthropic)
     # =========================================================================
 
-    async def openai_chat(self, messages: List[Dict], model: str = "gpt-4") -> MCPToolResult:
+    async def openai_chat(self, messages: list[dict], model: str = "gpt-4") -> MCPToolResult:
         """Send a chat completion request to OpenAI"""
         return await self.execute_tool(MCPServer.OPENAI, "chat", {
             "messages": messages,
@@ -949,8 +950,8 @@ class AUREAToolExecutor:
 
     def __init__(self):
         self.mcp = MCPClient()
-        self.execution_history: List[MCPToolResult] = []
-        self._workflow_templates: Dict[str, List] = {}
+        self.execution_history: list[MCPToolResult] = []
+        self._workflow_templates: dict[str, list] = {}
         self._critical_operations: set = {"DEPLOY", "REVENUE", "HEAL"}
         logger.info("Enhanced AUREAToolExecutor initialized - 245+ tools available")
 
@@ -1020,9 +1021,9 @@ class AUREAToolExecutor:
     async def execute_workflow(
         self,
         workflow_name: str,
-        params: Dict[str, Any],
+        params: dict[str, Any],
         fail_fast: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Execute a pre-defined workflow template
 
@@ -1054,11 +1055,11 @@ class AUREAToolExecutor:
 
         return await self.mcp.execute_chain(workflow_name, resolved_steps, fail_fast)
 
-    def get_available_workflows(self) -> List[str]:
+    def get_available_workflows(self) -> list[str]:
         """Get list of available workflow templates"""
         return list(self._workflow_templates.keys())
 
-    async def get_performance_metrics(self) -> Dict[str, Any]:
+    async def get_performance_metrics(self) -> dict[str, Any]:
         """Get comprehensive performance metrics"""
         mcp_metrics = self.mcp.get_metrics()
         execution_history = self.mcp.get_execution_history(limit=100)
@@ -1075,7 +1076,7 @@ class AUREAToolExecutor:
             "workflows_available": len(self._workflow_templates)
         }
 
-    async def execute_decision(self, decision_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_decision(self, decision_type: str, params: dict[str, Any]) -> dict[str, Any]:
         """
         Execute an AUREA decision using MCP tools
 
@@ -1178,10 +1179,10 @@ class SelfHealingMCPIntegration:
 
     def __init__(self):
         self.mcp = MCPClient()
-        self.restart_counts: Dict[str, int] = {}
+        self.restart_counts: dict[str, int] = {}
         self.max_restarts = 3
 
-    async def handle_unhealthy_service(self, service_name: str) -> Dict[str, Any]:
+    async def handle_unhealthy_service(self, service_name: str) -> dict[str, Any]:
         """
         Autonomous response to unhealthy service
 
@@ -1228,7 +1229,7 @@ class SelfHealingMCPIntegration:
             "message": f"Service {service_name} requires human intervention"
         }
 
-    async def get_diagnostic_info(self, service_name: str) -> Dict[str, Any]:
+    async def get_diagnostic_info(self, service_name: str) -> dict[str, Any]:
         """Get logs and metrics for diagnosis"""
         service_id = self.RENDER_SERVICE_IDS.get(service_name)
         if not service_id:
@@ -1269,7 +1270,7 @@ class RevenueMCPIntegration:
         email: str,
         name: str,
         plan: str = "pro"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Full customer onboarding flow:
         1. Create Stripe customer
@@ -1325,7 +1326,7 @@ class RevenueMCPIntegration:
         customer_id: str,
         amount: int,
         description: str = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Process a one-time payment"""
         result = await self.mcp.stripe_create_payment_intent(
             amount=amount,
@@ -1348,7 +1349,7 @@ class RevenueMCPIntegration:
             "error": result.error
         }
 
-    async def get_revenue_metrics(self) -> Dict[str, Any]:
+    async def get_revenue_metrics(self) -> dict[str, Any]:
         """Get current revenue metrics from Stripe"""
         balance = await self.mcp.stripe_get_balance()
         invoices = await self.mcp.stripe_list_invoices()
@@ -1379,7 +1380,7 @@ class DigitalTwinMCPIntegration:
     def __init__(self):
         self.mcp = MCPClient()
 
-    async def sync_twin_with_reality(self, twin_id: str) -> Dict[str, Any]:
+    async def sync_twin_with_reality(self, twin_id: str) -> dict[str, Any]:
         """
         Sync a digital twin with the actual production system state
         """
@@ -1433,7 +1434,7 @@ class DigitalTwinMCPIntegration:
         self,
         twin_id: str,
         scenario: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run a simulation that interacts with real infrastructure
         (in a safe, read-only manner)

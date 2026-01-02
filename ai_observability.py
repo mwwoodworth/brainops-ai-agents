@@ -17,19 +17,20 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
-import json
-import time
 import asyncio
+import json
 import logging
+import os
 import threading
-from typing import Dict, Any, List, Optional, Callable, Set, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from enum import Enum
+import time
+import uuid
 from collections import defaultdict, deque
 from contextlib import contextmanager
-import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Any, Callable, Optional
+
 # hashlib removed - was unused
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ class ObservabilityPersistence:
         if self._enabled:
             logger.info("ObservabilityPersistence initialized with database connection")
 
-    def _get_db_config(self) -> Optional[Dict[str, Any]]:
+    def _get_db_config(self) -> Optional[dict[str, Any]]:
         """Get database configuration from environment - no hardcoded fallbacks"""
         host = os.environ.get("DB_HOST")
         database = os.environ.get("DB_NAME", "postgres")
@@ -117,7 +118,7 @@ class ObservabilityPersistence:
             return None
 
     def record_metric(self, name: str, value: float, metric_type: str,
-                      labels: Dict[str, str] = None, module: str = ""):
+                      labels: dict[str, str] = None, module: str = ""):
         """Buffer a metric for persistence"""
         if not self._enabled:
             return
@@ -132,7 +133,7 @@ class ObservabilityPersistence:
         self._maybe_flush()
 
     def record_event(self, event_type: str, source_module: str,
-                     payload: Dict[str, Any], correlation_id: str = ""):
+                     payload: dict[str, Any], correlation_id: str = ""):
         """Buffer an event for persistence"""
         if not self._enabled:
             return
@@ -210,7 +211,7 @@ class ObservabilityPersistence:
         finally:
             conn.close()
 
-    def _insert_metrics(self, cur, metrics: List[Dict]):
+    def _insert_metrics(self, cur, metrics: list[dict]):
         """Insert metrics into observability.metrics table"""
         if not metrics:
             return
@@ -238,7 +239,7 @@ class ObservabilityPersistence:
         except Exception as e:
             logger.error(f"Failed to insert metrics: {e}")
 
-    def _insert_events(self, cur, events: List[Dict]):
+    def _insert_events(self, cur, events: list[dict]):
         """Insert events into observability.logs table"""
         if not events:
             return
@@ -266,7 +267,7 @@ class ObservabilityPersistence:
         except Exception as e:
             logger.error(f"Failed to insert events: {e}")
 
-    def _insert_traces(self, cur, traces: List[Dict]):
+    def _insert_traces(self, cur, traces: list[dict]):
         """Insert traces into observability.traces table"""
         if not traces:
             return
@@ -321,7 +322,7 @@ class MetricValue:
     name: str
     value: float
     metric_type: MetricType
-    labels: Dict[str, str] = field(default_factory=dict)
+    labels: dict[str, str] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     module: str = ""
 
@@ -347,7 +348,7 @@ class Histogram:
     """
     DEFAULT_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
 
-    def __init__(self, name: str, labels: Dict[str, str] = None, buckets: List[float] = None):
+    def __init__(self, name: str, labels: dict[str, str] = None, buckets: list[float] = None):
         self.name = name
         self.labels = labels or {}
         self.buckets = [HistogramBucket(le=b) for b in (buckets or self.DEFAULT_BUCKETS)]
@@ -393,7 +394,7 @@ class Histogram:
         with self._lock:
             return self._sum / self._count if self._count > 0 else 0.0
 
-    def to_prometheus(self) -> List[str]:
+    def to_prometheus(self) -> list[str]:
         """Export in Prometheus format"""
         lines = []
         label_str = ",".join(f'{k}="{v}"' for k, v in self.labels.items())
@@ -426,7 +427,7 @@ class CorrelationContext:
     parent_span_id: Optional[str] = None
     span_id: str = field(default_factory=lambda: str(uuid.uuid4())[:16])
     start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def child_span(self, module: str) -> "CorrelationContext":
         """Create child span for nested calls"""
@@ -439,7 +440,7 @@ class CorrelationContext:
             metadata=self.metadata.copy()
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "request_id": self.request_id,
             "session_id": self.session_id,
@@ -481,7 +482,7 @@ def traced_operation(name: str, module: str):
 
     try:
         yield ctx
-    except Exception as e:
+    except Exception:
         status = "error"
         raise
     finally:
@@ -556,12 +557,12 @@ class Event:
     """Event for cross-module communication"""
     event_type: EventType
     source_module: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     correlation_id: str = ""
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "event_id": self.event_id,
             "event_type": self.event_type.value,
@@ -589,11 +590,11 @@ class EventBus:
         return cls._instance
 
     def __init__(self):
-        self._handlers: Dict[EventType, List[Callable]] = defaultdict(list)
-        self._async_handlers: Dict[EventType, List[Callable]] = defaultdict(list)
+        self._handlers: dict[EventType, list[Callable]] = defaultdict(list)
+        self._async_handlers: dict[EventType, list[Callable]] = defaultdict(list)
         self._event_history: deque = deque(maxlen=1000)
-        self._event_counts: Dict[str, int] = defaultdict(int)
-        self._subscribers: Set[Callable] = set()  # Catch-all subscribers
+        self._event_counts: dict[str, int] = defaultdict(int)
+        self._subscribers: set[Callable] = set()  # Catch-all subscribers
         self._dead_letter_queue: deque = deque(maxlen=100)
         self._lock = threading.Lock()
 
@@ -714,17 +715,17 @@ class EventBus:
                 correlation_id=event.correlation_id
             )
 
-    def get_event_counts(self) -> Dict[str, int]:
+    def get_event_counts(self) -> dict[str, int]:
         """Get event counts by type"""
         with self._lock:
             return dict(self._event_counts)
 
-    def get_recent_events(self, limit: int = 100) -> List[Dict]:
+    def get_recent_events(self, limit: int = 100) -> list[dict]:
         """Get recent events"""
         with self._lock:
             return [e.to_dict() for e in list(self._event_history)[-limit:]]
 
-    def get_dead_letters(self) -> List[Tuple[Dict, str]]:
+    def get_dead_letters(self) -> list[tuple[dict, str]]:
         """Get failed events"""
         with self._lock:
             return [(e.to_dict(), err) for e, err in self._dead_letter_queue]
@@ -751,23 +752,23 @@ class MetricsRegistry:
         return cls._instance
 
     def __init__(self):
-        self._counters: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
-        self._gauges: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
-        self._histograms: Dict[str, Histogram] = {}
-        self._metric_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
-        self._thresholds: Dict[str, Tuple[float, float]] = {}  # min, max
-        self._threshold_handlers: List[Callable] = []
+        self._counters: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        self._gauges: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        self._histograms: dict[str, Histogram] = {}
+        self._metric_history: dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
+        self._thresholds: dict[str, tuple[float, float]] = {}  # min, max
+        self._threshold_handlers: list[Callable] = []
         self._lock = threading.Lock()
         self._start_time = datetime.now(timezone.utc)
 
-    def increment_counter(self, name: str, labels: Dict[str, str] = None, value: float = 1.0):
+    def increment_counter(self, name: str, labels: dict[str, str] = None, value: float = 1.0):
         """Increment a counter"""
         label_key = self._labels_to_key(labels or {})
         with self._lock:
             self._counters[name][label_key] += value
             self._check_threshold(name, self._counters[name][label_key])
 
-    def set_gauge(self, name: str, value: float, labels: Dict[str, str] = None):
+    def set_gauge(self, name: str, value: float, labels: dict[str, str] = None):
         """Set a gauge value"""
         label_key = self._labels_to_key(labels or {})
         with self._lock:
@@ -775,7 +776,7 @@ class MetricsRegistry:
             self._metric_history[f"{name}:{label_key}"].append((datetime.now(timezone.utc), value))
             self._check_threshold(name, value)
 
-    def observe_histogram(self, name: str, value: float, labels: Dict[str, str] = None):
+    def observe_histogram(self, name: str, value: float, labels: dict[str, str] = None):
         """Record histogram observation"""
         label_key = self._labels_to_key(labels or {})
         full_name = f"{name}:{label_key}"
@@ -785,13 +786,13 @@ class MetricsRegistry:
                 self._histograms[full_name] = Histogram(name, labels)
             self._histograms[full_name].observe(value)
 
-    def get_histogram(self, name: str, labels: Dict[str, str] = None) -> Optional[Histogram]:
+    def get_histogram(self, name: str, labels: dict[str, str] = None) -> Optional[Histogram]:
         """Get histogram by name and optional labels"""
         label_key = self._labels_to_key(labels or {})
         full_name = f"{name}:{label_key}"
         return self._histograms.get(full_name)
 
-    def get_histograms_by_name(self, name: str) -> List[Histogram]:
+    def get_histograms_by_name(self, name: str) -> list[Histogram]:
         """Get all histograms matching a base name (ignoring labels)"""
         with self._lock:
             matching = []
@@ -825,11 +826,11 @@ class MetricsRegistry:
                     except Exception as e:
                         logger.error(f"Threshold handler error: {e}")
 
-    def _labels_to_key(self, labels: Dict[str, str]) -> str:
+    def _labels_to_key(self, labels: dict[str, str]) -> str:
         """Convert labels dict to hashable key"""
         return json.dumps(labels, sort_keys=True)
 
-    def _key_to_labels(self, key: str) -> Dict[str, str]:
+    def _key_to_labels(self, key: str) -> dict[str, str]:
         """Convert key back to labels dict"""
         return json.loads(key) if key else {}
 
@@ -866,7 +867,7 @@ class MetricsRegistry:
 
         return "\n".join(lines)
 
-    def get_all_metrics(self) -> Dict[str, Any]:
+    def get_all_metrics(self) -> dict[str, Any]:
         """Get all metrics as dictionary"""
         with self._lock:
             metrics = {
@@ -913,8 +914,8 @@ class MetricsRegistry:
 
             return metrics
 
-    def get_metric_history(self, name: str, labels: Dict[str, str] = None,
-                          since: datetime = None) -> List[Tuple[datetime, float]]:
+    def get_metric_history(self, name: str, labels: dict[str, str] = None,
+                          since: datetime = None) -> list[tuple[datetime, float]]:
         """Get metric history for time-series analysis"""
         label_key = self._labels_to_key(labels or {})
         full_name = f"{name}:{label_key}"
@@ -1091,11 +1092,11 @@ class ObservabilityController:
         self.circuit_breaker = CircuitBreakerMetrics()
 
         # Anomaly detection
-        self._anomaly_thresholds: Dict[str, Dict] = {}
-        self._anomaly_handlers: List[Callable] = []
+        self._anomaly_thresholds: dict[str, dict] = {}
+        self._anomaly_handlers: list[Callable] = []
 
         # Dashboard state
-        self._dashboard_data: Dict[str, Any] = {}
+        self._dashboard_data: dict[str, Any] = {}
         self._last_dashboard_update = datetime.now(timezone.utc)
 
         logger.info("ObservabilityController initialized")
@@ -1104,7 +1105,7 @@ class ObservabilityController:
         """Get all metrics in Prometheus format"""
         return self.metrics.export_prometheus()
 
-    def get_dashboard_data(self) -> Dict[str, Any]:
+    def get_dashboard_data(self) -> dict[str, Any]:
         """Get aggregated data for dashboard"""
         return {
             "metrics": self.metrics.get_all_metrics(),
@@ -1117,7 +1118,7 @@ class ObservabilityController:
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
-    def _calculate_overall_health(self) -> Dict[str, Any]:
+    def _calculate_overall_health(self) -> dict[str, Any]:
         """Calculate overall system health from metrics"""
         all_metrics = self.metrics.get_all_metrics()
 
@@ -1176,7 +1177,7 @@ class ObservabilityController:
             lambda name, val, thresh: self._handle_anomaly(name, val, thresh)
         )
 
-    def _handle_anomaly(self, metric_name: str, value: float, thresholds: Tuple[float, float]):
+    def _handle_anomaly(self, metric_name: str, value: float, thresholds: tuple[float, float]):
         """Handle detected anomaly"""
         for handler in self._anomaly_handlers:
             try:
@@ -1215,7 +1216,7 @@ def get_metrics() -> MetricsRegistry:
     return MetricsRegistry.get_instance()
 
 
-def publish_event(event_type: EventType, source: str, payload: Dict[str, Any]):
+def publish_event(event_type: EventType, source: str, payload: dict[str, Any]):
     """Convenience function to publish event"""
     EventBus.get_instance().publish(Event(
         event_type=event_type,
@@ -1224,7 +1225,7 @@ def publish_event(event_type: EventType, source: str, payload: Dict[str, Any]):
     ))
 
 
-async def publish_event_async(event_type: EventType, source: str, payload: Dict[str, Any]):
+async def publish_event_async(event_type: EventType, source: str, payload: dict[str, Any]):
     """Convenience function to publish event asynchronously"""
     await EventBus.get_instance().publish_async(Event(
         event_type=event_type,
@@ -1246,7 +1247,7 @@ def flush_persistence():
         persistence.flush()
 
 
-def seed_observability_data() -> Dict[str, Any]:
+def seed_observability_data() -> dict[str, Any]:
     """
     Seed the observability tables with initial baseline data.
     Creates sample metrics, events, and traces for each bleeding-edge module.

@@ -18,16 +18,17 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
 import asyncio
-import aiohttp
-import logging
 import json
+import logging
+import os
 import subprocess
-from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
+from typing import Any, Optional
+
+import aiohttp
 
 logger = logging.getLogger('AUREA.Power')
 
@@ -98,14 +99,14 @@ class AUREAPowerLayer:
     def __init__(self, db_pool=None, mcp_client=None):
         self.db_pool = db_pool
         self.mcp_client = mcp_client
-        self.execution_log: List[PowerResult] = []
+        self.execution_log: list[PowerResult] = []
         logger.info("🔋 AUREA Power Layer initialized with full operational capability")
 
     # =========================================================================
     # DATABASE OPERATIONS
     # =========================================================================
 
-    async def query_database(self, sql: str, params: Tuple = (), read_only: bool = True) -> PowerResult:
+    async def query_database(self, sql: str, params: tuple = (), read_only: bool = True) -> PowerResult:
         """
         Execute a database query. By default, only allows SELECT statements.
         For mutations, set read_only=False (requires explicit confirmation).
@@ -181,7 +182,7 @@ class AUREAPowerLayer:
 
     async def get_table_info(self, table_name: str, schema: str = 'public') -> PowerResult:
         """Get information about a database table including columns and row count."""
-        sql = f"""
+        sql = """
             SELECT
                 column_name, data_type, is_nullable, column_default
             FROM information_schema.columns
@@ -345,7 +346,7 @@ class AUREAPowerLayer:
                 error=str(e)
             )
 
-    async def git_commit_and_push(self, repo_path: str, message: str, files: List[str] = None) -> PowerResult:
+    async def git_commit_and_push(self, repo_path: str, message: str, files: list[str] = None) -> PowerResult:
         """Commit changes and push to remote."""
         start = datetime.utcnow()
 
@@ -410,7 +411,7 @@ class AUREAPowerLayer:
     # UI TESTING WITH PLAYWRIGHT
     # =========================================================================
 
-    async def run_playwright_test(self, url: str, actions: List[Dict[str, Any]] = None) -> PowerResult:
+    async def run_playwright_test(self, url: str, actions: list[dict[str, Any]] = None) -> PowerResult:
         """Run Playwright UI tests against a URL."""
         start = datetime.utcnow()
         try:
@@ -712,7 +713,7 @@ class AUREAPowerLayer:
             )
 
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 content = f.read()
             duration = (datetime.utcnow() - start).total_seconds() * 1000
             return PowerResult(
@@ -780,7 +781,7 @@ class AUREAPowerLayer:
     # AUTOMATION / WORKFLOWS
     # =========================================================================
 
-    async def execute_workflow(self, workflow_name: str, params: Dict[str, Any] = None) -> PowerResult:
+    async def execute_workflow(self, workflow_name: str, params: dict[str, Any] = None) -> PowerResult:
         """Execute a predefined workflow."""
         start = datetime.utcnow()
 
@@ -823,7 +824,7 @@ class AUREAPowerLayer:
                 error=str(e)
             )
 
-    async def _workflow_full_deploy(self, params: Dict) -> Dict:
+    async def _workflow_full_deploy(self, params: dict) -> dict:
         """Full deployment workflow - backends then frontends."""
         results = {}
 
@@ -844,7 +845,7 @@ class AUREAPowerLayer:
 
         return results
 
-    async def _workflow_health_check_all(self, params: Dict) -> Dict:
+    async def _workflow_health_check_all(self, params: dict) -> dict:
         """Complete health check of all services."""
         results = {}
         results['services'] = await self.check_all_services_health()
@@ -859,7 +860,7 @@ class AUREAPowerLayer:
 
         return results
 
-    async def _workflow_db_backup_check(self, params: Dict) -> Dict:
+    async def _workflow_db_backup_check(self, params: dict) -> dict:
         """Check database backup status and key metrics."""
         results = {}
 
@@ -872,7 +873,7 @@ class AUREAPowerLayer:
 
         return results
 
-    async def _workflow_ui_smoke_test(self, params: Dict) -> Dict:
+    async def _workflow_ui_smoke_test(self, params: dict) -> dict:
         """Smoke test all frontend UIs."""
         results = {}
 
@@ -892,7 +893,7 @@ class AUREAPowerLayer:
     # SKILL REGISTRY FOR NLU
     # =========================================================================
 
-    def get_skill_registry(self) -> Dict[str, Dict[str, Any]]:
+    def get_skill_registry(self) -> dict[str, dict[str, Any]]:
         """Return the skill registry for AUREA NLU integration."""
         return {
             # Database

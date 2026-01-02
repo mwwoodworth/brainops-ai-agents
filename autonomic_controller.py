@@ -11,13 +11,14 @@ Features:
 - Resource optimization
 """
 
-import os
 import asyncio
-import logging
 import collections
-import psycopg2
-from datetime import datetime
+import logging
+import os
 from contextlib import contextmanager
+from datetime import datetime
+
+import psycopg2
 
 # ============================================================================
 # SHARED CONNECTION POOL - CRITICAL for preventing MaxClientsInSessionMode
@@ -44,10 +45,10 @@ def _get_pooled_connection():
                 conn.close()
 
 
-from typing import Dict, List, Callable, Any, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 from statistics import mean, stdev
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class Metric:
     name: str
     value: float
     timestamp: datetime
-    tags: Dict[str, str] = field(default_factory=dict)
+    tags: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -119,13 +120,13 @@ class MetricCollector:
 
     def __init__(self, window_size: int = 100):
         self.window_size = window_size
-        self.metrics: Dict[str, collections.deque] = collections.defaultdict(
+        self.metrics: dict[str, collections.deque] = collections.defaultdict(
             lambda: collections.deque(maxlen=window_size)
         )
         self._lock = asyncio.Lock()
-        self._baselines: Dict[str, float] = {}
+        self._baselines: dict[str, float] = {}
 
-    async def emit(self, name: str, value: float, tags: Dict[str, str] = None):
+    async def emit(self, name: str, value: float, tags: dict[str, str] = None):
         """Non-blocking metric emission"""
         async with self._lock:
             metric = Metric(
@@ -175,7 +176,7 @@ class MetricCollector:
         """Set baseline for anomaly detection"""
         self._baselines[name] = value
 
-    def detect_anomaly(self, name: str, threshold: float = 2.0) -> Optional[Dict]:
+    def detect_anomaly(self, name: str, threshold: float = 2.0) -> Optional[dict]:
         """Detect if current values deviate from baseline"""
         stats = self.get_stats(name)
         if not stats or name not in self._baselines:
@@ -194,7 +195,7 @@ class MetricCollector:
             }
         return None
 
-    def get_all_stats(self) -> Dict[str, MetricStats]:
+    def get_all_stats(self) -> dict[str, MetricStats]:
         """Get stats for all metrics"""
         return {name: self.get_stats(name) for name in self.metrics.keys()}
 
@@ -206,7 +207,7 @@ class EventBus:
     """
 
     def __init__(self):
-        self.subscribers: Dict[EventType, List[Callable]] = collections.defaultdict(list)
+        self.subscribers: dict[EventType, list[Callable]] = collections.defaultdict(list)
         self.event_history: collections.deque = collections.deque(maxlen=1000)
         self._lock = asyncio.Lock()
 
@@ -220,7 +221,7 @@ class EventBus:
         if callback in self.subscribers[event_type]:
             self.subscribers[event_type].remove(callback)
 
-    async def publish(self, event_type: EventType, payload: Dict[str, Any]):
+    async def publish(self, event_type: EventType, payload: dict[str, Any]):
         """Fire and forget event publishing with parallel subscriber notification"""
         async with self._lock:
             event = {
@@ -245,7 +246,7 @@ class EventBus:
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
 
-    def get_recent_events(self, event_type: EventType = None, limit: int = 50) -> List[Dict]:
+    def get_recent_events(self, event_type: EventType = None, limit: int = 50) -> list[dict]:
         """Get recent events, optionally filtered by type"""
         events = list(self.event_history)
         if event_type:
@@ -264,7 +265,7 @@ class AutonomicManager:
         self.event_bus = event_bus
         self.active = False
         self.loop_count = 0
-        self.knowledge_base: Dict[str, Any] = {}
+        self.knowledge_base: dict[str, Any] = {}
         self._init_db()
 
     def _init_db(self):
@@ -343,7 +344,7 @@ class AutonomicManager:
         self.active = False
         logger.info("⏹️ Stopping Autonomic Control Loop")
 
-    async def _monitor(self) -> Dict[str, Any]:
+    async def _monitor(self) -> dict[str, Any]:
         """MONITOR phase: Collect system state"""
         state = {
             'loop_id': self.loop_count,
@@ -369,7 +370,7 @@ class AutonomicManager:
 
         return state
 
-    async def _analyze(self, state: Dict) -> Dict[str, Any]:
+    async def _analyze(self, state: dict) -> dict[str, Any]:
         """ANALYZE phase: Identify issues and opportunities"""
         analysis = {
             'needs_healing': False,
@@ -419,7 +420,7 @@ class AutonomicManager:
 
         return analysis
 
-    async def _plan(self, analysis: Dict) -> Dict[str, Any]:
+    async def _plan(self, analysis: dict) -> dict[str, Any]:
         """PLAN phase: Determine actions to take"""
         plan = {
             'actions': [],
@@ -456,7 +457,7 @@ class AutonomicManager:
 
         return plan
 
-    async def _execute(self, plan: Dict) -> Dict[str, Any]:
+    async def _execute(self, plan: dict) -> dict[str, Any]:
         """EXECUTE phase: Take planned actions"""
         result = {
             'executed': [],
@@ -498,8 +499,8 @@ class AutonomicManager:
 
         return result
 
-    async def _update_knowledge(self, state: Dict, analysis: Dict,
-                                 plan: Dict, result: Dict):
+    async def _update_knowledge(self, state: dict, analysis: dict,
+                                 plan: dict, result: dict):
         """KNOWLEDGE phase: Update baselines and learn from outcomes"""
         # Update baselines from stable metrics
         for name, metrics in state.get('metrics', {}).items():
@@ -552,7 +553,7 @@ class PredictiveFailureDetector:
             'request_latency': 1.0
         }
 
-    async def predict_failures(self) -> List[Dict]:
+    async def predict_failures(self) -> list[dict]:
         """Predict potential failures based on trends"""
         predictions = []
 
@@ -600,7 +601,7 @@ class ResourceOptimizer:
         self.metrics = metrics
         self.event_bus = event_bus
 
-    async def optimize(self) -> Dict[str, Any]:
+    async def optimize(self) -> dict[str, Any]:
         """Run resource optimization analysis"""
         recommendations = []
 

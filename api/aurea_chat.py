@@ -12,16 +12,18 @@ Features:
 - Voice-ready architecture
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
-from fastapi.responses import StreamingResponse, JSONResponse
-from pydantic import BaseModel
-from typing import Dict, Any, Optional, List, AsyncGenerator
 import json
 import logging
 import os
-from datetime import datetime, timedelta
-from dataclasses import dataclass, asdict
 import uuid
+from collections.abc import AsyncGenerator
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +42,11 @@ class AUREAStateSnapshot:
     decisions_pending: int
     active_agents: int
     system_health_score: float
-    last_5_decisions: List[Dict]
-    last_5_actions: List[Dict]
+    last_5_decisions: list[dict]
+    last_5_actions: list[dict]
     memory_utilization: float
-    current_observations: List[str]
-    alerts: List[str]
+    current_observations: list[str]
+    alerts: list[str]
     uptime_seconds: int
     success_rate_last_100: float
 
@@ -225,12 +227,12 @@ class ConversationSession:
     def __init__(self, session_id: str, user_id: Optional[str] = None):
         self.session_id = session_id
         self.user_id = user_id
-        self.messages: List[Dict] = []
+        self.messages: list[dict] = []
         self.created_at = datetime.now()
         self.last_activity = datetime.now()
-        self.context: Dict[str, Any] = {}
+        self.context: dict[str, Any] = {}
 
-    def add_message(self, role: str, content: str, metadata: Optional[Dict] = None):
+    def add_message(self, role: str, content: str, metadata: Optional[dict] = None):
         self.messages.append({
             "role": role,
             "content": content,
@@ -239,11 +241,11 @@ class ConversationSession:
         })
         self.last_activity = datetime.now()
 
-    def get_context_window(self, max_messages: int = 20) -> List[Dict]:
+    def get_context_window(self, max_messages: int = 20) -> list[dict]:
         """Get recent messages for context"""
         return self.messages[-max_messages:]
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "session_id": self.session_id,
             "user_id": self.user_id,
@@ -254,7 +256,7 @@ class ConversationSession:
 
 
 # Session storage (in-memory for now, would be Redis in production)
-_sessions: Dict[str, ConversationSession] = {}
+_sessions: dict[str, ConversationSession] = {}
 
 
 def get_or_create_session(session_id: Optional[str] = None) -> ConversationSession:
@@ -747,8 +749,9 @@ async def execute_natural_language_command(payload: NLCommand):
     """
     try:
         # Import NLU processor
-        from aurea_nlu_processor import AUREANLUProcessor
         from langchain_openai import ChatOpenAI
+
+        from aurea_nlu_processor import AUREANLUProcessor
 
         # Get power layer
         try:

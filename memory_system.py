@@ -4,13 +4,14 @@ BrainOps AI Memory System
 Persistent memory and context management for all AI operations
 """
 
-import os
 import json
+import logging
+import os
+from datetime import datetime, timezone
+from typing import Any, Optional
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class AIMemorySystem:
             cursor.close()
             conn.close()
 
-    def get_context(self, key: str) -> Optional[Dict]:
+    def get_context(self, key: str) -> Optional[dict]:
         """Retrieve context from master memory"""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -87,7 +88,7 @@ class AIMemorySystem:
             conn.close()
 
     def record_conversation(self, session_id: str, role: str, content: str,
-                          tools_used: List[str] = None, important_facts: Dict = None):
+                          tools_used: list[str] = None, important_facts: dict = None):
         """Record conversation for learning"""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -164,7 +165,7 @@ class AIMemorySystem:
             cursor.close()
             conn.close()
 
-    def get_critical_context(self) -> Dict:
+    def get_critical_context(self) -> dict:
         """Get all critical system context"""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -192,7 +193,7 @@ class AIMemorySystem:
             cursor.close()
             conn.close()
 
-    def search_knowledge(self, query: str, category: str = None, limit: int = 10) -> List[Dict]:
+    def search_knowledge(self, query: str, category: str = None, limit: int = 10) -> list[dict]:
         """Search knowledge base"""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -225,7 +226,7 @@ class AIMemorySystem:
             cursor.close()
             conn.close()
 
-    def get_system_overview(self) -> Dict:
+    def get_system_overview(self) -> dict:
         """Get complete system overview"""
         conn = self.get_connection()
         cursor = conn.cursor()

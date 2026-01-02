@@ -6,6 +6,7 @@ Skips execution if DATABASE_URL is missing.
 """
 import os
 import sys
+
 import psycopg2
 
 REQUIRED_TABLES = {

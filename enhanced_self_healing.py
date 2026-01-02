@@ -8,18 +8,18 @@ Based on 2025 research showing 60-70% incident resolution time reduction.
 """
 
 import asyncio
-import json
-from datetime import datetime
-from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-import os
-import logging
 import hashlib
+import json
+import logging
+import os
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Optional
 
 # Use centralized MCPClient instead of duplicating MCP code
 try:
-    from mcp_integration import get_mcp_client, MCPServer
+    from mcp_integration import MCPServer, get_mcp_client
     MCP_AVAILABLE = True
 except ImportError:
     MCP_AVAILABLE = False
@@ -72,10 +72,10 @@ class Incident:
     status: IncidentStatus
     detected_at: str
     resolved_at: Optional[str]
-    metrics: Dict[str, Any]
+    metrics: dict[str, Any]
     root_cause: Optional[str]
-    remediation_steps: List[Dict[str, Any]] = field(default_factory=list)
-    escalation_history: List[Dict[str, Any]] = field(default_factory=list)
+    remediation_steps: list[dict[str, Any]] = field(default_factory=list)
+    escalation_history: list[dict[str, Any]] = field(default_factory=list)
     recovery_time_seconds: Optional[float] = None
     auto_resolved: bool = False
 
@@ -85,7 +85,7 @@ class RemediationPlan:
     """A plan for resolving an incident"""
     plan_id: str
     incident_id: str
-    actions: List[Dict[str, Any]]
+    actions: list[dict[str, Any]]
     confidence: float
     estimated_recovery_seconds: int
     requires_approval: bool
@@ -98,14 +98,15 @@ class HealthPattern:
     """A learned health pattern"""
     pattern_id: str
     component: str
-    normal_ranges: Dict[str, tuple]  # metric -> (min, max)
-    anomaly_signatures: List[Dict[str, Any]]
+    normal_ranges: dict[str, tuple]  # metric -> (min, max)
+    anomaly_signatures: list[dict[str, Any]]
     learned_from: int  # Number of data points
     last_updated: str
 
 
 
 from contextlib import asynccontextmanager
+
 
 # Connection pool helper - prefer shared pool, fallback to direct connection
 @asynccontextmanager
@@ -124,7 +125,7 @@ async def _get_db_connection(db_url: str = None):
         # Fallback to direct connection if pool unavailable
         if not db_url:
             db_url = os.getenv("DATABASE_URL")
-            
+
         if db_url:
             import asyncpg
             conn = await asyncpg.connect(db_url)
@@ -151,13 +152,13 @@ class EnhancedSelfHealing:
 
     def __init__(self):
         self.db_url = os.getenv("DATABASE_URL")
-        self.incidents: Dict[str, Incident] = {}
-        self.remediation_plans: Dict[str, RemediationPlan] = {}
-        self.health_patterns: Dict[str, HealthPattern] = {}
+        self.incidents: dict[str, Incident] = {}
+        self.remediation_plans: dict[str, RemediationPlan] = {}
+        self.health_patterns: dict[str, HealthPattern] = {}
         self._initialized = False
 
         # Remediation handlers
-        self.remediation_handlers: Dict[RemediationAction, Callable] = {}
+        self.remediation_handlers: dict[RemediationAction, Callable] = {}
 
         # Configuration
         self.auto_remediate_threshold = 0.70  # Auto-remediate if confidence > 70% (lowered for operational effectiveness)
@@ -291,8 +292,8 @@ class EnhancedSelfHealing:
         self,
         platform: str,
         tool: str,
-        params: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        params: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Execute a tool via centralized MCPClient - unified access to 345+ tools.
 
@@ -341,8 +342,8 @@ class EnhancedSelfHealing:
     async def detect_anomaly(
         self,
         component: str,
-        metrics: Dict[str, float],
-        context: Dict[str, Any] = None
+        metrics: dict[str, float],
+        context: dict[str, Any] = None
     ) -> Optional[Incident]:
         """
         Detect if current metrics indicate an anomaly
@@ -440,7 +441,7 @@ class EnhancedSelfHealing:
 
         return incident
 
-    def _matches_signature(self, metrics: Dict[str, float], signature: Dict[str, Any]) -> bool:
+    def _matches_signature(self, metrics: dict[str, float], signature: dict[str, Any]) -> bool:
         """Check if metrics match an anomaly signature"""
         conditions = signature.get("conditions", [])
 
@@ -464,7 +465,7 @@ class EnhancedSelfHealing:
 
         return len(conditions) > 0
 
-    async def _update_pattern_with_healthy_data(self, component: str, metrics: Dict[str, float]):
+    async def _update_pattern_with_healthy_data(self, component: str, metrics: dict[str, float]):
         """Update health pattern with new healthy data point"""
         pattern_id = f"pattern_{component}"
 
@@ -675,7 +676,7 @@ class EnhancedSelfHealing:
 
         return plan
 
-    async def _get_successful_actions(self, component: str, root_cause: str) -> List[Dict[str, Any]]:
+    async def _get_successful_actions(self, component: str, root_cause: str) -> list[dict[str, Any]]:
         """Get historically successful remediation actions using connection pool"""
         try:
             async with _get_db_connection(self.db_url) as conn:
@@ -742,7 +743,7 @@ class EnhancedSelfHealing:
         return success
 
     # Remediation handlers
-    async def _handle_restart_service(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_restart_service(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle service restart via MCP Bridge"""
         component = params.get("component", "unknown")
         service_id = params.get("service_id")
@@ -774,7 +775,7 @@ class EnhancedSelfHealing:
             await self._log_to_unified_brain('service_restart_failed', error_result)
             return error_result
 
-    async def _handle_scale_up(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_scale_up(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle scale up via MCP Bridge - Render/Kubernetes"""
         component = params.get("component", "unknown")
         amount = params.get("amount", 1)
@@ -823,7 +824,7 @@ class EnhancedSelfHealing:
             logger.error(f"Scale up failed: {e}")
             return {"success": False, "action": "scale_up", "error": str(e)}
 
-    async def _handle_scale_down(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_scale_down(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle scale down via MCP Bridge"""
         component = params.get("component", "unknown")
         amount = params.get("amount", 1)
@@ -872,7 +873,7 @@ class EnhancedSelfHealing:
             logger.error(f"Scale down failed: {e}")
             return {"success": False, "action": "scale_down", "error": str(e)}
 
-    async def _handle_clear_cache(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_clear_cache(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle cache clear via MCP Bridge - Supabase/Redis"""
         component = params.get("component", "unknown")
         cache_type = params.get("cache_type", "application")
@@ -915,7 +916,7 @@ class EnhancedSelfHealing:
             logger.error(f"Cache clear failed: {e}")
             return {"success": False, "action": "clear_cache", "error": str(e)}
 
-    async def _handle_failover(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_failover(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle failover via MCP Bridge - Multi-step orchestration"""
         component = params.get("component", "unknown")
         backup_region = params.get("backup_region", "us-west-2")
@@ -973,7 +974,7 @@ class EnhancedSelfHealing:
             logger.error(f"Failover failed: {e}")
             return {"success": False, "action": "failover", "error": str(e)}
 
-    async def _handle_rollback(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_rollback(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle rollback via MCP Bridge - Render/Vercel/GitHub"""
         component = params.get("component", "unknown")
         platform = params.get("platform", "render")
@@ -1051,7 +1052,7 @@ class EnhancedSelfHealing:
             await self._log_to_unified_brain('rollback_failed', error_result)
             return error_result
 
-    async def _handle_flush_connections(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_flush_connections(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle connection flush via MCP Bridge - Supabase/PostgreSQL"""
         component = params.get("component", "unknown")
         platform = params.get("platform", "supabase")
@@ -1094,7 +1095,7 @@ class EnhancedSelfHealing:
             logger.error(f"Connection flush failed: {e}")
             return {"success": False, "action": "flush_connections", "error": str(e)}
 
-    async def _handle_increase_resources(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_increase_resources(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle resource increase via MCP Bridge - Render/K8s"""
         component = params.get("component", "unknown")
         resource_type = params.get("resource_type", "memory")  # memory, cpu, disk
@@ -1268,7 +1269,7 @@ class EnhancedSelfHealing:
         except Exception as e:
             logger.error(f"Error persisting pattern: {e}")
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """Get self-healing system metrics"""
         return {
             "total_incidents": self.total_incidents,
@@ -1288,8 +1289,8 @@ class EnhancedSelfHealing:
         self,
         system_id: str,
         pattern_type: str,
-        metrics_snapshot: Dict[str, float]
-    ) -> Dict[str, Any]:
+        metrics_snapshot: dict[str, float]
+    ) -> dict[str, Any]:
         """Record a health pattern for machine learning"""
         pattern_id = self._generate_id(f"pattern:{system_id}:{pattern_type}")
 
@@ -1332,7 +1333,7 @@ class EnhancedSelfHealing:
             "message": f"Health pattern recorded for {system_id}"
         }
 
-    async def get_patterns(self, system_id: str) -> List[Dict[str, Any]]:
+    async def get_patterns(self, system_id: str) -> list[dict[str, Any]]:
         """Get all patterns for a system"""
         patterns = []
         for pattern_id, pattern in self.health_patterns.items():
@@ -1353,7 +1354,7 @@ class EnhancedSelfHealing:
         severity: str = None,
         system_id: str = None,
         limit: int = 50
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Get incidents with optional filtering"""
         incidents = []
         for incident in list(self.incidents.values())[:limit]:
@@ -1377,11 +1378,11 @@ class EnhancedSelfHealing:
             })
         return incidents
 
-    async def get_active_incidents(self) -> List[Dict[str, Any]]:
+    async def get_active_incidents(self) -> list[dict[str, Any]]:
         """Get all unresolved incidents"""
         return await self.get_incidents(status=None)
 
-    async def get_incident(self, incident_id: str) -> Optional[Dict[str, Any]]:
+    async def get_incident(self, incident_id: str) -> Optional[dict[str, Any]]:
         """Get a specific incident by ID"""
         incident = self.incidents.get(incident_id)
         if not incident:
@@ -1397,7 +1398,7 @@ class EnhancedSelfHealing:
             "metrics": incident.metrics
         }
 
-    async def get_remediation_plan(self, incident_id: str) -> Optional[Dict[str, Any]]:
+    async def get_remediation_plan(self, incident_id: str) -> Optional[dict[str, Any]]:
         """Get remediation plan for an incident"""
         plan = self.remediation_plans.get(incident_id)
         if not plan:
@@ -1417,7 +1418,7 @@ class EnhancedSelfHealing:
         approved: bool,
         approver: str,
         notes: str = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Process approval/rejection of a remediation plan"""
         plan = self.remediation_plans.get(incident_id)
         if not plan:
@@ -1445,7 +1446,7 @@ class EnhancedSelfHealing:
             await self._log_to_unified_brain('remediation_rejected', result)
             return result
 
-    async def _log_to_unified_brain(self, action_type: str, data: Dict[str, Any]):
+    async def _log_to_unified_brain(self, action_type: str, data: dict[str, Any]):
         """Log healing actions to unified_brain table using connection pool"""
         try:
             async with _get_db_connection(self.db_url) as conn:
@@ -1480,8 +1481,8 @@ enhanced_self_healing = EnhancedSelfHealing()
 # API Functions
 async def detect_system_anomaly(
     component: str,
-    metrics: Dict[str, float]
-) -> Optional[Dict[str, Any]]:
+    metrics: dict[str, float]
+) -> Optional[dict[str, Any]]:
     """Detect anomaly in system metrics"""
     await enhanced_self_healing.initialize()
     incident = await enhanced_self_healing.detect_anomaly(component, metrics)
@@ -1497,13 +1498,13 @@ async def detect_system_anomaly(
     return None
 
 
-async def get_self_healing_metrics() -> Dict[str, Any]:
+async def get_self_healing_metrics() -> dict[str, Any]:
     """Get self-healing system metrics"""
     await enhanced_self_healing.initialize()
     return enhanced_self_healing.get_metrics()
 
 
-async def get_active_incidents() -> List[Dict[str, Any]]:
+async def get_active_incidents() -> list[dict[str, Any]]:
     """Get active incidents"""
     await enhanced_self_healing.initialize()
     return [

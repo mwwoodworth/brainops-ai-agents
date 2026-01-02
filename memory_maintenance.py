@@ -4,10 +4,11 @@ Memory System Maintenance Script
 Run periodic maintenance tasks for memory coordination
 """
 
-import asyncio
 import argparse
+import asyncio
 import json
 import logging
+
 from memory_coordination_system import get_memory_coordinator
 from unified_memory_manager import get_memory_manager
 
@@ -100,7 +101,7 @@ async def run_retention(tenant_id: str = None, aggressive: bool = False):
 
     result = manager.apply_retention_policy(tenant_id=tenant_id, aggressive=aggressive)
 
-    logger.info(f"✅ Retention policy applied:")
+    logger.info("✅ Retention policy applied:")
     logger.info(f"  - Retained: {result['retained']}")
     logger.info(f"  - Removed: {result['removed']}")
     logger.info(f"  - Promoted: {result['promoted']}")
@@ -133,7 +134,7 @@ async def run_stats():
 
     print("\n📊 Master Registry:")
     print(f"  Total entries: {stats.get('total_entries', 0):,}")
-    print(f"  By layer:")
+    print("  By layer:")
     print(f"    - Ephemeral: {stats.get('ephemeral_count', 0):,}")
     print(f"    - Session: {stats.get('session_count', 0):,}")
     print(f"    - Short-term: {stats.get('short_term_count', 0):,}")

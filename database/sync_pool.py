@@ -6,11 +6,11 @@ Do NOT create your own psycopg2 connections!
 """
 
 import logging
-import threading
 import os
-from typing import Optional, Any, Dict, List
-from queue import Queue, Empty
+import threading
 from contextlib import contextmanager
+from queue import Empty, Queue
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +191,7 @@ class SyncConnectionPool:
                 logger.error(f"Execute failed: {e}")
                 return False
 
-    def fetchone(self, query: str, params: tuple = None) -> Optional[Dict[str, Any]]:
+    def fetchone(self, query: str, params: tuple = None) -> Optional[dict[str, Any]]:
         """Fetch one row as a dictionary."""
         with self.get_connection() as conn:
             if not conn:
@@ -210,7 +210,7 @@ class SyncConnectionPool:
                 logger.error(f"Fetchone failed: {e}")
                 return None
 
-    def fetchall(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
+    def fetchall(self, query: str, params: tuple = None) -> list[dict[str, Any]]:
         """Fetch all rows as list of dictionaries."""
         with self.get_connection() as conn:
             if not conn:
@@ -226,7 +226,7 @@ class SyncConnectionPool:
                 logger.error(f"Fetchall failed: {e}")
                 return []
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get pool status."""
         return {
             "initialized": self._initialized,
@@ -262,11 +262,11 @@ def sync_execute(query: str, params: tuple = None) -> bool:
     return get_sync_pool().execute(query, params)
 
 
-def sync_fetchone(query: str, params: tuple = None) -> Optional[Dict[str, Any]]:
+def sync_fetchone(query: str, params: tuple = None) -> Optional[dict[str, Any]]:
     """Fetch one row using shared pool."""
     return get_sync_pool().fetchone(query, params)
 
 
-def sync_fetchall(query: str, params: tuple = None) -> List[Dict[str, Any]]:
+def sync_fetchall(query: str, params: tuple = None) -> list[dict[str, Any]]:
     """Fetch all rows using shared pool."""
     return get_sync_pool().fetchall(query, params)

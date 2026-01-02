@@ -14,14 +14,14 @@ Author: BrainOps AI Team
 Date: 2025-12-30
 """
 
-import os
+import hashlib
 import json
 import logging
-import hashlib
+import os
 from datetime import datetime
-from typing import Any, Optional, Dict, List
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Header, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from database.async_connection import get_pool
@@ -39,7 +39,7 @@ BATCH_SIZE = 100
 EMBEDDING_DIMENSION = 1536
 
 # Track migration progress (in-memory for now, should be persisted)
-_migration_status: Dict[str, Any] = {
+_migration_status: dict[str, Any] = {
     "running": False,
     "current_table": None,
     "progress": {},
@@ -57,15 +57,15 @@ class MigrationStatus(BaseModel):
     """Migration status response"""
     running: bool
     current_table: Optional[str]
-    progress: Dict[str, Any]
-    errors: List[str]
+    progress: dict[str, Any]
+    errors: list[str]
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
 
 
 class MigrationRequest(BaseModel):
     """Migration request parameters"""
-    tables: List[str] = Field(
+    tables: list[str] = Field(
         default=["memories", "production_memory", "cns_memory"],
         description="Tables to migrate"
     )
@@ -96,7 +96,7 @@ async def get_tenant_id(
 # EMBEDDING GENERATION
 # =============================================================================
 
-async def generate_embedding(text: str) -> Optional[List[float]]:
+async def generate_embedding(text: str) -> Optional[list[float]]:
     """
     Generate REAL embedding using OpenAI with fallbacks.
     NEVER returns random vectors.
@@ -167,7 +167,7 @@ async def migrate_memories_table(
     generate_embeddings: bool = True,
     dry_run: bool = False,
     limit: Optional[int] = None
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """
     Migrate from 'memories' table to unified_ai_memory.
 
@@ -327,7 +327,7 @@ async def migrate_production_memory_table(
     generate_embeddings: bool = True,
     dry_run: bool = False,
     limit: Optional[int] = None
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """
     Migrate from 'production_memory' table to unified_ai_memory.
 
@@ -485,7 +485,7 @@ async def migrate_cns_memory_table(
     generate_embeddings: bool = True,
     dry_run: bool = False,
     limit: Optional[int] = None
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """
     Migrate from 'cns_memory' table to unified_ai_memory.
 
@@ -647,7 +647,7 @@ async def backfill_missing_embeddings(
     tenant_id: str,
     batch_size: int = 100,
     dry_run: bool = False
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Backfill embeddings for records that don't have them."""
     stats = {"total_without": 0, "processed": 0, "successful": 0, "failed": 0}
 
@@ -717,7 +717,7 @@ async def get_migration_status() -> MigrationStatus:
 @router.get("/preview")
 async def preview_migration(
     tenant_id: str = Depends(get_tenant_id)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Preview migration without executing - shows what would be migrated"""
     pool = get_pool()
 
@@ -780,7 +780,7 @@ async def start_migration(
     request: MigrationRequest,
     background_tasks: BackgroundTasks,
     tenant_id: str = Depends(get_tenant_id)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Start migration from legacy tables to unified_ai_memory.
     Runs in background to avoid timeout.
@@ -861,7 +861,7 @@ async def backfill_embeddings(
     request: BackfillRequest,
     background_tasks: BackgroundTasks,
     tenant_id: str = Depends(get_tenant_id)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Backfill missing embeddings in unified_ai_memory"""
     pool = get_pool()
 
@@ -900,7 +900,7 @@ async def migrate_single_table(
     generate_embeddings: bool = Query(default=True),
     dry_run: bool = Query(default=False),
     tenant_id: str = Depends(get_tenant_id)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Migrate a single table synchronously (use for smaller tables)"""
     pool = get_pool()
 

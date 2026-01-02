@@ -8,9 +8,9 @@ This is not a dashboard - it's INTELLIGENCE.
 """
 
 import logging
-import asyncio
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from datetime import datetime
+from typing import Any, Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -19,6 +19,7 @@ router = APIRouter(prefix="/ai/awareness", tags=["AI Awareness"])
 
 # Database pool
 from database.async_connection import get_pool
+
 
 class SystemAlert(BaseModel):
     severity: str  # critical, warning, info
@@ -30,12 +31,12 @@ class SystemAlert(BaseModel):
 class AwarenessResponse(BaseModel):
     timestamp: str
     overall_health: str
-    alerts: List[Dict[str, Any]]
-    systems: Dict[str, Any]
-    metrics: Dict[str, Any]
-    recent_activity: Dict[str, Any]
-    knowledge_summary: Dict[str, Any]
-    recommendations: List[str]
+    alerts: list[dict[str, Any]]
+    systems: dict[str, Any]
+    metrics: dict[str, Any]
+    recent_activity: dict[str, Any]
+    knowledge_summary: dict[str, Any]
+    recommendations: list[str]
 
 
 async def _safe_query(pool, query: str, *args, default=None):
@@ -48,7 +49,7 @@ async def _safe_query(pool, query: str, *args, default=None):
 
 
 @router.get("/complete")
-async def get_complete_awareness() -> Dict[str, Any]:
+async def get_complete_awareness() -> dict[str, Any]:
     """
     COMPLETE AI AWARENESS - Everything an AI needs to know
 
@@ -66,8 +67,8 @@ async def get_complete_awareness() -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail="Database not available")
 
     now = datetime.utcnow()
-    alerts: List[Dict[str, Any]] = []
-    recommendations: List[str] = []
+    alerts: list[dict[str, Any]] = []
+    recommendations: list[str] = []
 
     # ============================================
     # 1. AGENT HEALTH - Are agents actually working?
@@ -337,7 +338,7 @@ async def get_complete_awareness() -> Dict[str, Any]:
 
 
 @router.get("/alerts")
-async def get_active_alerts() -> Dict[str, Any]:
+async def get_active_alerts() -> dict[str, Any]:
     """Get only active alerts that need attention"""
     awareness = await get_complete_awareness()
     return {
@@ -349,7 +350,7 @@ async def get_active_alerts() -> Dict[str, Any]:
 
 
 @router.get("/quick")
-async def get_quick_status() -> Dict[str, Any]:
+async def get_quick_status() -> dict[str, Any]:
     """Ultra-fast status check - just the essentials"""
     pool = get_pool()
     if not pool:

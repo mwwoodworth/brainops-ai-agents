@@ -5,6 +5,7 @@ Test script to verify all modules can be imported
 
 import sys
 
+
 def test_import(module_name, description):
     """Test if a module can be imported"""
     try:
@@ -48,8 +49,9 @@ def main():
     # Test database connection
     print("\nTesting database connection...")
     try:
-        import psycopg2
         import os
+
+        import psycopg2
         from dotenv import load_dotenv
 
         load_dotenv()

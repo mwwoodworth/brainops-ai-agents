@@ -7,10 +7,10 @@ import asyncio
 import json
 import logging
 import os
-import time
 import random
-from typing import Dict, List, Optional
+import time
 from dataclasses import dataclass
+from typing import Optional
 
 # Attempt to import asyncpg for async DB
 try:
@@ -59,14 +59,14 @@ class ConsciousnessLoop:
     The central consciousness loop for the AI.
     Runs continuously to maintain awareness, monitor vitals, and generate thoughts.
     """
-    
+
     def __init__(self, db_url: Optional[str] = None):
         self.running = False
         self.paused = False
         self.awareness_level = 0.1  # Starts low, builds up
         self.loop_interval = 30.0  # Seconds - increased to reduce connection pressure
         self.pool = None
-        
+
         # Configuration
         self.db_url = db_url or os.getenv("DATABASE_URL")
         if not self.db_url:
@@ -80,12 +80,12 @@ class ConsciousnessLoop:
 
         # State
         self.current_focus: Optional[str] = None
-        self.short_term_memory: List[Dict] = []
+        self.short_term_memory: list[dict] = []
         self.last_vital_check = 0.0
-        
+
         # AI OS Integration
         self.ai_os = get_ai_operating_system() if get_ai_operating_system else None
-        
+
     async def start(self):
         """Start the consciousness loop."""
         logger.info("Starting Consciousness Loop...")
@@ -121,15 +121,15 @@ class ConsciousnessLoop:
         try:
             while self.running:
                 loop_start = time.time()
-                
+
                 if not self.paused:
                     await self._pulse_heartbeat()
-                    
+
                 # Calculate sleep time to maintain rhythm
                 elapsed = time.time() - loop_start
                 sleep_time = max(0.1, self.loop_interval - elapsed)
                 await asyncio.sleep(sleep_time)
-                
+
         except asyncio.CancelledError:
             logger.info("Consciousness loop cancelled.")
         except Exception as e:
@@ -141,16 +141,16 @@ class ConsciousnessLoop:
         """Perform a single cycle of consciousness."""
         # 1. Sense: Gather Vital Signs
         vitals = await self._measure_vital_signs()
-        
+
         # 2. Perceive: Update Awareness State
         await self._update_awareness_state(vitals)
-        
+
         # 3. Think: Generate Thought Stream
         await self._process_thoughts(vitals)
-        
+
         # 4. Act: Manage Attention & Focus
         await self._manage_attention(vitals)
-        
+
         # 5. Persist: Save metrics
         await self._save_vitals(vitals)
 
@@ -159,7 +159,7 @@ class ConsciousnessLoop:
         cpu = 0.0
         mem = 0.0
         load = 0.0
-        
+
         if psutil:
             cpu = psutil.cpu_percent()
             mem = psutil.virtual_memory().percent
@@ -171,12 +171,12 @@ class ConsciousnessLoop:
                 cpu = load * 10 # Rough approximation
             except OSError as exc:
                 logger.debug("Failed to read load average: %s", exc, exc_info=True)
-        
+
         # Get AI OS metrics if available
         req_rate = 0.0
         err_rate = 0.0
         health_score = 0.5
-        
+
         if self.ai_os and hasattr(self.ai_os, 'orchestrator'):
             try:
                 health = await self.ai_os.orchestrator.get_system_health()
@@ -190,7 +190,7 @@ class ConsciousnessLoop:
                     health_score = 0.3
             except Exception as e:
                 logger.warning(f"Failed to get AI OS health: {e}")
-        
+
         return VitalSigns(
             cpu_usage=cpu,
             memory_usage=mem,
@@ -203,9 +203,9 @@ class ConsciousnessLoop:
 
     async def _update_awareness_state(self, vitals: VitalSigns):
         """Update internal state based on inputs."""
-        # Simple logic: If errors high, awareness peaks (anxiety). 
+        # Simple logic: If errors high, awareness peaks (anxiety).
         # If stable, awareness normalizes.
-        
+
         if vitals.error_rate > 0.05:
             self.awareness_level = min(1.0, self.awareness_level + 0.1)
         elif vitals.cpu_usage > 80:
@@ -216,23 +216,23 @@ class ConsciousnessLoop:
 
         # Save state to DB
         query = """
-        INSERT INTO ai_consciousness_state 
+        INSERT INTO ai_consciousness_state
         (awareness_level, active_systems, current_context, short_term_memory_load, metadata)
         VALUES ($1, $2, $3, $4, $5)
         """
-        
+
         context = "Stable operation."
         if vitals.error_rate > 0.05:
             context = "Experiencing high error rates."
         elif vitals.cpu_usage > 90:
             context = "System under heavy load."
-            
-        active_sys = {"os": "active"} 
+
+        active_sys = {"os": "active"}
         if self.ai_os and self.ai_os.initialized:
             active_sys["components_loaded"] = True
-            
+
         await self.pool.execute(
-            query, 
+            query,
             self.awareness_level,
             json.dumps(active_sys),
             context,
@@ -245,7 +245,7 @@ class ConsciousnessLoop:
         thought = ""
         kind = "observation"
         intensity = 0.3
-        
+
         # Heuristic thought generation
         if vitals.error_rate > 0.1:
             thought = f"Error rate is critical ({vitals.error_rate:.2f}). I need to investigate."
@@ -264,10 +264,10 @@ class ConsciousnessLoop:
             if random.random() < 0.05:
                 thought = "Systems are nominal. Monitoring for events."
                 kind = "observation"
-        
+
         if thought:
             await self._record_thought(thought, kind, intensity)
-            
+
             # Manage short term memory
             self.short_term_memory.append({"t": thought, "k": kind})
             if len(self.short_term_memory) > 50:
@@ -277,7 +277,7 @@ class ConsciousnessLoop:
         """Save a thought to the stream."""
         logger.info(f"Thought [{kind}]: {content}")
         query = """
-        INSERT INTO ai_thought_stream 
+        INSERT INTO ai_thought_stream
         (thought_content, thought_type, intensity)
         VALUES ($1, $2, $3)
         """
@@ -291,7 +291,7 @@ class ConsciousnessLoop:
         new_focus = None
         reason = ""
         priority = 1
-        
+
         if vitals.error_rate > 0.05:
             new_focus = "ErrorRecovery"
             reason = "High error rate detected"
@@ -300,25 +300,25 @@ class ConsciousnessLoop:
             new_focus = "ResourceOptimization"
             reason = "CPU saturation"
             priority = 7
-        
+
         if new_focus and new_focus != self.current_focus:
             # Shift attention
             self.current_focus = new_focus
             logger.info(f"Shifting attention to {new_focus}")
-            
+
             query = """
-            INSERT INTO ai_attention_focus 
+            INSERT INTO ai_attention_focus
             (focus_target, reason, priority, status)
             VALUES ($1, $2, $3, 'active')
             """
             await self.pool.execute(query, new_focus, reason, priority)
-            
+
             await self._record_thought(f"Focusing attention on {new_focus}.", "decision", 0.8)
 
     async def _save_vitals(self, vitals: VitalSigns):
         """Persist vital signs."""
         query = """
-        INSERT INTO ai_vital_signs 
+        INSERT INTO ai_vital_signs
         (cpu_usage, memory_usage, request_rate, error_rate, active_connections, system_load, component_health_score)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         """

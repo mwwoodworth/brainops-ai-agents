@@ -40,5 +40,5 @@ for endpoint in new_endpoints:
         else:
             r = requests.post(f"{url}{endpoint}", json={"prompt": "test", "messages": [{"role": "user", "content": "test"}]}, timeout=3)
         print(f"{endpoint}: {r.status_code}")
-    except Exception as e:
+    except Exception:
         print(f"{endpoint}: Timeout/Error")
