@@ -237,26 +237,75 @@ class MetaAwarenessEngine:
         }
 
     def _consolidate_thought_stream(self):
-        """Consolidate old thoughts into summaries"""
+        """Consolidate old thoughts into summaries and PERSIST them"""
         # Keep last 500, summarize the rest
-        old_thoughts = self.thought_stream[:-500]
-        self.thought_stream = self.thought_stream[-500:]
+        if len(self.thought_stream) <= 500:
+            return  # Nothing to consolidate
+
+        old_thoughts = list(self.thought_stream)[:-500]
+        self.thought_stream = deque(list(self.thought_stream)[-500:], maxlen=THOUGHT_STREAM_MAX_SIZE)
+
+        if not old_thoughts:
+            return
 
         # Create summary
         summary = {
             "consolidated_at": datetime.now(timezone.utc).isoformat(),
             "thought_count": len(old_thoughts),
-            "types": defaultdict(int),
+            "types": dict(defaultdict(int)),
             "time_range": {
                 "start": old_thoughts[0].timestamp.isoformat() if old_thoughts else None,
                 "end": old_thoughts[-1].timestamp.isoformat() if old_thoughts else None
-            }
+            },
+            "key_insights": [],
+            "dominant_themes": []
         }
 
         for t in old_thoughts:
-            summary["types"][t.thought_type] += 1
+            summary["types"][t.thought_type] = summary["types"].get(t.thought_type, 0) + 1
+            # Capture high-confidence insights
+            if hasattr(t, 'confidence') and t.confidence > 0.8:
+                summary["key_insights"].append({
+                    "content": t.content[:200] if hasattr(t, 'content') else str(t)[:200],
+                    "confidence": t.confidence,
+                    "type": t.thought_type
+                })
 
-        logger.info(f"Consolidated {len(old_thoughts)} thoughts")
+        # CRITICAL FIX: Actually persist the consolidation!
+        asyncio.create_task(self._persist_consolidation(summary, old_thoughts))
+        logger.info(f"Consolidated {len(old_thoughts)} thoughts - persisting to database")
+
+    async def _persist_consolidation(self, summary: dict, old_thoughts: list):
+        """Persist thought consolidation to ai_persistent_memory"""
+        try:
+            import json
+            from db_pool import get_db_pool
+
+            pool = await get_db_pool()
+            if pool is None:
+                logger.warning("No DB pool for consolidation persistence")
+                return
+
+            # Generate a summary content for embedding
+            summary_content = f"Thought consolidation from {summary['time_range']['start']} to {summary['time_range']['end']}: {summary['thought_count']} thoughts processed. Types: {json.dumps(summary['types'])}. Key insights: {len(summary.get('key_insights', []))} high-confidence thoughts captured."
+
+            async with pool.acquire() as conn:
+                # Insert into ai_persistent_memory
+                await conn.execute("""
+                    INSERT INTO ai_persistent_memory
+                    (memory_type, content, metadata, importance, created_at)
+                    VALUES ($1, $2, $3, $4, NOW())
+                    ON CONFLICT DO NOTHING
+                """,
+                'thought_consolidation',
+                summary_content,
+                json.dumps(summary),
+                0.7  # Medium-high importance for consolidations
+                )
+
+            logger.info(f"Persisted thought consolidation with {summary['thought_count']} thoughts")
+        except Exception as e:
+            logger.error(f"Failed to persist consolidation: {e}")
 
     def elevate_awareness(self):
         """Attempt to elevate awareness level"""
