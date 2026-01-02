@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import os
+from urllib.parse import urlparse as _urlparse
 import sys
 
 import psycopg2
