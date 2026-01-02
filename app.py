@@ -143,6 +143,15 @@ except ImportError as e:
     UNIFIED_AWARENESS_AVAILABLE = False
     logger.warning(f"Unified Awareness not available: {e}")
 
+# True Self-Awareness - Live system truth, not static docs (2026-01-01)
+try:
+    from true_self_awareness import get_system_truth, get_quick_status, get_true_awareness
+    TRUE_AWARENESS_AVAILABLE = True
+    logger.info("True Self-Awareness loaded - AI OS knows its own truth")
+except ImportError as e:
+    TRUE_AWARENESS_AVAILABLE = False
+    logger.warning(f"True Self-Awareness not available: {e}")
+
 # New Pipeline Routers - Secure, authenticated endpoints
 try:
     from api.product_generation import router as product_generation_router
@@ -1974,6 +1983,45 @@ async def get_system_pulse():
         pulse = awareness.get_system_pulse()
         return pulse.to_dict()
     except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+# ============================================================================
+# TRUE SELF-AWARENESS - Live System Truth (not static documentation)
+# ============================================================================
+
+@app.get("/truth")
+async def get_truth():
+    """
+    THE TRUTH - Complete live system truth from database.
+    This is what the AI OS ACTUALLY knows about itself.
+    No static docs, no outdated info - just live truth.
+    """
+    if not TRUE_AWARENESS_AVAILABLE:
+        return {"available": False, "message": "True self-awareness not loaded"}
+
+    try:
+        truth = await get_system_truth()
+        return truth
+    except Exception as e:
+        logger.error(f"Error getting truth: {e}")
+        return {"available": False, "error": str(e)}
+
+
+@app.get("/truth/quick")
+async def get_truth_quick():
+    """
+    Quick human-readable system truth.
+    Shows what's real vs demo, what's working vs broken.
+    """
+    if not TRUE_AWARENESS_AVAILABLE:
+        return {"available": False, "message": "True self-awareness not loaded"}
+
+    try:
+        status = await get_quick_status()
+        return {"status": status}
+    except Exception as e:
+        logger.error(f"Error getting quick truth: {e}")
         return {"available": False, "error": str(e)}
 
 
