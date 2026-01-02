@@ -547,6 +547,51 @@ async def get_memories_by_category(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.get("/health")
+async def memory_health(
+    tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
+    """
+    Health check endpoint for memory system.
+    Returns operational status and basic statistics.
+    MUST be defined before /{memory_id} to avoid route collision.
+    """
+    pool = get_pool()
+
+    try:
+        stats = await pool.fetchrow("""
+            SELECT
+                COUNT(*) as total_memories,
+                COUNT(*) FILTER (WHERE embedding IS NOT NULL) as with_embeddings,
+                COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour') as recent_hour,
+                MAX(created_at) as last_memory_at
+            FROM unified_ai_memory
+            WHERE tenant_id = $1::uuid OR tenant_id IS NULL
+        """, tenant_id)
+
+        return {
+            "status": "healthy",
+            "operational": True,
+            "table": CANONICAL_TABLE,
+            "total_memories": stats["total_memories"] or 0,
+            "memories_with_embeddings": stats["with_embeddings"] or 0,
+            "memories_last_hour": stats["recent_hour"] or 0,
+            "last_memory_at": stats["last_memory_at"].isoformat() if stats["last_memory_at"] else None,
+            "tenant_id": tenant_id,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Memory health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "operational": False,
+            "error": str(e),
+            "table": CANONICAL_TABLE,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+
 @router.get("/{memory_id}")
 async def get_memory(
     memory_id: str,
