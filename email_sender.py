@@ -18,6 +18,7 @@ Version: 1.0.0
 import json
 import logging
 import os
+from urllib.parse import urlparse as _urlparse
 import smtplib
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart

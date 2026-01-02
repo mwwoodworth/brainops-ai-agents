@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+from urllib.parse import urlparse as _urlparse
 import time
 import traceback
 import uuid
@@ -40,7 +41,17 @@ def _get_db_config():
     required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
     missing = [var for var in required_vars if not os.getenv(var)]
     if missing:
-        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+        
+        # DATABASE_URL fallback
+        _db_url = os.getenv('DATABASE_URL', '')
+        if _db_url:
+            try:
+                _p = _urlparse(_db_url)
+                globals().update({'_DB_HOST': _p.hostname, '_DB_NAME': _p.path.lstrip('/'), '_DB_USER': _p.username, '_DB_PASSWORD': _p.password, '_DB_PORT': str(_p.port or 5432)})
+            except: pass
+        missing = [v for v in required_vars if not os.getenv(v) and not globals().get('_' + v)]
+        if missing:
+            raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
     return {
         "host": os.getenv("DB_HOST"),
         "database": os.getenv("DB_NAME", "postgres"),
@@ -136,6 +147,16 @@ class SelfHealingRecovery:
         # All credentials MUST come from environment variables - no hardcoded defaults
         required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
         missing = [var for var in required_vars if not os.getenv(var)]
+        if missing:
+            
+        # DATABASE_URL fallback
+        _db_url = os.getenv('DATABASE_URL', '')
+        if _db_url:
+            try:
+                _p = _urlparse(_db_url)
+                globals().update({'_DB_HOST': _p.hostname, '_DB_NAME': _p.path.lstrip('/'), '_DB_USER': _p.username, '_DB_PASSWORD': _p.password, '_DB_PORT': str(_p.port or 5432)})
+            except: pass
+        missing = [v for v in required_vars if not os.getenv(v) and not globals().get('_' + v)]
         if missing:
             raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
         self.db_config = {

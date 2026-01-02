@@ -15,6 +15,7 @@ import asyncio
 import importlib.util
 import logging
 import os
+from urllib.parse import urlparse as _urlparse
 import sys
 import warnings
 from dataclasses import dataclass
