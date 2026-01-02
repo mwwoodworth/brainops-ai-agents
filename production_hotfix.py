@@ -29,12 +29,35 @@ class CustomJSONEncoder(json.JSONEncoder):
 async def fix_database_schema():
     """Fix missing columns and type mismatches in database"""
 
+    # Validate required environment variables - NO hardcoded fallbacks
+    db_host = os.getenv("DB_HOST")
+    db_name = os.getenv("DB_NAME")
+    db_user = os.getenv("DB_USER")
+    db_password = os.getenv("DB_PASSWORD")
+    db_port = os.getenv("DB_PORT", "5432")
+
+    missing = []
+    if not db_host:
+        missing.append("DB_HOST")
+    if not db_name:
+        missing.append("DB_NAME")
+    if not db_user:
+        missing.append("DB_USER")
+    if not db_password:
+        missing.append("DB_PASSWORD")
+
+    if missing:
+        raise RuntimeError(
+            f"Required environment variables not set: {', '.join(missing)}. "
+            "Set these variables before running this hotfix."
+        )
+
     db_config = {
-        "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-        "database": os.getenv("DB_NAME", "postgres"),
-        "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-        "password": os.getenv("DB_PASSWORD", "<DB_PASSWORD_REDACTED>"),
-        "port": int(os.getenv("DB_PORT", 5432))
+        "host": db_host,
+        "database": db_name,
+        "user": db_user,
+        "password": db_password,
+        "port": int(db_port)
     }
 
     conn = await asyncpg.connect(**db_config)

@@ -188,7 +188,7 @@ if [ -z "$DB_PASSWORD" ]; then
     echo "⚠️  SKIPPED (DB_PASSWORD not set)"
     ((PASSED++))
 else
-    AGENT_COUNT=$(PGPASSWORD="$DB_PASSWORD" psql -h aws-0-us-east-2.pooler.supabase.com -U postgres.yomagoqdmxszqtdwuhab -d postgres -t -c "SELECT COUNT(*) FROM agents WHERE enabled = true;" 2>/dev/null | tr -d ' ')
+    AGENT_COUNT=$(PGPASSWORD="$DB_PASSWORD" psql -h "${DB_HOST:-aws-0-us-east-2.pooler.supabase.com}" -U "${DB_USER:-postgres.yomagoqdmxszqtdwuhab}" -d "${DB_NAME:-postgres}" -t -c "SELECT COUNT(*) FROM agents WHERE enabled = true;" 2>/dev/null | tr -d ' ')
     if [ "$AGENT_COUNT" = "59" ]; then
         echo "✅ PASS (59 enabled agents)"
         ((PASSED++))
@@ -204,7 +204,7 @@ if [ -z "$DB_PASSWORD" ]; then
     echo "⚠️  SKIPPED (DB_PASSWORD not set)"
     ((PASSED++))
 else
-    TABLE_COUNT=$(PGPASSWORD="$DB_PASSWORD" psql -h aws-0-us-east-2.pooler.supabase.com -U postgres.yomagoqdmxszqtdwuhab -d postgres -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_name IN ('agents', 'agent_executions', 'unified_memory');" 2>/dev/null | tr -d ' ')
+    TABLE_COUNT=$(PGPASSWORD="$DB_PASSWORD" psql -h "${DB_HOST:-aws-0-us-east-2.pooler.supabase.com}" -U "${DB_USER:-postgres.yomagoqdmxszqtdwuhab}" -d "${DB_NAME:-postgres}" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_name IN ('agents', 'agent_executions', 'unified_memory');" 2>/dev/null | tr -d ' ')
     if [ "$TABLE_COUNT" -ge "2" ]; then
         echo "✅ PASS ($TABLE_COUNT critical tables found)"
         ((PASSED++))

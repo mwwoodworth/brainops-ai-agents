@@ -208,15 +208,17 @@ class UIPlaywrightTestStore:
         except RuntimeError:
             pass
 
-        db_password = os.getenv("DB_PASSWORD") or os.getenv("SUPABASE_DB_PASSWORD")
-        if not db_password and os.getenv("ENVIRONMENT") == "production":
-            raise RuntimeError("DB_PASSWORD must be set for production UI testing.")
+        # Validate required environment variables
+        required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+        missing = [var for var in required_vars if not os.getenv(var)]
+        if missing:
+            raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
         pool_config = PoolConfig(
-            host=os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
+            host=os.getenv("DB_HOST"),
             port=int(os.getenv("DB_PORT", "5432")),
-            user=os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-            password=db_password or "",
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
             database=os.getenv("DB_NAME", "postgres"),
             min_size=_env_int("UI_TEST_DB_MIN_POOL", 1),
             max_size=_env_int("UI_TEST_DB_MAX_POOL", 4),

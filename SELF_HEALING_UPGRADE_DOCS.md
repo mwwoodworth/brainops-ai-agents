@@ -351,13 +351,13 @@ CREATE TABLE IF NOT EXISTS ai_rollback_history (
 
 ```bash
 # Required for Render API integration
-export RENDER_API_KEY="rnd_xxxxxxxxxxxxx"
+export RENDER_API_KEY="${RENDER_API_KEY}"
 
 # Database configuration (already set)
 export DB_HOST="aws-0-us-east-2.pooler.supabase.com"
 export DB_NAME="postgres"
 export DB_USER="postgres.yomagoqdmxszqtdwuhab"
-export DB_PASSWORD="Brain0ps2O2S"
+export DB_PASSWORD="${DB_PASSWORD}"
 export DB_PORT="5432"
 
 # Optional: Health check thresholds
@@ -548,7 +548,7 @@ CREATE TABLE IF NOT EXISTS unified_brain (
 **Solution:**
 ```bash
 # Get API key from Render dashboard
-export RENDER_API_KEY="rnd_xxxxxxxxxxxxx"
+export RENDER_API_KEY="${RENDER_API_KEY}"
 ```
 
 ### Issue: Memory leak not detected

@@ -18,14 +18,21 @@ from psycopg2.extras import RealDictCursor, Json
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD"),
-    "port": os.getenv("DB_PORT", "5432")
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        "host": os.getenv("DB_HOST"),
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": int(os.getenv("DB_PORT", "5432"))
+    }
 
 
 class AuditEventType(Enum):
@@ -189,7 +196,7 @@ class AuditLogger:
             return
 
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             for event in self.buffer:
@@ -367,7 +374,7 @@ class ComplianceChecker:
         evidence = {}
 
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             max_days = rule.conditions.get('max_retention_days', 30)
@@ -415,7 +422,7 @@ class ComplianceChecker:
         evidence = {}
 
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Check for decisions without reasoning
@@ -479,12 +486,13 @@ class ComplianceChecker:
         try:
             # Actually verify SSL connection to database
             import asyncpg
+            db_config = _get_db_config()
             pool = await asyncpg.create_pool(
-                host=os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-                database=os.getenv('DB_NAME', 'postgres'),
-                user=os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-                password=os.getenv('DB_PASSWORD', ''),
-                port=int(os.getenv('DB_PORT', '6543')),
+                host=db_config['host'],
+                database=db_config['database'],
+                user=db_config['user'],
+                password=db_config['password'],
+                port=db_config['port'],
                 ssl='require',  # Forces SSL - connection fails if SSL unavailable
                 min_size=1, max_size=1
             )
@@ -533,12 +541,13 @@ class ComplianceChecker:
 
         try:
             import asyncpg
+            db_config = _get_db_config()
             pool = await asyncpg.create_pool(
-                host=os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-                database=os.getenv('DB_NAME', 'postgres'),
-                user=os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-                password=os.getenv('DB_PASSWORD', ''),
-                port=int(os.getenv('DB_PORT', '6543')),
+                host=db_config['host'],
+                database=db_config['database'],
+                user=db_config['user'],
+                password=db_config['password'],
+                port=db_config['port'],
                 ssl='require',
                 min_size=1, max_size=1
             )
@@ -595,12 +604,13 @@ class ComplianceChecker:
 
         try:
             import asyncpg
+            db_config = _get_db_config()
             pool = await asyncpg.create_pool(
-                host=os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-                database=os.getenv('DB_NAME', 'postgres'),
-                user=os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-                password=os.getenv('DB_PASSWORD', ''),
-                port=int(os.getenv('DB_PORT', '6543')),
+                host=db_config['host'],
+                database=db_config['database'],
+                user=db_config['user'],
+                password=db_config['password'],
+                port=db_config['port'],
                 ssl='require',
                 min_size=1, max_size=1
             )
@@ -679,7 +689,7 @@ class AuditReporter:
         report_id = str(uuid.uuid4())
 
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get event summary
@@ -804,7 +814,7 @@ class AIAuditComplianceSystem:
     def _get_connection(self):
         """Get database connection"""
         if not self.conn or self.conn.closed:
-            self.conn = psycopg2.connect(**DB_CONFIG)
+            self.conn = psycopg2.connect(**_get_db_config())
         return self.conn
 
     def _init_database(self):

@@ -27,32 +27,46 @@ from psycopg2.extras import RealDictCursor, Json
 
 logger = logging.getLogger("PROACTIVE_INTELLIGENCE")
 
-# Database configuration with DATABASE_URL fallback
-def _build_db_config():
-    """Build database config, supporting both individual vars and DATABASE_URL"""
-    config = {
-        'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-        'database': os.getenv('DB_NAME', 'postgres'),
-        'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-        'password': os.getenv('DB_PASSWORD'),
-        'port': int(os.getenv('DB_PORT', 5432))
-    }
-    if not config['password']:
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    # First check individual vars
+    db_host = os.getenv('DB_HOST')
+    db_user = os.getenv('DB_USER')
+    db_password = os.getenv('DB_PASSWORD')
+
+    # If not set, try parsing DATABASE_URL
+    if not all([db_host, db_user, db_password]):
         database_url = os.getenv('DATABASE_URL', '')
         if database_url:
             from urllib.parse import urlparse
             try:
                 parsed = urlparse(database_url)
-                config['host'] = parsed.hostname or config['host']
-                config['database'] = parsed.path.lstrip('/') or config['database']
-                config['user'] = parsed.username or config['user']
-                config['password'] = parsed.password or ''
-                config['port'] = parsed.port or config['port']
+                db_host = db_host or parsed.hostname
+                db_user = db_user or parsed.username
+                db_password = db_password or parsed.password
             except Exception as e:
                 logger.error(f"Failed to parse DATABASE_URL: {e}")
-    return config
 
-DB_CONFIG = _build_db_config()
+    # Validate required vars
+    missing = []
+    if not db_host:
+        missing.append('DB_HOST')
+    if not db_user:
+        missing.append('DB_USER')
+    if not db_password:
+        missing.append('DB_PASSWORD')
+
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        'host': db_host,
+        'database': os.getenv('DB_NAME', 'postgres'),
+        'user': db_user,
+        'password': db_password,
+        'port': int(os.getenv('DB_PORT', '5432'))
+    }
 
 
 class PredictionType(Enum):
@@ -138,7 +152,7 @@ class ProactiveIntelligence:
         # self._ensure_schema() - tables already exist
 
     def _get_connection(self):
-        return psycopg2.connect(**DB_CONFIG)
+        return psycopg2.connect(**_get_db_config())
 
     def _ensure_schema(self):
         """Create required tables"""

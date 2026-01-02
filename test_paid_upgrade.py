@@ -4,6 +4,7 @@ Comprehensive test of upgraded paid AI agents service
 Tests performance improvements, consistency, and identifies any runtime errors
 """
 
+import os
 import sys
 import time
 import psycopg2
@@ -16,14 +17,40 @@ import aiohttp
 from datetime import datetime
 import statistics
 
-# Configuration
-DB_CONFIG = {
-    'host': 'aws-0-us-east-2.pooler.supabase.com',
-    'database': 'postgres',
-    'user': 'postgres.yomagoqdmxszqtdwuhab',
-    'password': '<DB_PASSWORD_REDACTED>',
-    'port': 5432
-}
+# Database configuration - NO hardcoded credentials
+def get_db_config():
+    """Get database configuration from environment variables."""
+    db_host = os.getenv('DB_HOST')
+    db_name = os.getenv('DB_NAME')
+    db_user = os.getenv('DB_USER')
+    db_password = os.getenv('DB_PASSWORD')
+    db_port = os.getenv('DB_PORT', '5432')
+
+    missing = []
+    if not db_host:
+        missing.append('DB_HOST')
+    if not db_name:
+        missing.append('DB_NAME')
+    if not db_user:
+        missing.append('DB_USER')
+    if not db_password:
+        missing.append('DB_PASSWORD')
+
+    if missing:
+        raise RuntimeError(
+            f"Required environment variables not set: {', '.join(missing)}. "
+            "Set these variables before running tests."
+        )
+
+    return {
+        'host': db_host,
+        'database': db_name,
+        'user': db_user,
+        'password': db_password,
+        'port': int(db_port)
+    }
+
+DB_CONFIG = get_db_config()
 
 AI_AGENTS_URL = "https://brainops-ai-agents.onrender.com"
 ERP_URL = "https://myroofgenius.com"

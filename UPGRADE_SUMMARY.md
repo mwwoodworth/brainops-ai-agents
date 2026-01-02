@@ -202,10 +202,10 @@ Required for full functionality:
 
 ```bash
 # Render API integration (optional but recommended)
-export RENDER_API_KEY="rnd_xxxxxxxxxxxxx"
+export RENDER_API_KEY="${RENDER_API_KEY}"
 
 # Database (already configured)
-export DB_PASSWORD="Brain0ps2O2S"
+export DB_PASSWORD="${DB_PASSWORD}"
 
 # Optional: Custom thresholds
 export HEAL_LATENCY_THRESH="5000"

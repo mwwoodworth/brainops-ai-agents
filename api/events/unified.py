@@ -448,6 +448,32 @@ class ERPEventWebhook(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
+async def verify_erp_signature(request: Request) -> bool:
+    """Verify HMAC signature from ERP webhook"""
+    import hmac
+    import hashlib
+
+    signature = request.headers.get("X-ERP-Signature") or request.headers.get("X-Webhook-Signature")
+    secret = os.getenv("ERP_WEBHOOK_SECRET", "")
+
+    if not secret:
+        logger.warning("ERP_WEBHOOK_SECRET not configured - webhook verification disabled")
+        return True  # Allow in dev mode if no secret configured
+
+    if not signature:
+        logger.error("Missing ERP webhook signature header")
+        return False
+
+    body = await request.body()
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(signature, expected):
+        logger.error("Invalid ERP webhook signature")
+        return False
+
+    return True
+
+
 @router.post("/webhook/erp", summary="Receive events from ERP SystemEventBus")
 async def handle_erp_webhook(
     webhook: ERPEventWebhook,
@@ -459,6 +485,10 @@ async def handle_erp_webhook(
 
     This transforms ERP events to unified format and processes them.
     """
+    # Verify webhook signature
+    if not await verify_erp_signature(request):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
     try:
         # Transform ERP event to unified format
         event = UnifiedEvent.from_erp_event(webhook.dict())
