@@ -15,14 +15,15 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Optional
 
 from ai_ui_testing import (
-    AIUITestingEngine,
     ERP_ROUTES,
     MRG_ROUTES,
+    AIUITestingEngine,
     TestSeverity,
     TestStatus,
     UITestResult,
@@ -43,8 +44,8 @@ class UITestTarget:
 
     name: str
     base_url: str
-    routes: List[str]
-    tags: List[str] = field(default_factory=list)
+    routes: list[str]
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -84,7 +85,7 @@ class UIIssue:
     location: Optional[str] = None
     source: Optional[str] = None
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "severity": self.severity,
             "category": self.category,
@@ -101,8 +102,8 @@ class UIPlaywrightTestStore:
 
     def __init__(self) -> None:
         self._initialized = False
-        self._memory_runs: Dict[str, Dict[str, Any]] = {}
-        self._memory_issues: List[Dict[str, Any]] = []
+        self._memory_runs: dict[str, dict[str, Any]] = {}
+        self._memory_issues: list[dict[str, Any]] = []
 
     async def initialize(self) -> None:
         if self._initialized:
@@ -115,7 +116,7 @@ class UIPlaywrightTestStore:
         await self._ensure_schema()
         self._initialized = True
 
-    async def persist_run(self, run_record: Dict[str, Any]) -> None:
+    async def persist_run(self, run_record: dict[str, Any]) -> None:
         await self.initialize()
         if using_fallback():
             self._memory_runs[run_record["test_id"]] = run_record
@@ -297,7 +298,7 @@ class UIPlaywrightTestRunner:
 
     def __init__(
         self,
-        targets: Optional[Dict[str, UITestTarget]] = None,
+        targets: Optional[dict[str, UITestTarget]] = None,
         run_config: Optional[UITestRunConfig] = None,
         store: Optional[UIPlaywrightTestStore] = None,
     ) -> None:
@@ -322,13 +323,13 @@ class UIPlaywrightTestRunner:
 
     async def run_targets(
         self,
-        target_names: Optional[List[str]] = None,
+        target_names: Optional[list[str]] = None,
         triggered_by: str = "manual",
         store_results: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         await self.initialize()
         selected = self._resolve_targets(target_names)
-        results: Dict[str, Any] = {"targets": [], "status": "completed"}
+        results: dict[str, Any] = {"targets": [], "status": "completed"}
 
         for target in selected:
             try:
@@ -358,7 +359,7 @@ class UIPlaywrightTestRunner:
         target: UITestTarget,
         triggered_by: str = "manual",
         store_results: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         await self.initialize()
         if not self._engine:
             raise RuntimeError("Playwright UI testing engine failed to initialize.")
@@ -391,7 +392,7 @@ class UIPlaywrightTestRunner:
         test_name: str = "UI Test",
         triggered_by: str = "manual",
         store_results: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         await self.initialize()
         if not self._engine:
             raise RuntimeError("Playwright UI testing engine failed to initialize.")
@@ -417,7 +418,7 @@ class UIPlaywrightTestRunner:
 
         return report["response"]
 
-    def list_targets(self) -> List[Dict[str, Any]]:
+    def list_targets(self) -> list[dict[str, Any]]:
         return [
             {
                 "name": target.name,
@@ -428,7 +429,7 @@ class UIPlaywrightTestRunner:
             for target in self.targets.values()
         ]
 
-    def _resolve_targets(self, target_names: Optional[List[str]]) -> List[UITestTarget]:
+    def _resolve_targets(self, target_names: Optional[list[str]]) -> list[UITestTarget]:
         if not target_names:
             return list(self.targets.values())
         resolved = []
@@ -444,7 +445,7 @@ class UIPlaywrightTestRunner:
             raise ValueError(f"No matching UI targets for {target_names}")
         return resolved
 
-    async def _run_routes(self, target: UITestTarget) -> List[Dict[str, Any]]:
+    async def _run_routes(self, target: UITestTarget) -> list[dict[str, Any]]:
         semaphore = asyncio.Semaphore(max(1, self.run_config.max_concurrency))
         tasks = []
         for route in target.routes:
@@ -464,11 +465,11 @@ class UIPlaywrightTestRunner:
         route: str,
         semaphore: Optional[asyncio.Semaphore] = None,
         timeout: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not self._engine:
             raise RuntimeError("Playwright UI testing engine not initialized.")
 
-        async def _execute() -> Tuple[UITestResult, float]:
+        async def _execute() -> tuple[UITestResult, float]:
             start = datetime.now(timezone.utc)
             result = await self._engine.test_url(
                 url=url,
@@ -491,7 +492,7 @@ class UIPlaywrightTestRunner:
         url: str,
         route: str,
         timeout: Optional[int],
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         try:
             if timeout:
                 result, duration_ms = await asyncio.wait_for(coroutine_factory(), timeout=timeout)
@@ -507,11 +508,11 @@ class UIPlaywrightTestRunner:
         self,
         run_id: str,
         target: UITestTarget,
-        route_results: List[Dict[str, Any]],
+        route_results: list[dict[str, Any]],
         started_at: datetime,
         completed_at: datetime,
         triggered_by: str,
-    ) -> Tuple[Dict[str, Any], List[UIIssue]]:
+    ) -> tuple[dict[str, Any], list[UIIssue]]:
         issues = _extract_issues(route_results)
         issue_payloads = [issue.as_dict() for issue in issues]
         issue_summary = _summarize_issues(issues)
@@ -568,7 +569,7 @@ class PlaywrightUITestingAgent:
         self.agent_type = "ui_testing_playwright"
         self._runner = UIPlaywrightTestRunner()
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         action = (task.get("action") or task.get("type") or "run_all").lower()
         triggered_by = task.get("triggered_by", "agent")
         store_results = task.get("store_results", True)
@@ -602,7 +603,7 @@ class PlaywrightUITestingAgent:
         return {"status": "completed", "result": result}
 
 
-def _default_targets() -> Dict[str, UITestTarget]:
+def _default_targets() -> dict[str, UITestTarget]:
     return {
         "weathercraft-erp": UITestTarget(
             name="Weathercraft ERP",
@@ -619,7 +620,7 @@ def _default_targets() -> Dict[str, UITestTarget]:
     }
 
 
-def _serialize_result(result: UITestResult, url: str, route: str, duration_ms: float) -> Dict[str, Any]:
+def _serialize_result(result: UITestResult, url: str, route: str, duration_ms: float) -> dict[str, Any]:
     ai_analysis = result.ai_analysis or {}
     return {
         "route": route,
@@ -636,7 +637,7 @@ def _serialize_result(result: UITestResult, url: str, route: str, duration_ms: f
     }
 
 
-def _timeout_result(url: str, route: str, timeout: int) -> Dict[str, Any]:
+def _timeout_result(url: str, route: str, timeout: int) -> dict[str, Any]:
     return {
         "route": route,
         "url": url,
@@ -651,7 +652,7 @@ def _timeout_result(url: str, route: str, timeout: int) -> Dict[str, Any]:
     }
 
 
-def _error_result(url: str, route: str, error: str) -> Dict[str, Any]:
+def _error_result(url: str, route: str, error: str) -> dict[str, Any]:
     return {
         "route": route,
         "url": url,
@@ -666,8 +667,8 @@ def _error_result(url: str, route: str, error: str) -> Dict[str, Any]:
     }
 
 
-def _extract_issues(route_results: List[Dict[str, Any]]) -> List[UIIssue]:
-    issues: List[UIIssue] = []
+def _extract_issues(route_results: list[dict[str, Any]]) -> list[UIIssue]:
+    issues: list[UIIssue] = []
 
     for result in route_results:
         url = result.get("url", "")
@@ -735,7 +736,7 @@ def _extract_issues(route_results: List[Dict[str, Any]]) -> List[UIIssue]:
     return issues
 
 
-def _summarize_status(route_results: List[Dict[str, Any]], issue_summary: Dict[str, Any]) -> Tuple[str, str, str]:
+def _summarize_status(route_results: list[dict[str, Any]], issue_summary: dict[str, Any]) -> tuple[str, str, str]:
     statuses = [result.get("status") for result in route_results]
     failed = sum(1 for status in statuses if status in {"failed", "error"})
     warnings = sum(1 for status in statuses if status == "warning")
@@ -751,7 +752,7 @@ def _summarize_status(route_results: List[Dict[str, Any]], issue_summary: Dict[s
     return status, severity, message
 
 
-def _summarize_performance(route_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _summarize_performance(route_results: list[dict[str, Any]]) -> dict[str, Any]:
     load_times = [
         result.get("performance_metrics", {}).get("load_complete")
         for result in route_results
@@ -766,21 +767,21 @@ def _summarize_performance(route_results: List[Dict[str, Any]]) -> Dict[str, Any
     }
 
 
-def _summarize_accessibility(route_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    aggregated: List[Dict[str, Any]] = []
+def _summarize_accessibility(route_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    aggregated: list[dict[str, Any]] = []
     for result in route_results:
         aggregated.extend(result.get("accessibility_issues", []) or [])
     return aggregated[:200]
 
 
-def _summarize_suggestions(route_results: List[Dict[str, Any]]) -> List[str]:
-    suggestions: List[str] = []
+def _summarize_suggestions(route_results: list[dict[str, Any]]) -> list[str]:
+    suggestions: list[str] = []
     for result in route_results:
         suggestions.extend(result.get("suggestions", []) or [])
     return list(dict.fromkeys(suggestions))[:25]
 
 
-def _summarize_issues(issues: List[UIIssue]) -> Dict[str, Any]:
+def _summarize_issues(issues: list[UIIssue]) -> dict[str, Any]:
     severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     max_severity = None
     for issue in issues:
@@ -840,7 +841,7 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.lower() in {"1", "true", "yes", "y", "on"}
 
 
-async def run_default_ui_tests() -> Dict[str, Any]:
+async def run_default_ui_tests() -> dict[str, Any]:
     """Convenience entrypoint to run the default UI test suite."""
     runner = UIPlaywrightTestRunner()
     return await runner.run_targets()

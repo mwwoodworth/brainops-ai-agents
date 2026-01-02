@@ -13,12 +13,13 @@ import asyncio
 import logging
 from typing import Optional
 
+from ai_board_governance import AIBoardOfDirectors, Proposal, ProposalType
+from ai_knowledge_graph import AIKnowledgeGraph, get_knowledge_graph
+from ai_self_awareness import SelfAwareAI, get_self_aware_ai
+
 # Import Core Systems
 from aurea_orchestrator import AUREA, AutonomyLevel, DecisionType
-from ai_board_governance import AIBoardOfDirectors, Proposal, ProposalType
-from ai_self_awareness import get_self_aware_ai, SelfAwareAI
-from ai_knowledge_graph import get_knowledge_graph, AIKnowledgeGraph
-from revenue_generation_system import get_revenue_system, AutonomousRevenueSystem
+from revenue_generation_system import AutonomousRevenueSystem, get_revenue_system
 
 # Configure logging
 logging.basicConfig(
@@ -36,14 +37,14 @@ class BrainOpsCore:
     def __init__(self, tenant_id: str, mode: str = "simulation"):
         self.tenant_id = tenant_id
         self.mode = mode
-        
+
         # System references
         self.aurea: Optional[AUREA] = None
         self.board: Optional[AIBoardOfDirectors] = None
         self.self_aware: Optional[SelfAwareAI] = None
         self.knowledge: Optional[AIKnowledgeGraph] = None
         self.revenue: Optional[AutonomousRevenueSystem] = None
-        
+
         logger.info(f"🧠 BrainOps Core initializing for tenant {tenant_id} in {mode} mode")
 
     async def initialize(self):
@@ -54,7 +55,7 @@ class BrainOpsCore:
         # The foundation of all intelligence
         self.knowledge = get_knowledge_graph()
         # In a real scenario, we might await a build step here
-        # await self.knowledge.build_from_all_sources() 
+        # await self.knowledge.build_from_all_sources()
         logger.info("✅ Knowledge Graph connected")
 
         # 2. Initialize Safety (Self-Awareness)
@@ -76,15 +77,15 @@ class BrainOpsCore:
         # Connects everything together
         autonomy = AutonomyLevel.FULL_AUTO if self.mode == "production" else AutonomyLevel.SEMI_AUTO
         self.aurea = AUREA(tenant_id=self.tenant_id, autonomy_level=autonomy)
-        
+
         # Inject dependencies into AUREA (Monkey-patching or future setter injection)
-        # Ideally, AUREA class should accept these in constructor. 
+        # Ideally, AUREA class should accept these in constructor.
         # For this architecture V3 implementation, we are orchestrating them here.
         self.aurea.board_ref = self.board
         self.aurea.safety_ref = self.self_aware
         self.aurea.revenue_ref = self.revenue
         self.aurea.knowledge_ref = self.knowledge
-        
+
         logger.info(f"✅ AUREA Orchestrator online (Autonomy: {autonomy.name})")
         logger.info("🚀 BrainOps Core Boot Complete")
 
@@ -118,7 +119,7 @@ class BrainOpsCore:
             if assessment.confidence_score < 80:
                 logger.warning(f"🛑 SAFETY VETO: Confidence {assessment.confidence_score}% too low for autonomous execution.")
                 decision.requires_human_approval = True
-            
+
             # 3. GOVERNANCE CHECK: AI Board validation for Strategic/High-Value decisions
             if decision.type in [DecisionType.STRATEGIC, DecisionType.FINANCIAL]:
                 logger.info("⚖️  Escalating to AI Board of Directors...")
@@ -136,11 +137,11 @@ class BrainOpsCore:
                     urgency=8,
                     created_at=decision.deadline # Approximate
                 )
-                
+
                 # Board deliberates
                 board_decision = await self.board._deliberate_proposal(proposal)
                 logger.info(f"🏛️  Board Verdict: {board_decision.decision.upper()}")
-                
+
                 if board_decision.decision != "approved":
                     logger.info(f"❌ Decision blocked by Board. Reason: {board_decision.dissenting_opinions}")
                     continue # Skip execution
@@ -153,10 +154,10 @@ class BrainOpsCore:
                      # Example: Trigger revenue workflow
                      # await self.revenue.run_revenue_workflow(...)
                      pass
-                
+
                 # Standard AUREA execution
                 await self.aurea._execute_decision(decision)
-                
+
                 # 5. MEMORY: Record in Knowledge Graph
                 # In a full implementation, this would extract nodes/edges from the result
                 # await self.knowledge.builder.build_graph(...)
@@ -167,7 +168,7 @@ class BrainOpsCore:
     async def run_forever(self):
         """Run the OS continuously"""
         await self.initialize()
-        
+
         while True:
             try:
                 await self.run_cycle()
@@ -182,9 +183,9 @@ class BrainOpsCore:
 if __name__ == "__main__":
     # Example Production Run
     TEST_TENANT = "brainops-prod-tenant"
-    
+
     core = BrainOpsCore(tenant_id=TEST_TENANT, mode="simulation")
-    
+
     try:
         asyncio.run(core.run_forever())
     except KeyboardInterrupt:

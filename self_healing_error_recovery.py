@@ -4,16 +4,17 @@ Self-Healing Error Recovery System
 AI-powered error detection, analysis, and automatic recovery
 """
 
-import os
-import json
 import asyncio
-import logging
-import traceback
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, Callable, Awaitable
-from dataclasses import dataclass, field
-from enum import Enum
 import hashlib
+import json
+import logging
+import os
+import traceback
+from collections.abc import Awaitable
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Callable, Optional
 
 # ============================================================================
 # SHARED CONNECTION POOL
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 from contextlib import contextmanager
+
 
 @contextmanager
 def _get_pooled_connection(db_config):
@@ -109,12 +111,12 @@ class ErrorEvent:
     error_type: str
     message: str
     stack_trace: Optional[str] = None
-    context: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
     correlation_id: Optional[str] = None
     tenant_id: Optional[str] = None
     user_id: Optional[str] = None
     request_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -128,9 +130,9 @@ class RecoveryAction:
     completed_at: Optional[datetime] = None
     attempt_count: int = 0
     max_attempts: int = 3
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[dict[str, Any]] = None
     error_message: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -145,7 +147,7 @@ class RecoveryPattern:
     enabled: bool = True
     success_count: int = 0
     failure_count: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -175,16 +177,16 @@ class SelfHealingErrorRecovery:
     def __init__(self):
         self._initialized = False
         self._db_config = None
-        self._error_history: Dict[str, List[ErrorEvent]] = {}
-        self._recovery_actions: Dict[str, RecoveryAction] = {}
-        self._circuit_breakers: Dict[str, CircuitBreakerState] = {}
-        self._recovery_patterns: List[RecoveryPattern] = []
-        self._custom_handlers: Dict[str, Callable] = {}
-        self._fallback_handlers: Dict[str, Callable] = {}
-        self._error_counts: Dict[str, int] = {}
+        self._error_history: dict[str, list[ErrorEvent]] = {}
+        self._recovery_actions: dict[str, RecoveryAction] = {}
+        self._circuit_breakers: dict[str, CircuitBreakerState] = {}
+        self._recovery_patterns: list[RecoveryPattern] = []
+        self._custom_handlers: dict[str, Callable] = {}
+        self._fallback_handlers: dict[str, Callable] = {}
+        self._error_counts: dict[str, int] = {}
         self._lock = asyncio.Lock()
 
-    def _get_db_config(self) -> Dict[str, Any]:
+    def _get_db_config(self) -> dict[str, Any]:
         """Get database configuration lazily with validation"""
         if not self._db_config:
             required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
@@ -376,7 +378,7 @@ class SelfHealingErrorRecovery:
         self,
         error: Exception,
         component: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[dict[str, Any]] = None,
         correlation_id: Optional[str] = None,
         tenant_id: Optional[str] = None,
         auto_recover: bool = True
@@ -863,7 +865,7 @@ class SelfHealingErrorRecovery:
     def register_custom_handler(
         self,
         component: str,
-        handler: Callable[[Dict[str, Any]], Awaitable[Any]]
+        handler: Callable[[dict[str, Any]], Awaitable[Any]]
     ):
         """Register custom recovery handler for a component"""
         self._custom_handlers[component] = handler
@@ -872,7 +874,7 @@ class SelfHealingErrorRecovery:
     def register_fallback_handler(
         self,
         component: str,
-        handler: Callable[[Dict[str, Any]], Awaitable[Any]]
+        handler: Callable[[dict[str, Any]], Awaitable[Any]]
     ):
         """Register fallback handler for a component"""
         self._fallback_handlers[component] = handler
@@ -887,7 +889,7 @@ class SelfHealingErrorRecovery:
     # MONITORING & STATS
     # ========================================================================
 
-    async def get_error_stats(self) -> Dict[str, Any]:
+    async def get_error_stats(self) -> dict[str, Any]:
         """Get error statistics"""
         return {
             "error_counts": self._error_counts.copy(),
@@ -907,7 +909,7 @@ class SelfHealingErrorRecovery:
             "total_recoveries": len(self._recovery_actions)
         }
 
-    async def get_recent_errors(self, component: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
+    async def get_recent_errors(self, component: Optional[str] = None, limit: int = 10) -> list[dict[str, Any]]:
         """Get recent errors"""
         try:
             from psycopg2.extras import RealDictCursor
@@ -938,7 +940,7 @@ class SelfHealingErrorRecovery:
             logger.error(f"Failed to get recent errors: {e}")
             return []
 
-    async def get_health_status(self) -> Dict[str, Any]:
+    async def get_health_status(self) -> dict[str, Any]:
         """Get self-healing system health status"""
         stats = await self.get_error_stats()
 
@@ -979,7 +981,7 @@ def get_self_healing_recovery() -> SelfHealingErrorRecovery:
 async def handle_error(
     error: Exception,
     component: str,
-    context: Optional[Dict[str, Any]] = None,
+    context: Optional[dict[str, Any]] = None,
     auto_recover: bool = True
 ) -> ErrorEvent:
     """Convenience function to handle errors"""
@@ -992,13 +994,13 @@ async def handle_error(
     )
 
 
-async def get_error_stats() -> Dict[str, Any]:
+async def get_error_stats() -> dict[str, Any]:
     """Get error statistics"""
     recovery = get_self_healing_recovery()
     return await recovery.get_error_stats()
 
 
-async def get_health_status() -> Dict[str, Any]:
+async def get_health_status() -> dict[str, Any]:
     """Get health status"""
     recovery = get_self_healing_recovery()
     return await recovery.get_health_status()

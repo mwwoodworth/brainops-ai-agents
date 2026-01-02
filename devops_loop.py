@@ -17,14 +17,15 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
 import asyncio
-import logging
 import json
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
+import logging
+import os
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from enum import Enum
+from typing import Any, Optional
+
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -173,7 +174,7 @@ class SystemStatus:
     version: Optional[str]
     last_check: datetime
     error: Optional[str] = None
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -183,7 +184,7 @@ class DevOpsAction:
     description: str
     timestamp: datetime
     success: bool
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
     remediation_taken: Optional[str] = None
 
 
@@ -203,8 +204,8 @@ class DevOpsLoop:
     """
 
     def __init__(self):
-        self.systems: Dict[str, SystemStatus] = {}
-        self.actions: List[DevOpsAction] = []
+        self.systems: dict[str, SystemStatus] = {}
+        self.actions: list[DevOpsAction] = []
         self.is_running = False
         self.cycle_count = 0
         self.session: Optional[aiohttp.ClientSession] = None
@@ -212,10 +213,10 @@ class DevOpsLoop:
         # Health thresholds
         self.latency_warning_ms = 1000
         self.latency_critical_ms = 5000
-        self.consecutive_failures: Dict[str, int] = {}
+        self.consecutive_failures: dict[str, int] = {}
 
         # Remediation history
-        self.remediation_cooldown: Dict[str, datetime] = {}
+        self.remediation_cooldown: dict[str, datetime] = {}
         self.cooldown_period = timedelta(minutes=5)
 
     async def start(self):
@@ -236,7 +237,7 @@ class DevOpsLoop:
         logger.info("DevOps Loop stopped")
         await self._log_thought("system", "DevOps Loop deactivated")
 
-    async def run_single_cycle(self) -> Dict[str, Any]:
+    async def run_single_cycle(self) -> dict[str, Any]:
         """Run a single OODA cycle"""
         cycle_start = datetime.now(timezone.utc)
         self.cycle_count += 1
@@ -299,7 +300,7 @@ class DevOpsLoop:
 
         return results
 
-    async def _observe(self) -> Dict[str, Any]:
+    async def _observe(self) -> dict[str, Any]:
         """OBSERVE: Monitor ALL systems comprehensively"""
         observations = {
             "backends": {},
@@ -369,7 +370,7 @@ class DevOpsLoop:
 
         return observations
 
-    async def _check_backend(self, name: str, url: str, health_endpoint: str = "/health") -> Dict[str, Any]:
+    async def _check_backend(self, name: str, url: str, health_endpoint: str = "/health") -> dict[str, Any]:
         """Check a backend service health"""
         start = datetime.now(timezone.utc)
         try:
@@ -406,7 +407,7 @@ class DevOpsLoop:
                 "timestamp": start.isoformat()
             }
 
-    async def _check_frontend(self, name: str, url: str) -> Dict[str, Any]:
+    async def _check_frontend(self, name: str, url: str) -> dict[str, Any]:
         """Check a frontend health"""
         start = datetime.now(timezone.utc)
         try:
@@ -438,7 +439,7 @@ class DevOpsLoop:
                 "timestamp": start.isoformat()
             }
 
-    async def _check_agents(self) -> Dict[str, Any]:
+    async def _check_agents(self) -> dict[str, Any]:
         """Check agent system health"""
         try:
             async with self.session.get(f"{BRAINOPS_API}/ai/awareness/complete") as resp:
@@ -456,7 +457,7 @@ class DevOpsLoop:
             return {"health": "error", "error": str(e)}
         return {"health": "unknown"}
 
-    async def _check_consciousness(self) -> Dict[str, Any]:
+    async def _check_consciousness(self) -> dict[str, Any]:
         """Check consciousness/thought stream"""
         try:
             import asyncpg
@@ -492,7 +493,7 @@ class DevOpsLoop:
         except Exception as e:
             return {"active": False, "error": str(e)}
 
-    async def _check_subsystem(self, name: str, endpoint: str, critical: bool = False) -> Dict[str, Any]:
+    async def _check_subsystem(self, name: str, endpoint: str, critical: bool = False) -> dict[str, Any]:
         """Check an internal subsystem health"""
         start = datetime.now(timezone.utc)
         try:
@@ -536,7 +537,7 @@ class DevOpsLoop:
                 "timestamp": start.isoformat()
             }
 
-    async def _check_all_agents(self) -> Dict[str, Any]:
+    async def _check_all_agents(self) -> dict[str, Any]:
         """Check ALL 59 agents comprehensively"""
         try:
             async with self.session.get(f"{BRAINOPS_API}/agents") as resp:
@@ -570,7 +571,7 @@ class DevOpsLoop:
             return {"health": "error", "error": str(e), "total_agents": 0}
         return {"health": "unknown", "total_agents": 0}
 
-    async def _check_revenue_system(self) -> Dict[str, Any]:
+    async def _check_revenue_system(self) -> dict[str, Any]:
         """Check revenue pipeline health"""
         try:
             async with self.session.get(f"{BRAINOPS_API}/revenue/status") as resp:
@@ -588,7 +589,7 @@ class DevOpsLoop:
             return {"health": "error", "error": str(e)}
         return {"health": "unknown"}
 
-    async def _check_database_health(self) -> Dict[str, Any]:
+    async def _check_database_health(self) -> dict[str, Any]:
         """Check database health and key metrics"""
         try:
             import asyncpg
@@ -630,7 +631,7 @@ class DevOpsLoop:
         except Exception as e:
             return {"health": "error", "error": str(e)}
 
-    async def _orient(self, observations: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def _orient(self, observations: dict[str, Any]) -> list[dict[str, Any]]:
         """ORIENT: Analyze observations, identify anomalies"""
         anomalies = []
 
@@ -756,7 +757,7 @@ class DevOpsLoop:
 
         return anomalies
 
-    async def _decide(self, anomalies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def _decide(self, anomalies: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """DECIDE: Determine what actions to take"""
         decisions = []
 
@@ -782,7 +783,7 @@ class DevOpsLoop:
                     decisions.append({
                         "system": system,
                         "action": "restart",
-                        "reason": f"3+ consecutive failures",
+                        "reason": "3+ consecutive failures",
                         "severity": severity
                     })
                 else:
@@ -819,7 +820,7 @@ class DevOpsLoop:
 
         return decisions
 
-    async def _act(self, decisions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def _act(self, decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """ACT: Execute remediation actions"""
         actions = []
 
@@ -887,7 +888,7 @@ class DevOpsLoop:
 
         return actions
 
-    async def _learn(self, observations: Dict, anomalies: List, actions: List):
+    async def _learn(self, observations: dict, anomalies: list, actions: list):
         """LEARN: Store comprehensive metrics for ALL systems"""
         try:
             import asyncpg
@@ -1038,7 +1039,7 @@ class DevOpsLoop:
         except Exception as e:
             logger.warning(f"Failed to store learning: {e}")
 
-    def _get_health_summary(self) -> Dict[str, str]:
+    def _get_health_summary(self) -> dict[str, str]:
         """Get health summary of all systems"""
         return {
             "overall": "healthy" if not any(
@@ -1080,7 +1081,7 @@ def get_devops_loop() -> DevOpsLoop:
     return _devops_loop
 
 
-async def run_devops_cycle() -> Dict[str, Any]:
+async def run_devops_cycle() -> dict[str, Any]:
     """Run a single DevOps cycle (for API calls)"""
     loop = get_devops_loop()
     if not loop.session:

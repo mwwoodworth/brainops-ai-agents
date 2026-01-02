@@ -1,7 +1,7 @@
 import asyncio
-import os
 import json
 import logging
+import os
 from datetime import datetime
 
 # SECURITY: Load credentials from environment or .env file
@@ -16,7 +16,7 @@ except ImportError:
 required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
 missing = [v for v in required_vars if not os.getenv(v)]
 if missing:
-    raise EnvironmentError(f"Required environment variables not set: {', '.join(missing)}. "
+    raise OSError(f"Required environment variables not set: {', '.join(missing)}. "
                           "Set them in .env file or environment.")
 
 # Set Auth Bypass for Testing (only for local test runs)
@@ -51,7 +51,7 @@ async def verify_memory_system():
     try:
         from memory_system import AIMemorySystem
         memory = AIMemorySystem()
-        
+
         # Test 1: Store Context
         key = f"verification_test_{int(datetime.now().timestamp())}"
         value = {"status": "testing", "timestamp": str(datetime.now())}
@@ -60,20 +60,20 @@ async def verify_memory_system():
             print(f"✅ Memory Store: Success (Key: {key})")
         except Exception as e:
             print(f"❌ Memory Store: Failed ({str(e)})")
-        
+
         # Test 2: Get Context (Try to get system info if test key failed)
         try:
             # Try getting 'system' context which usually exists
             retrieved = memory.get_context("system")
             if retrieved:
-                 print(f"✅ Memory Retrieve (System): Success")
+                 print("✅ Memory Retrieve (System): Success")
             else:
                  # Try the key we just stored (if it worked)
                  retrieved = memory.get_context(key)
                  if retrieved:
-                     print(f"✅ Memory Retrieve (Test Key): Success")
+                     print("✅ Memory Retrieve (Test Key): Success")
                  else:
-                     print(f"❌ Memory Retrieve: Failed")
+                     print("❌ Memory Retrieve: Failed")
         except Exception as e:
             print(f"❌ Memory Retrieve Exception: {e}")
 
@@ -81,10 +81,10 @@ async def verify_memory_system():
         try:
             overview = memory.get_system_overview()
             if overview and 'statistics' in overview:
-                 print(f"✅ System Overview: Success (Stats found)")
+                 print("✅ System Overview: Success (Stats found)")
                  print(f"   Stats: {json.dumps(overview['statistics'], default=str)}")
             else:
-                 print(f"❌ System Overview: Failed")
+                 print("❌ System Overview: Failed")
         except Exception as e:
             print(f"❌ System Overview Exception: {e}")
 
@@ -96,21 +96,21 @@ async def verify_agents():
     try:
         # Mock config if needed, but we rely on imports
         from agent_executor import AgentExecutor
-        
+
         executor = AgentExecutor()
-        
+
         results = {"success": [], "failed": []}
-        
+
         for agent_name in AGENTS:
             print(f"Testing Agent: {agent_name}...", end=" ", flush=True)
             try:
                 # Define a harmless task
                 task = {
-                    "action": "health_check", 
+                    "action": "health_check",
                     "type": "verification",
                     "description": "Verification ping"
                 }
-                
+
                 # Specific tasks for known implemented agents
                 if agent_name == "Monitor":
                     task = {"action": "backend_check"}
@@ -120,27 +120,27 @@ async def verify_agents():
                     task = {"action": "report"} # Read-only
                 elif agent_name == "SystemMonitor":
                     task = {"action": "health_check"} # Might trigger full check
-                
+
                 # We use a short timeout wrapper if possible, but AgentExecutor calls are async
                 # Just call it
                 result = await executor.execute(agent_name, task)
-                
+
                 if result and result.get("status") != "failed":
                     print("✅ OK")
                     results["success"].append(agent_name)
                 else:
                     print(f"❌ Failed (Status: {result.get('status')})")
                     results["failed"].append(agent_name)
-                    
+
             except Exception as e:
                 print(f"❌ Exception: {str(e)}")
                 results["failed"].append(agent_name)
-        
+
         print("\n=== Agent Verification Summary ===")
         print(f"Total Agents: {len(AGENTS)}")
         print(f"Success: {len(results['success'])}")
         print(f"Failed: {len(results['failed'])}")
-        
+
         if results['failed']:
             print("Failed Agents:")
             for a in results['failed']:

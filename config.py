@@ -2,9 +2,9 @@
 Configuration Management for AI Agents Service
 Centralizes all configuration with environment variable support
 """
+import logging
 import os
 from typing import Optional
-import logging
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -80,7 +80,7 @@ class SecurityConfig:
             if auth_required_env is not None
             else True
         )
-        
+
         # Build valid API keys from multiple sources
         api_keys_str = os.getenv('API_KEYS', '')
         self.valid_api_keys = set(k.strip() for k in api_keys_str.split(',') if k.strip())
@@ -115,7 +115,7 @@ class SecurityConfig:
                 "Set API_KEYS or enable a non-production test key via ALLOW_TEST_KEY. "
                 "Service will start in lockdown mode (all secured endpoints return 503)."
             )
-        
+
         cors_origins_str = os.getenv('ALLOWED_ORIGINS', '')
         if cors_origins_str:
             self.allowed_origins = cors_origins_str.split(',')

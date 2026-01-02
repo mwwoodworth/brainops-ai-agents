@@ -21,12 +21,12 @@ Version: 1.0.0
 
 import asyncio
 import json
-from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
 import logging
 import os
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,8 @@ class SystemComponent:
     status: str = "unknown"  # healthy, degraded, error, unknown
     last_updated: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     version: Optional[str] = None
-    dependencies: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    dependencies: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
     checksum: Optional[str] = None  # For detecting changes
 
 
@@ -51,8 +51,8 @@ class StateChange:
     """Records a change in system state"""
     component: str
     change_type: str  # created, updated, deleted, status_changed
-    before: Optional[Dict[str, Any]] = None
-    after: Optional[Dict[str, Any]] = None
+    before: Optional[dict[str, Any]] = None
+    after: Optional[dict[str, Any]] = None
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     source: str = "system"  # system, user, agent, daemon
     propagated: bool = False
@@ -63,9 +63,9 @@ class SystemState:
     """Complete state of the BrainOps AI OS"""
     version: str = "1.0.0"
     last_sync: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    components: Dict[str, SystemComponent] = field(default_factory=dict)
-    pending_changes: List[StateChange] = field(default_factory=list)
-    health_summary: Dict[str, Any] = field(default_factory=dict)
+    components: dict[str, SystemComponent] = field(default_factory=dict)
+    pending_changes: list[StateChange] = field(default_factory=list)
+    health_summary: dict[str, Any] = field(default_factory=dict)
 
 
 # ============== REAL-TIME STATE SYNC ==============
@@ -96,7 +96,7 @@ class RealTimeStateSync:
     def __init__(self):
         self._file_io_enabled = not self._IS_PRODUCTION  # Disable file spam in production
         self.state = self._load_state()
-        self.change_handlers: List[callable] = []
+        self.change_handlers: list[callable] = []
         self._initialized = False
         self._digital_twin_integration_enabled = False
         self._digital_twin_engine = None  # Lazy load to avoid circular imports
@@ -210,7 +210,7 @@ class RealTimeStateSync:
 
         return True
 
-    def update_component_status(self, name: str, status: str, metadata: Optional[Dict] = None) -> bool:
+    def update_component_status(self, name: str, status: str, metadata: Optional[dict] = None) -> bool:
         """Update a component's status"""
         if name not in self.state.components:
             logger.warning(f"Component not found: {name}")
@@ -242,7 +242,7 @@ class RealTimeStateSync:
         """Get a component by name"""
         return self.state.components.get(name)
 
-    def register_agent(self, agent_name: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
+    def register_agent(self, agent_name: str, metadata: Optional[dict[str, Any]] = None) -> bool:
         """
         Register or update an AI agent in the state tracking system.
 
@@ -261,7 +261,7 @@ class RealTimeStateSync:
         )
         return self.register_component(component)
 
-    def get_all_components(self, component_type: Optional[str] = None) -> List[SystemComponent]:
+    def get_all_components(self, component_type: Optional[str] = None) -> list[SystemComponent]:
         """Get all components, optionally filtered by type"""
         components = list(self.state.components.values())
         if component_type:
@@ -285,7 +285,7 @@ class RealTimeStateSync:
 
     # ============== HEALTH MONITORING ==============
 
-    def compute_health_summary(self) -> Dict[str, Any]:
+    def compute_health_summary(self) -> dict[str, Any]:
         """Compute overall system health"""
         components = list(self.state.components.values())
 
@@ -340,7 +340,7 @@ class RealTimeStateSync:
 
     # ============== CODEBASE TRACKING ==============
 
-    async def scan_codebases(self) -> Dict[str, Any]:
+    async def scan_codebases(self) -> dict[str, Any]:
         """Scan all codebases and register them"""
         codebases = [
             ("weathercraft-erp", "/home/matt-woodworth/dev/weathercraft-erp"),
@@ -380,7 +380,7 @@ class RealTimeStateSync:
 
         return results
 
-    async def _get_git_status(self, path: str) -> Dict[str, Any]:
+    async def _get_git_status(self, path: str) -> dict[str, Any]:
         """Get git status for a path"""
         try:
             import subprocess
@@ -420,7 +420,7 @@ class RealTimeStateSync:
 
     # ============== AGENT TRACKING ==============
 
-    async def scan_agents(self) -> Dict[str, Any]:
+    async def scan_agents(self) -> dict[str, Any]:
         """Scan and register all AI agents"""
         agents = [
             "AUREA Master Orchestrator",
@@ -458,7 +458,7 @@ class RealTimeStateSync:
 
     # ============== DATABASE TRACKING ==============
 
-    async def scan_database_tables(self, pool) -> Dict[str, Any]:
+    async def scan_database_tables(self, pool) -> dict[str, Any]:
         """Scan and register database tables"""
         try:
             tables = await pool.fetch("""
@@ -495,7 +495,7 @@ class RealTimeStateSync:
 
     # ============== API ENDPOINT TRACKING ==============
 
-    async def scan_api_endpoints(self) -> Dict[str, Any]:
+    async def scan_api_endpoints(self) -> dict[str, Any]:
         """Scan and register API endpoints from codebase graph"""
         try:
             from database.async_connection import get_pool
@@ -525,7 +525,7 @@ class RealTimeStateSync:
 
     # ============== FULL SYSTEM SCAN ==============
 
-    async def full_system_scan(self) -> Dict[str, Any]:
+    async def full_system_scan(self) -> dict[str, Any]:
         """Perform a complete scan of all system components"""
         logger.info("Starting full system scan...")
 
@@ -615,7 +615,7 @@ class RealTimeStateSync:
         except Exception as e:
             logger.error(f"Error syncing component {component.name} to digital twin: {e}")
 
-    def get_twin_status_for_component(self, component_name: str) -> Optional[Dict[str, Any]]:
+    def get_twin_status_for_component(self, component_name: str) -> Optional[dict[str, Any]]:
         """Get digital twin status for a component"""
         if not self._digital_twin_integration_enabled or not self._digital_twin_engine:
             return None
@@ -679,14 +679,14 @@ async def main():
 
     results = await sync.full_system_scan()
 
-    print(f"\n📊 SCAN RESULTS:")
+    print("\n📊 SCAN RESULTS:")
     print(f"   Codebases: {len(results['codebases'])} registered")
     print(f"   Agents: {len(results['agents'])} registered")
     print(f"   Database Tables: {results.get('database', {}).get('tables_registered', 'N/A')}")
     print(f"   API Endpoints: {results.get('api_endpoints', {}).get('endpoints_registered', 'N/A')}")
 
     health = results['health']
-    print(f"\n🏥 HEALTH SUMMARY:")
+    print("\n🏥 HEALTH SUMMARY:")
     print(f"   Overall: {health['status'].upper()}")
     print(f"   Total Components: {health['total_components']}")
     for status, count in health['by_status'].items():
@@ -695,7 +695,7 @@ async def main():
 
     # Export context
     context = sync.export_for_ai_context()
-    print(f"\n📝 AI CONTEXT EXPORT:")
+    print("\n📝 AI CONTEXT EXPORT:")
     print(context[:500] + "..." if len(context) > 500 else context)
 
     print(f"\n✅ State saved to: {sync.STATE_FILE}")

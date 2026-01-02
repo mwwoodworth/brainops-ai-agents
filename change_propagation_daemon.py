@@ -17,15 +17,15 @@ Version: 1.0.0
 """
 
 import asyncio
-import os
+import hashlib
 import json
+import logging
+import os
 import subprocess
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Any, Set
-from dataclasses import dataclass, asdict
-import logging
-import hashlib
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ class FileChange:
 class PropagationResult:
     """Result of propagating a change"""
     change: FileChange
-    actions_taken: List[str]
+    actions_taken: list[str]
     success: bool
     error: str = ""
 
@@ -79,7 +79,7 @@ class ChangeDetector:
     """Detects changes in watched directories"""
 
     def __init__(self):
-        self.file_checksums: Dict[str, str] = {}
+        self.file_checksums: dict[str, str] = {}
         self._load_checksums()
 
     def _load_checksums(self):
@@ -126,10 +126,10 @@ class ChangeDetector:
                 return True
         return False
 
-    async def detect_changes(self) -> List[FileChange]:
+    async def detect_changes(self) -> list[FileChange]:
         """Scan for changes since last check"""
-        changes: List[FileChange] = []
-        current_files: Set[str] = set()
+        changes: list[FileChange] = []
+        current_files: set[str] = set()
 
         for directory in WATCHED_DIRECTORIES:
             dir_path = Path(directory)
@@ -254,7 +254,7 @@ class ChangePropagator:
                 file_stats = os.stat(change.path)
                 line_count = 0
                 try:
-                    with open(change.path, 'r', errors='ignore') as f:
+                    with open(change.path, errors='ignore') as f:
                         line_count = sum(1 for _ in f)
                 except (OSError, UnicodeError) as exc:
                     logger.warning(
@@ -263,14 +263,14 @@ class ChangePropagator:
                         exc,
                         exc_info=True,
                     )
-                
+
                 metadata_update = {
                     "timestamp": change.timestamp,
                     "type": change.change_type,
                     "size": file_stats.st_size,
                     "line_count": line_count
                 }
-                
+
                 await pool.execute("""
                     UPDATE codebase_nodes
                     SET metadata = jsonb_set(
@@ -360,7 +360,7 @@ class ChangePropagator:
         except Exception as e:
             logger.error(f"Failed to log change: {e}")
 
-    async def run_propagation_cycle(self) -> Dict[str, Any]:
+    async def run_propagation_cycle(self) -> dict[str, Any]:
         """Run a complete propagation cycle"""
         changes = await self.detector.detect_changes()
 
@@ -441,7 +441,7 @@ class ChangePropagationDaemon:
 
 # ============== GIT CHANGE DETECTION ==============
 
-async def detect_git_changes() -> List[Dict[str, Any]]:
+async def detect_git_changes() -> list[dict[str, Any]]:
     """Detect uncommitted changes across all codebases"""
     changes = []
 
@@ -487,7 +487,7 @@ async def main():
     print("\n🔍 Detecting changes...")
     result = await propagator.run_propagation_cycle()
 
-    print(f"\n📊 PROPAGATION RESULTS:")
+    print("\n📊 PROPAGATION RESULTS:")
     print(f"   Total changes detected: {result['changes']}")
     print(f"   Successfully propagated: {result.get('successful', 0)}")
     print(f"   Failed: {result.get('failed', 0)}")

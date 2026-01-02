@@ -1,15 +1,14 @@
+import asyncio
+import inspect
 import json
 import logging
 import os
-from typing import Dict, Any
-
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from datetime import datetime
-import inspect
-import asyncio
+from typing import Any
+
 import httpx
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
 
 # Import Power Layer for full operational capability
 try:
@@ -81,12 +80,12 @@ class AUREANLUProcessor:
         # Dynamically built registry of executable actions
         self.skill_registry = self._build_skill_registry()
 
-    def _build_skill_registry(self) -> Dict[str, Any]:
+    def _build_skill_registry(self) -> dict[str, Any]:
         """
         Build the skill registry based on which subsystems are actually available.
         This prevents NLU from advertising skills that would crash at runtime.
         """
-        registry: Dict[str, Any] = {}
+        registry: dict[str, Any] = {}
 
         # Integration layer-dependent skills
         if self.integration_layer is not None:
@@ -201,7 +200,7 @@ class AUREANLUProcessor:
 
         return registry
 
-    def _get_serializable_registry(self) -> Dict[str, Dict[str, Any]]:
+    def _get_serializable_registry(self) -> dict[str, dict[str, Any]]:
         """Get a JSON-serializable version of the skill registry (without action functions)."""
         return {
             skill_name: {
@@ -211,7 +210,7 @@ class AUREANLUProcessor:
             for skill_name, skill_data in self.skill_registry.items()
         }
 
-    async def analyze_command_intent(self, command_text: str) -> Dict[str, Any]:
+    async def analyze_command_intent(self, command_text: str) -> dict[str, Any]:
         """Use LLM to analyze natural language command intent and extract parameters."""
         # This prompt needs to be highly sophisticated to handle Founder-level commands
         serializable_registry = self._get_serializable_registry()
@@ -276,7 +275,7 @@ class AUREANLUProcessor:
             logger.error(f"Invalid structure in LLM response: {response_content}. Error: {e}")
             return {"intent": "UNKNOWN", "parameters": {}, "confidence": 0.0, "requires_confirmation": False, "clarification_needed": f"Invalid structure in LLM response: {e}"}
 
-    async def execute_natural_language_command(self, command_text: str) -> Dict[str, Any]:
+    async def execute_natural_language_command(self, command_text: str) -> dict[str, Any]:
         """Analyze, confirm (if needed), and execute a natural language command."""
         intent_data = await self.analyze_command_intent(command_text)
 
@@ -285,7 +284,7 @@ class AUREANLUProcessor:
 
         if intent_data.get("requires_confirmation"):
             logger.info(f"Human confirmation required for intent: {intent_data['intent']} with params: {intent_data['parameters']}")
-            
+
             # Allow bypass via env var for testing/demo
             if os.getenv("AUREA_AUTO_CONFIRM", "false").lower() == "true":
                 logger.warning("⚠️ Auto-confirming action due to AUREA_AUTO_CONFIRM=true")

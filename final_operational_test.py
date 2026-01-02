@@ -3,15 +3,17 @@
 Final operational test - verify everything works as expected
 """
 
+import json
 import os
+import statistics
 import sys
 import time
-import psycopg2
-from psycopg2.extras import RealDictCursor
-import requests
-import json
-import statistics
 from datetime import datetime
+
+import psycopg2
+import requests
+from psycopg2.extras import RealDictCursor
+
 
 # Database configuration - NO hardcoded fallback credentials
 def get_db_config():
@@ -358,7 +360,7 @@ def analyze_upgrade_value():
         value_score += 5
         stability = "Poor"
 
-    print(f"\n" + "="*50)
+    print("\n" + "="*50)
     print(f"Performance:     {performance} ({avg_response:.3f}s)")
     print(f"Features:        {metrics['features_working']}/{metrics['features_total']} working ({feature_rate:.0f}%)")
     print(f"Stability:       {stability}")

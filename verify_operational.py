@@ -3,15 +3,16 @@
 Verify complete operational status - final test
 """
 
+import json
 import os
 import sys
-import psycopg2
-from psycopg2.extras import RealDictCursor
-import requests
-import json
 import uuid
 from datetime import datetime
-from typing import Tuple
+
+import psycopg2
+import requests
+from psycopg2.extras import RealDictCursor
+
 
 # Database config - NO hardcoded credentials
 def get_db_config():
@@ -48,7 +49,7 @@ def get_db_config():
 
 DB_CONFIG = get_db_config()
 
-def test_database() -> Tuple[bool, str]:
+def test_database() -> tuple[bool, str]:
     """Test database connectivity and operations"""
     try:
         conn = psycopg2.connect(**DB_CONFIG)
@@ -91,7 +92,7 @@ def test_database() -> Tuple[bool, str]:
     except Exception as e:
         return False, f"Database error: {str(e)}"
 
-def test_ai_agents() -> Tuple[bool, str]:
+def test_ai_agents() -> tuple[bool, str]:
     """Test AI agents service"""
     try:
         base_url = "https://brainops-ai-agents.onrender.com"
@@ -132,7 +133,7 @@ def test_ai_agents() -> Tuple[bool, str]:
     except Exception as e:
         return False, f"AI Agents error: {str(e)}"
 
-def test_erp() -> Tuple[bool, str]:
+def test_erp() -> tuple[bool, str]:
     """Test ERP frontend"""
     try:
         # Test main site
@@ -156,7 +157,7 @@ def test_erp() -> Tuple[bool, str]:
     except Exception as e:
         return False, f"ERP error: {str(e)}"
 
-def test_integration() -> Tuple[bool, str]:
+def test_integration() -> tuple[bool, str]:
     """Test system integration"""
     try:
         # Test AI analysis endpoint

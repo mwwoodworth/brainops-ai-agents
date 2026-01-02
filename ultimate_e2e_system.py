@@ -16,17 +16,17 @@ Author: BrainOps AI System
 Version: 2.0.0
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-import aiohttp
+import os
 import time
-import re
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Optional
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class SystemIssue:
     service: str
     title: str
     description: str
-    raw_data: Dict[str, Any] = field(default_factory=dict)
+    raw_data: dict[str, Any] = field(default_factory=dict)
     ai_analysis: Optional[str] = None
     suggested_fix: Optional[str] = None
     auto_fixable: bool = False
@@ -118,7 +118,7 @@ class BuildLog:
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     error_message: Optional[str] = None
-    logs: List[str] = field(default_factory=list)
+    logs: list[str] = field(default_factory=list)
 
 
 class UltimateE2ESystem:
@@ -131,10 +131,10 @@ class UltimateE2ESystem:
         self._session: Optional[aiohttp.ClientSession] = None
         self._db_conn = None
         self._running = False
-        self._issues: Dict[str, SystemIssue] = {}
-        self._build_history: List[BuildLog] = []
-        self._last_build_check: Dict[str, str] = {}  # service -> last deploy_id
-        self._test_results: List[Dict[str, Any]] = []
+        self._issues: dict[str, SystemIssue] = {}
+        self._build_history: list[BuildLog] = []
+        self._last_build_check: dict[str, str] = {}  # service -> last deploy_id
+        self._test_results: list[dict[str, Any]] = []
 
     async def initialize(self):
         """Initialize all connections"""
@@ -173,7 +173,7 @@ class UltimateE2ESystem:
     # BUILD LOG MONITORING
     # =========================================================================
 
-    async def get_render_deploys(self, service_name: str, limit: int = 10) -> List[Dict[str, Any]]:
+    async def get_render_deploys(self, service_name: str, limit: int = 10) -> list[dict[str, Any]]:
         """Get recent deploys for a Render service"""
         if not RENDER_API_KEY:
             logger.warning("RENDER_API_KEY not set - build monitoring disabled")
@@ -199,7 +199,7 @@ class UltimateE2ESystem:
             logger.error(f"Failed to get deploys: {e}")
             return []
 
-    async def get_deploy_logs(self, service_name: str, deploy_id: str) -> List[str]:
+    async def get_deploy_logs(self, service_name: str, deploy_id: str) -> list[str]:
         """Get logs for a specific deploy"""
         if not RENDER_API_KEY:
             return []
@@ -227,7 +227,7 @@ class UltimateE2ESystem:
             logger.error(f"Failed to get deploy logs: {e}")
             return []
 
-    async def monitor_all_builds(self) -> Dict[str, Any]:
+    async def monitor_all_builds(self) -> dict[str, Any]:
         """Monitor builds for all services and detect issues"""
         results = {
             "services": {},
@@ -283,7 +283,7 @@ class UltimateE2ESystem:
 
         return results
 
-    async def _ai_analyze_build_failure(self, logs: List[str], service_name: str) -> str:
+    async def _ai_analyze_build_failure(self, logs: list[str], service_name: str) -> str:
         """Use AI to analyze build failure logs"""
         if not OPENAI_API_KEY:
             return "AI analysis not available (no API key)"
@@ -319,7 +319,7 @@ class UltimateE2ESystem:
     # DATABASE AWARENESS
     # =========================================================================
 
-    async def get_database_state(self) -> Dict[str, Any]:
+    async def get_database_state(self) -> dict[str, Any]:
         """Get comprehensive database state"""
         if not self._db_conn:
             return {"error": "Database not connected"}
@@ -394,7 +394,7 @@ class UltimateE2ESystem:
             logger.error(f"Database state check failed: {e}")
             return {"error": str(e), "connected": False}
 
-    async def query_database(self, query: str, params: tuple = ()) -> List[Dict[str, Any]]:
+    async def query_database(self, query: str, params: tuple = ()) -> list[dict[str, Any]]:
         """Execute a database query and return results"""
         if not self._db_conn:
             return [{"error": "Database not connected"}]
@@ -414,7 +414,7 @@ class UltimateE2ESystem:
     # COMPREHENSIVE UI TESTING
     # =========================================================================
 
-    async def run_comprehensive_ui_tests(self) -> Dict[str, Any]:
+    async def run_comprehensive_ui_tests(self) -> dict[str, Any]:
         """Run comprehensive UI tests on all frontends"""
         try:
             from comprehensive_e2e_tests import run_comprehensive_e2e
@@ -452,7 +452,7 @@ class UltimateE2ESystem:
             logger.error(f"UI tests failed: {e}")
             return {"error": str(e)}
 
-    async def run_chatgpt_agent_tests(self) -> Dict[str, Any]:
+    async def run_chatgpt_agent_tests(self) -> dict[str, Any]:
         """Run human-like ChatGPT agent tests"""
         try:
             from chatgpt_agent_tester import run_chatgpt_agent_tests
@@ -467,7 +467,7 @@ class UltimateE2ESystem:
     # ISSUE MANAGEMENT
     # =========================================================================
 
-    def get_all_issues(self, include_resolved: bool = False) -> List[Dict[str, Any]]:
+    def get_all_issues(self, include_resolved: bool = False) -> list[dict[str, Any]]:
         """Get all detected issues"""
         issues = []
         for issue in self._issues.values():
@@ -502,7 +502,7 @@ class UltimateE2ESystem:
     # COMPREHENSIVE STATUS
     # =========================================================================
 
-    async def get_comprehensive_status(self) -> Dict[str, Any]:
+    async def get_comprehensive_status(self) -> dict[str, Any]:
         """Get COMPLETE system status - everything we know"""
         status = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -640,31 +640,31 @@ async def get_ultimate_e2e() -> UltimateE2ESystem:
     return _system
 
 
-async def run_full_system_check() -> Dict[str, Any]:
+async def run_full_system_check() -> dict[str, Any]:
     """Run a complete system check"""
     system = await get_ultimate_e2e()
     return await system.get_comprehensive_status()
 
 
-async def monitor_builds() -> Dict[str, Any]:
+async def monitor_builds() -> dict[str, Any]:
     """Monitor all build logs"""
     system = await get_ultimate_e2e()
     return await system.monitor_all_builds()
 
 
-async def get_database_state() -> Dict[str, Any]:
+async def get_database_state() -> dict[str, Any]:
     """Get database state"""
     system = await get_ultimate_e2e()
     return await system.get_database_state()
 
 
-async def run_all_ui_tests() -> Dict[str, Any]:
+async def run_all_ui_tests() -> dict[str, Any]:
     """Run all UI tests"""
     system = await get_ultimate_e2e()
     return await system.run_comprehensive_ui_tests()
 
 
-async def get_all_issues() -> List[Dict[str, Any]]:
+async def get_all_issues() -> list[dict[str, Any]]:
     """Get all system issues"""
     system = await get_ultimate_e2e()
     return system.get_all_issues()

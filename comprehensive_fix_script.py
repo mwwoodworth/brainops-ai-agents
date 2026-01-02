@@ -4,14 +4,15 @@ Comprehensive Fix Script for All Production Services
 Fixes database schema, dependencies, and API errors
 """
 
-import os
-import sys
-import subprocess
-import psycopg2
-from psycopg2.extras import RealDictCursor
-import requests
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime
+
+import psycopg2
+import requests
+from psycopg2.extras import RealDictCursor
 
 # Database configuration
 DB_CONFIG = {

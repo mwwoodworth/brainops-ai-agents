@@ -4,11 +4,13 @@ Advanced AI Providers Integration
 Gemini, Perplexity, and enhanced Notebook LM+
 """
 
-import os
 import json
 import logging
+import os
+from typing import Any, Optional
+
 import requests
-from typing import Dict, Optional, Any
+
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
@@ -61,7 +63,7 @@ class AdvancedAIProviders:
             logger.error(f"Gemini error: {e}")
             return None
 
-    def search_with_perplexity(self, query: str, citations: bool = True) -> Optional[Dict]:
+    def search_with_perplexity(self, query: str, citations: bool = True) -> Optional[dict]:
         """Search using Perplexity AI (real-time web access)"""
         if not self.perplexity_key:
             logger.warning("Perplexity API key not configured - search unavailable")
@@ -103,7 +105,7 @@ class AdvancedAIProviders:
 
         return None
 
-    def notebook_lm_analyze(self, content: str, analysis_type: str = "comprehensive") -> Dict[str, Any]:
+    def notebook_lm_analyze(self, content: str, analysis_type: str = "comprehensive") -> dict[str, Any]:
         """Enhanced Notebook LM+ style analysis using Gemini"""
 
         analysis_prompts = {
@@ -159,13 +161,13 @@ Map out:
 
         # Fallback response
         return {
-            "analysis": f"Analysis of content completed. Key patterns identified with actionable insights generated.",
+            "analysis": "Analysis of content completed. Key patterns identified with actionable insights generated.",
             "type": analysis_type,
             "provider": "fallback",
             "enhanced": False
         }
 
-    def multi_model_consensus(self, prompt: str) -> Dict[str, Any]:
+    def multi_model_consensus(self, prompt: str) -> dict[str, Any]:
         """Get consensus from multiple AI models"""
 
         responses = {}
@@ -213,7 +215,7 @@ Create a unified response that combines the best insights from each."""
                 "individual_responses": {}
             }
 
-    def roofing_industry_research(self, topic: str) -> Dict[str, Any]:
+    def roofing_industry_research(self, topic: str) -> dict[str, Any]:
         """Specialized roofing industry research using Perplexity"""
 
         research_query = f"""Current roofing industry information about {topic}.
@@ -253,7 +255,7 @@ Focus on:
             "timestamp": "2025-09-17"
         }
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get status of advanced providers"""
         return {
             "gemini": {
@@ -277,7 +279,7 @@ Focus on:
 advanced_ai = AdvancedAIProviders()
 
 # FastAPI endpoint functions
-async def generate_with_gemini_endpoint(prompt: str, max_tokens: int = 1000) -> Dict[str, Any]:
+async def generate_with_gemini_endpoint(prompt: str, max_tokens: int = 1000) -> dict[str, Any]:
     """Gemini generation endpoint"""
     result = advanced_ai.generate_with_gemini(prompt, max_tokens)
     return {
@@ -286,7 +288,7 @@ async def generate_with_gemini_endpoint(prompt: str, max_tokens: int = 1000) -> 
         "success": bool(result)
     }
 
-async def search_with_perplexity_endpoint(query: str) -> Dict[str, Any]:
+async def search_with_perplexity_endpoint(query: str) -> dict[str, Any]:
     """Perplexity search endpoint"""
     result = advanced_ai.search_with_perplexity(query)
     return result or {
@@ -295,15 +297,15 @@ async def search_with_perplexity_endpoint(query: str) -> Dict[str, Any]:
         "confidence": 0.5
     }
 
-async def notebook_lm_analyze_endpoint(content: str, analysis_type: str = "comprehensive") -> Dict[str, Any]:
+async def notebook_lm_analyze_endpoint(content: str, analysis_type: str = "comprehensive") -> dict[str, Any]:
     """Notebook LM+ analysis endpoint"""
     return advanced_ai.notebook_lm_analyze(content, analysis_type)
 
-async def multi_model_consensus_endpoint(prompt: str) -> Dict[str, Any]:
+async def multi_model_consensus_endpoint(prompt: str) -> dict[str, Any]:
     """Multi-model consensus endpoint"""
     return advanced_ai.multi_model_consensus(prompt)
 
-async def roofing_research_endpoint(topic: str) -> Dict[str, Any]:
+async def roofing_research_endpoint(topic: str) -> dict[str, Any]:
     """Roofing industry research endpoint"""
     return advanced_ai.roofing_industry_research(topic)
 

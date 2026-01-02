@@ -4,14 +4,15 @@ CI/CD Management API Endpoints
 RESTful API for autonomous CI/CD management.
 """
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
-from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
 import logging
+from typing import Any, Optional
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from pydantic import BaseModel
 
 from autonomous_cicd_management import (
-    get_cicd_engine,
     DeploymentPlatform,
+    get_cicd_engine,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,8 +27,8 @@ class RegisterServiceRequest(BaseModel):
     environment: str = "production"
     health_endpoint: str = "/health"
     deployment_url: Optional[str] = None
-    platform_config: Dict[str, Any] = {}
-    dependencies: List[str] = []
+    platform_config: dict[str, Any] = {}
+    dependencies: list[str] = []
 
 
 class DeployServiceRequest(BaseModel):
@@ -36,7 +37,7 @@ class DeployServiceRequest(BaseModel):
 
 
 @router.get("/services")
-async def list_services() -> Dict[str, Any]:
+async def list_services() -> dict[str, Any]:
     """List all registered services"""
     engine = get_cicd_engine()
     await engine.initialize()
@@ -59,7 +60,7 @@ async def list_services() -> Dict[str, Any]:
 
 
 @router.post("/services")
-async def register_service(request: RegisterServiceRequest) -> Dict[str, Any]:
+async def register_service(request: RegisterServiceRequest) -> dict[str, Any]:
     """Register a new service for CI/CD management"""
     engine = get_cicd_engine()
     await engine.initialize()
@@ -93,7 +94,7 @@ async def register_service(request: RegisterServiceRequest) -> Dict[str, Any]:
 
 
 @router.get("/services/{service_id}")
-async def get_service(service_id: str) -> Dict[str, Any]:
+async def get_service(service_id: str) -> dict[str, Any]:
     """Get details for a specific service"""
     engine = get_cicd_engine()
     await engine.initialize()
@@ -123,7 +124,7 @@ async def deploy_service(
     service_id: str,
     request: DeployServiceRequest,
     background_tasks: BackgroundTasks
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Deploy a service"""
     engine = get_cicd_engine()
     await engine.initialize()
@@ -155,7 +156,7 @@ async def list_deployments(
     service_id: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = Query(default=50, le=200),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """List recent deployments"""
     engine = get_cicd_engine()
     await engine.initialize()
@@ -192,7 +193,7 @@ async def list_deployments(
 
 
 @router.get("/deployments/{deployment_id}")
-async def get_deployment(deployment_id: str) -> Dict[str, Any]:
+async def get_deployment(deployment_id: str) -> dict[str, Any]:
     """Get details for a specific deployment"""
     engine = get_cicd_engine()
     await engine.initialize()
@@ -221,7 +222,7 @@ async def get_deployment(deployment_id: str) -> Dict[str, Any]:
 @router.post("/deploy-all")
 async def deploy_all_services(
     triggered_by: str = "manual",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Deploy all services (coordinated multi-service deployment)"""
     engine = get_cicd_engine()
     await engine.initialize()
@@ -248,7 +249,7 @@ async def deploy_all_services(
 
 
 @router.get("/health")
-async def check_all_health() -> Dict[str, Any]:
+async def check_all_health() -> dict[str, Any]:
     """Check health of all registered services"""
     engine = get_cicd_engine()
     await engine.initialize()
@@ -271,7 +272,7 @@ async def check_all_health() -> Dict[str, Any]:
 
 
 @router.get("/metrics")
-async def get_metrics() -> Dict[str, Any]:
+async def get_metrics() -> dict[str, Any]:
     """Get CI/CD metrics"""
     engine = get_cicd_engine()
     await engine.initialize()
@@ -280,7 +281,7 @@ async def get_metrics() -> Dict[str, Any]:
 
 
 @router.post("/seed-brainops-services")
-async def seed_brainops_services() -> Dict[str, Any]:
+async def seed_brainops_services() -> dict[str, Any]:
     """Seed the BrainOps services for CI/CD management"""
     engine = get_cicd_engine()
     await engine.initialize()

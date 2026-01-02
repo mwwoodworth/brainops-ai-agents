@@ -4,10 +4,11 @@ DevOps Loop API Router
 Exposes the ultimate self-healing DevOps loop via API.
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from typing import Optional, Dict, Any
-import logging
 import asyncio
+import logging
+from typing import Optional
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 logger = logging.getLogger(__name__)
 

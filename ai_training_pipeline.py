@@ -6,13 +6,13 @@ Learns and improves from every customer touchpoint
 Converted to async asyncpg for non-blocking database operations.
 """
 
-import os
 import json
 import logging
+import os
 import uuid
-from typing import Dict, List, Tuple
 from datetime import datetime, timezone
 from enum import Enum
+
 import numpy as np
 from openai import OpenAI
 
@@ -243,7 +243,7 @@ class AITrainingPipeline:
         interaction_type: InteractionType,
         content: str,
         channel: str = None,
-        context: Dict = None,
+        context: dict = None,
         outcome: str = None,
         value: float = None
     ) -> str:
@@ -301,7 +301,7 @@ class AITrainingPipeline:
             logger.error(f"Failed to capture interaction: {e}")
             return None
 
-    async def _analyze_interaction(self, content: str, context: Dict = None) -> Dict:
+    async def _analyze_interaction(self, content: str, context: dict = None) -> dict:
         """Analyze interaction using AI"""
         try:
             prompt = f"""
@@ -356,7 +356,7 @@ class AITrainingPipeline:
                 'metadata': {}
             }
 
-    async def _extract_features(self, content: str, context: Dict, analysis: Dict) -> Dict:
+    async def _extract_features(self, content: str, context: dict, analysis: dict) -> dict:
         """Extract features for machine learning"""
         features = {}
 
@@ -400,7 +400,7 @@ class AITrainingPipeline:
 
         return features
 
-    def _extract_keywords(self, text: str) -> List[str]:
+    def _extract_keywords(self, text: str) -> list[str]:
         """Extract keywords from text"""
         # Simple keyword extraction
         stop_words = {'the', 'is', 'at', 'which', 'on', 'a', 'an', 'and', 'or', 'but', 'in', 'with', 'to', 'for'}
@@ -448,7 +448,7 @@ class AITrainingPipeline:
         except Exception as e:
             logger.error(f"Failed to check training triggers: {e}")
 
-    async def train_model(self, model_type: ModelType, force: bool = False) -> Dict:
+    async def train_model(self, model_type: ModelType, force: bool = False) -> dict:
         """Train a specific model"""
         try:
             await self._init_database()
@@ -522,10 +522,11 @@ class AITrainingPipeline:
                 'error': str(e)
             }
 
-    async def _train_sklearn_model(self, X: List, y: List, model_type: ModelType) -> Tuple[bytes, Dict]:
+    async def _train_sklearn_model(self, X: list, y: list, model_type: ModelType) -> tuple[bytes, dict]:
         """Train a model using scikit-learn with real ML algorithms"""
         import pickle
-        from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+
+        from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
         from sklearn.linear_model import LogisticRegression
         from sklearn.model_selection import cross_val_score
         from sklearn.preprocessing import StandardScaler
@@ -588,7 +589,7 @@ class AITrainingPipeline:
             fallback_model = {'type': model_type.value, 'error': str(e), 'trained_at': datetime.now(timezone.utc).isoformat()}
             return pickle.dumps(fallback_model), {'accuracy': 0.0, 'error': str(e)}
 
-    async def generate_insights(self) -> List[Dict]:
+    async def generate_insights(self) -> list[dict]:
         """Generate insights from interactions and training"""
         try:
             await self._init_database()
@@ -699,7 +700,7 @@ class AITrainingPipeline:
             logger.error(f"Failed to generate insights: {e}")
             return []
 
-    async def apply_learning(self, insight_id: str) -> Dict:
+    async def apply_learning(self, insight_id: str) -> dict:
         """Apply learning from an insight"""
         try:
             await self._init_database()
@@ -738,7 +739,7 @@ class AITrainingPipeline:
             logger.error(f"Failed to apply learning: {e}")
             return {'status': 'error', 'message': str(e)}
 
-    async def _apply_insight_actions(self, insight: dict) -> Dict:
+    async def _apply_insight_actions(self, insight: dict) -> dict:
         """Apply specific actions based on insight"""
         insight_type = insight['insight_type']
 
@@ -763,7 +764,7 @@ class AITrainingPipeline:
         model_id: str,
         prediction: str,
         actual_outcome: str
-    ) -> Dict:
+    ) -> dict:
         """Record feedback for continuous improvement"""
         try:
             await self._init_database()
@@ -829,7 +830,7 @@ class AITrainingPipeline:
             logger.error(f"Failed to record feedback: {e}")
             return {'status': 'error', 'message': str(e)}
 
-    async def detect_outcome_patterns(self) -> List[Dict]:
+    async def detect_outcome_patterns(self) -> list[dict]:
         """Detect patterns in outcomes for continuous learning"""
         try:
             await self._init_database()
@@ -908,7 +909,7 @@ class AITrainingPipeline:
             logger.error(f"Failed to detect outcome patterns: {e}")
             return []
 
-    async def learn_from_outcomes(self) -> Dict:
+    async def learn_from_outcomes(self) -> dict:
         """Continuous learning from agent outcomes"""
         try:
             await self._init_database()
@@ -999,7 +1000,7 @@ class AITrainingPipeline:
             logger.error(f"Failed to learn from outcomes: {e}")
             return {"error": str(e)}
 
-    async def get_training_metrics(self) -> Dict:
+    async def get_training_metrics(self) -> dict:
         """Get comprehensive training metrics with learning insights"""
         try:
             await self._init_database()

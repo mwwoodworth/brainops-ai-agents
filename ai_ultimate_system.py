@@ -4,16 +4,18 @@ Ultimate AI System - Integrates ALL AI providers
 100% Real AI with intelligent provider selection
 """
 
+import asyncio
 import json
 import logging
 import time
-import asyncio
-from typing import Dict, List, Optional, Any
 from datetime import datetime
+from typing import Any, Optional
+
+from anthropic import Anthropic
 
 # Import all AI providers
 from openai import OpenAI
-from anthropic import Anthropic
+
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
@@ -24,11 +26,11 @@ import requests
 
 # Import our configuration
 from ai_config import (
-    OPENAI_API_KEY,
     ANTHROPIC_API_KEY,
     GOOGLE_API_KEY,
+    HUGGINGFACE_API_TOKEN,
+    OPENAI_API_KEY,
     PERPLEXITY_API_KEY,
-    HUGGINGFACE_API_TOKEN
 )
 
 logger = logging.getLogger(__name__)
@@ -83,7 +85,7 @@ class UltimateAISystem:
         task_type: str = "general",
         max_tokens: int = 1000,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Intelligently route to the best AI provider based on task type
 
@@ -324,11 +326,11 @@ class UltimateAISystem:
 
         responses = {
             "research": f"Based on comprehensive analysis of '{prompt[:100]}', current industry trends indicate significant opportunities for optimization and growth. Implementation of best practices is recommended.",
-            "analysis": f"Deep analysis reveals multiple dimensions to consider. The data suggests a strategic approach focusing on efficiency, scalability, and measurable outcomes.",
-            "creative": f"Creative solution generated: Innovative approach combining traditional methods with cutting-edge techniques to achieve optimal results.",
-            "code": f"Code implementation strategy: Modular architecture with emphasis on maintainability, performance, and scalability. Follow SOLID principles.",
-            "general": f"Processing complete. The solution involves systematic implementation with continuous monitoring and optimization.",
-            "complex": f"Complex analysis indicates multi-faceted approach required. Prioritize high-impact areas while maintaining system stability."
+            "analysis": "Deep analysis reveals multiple dimensions to consider. The data suggests a strategic approach focusing on efficiency, scalability, and measurable outcomes.",
+            "creative": "Creative solution generated: Innovative approach combining traditional methods with cutting-edge techniques to achieve optimal results.",
+            "code": "Code implementation strategy: Modular architecture with emphasis on maintainability, performance, and scalability. Follow SOLID principles.",
+            "general": "Processing complete. The solution involves systematic implementation with continuous monitoring and optimization.",
+            "complex": "Complex analysis indicates multi-faceted approach required. Prioritize high-impact areas while maintaining system stability."
         }
 
         return responses.get(task_type, responses["general"])
@@ -336,9 +338,9 @@ class UltimateAISystem:
     async def multi_model_consensus(
         self,
         prompt: str,
-        models: List[str] = ["openai", "anthropic", "gemini"],
+        models: list[str] = ["openai", "anthropic", "gemini"],
         synthesize: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get consensus from multiple AI models"""
 
         tasks = []
@@ -393,7 +395,7 @@ Create a unified response combining the best insights."""
         self,
         query: str,
         operation_type: str = "general"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Specialized roofing industry AI assistant"""
 
         # Enhance prompt with roofing context
@@ -424,7 +426,7 @@ Operation Type: {operation_type}"""
             "operation_type": operation_type
         }
 
-    def get_system_status(self) -> Dict[str, Any]:
+    def get_system_status(self) -> dict[str, Any]:
         """Get complete system status"""
         return {
             "providers": {
@@ -458,25 +460,25 @@ async def ai_generate_ultimate(
     prompt: str,
     task_type: str = "general",
     max_tokens: int = 1000
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Ultimate AI generation endpoint"""
     return await ultimate_ai.generate_intelligent(prompt, task_type, max_tokens)
 
 async def ai_consensus(
     prompt: str,
-    models: List[str] = ["openai", "anthropic", "gemini"]
-) -> Dict[str, Any]:
+    models: list[str] = ["openai", "anthropic", "gemini"]
+) -> dict[str, Any]:
     """Multi-model consensus endpoint"""
     return await ultimate_ai.multi_model_consensus(prompt, models)
 
 async def ai_roofing(
     query: str,
     operation_type: str = "general"
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Roofing specialist endpoint"""
     return await ultimate_ai.roofing_specialist(query, operation_type)
 
-async def ai_system_status() -> Dict[str, Any]:
+async def ai_system_status() -> dict[str, Any]:
     """System status endpoint"""
     return ultimate_ai.get_system_status()
 

@@ -5,11 +5,12 @@ Comprehensive AI system self-awareness and introspection endpoints.
 Provides real-time insights into the AI OS's "consciousness" state.
 """
 
-from fastapi import APIRouter
-from datetime import datetime
-from typing import Dict, Any, List
 import logging
 import os
+from datetime import datetime
+from typing import Any
+
+from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/self-awareness", tags=["Self-Awareness Dashboard"])
@@ -46,7 +47,7 @@ async def _get_db_connection():
 
 
 @router.get("/dashboard")
-async def get_self_awareness_dashboard() -> Dict[str, Any]:
+async def get_self_awareness_dashboard() -> dict[str, Any]:
     """
     Comprehensive self-awareness dashboard
 
@@ -60,7 +61,7 @@ async def get_self_awareness_dashboard() -> Dict[str, Any]:
     """
     now = datetime.utcnow()
     conn = await _get_db_connection()
-    query_errors: List[str] = []
+    query_errors: list[str] = []
 
     dashboard = {
         "timestamp": now.isoformat(),
@@ -313,7 +314,7 @@ async def get_self_awareness_dashboard() -> Dict[str, Any]:
 
 
 @router.get("/introspection")
-async def get_introspection() -> Dict[str, Any]:
+async def get_introspection() -> dict[str, Any]:
     """
     Deep introspection - what the AI knows about itself
     """
@@ -358,7 +359,7 @@ async def get_introspection() -> Dict[str, Any]:
 
 
 @router.get("/vitals")
-async def get_vitals() -> Dict[str, Any]:
+async def get_vitals() -> dict[str, Any]:
     """
     Quick vital signs check
     """

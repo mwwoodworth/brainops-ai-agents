@@ -4,18 +4,20 @@ Comprehensive test of upgraded paid AI agents service
 Tests performance improvements, consistency, and identifies any runtime errors
 """
 
+import asyncio
+import json
 import os
+import statistics
 import sys
 import time
-import psycopg2
-from psycopg2.extras import RealDictCursor
-import requests
-import json
 import uuid
-import asyncio
-import aiohttp
 from datetime import datetime
-import statistics
+
+import aiohttp
+import psycopg2
+import requests
+from psycopg2.extras import RealDictCursor
+
 
 # Database configuration - NO hardcoded credentials
 def get_db_config():
@@ -483,9 +485,9 @@ def test_database_consistency():
 
         result = cursor.fetchone()
         if result['unique_agents'] <= result['total_agents']:
-            print(f"✅ Agent relationships consistent")
+            print("✅ Agent relationships consistent")
         else:
-            print(f"⚠️ Agent relationship issues detected")
+            print("⚠️ Agent relationship issues detected")
             issues.append("Agent relationship mismatch")
 
         cursor.close()

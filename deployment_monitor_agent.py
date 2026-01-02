@@ -5,12 +5,14 @@ BrainOps Deployment Monitor Agent
 Real-time monitoring of Render and Vercel deployments with log access
 """
 
-import os
 import asyncio
-import aiohttp
+import os
 from datetime import datetime
-from typing import Dict, Any, List
 from enum import Enum
+from typing import Any
+
+import aiohttp
+
 
 class DeploymentStatus(Enum):
     PENDING = "pending"
@@ -78,7 +80,7 @@ class DeploymentMonitorAgent:
         self.current_deployments = {}
         self.build_logs = {}
 
-    async def fetch_render_services(self) -> List[Dict]:
+    async def fetch_render_services(self) -> list[dict]:
         """Fetch all Render services"""
         if not self.render_api_key:
             return []
@@ -94,7 +96,7 @@ class DeploymentMonitorAgent:
                     return data.get("services", [])
                 return []
 
-    async def fetch_render_deploys(self, service_id: str) -> List[Dict]:
+    async def fetch_render_deploys(self, service_id: str) -> list[dict]:
         """Fetch deployment history for a Render service"""
         if not self.render_api_key or not service_id:
             return []
@@ -126,7 +128,7 @@ class DeploymentMonitorAgent:
                     return await response.text()
                 return ""
 
-    async def fetch_vercel_projects(self) -> List[Dict]:
+    async def fetch_vercel_projects(self) -> list[dict]:
         """Fetch all Vercel projects"""
         if not self.vercel_token:
             return []
@@ -142,7 +144,7 @@ class DeploymentMonitorAgent:
                     return data.get("projects", [])
                 return []
 
-    async def fetch_vercel_deployments(self, project_id: str = None) -> List[Dict]:
+    async def fetch_vercel_deployments(self, project_id: str = None) -> list[dict]:
         """Fetch Vercel deployments"""
         async with aiohttp.ClientSession() as session:
             headers = {"Authorization": f"Bearer {self.vercel_token}"}
@@ -156,7 +158,7 @@ class DeploymentMonitorAgent:
                     return data.get("deployments", [])
                 return []
 
-    async def fetch_vercel_build_logs(self, deployment_id: str) -> Dict:
+    async def fetch_vercel_build_logs(self, deployment_id: str) -> dict:
         """Fetch build logs for a Vercel deployment"""
         async with aiohttp.ClientSession() as session:
             headers = {"Authorization": f"Bearer {self.vercel_token}"}
@@ -182,7 +184,7 @@ class DeploymentMonitorAgent:
                             }
         return {}
 
-    async def monitor_deployment(self, service_name: str) -> Dict[str, Any]:
+    async def monitor_deployment(self, service_name: str) -> dict[str, Any]:
         """Monitor a specific service deployment"""
         service = self.services.get(service_name)
         if not service:
@@ -278,7 +280,7 @@ class DeploymentMonitorAgent:
         }
         return state_map.get(vercel_state, DeploymentStatus.PENDING.value)
 
-    async def check_service_health(self, url: str) -> Dict[str, Any]:
+    async def check_service_health(self, url: str) -> dict[str, Any]:
         """Check if a service is healthy"""
         try:
             async with aiohttp.ClientSession() as session:
@@ -301,7 +303,7 @@ class DeploymentMonitorAgent:
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def monitor_all_deployments(self) -> Dict[str, Any]:
+    async def monitor_all_deployments(self) -> dict[str, Any]:
         """Monitor all configured services"""
         results = {}
 
@@ -330,7 +332,7 @@ class DeploymentMonitorAgent:
             "summary": self._generate_summary(results)
         }
 
-    def _generate_summary(self, results: Dict) -> Dict:
+    def _generate_summary(self, results: dict) -> dict:
         """Generate a summary of all deployments"""
         total = len(results)
         live = sum(1 for r in results.values() if r.get("status") == DeploymentStatus.LIVE.value)
@@ -347,7 +349,7 @@ class DeploymentMonitorAgent:
             "all_operational": live == total and healthy == total
         }
 
-    async def calculate_deployment_risk(self, service_name: str, deployment_details: Dict[str, Any]) -> Dict[str, Any]:
+    async def calculate_deployment_risk(self, service_name: str, deployment_details: dict[str, Any]) -> dict[str, Any]:
         """Calculate deployment risk score based on multiple factors"""
         try:
             risk_factors = {
@@ -423,7 +425,7 @@ class DeploymentMonitorAgent:
                 "should_proceed": False
             }
 
-    def _generate_mitigation_steps(self, risk_factors: Dict[str, float]) -> List[str]:
+    def _generate_mitigation_steps(self, risk_factors: dict[str, float]) -> list[str]:
         """Generate mitigation steps based on risk factors"""
         steps = []
 
@@ -447,7 +449,7 @@ class DeploymentMonitorAgent:
 
         return steps
 
-    async def auto_rollback_decision(self, service_name: str, deployment_id: str, metrics: Dict[str, Any]) -> Dict[str, Any]:
+    async def auto_rollback_decision(self, service_name: str, deployment_id: str, metrics: dict[str, Any]) -> dict[str, Any]:
         """Determine if automatic rollback should be triggered"""
         try:
             rollback_triggers = {
@@ -518,7 +520,7 @@ class DeploymentMonitorAgent:
                 "severity": "critical"
             }
 
-    def _generate_rollback_reason(self, triggers: Dict[str, bool]) -> str:
+    def _generate_rollback_reason(self, triggers: dict[str, bool]) -> str:
         """Generate human-readable rollback reason"""
         active_triggers = [k.replace('_', ' ').title() for k, v in triggers.items() if v]
 
@@ -530,7 +532,7 @@ class DeploymentMonitorAgent:
 
         return f"Multiple issues detected: {', '.join(active_triggers)}"
 
-    async def monitor_deployment_metrics(self, service_name: str, duration_minutes: int = 10) -> Dict[str, Any]:
+    async def monitor_deployment_metrics(self, service_name: str, duration_minutes: int = 10) -> dict[str, Any]:
         """Monitor deployment metrics for a period after deployment"""
         try:
             service = self.services.get(service_name)
@@ -592,7 +594,7 @@ class DeploymentMonitorAgent:
 
         return "No logs available"
 
-    def format_report(self, monitoring_data: Dict) -> str:
+    def format_report(self, monitoring_data: dict) -> str:
         """Format monitoring data as a readable report"""
         report = []
         report.append("=" * 60)

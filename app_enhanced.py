@@ -2,24 +2,25 @@
 BrainOps AI Agents Service - Enhanced Production Version
 Type-safe, async, fully operational
 """
-import logging
 import asyncio
 import json
+import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
-from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, Security, Depends
+from fastapi import Depends, FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 
+from api.memory import router as memory_router
+
 # Import our production-ready components
 from config import config
-from database.async_connection import init_pool, get_pool, close_pool, PoolConfig
+from database.async_connection import PoolConfig, close_pool, get_pool, init_pool
 from models.agent import Agent, AgentExecution, AgentList
-from api.memory import router as memory_router
 
 # Configure logging
 logging.basicConfig(

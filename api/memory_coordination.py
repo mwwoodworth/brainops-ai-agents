@@ -3,11 +3,12 @@
 MEMORY COORDINATION API - Endpoints for Perfect E2E Context Management
 """
 
-from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, Optional
-from pydantic import BaseModel, Field
-from datetime import datetime
 import logging
+from datetime import datetime
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class StoreContextRequest(BaseModel):
     user_id: Optional[str] = None
     session_id: Optional[str] = None
     agent_id: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     expires_in_seconds: Optional[int] = None
 
 
@@ -56,19 +57,19 @@ class StartSessionRequest(BaseModel):
     session_id: str
     tenant_id: Optional[str] = None
     user_id: Optional[str] = None
-    initial_context: Dict[str, Any] = Field(default_factory=dict)
+    initial_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class AddMessageRequest(BaseModel):
     session_id: str
     role: str
     content: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AddTaskRequest(BaseModel):
     session_id: str
-    task: Dict[str, Any]
+    task: dict[str, Any]
     status: str = "pending"
 
 
@@ -76,7 +77,7 @@ class HandoffRequest(BaseModel):
     session_id: str
     to_agent: str
     handoff_reason: str
-    critical_info: Dict[str, Any]
+    critical_info: dict[str, Any]
     continuation_instructions: str
 
 
@@ -95,6 +96,7 @@ async def get_coordinator():
         try:
             # Try with 5 second timeout to prevent hanging
             import asyncio
+
             from memory_coordination_system import get_memory_coordinator
             _coordinator = await asyncio.wait_for(
                 asyncio.to_thread(get_memory_coordinator),
@@ -150,8 +152,9 @@ async def store_context(
     - agent: Specific AI agent only
     """
     try:
-        from memory_coordination_system import ContextEntry, MemoryLayer, ContextScope
         from datetime import timedelta
+
+        from memory_coordination_system import ContextEntry, ContextScope, MemoryLayer
 
         entry = ContextEntry(
             key=request.key,

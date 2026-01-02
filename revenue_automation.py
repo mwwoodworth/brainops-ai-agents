@@ -4,17 +4,18 @@ Secure Production Revenue Automation for MyRoofGenius
 All credentials loaded from environment variables
 """
 
+import logging
 import os
 import time
-import logging
-import schedule
 from datetime import datetime, timedelta
+
 import psycopg2
-from psycopg2.extras import RealDictCursor
+import schedule
 import stripe
+from dotenv import load_dotenv
+from psycopg2.extras import RealDictCursor
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
-from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()

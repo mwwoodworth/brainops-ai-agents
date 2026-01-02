@@ -3,18 +3,20 @@ AI Agent Scheduler - Automatic Execution System
 Schedules and executes AI agents based on configured intervals
 """
 
+import asyncio
+import json
 import logging
+import os
+import uuid
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+from typing import Any, Optional
+
+import psycopg2
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from datetime import datetime, timedelta
-import psycopg2
 from psycopg2.extras import RealDictCursor
-import os
-from typing import Dict, Optional, Any
-import asyncio
-import uuid
-import json
-from contextlib import contextmanager
+
 from revenue_generation_system import get_revenue_system
 
 # CRITICAL: Use shared connection pool to prevent MaxClientsInSessionMode
@@ -62,7 +64,7 @@ logger = logging.getLogger(__name__)
 class AgentScheduler:
     """Manages automatic execution of AI agents"""
 
-    def __init__(self, db_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, db_config: Optional[dict[str, Any]] = None):
         # All credentials MUST come from environment variables - no hardcoded defaults
         self.db_config = db_config or {
             'host': os.getenv('DB_HOST'),
@@ -237,7 +239,7 @@ class AgentScheduler:
         except Exception as outer_e:
             logger.error(f"Failed to get database connection for agent {agent_name}: {outer_e}")
 
-    def _execute_by_type_sync(self, agent: Dict, cur, conn) -> Dict:
+    def _execute_by_type_sync(self, agent: dict, cur, conn) -> dict:
         """Execute agent based on its type (SYNCHRONOUS)"""
         agent_type = agent.get('type', '').lower()
         agent_name = agent.get('name', 'Unknown')
@@ -281,7 +283,7 @@ class AgentScheduler:
             logger.info(f"No specific handler for agent type: {agent_type}")
             return {"status": "executed", "type": agent_type}
 
-    def _execute_revenue_agent(self, agent: Dict, cur, conn) -> Dict:
+    def _execute_revenue_agent(self, agent: dict, cur, conn) -> dict:
         """Execute revenue optimization agent - TAKES REAL ACTIONS"""
         logger.info(f"Running revenue optimization for agent: {agent['name']}")
         actions_taken = []
@@ -367,7 +369,7 @@ class AgentScheduler:
         try:
             logger.info("🔄 Triggering Autonomous Revenue System...")
             rev_sys = get_revenue_system()
-            
+
             async def run_autonomous_tasks():
                 # 1. Identify new leads
                 criteria = {
@@ -376,7 +378,7 @@ class AgentScheduler:
                     "industry": "Roofing"
                 }
                 new_leads = await rev_sys.identify_new_leads(criteria)
-                
+
                 # 2. Automatically qualify and start workflow for new leads
                 processed = 0
                 for lead_id in new_leads:
@@ -384,7 +386,7 @@ class AgentScheduler:
                         break
                     await rev_sys.run_revenue_workflow(lead_id)
                     processed += 1
-                    
+
                 return {
                     "new_leads_identified": len(new_leads),
                     "workflows_started": processed
@@ -435,7 +437,7 @@ class AgentScheduler:
             "timestamp": datetime.utcnow().isoformat()
         }
 
-    def _execute_lead_agent(self, agent: Dict, cur, conn) -> Dict:
+    def _execute_lead_agent(self, agent: dict, cur, conn) -> dict:
         """Execute lead generation/scoring agent - TAKES REAL ACTIONS"""
         logger.info(f"Running lead analysis for agent: {agent['name']}")
         actions_taken = []
@@ -563,7 +565,7 @@ class AgentScheduler:
             "timestamp": datetime.utcnow().isoformat()
         }
 
-    def _execute_customer_agent(self, agent: Dict, cur, conn) -> Dict:
+    def _execute_customer_agent(self, agent: dict, cur, conn) -> dict:
         """Execute customer intelligence agent - TAKES REAL ACTIONS"""
         logger.info(f"Running customer intelligence for agent: {agent['name']}")
         actions_taken = []
@@ -708,7 +710,7 @@ class AgentScheduler:
             "timestamp": datetime.utcnow().isoformat()
         }
 
-    def _execute_analytics_agent(self, agent: Dict, cur, conn) -> Dict:
+    def _execute_analytics_agent(self, agent: dict, cur, conn) -> dict:
         """Execute analytics agent"""
         logger.info(f"Running analytics for agent: {agent['name']}")
 
@@ -733,7 +735,7 @@ class AgentScheduler:
             "timestamp": datetime.utcnow().isoformat()
         }
 
-    def _execute_health_monitor(self, agent: Dict, cur, conn) -> Dict:
+    def _execute_health_monitor(self, agent: dict, cur, conn) -> dict:
         """Execute health monitoring agent - checks all agents and auto-restarts failed ones"""
         logger.info(f"Running health monitoring for agent: {agent['name']}")
 
@@ -782,13 +784,13 @@ class AgentScheduler:
                 "timestamp": datetime.utcnow().isoformat()
             }
 
-    def _execute_email_processor(self, agent: Dict, cur, conn) -> Dict:
+    def _execute_email_processor(self, agent: dict, cur, conn) -> dict:
         """Execute email processor agent - processes ai_email_queue"""
         logger.info(f"Running email processor for agent: {agent['name']}")
 
         try:
             # Import email sender
-            from email_sender import process_email_queue, get_queue_status
+            from email_sender import get_queue_status, process_email_queue
 
             # Get queue status before processing
             queue_status = get_queue_status()
@@ -840,7 +842,7 @@ class AgentScheduler:
                 "timestamp": datetime.utcnow().isoformat()
             }
 
-    def _execute_learning_feedback_loop(self, agent: Dict, cur, conn) -> Dict:
+    def _execute_learning_feedback_loop(self, agent: dict, cur, conn) -> dict:
         """
         Execute Learning Feedback Loop agent - CLOSES THE GAP BETWEEN INSIGHTS AND ACTION.
 
@@ -1025,7 +1027,7 @@ class AgentScheduler:
         except Exception as e:
             logger.error(f"Error shutting down scheduler: {e}")
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         """Get scheduler status"""
         return {
             "running": self.scheduler.running,
@@ -1042,7 +1044,7 @@ class AgentScheduler:
 
 
 # Create execution tracking table if needed
-def create_execution_table(db_config: Dict):
+def create_execution_table(db_config: dict):
     """Create ai_agent_executions table if it doesn't exist"""
     try:
         with _get_pooled_connection(db_config) as conn:

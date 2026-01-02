@@ -18,19 +18,20 @@ Components:
 Based on Perplexity research on self-healing AI infrastructure patterns 2025.
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
+import os
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
-from enum import Enum
 from decimal import Decimal
+from enum import Enum
+from typing import Any, Optional
+
+import httpx
 import psycopg2
 from psycopg2.extras import Json
-import httpx
-from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,7 @@ class Incident:
     metrics: HealthMetrics
     detected_at: datetime
     resolved_at: Optional[datetime] = None
-    remediation_actions: List[str] = None
+    remediation_actions: list[str] = None
     human_escalated: bool = False
 
 
@@ -179,7 +180,7 @@ class ReconciliationResult:
     incidents_detected: int
     remediations_executed: int
     success: bool
-    details: Dict[str, Any]
+    details: dict[str, Any]
 
 
 class CircuitBreaker:
@@ -188,8 +189,8 @@ class CircuitBreaker:
     def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 60):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
-        self.failures: Dict[str, int] = {}
-        self.open_circuits: Dict[str, datetime] = {}
+        self.failures: dict[str, int] = {}
+        self.open_circuits: dict[str, datetime] = {}
 
     def is_open(self, component_id: str) -> bool:
         """Check if circuit is open (blocking requests)"""
@@ -257,7 +258,7 @@ class SelfHealingReconciler:
         }
 
         self.circuit_breaker = CircuitBreaker()
-        self.active_incidents: Dict[str, Incident] = {}
+        self.active_incidents: dict[str, Incident] = {}
         self.running = False
         self.reconcile_interval = int(os.getenv("HEAL_INTERVAL_SECONDS", "120"))  # 2 min for stability
 
@@ -350,13 +351,13 @@ class SelfHealingReconciler:
         start_time = datetime.now()
         incidents_detected = 0
         remediations_executed = 0
-        details: Dict[str, Any] = {"components": {}}
+        details: dict[str, Any] = {"components": {}}
 
         # OBSERVE: Collect metrics from all components
         metrics_list = await self._observe_all_components()
 
         for metrics in metrics_list:
-            component_details: Dict[str, Any] = {
+            component_details: dict[str, Any] = {
                 "status": HealthStatus.HEALTHY.value,
                 "metrics": asdict(metrics),
                 "incidents": [],
@@ -408,7 +409,7 @@ class SelfHealingReconciler:
         self._store_reconciliation(result)
         return result
 
-    async def _observe_all_components(self) -> List[HealthMetrics]:
+    async def _observe_all_components(self) -> list[HealthMetrics]:
         """Observe health metrics from all monitored components"""
         metrics_list = []
 
@@ -461,7 +462,7 @@ class SelfHealingReconciler:
 
         return metrics_list
 
-    def _detect_anomalies(self, metrics: HealthMetrics) -> List[str]:
+    def _detect_anomalies(self, metrics: HealthMetrics) -> list[str]:
         """Detect anomalies in metrics"""
         anomalies = []
 
@@ -718,7 +719,7 @@ class SelfHealingReconciler:
         except Exception as e:
             logger.error(f"Failed to store reconciliation: {e}")
 
-    def _log_to_unified_brain(self, action_type: str, data: Dict[str, Any]):
+    def _log_to_unified_brain(self, action_type: str, data: dict[str, Any]):
         """Log reconciliation actions to unified_brain table"""
         try:
             with _get_pooled_connection() as conn:

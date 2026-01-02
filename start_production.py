@@ -5,6 +5,7 @@ Ensures the new integrated system runs
 """
 
 import os
+
 import uvicorn
 
 # Set environment variables
@@ -17,9 +18,9 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     host = "0.0.0.0"
 
-    print(f"🚀 Starting BrainOps AI OS - Integrated System")
+    print("🚀 Starting BrainOps AI OS - Integrated System")
     print(f"Running on http://{host}:{port}")
-    print(f"AUREA, Memory, Board, and all 59 agents activated")
+    print("AUREA, Memory, Board, and all 59 agents activated")
 
     uvicorn.run(
         app,

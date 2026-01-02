@@ -2,8 +2,9 @@
 """Fix production database schema issues"""
 
 import os
-import psycopg2
 import sys
+
+import psycopg2
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),

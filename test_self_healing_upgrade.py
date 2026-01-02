@@ -7,7 +7,9 @@ Tests all new proactive recovery capabilities
 import asyncio
 import sys
 from datetime import datetime
+
 from self_healing_recovery import get_self_healing_recovery
+
 
 def test_proactive_health_monitoring():
     """Test proactive health monitoring"""
@@ -69,7 +71,7 @@ def test_predictive_failure_detection():
     result = healer.monitor_proactive_health('leaky_component', final_metrics)
     prediction = result['failure_prediction']
 
-    print(f"Memory Leak Detection:")
+    print("Memory Leak Detection:")
     print(f"  Failure Probability: {prediction['probability']:.1%}")
     print(f"  Time to Failure: {prediction['time_to_failure']}")
     print(f"  Reasons: {prediction['reasons']}")
@@ -85,7 +87,7 @@ async def test_automatic_rollback():
     # Test rollback
     result = await healer.rollback_component('test_service', 'previous_state')
 
-    print(f"Rollback Result:")
+    print("Rollback Result:")
     print(f"  Success: {result['success']}")
     print(f"  Component: {result.get('component')}")
     print(f"  Rollback Type: {result.get('rollback_type')}")
@@ -104,7 +106,7 @@ async def test_service_restart():
         'test_service'
     )
 
-    print(f"Service Restart Result:")
+    print("Service Restart Result:")
     print(f"  Success: {result['success']}")
     print(f"  Message: {result.get('message', result.get('error'))}")
 
@@ -119,7 +121,7 @@ def test_database_connection_recovery():
 
     result = healer.recover_database_connection()
 
-    print(f"Database Recovery Result:")
+    print("Database Recovery Result:")
     print(f"  Success: {result['success']}")
     print(f"  Attempts: {result.get('attempts', 'N/A')}")
     print(f"  Message: {result.get('message', result.get('error'))}")
@@ -137,7 +139,7 @@ def test_memory_leak_detection():
 
     result = healer.detect_and_cleanup_memory_leaks('test_component')
 
-    print(f"Memory Leak Detection Result:")
+    print("Memory Leak Detection Result:")
     print(f"  Success: {result['success']}")
     print(f"  Leak Detected: {result.get('leak_detected', False)}")
     print(f"  Message: {result.get('message', 'Cleanup performed')}")

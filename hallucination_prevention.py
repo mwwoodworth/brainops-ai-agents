@@ -20,17 +20,18 @@ Author: BrainOps AI System
 Version: 1.0.0 - Bleeding Edge
 """
 
-import os
 import asyncio
-import logging
 import hashlib
+import logging
+import os
+import random
 import re
-from typing import Dict, Any, List, Optional, Tuple
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from collections import defaultdict
-import random
+from typing import Any, Optional
+
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ class Claim:
     id: str
     text: str
     category: str  # fact, opinion, inference, speculation
-    entities: List[str]
+    entities: list[str]
     confidence: float
     source_sentence: str
     verified: Optional[bool] = None
@@ -112,11 +113,11 @@ class ValidationResult:
     consensus_level: float  # Agreement between models
     hallucination_detected: bool
     hallucination_type: Optional[HallucinationType] = None
-    flagged_claims: List[Claim] = field(default_factory=list)
-    model_responses: Dict[str, Dict] = field(default_factory=dict)
+    flagged_claims: list[Claim] = field(default_factory=list)
+    model_responses: dict[str, dict] = field(default_factory=dict)
     validation_method: str = ""
     validation_duration_ms: float = 0.0
-    recommendations: List[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
     safe_response: Optional[str] = None  # Corrected/safe version if needed
 
 
@@ -128,9 +129,9 @@ class CrossValidationMetrics:
     consensus_failures: int = 0
     avg_confidence: float = 0.0
     avg_consensus: float = 0.0
-    model_agreement_rates: Dict[str, float] = field(default_factory=dict)
-    detection_by_type: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    validation_times: List[float] = field(default_factory=list)
+    model_agreement_rates: dict[str, float] = field(default_factory=dict)
+    detection_by_type: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    validation_times: list[float] = field(default_factory=list)
 
 
 # =============================================================================
@@ -158,7 +159,7 @@ class ClaimExtractor:
         self.inference_indicators = ['therefore', 'thus', 'hence', 'suggests', 'indicates']
         self.speculation_indicators = ['might', 'could', 'may', 'possibly', 'perhaps']
 
-    def extract_claims(self, text: str) -> List[Claim]:
+    def extract_claims(self, text: str) -> list[Claim]:
         """Extract atomic verifiable claims from text"""
         claims = []
 
@@ -217,7 +218,7 @@ class SemanticSimilarityEngine:
     def __init__(self):
         self.openai_key = os.getenv("OPENAI_API_KEY", "")
 
-    async def get_embedding(self, text: str) -> Optional[List[float]]:
+    async def get_embedding(self, text: str) -> Optional[list[float]]:
         """Get embedding vector for text"""
         if not self.openai_key:
             return None
@@ -244,7 +245,7 @@ class SemanticSimilarityEngine:
 
         return None
 
-    def cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+    def cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
         """Calculate cosine similarity between two vectors"""
         import math
 
@@ -308,7 +309,7 @@ class SAC3CrossChecker:
             "Said another way: {query}"
         ]
 
-    def generate_perturbations(self, query: str, num_perturbations: int = 3) -> List[str]:
+    def generate_perturbations(self, query: str, num_perturbations: int = 3) -> list[str]:
         """Generate semantically equivalent question perturbations"""
         perturbations = []
 
@@ -329,9 +330,9 @@ class SAC3CrossChecker:
     async def check_consistency(
         self,
         original_response: str,
-        perturbed_responses: List[str],
+        perturbed_responses: list[str],
         similarity_engine: SemanticSimilarityEngine
-    ) -> Tuple[float, List[Dict]]:
+    ) -> tuple[float, list[dict]]:
         """
         Check consistency between original and perturbed responses.
         Returns consistency score and list of divergences.
@@ -381,7 +382,7 @@ class MultiModelCrossValidator:
     """
 
     # ENHANCEMENT: Class-level validation cache with TTL
-    _validation_cache: Dict[str, Tuple[Any, datetime]] = {}
+    _validation_cache: dict[str, tuple[Any, datetime]] = {}
     _cache_max_size = 1000
     _cache_ttl_seconds = 300  # 5 minutes
 
@@ -448,7 +449,7 @@ class MultiModelCrossValidator:
         self._validation_cache[cache_key] = (result, datetime.now(timezone.utc))
         self._cache_misses += 1
 
-    def get_usage_stats(self) -> Dict[str, Any]:
+    def get_usage_stats(self) -> dict[str, Any]:
         """ENHANCEMENT: Get API usage and cache statistics"""
         total_cache_accesses = self._cache_hits + self._cache_misses
         return {
@@ -583,7 +584,7 @@ class MultiModelCrossValidator:
         self,
         response: str,
         prompt: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         OPTIMIZATION: Fast heuristic check to avoid expensive API calls.
         Uses local pattern matching and basic logic checks.
@@ -648,7 +649,7 @@ class MultiModelCrossValidator:
         prompt: str,
         response_to_validate: str,
         validation_level: ValidationLevel = ValidationLevel.STANDARD,
-        context: Optional[Dict] = None
+        context: Optional[dict] = None
     ) -> ValidationResult:
         """
         Cross-validate a response using multiple AI models.
@@ -669,7 +670,7 @@ class MultiModelCrossValidator:
         cache_key = self._get_cache_key(prompt, response_to_validate, validation_level.value)
         cached_result = self._check_cache(cache_key)
         if cached_result is not None:
-            logger.info(f"CACHE HIT: Returning cached validation result")
+            logger.info("CACHE HIT: Returning cached validation result")
             return cached_result
 
         # OPTIMIZATION: Cascade Pattern - fast local check first
@@ -837,7 +838,7 @@ class MultiModelCrossValidator:
 
         return result
 
-    def _parse_verification_response(self, response: str) -> Dict:
+    def _parse_verification_response(self, response: str) -> dict:
         """Parse verification response from model"""
         parsed = {
             "verdict": "CANNOT_VERIFY",
@@ -872,7 +873,7 @@ class MultiModelCrossValidator:
 
         return parsed
 
-    async def _calculate_consensus(self, model_responses: Dict) -> float:
+    async def _calculate_consensus(self, model_responses: dict) -> float:
         """Calculate consensus score between model responses"""
         if len(model_responses) < 2:
             return 1.0  # Single model = full consensus (with itself)
@@ -910,13 +911,13 @@ class RAGFactVerifier:
     def __init__(self, knowledge_base_url: Optional[str] = None):
         self.knowledge_base_url = knowledge_base_url
         self.claim_extractor = ClaimExtractor()
-        self._verified_facts_cache: Dict[str, Dict] = {}
+        self._verified_facts_cache: dict[str, dict] = {}
 
     async def verify_claims(
         self,
-        claims: List[Claim],
-        context: Optional[Dict] = None
-    ) -> List[Claim]:
+        claims: list[Claim],
+        context: Optional[dict] = None
+    ) -> list[Claim]:
         """Verify claims against knowledge base"""
         verified_claims = []
 
@@ -975,7 +976,7 @@ class CalibratedUncertaintySystem:
         self,
         response: str,
         confidence: float,
-        flagged_claims: List[Claim]
+        flagged_claims: list[Claim]
     ) -> str:
         """Apply appropriate uncertainty markers to response"""
         if confidence >= CONFIDENCE_THRESHOLDS["high"]:
@@ -1000,7 +1001,7 @@ class CalibratedUncertaintySystem:
         confidence: float,
         hallucination_detected: bool,
         consensus: float
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """Determine if the system should refuse to answer"""
         if confidence < CONFIDENCE_THRESHOLDS["reject"]:
             return True, self.refusal_templates["low_confidence"]
@@ -1035,7 +1036,7 @@ class HallucinationPreventionController:
         # Metrics tracking
         self.total_validations = 0
         self.hallucinations_prevented = 0
-        self.validation_history: List[Dict] = []
+        self.validation_history: list[dict] = []
 
         logger.info("HallucinationPreventionController initialized")
 
@@ -1044,8 +1045,8 @@ class HallucinationPreventionController:
         prompt: str,
         response: str,
         validation_level: ValidationLevel = ValidationLevel.STANDARD,
-        context: Optional[Dict] = None
-    ) -> Dict[str, Any]:
+        context: Optional[dict] = None
+    ) -> dict[str, Any]:
         """
         Main entry point - validates response and sanitizes if needed.
 
@@ -1124,7 +1125,7 @@ class HallucinationPreventionController:
             "details": validation_result
         }
 
-    async def quick_validate(self, response: str) -> Tuple[bool, float]:
+    async def quick_validate(self, response: str) -> tuple[bool, float]:
         """
         Quick validation for high-throughput scenarios.
         Returns (is_valid, confidence) tuple.
@@ -1161,7 +1162,7 @@ class HallucinationPreventionController:
 
         return (red_flags < 2, confidence)
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """Get comprehensive metrics"""
         cross_val_metrics = self.cross_validator.metrics
 
@@ -1211,7 +1212,7 @@ async def validate_response(
     prompt: str,
     response: str,
     level: str = "standard"
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Convenience function to validate an AI response.
 
@@ -1262,7 +1263,7 @@ async def test_hallucination_prevention():
     print("\n2. Testing quick validation...")
     suspicious = "Studies show that 100% of experts agree this is always true."
     is_valid, confidence = await controller.quick_validate(suspicious)
-    print(f"   Quick validation of suspicious text:")
+    print("   Quick validation of suspicious text:")
     print(f"   Valid: {is_valid}, Confidence: {confidence:.2f}")
 
     # Test 3: Get metrics

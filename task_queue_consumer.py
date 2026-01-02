@@ -12,12 +12,12 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
+import os
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class TaskQueueConsumer:
 
             await asyncio.sleep(self.poll_interval)
 
-    async def _fetch_pending_tasks(self) -> List[Dict[str, Any]]:
+    async def _fetch_pending_tasks(self) -> list[dict[str, Any]]:
         """Fetch pending tasks from database with row locking"""
         try:
             from database.async_connection import get_pool
@@ -144,7 +144,7 @@ class TaskQueueConsumer:
             logger.error(f"Failed to fetch tasks: {e}")
             return []
 
-    async def _process_task(self, task: Dict[str, Any]):
+    async def _process_task(self, task: dict[str, Any]):
         """Process a single task"""
         task_id = task['id']
         agent_id = task.get('agent_id')
@@ -186,7 +186,7 @@ class TaskQueueConsumer:
         self,
         task_id: str,
         status: str,
-        result: Optional[Dict[str, Any]] = None
+        result: Optional[dict[str, Any]] = None
     ):
         """Update task status in database"""
         try:
@@ -205,7 +205,7 @@ class TaskQueueConsumer:
         except Exception as e:
             logger.error(f"Failed to update task status: {e}")
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get consumer statistics"""
         return {
             **self._stats,

@@ -11,12 +11,13 @@ All events flow through a unified event bus stored in brainops_core.event_bus
 and broadcast via Supabase Realtime for live subscribers.
 """
 
-from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, validator
 import logging
 import uuid
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field, validator
 
 logger = logging.getLogger(__name__)
 
@@ -216,10 +217,10 @@ class UnifiedEvent(BaseModel):
     occurred_at: Optional[datetime] = Field(None, description="When the actual event occurred (may differ from timestamp)")
 
     # Content
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
 
     # Routing metadata
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    metadata: Optional[dict[str, Any]] = Field(default_factory=dict)
     correlation_id: Optional[str] = Field(None, description="For tracing related events")
     causation_id: Optional[str] = Field(None, description="Event that caused this event")
 
@@ -230,7 +231,7 @@ class UnifiedEvent(BaseModel):
     # Processing state (set by event bus, not by publisher)
     processed: bool = Field(default=False)
     processed_at: Optional[datetime] = Field(None)
-    processing_result: Optional[Dict[str, Any]] = Field(None)
+    processing_result: Optional[dict[str, Any]] = Field(None)
     retry_count: int = Field(default=0)
 
     @validator('event_type')
@@ -245,7 +246,7 @@ class UnifiedEvent(BaseModel):
                     return f"{parts[0]}.{'_'.join(parts[1:])}"
         return v.lower()
 
-    def to_db_record(self) -> Dict[str, Any]:
+    def to_db_record(self) -> dict[str, Any]:
         """Convert to database-friendly dict for insertion"""
         return {
             'event_id': self.event_id,
@@ -270,7 +271,7 @@ class UnifiedEvent(BaseModel):
             'retry_count': self.retry_count,
         }
 
-    def to_broadcast_payload(self) -> Dict[str, Any]:
+    def to_broadcast_payload(self) -> dict[str, Any]:
         """Convert to Supabase Realtime broadcast payload"""
         return {
             'event_id': self.event_id,
@@ -290,7 +291,7 @@ class UnifiedEvent(BaseModel):
         }
 
     @classmethod
-    def from_erp_event(cls, erp_event: Dict[str, Any]) -> "UnifiedEvent":
+    def from_erp_event(cls, erp_event: dict[str, Any]) -> "UnifiedEvent":
         """
         Transform ERP SystemEventEnvelope to UnifiedEvent.
 
@@ -327,7 +328,7 @@ class UnifiedEvent(BaseModel):
         )
 
     @classmethod
-    def from_legacy_event(cls, legacy: Dict[str, Any]) -> "UnifiedEvent":
+    def from_legacy_event(cls, legacy: dict[str, Any]) -> "UnifiedEvent":
         """
         Transform legacy AI Agents SystemEvent to UnifiedEvent.
 
@@ -449,8 +450,8 @@ class AgentExecutionPayload(UnifiedEventPayload):
     agent_id: str
     agent_name: str
     execution_id: Optional[str] = None
-    input_data: Optional[Dict[str, Any]] = None
-    output_data: Optional[Dict[str, Any]] = None
+    input_data: Optional[dict[str, Any]] = None
+    output_data: Optional[dict[str, Any]] = None
     duration_ms: Optional[int] = None
     error: Optional[str] = None
 
@@ -470,7 +471,7 @@ class AnomalyDetectedPayload(UnifiedEventPayload):
 # =============================================================================
 
 # Maps event types to their expected payload schemas
-EVENT_PAYLOAD_REGISTRY: Dict[str, type] = {
+EVENT_PAYLOAD_REGISTRY: dict[str, type] = {
     'lead.created': LeadCreatedPayload,
     'job.created': JobCreatedPayload,
     'job.completed': JobCompletedPayload,
@@ -486,7 +487,7 @@ EVENT_PAYLOAD_REGISTRY: Dict[str, type] = {
 }
 
 # Maps event types to their processing agents
-EVENT_AGENT_ROUTING: Dict[str, List[str]] = {
+EVENT_AGENT_ROUTING: dict[str, list[str]] = {
     # Customer lifecycle
     'customer.created': ['customer_success_agent', 'revenue_agent'],
     'lead.created': ['lead_qualification_agent', 'outreach_agent'],
@@ -513,12 +514,12 @@ EVENT_AGENT_ROUTING: Dict[str, List[str]] = {
 }
 
 
-def get_agents_for_event(event_type: str) -> List[str]:
+def get_agents_for_event(event_type: str) -> list[str]:
     """Get list of agents that should process a given event type"""
     return EVENT_AGENT_ROUTING.get(event_type.lower(), [])
 
 
-def validate_payload(event_type: str, payload: Dict[str, Any]) -> bool:
+def validate_payload(event_type: str, payload: dict[str, Any]) -> bool:
     """Validate payload against registered schema"""
     schema = EVENT_PAYLOAD_REGISTRY.get(event_type.lower())
     if not schema:

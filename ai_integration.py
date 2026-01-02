@@ -39,7 +39,7 @@ try:
     from ai_advanced_providers import (
         advanced_ai,
         generate_with_gemini_endpoint,
-        search_with_perplexity_endpoint
+        search_with_perplexity_endpoint,
     )
     AI_SYSTEMS["advanced"] = True
     logger.info("✅ Advanced Providers loaded")
@@ -49,10 +49,7 @@ except ImportError as e:
 
 # Try to import ultimate system
 try:
-    from ai_ultimate_system import (
-        ultimate_ai,
-        ai_generate_ultimate
-    )
+    from ai_ultimate_system import ai_generate_ultimate, ultimate_ai
     AI_SYSTEMS["ultimate"] = True
     logger.info("✅ Ultimate System loaded")
 except ImportError as e:

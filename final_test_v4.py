@@ -3,8 +3,9 @@
 Final test of v4.0.4 with synchronous AI
 """
 
-import requests
 import time
+
+import requests
 
 BASE_URL = "https://brainops-ai-agents.onrender.com"
 
@@ -44,7 +45,7 @@ try:
         data = r.json()
         if data.get('success'):
             print(f"   ✅ SUCCESS! Result: {data.get('result')}")
-            print(f"   This is REAL AI working!")
+            print("   This is REAL AI working!")
         else:
             print(f"   ❌ Failed: {data.get('error')}")
 except Exception as e:
@@ -66,7 +67,7 @@ try:
         data = r.json()
         result = data.get('result', '')
         if len(result) > 10:
-            print(f"   ✅ SUCCESS! AI responded with real answer")
+            print("   ✅ SUCCESS! AI responded with real answer")
             print(f"   Response: {result[:150]}...")
         else:
             print(f"   ⚠️ Response: {result}")
@@ -89,7 +90,7 @@ try:
         data = r.json()
         result = data.get('result', '')
         if len(result) > 50:
-            print(f"   ✅ GPT-4 WORKS!")
+            print("   ✅ GPT-4 WORKS!")
             print(f"   Response preview: {result[:200]}...")
 except Exception as e:
     print(f"   ❌ Error: {e}")

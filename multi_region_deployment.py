@@ -12,20 +12,23 @@ A comprehensive multi-region deployment orchestrator that provides:
 - Compliance with data residency requirements
 """
 
-import os
-import time
 import asyncio
 import hashlib
 import logging
-import psycopg2
+import os
 import threading
-from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
-from collections import defaultdict, deque
+import time
+
 # GeoIP and distance calculation implemented locally
 import warnings
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
+import psycopg2
+
 warnings.filterwarnings('ignore')
 
 # Configure logging
@@ -87,14 +90,14 @@ class RegionInfo:
     """Region information"""
     region: Region
     name: str
-    location: Tuple[float, float]  # latitude, longitude
-    endpoints: List[str]
+    location: tuple[float, float]  # latitude, longitude
+    endpoints: list[str]
     capacity: int
     current_load: int
     latency_ms: float
     available: bool
     data_residency: DataResidency
-    
+
     def utilization(self) -> float:
         return self.current_load / self.capacity if self.capacity > 0 else 0
 
@@ -105,18 +108,18 @@ class DeploymentConfig:
     service_name: str
     version: str
     strategy: DeploymentStrategy
-    regions: List[Region]
+    regions: list[Region]
     replicas_per_region: int
     health_check_endpoint: str
     rollback_on_failure: bool
-    traffic_split: Dict[str, float] = field(default_factory=dict)
+    traffic_split: dict[str, float] = field(default_factory=dict)
 
 
-@dataclass 
+@dataclass
 class TrafficRoute:
     """Traffic routing decision"""
     client_ip: str
-    client_location: Tuple[float, float]
+    client_location: tuple[float, float]
     target_region: Region
     target_endpoint: str
     latency_estimate: float
@@ -125,12 +128,12 @@ class TrafficRoute:
 
 class GeoLocationService:
     """Geolocation service for routing"""
-    
+
     def __init__(self):
         # Simulated GeoIP database
         self.ip_locations = {}
         self._init_sample_data()
-    
+
     def _init_sample_data(self):
         """Initialize sample geolocation data"""
         # Sample IP ranges for testing
@@ -142,8 +145,8 @@ class GeoLocationService:
             '5.0.0.0/8': (1.3521, 103.8198),    # AP Southeast
             '6.0.0.0/8': (35.6762, 139.6503),   # AP Northeast
         }
-    
-    def get_location(self, ip_address: str) -> Tuple[float, float]:
+
+    def get_location(self, ip_address: str) -> tuple[float, float]:
         """Get location for IP address"""
         # Simplified - check first octet
         try:
@@ -153,48 +156,48 @@ class GeoLocationService:
         except (ValueError, AttributeError) as exc:
             logger.debug("Invalid IP address %s: %s", ip_address, exc)
             return (0, 0)  # Default location
-    
-    def get_nearest_region(self, location: Tuple[float, float], regions: List[RegionInfo]) -> RegionInfo:
+
+    def get_nearest_region(self, location: tuple[float, float], regions: list[RegionInfo]) -> RegionInfo:
         """Get nearest available region to location"""
         min_distance = float('inf')
         nearest_region = regions[0] if regions else None
-        
+
         for region in regions:
             if not region.available:
                 continue
-            
+
             # Calculate distance using haversine formula
             distance = self._calculate_distance(location, region.location)
-            
+
             if distance < min_distance:
                 min_distance = distance
                 nearest_region = region
-        
+
         return nearest_region
-    
-    def _calculate_distance(self, loc1: Tuple[float, float], loc2: Tuple[float, float]) -> float:
+
+    def _calculate_distance(self, loc1: tuple[float, float], loc2: tuple[float, float]) -> float:
         """Calculate distance between two locations in km"""
-        from math import radians, cos, sin, asin, sqrt
-        
+        from math import asin, cos, radians, sin, sqrt
+
         lat1, lon1 = loc1
         lat2, lon2 = loc2
-        
+
         # Convert to radians
         lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-        
+
         # Haversine formula
         dlat = lat2 - lat1
         dlon = lon2 - lon1
         a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
         c = 2 * asin(sqrt(a))
         r = 6371  # Earth radius in km
-        
+
         return c * r
 
 
 class EdgeNode:
     """Edge computing node"""
-    
+
     def __init__(self, node_id: str, region: Region, capacity: int):
         self.node_id = node_id
         self.region = region
@@ -203,7 +206,7 @@ class EdgeNode:
         self.cache = {}
         self.functions = {}
         self.metrics = defaultdict(list)
-    
+
     def deploy_function(self, function_name: str, code: str) -> bool:
         """Deploy edge function"""
         try:
@@ -217,16 +220,16 @@ class EdgeNode:
         except Exception as e:
             logger.error(f"Failed to deploy function: {e}")
             return False
-    
-    def execute_function(self, function_name: str, params: Dict) -> Any:
+
+    def execute_function(self, function_name: str, params: dict) -> Any:
         """Execute edge function"""
         if function_name not in self.functions:
             raise ValueError(f"Function {function_name} not found")
-        
+
         # Simulate function execution
         self.functions[function_name]['invocations'] += 1
         self.current_load += 1
-        
+
         # Return simulated result
         result = {
             'function': function_name,
@@ -234,10 +237,10 @@ class EdgeNode:
             'region': self.region.value,
             'result': f"Processed at edge: {params}"
         }
-        
+
         self.current_load -= 1
         return result
-    
+
     def cache_content(self, key: str, content: Any, ttl: int = 3600) -> bool:
         """Cache content at edge"""
         try:
@@ -250,7 +253,7 @@ class EdgeNode:
         except TypeError as exc:
             logger.warning("Failed to cache content for key %s: %s", key, exc)
             return False
-    
+
     def get_cached_content(self, key: str) -> Optional[Any]:
         """Get cached content"""
         if key in self.cache:
@@ -264,58 +267,58 @@ class EdgeNode:
 
 class CDNManager:
     """Content Delivery Network manager"""
-    
+
     def __init__(self):
         self.edge_nodes = {}
         self.content_registry = {}
         self.cache_hits = 0
         self.cache_misses = 0
-    
+
     def add_edge_node(self, node: EdgeNode):
         """Add edge node to CDN"""
         self.edge_nodes[node.node_id] = node
         logger.info(f"Added edge node {node.node_id} in region {node.region.value}")
-    
-    def distribute_content(self, content_id: str, content: Any, regions: List[Region]):
+
+    def distribute_content(self, content_id: str, content: Any, regions: list[Region]):
         """Distribute content to edge nodes"""
         distributed_to = []
-        
+
         for node_id, node in self.edge_nodes.items():
             if node.region in regions:
                 if node.cache_content(content_id, content):
                     distributed_to.append(node_id)
-        
+
         self.content_registry[content_id] = {
             'distributed_to': distributed_to,
             'timestamp': datetime.utcnow()
         }
-        
+
         logger.info(f"Distributed content {content_id} to {len(distributed_to)} nodes")
         return distributed_to
-    
+
     def get_content(self, content_id: str, region: Region) -> Optional[Any]:
         """Get content from nearest edge node"""
         # Find edge nodes in region
         regional_nodes = [
-            node for node in self.edge_nodes.values() 
+            node for node in self.edge_nodes.values()
             if node.region == region
         ]
-        
+
         # Try to get from cache
         for node in regional_nodes:
             content = node.get_cached_content(content_id)
             if content:
                 self.cache_hits += 1
                 return content
-        
+
         self.cache_misses += 1
         return None
-    
-    def get_cache_stats(self) -> Dict:
+
+    def get_cache_stats(self) -> dict:
         """Get CDN cache statistics"""
         total_requests = self.cache_hits + self.cache_misses
         hit_rate = self.cache_hits / total_requests if total_requests > 0 else 0
-        
+
         return {
             'cache_hits': self.cache_hits,
             'cache_misses': self.cache_misses,
@@ -327,13 +330,13 @@ class CDNManager:
 
 class RegionManager:
     """Manage multi-region deployments"""
-    
+
     def __init__(self):
         self.regions = self._initialize_regions()
         self.deployments = {}
         self.sync_queue = deque(maxlen=10000)
-    
-    def _initialize_regions(self) -> Dict[Region, RegionInfo]:
+
+    def _initialize_regions(self) -> dict[Region, RegionInfo]:
         """Initialize region information"""
         return {
             Region.US_EAST: RegionInfo(
@@ -381,28 +384,28 @@ class RegionManager:
                 data_residency=DataResidency.NONE
             )
         }
-    
+
     async def deploy_service(
         self,
         config: DeploymentConfig
-    ) -> Dict:
+    ) -> dict:
         """Deploy service to multiple regions"""
         deployment_id = hashlib.md5(f"{config.service_name}{config.version}{time.time()}".encode()).hexdigest()[:8]
         deployment_results = []
-        
+
         for region in config.regions:
             if region not in self.regions:
                 continue
-            
+
             result = await self._deploy_to_region(config, region)
             deployment_results.append(result)
-        
+
         self.deployments[deployment_id] = {
             'config': config,
             'results': deployment_results,
             'timestamp': datetime.utcnow()
         }
-        
+
         return {
             'deployment_id': deployment_id,
             'service': config.service_name,
@@ -411,16 +414,16 @@ class RegionManager:
             'strategy': config.strategy.value,
             'results': deployment_results
         }
-    
+
     async def _deploy_to_region(
         self,
         config: DeploymentConfig,
         region: Region
-    ) -> Dict:
+    ) -> dict:
         """Deploy to specific region"""
         try:
             region_info = self.regions[region]
-            
+
             # Simulate deployment based on strategy
             if config.strategy == DeploymentStrategy.BLUE_GREEN:
                 result = await self._blue_green_deploy(config, region_info)
@@ -430,7 +433,7 @@ class RegionManager:
                 result = await self._rolling_deploy(config, region_info)
             else:
                 result = await self._standard_deploy(config, region_info)
-            
+
             return {
                 'region': region.value,
                 'status': 'success',
@@ -438,7 +441,7 @@ class RegionManager:
                 'replicas': config.replicas_per_region,
                 'result': result
             }
-            
+
         except Exception as e:
             logger.error(f"Deployment to {region.value} failed: {e}")
             return {
@@ -446,59 +449,59 @@ class RegionManager:
                 'status': 'failed',
                 'error': str(e)
             }
-    
-    async def _blue_green_deploy(self, config: DeploymentConfig, region: RegionInfo) -> Dict:
+
+    async def _blue_green_deploy(self, config: DeploymentConfig, region: RegionInfo) -> dict:
         """Blue-green deployment"""
         # Deploy to green environment
         green_endpoint = f"{region.region.value}-green.api.service.com"
-        
+
         # Simulate deployment
         await asyncio.sleep(0.1)
-        
+
         # Switch traffic
         return {
             'strategy': 'blue_green',
             'green_endpoint': green_endpoint,
             'switched_at': datetime.utcnow().isoformat()
         }
-    
-    async def _canary_deploy(self, config: DeploymentConfig, region: RegionInfo) -> Dict:
+
+    async def _canary_deploy(self, config: DeploymentConfig, region: RegionInfo) -> dict:
         """Canary deployment"""
         # Deploy canary version
         canary_percentage = config.traffic_split.get('canary', 10)
-        
+
         return {
             'strategy': 'canary',
             'canary_percentage': canary_percentage,
             'stable_percentage': 100 - canary_percentage
         }
-    
-    async def _rolling_deploy(self, config: DeploymentConfig, region: RegionInfo) -> Dict:
+
+    async def _rolling_deploy(self, config: DeploymentConfig, region: RegionInfo) -> dict:
         """Rolling deployment"""
         # Deploy replicas one by one
         deployed_replicas = []
-        
+
         for i in range(config.replicas_per_region):
             await asyncio.sleep(0.05)  # Simulate deployment time
             deployed_replicas.append(f"replica-{i}")
-        
+
         return {
             'strategy': 'rolling',
             'deployed_replicas': deployed_replicas
         }
-    
-    async def _standard_deploy(self, config: DeploymentConfig, region: RegionInfo) -> Dict:
+
+    async def _standard_deploy(self, config: DeploymentConfig, region: RegionInfo) -> dict:
         """Standard deployment"""
         return {
             'strategy': 'standard',
             'replicas': config.replicas_per_region
         }
-    
+
     def get_region_status(self, region: Region) -> Optional[RegionInfo]:
         """Get region status"""
         return self.regions.get(region)
-    
-    def get_all_regions_status(self) -> Dict:
+
+    def get_all_regions_status(self) -> dict:
         """Get all regions status"""
         return {
             region.value: {
@@ -514,22 +517,22 @@ class RegionManager:
 
 class TrafficRouter:
     """Route traffic based on geography and latency"""
-    
+
     def __init__(self):
         self.geo_service = GeoLocationService()
         self.routing_cache = {}
         self.routing_metrics = defaultdict(int)
-    
+
     def route_request(
         self,
         client_ip: str,
-        regions: Dict[Region, RegionInfo],
+        regions: dict[Region, RegionInfo],
         compliance_required: Optional[DataResidency] = None
     ) -> TrafficRoute:
         """Route request to optimal region"""
         # Get client location
         client_location = self.geo_service.get_location(client_ip)
-        
+
         # Filter regions by compliance if required
         available_regions = []
         for region, info in regions.items():
@@ -538,13 +541,13 @@ class TrafficRouter:
             if compliance_required and info.data_residency != compliance_required:
                 continue
             available_regions.append(info)
-        
+
         if not available_regions:
             raise ValueError("No available regions matching requirements")
-        
+
         # Find optimal region
         optimal_region = self._find_optimal_region(client_location, available_regions)
-        
+
         # Create route
         route = TrafficRoute(
             client_ip=client_ip,
@@ -554,46 +557,46 @@ class TrafficRouter:
             latency_estimate=self._estimate_latency(client_location, optimal_region.location),
             routing_reason="Lowest latency"
         )
-        
+
         # Update metrics
         self.routing_metrics[optimal_region.region.value] += 1
-        
+
         return route
-    
+
     def _find_optimal_region(
         self,
-        client_location: Tuple[float, float],
-        regions: List[RegionInfo]
+        client_location: tuple[float, float],
+        regions: list[RegionInfo]
     ) -> RegionInfo:
         """Find optimal region based on latency and load"""
         best_score = float('inf')
         best_region = regions[0]
-        
+
         for region in regions:
             # Calculate composite score (latency + utilization)
             distance = self.geo_service._calculate_distance(client_location, region.location)
             latency_score = distance / 100  # Normalize
             utilization_score = region.utilization() * 10
-            
+
             total_score = latency_score + utilization_score
-            
+
             if total_score < best_score:
                 best_score = total_score
                 best_region = region
-        
+
         return best_region
-    
+
     def _estimate_latency(
         self,
-        loc1: Tuple[float, float],
-        loc2: Tuple[float, float]
+        loc1: tuple[float, float],
+        loc2: tuple[float, float]
     ) -> float:
         """Estimate latency based on distance"""
         distance = self.geo_service._calculate_distance(loc1, loc2)
         # Rough estimate: 1ms per 100km
         return distance / 100
-    
-    def get_routing_metrics(self) -> Dict:
+
+    def get_routing_metrics(self) -> dict:
         """Get routing metrics"""
         total_requests = sum(self.routing_metrics.values())
         return {
@@ -605,13 +608,13 @@ class TrafficRouter:
 
 class DataSyncManager:
     """Manage data synchronization across regions"""
-    
+
     def __init__(self):
         self.sync_queue = deque(maxlen=10000)
         self.sync_status = {}
         self.is_syncing = False
         self.sync_thread = None
-    
+
     def start_sync(self):
         """Start data synchronization"""
         if not self.is_syncing:
@@ -620,14 +623,14 @@ class DataSyncManager:
             self.sync_thread.daemon = True
             self.sync_thread.start()
             logger.info("Started data synchronization")
-    
+
     def stop_sync(self):
         """Stop data synchronization"""
         self.is_syncing = False
         if self.sync_thread:
             self.sync_thread.join(timeout=5)
         logger.info("Stopped data synchronization")
-    
+
     def _sync_loop(self):
         """Main synchronization loop"""
         while self.is_syncing:
@@ -636,33 +639,33 @@ class DataSyncManager:
                     batch = []
                     while self.sync_queue and len(batch) < 100:
                         batch.append(self.sync_queue.popleft())
-                    
+
                     if batch:
                         asyncio.run(self._sync_batch(batch))
-                
+
                 time.sleep(1)
-                
+
             except Exception as e:
                 logger.error(f"Sync error: {e}")
-    
-    async def _sync_batch(self, batch: List[Dict]):
+
+    async def _sync_batch(self, batch: list[dict]):
         """Synchronize batch of data"""
         for item in batch:
             source_region = item['source_region']
             target_regions = item['target_regions']
             data = item['data']
-            
+
             for target in target_regions:
                 # Simulate sync
                 self.sync_status[f"{source_region}->{target}"] = {
                     'last_sync': datetime.utcnow(),
                     'records': len(data) if isinstance(data, list) else 1
                 }
-    
+
     def queue_sync(
         self,
         source_region: Region,
-        target_regions: List[Region],
+        target_regions: list[Region],
         data: Any
     ):
         """Queue data for synchronization"""
@@ -672,8 +675,8 @@ class DataSyncManager:
             'data': data,
             'queued_at': datetime.utcnow()
         })
-    
-    def get_sync_status(self) -> Dict:
+
+    def get_sync_status(self) -> dict:
         """Get synchronization status"""
         return {
             'queue_size': len(self.sync_queue),
@@ -684,14 +687,14 @@ class DataSyncManager:
 
 class MultiRegionOrchestrator:
     """Main multi-region deployment orchestrator"""
-    
+
     def __init__(self):
         self.region_manager = RegionManager()
         self.traffic_router = TrafficRouter()
         self.cdn_manager = CDNManager()
         self.data_sync = DataSyncManager()
         self._initialize_edge_nodes()
-    
+
     def _initialize_edge_nodes(self):
         """Initialize edge nodes for CDN"""
         # Create edge nodes for each region
@@ -702,13 +705,13 @@ class MultiRegionOrchestrator:
                 capacity=100
             )
             self.cdn_manager.add_edge_node(node)
-    
+
     async def deploy_globally(
         self,
         service_name: str,
         version: str,
         strategy: DeploymentStrategy = DeploymentStrategy.ROLLING
-    ) -> Dict:
+    ) -> dict:
         """Deploy service globally"""
         config = DeploymentConfig(
             service_name=service_name,
@@ -719,30 +722,30 @@ class MultiRegionOrchestrator:
             health_check_endpoint="/health",
             rollback_on_failure=True
         )
-        
+
         # Deploy to all regions
         deployment_result = await self.region_manager.deploy_service(config)
-        
+
         # Distribute static assets to CDN
         self.cdn_manager.distribute_content(
             f"{service_name}-{version}-assets",
             {"css": "styles.css", "js": "app.js"},
             config.regions
         )
-        
+
         # Start data synchronization
         self.data_sync.start_sync()
-        
+
         return deployment_result
-    
+
     def route_traffic(self, client_ip: str) -> TrafficRoute:
         """Route client traffic"""
         return self.traffic_router.route_request(
             client_ip,
             self.region_manager.regions
         )
-    
-    async def get_global_status(self) -> Dict:
+
+    async def get_global_status(self) -> dict:
         """Get global deployment status"""
         return {
             'timestamp': datetime.utcnow().isoformat(),
@@ -752,7 +755,7 @@ class MultiRegionOrchestrator:
             'sync_status': self.data_sync.get_sync_status(),
             'edge_nodes': len(self.cdn_manager.edge_nodes)
         }
-    
+
     def stop(self):
         """Stop orchestrator"""
         self.data_sync.stop_sync()
@@ -765,7 +768,7 @@ async def setup_database():
     try:
         conn = psycopg2.connect(**_get_db_config())
         cursor = conn.cursor()
-        
+
         # Regional deployments table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS regional_deployments (
@@ -779,7 +782,7 @@ async def setup_database():
                 deployed_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         # Traffic routing table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS traffic_routes (
@@ -792,7 +795,7 @@ async def setup_database():
                 routed_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         # Data sync table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS data_sync_log (
@@ -804,13 +807,13 @@ async def setup_database():
                 synced_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         conn.commit()
         cursor.close()
         conn.close()
-        
+
         logger.info("Database tables created successfully")
-        
+
     except Exception as e:
         logger.error(f"Database setup error: {e}")
 
@@ -825,64 +828,64 @@ if __name__ == "__main__":
         """Test multi-region deployment"""
         print("\n🌐 Testing Multi-Region Deployment System...")
         print("="*50)
-        
+
         # Setup database
         await setup_database()
-        
+
         # Initialize orchestrator
         orchestrator = get_multi_region_orchestrator()
-        
+
         print("✅ Initialized multi-region orchestrator")
-        print(f"   - Regions: 4")
+        print("   - Regions: 4")
         print(f"   - Edge nodes: {len(orchestrator.cdn_manager.edge_nodes)}")
-        
+
         # Test global deployment
         deployment = await orchestrator.deploy_globally(
             "api-service",
             "v2.0.0",
             DeploymentStrategy.BLUE_GREEN
         )
-        
-        print(f"✅ Deployed service globally")
+
+        print("✅ Deployed service globally")
         print(f"   - Deployment ID: {deployment['deployment_id']}")
         print(f"   - Regions: {deployment['regions']}")
         print(f"   - Strategy: {deployment['strategy']}")
-        
+
         # Test traffic routing
         test_ips = ["1.2.3.4", "2.3.4.5", "3.4.5.6", "5.6.7.8"]
         for ip in test_ips:
             route = orchestrator.route_traffic(ip)
             print(f"✅ Routed {ip} -> {route.target_region.value} (latency: {route.latency_estimate:.1f}ms)")
-        
+
         # Test CDN
         orchestrator.cdn_manager.distribute_content(
             "static-content",
             {"index.html": "<html>...</html>"},
             [Region.US_EAST, Region.EU_WEST]
         )
-        
+
         content = orchestrator.cdn_manager.get_content("static-content", Region.US_EAST)
         print(f"✅ CDN test: {'Content cached' if content else 'Cache miss'}")
-        
+
         # Test edge computing
         edge_node = list(orchestrator.cdn_manager.edge_nodes.values())[0]
         edge_node.deploy_function(
             "resize_image",
             "def resize(img, size): return img.resize(size)"
         )
-        
+
         result = edge_node.execute_function("resize_image", {"image": "test.jpg", "size": "100x100"})
         print(f"✅ Edge computing: Function executed at {result['region']}")
-        
+
         # Get global status
         status = await orchestrator.get_global_status()
-        print(f"✅ Global status retrieved")
+        print("✅ Global status retrieved")
         print(f"   - Active regions: {len(status['regions'])}")
         print(f"   - CDN hit rate: {status['cdn_stats']['hit_rate']:.1%}")
-        
+
         # Stop orchestrator
         orchestrator.stop()
-        
+
         print("\n" + "="*50)
         print("🎯 Multi-Region Deployment: OPERATIONAL!")
         print("="*50)
@@ -893,8 +896,8 @@ if __name__ == "__main__":
         print("✅ Data Synchronization")
         print("✅ Latency-Based Routing")
         print("✅ Compliance Support")
-        
+
         return True
-    
+
     # Run test
     asyncio.run(test_multi_region())

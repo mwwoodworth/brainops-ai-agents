@@ -16,9 +16,9 @@ import asyncio
 import logging
 import os
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Any, Optional
 
-from fastapi import APIRouter, Request, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 
 # Configure logging
@@ -31,10 +31,10 @@ router = APIRouter(tags=["erp-bridge"])
 # =============================================================================
 
 try:
+    from api.events.unified import mark_event_processed, store_event
     from lib.events.schema import (
         UnifiedEvent,
     )
-    from api.events.unified import store_event, mark_event_processed
     UNIFIED_EVENTS_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Unified events not available: {e}")
@@ -63,9 +63,9 @@ except ImportError:
 # Intelligent Follow-up System
 try:
     from intelligent_followup_system import (
-        get_intelligent_followup_system,
-        FollowUpType,
         FollowUpPriority,
+        FollowUpType,
+        get_intelligent_followup_system,
     )
     FOLLOWUP_SYSTEM_AVAILABLE = True
 except ImportError:
@@ -125,13 +125,13 @@ class ERPSystemEvent(BaseModel):
     type: str
     tenant_id: str = Field(..., alias="tenantId")
     timestamp: datetime
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
 
     # Optional fields
     version: int = 1
     source: Optional[str] = None
     origin: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
 
     class Config:
         populate_by_name = True
@@ -142,8 +142,8 @@ class ERPEventResponse(BaseModel):
     status: str
     event_id: str
     unified_event_id: Optional[str] = None
-    agents_triggered: List[str] = []
-    errors: List[str] = []
+    agents_triggered: list[str] = []
+    errors: list[str] = []
 
 
 # =============================================================================
@@ -168,7 +168,7 @@ def event_processor(event_type: str):
 
 @event_processor("CUSTOMER_CREATED")
 @event_processor("NEW_CUSTOMER")
-async def process_customer_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_customer_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process new customer creation - trigger onboarding"""
     result = {"agents": [], "actions": []}
 
@@ -211,7 +211,7 @@ async def process_customer_created(event: ERPSystemEvent, unified_event: Optiona
 
 
 @event_processor("LEAD_CREATED")
-async def process_lead_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_lead_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process new lead - trigger qualification and scoring"""
     result = {"agents": [], "actions": []}
 
@@ -257,7 +257,7 @@ async def process_lead_created(event: ERPSystemEvent, unified_event: Optional["U
 
 @event_processor("JOB_CREATED")
 @event_processor("NEW_JOB")
-async def process_job_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_job_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process new job - trigger scheduling and revenue tracking"""
     result = {"agents": [], "actions": []}
 
@@ -312,7 +312,7 @@ async def process_job_created(event: ERPSystemEvent, unified_event: Optional["Un
 
 
 @event_processor("JOB_SCHEDULED")
-async def process_job_scheduled(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_job_scheduled(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process job scheduled - send notifications"""
     result = {"agents": [], "actions": []}
 
@@ -338,7 +338,7 @@ async def process_job_scheduled(event: ERPSystemEvent, unified_event: Optional["
 
 
 @event_processor("JOB_COMPLETED")
-async def process_job_completed(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_job_completed(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process job completion - trigger follow-up and review request"""
     result = {"agents": [], "actions": []}
 
@@ -398,7 +398,7 @@ async def process_job_completed(event: ERPSystemEvent, unified_event: Optional["
 
 
 @event_processor("ESTIMATE_CREATED")
-async def process_estimate_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_estimate_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process new estimate - trigger pricing analysis"""
     result = {"agents": [], "actions": []}
 
@@ -430,7 +430,7 @@ async def process_estimate_created(event: ERPSystemEvent, unified_event: Optiona
 
 
 @event_processor("ESTIMATE_ACCEPTED")
-async def process_estimate_accepted(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_estimate_accepted(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process accepted estimate - trigger job creation workflow"""
     result = {"agents": [], "actions": []}
 
@@ -458,7 +458,7 @@ async def process_estimate_accepted(event: ERPSystemEvent, unified_event: Option
 
 
 @event_processor("INVOICE_CREATED")
-async def process_invoice_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_invoice_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process new invoice - trigger notification"""
     result = {"agents": [], "actions": []}
 
@@ -489,7 +489,7 @@ async def process_invoice_created(event: ERPSystemEvent, unified_event: Optional
 
 @event_processor("INVOICE_PAID")
 @event_processor("PAYMENT_RECEIVED")
-async def process_payment_received(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_payment_received(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process payment - update revenue metrics and trigger thank you"""
     result = {"agents": [], "actions": []}
 
@@ -540,7 +540,7 @@ async def process_payment_received(event: ERPSystemEvent, unified_event: Optiona
 
 
 @event_processor("INVOICE_OVERDUE")
-async def process_invoice_overdue(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_invoice_overdue(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process overdue invoice - trigger collection workflow"""
     result = {"agents": [], "actions": []}
 
@@ -573,7 +573,7 @@ async def process_invoice_overdue(event: ERPSystemEvent, unified_event: Optional
 
 
 @event_processor("EMPLOYEE_CLOCK_IN")
-async def process_employee_clock_in(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_employee_clock_in(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process employee clock in - update workforce metrics"""
     result = {"agents": [], "actions": []}
 
@@ -587,7 +587,7 @@ async def process_employee_clock_in(event: ERPSystemEvent, unified_event: Option
 
 
 @event_processor("WEATHER_ALERT")
-async def process_weather_alert(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_weather_alert(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process weather alert - trigger rescheduling workflow"""
     result = {"agents": [], "actions": []}
 
@@ -622,7 +622,7 @@ async def process_weather_alert(event: ERPSystemEvent, unified_event: Optional["
 
 @event_processor("SYSTEM_ANOMALY")
 @event_processor("DATA_INTEGRITY_ISSUE")
-async def process_system_anomaly(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> Dict[str, Any]:
+async def process_system_anomaly(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
     """Process system anomaly - trigger self-healing"""
     result = {"agents": [], "actions": []}
 
@@ -660,8 +660,8 @@ async def process_system_anomaly(event: ERPSystemEvent, unified_event: Optional[
 
 async def verify_erp_webhook_signature(request: Request) -> bool:
     """Verify HMAC signature from ERP webhook"""
-    import hmac
     import hashlib
+    import hmac
 
     signature = request.headers.get("X-ERP-Signature") or request.headers.get("X-Webhook-Signature")
     secret = os.getenv("ERP_WEBHOOK_SECRET", "")

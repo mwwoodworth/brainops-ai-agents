@@ -26,12 +26,11 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
 from pathlib import Path
+from typing import Any, Optional
 
 import httpx
 from loguru import logger
-
 
 # =============================================================================
 # ENUMERATIONS
@@ -129,14 +128,14 @@ class KnowledgeEntry:
     # Organization
     category: str = ""
     subcategory: str = ""
-    tags: List[str] = field(default_factory=list)
-    keywords: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
 
     # Access control
     access_level: AccessLevel = AccessLevel.INTERNAL
-    allowed_teams: List[str] = field(default_factory=list)
-    allowed_users: List[str] = field(default_factory=list)
-    allowed_agents: List[str] = field(default_factory=list)
+    allowed_teams: list[str] = field(default_factory=list)
+    allowed_users: list[str] = field(default_factory=list)
+    allowed_agents: list[str] = field(default_factory=list)
 
     # Status
     status: KnowledgeStatus = KnowledgeStatus.DRAFT
@@ -145,7 +144,7 @@ class KnowledgeEntry:
 
     # Relationships
     parent_id: Optional[str] = None
-    relationships: List[Dict[str, str]] = field(default_factory=list)
+    relationships: list[dict[str, str]] = field(default_factory=list)
 
     # Source
     source_type: str = "manual"  # manual, import, ai_generated, extracted
@@ -154,7 +153,7 @@ class KnowledgeEntry:
     original_author: str = ""
 
     # Vector embedding
-    embedding: List[float] = field(default_factory=list)
+    embedding: list[float] = field(default_factory=list)
     embedding_model: str = ""
 
     # Metadata
@@ -180,10 +179,10 @@ class KnowledgeEntry:
     # Audit
     created_by: str = ""
     updated_by: str = ""
-    review_history: List[Dict[str, Any]] = field(default_factory=list)
+    review_history: list[dict[str, Any]] = field(default_factory=list)
 
     # Custom data
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -198,7 +197,7 @@ class KnowledgeCategory:
     color: str = ""
     order: int = 0
     entry_count: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -206,7 +205,7 @@ class KnowledgeQuery:
     """Knowledge search query."""
     query_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     query_text: str = ""
-    filters: Dict[str, Any] = field(default_factory=dict)
+    filters: dict[str, Any] = field(default_factory=dict)
     user_id: str = ""
     agent_id: str = ""
     timestamp: datetime = field(default_factory=datetime.utcnow)
@@ -229,11 +228,11 @@ class KnowledgeExtraction:
     source_type: str = ""  # pdf, webpage, email, conversation
 
     # Extracted content
-    extracted_entries: List[Dict[str, Any]] = field(default_factory=list)
-    entities: List[Dict[str, str]] = field(default_factory=list)
-    key_phrases: List[str] = field(default_factory=list)
-    action_items: List[str] = field(default_factory=list)
-    decisions: List[str] = field(default_factory=list)
+    extracted_entries: list[dict[str, Any]] = field(default_factory=list)
+    entities: list[dict[str, str]] = field(default_factory=list)
+    key_phrases: list[str] = field(default_factory=list)
+    action_items: list[str] = field(default_factory=list)
+    decisions: list[str] = field(default_factory=list)
 
     # Metadata
     extraction_model: str = ""
@@ -253,10 +252,10 @@ class SimpleVectorStore:
     """
 
     def __init__(self):
-        self.vectors: Dict[str, List[float]] = {}
-        self.metadata: Dict[str, Dict[str, Any]] = {}
+        self.vectors: dict[str, list[float]] = {}
+        self.metadata: dict[str, dict[str, Any]] = {}
 
-    def add(self, entry_id: str, vector: List[float], metadata: Dict[str, Any] = None):
+    def add(self, entry_id: str, vector: list[float], metadata: dict[str, Any] = None):
         """Add a vector to the store."""
         self.vectors[entry_id] = vector
         self.metadata[entry_id] = metadata or {}
@@ -268,10 +267,10 @@ class SimpleVectorStore:
 
     def search(
         self,
-        query_vector: List[float],
+        query_vector: list[float],
         top_k: int = 10,
-        filters: Dict[str, Any] = None
-    ) -> List[Tuple[str, float, Dict[str, Any]]]:
+        filters: dict[str, Any] = None
+    ) -> list[tuple[str, float, dict[str, Any]]]:
         """Search for similar vectors."""
         if not self.vectors:
             return []
@@ -292,7 +291,7 @@ class SimpleVectorStore:
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:top_k]
 
-    def _cosine_similarity(self, a: List[float], b: List[float]) -> float:
+    def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
         """Calculate cosine similarity between two vectors."""
         if len(a) != len(b):
             return 0.0
@@ -306,7 +305,7 @@ class SimpleVectorStore:
 
         return dot_product / (norm_a * norm_b)
 
-    def _matches_filters(self, metadata: Dict[str, Any], filters: Dict[str, Any]) -> bool:
+    def _matches_filters(self, metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
         """Check if metadata matches filters."""
         for key, value in filters.items():
             meta_value = metadata.get(key)
@@ -381,14 +380,14 @@ Format as JSON with these exact keys."""
 
     async def generate_embeddings(
         self,
-        texts: List[str],
+        texts: list[str],
         model: str = "text-embedding-3-small"
-    ) -> List[List[float]]:
+    ) -> list[list[float]]:
         """Generate embeddings for texts using OpenAI."""
         if not self.openai_api_key:
             # Try to get from environment if not set
             self.openai_api_key = os.getenv("OPENAI_API_KEY")
-            
+
         if not self.openai_api_key:
             logger.error("OpenAI API Key missing for embeddings")
             raise ValueError("OPENAI_API_KEY is required for knowledge base embeddings")
@@ -424,7 +423,7 @@ Write a clear, concise summary that captures the key points."""
 
         return await self._call_claude(prompt)
 
-    async def extract_keywords(self, content: str, max_keywords: int = 10) -> List[str]:
+    async def extract_keywords(self, content: str, max_keywords: int = 10) -> list[str]:
         """Extract keywords from content."""
         prompt = f"""Extract the {max_keywords} most important keywords/phrases from this content:
 
@@ -438,8 +437,8 @@ Return as a simple comma-separated list."""
     async def categorize_content(
         self,
         content: str,
-        categories: List[str]
-    ) -> Tuple[str, float]:
+        categories: list[str]
+    ) -> tuple[str, float]:
         """Categorize content into predefined categories."""
         prompt = f"""Categorize this content into one of these categories:
 {', '.join(categories)}
@@ -463,7 +462,7 @@ Return ONLY the category name that best matches, nothing else."""
         """Call Claude API."""
         if not self.anthropic_api_key:
              self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-             
+
         if not self.anthropic_api_key:
             logger.error("Anthropic API Key missing")
             raise ValueError("ANTHROPIC_API_KEY is required for knowledge processing")
@@ -490,7 +489,7 @@ Return ONLY the category name that best matches, nothing else."""
             logger.error(f"Claude API error: {e}")
             raise
 
-    def _parse_json_response(self, response: str) -> Dict[str, Any]:
+    def _parse_json_response(self, response: str) -> dict[str, Any]:
         """Parse JSON from AI response."""
         try:
             # Try to find JSON in response
@@ -525,9 +524,9 @@ class MasterKnowledgeBase:
         self.db_url = db_url or os.getenv("DATABASE_URL")
 
         # In-memory storage (would be database in production)
-        self.entries: Dict[str, KnowledgeEntry] = {}
-        self.categories: Dict[str, KnowledgeCategory] = {}
-        self.queries: Dict[str, KnowledgeQuery] = {}
+        self.entries: dict[str, KnowledgeEntry] = {}
+        self.categories: dict[str, KnowledgeCategory] = {}
+        self.queries: dict[str, KnowledgeQuery] = {}
 
         # Vector store
         self.vector_store = SimpleVectorStore()
@@ -536,9 +535,9 @@ class MasterKnowledgeBase:
         self.processor = KnowledgeProcessor()
 
         # Indexes
-        self.by_type: Dict[KnowledgeType, Set[str]] = {t: set() for t in KnowledgeType}
-        self.by_category: Dict[str, Set[str]] = {}
-        self.by_tag: Dict[str, Set[str]] = {}
+        self.by_type: dict[KnowledgeType, set[str]] = {t: set() for t in KnowledgeType}
+        self.by_category: dict[str, set[str]] = {}
+        self.by_tag: dict[str, set[str]] = {}
 
         # Initialize default categories
         self._initialize_categories()
@@ -578,11 +577,11 @@ class MasterKnowledgeBase:
         content: str,
         knowledge_type: KnowledgeType,
         category: str = "",
-        tags: List[str] = None,
+        tags: list[str] = None,
         access_level: AccessLevel = AccessLevel.INTERNAL,
         source_type: str = "manual",
         created_by: str = "system",
-        metadata: Dict[str, Any] = None,
+        metadata: dict[str, Any] = None,
         auto_process: bool = True
     ) -> KnowledgeEntry:
         """Create a new knowledge entry."""
@@ -656,7 +655,7 @@ class MasterKnowledgeBase:
     async def update_entry(
         self,
         entry_id: str,
-        updates: Dict[str, Any],
+        updates: dict[str, Any],
         updated_by: str = "system",
         create_version: bool = True
     ) -> KnowledgeEntry:
@@ -791,15 +790,15 @@ class MasterKnowledgeBase:
     async def search(
         self,
         query: str,
-        knowledge_types: List[KnowledgeType] = None,
-        categories: List[str] = None,
-        tags: List[str] = None,
-        access_levels: List[AccessLevel] = None,
+        knowledge_types: list[KnowledgeType] = None,
+        categories: list[str] = None,
+        tags: list[str] = None,
+        access_levels: list[AccessLevel] = None,
         top_k: int = 10,
         user_id: str = None,
         agent_id: str = None,
         semantic: bool = True
-    ) -> List[Tuple[KnowledgeEntry, float]]:
+    ) -> list[tuple[KnowledgeEntry, float]]:
         """Search knowledge base."""
 
         results = []
@@ -879,7 +878,7 @@ class MasterKnowledgeBase:
         self,
         entry_id: str,
         top_k: int = 5
-    ) -> List[Tuple[KnowledgeEntry, float]]:
+    ) -> list[tuple[KnowledgeEntry, float]]:
         """Find entries related to a given entry."""
 
         entry = self.entries.get(entry_id)
@@ -907,11 +906,11 @@ class MasterKnowledgeBase:
 
     async def bulk_import(
         self,
-        entries_data: List[Dict[str, Any]],
+        entries_data: list[dict[str, Any]],
         knowledge_type: KnowledgeType,
         category: str = "",
         created_by: str = "import"
-    ) -> Tuple[int, int, List[str]]:
+    ) -> tuple[int, int, list[str]]:
         """Bulk import knowledge entries."""
 
         created = 0
@@ -950,7 +949,7 @@ class MasterKnowledgeBase:
 
         # Read document
         try:
-            with open(document_path, "r", encoding="utf-8") as f:
+            with open(document_path, encoding="utf-8") as f:
                 content = f.read()
         except Exception as e:
             logger.error(f"Failed to read document: {e}")
@@ -983,7 +982,7 @@ class MasterKnowledgeBase:
     # ANALYTICS
     # =========================================================================
 
-    async def get_statistics(self) -> Dict[str, Any]:
+    async def get_statistics(self) -> dict[str, Any]:
         """Get knowledge base statistics."""
 
         total_entries = len(self.entries)
@@ -1047,7 +1046,7 @@ class MasterKnowledgeBase:
             ],
         }
 
-    async def get_gaps_analysis(self) -> Dict[str, Any]:
+    async def get_gaps_analysis(self) -> dict[str, Any]:
         """Analyze gaps in knowledge coverage."""
 
         # Types with no entries
@@ -1113,8 +1112,8 @@ class MasterKnowledgeBase:
         self,
         agent_id: str,
         query: str,
-        context: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        context: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """
         Query knowledge base for an AI agent.
         Returns formatted response suitable for agent consumption.
@@ -1168,8 +1167,8 @@ class MasterKnowledgeBase:
     async def _generate_follow_up_questions(
         self,
         query: str,
-        entries: List[Dict[str, Any]]
-    ) -> List[str]:
+        entries: list[dict[str, Any]]
+    ) -> list[str]:
         """Generate follow-up questions based on search results."""
         if not entries:
             return []
@@ -1496,7 +1495,7 @@ Knowledge Base Access:
     print("\n2. Searching knowledge base...")
 
     results = await kb.search("how to handle refunds", top_k=3)
-    print(f"   Query: 'how to handle refunds'")
+    print("   Query: 'how to handle refunds'")
     print(f"   Results: {len(results)}")
     for entry, score in results:
         print(f"   - {entry.title} (score: {score:.3f})")
@@ -1516,7 +1515,7 @@ Knowledge Base Access:
         agent_id="support_agent_001",
         query="What is the refund policy?",
     )
-    print(f"   Agent query: 'What is the refund policy?'")
+    print("   Agent query: 'What is the refund policy?'")
     print(f"   Success: {agent_result['success']}")
     print(f"   Entries found: {agent_result['entries_count']}")
 

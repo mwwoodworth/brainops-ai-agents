@@ -4,18 +4,20 @@ Secure, authenticated endpoints for the Automated SOP Generator
 """
 
 import logging
-from typing import Dict, List, Optional, Any
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, Security, BackgroundTasks
-from fastapi.security import APIKeyHeader
-from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from typing import Any, Optional
+
 import bleach  # For HTML sanitization
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Security
+from fastapi.responses import Response
+from fastapi.security import APIKeyHeader
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 # API Key Security - use centralized config
 from config import config
+
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 VALID_API_KEYS = config.security.valid_api_keys
 # Approver keys: keys containing 'prod' are considered approver keys
@@ -54,10 +56,7 @@ ALLOWED_ATTRIBUTES = {
 
 # Import the SOP generator with fallback
 try:
-    from automated_sop_generator import (
-        SOPType,
-        get_sop_generator
-    )
+    from automated_sop_generator import SOPType, get_sop_generator
     SOP_GENERATOR_AVAILABLE = True
     logger.info("Automated SOP Generator loaded")
 except ImportError as e:
@@ -77,8 +76,8 @@ class SOPGenerationRequest(BaseModel):
     include_visuals: bool = True
     include_checklists: bool = True
     include_flowcharts: bool = False
-    related_processes: List[str] = Field(default_factory=list, max_items=10)
-    compliance_requirements: List[str] = Field(default_factory=list, max_items=10)
+    related_processes: list[str] = Field(default_factory=list, max_items=10)
+    compliance_requirements: list[str] = Field(default_factory=list, max_items=10)
     custom_instructions: str = Field(default="", max_length=3000)
     tenant_id: str = Field(default="default")
     author: str = Field(default="system", max_length=200)
@@ -86,7 +85,7 @@ class SOPGenerationRequest(BaseModel):
 
 class SOPFromProcessRequest(BaseModel):
     """Request to generate SOP from process mining"""
-    process_logs: List[Dict[str, Any]] = Field(..., min_items=1, max_items=1000)
+    process_logs: list[dict[str, Any]] = Field(..., min_items=1, max_items=1000)
     process_name: str = Field(..., min_length=3, max_length=200)
     department: str = Field(default="general", max_length=100)
     tenant_id: str = Field(default="default")
@@ -95,7 +94,7 @@ class SOPFromProcessRequest(BaseModel):
 class SOPUpdateRequest(BaseModel):
     """Request to update an SOP"""
     title: Optional[str] = Field(None, min_length=5, max_length=300)
-    content_updates: Optional[Dict[str, Any]] = None
+    content_updates: Optional[dict[str, Any]] = None
     status: Optional[str] = None
     tenant_id: str = Field(default="default")
 

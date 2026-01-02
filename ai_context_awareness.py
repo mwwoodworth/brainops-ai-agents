@@ -4,16 +4,17 @@ AI Context Awareness using Auth
 Build user-specific AI personalization
 """
 
-import os
 import logging
+import os
 import uuid
-from typing import Dict, List, Any
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from typing import Any
+
 import jwt
+import psycopg2
 from openai import OpenAI
+from psycopg2.extras import Json, RealDictCursor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -244,8 +245,8 @@ class AIContextAwareness:
         role: UserRole = UserRole.USER,
         organization: str = None,
         department: str = None,
-        metadata: Dict = None
-    ) -> Dict:
+        metadata: dict = None
+    ) -> dict:
         """Create or update user profile"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -337,7 +338,7 @@ class AIContextAwareness:
         except Exception as e:
             logger.error(f"Failed to initialize user context: {e}")
 
-    def _get_default_preferences(self, role: UserRole) -> Dict:
+    def _get_default_preferences(self, role: UserRole) -> dict:
         """Get default preferences based on role"""
         base_preferences = {
             'interface': {
@@ -388,8 +389,8 @@ class AIContextAwareness:
 
     async def authenticate_user(
         self,
-        credentials: Dict
-    ) -> Dict:
+        credentials: dict
+    ) -> dict:
         """Authenticate user and create session"""
         try:
             # Verify credentials (simplified - would integrate with real auth)
@@ -438,7 +439,7 @@ class AIContextAwareness:
             logger.error(f"Failed to authenticate user: {e}")
             return {'error': str(e)}
 
-    async def verify_token(self, token: str) -> Dict:
+    async def verify_token(self, token: str) -> dict:
         """Verify JWT token and get user context"""
         try:
             # Decode token
@@ -490,8 +491,8 @@ class AIContextAwareness:
     async def get_user_context(
         self,
         user_id: str,
-        context_types: List[ContextType] = None
-    ) -> Dict:
+        context_types: list[ContextType] = None
+    ) -> dict:
         """Get comprehensive user context"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -581,7 +582,7 @@ class AIContextAwareness:
         self,
         user_id: str,
         context_type: ContextType,
-        context_data: Dict,
+        context_data: dict,
         privacy_level: PrivacyLevel = PrivacyLevel.INTERNAL
     ) -> bool:
         """Update user context"""
@@ -628,8 +629,8 @@ class AIContextAwareness:
         action: str,
         entity_type: str = None,
         entity_id: str = None,
-        context: Dict = None,
-        result: Dict = None,
+        context: dict = None,
+        result: dict = None,
         duration_ms: int = None
     ) -> str:
         """Track user interaction"""
@@ -680,8 +681,8 @@ class AIContextAwareness:
         user_id: str,
         interaction_type: str,
         action: str,
-        context: Dict,
-        result: Dict
+        context: dict,
+        result: dict
     ):
         """Learn from user interaction to improve personalization"""
         try:
@@ -805,8 +806,8 @@ class AIContextAwareness:
 
     def _evaluate_conditions(
         self,
-        conditions: Dict,
-        context: Dict,
+        conditions: dict,
+        context: dict,
         resource_id: str
     ) -> bool:
         """Evaluate permission conditions"""
@@ -853,7 +854,7 @@ class AIContextAwareness:
             logger.error(f"Failed to personalize content: {e}")
             return base_content
 
-    def _personalize_dashboard(self, dashboard: Dict, preferences: Dict) -> Dict:
+    def _personalize_dashboard(self, dashboard: dict, preferences: dict) -> dict:
         """Personalize dashboard layout"""
         dashboard_prefs = preferences.get('dashboard', {})
 
@@ -867,8 +868,8 @@ class AIContextAwareness:
     async def _generate_recommendations(
         self,
         user_id: str,
-        context: Dict
-    ) -> List[Dict]:
+        context: dict
+    ) -> list[dict]:
         """Generate personalized recommendations"""
         try:
             # Get user embedding
@@ -918,9 +919,9 @@ class AIContextAwareness:
 
     def _personalize_communication(
         self,
-        message: Dict,
-        preferences: Dict
-    ) -> Dict:
+        message: dict,
+        preferences: dict
+    ) -> dict:
         """Personalize communication based on preferences"""
         comm_prefs = preferences.get('communication', {})
 
@@ -935,7 +936,7 @@ class AIContextAwareness:
         self,
         user_id: str,
         limit: int = 5
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Find users with similar preferences/behavior"""
         try:
             conn = psycopg2.connect(**_get_db_config())

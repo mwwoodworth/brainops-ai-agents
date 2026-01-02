@@ -5,10 +5,11 @@ Exposes the 345-tool MCP Bridge to the REST API.
 Enables external systems and the UI to invoke MCP tools.
 """
 
+import logging
+from typing import Any, Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +70,12 @@ def _get_digital_twin():
 class ExecuteToolRequest(BaseModel):
     server: str  # render, vercel, supabase, github, stripe, etc.
     tool: str    # The tool name
-    params: Optional[Dict[str, Any]] = None
+    params: Optional[dict[str, Any]] = None
 
 
 class AUREADecisionRequest(BaseModel):
     decision_type: str  # DEPLOY, HEAL, REVENUE, DATA, CODE
-    params: Dict[str, Any]
+    params: dict[str, Any]
 
 
 class SelfHealRequest(BaseModel):
@@ -220,7 +221,7 @@ async def get_render_logs(service_id: str, lines: int = 100):
 # =============================================================================
 
 @router.post("/supabase/query")
-async def supabase_query(query: str, params: List[Any] = None):
+async def supabase_query(query: str, params: list[Any] = None):
     """Execute a Supabase SQL query - RESTRICTED TO SELECT ONLY"""
     # SECURITY: Only allow SELECT statements to prevent SQL injection/data modification
     query_upper = query.strip().upper()
@@ -462,7 +463,7 @@ async def sync_digital_twin(request: TwinSyncRequest):
 # =============================================================================
 
 @router.post("/bulk/execute")
-async def bulk_execute(tools: List[ExecuteToolRequest]):
+async def bulk_execute(tools: list[ExecuteToolRequest]):
     """
     Execute multiple MCP tools in parallel
 

@@ -4,17 +4,18 @@ Notebook LM+ Style Learning System
 Implements continuous learning from all interactions with knowledge synthesis
 """
 
-import os
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from openai import OpenAI
+from typing import Any, Optional
+
 import numpy as np
+import psycopg2
+from openai import OpenAI
+from psycopg2.extras import RealDictCursor
 
 # Initialize OpenAI client
 _openai_client = None
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 # Database configuration - uses centralized config
 from config import config as app_config
+
 
 def get_db_config():
     """Get database config from centralized config module"""
@@ -90,20 +92,20 @@ class KnowledgeNode:
     source: LearningSource
     confidence: float
     importance: float
-    connections: List[str]
-    metadata: Dict[str, Any]
+    connections: list[str]
+    metadata: dict[str, Any]
     created_at: datetime
     accessed_count: int
     last_accessed: datetime
     synthesis_count: int
-    embedding: Optional[List[float]] = None
+    embedding: Optional[list[float]] = None
 
 @dataclass
 class LearningSession:
     """Tracks a learning session"""
     session_id: str
     start_time: datetime
-    topics: List[str]
+    topics: list[str]
     nodes_created: int
     connections_made: int
     insights_generated: int
@@ -246,7 +248,7 @@ class NotebookLMPlus:
             logger.error(f"Failed to create tables: {e}")
             raise
 
-    def start_learning_session(self, topics: List[str] = None) -> str:
+    def start_learning_session(self, topics: list[str] = None) -> str:
         """Start a new learning session"""
         try:
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
@@ -274,7 +276,7 @@ class NotebookLMPlus:
 
     def learn_from_interaction(self,
                               content: str,
-                              context: Dict[str, Any],
+                              context: dict[str, Any],
                               source: LearningSource = LearningSource.USER_INTERACTION) -> Optional[str]:
         """Learn from an interaction and store knowledge"""
         try:
@@ -316,7 +318,7 @@ class NotebookLMPlus:
             logger.error(f"Failed to learn from interaction: {e}")
             return None
 
-    def _analyze_content(self, content: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _analyze_content(self, content: str, context: dict[str, Any]) -> dict[str, Any]:
         """Analyze content to determine knowledge type and importance"""
         try:
             # Use OpenAI to analyze the content
@@ -364,7 +366,7 @@ class NotebookLMPlus:
                 'entities': []
             }
 
-    def _generate_embedding(self, text: str) -> List[float]:
+    def _generate_embedding(self, text: str) -> list[float]:
         """Generate embedding for text using OpenAI"""
         try:
             client = get_openai_client()
@@ -380,7 +382,7 @@ class NotebookLMPlus:
             logger.error(f"Failed to generate embedding: {e}")
             return [0.0] * 1536
 
-    def _find_related_knowledge(self, embedding: List[float], limit: int = 5) -> List[Dict]:
+    def _find_related_knowledge(self, embedding: list[float], limit: int = 5) -> list[dict]:
         """Find related knowledge using vector similarity"""
         try:
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
@@ -447,7 +449,7 @@ class NotebookLMPlus:
             logger.error(f"Failed to store knowledge: {e}")
             return None
 
-    def _attempt_synthesis(self, node_ids: List[str]):
+    def _attempt_synthesis(self, node_ids: list[str]):
         """Attempt to synthesize insights from multiple knowledge nodes"""
         try:
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
@@ -515,7 +517,7 @@ class NotebookLMPlus:
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
 
-    def _update_connections(self, knowledge_id: str, related: List[Dict]):
+    def _update_connections(self, knowledge_id: str, related: list[dict]):
         """Update bidirectional connections between knowledge nodes"""
         try:
             if not related:
@@ -582,7 +584,7 @@ class NotebookLMPlus:
         except Exception as e:
             logger.error(f"Failed to update session stats: {e}")
 
-    def query_knowledge(self, query: str, limit: int = 10) -> List[Dict]:
+    def query_knowledge(self, query: str, limit: int = 10) -> list[dict]:
         """Query the knowledge base"""
         try:
             # Generate query embedding
@@ -626,7 +628,7 @@ class NotebookLMPlus:
             logger.error(f"Knowledge query failed: {e}")
             return []
 
-    def get_insights(self, category: str = None, min_impact: float = 0.5) -> List[Dict]:
+    def get_insights(self, category: str = None, min_impact: float = 0.5) -> list[dict]:
         """Get synthesized insights"""
         try:
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
@@ -657,7 +659,7 @@ class NotebookLMPlus:
             logger.error(f"Failed to get insights: {e}")
             return []
 
-    def recognize_patterns(self, timeframe_days: int = 7) -> List[Dict]:
+    def recognize_patterns(self, timeframe_days: int = 7) -> list[dict]:
         """Recognize patterns across historical data"""
         try:
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
@@ -784,7 +786,7 @@ class NotebookLMPlus:
         except Exception as e:
             logger.error(f"Failed to track outcome: {e}")
 
-    def generate_recommendations(self) -> List[Dict]:
+    def generate_recommendations(self) -> list[dict]:
         """Generate actionable recommendations from learned knowledge"""
         try:
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
@@ -861,7 +863,7 @@ class NotebookLMPlus:
             logger.error(f"Failed to generate recommendations: {e}")
             return []
 
-    def end_learning_session(self) -> Dict[str, Any]:
+    def end_learning_session(self) -> dict[str, Any]:
         """End the current learning session and generate summary with patterns"""
         if not self.active_session:
             return {"error": "No active session"}
@@ -919,8 +921,8 @@ class NotebookLMPlus:
         self,
         agent: str,
         task_type: str,
-        input_data: Dict[str, Any],
-        output_data: Dict[str, Any],
+        input_data: dict[str, Any],
+        output_data: dict[str, Any],
         success: bool
     ) -> Optional[str]:
         """
@@ -981,7 +983,7 @@ class NotebookLMPlus:
         agent: str,
         task_type: str,
         error: str,
-        context: Dict[str, Any]
+        context: dict[str, Any]
     ) -> Optional[str]:
         """
         Record an agent error for learning.

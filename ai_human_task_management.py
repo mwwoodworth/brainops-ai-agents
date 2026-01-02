@@ -19,15 +19,14 @@ Version: 1.0.0
 """
 
 import asyncio
-import json
-import os
-import logging
 import hashlib
-from typing import Dict, Any, List, Optional, Callable
-from datetime import datetime, timezone, timedelta
-from dataclasses import dataclass, field, asdict
-from enum import Enum
+import json
+import logging
 from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -84,17 +83,17 @@ class Task:
     completed_at: Optional[datetime] = None
 
     # Content
-    payload: Dict[str, Any] = field(default_factory=dict)
-    result: Optional[Dict[str, Any]] = None
+    payload: dict[str, Any] = field(default_factory=dict)
+    result: Optional[dict[str, Any]] = None
     error: Optional[str] = None
 
     # Tracking
     progress_percent: int = 0
-    progress_notes: List[str] = field(default_factory=list)
+    progress_notes: list[str] = field(default_factory=list)
 
     # Relations
     parent_task_id: Optional[str] = None
-    subtask_ids: List[str] = field(default_factory=list)
+    subtask_ids: list[str] = field(default_factory=list)
 
     # Approval workflow
     requires_approval: bool = False
@@ -103,7 +102,7 @@ class Task:
 
     # Metadata
     tenant_id: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -114,7 +113,7 @@ class TaskUpdate:
     update_type: str  # "progress", "status", "escalation", "completion"
     from_entity: str  # Who made the update
     message: str
-    data: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
 
 
 class AIHumanTaskManager:
@@ -130,16 +129,16 @@ class AIHumanTaskManager:
     """
 
     def __init__(self):
-        self.tasks: Dict[str, Task] = {}
-        self.updates: Dict[str, List[TaskUpdate]] = defaultdict(list)
-        self.subscribers: Dict[str, List[Callable]] = defaultdict(list)
+        self.tasks: dict[str, Task] = {}
+        self.updates: dict[str, list[TaskUpdate]] = defaultdict(list)
+        self.subscribers: dict[str, list[Callable]] = defaultdict(list)
 
         # Queue by priority for processing
-        self.priority_queues: Dict[TaskPriority, List[str]] = {p: [] for p in TaskPriority}
+        self.priority_queues: dict[TaskPriority, list[str]] = {p: [] for p in TaskPriority}
 
         # Handlers
-        self._ai_handlers: Dict[str, Callable] = {}
-        self._human_handlers: Dict[str, Callable] = {}
+        self._ai_handlers: dict[str, Callable] = {}
+        self._human_handlers: dict[str, Callable] = {}
 
         # Metrics
         self.metrics = {
@@ -163,12 +162,12 @@ class AIHumanTaskManager:
         priority: TaskPriority = TaskPriority.MEDIUM,
         created_by: str = "system",
         assigned_to: Optional[str] = None,
-        payload: Optional[Dict] = None,
+        payload: Optional[dict] = None,
         due_at: Optional[datetime] = None,
         requires_approval: bool = False,
         parent_task_id: Optional[str] = None,
         tenant_id: Optional[str] = None,
-        tags: Optional[List[str]] = None
+        tags: Optional[list[str]] = None
     ) -> Task:
         """Create a new task"""
         task_id = hashlib.md5(
@@ -223,7 +222,7 @@ class AIHumanTaskManager:
         agent_name: str,
         user_id: str,
         priority: TaskPriority = TaskPriority.MEDIUM,
-        payload: Optional[Dict] = None,
+        payload: Optional[dict] = None,
         due_at: Optional[datetime] = None
     ) -> Task:
         """Human delegates a task to an AI agent"""
@@ -335,7 +334,7 @@ class AIHumanTaskManager:
         title: str,
         description: str,
         agent_name: str,
-        action_to_approve: Dict[str, Any],
+        action_to_approve: dict[str, Any],
         risk_level: str = "medium"
     ) -> Task:
         """AI requests human approval for an action"""
@@ -421,7 +420,7 @@ class AIHumanTaskManager:
     async def complete_task(
         self,
         task_id: str,
-        result: Dict[str, Any],
+        result: dict[str, Any],
         completed_by: str
     ):
         """Mark task as completed"""
@@ -456,7 +455,7 @@ class AIHumanTaskManager:
 
     # ==================== TASK QUERIES ====================
 
-    def get_pending_for_human(self, user_id: Optional[str] = None) -> List[Task]:
+    def get_pending_for_human(self, user_id: Optional[str] = None) -> list[Task]:
         """Get tasks awaiting human attention"""
         pending = []
         for task in self.tasks.values():
@@ -471,7 +470,7 @@ class AIHumanTaskManager:
             t.created_at
         ))
 
-    def get_pending_for_ai(self, agent_name: Optional[str] = None) -> List[Task]:
+    def get_pending_for_ai(self, agent_name: Optional[str] = None) -> list[Task]:
         """Get tasks awaiting AI processing"""
         pending = []
         for task in self.tasks.values():
@@ -485,11 +484,11 @@ class AIHumanTaskManager:
             t.created_at
         ))
 
-    def get_task_history(self, task_id: str) -> List[TaskUpdate]:
+    def get_task_history(self, task_id: str) -> list[TaskUpdate]:
         """Get complete history of task updates"""
         return self.updates.get(task_id, [])
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """Get task management metrics"""
         active_count = len([t for t in self.tasks.values() if t.status in [
             TaskStatus.PENDING, TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS
@@ -557,7 +556,7 @@ class AIHumanTaskManager:
         update_type: str,
         from_entity: str,
         message: str,
-        data: Optional[Dict] = None
+        data: Optional[dict] = None
     ):
         """Add an update to task history"""
         update = TaskUpdate(
@@ -676,7 +675,7 @@ class AIHumanTaskAgent:
         self.name = "AIHumanTaskManager"
         self.agent_type = "ai_human_task_management"
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute task management operations"""
         manager = get_task_manager()
         action = task.get("action", "status")

@@ -4,17 +4,18 @@ A/B Testing Framework - Task 24
 Test and optimize AI decisions with real experiments
 """
 
-import os
+import hashlib
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
 from enum import Enum
+from typing import Optional
+
+import numpy as np
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import hashlib
-import numpy as np
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -77,9 +78,9 @@ class ExperimentDesigner:
         self,
         name: str,
         hypothesis: str,
-        variants: List[Dict],
-        metrics: List[Dict],
-        allocation: Optional[Dict] = None,
+        variants: list[dict],
+        metrics: list[dict],
+        allocation: Optional[dict] = None,
         duration_days: int = 14
     ) -> str:
         """Create a new A/B test experiment"""
@@ -140,7 +141,7 @@ class ExperimentDesigner:
             logger.error(f"Error creating experiment: {e}")
             raise
 
-    def _calculate_allocation(self, num_variants: int) -> Dict:
+    def _calculate_allocation(self, num_variants: int) -> dict:
         """Calculate equal allocation for variants"""
         if num_variants == 2:
             return {"control": 50, "treatment": 50}
@@ -247,7 +248,7 @@ class TrafficSplitter:
     def _hash_assignment(
         self,
         user_id: str,
-        allocation: Dict
+        allocation: dict
     ) -> str:
         """Hash-based variant assignment"""
         # Create hash
@@ -278,7 +279,7 @@ class MetricsCollector:
         user_id: str,
         event_type: str,
         value: Optional[float] = None,
-        metadata: Optional[Dict] = None
+        metadata: Optional[dict] = None
     ) -> bool:
         """Track an event for an experiment"""
         try:
@@ -328,7 +329,7 @@ class MetricsCollector:
     async def calculate_metrics(
         self,
         experiment_id: str
-    ) -> Dict:
+    ) -> dict:
         """Calculate current metrics for experiment"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -385,7 +386,7 @@ class StatisticalAnalyzer:
     async def analyze_experiment(
         self,
         experiment_id: str
-    ) -> Dict:
+    ) -> dict:
         """Perform statistical analysis on experiment results"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -452,7 +453,7 @@ class StatisticalAnalyzer:
             logger.error(f"Error analyzing experiment: {e}")
             raise
 
-    def _format_variant_stats(self, variant: Dict) -> Dict:
+    def _format_variant_stats(self, variant: dict) -> dict:
         """Format variant statistics"""
         return {
             "name": variant['variant_name'],
@@ -465,9 +466,9 @@ class StatisticalAnalyzer:
 
     def _compare_variants(
         self,
-        control: Dict,
-        treatment: Dict
-    ) -> Dict:
+        control: dict,
+        treatment: dict
+    ) -> dict:
         """Compare treatment to control"""
         # Conversion rate comparison
         control_rate = control['conversions'] / control['users'] if control['users'] > 0 else 0
@@ -512,7 +513,7 @@ class StatisticalAnalyzer:
         else:
             return StatisticalSignificance.NOT_SIGNIFICANT
 
-    def _generate_recommendation(self, analysis: Dict) -> str:
+    def _generate_recommendation(self, analysis: dict) -> str:
         """Generate recommendation based on analysis"""
         if analysis["winner"]:
             winner = analysis["winner"]
@@ -552,7 +553,7 @@ class ExperimentManager:
             logger.error(f"Error starting experiment: {e}")
             return False
 
-    async def stop_experiment(self, experiment_id: str) -> Dict:
+    async def stop_experiment(self, experiment_id: str) -> dict:
         """Stop an experiment and get final results"""
         try:
             # Get final analysis
@@ -587,7 +588,7 @@ class ExperimentManager:
             logger.error(f"Error stopping experiment: {e}")
             raise
 
-    async def get_experiment_status(self, experiment_id: str) -> Dict:
+    async def get_experiment_status(self, experiment_id: str) -> dict:
         """Get current experiment status and metrics"""
         try:
             collector = MetricsCollector()
@@ -621,8 +622,8 @@ class ABTestingFramework:
         self,
         name: str,
         hypothesis: str,
-        control_config: Dict,
-        treatment_config: Dict,
+        control_config: dict,
+        treatment_config: dict,
         duration_days: int = 14
     ) -> str:
         """Run a complete A/B test"""
@@ -666,11 +667,11 @@ class ABTestingFramework:
             value
         )
 
-    async def analyze(self, experiment_id: str) -> Dict:
+    async def analyze(self, experiment_id: str) -> dict:
         """Analyze experiment results"""
         return await self.analyzer.analyze_experiment(experiment_id)
 
-    async def complete(self, experiment_id: str) -> Dict:
+    async def complete(self, experiment_id: str) -> dict:
         """Complete experiment and get results"""
         return await self.manager.stop_experiment(experiment_id)
 

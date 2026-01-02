@@ -4,14 +4,14 @@ AI-Powered Dynamic Pricing and Quoting Engine
 Optimizes pricing for maximum conversion and profit using AI
 """
 
-import os
 import json
 import logging
+import os
 import uuid
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timezone, timedelta
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from dataclasses import dataclass, asdict
+from typing import Any, Optional
 
 import openai
 import psycopg2
@@ -65,14 +65,14 @@ class PricingFactors:
     """Factors that influence pricing"""
     customer_segment: CustomerSegment
     company_size: int  # Number of employees
-    revenue_range: Tuple[float, float]
+    revenue_range: tuple[float, float]
     urgency_level: float  # 0-1 scale
     competition_present: bool
-    feature_requirements: List[str]
+    feature_requirements: list[str]
     contract_length: int  # months
     payment_terms: str
-    market_conditions: Dict[str, Any]
-    historical_data: Dict[str, Any]
+    market_conditions: dict[str, Any]
+    historical_data: dict[str, Any]
 
 @dataclass
 class PriceQuote:
@@ -87,8 +87,8 @@ class PriceQuote:
     margin_percentage: float
     win_probability: float
     expires_at: datetime
-    components: List[Dict]
-    terms: Dict[str, Any]
+    components: list[dict]
+    terms: dict[str, Any]
 
 class AIPricingEngine:
     """AI-powered dynamic pricing engine"""
@@ -170,7 +170,7 @@ class AIPricingEngine:
         cursor.close()
         conn.close()
 
-    def _load_base_costs(self) -> Dict:
+    def _load_base_costs(self) -> dict:
         """Load base costs for pricing calculations"""
         return {
             "base_monthly": 299,
@@ -256,7 +256,7 @@ class AIPricingEngine:
             logger.error(f"Failed to generate quote: {e}")
             return None
 
-    async def _analyze_pricing_factors(self, factors: PricingFactors) -> Dict:
+    async def _analyze_pricing_factors(self, factors: PricingFactors) -> dict:
         """Analyze pricing factors using AI"""
         try:
             prompt = f"""Analyze these pricing factors for a roofing software quote:
@@ -323,7 +323,7 @@ class AIPricingEngine:
 
         return base
 
-    async def _optimize_price(self, base_price: float, factors: PricingFactors, analysis: Dict) -> float:
+    async def _optimize_price(self, base_price: float, factors: PricingFactors, analysis: dict) -> float:
         """Optimize price using AI and historical data"""
         try:
             # Get historical win rates
@@ -364,7 +364,7 @@ class AIPricingEngine:
             logger.error(f"Price optimization failed: {e}")
             return base_price
 
-    async def _calculate_win_probability(self, price: float, factors: PricingFactors, analysis: Dict) -> float:
+    async def _calculate_win_probability(self, price: float, factors: PricingFactors, analysis: dict) -> float:
         """Calculate probability of winning at this price"""
         try:
             # Base probability
@@ -393,7 +393,7 @@ class AIPricingEngine:
             logger.error(f"Win probability calculation failed: {e}")
             return 0.5
 
-    async def _select_pricing_strategy(self, factors: PricingFactors, analysis: Dict, win_prob: float) -> PricingStrategy:
+    async def _select_pricing_strategy(self, factors: PricingFactors, analysis: dict, win_prob: float) -> PricingStrategy:
         """Select optimal pricing strategy"""
         try:
             prompt = f"""Select the best pricing strategy:
@@ -468,7 +468,7 @@ class AIPricingEngine:
 
         return base_cost + support_cost + infra_cost
 
-    def _create_price_components(self, factors: PricingFactors, total_price: float) -> List[Dict]:
+    def _create_price_components(self, factors: PricingFactors, total_price: float) -> list[dict]:
         """Break down price into components"""
         components = []
 
@@ -503,7 +503,7 @@ class AIPricingEngine:
 
         return components
 
-    def _generate_terms(self, factors: PricingFactors, strategy: PricingStrategy) -> Dict:
+    def _generate_terms(self, factors: PricingFactors, strategy: PricingStrategy) -> dict:
         """Generate quote terms"""
         terms = {
             "payment_terms": factors.payment_terms or "Net 30",
@@ -567,7 +567,7 @@ class AIPricingEngine:
         except Exception as e:
             logger.error(f"Failed to store quote: {e}")
 
-    async def _get_historical_performance(self, segment: CustomerSegment, price_range: float) -> Dict:
+    async def _get_historical_performance(self, segment: CustomerSegment, price_range: float) -> dict:
         """Get historical performance data"""
         try:
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
@@ -604,7 +604,7 @@ class AIPricingEngine:
             logger.error(f"Failed to get historical data: {e}")
             return {'win_rate': 0.5, 'sample_size': 0}
 
-    async def run_ab_test(self, test_name: str, variant_a: Dict, variant_b: Dict, sample_size: int = 100):
+    async def run_ab_test(self, test_name: str, variant_a: dict, variant_b: dict, sample_size: int = 100):
         """Run A/B test on pricing strategies"""
         try:
             logger.info(f"Starting A/B test: {test_name}")

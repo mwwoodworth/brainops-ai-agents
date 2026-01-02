@@ -10,12 +10,12 @@ relationships from the codebase graph to inform their responses.
 import asyncio
 import json
 import logging
-from typing import List, Dict, Any, Optional, Set
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from typing import Any, Optional
 
 from config import config
-from database.async_connection import get_pool, init_pool, PoolConfig
+from database.async_connection import PoolConfig, get_pool, init_pool
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +23,11 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CodeContext:
     """Structured context from codebase graph"""
-    files: List[Dict[str, Any]] = field(default_factory=list)
-    functions: List[Dict[str, Any]] = field(default_factory=list)
-    classes: List[Dict[str, Any]] = field(default_factory=list)
-    endpoints: List[Dict[str, Any]] = field(default_factory=list)
-    relationships: List[Dict[str, Any]] = field(default_factory=list)
+    files: list[dict[str, Any]] = field(default_factory=list)
+    functions: list[dict[str, Any]] = field(default_factory=list)
+    classes: list[dict[str, Any]] = field(default_factory=list)
+    endpoints: list[dict[str, Any]] = field(default_factory=list)
+    relationships: list[dict[str, Any]] = field(default_factory=list)
     summary: str = ""
     relevance_score: float = 0.0
     query_time_ms: float = 0.0
@@ -68,7 +68,7 @@ class CodeContext:
 
         return "\n".join(parts)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -115,9 +115,9 @@ class GraphContextProvider:
     async def get_context_for_task(
         self,
         task_description: str,
-        repos: Optional[List[str]] = None,
+        repos: Optional[list[str]] = None,
         include_relationships: bool = True,
-        focus_types: Optional[List[str]] = None
+        focus_types: Optional[list[str]] = None
     ) -> CodeContext:
         """
         Get relevant codebase context for a task description.
@@ -178,7 +178,7 @@ class GraphContextProvider:
     async def get_context_for_agent(
         self,
         agent_name: str,
-        task_data: Optional[Dict[str, Any]] = None
+        task_data: Optional[dict[str, Any]] = None
     ) -> CodeContext:
         """
         Get relevant codebase context for an AI agent's current task.
@@ -274,8 +274,8 @@ class GraphContextProvider:
         self,
         name: str,
         node_type: Optional[str] = None,
-        repos: Optional[List[str]] = None
-    ) -> List[Dict[str, Any]]:
+        repos: Optional[list[str]] = None
+    ) -> list[dict[str, Any]]:
         """Search for code elements by name"""
         await self._ensure_pool()
         pool = get_pool()
@@ -308,9 +308,9 @@ class GraphContextProvider:
 
     async def get_api_endpoints(
         self,
-        repos: Optional[List[str]] = None,
+        repos: Optional[list[str]] = None,
         method: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Get all API endpoints from the codebase"""
         await self._ensure_pool()
         pool = get_pool()
@@ -338,7 +338,7 @@ class GraphContextProvider:
             logger.error(f"Endpoint query failed: {e}")
             return []
 
-    async def find_callers(self, function_name: str, codebase: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def find_callers(self, function_name: str, codebase: Optional[str] = None) -> list[dict[str, Any]]:
         """Find all callers of a function"""
         await self._ensure_pool()
         pool = get_pool()
@@ -365,7 +365,7 @@ class GraphContextProvider:
             logger.error(f"Caller search failed: {e}")
             return []
 
-    async def get_class_hierarchy(self, class_name: str, codebase: Optional[str] = None) -> Dict[str, Any]:
+    async def get_class_hierarchy(self, class_name: str, codebase: Optional[str] = None) -> dict[str, Any]:
         """Get inheritance hierarchy for a class"""
         await self._ensure_pool()
         pool = get_pool()
@@ -409,7 +409,7 @@ class GraphContextProvider:
 
         return hierarchy
 
-    async def get_graph_stats(self) -> Dict[str, Any]:
+    async def get_graph_stats(self) -> dict[str, Any]:
         """Get statistics about the codebase graph"""
         await self._ensure_pool()
         pool = get_pool()
@@ -453,7 +453,7 @@ class GraphContextProvider:
             logger.error(f"Stats query failed: {e}")
             return {"error": str(e)}
 
-    def _extract_keywords(self, text: str) -> List[str]:
+    def _extract_keywords(self, text: str) -> list[str]:
         """Extract search keywords from natural language text"""
         # Common words to filter out
         stopwords = {
@@ -492,7 +492,7 @@ class GraphContextProvider:
                 keywords.append(word)
 
         # Deduplicate while preserving order
-        seen: Set[str] = set()
+        seen: set[str] = set()
         unique_keywords = []
         for kw in keywords:
             if kw not in seen:
@@ -504,10 +504,10 @@ class GraphContextProvider:
     async def _search_nodes(
         self,
         pool,
-        keywords: List[str],
-        repos: Optional[List[str]],
-        focus_types: Optional[List[str]]
-    ) -> List[Dict[str, Any]]:
+        keywords: list[str],
+        repos: Optional[list[str]],
+        focus_types: Optional[list[str]]
+    ) -> list[dict[str, Any]]:
         """Search for nodes matching keywords"""
         if not keywords:
             return []
@@ -561,7 +561,7 @@ class GraphContextProvider:
             logger.error(f"Node search failed: {e}")
             return []
 
-    async def _get_relationships(self, pool, node_ids: List[str]) -> List[Dict[str, Any]]:
+    async def _get_relationships(self, pool, node_ids: list[str]) -> list[dict[str, Any]]:
         """Get relationships for given node IDs"""
         if not node_ids:
             return []
@@ -604,7 +604,7 @@ class GraphContextProvider:
             logger.error(f"Relationship query failed: {e}")
             return []
 
-    def _generate_summary(self, context: CodeContext, keywords: List[str]) -> str:
+    def _generate_summary(self, context: CodeContext, keywords: list[str]) -> str:
         """Generate a summary of the retrieved context"""
         parts = []
 
@@ -633,7 +633,7 @@ class GraphContextProvider:
 
         return " ".join(parts)
 
-    def _calculate_relevance(self, context: CodeContext, keywords: List[str]) -> float:
+    def _calculate_relevance(self, context: CodeContext, keywords: list[str]) -> float:
         """Calculate relevance score for the context"""
         if not keywords:
             return 0.0
@@ -685,7 +685,7 @@ async def get_context_for_task(task_description: str, **kwargs) -> CodeContext:
 async def enrich_prompt_with_context(
     prompt: str,
     task_description: Optional[str] = None,
-    repos: Optional[List[str]] = None
+    repos: Optional[list[str]] = None
 ) -> str:
     """Enrich a prompt with relevant codebase context"""
     provider = get_graph_context_provider()

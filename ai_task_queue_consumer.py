@@ -12,7 +12,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from database.async_connection import get_pool
 
@@ -97,7 +97,7 @@ class AITaskQueueConsumer:
                 logger.error("Error in ai_task_queue consume loop: %s", exc)
             await asyncio.sleep(self.poll_interval)
 
-    async def _fetch_pending_tasks(self) -> List[Dict[str, Any]]:
+    async def _fetch_pending_tasks(self) -> list[dict[str, Any]]:
         try:
             pool = get_pool()
             async with pool.acquire() as conn:
@@ -129,7 +129,7 @@ class AITaskQueueConsumer:
             logger.error("Failed to fetch ai_task_queue tasks: %s", exc)
             return []
 
-    async def _process_task(self, task: Dict[str, Any]):
+    async def _process_task(self, task: dict[str, Any]):
         task_id = str(task.get("id"))
         task_type = (task.get("task_type") or "").lower()
         payload = task.get("payload") or {}
@@ -180,8 +180,8 @@ class AITaskQueueConsumer:
         self,
         task_id: str,
         tenant_id: str,
-        payload: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
         if not self._nurture_agent:
             raise RuntimeError("NurtureExecutorAgentReal not available")
 
@@ -259,7 +259,7 @@ class AITaskQueueConsumer:
             "nurture_result": result,
         }
 
-    async def _handle_quality_check(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_quality_check(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not self._executor:
             raise RuntimeError("AgentExecutor not available")
         result = await self._executor.execute(
@@ -272,7 +272,7 @@ class AITaskQueueConsumer:
         self,
         task_id: str,
         status: str,
-        result: Optional[Dict[str, Any]],
+        result: Optional[dict[str, Any]],
         duration_ms: int,
     ):
         try:

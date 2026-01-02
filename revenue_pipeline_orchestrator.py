@@ -20,14 +20,13 @@ Features:
 - Churn prevention
 """
 
-import os
 import json
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List
-from dataclasses import dataclass, field
-from enum import Enum
+import os
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -82,12 +81,12 @@ class RevenueStreamConfig:
     description: str
     pricing_strategy: PricingStrategy
     base_price: float
-    target_segments: List[CustomerSegment]
+    target_segments: list[CustomerSegment]
     commission_rate: float = 0.0  # For affiliates
     revenue_share: float = 0.0   # For partnerships
     active: bool = True
     automation_enabled: bool = True
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -101,8 +100,8 @@ class RevenueMetrics:
     cac: float = 0.0  # Customer Acquisition Cost
     churn_rate: float = 0.0
     growth_rate: float = 0.0
-    by_stream: Dict[str, float] = field(default_factory=dict)
-    by_product: Dict[str, float] = field(default_factory=dict)
+    by_stream: dict[str, float] = field(default_factory=dict)
+    by_product: dict[str, float] = field(default_factory=dict)
     period_start: datetime = None
     period_end: datetime = None
 
@@ -393,7 +392,7 @@ class RevenuePipelineOrchestrator:
     async def record_transaction(self, stream_type: RevenueStream, amount: float,
                                   product_id: str = None, customer_id: str = None,
                                   transaction_type: str = "purchase",
-                                  attribution: Dict = None, metadata: Dict = None) -> str:
+                                  attribution: dict = None, metadata: dict = None) -> str:
         """Record a revenue transaction"""
         await self.initialize_tables()
 
@@ -517,7 +516,7 @@ class RevenuePipelineOrchestrator:
         finally:
             conn.close()
 
-    async def optimize_pricing(self, product_id: str = None, stream_type: RevenueStream = None) -> Dict:
+    async def optimize_pricing(self, product_id: str = None, stream_type: RevenueStream = None) -> dict:
         """
         Optimize pricing using AI analysis
 
@@ -758,7 +757,7 @@ class RevenuePipelineOrchestrator:
         finally:
             conn.close()
 
-    async def get_revenue_dashboard(self) -> Dict:
+    async def get_revenue_dashboard(self) -> dict:
         """Get comprehensive revenue dashboard data"""
         await self.initialize_tables()
 
@@ -956,7 +955,7 @@ class ProductCatalogGenerator:
         finally:
             conn.close()
 
-    async def add_to_catalog(self, product_data: Dict) -> str:
+    async def add_to_catalog(self, product_data: dict) -> str:
         """Add a product to the catalog"""
         await self.initialize_tables()
 
@@ -1007,7 +1006,7 @@ class ProductCatalogGenerator:
         slug = slug.strip('-')
         return f"{slug}-{uuid.uuid4().hex[:8]}"
 
-    async def create_bundle(self, name: str, product_ids: List[str],
+    async def create_bundle(self, name: str, product_ids: list[str],
                             discount_percentage: float = 20) -> str:
         """Create a product bundle with discount"""
         await self.initialize_tables()
@@ -1058,7 +1057,7 @@ class ProductCatalogGenerator:
             conn.close()
 
     async def get_catalog(self, category: str = None, product_type: str = None,
-                          active_only: bool = True) -> List[Dict]:
+                          active_only: bool = True) -> list[dict]:
         """Get products from catalog"""
         await self.initialize_tables()
 

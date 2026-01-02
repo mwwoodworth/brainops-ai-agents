@@ -6,12 +6,13 @@ Provides endpoints for ALL previously unused systems.
 Creates actual data flow between Training → Learning → Memory → Agents.
 """
 
-import logging
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from typing import Any, Optional
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ class TrainingRequest(BaseModel):
     """Request to train on new data."""
     data_type: str  # "interaction", "feedback", "correction", "knowledge"
     content: str
-    context: Optional[Dict[str, Any]] = None
+    context: Optional[dict[str, Any]] = None
     source: Optional[str] = "api"
 
 
@@ -32,21 +33,21 @@ class LearningRequest(BaseModel):
     interaction_type: str  # "success", "failure", "insight", "pattern"
     content: str
     outcome: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
 
 
 class AgentTaskRequest(BaseModel):
     """Request to execute a specific agent task."""
     agent_name: str
     action: str
-    parameters: Optional[Dict[str, Any]] = None
+    parameters: Optional[dict[str, Any]] = None
 
 
 class SystemAnalysisRequest(BaseModel):
     """Request for system analysis."""
     target: str  # "code", "devops", "customers", "competition", "vision"
     scope: Optional[str] = "full"
-    parameters: Optional[Dict[str, Any]] = None
+    parameters: Optional[dict[str, Any]] = None
 
 
 class IntegrationPipeline:
@@ -82,7 +83,7 @@ class IntegrationPipeline:
             except Exception as e:
                 logger.error(f"Event processing error: {e}")
 
-    async def _route_event(self, event: Dict[str, Any]):
+    async def _route_event(self, event: dict[str, Any]):
         """Route event through the appropriate systems."""
         event_type = event.get("type", "unknown")
         content = event.get("content", "")
@@ -117,7 +118,7 @@ class IntegrationPipeline:
         except Exception as e:
             logger.error(f"Pipeline routing error: {e}")
 
-    async def _trigger_agents(self, event: Dict[str, Any]):
+    async def _trigger_agents(self, event: dict[str, Any]):
         """Trigger relevant agents based on event."""
         agent_triggers = event.get("trigger_agents", [])
         for agent_name in agent_triggers:
@@ -128,7 +129,7 @@ class IntegrationPipeline:
             except Exception as e:
                 logger.error(f"Failed to trigger agent {agent_name}: {e}")
 
-    async def submit_event(self, event: Dict[str, Any]):
+    async def submit_event(self, event: dict[str, Any]):
         """Submit an event to the integration pipeline."""
         event["submitted_at"] = datetime.now(timezone.utc).isoformat()
         await self._event_queue.put(event)
@@ -138,7 +139,7 @@ class IntegrationPipeline:
     # TRAINING PIPELINE INTEGRATION
     # =========================================================================
 
-    async def train(self, request: TrainingRequest) -> Dict[str, Any]:
+    async def train(self, request: TrainingRequest) -> dict[str, Any]:
         """Process training data through the training pipeline."""
         training = getattr(self.app_state, "training", None)
         if not training:
@@ -182,7 +183,7 @@ class IntegrationPipeline:
     # LEARNING SYSTEM INTEGRATION
     # =========================================================================
 
-    async def learn(self, request: LearningRequest) -> Dict[str, Any]:
+    async def learn(self, request: LearningRequest) -> dict[str, Any]:
         """Process learning from an interaction."""
         learning = getattr(self.app_state, "learning", None)
         if not learning:
@@ -226,7 +227,7 @@ class IntegrationPipeline:
     # SPECIALIZED AGENT INTEGRATION
     # =========================================================================
 
-    async def run_system_improvement(self, scope: str = "full") -> Dict[str, Any]:
+    async def run_system_improvement(self, scope: str = "full") -> dict[str, Any]:
         """Run the System Improvement Agent."""
         agent = getattr(self.app_state, "system_improvement", None)
         if not agent:
@@ -255,7 +256,7 @@ class IntegrationPipeline:
             logger.error(f"System improvement error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def run_devops_optimization(self, target: str = "all") -> Dict[str, Any]:
+    async def run_devops_optimization(self, target: str = "all") -> dict[str, Any]:
         """Run the DevOps Optimization Agent."""
         agent = getattr(self.app_state, "devops_agent", None)
         if not agent:
@@ -274,7 +275,7 @@ class IntegrationPipeline:
             logger.error(f"DevOps optimization error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def run_code_quality(self, target: str = "all") -> Dict[str, Any]:
+    async def run_code_quality(self, target: str = "all") -> dict[str, Any]:
         """Run the Code Quality Agent."""
         agent = getattr(self.app_state, "code_quality", None)
         if not agent:
@@ -293,7 +294,7 @@ class IntegrationPipeline:
             logger.error(f"Code quality error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def run_customer_success(self, analysis_type: str = "health") -> Dict[str, Any]:
+    async def run_customer_success(self, analysis_type: str = "health") -> dict[str, Any]:
         """Run the Customer Success Agent."""
         agent = getattr(self.app_state, "customer_success", None)
         if not agent:
@@ -312,7 +313,7 @@ class IntegrationPipeline:
             logger.error(f"Customer success error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def run_competitive_intel(self, scope: str = "market") -> Dict[str, Any]:
+    async def run_competitive_intel(self, scope: str = "market") -> dict[str, Any]:
         """Run the Competitive Intelligence Agent."""
         agent = getattr(self.app_state, "competitive_intel", None)
         if not agent:
@@ -331,7 +332,7 @@ class IntegrationPipeline:
             logger.error(f"Competitive intel error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def run_vision_alignment(self) -> Dict[str, Any]:
+    async def run_vision_alignment(self) -> dict[str, Any]:
         """Run the Vision Alignment Agent."""
         agent = getattr(self.app_state, "vision_alignment", None)
         if not agent:
@@ -354,7 +355,7 @@ class IntegrationPipeline:
     # FULL INTEGRATION - RUN ALL SYSTEMS
     # =========================================================================
 
-    async def run_full_integration(self) -> Dict[str, Any]:
+    async def run_full_integration(self) -> dict[str, Any]:
         """
         Run all integrated systems in the correct order.
         This demonstrates the full pipeline is operational.
@@ -514,7 +515,7 @@ async def full_integration_run():
 
 
 @router.post("/event")
-async def submit_event(event: Dict[str, Any]):
+async def submit_event(event: dict[str, Any]):
     """
     Submit an event to the integration pipeline.
     Event flows through: Training → Learning → Memory → Agents

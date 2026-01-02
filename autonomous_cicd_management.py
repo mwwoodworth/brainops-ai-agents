@@ -15,15 +15,16 @@ Based on 2025 best practices from Google SRE, Netflix deployment automation, and
 """
 
 import asyncio
-import json
 import hashlib
-import aiohttp
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field, asdict
-from enum import Enum
-import os
+import json
 import logging
+import os
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Optional
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +94,8 @@ class Service:
     current_version: str = ""
     health_endpoint: str = "/health"
     deployment_url: Optional[str] = None
-    platform_config: Dict[str, Any] = field(default_factory=dict)
-    dependencies: List[str] = field(default_factory=list)  # service_ids this depends on
+    platform_config: dict[str, Any] = field(default_factory=dict)
+    dependencies: list[str] = field(default_factory=list)  # service_ids this depends on
     last_deployed: Optional[str] = None
     last_health_check: Optional[str] = None
     health_status: str = "unknown"
@@ -112,7 +113,7 @@ class Deployment:
     triggered_by: str = "autonomous"  # autonomous, manual, webhook
     commit_sha: Optional[str] = None
     build_logs: str = ""
-    test_results: Dict[str, Any] = field(default_factory=dict)
+    test_results: dict[str, Any] = field(default_factory=dict)
     rollback_version: Optional[str] = None
     duration_seconds: Optional[float] = None
     error: Optional[str] = None
@@ -127,7 +128,7 @@ class TestRun:
     status: str  # pending, running, passed, failed
     started_at: str
     completed_at: Optional[str] = None
-    results: Dict[str, Any] = field(default_factory=dict)
+    results: dict[str, Any] = field(default_factory=dict)
     coverage: Optional[float] = None
 
 
@@ -137,8 +138,8 @@ class DeploymentSchedule:
     schedule_id: str
     service_id: str
     cron_expression: str
-    deployment_window: Dict[str, str]  # {"start": "02:00", "end": "04:00"}
-    conditions: Dict[str, Any]  # traffic thresholds, etc.
+    deployment_window: dict[str, str]  # {"start": "02:00", "end": "04:00"}
+    conditions: dict[str, Any]  # traffic thresholds, etc.
     enabled: bool = True
     last_executed: Optional[str] = None
 
@@ -158,9 +159,9 @@ class AutonomousCICDManagement:
 
     def __init__(self):
         self.db_url = os.getenv("DATABASE_URL")
-        self.services: Dict[str, Service] = {}
-        self.deployments: Dict[str, Deployment] = {}
-        self.schedules: Dict[str, DeploymentSchedule] = {}
+        self.services: dict[str, Service] = {}
+        self.deployments: dict[str, Deployment] = {}
+        self.schedules: dict[str, DeploymentSchedule] = {}
         self._initialized = False
 
         # Platform API configurations
@@ -637,7 +638,7 @@ class AutonomousCICDManagement:
         )
         return result.get("success", False)
 
-    async def _execute_via_mcp(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_via_mcp(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         """Execute a tool via MCP Bridge"""
         try:
             async with aiohttp.ClientSession() as session:
@@ -737,7 +738,7 @@ class AutonomousCICDManagement:
         except Exception as e:
             logger.error(f"Failed to save deployment: {e}")
 
-    async def check_all_health(self) -> Dict[str, Any]:
+    async def check_all_health(self) -> dict[str, Any]:
         """Check health of all registered services"""
         results = {}
 
@@ -760,7 +761,7 @@ class AutonomousCICDManagement:
         self,
         session: aiohttp.ClientSession,
         service: Service
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Check health of a single service"""
         if not service.deployment_url:
             return {"status": "unknown", "reason": "No deployment URL"}
@@ -783,9 +784,9 @@ class AutonomousCICDManagement:
     async def detect_performance_regression(
         self,
         service_id: str,
-        current_metrics: Dict[str, Any],
-        baseline_metrics: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        current_metrics: dict[str, Any],
+        baseline_metrics: dict[str, Any]
+    ) -> dict[str, Any]:
         """Detect performance regressions by comparing current vs baseline metrics"""
         try:
             regressions = []
@@ -895,7 +896,7 @@ class AutonomousCICDManagement:
         service_id: str,
         deployment_id: str,
         duration_minutes: int = 15
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Advanced monitoring after deployment with multiple checks"""
         try:
             service = self.services.get(service_id)
@@ -974,7 +975,7 @@ class AutonomousCICDManagement:
                 "overall_status": "error"
             }
 
-    async def get_deployment_metrics(self) -> Dict[str, Any]:
+    async def get_deployment_metrics(self) -> dict[str, Any]:
         """Get CI/CD metrics with enhanced analytics"""
         try:
             # Calculate deployment velocity
@@ -1031,7 +1032,7 @@ class AutonomousCICDManagement:
                 "total_deployments": self.total_deployments
             }
 
-    async def deploy_all(self, triggered_by: str = "autonomous") -> List[Deployment]:
+    async def deploy_all(self, triggered_by: str = "autonomous") -> list[Deployment]:
         """Deploy all services (coordinated multi-service deployment)"""
         deployments = []
 
@@ -1048,7 +1049,7 @@ class AutonomousCICDManagement:
 
         return deployments
 
-    def _topological_sort(self) -> List[str]:
+    def _topological_sort(self) -> list[str]:
         """Sort services by dependencies (deployment order)"""
         # Simple implementation - no dependencies first, then dependent services
         no_deps = [s.service_id for s in self.services.values() if not s.dependencies]

@@ -3,14 +3,14 @@ Memory System API Endpoints - Production Ready
 CANONICAL: All operations use unified_ai_memory as the single source of truth
 Includes tenant isolation, semantic search, and backward compatibility
 """
-import logging
 import json
+import logging
 import os
 from datetime import datetime
-from typing import Any, Optional, List
 from enum import Enum
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Header, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from database.async_connection import get_pool
@@ -64,7 +64,7 @@ class MemoryEntry(BaseModel):
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     category: Optional[str] = None
     title: Optional[str] = None
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     source_system: Optional[str] = None
     source_agent: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -81,7 +81,7 @@ class StoreMemoryRequest(BaseModel):
     importance_score: float = Field(default=0.5, ge=0.0, le=1.0)
     category: Optional[str] = None
     title: Optional[str] = None
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     source_system: str = Field(default="api")
     source_agent: str = Field(default="user")
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -113,7 +113,7 @@ async def get_tenant_id(
 # EMBEDDING GENERATION
 # =============================================================================
 
-async def generate_embedding(text: str) -> Optional[List[float]]:
+async def generate_embedding(text: str) -> Optional[list[float]]:
     """
     Generate real embedding using OpenAI text-embedding-3-small.
     Falls back gracefully if API unavailable.

@@ -4,14 +4,15 @@ AI agent for optimizing CI/CD pipelines and infrastructure.
 Uses OpenAI for real analysis and persists results to database.
 """
 
-import os
 import json
 import logging
+import os
 import subprocess
+from datetime import datetime
+from typing import Any
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from typing import Dict, Any, List
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class DevOpsOptimizationAgent:
             logger.error(f"Database connection failed: {e}")
             return None
 
-    async def analyze_pipeline(self, pipeline_id: str) -> Dict[str, Any]:
+    async def analyze_pipeline(self, pipeline_id: str) -> dict[str, Any]:
         """Analyze pipeline performance using real metrics and AI"""
         try:
             results = {
@@ -152,7 +153,7 @@ Respond with JSON only:
             logger.error(f"Pipeline analysis failed: {e}")
             return {"error": str(e), "pipeline_id": pipeline_id}
 
-    async def optimize_resources(self, cloud_resources: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def optimize_resources(self, cloud_resources: list[dict[str, Any]]) -> dict[str, Any]:
         """Suggest resource optimizations using AI analysis"""
         try:
             results = {
@@ -206,7 +207,7 @@ Respond with JSON only:
             logger.error(f"Resource optimization failed: {e}")
             return {"error": str(e)}
 
-    async def analyze_deployment_health(self) -> Dict[str, Any]:
+    async def analyze_deployment_health(self) -> dict[str, Any]:
         """Analyze overall deployment health across services"""
         try:
             results = {
@@ -278,7 +279,7 @@ Respond with JSON only:
             logger.error(f"Deployment health analysis failed: {e}")
             return {"error": str(e)}
 
-    async def scan_security_vulnerabilities(self, repo_path: str) -> Dict[str, Any]:
+    async def scan_security_vulnerabilities(self, repo_path: str) -> dict[str, Any]:
         """Scan for security vulnerabilities in code and dependencies"""
         try:
             results = {
@@ -405,7 +406,7 @@ Respond with JSON only:
             logger.error(f"Security scan failed: {e}")
             return {"error": str(e), "repo_path": repo_path}
 
-    async def optimize_infrastructure_costs(self, resources: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def optimize_infrastructure_costs(self, resources: list[dict[str, Any]]) -> dict[str, Any]:
         """Analyze infrastructure costs and suggest optimizations"""
         try:
             results = {
@@ -482,7 +483,7 @@ Respond with JSON only:
             logger.error(f"Cost optimization failed: {e}")
             return {"error": str(e)}
 
-    async def analyze_logs(self, log_source: str, log_lines: List[str]) -> Dict[str, Any]:
+    async def analyze_logs(self, log_source: str, log_lines: list[str]) -> dict[str, Any]:
         """Analyze logs for errors, patterns, and anomalies"""
         try:
             results = {
@@ -590,7 +591,7 @@ Respond with JSON only:
             logger.error(f"Log analysis failed: {e}")
             return {"error": str(e)}
 
-    async def _save_analysis(self, analysis_type: str, results: Dict[str, Any]):
+    async def _save_analysis(self, analysis_type: str, results: dict[str, Any]):
         """Save analysis results to database"""
         conn = self._get_db_connection()
         if not conn:

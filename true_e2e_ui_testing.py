@@ -21,15 +21,15 @@ Version: 1.0.0
 """
 
 import asyncio
-import json
-import os
-import logging
-import hashlib
 import base64
-from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timezone, timedelta
-from dataclasses import dataclass, field, asdict
+import hashlib
+import json
+import logging
+import os
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ class UITestIssue:
     route: str
     element: Optional[str] = None
     screenshot: Optional[str] = None  # Base64 screenshot
-    ai_analysis: Optional[Dict] = None
+    ai_analysis: Optional[dict] = None
     suggested_fix: Optional[str] = None
     detected_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -88,14 +88,14 @@ class UITestResult:
     base_url: str
     routes_tested: int
     issues_found: int
-    issues: List[UITestIssue]
+    issues: list[UITestIssue]
     overall_score: float  # 0-100
-    category_scores: Dict[str, float]
+    category_scores: dict[str, float]
     started_at: str
     completed_at: str
     duration_seconds: float
     ai_summary: str
-    recommendations: List[str]
+    recommendations: list[str]
 
 
 class TrueE2EUITester:
@@ -157,7 +157,7 @@ class TrueE2EUITester:
             )
         return self._session
 
-    async def _execute_mcp_tool(self, server: str, tool: str, params: Dict) -> Dict:
+    async def _execute_mcp_tool(self, server: str, tool: str, params: dict) -> dict:
         """Execute a tool via MCP Bridge"""
         try:
             session = await self._get_session()
@@ -175,7 +175,7 @@ class TrueE2EUITester:
             logger.error(f"MCP execution error: {e}")
             return {"error": str(e)}
 
-    async def _analyze_screenshot_with_ai(self, screenshot_base64: str, page_context: Dict) -> Dict:
+    async def _analyze_screenshot_with_ai(self, screenshot_base64: str, page_context: dict) -> dict:
         """Analyze screenshot with AI Vision (Gemini or GPT-4V)"""
         analysis = {
             "visual_issues": [],
@@ -308,7 +308,7 @@ Return a JSON object with this structure:
         analysis["overall_score"] = 70
         return analysis
 
-    async def _test_page_operation(self, url: str, route: str, app_name: str) -> Dict:
+    async def _test_page_operation(self, url: str, route: str, app_name: str) -> dict:
         """Test if a page operates correctly (loads, responds)"""
         result = {
             "url": url,
@@ -321,7 +321,6 @@ Return a JSON object with this structure:
         }
 
         try:
-            import aiohttp
             start = datetime.now()
             session = await self._get_session()
 
@@ -351,7 +350,7 @@ Return a JSON object with this structure:
 
         return result
 
-    async def _test_page_function(self, url: str, route: str, expected_elements: List[str]) -> Dict:
+    async def _test_page_function(self, url: str, route: str, expected_elements: list[str]) -> dict:
         """Test if page functions correctly (elements present, interactive)"""
         result = {
             "url": url,
@@ -417,7 +416,7 @@ Return a JSON object with this structure:
 
         return result
 
-    async def _capture_and_analyze_screenshot(self, url: str, route: str, app_name: str) -> Dict:
+    async def _capture_and_analyze_screenshot(self, url: str, route: str, app_name: str) -> dict:
         """Capture screenshot and analyze with AI Vision"""
         result = {
             "url": url,
@@ -503,7 +502,7 @@ Return a JSON object with this structure:
 
         logger.info(f"Starting TRUE E2E test for {target['name']} ({len(target['routes'])} routes)")
 
-        all_issues: List[UITestIssue] = []
+        all_issues: list[UITestIssue] = []
         category_scores = {cat.value: 100.0 for cat in TestCategory}
         routes_tested = 0
 
@@ -522,7 +521,7 @@ Return a JSON object with this structure:
                     id=hashlib.md5(f"{url}_operation".encode()).hexdigest()[:12],
                     category=TestCategory.OPERATION,
                     severity=IssueSeverity.CRITICAL,
-                    title=f"Page not operational",
+                    title="Page not operational",
                     description=f"Status: {op_result.get('status_code')}, Errors: {op_result.get('errors', [])}",
                     url=url,
                     route=route
@@ -612,7 +611,7 @@ Return a JSON object with this structure:
         logger.info(f"TRUE E2E test complete for {target['name']}: Score {overall_score:.1f}, {len(all_issues)} issues")
         return result
 
-    def _generate_summary(self, app_name: str, issues: List[UITestIssue], scores: Dict, overall: float) -> str:
+    def _generate_summary(self, app_name: str, issues: list[UITestIssue], scores: dict, overall: float) -> str:
         """Generate human-readable summary"""
         critical = len([i for i in issues if i.severity == IssueSeverity.CRITICAL])
         high = len([i for i in issues if i.severity == IssueSeverity.HIGH])
@@ -636,7 +635,7 @@ Return a JSON object with this structure:
 
         return summary
 
-    def _generate_recommendations(self, issues: List[UITestIssue]) -> List[str]:
+    def _generate_recommendations(self, issues: list[UITestIssue]) -> list[str]:
         """Generate prioritized recommendations"""
         recommendations = []
 
@@ -714,7 +713,7 @@ Return a JSON object with this structure:
         except Exception as e:
             logger.warning(f"Failed to store UI test result: {e}")
 
-    async def test_all_applications(self) -> Dict[str, UITestResult]:
+    async def test_all_applications(self) -> dict[str, UITestResult]:
         """Test all registered applications"""
         results = {}
         for app_key in self.targets:
@@ -750,7 +749,7 @@ class TrueE2EUITestingAgent:
         self.name = "TrueE2EUITesting"
         self.agent_type = "true_e2e_ui_testing"
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute TRUE E2E UI testing"""
         tester = await get_true_e2e_tester()
         action = task.get("action", "test_all")
@@ -804,11 +803,11 @@ if __name__ == "__main__":
         print(f"  Routes Tested: {result.routes_tested}")
         print(f"  Issues Found: {result.issues_found}")
         print(f"  Duration: {result.duration_seconds}s")
-        print(f"\nCategory Scores:")
+        print("\nCategory Scores:")
         for cat, score in result.category_scores.items():
             print(f"  {cat}: {score}/100")
         print(f"\nSummary: {result.ai_summary}")
-        print(f"\nTop Recommendations:")
+        print("\nTop Recommendations:")
         for rec in result.recommendations[:5]:
             print(f"  - {rec}")
 

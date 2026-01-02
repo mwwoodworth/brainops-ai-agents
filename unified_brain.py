@@ -15,17 +15,17 @@ ENHANCED FEATURES:
 ASYNC VERSION: Uses asyncpg for non-blocking database operations
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass
+import os
 import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 # Use async database connection
-from database.async_connection import get_pool, init_pool, PoolConfig
+from database.async_connection import PoolConfig, get_pool, init_pool
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class BrainContext:
     priority: str  # critical, high, medium, low
     last_updated: datetime
     source: str  # where this came from
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
 
 class UnifiedBrain:
@@ -200,7 +200,7 @@ class UnifiedBrain:
             self.embedded_memory = None
             return None
 
-    def _generate_embedding(self, text: str) -> Optional[List[float]]:
+    def _generate_embedding(self, text: str) -> Optional[list[float]]:
         """Generate embedding vector for text using OpenAI"""
         if not OPENAI_AVAILABLE or not openai_client:
             return None
@@ -277,7 +277,7 @@ class UnifiedBrain:
         # Clamp to 0.0 - 1.0
         return max(0.0, min(1.0, score))
 
-    def _extract_tags(self, key: str, value: Any, category: str) -> List[str]:
+    def _extract_tags(self, key: str, value: Any, category: str) -> list[str]:
         """Extract searchable tags from content"""
         tags = set()
 
@@ -302,8 +302,8 @@ class UnifiedBrain:
 
         return list(tags)[:20]  # Limit to 20 tags
 
-    async def _find_related_entries(self, key: str, embedding: Optional[List[float]],
-                             limit: int = 5) -> List[str]:
+    async def _find_related_entries(self, key: str, embedding: Optional[list[float]],
+                             limit: int = 5) -> list[str]:
         """Find related entries using vector similarity"""
         if not embedding:
             return []
@@ -329,7 +329,7 @@ class UnifiedBrain:
 
     async def store(self, key: str, value: Any, category: str = "general",
               priority: str = "medium", source: str = "manual",
-              metadata: Optional[Dict] = None, ttl_hours: Optional[int] = None) -> str:
+              metadata: Optional[dict] = None, ttl_hours: Optional[int] = None) -> str:
         """
         Store or update a piece of context with enhanced features
 
@@ -483,7 +483,7 @@ class UnifiedBrain:
                 return False
         return False
 
-    async def get(self, key: str, include_related: bool = False) -> Optional[Dict]:
+    async def get(self, key: str, include_related: bool = False) -> Optional[dict]:
         """
         Retrieve a piece of context with enhanced tracking
 
@@ -561,7 +561,7 @@ class UnifiedBrain:
 
         return response
 
-    async def get_by_category(self, category: str, limit: int = 100) -> List[Dict]:
+    async def get_by_category(self, category: str, limit: int = 100) -> list[dict]:
         """Get all context in a category"""
         await self._ensure_table()
         pool = get_pool()
@@ -583,7 +583,7 @@ class UnifiedBrain:
 
         return [dict(row) for row in rows]
 
-    async def get_all_critical(self) -> List[Dict]:
+    async def get_all_critical(self) -> list[dict]:
         """Get ALL critical context across all categories"""
         await self._ensure_table()
         pool = get_pool()
@@ -597,7 +597,7 @@ class UnifiedBrain:
 
         return [dict(row) for row in rows]
 
-    async def get_full_context(self) -> Dict[str, Any]:
+    async def get_full_context(self) -> dict[str, Any]:
         """
         Get COMPLETE system context for Claude Code session initialization
         This is THE function that runs at session start
@@ -653,7 +653,7 @@ class UnifiedBrain:
 
         return context
 
-    async def search(self, query: str, limit: int = 20, use_semantic: bool = True) -> List[Dict]:
+    async def search(self, query: str, limit: int = 20, use_semantic: bool = True) -> list[dict]:
         """
         Enhanced search with multiple strategies:
         1. Semantic vector search (if embeddings available)
@@ -855,7 +855,7 @@ class UnifiedBrain:
 
         logger.info("✅ Consolidation complete!")
 
-    async def record_session_summary(self, session_id: str, summary: Dict[str, Any]):
+    async def record_session_summary(self, session_id: str, summary: dict[str, Any]):
         """Record a Claude Code session summary"""
         await self.store(
             key=f"session_{session_id}",
@@ -869,7 +869,7 @@ class UnifiedBrain:
             }
         )
 
-    async def update_system_state(self, component: str, state: Dict[str, Any]):
+    async def update_system_state(self, component: str, state: dict[str, Any]):
         """Update current system state"""
         await self.store(
             key=f"system_state_{component}",
@@ -880,7 +880,7 @@ class UnifiedBrain:
             metadata={'component': component}
         )
 
-    async def record_deployment(self, service: str, version: str, status: str, metadata: Optional[Dict] = None):
+    async def record_deployment(self, service: str, version: str, status: str, metadata: Optional[dict] = None):
         """Record a deployment"""
         await self.store(
             key=f"deployment_{service}_latest",
@@ -915,7 +915,7 @@ class UnifiedBrain:
             logger.warning(f"⚠️ Failed to cleanup expired entries: {e}")
             return 0
 
-    async def get_related_entries(self, key: str, max_depth: int = 2) -> List[Dict]:
+    async def get_related_entries(self, key: str, max_depth: int = 2) -> list[dict]:
         """
         Get related entries recursively up to max_depth
 
@@ -964,7 +964,7 @@ class UnifiedBrain:
         await _get_related_recursive(key, 1)
         return results
 
-    async def find_similar(self, key: str, limit: int = 10) -> List[Dict]:
+    async def find_similar(self, key: str, limit: int = 10) -> list[dict]:
         """Find entries similar to the given key using vector similarity"""
         await self._ensure_pool()
         pool = get_pool()
@@ -1001,7 +1001,7 @@ class UnifiedBrain:
         logger.info(f"✅ Found {len(results)} similar entries to '{key}'")
         return results
 
-    async def get_statistics(self) -> Dict[str, Any]:
+    async def get_statistics(self) -> dict[str, Any]:
         """Get comprehensive statistics about the brain"""
         await self._ensure_pool()
         pool = get_pool()

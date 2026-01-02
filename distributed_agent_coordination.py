@@ -4,16 +4,16 @@ Distributed Agent Coordination System
 Multi-agent orchestration, task distribution, and synchronization
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
+import os
 import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List, Callable
-from dataclasses import dataclass, field
-from enum import Enum
 from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -73,14 +73,14 @@ class AgentRegistration:
     agent_id: str
     agent_name: str
     agent_type: str
-    capabilities: List[str]
+    capabilities: list[str]
     state: AgentState = AgentState.IDLE
     registered_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_heartbeat: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     current_task_id: Optional[str] = None
     max_concurrent_tasks: int = 1
     current_task_count: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -88,7 +88,7 @@ class DistributedTask:
     """A task to be distributed among agents"""
     task_id: str
     task_type: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     priority: TaskPriority = TaskPriority.NORMAL
     status: TaskStatus = TaskStatus.PENDING
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -96,16 +96,16 @@ class DistributedTask:
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     assigned_agent_id: Optional[str] = None
-    required_capabilities: List[str] = field(default_factory=list)
-    dependencies: List[str] = field(default_factory=list)
+    required_capabilities: list[str] = field(default_factory=list)
+    dependencies: list[str] = field(default_factory=list)
     timeout_seconds: int = 300
     retry_count: int = 0
     max_retries: int = 3
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[dict[str, Any]] = None
     error: Optional[str] = None
     correlation_id: Optional[str] = None
     tenant_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -114,14 +114,14 @@ class TaskGroup:
     group_id: str
     name: str
     mode: CoordinationMode
-    tasks: List[str] = field(default_factory=list)
+    tasks: list[str] = field(default_factory=list)
     status: TaskStatus = TaskStatus.PENDING
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = None
     leader_agent_id: Optional[str] = None
-    participating_agents: List[str] = field(default_factory=list)
-    results: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    participating_agents: list[str] = field(default_factory=list)
+    results: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -131,7 +131,7 @@ class CoordinationMessage:
     from_agent_id: str
     to_agent_id: Optional[str]  # None for broadcast
     message_type: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     correlation_id: Optional[str] = None
     requires_ack: bool = False
@@ -152,25 +152,25 @@ class DistributedAgentCoordinator:
         self._db_config = None
 
         # Agent registry
-        self._agents: Dict[str, AgentRegistration] = {}
+        self._agents: dict[str, AgentRegistration] = {}
 
         # Task management
-        self._tasks: Dict[str, DistributedTask] = {}
-        self._task_queue: List[str] = []  # Priority queue of task IDs
-        self._task_groups: Dict[str, TaskGroup] = {}
+        self._tasks: dict[str, DistributedTask] = {}
+        self._task_queue: list[str] = []  # Priority queue of task IDs
+        self._task_groups: dict[str, TaskGroup] = {}
 
         # Message passing
-        self._message_queue: Dict[str, List[CoordinationMessage]] = defaultdict(list)
-        self._broadcast_messages: List[CoordinationMessage] = []
+        self._message_queue: dict[str, list[CoordinationMessage]] = defaultdict(list)
+        self._broadcast_messages: list[CoordinationMessage] = []
 
         # Coordination state
-        self._locks: Dict[str, asyncio.Lock] = {}
-        self._leader_elections: Dict[str, str] = {}  # group_id -> leader_agent_id
-        self._consensus_votes: Dict[str, Dict[str, Any]] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._leader_elections: dict[str, str] = {}  # group_id -> leader_agent_id
+        self._consensus_votes: dict[str, dict[str, Any]] = {}
 
         # Callbacks
-        self._task_callbacks: Dict[str, Callable] = {}
-        self._event_handlers: Dict[str, List[Callable]] = defaultdict(list)
+        self._task_callbacks: dict[str, Callable] = {}
+        self._event_handlers: dict[str, list[Callable]] = defaultdict(list)
 
         # Monitoring
         self._stats = {
@@ -184,7 +184,7 @@ class DistributedAgentCoordinator:
         self._main_lock = asyncio.Lock()
         self._heartbeat_task: Optional[asyncio.Task] = None
 
-    def _get_db_config(self) -> Dict[str, Any]:
+    def _get_db_config(self) -> dict[str, Any]:
         """Get database configuration lazily with validation"""
         if not self._db_config:
             required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
@@ -414,9 +414,9 @@ class DistributedAgentCoordinator:
         agent_id: str,
         agent_name: str,
         agent_type: str,
-        capabilities: List[str],
+        capabilities: list[str],
         max_concurrent_tasks: int = 1,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None
     ) -> AgentRegistration:
         """Register an agent with the coordinator"""
         await self.initialize()
@@ -470,8 +470,8 @@ class DistributedAgentCoordinator:
 
     async def get_available_agents(
         self,
-        capabilities: Optional[List[str]] = None
-    ) -> List[AgentRegistration]:
+        capabilities: Optional[list[str]] = None
+    ) -> list[AgentRegistration]:
         """Get available agents, optionally filtered by capabilities"""
         available = []
         for agent in self._agents.values():
@@ -553,14 +553,14 @@ class DistributedAgentCoordinator:
     async def submit_task(
         self,
         task_type: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         priority: TaskPriority = TaskPriority.NORMAL,
-        required_capabilities: Optional[List[str]] = None,
-        dependencies: Optional[List[str]] = None,
+        required_capabilities: Optional[list[str]] = None,
+        dependencies: Optional[list[str]] = None,
         timeout_seconds: int = 300,
         correlation_id: Optional[str] = None,
         tenant_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None
     ) -> DistributedTask:
         """Submit a task for distributed execution"""
         await self.initialize()
@@ -660,7 +660,7 @@ class DistributedAgentCoordinator:
     async def complete_task(
         self,
         task_id: str,
-        result: Dict[str, Any],
+        result: dict[str, Any],
         success: bool = True
     ) -> bool:
         """Complete a task"""
@@ -920,8 +920,8 @@ class DistributedAgentCoordinator:
         self,
         name: str,
         mode: CoordinationMode,
-        tasks: List[DistributedTask],
-        metadata: Optional[Dict[str, Any]] = None
+        tasks: list[DistributedTask],
+        metadata: Optional[dict[str, Any]] = None
     ) -> TaskGroup:
         """Create a group of coordinated tasks"""
         group_id = f"group_{uuid.uuid4().hex[:12]}"
@@ -1042,7 +1042,7 @@ class DistributedAgentCoordinator:
         from_agent_id: str,
         to_agent_id: Optional[str],
         message_type: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         requires_ack: bool = False,
         correlation_id: Optional[str] = None
     ) -> CoordinationMessage:
@@ -1071,7 +1071,7 @@ class DistributedAgentCoordinator:
 
         return message
 
-    async def get_messages(self, agent_id: str, limit: int = 100) -> List[CoordinationMessage]:
+    async def get_messages(self, agent_id: str, limit: int = 100) -> list[CoordinationMessage]:
         """Get messages for an agent"""
         messages = []
 
@@ -1140,7 +1140,7 @@ class DistributedAgentCoordinator:
         """Register an event handler"""
         self._event_handlers[event_type].append(handler)
 
-    async def _emit_event(self, event_type: str, data: Dict[str, Any]):
+    async def _emit_event(self, event_type: str, data: dict[str, Any]):
         """Emit an event to handlers"""
         for handler in self._event_handlers.get(event_type, []):
             try:
@@ -1159,7 +1159,7 @@ class DistributedAgentCoordinator:
     # MONITORING & STATS
     # ========================================================================
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Get coordination statistics"""
         return {
             **self._stats,
@@ -1171,7 +1171,7 @@ class DistributedAgentCoordinator:
             "pending_messages": sum(len(q) for q in self._message_queue.values())
         }
 
-    async def get_health_status(self) -> Dict[str, Any]:
+    async def get_health_status(self) -> dict[str, Any]:
         """Get health status"""
         stats = await self.get_stats()
 
@@ -1205,7 +1205,7 @@ async def register_agent(
     agent_id: str,
     agent_name: str,
     agent_type: str,
-    capabilities: List[str]
+    capabilities: list[str]
 ) -> AgentRegistration:
     """Register an agent"""
     coordinator = get_agent_coordinator()
@@ -1219,7 +1219,7 @@ async def register_agent(
 
 async def submit_task(
     task_type: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     priority: TaskPriority = TaskPriority.NORMAL
 ) -> DistributedTask:
     """Submit a task"""
@@ -1231,13 +1231,13 @@ async def submit_task(
     )
 
 
-async def complete_task(task_id: str, result: Dict[str, Any], success: bool = True) -> bool:
+async def complete_task(task_id: str, result: dict[str, Any], success: bool = True) -> bool:
     """Complete a task"""
     coordinator = get_agent_coordinator()
     return await coordinator.complete_task(task_id, result, success)
 
 
-async def get_coordinator_stats() -> Dict[str, Any]:
+async def get_coordinator_stats() -> dict[str, Any]:
     """Get coordinator statistics"""
     coordinator = get_agent_coordinator()
     return await coordinator.get_stats()

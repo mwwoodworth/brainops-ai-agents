@@ -9,16 +9,17 @@ No partial operations allowed - everything must be 100% or flagged for immediate
 """
 
 import asyncio
-import aiohttp
-import json
-import time
-import os
-import logging
-from datetime import datetime
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, field, asdict
-from enum import Enum
 import hashlib
+import json
+import logging
+import os
+import time
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +60,10 @@ class EndpointTest:
     name: str
     url: str
     method: str = "GET"
-    headers: Dict[str, str] = field(default_factory=dict)
-    body: Optional[Dict[str, Any]] = None
+    headers: dict[str, str] = field(default_factory=dict)
+    body: Optional[dict[str, Any]] = None
     expected_status: int = 200
-    expected_fields: List[str] = field(default_factory=list)
+    expected_fields: list[str] = field(default_factory=list)
     timeout_seconds: float = 30.0
     category: SystemCategory = SystemCategory.CORE_API
     critical: bool = True  # If True, failure means system is NOT 100% operational
@@ -77,10 +78,10 @@ class TestResult:
     status: VerificationStatus
     response_time_ms: float
     status_code: Optional[int] = None
-    response_body: Optional[Dict[str, Any]] = None
+    response_body: Optional[dict[str, Any]] = None
     error_message: Optional[str] = None
-    missing_fields: List[str] = field(default_factory=list)
-    validation_errors: List[str] = field(default_factory=list)
+    missing_fields: list[str] = field(default_factory=list)
+    validation_errors: list[str] = field(default_factory=list)
     timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
 
 
@@ -97,10 +98,10 @@ class SystemVerificationReport:
     degraded: int
     overall_status: VerificationStatus
     pass_rate: float
-    results_by_category: Dict[str, Dict[str, Any]]
-    failed_tests: List[TestResult]
-    all_results: List[TestResult]
-    recommendations: List[str]
+    results_by_category: dict[str, dict[str, Any]]
+    failed_tests: list[TestResult]
+    all_results: list[TestResult]
+    recommendations: list[str]
     is_100_percent_operational: bool
 
 
@@ -118,8 +119,8 @@ class E2ESystemVerification:
     """
 
     def __init__(self):
-        self.tests: List[EndpointTest] = []
-        self.results: List[TestResult] = []
+        self.tests: list[EndpointTest] = []
+        self.results: list[TestResult] = []
         self.last_report: Optional[SystemVerificationReport] = None
         self._initialize_tests()
 
@@ -616,7 +617,7 @@ class E2ESystemVerification:
 
         return report
 
-    def _generate_recommendations(self, failed_tests: List[TestResult], by_category: Dict) -> List[str]:
+    def _generate_recommendations(self, failed_tests: list[TestResult], by_category: dict) -> list[str]:
         """Generate actionable recommendations based on failures"""
         recommendations = []
 
@@ -648,7 +649,7 @@ class E2ESystemVerification:
 
         return recommendations
 
-    async def run_quick_health_check(self) -> Dict[str, Any]:
+    async def run_quick_health_check(self) -> dict[str, Any]:
         """Quick health check of critical endpoints only"""
         critical_tests = [t for t in self.tests if t.critical]
 
@@ -668,7 +669,7 @@ class E2ESystemVerification:
             "timestamp": datetime.utcnow().isoformat()
         }
 
-    def get_report_summary(self) -> Optional[Dict[str, Any]]:
+    def get_report_summary(self) -> Optional[dict[str, Any]]:
         """Get summary of last verification report"""
         if not self.last_report:
             return None
@@ -695,7 +696,7 @@ e2e_verification = E2ESystemVerification()
 # API FUNCTIONS
 # ============================================
 
-async def run_full_e2e_verification() -> Dict[str, Any]:
+async def run_full_e2e_verification() -> dict[str, Any]:
     """Run complete E2E verification and return report"""
     report = await e2e_verification.run_full_verification()
 
@@ -728,11 +729,11 @@ async def run_full_e2e_verification() -> Dict[str, Any]:
     }
 
 
-async def run_quick_health_check() -> Dict[str, Any]:
+async def run_quick_health_check() -> dict[str, Any]:
     """Run quick health check of critical systems"""
     return await e2e_verification.run_quick_health_check()
 
 
-async def get_last_verification_report() -> Optional[Dict[str, Any]]:
+async def get_last_verification_report() -> Optional[dict[str, Any]]:
     """Get the last verification report summary"""
     return e2e_verification.get_report_summary()

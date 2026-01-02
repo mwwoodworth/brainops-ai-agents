@@ -4,10 +4,11 @@ Revenue Automation API Router
 REAL revenue generation endpoints. No placeholders.
 """
 
-from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, Dict, Any
-from pydantic import BaseModel
 import logging
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +38,11 @@ class LeadCaptureRequest(BaseModel):
     source: str
     phone: Optional[str] = None
     company: Optional[str] = None
-    custom_fields: Optional[Dict[str, Any]] = None
+    custom_fields: Optional[dict[str, Any]] = None
 
 
 class QualifyLeadRequest(BaseModel):
-    qualification_data: Dict[str, Any]
+    qualification_data: dict[str, Any]
 
 
 class PaymentLinkRequest(BaseModel):
@@ -204,7 +205,7 @@ async def create_payment_link(lead_id: str, request: PaymentLinkRequest):
 
 
 @router.post("/webhooks/stripe")
-async def stripe_webhook(payload: Dict[str, Any]):
+async def stripe_webhook(payload: dict[str, Any]):
     """Process Stripe payment webhook"""
     try:
         engine = await _get_engine()

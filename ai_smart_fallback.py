@@ -4,13 +4,14 @@ Smart AI Fallback System
 Automatically switches between OpenAI, Anthropic, and Hugging Face
 """
 
-import os
 import logging
+import os
 import time
+from typing import Any, Optional
+
 import requests
-from typing import Dict, Optional, Any
-from openai import OpenAI
 from anthropic import Anthropic
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,7 @@ class SmartAISystem:
         # Last resort: return a helpful message
         return f"I understand your request about: {prompt[:100]}... Let me help you with that."
 
-    def generate(self, prompt: str, max_tokens: int = 1000, **kwargs) -> Dict[str, Any]:
+    def generate(self, prompt: str, max_tokens: int = 1000, **kwargs) -> dict[str, Any]:
         """Generate AI response with automatic fallback"""
 
         start_time = time.time()
@@ -251,7 +252,7 @@ class SmartAISystem:
         else:
             return f"Processing request: {prompt[:100]}... Task completed successfully with optimized parameters."
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get system status"""
         return {
             "providers": {
@@ -286,11 +287,11 @@ class SmartAISystem:
 smart_ai = SmartAISystem()
 
 # FastAPI endpoints
-async def ai_generate_smart(prompt: str, max_tokens: int = 1000) -> Dict[str, Any]:
+async def ai_generate_smart(prompt: str, max_tokens: int = 1000) -> dict[str, Any]:
     """Smart AI generation with automatic fallback"""
     return smart_ai.generate(prompt, max_tokens)
 
-async def ai_status_smart() -> Dict[str, Any]:
+async def ai_status_smart() -> dict[str, Any]:
     """Get smart AI system status"""
     return smart_ai.get_status()
 

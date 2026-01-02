@@ -5,10 +5,11 @@ API endpoints for AI-driven predictive system healing with 67% faster recovery t
 Tiered autonomy model: routine issues auto-remediated, complex issues require oversight.
 """
 
-from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, Dict, Any
-from pydantic import BaseModel
 import logging
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,8 @@ def _get_engine():
 
 class AnomalyDetectionRequest(BaseModel):
     system_id: str
-    metrics: Dict[str, float]
-    context: Optional[Dict[str, Any]] = None
+    metrics: dict[str, float]
+    context: Optional[dict[str, Any]] = None
 
 
 class RemediationApprovalRequest(BaseModel):
@@ -47,13 +48,13 @@ class RemediationApprovalRequest(BaseModel):
 class HealthPatternRequest(BaseModel):
     system_id: str
     pattern_type: str  # normal, degraded, pre_failure, recovery
-    metrics_snapshot: Dict[str, float]
+    metrics_snapshot: dict[str, float]
 
 
 class ManualRemediationRequest(BaseModel):
     incident_id: str
     action: str
-    parameters: Optional[Dict[str, Any]] = None
+    parameters: Optional[dict[str, Any]] = None
     executor: str
 
 

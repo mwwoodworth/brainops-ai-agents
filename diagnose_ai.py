@@ -4,6 +4,7 @@ Diagnose AI Issues
 """
 
 import os
+
 from openai import OpenAI
 
 print("="*60)

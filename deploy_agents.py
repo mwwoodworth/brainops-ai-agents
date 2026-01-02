@@ -4,9 +4,10 @@ Deploy and Monitor 50+ AI Agents
 Production-ready with error handling and monitoring
 """
 
+import logging
 import os
 import sys
-import logging
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
