@@ -1071,10 +1071,15 @@ if __name__ == "__main__":
     if not db_password:
         raise RuntimeError("DB_PASSWORD environment variable is required for agent scheduler startup.")
 
+    # All credentials MUST come from environment variables - no hardcoded defaults
+    db_host = os.getenv('DB_HOST')
+    db_user = os.getenv('DB_USER')
+    if not all([db_host, db_user, db_password]):
+        raise RuntimeError("DB_HOST, DB_USER, and DB_PASSWORD environment variables are required")
     DB_CONFIG = {
-        'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
+        'host': db_host,
         'database': os.getenv('DB_NAME', 'postgres'),
-        'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
+        'user': db_user,
         'password': db_password,
         'port': int(os.getenv('DB_PORT', 5432))
     }

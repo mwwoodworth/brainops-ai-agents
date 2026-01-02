@@ -52,6 +52,7 @@ except ImportError:
     logger.warning("AI Core not available - using direct clients")
 
 # Database configuration - use config module for consistency
+# NO hardcoded credentials - all values MUST come from environment variables
 try:
     from config import config
     DB_CONFIG = {
@@ -62,12 +63,25 @@ try:
         "port": config.database.port
     }
 except (ImportError, AttributeError):
+    # Fallback to environment variables directly - NO hardcoded defaults
+    _DB_HOST = os.getenv("DB_HOST")
+    _DB_NAME = os.getenv("DB_NAME")
+    _DB_USER = os.getenv("DB_USER")
+    _DB_PASSWORD = os.getenv("DB_PASSWORD")
+    _DB_PORT = os.getenv("DB_PORT", "5432")
+
+    if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
+        raise RuntimeError(
+            "Database configuration is incomplete. "
+            "Ensure DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD environment variables are set."
+        )
+
     DB_CONFIG = {
-        "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-        "database": os.getenv("DB_NAME", "postgres"),
-        "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-        "password": os.getenv("DB_PASSWORD"),
-        "port": int(os.getenv("DB_PORT", 5432))
+        "host": _DB_HOST,
+        "database": _DB_NAME,
+        "user": _DB_USER,
+        "password": _DB_PASSWORD,
+        "port": int(_DB_PORT)
     }
 
 # Connection pool for sync operations (reuse connections)
@@ -888,14 +902,9 @@ Return ONLY valid JSON array, no other text."""
             try:
                 import psycopg2
                 from psycopg2.extras import RealDictCursor
-                db_config = {
-                    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-                    "port": int(os.getenv("DB_PORT", "5432")),
-                    "dbname": os.getenv("DB_NAME", "postgres"),
-                    "user": os.getenv("DB_USER"),
-                    "password": os.getenv("DB_PASSWORD")
-                }
-                conn = psycopg2.connect(**db_config)
+                # Use the validated DB config - no hardcoded defaults
+                from revenue_generation_system import DB_CONFIG
+                conn = psycopg2.connect(**DB_CONFIG)
                 cur = conn.cursor(cursor_factory=RealDictCursor)
 
                 # First, check for existing leads in NEW or CONTACTED status

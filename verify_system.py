@@ -9,18 +9,42 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SystemVerifier")
 
-# DB Credentials MUST come from environment variables
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-    'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('DB_PASSWORD'),  # No default - must be set
-    'port': int(os.getenv('DB_PORT', '5432'))
-}
+# DB Credentials MUST come from environment variables - NO hardcoded fallbacks
+def get_db_config():
+    """Get database configuration from environment variables."""
+    db_host = os.getenv('DB_HOST')
+    db_name = os.getenv('DB_NAME')
+    db_user = os.getenv('DB_USER')
+    db_password = os.getenv('DB_PASSWORD')
+    db_port = os.getenv('DB_PORT', '5432')
 
-# Validate DB_PASSWORD is set
-if not DB_CONFIG['password']:
-    logger.error("❌ DB_PASSWORD environment variable not set")
+    missing = []
+    if not db_host:
+        missing.append('DB_HOST')
+    if not db_name:
+        missing.append('DB_NAME')
+    if not db_user:
+        missing.append('DB_USER')
+    if not db_password:
+        missing.append('DB_PASSWORD')
+
+    if missing:
+        logger.error(f"Required environment variables not set: {', '.join(missing)}")
+        raise RuntimeError(
+            f"Required environment variables not set: {', '.join(missing)}"
+        )
+
+    return {
+        'host': db_host,
+        'database': db_name,
+        'user': db_user,
+        'password': db_password,
+        'port': int(db_port)
+    }
+
+try:
+    DB_CONFIG = get_db_config()
+except RuntimeError:
     sys.exit(1)
 
 async def verify_db():
@@ -84,10 +108,8 @@ async def verify_self_healing():
     try:
         from self_healing_recovery import SelfHealingRecovery
         # We need to monkeypatch the DB config in the class or instance because it reads from env
-        # But wait, the class __init__ reads env. Let's set env vars temporarily or mock.
-        # Actually, let's just set the env vars for the process if possible, or trust the fallback if defaults match.
-        # The file has defaults: postgres.yomagoqdmxszqtdwuhab / aws-0-us-east-2.pooler.supabase.com.
-        # But password is redacted in file.
+        # The class __init__ reads env vars - ensure DB_HOST, DB_USER, DB_PASSWORD are set
+        # Password must be set via DB_PASSWORD environment variable
         
         # We'll set the env var for the process
         os.environ['DB_PASSWORD'] = DB_CONFIG['password']

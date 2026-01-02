@@ -34,23 +34,42 @@ warnings.filterwarnings('ignore')
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-    'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv("DB_PASSWORD"),
-    'port': int(os.getenv('DB_PORT', 5432))
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
-# Backup database config (for failover)
-BACKUP_DB_CONFIG = {
-    'host': os.getenv('BACKUP_DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),  # Same for now
-    'database': os.getenv('BACKUP_DB_NAME', 'postgres'),
-    'user': os.getenv('BACKUP_DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('BACKUP_DB_PASSWORD', '<DB_PASSWORD_REDACTED>'),
-    'port': int(os.getenv('BACKUP_DB_PORT', os.getenv('DB_PORT', 5432)))
-}
+    return {
+        'host': os.getenv('DB_HOST'),
+        'database': os.getenv('DB_NAME', 'postgres'),
+        'user': os.getenv('DB_USER'),
+        'password': os.getenv("DB_PASSWORD"),
+        'port': int(os.getenv('DB_PORT', '5432'))
+    }
+
+# Backup database config (for failover) - uses same validation pattern
+def _get_backup_db_config():
+    """Get backup database configuration for failover."""
+    # Only validate backup config if backup host is set
+    backup_host = os.getenv('BACKUP_DB_HOST')
+    if not backup_host:
+        # Fall back to primary config if no backup configured
+        return _get_db_config()
+
+    backup_password = os.getenv('BACKUP_DB_PASSWORD')
+    if not backup_password:
+        raise RuntimeError("BACKUP_DB_PASSWORD required when BACKUP_DB_HOST is set")
+
+    return {
+        'host': backup_host,
+        'database': os.getenv('BACKUP_DB_NAME', 'postgres'),
+        'user': os.getenv('BACKUP_DB_USER', os.getenv('DB_USER')),
+        'password': backup_password,
+        'port': int(os.getenv('BACKUP_DB_PORT', os.getenv('DB_PORT', '5432')))
+    }
 
 
 class ServiceStatus(Enum):
@@ -233,7 +252,7 @@ class HealthMonitor:
         conn = None
         cursor = None
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
             
             cursor.execute("""
@@ -414,15 +433,15 @@ class DataReplicator:
         """Replicate a batch of data"""
         try:
             # Try primary first
-            success = await self._write_to_database(batch, DB_CONFIG)
+            success = await self._write_to_database(batch, _get_db_config())
             
             if success:
                 # Also write to backup
-                await self._write_to_database(batch, BACKUP_DB_CONFIG)
+                await self._write_to_database(batch, BACKUP__get_db_config())
             else:
                 # Primary failed, write to backup only
                 logger.warning("Primary database unavailable, using backup")
-                await self._write_to_database(batch, BACKUP_DB_CONFIG)
+                await self._write_to_database(batch, BACKUP__get_db_config())
             
         except Exception as e:
             logger.error(f"Batch replication failed: {e}")
@@ -564,7 +583,7 @@ class FailoverManager:
         conn = None
         cursor = None
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
             
             cursor.execute("""
@@ -658,7 +677,7 @@ class DisasterRecovery:
         conn = None
         cursor = None
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             # Get critical data
@@ -917,7 +936,7 @@ class RedundancyOrchestrator:
 async def setup_database():
     """Create necessary database tables"""
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = psycopg2.connect(**_get_db_config())
         cursor = conn.cursor()
         
         # Service health table
@@ -991,7 +1010,7 @@ if __name__ == "__main__":
         # Define test health checks
         def db_health_check():
             try:
-                conn = psycopg2.connect(**DB_CONFIG)
+                conn = psycopg2.connect(**_get_db_config())
                 cursor = conn.cursor()
                 cursor.execute("SELECT 1")
                 cursor.close()

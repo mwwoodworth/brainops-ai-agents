@@ -20,13 +20,21 @@ from collections import defaultdict
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD")
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        "host": os.getenv("DB_HOST"),
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": int(os.getenv("DB_PORT", "5432"))
+    }
 
 class NodeType(Enum):
     """Types of knowledge nodes"""
@@ -91,7 +99,7 @@ class KnowledgeExtractor:
     ) -> List[Dict]:
         """Extract knowledge from agent executions"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get recent executions
@@ -339,7 +347,7 @@ class KnowledgeExtractor:
     async def extract_from_conversations(self) -> List[Dict]:
         """Extract knowledge from conversations"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get conversations with messages
@@ -404,7 +412,7 @@ class KnowledgeExtractor:
     async def extract_from_business_data(self) -> List[Dict]:
         """Extract knowledge from business data"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             knowledge_items = []
@@ -610,7 +618,7 @@ class KnowledgeGraphBuilder:
     async def _store_graph(self):
         """Store graph in database"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             # Store nodes
@@ -679,7 +687,7 @@ class KnowledgeQueryEngine:
     async def load_graph(self) -> nx.DiGraph:
         """Load graph from database"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             graph = nx.DiGraph()
@@ -826,7 +834,7 @@ class KnowledgeQueryEngine:
                 await self.load_graph()
 
             # Search in database for vector similarity
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
@@ -953,7 +961,7 @@ class KnowledgeQueryEngine:
         # Identify trending patterns
         try:
             # Get temporal patterns
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             cursor.execute("""

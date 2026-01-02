@@ -19,14 +19,21 @@ from openai import OpenAI
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD"),
-    "port": int(os.getenv("DB_PORT", 5432))
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        "host": os.getenv("DB_HOST"),
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": int(os.getenv("DB_PORT", "5432"))
+    }
 
 # Auth configuration
 JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key")
@@ -87,7 +94,7 @@ class AIContextAwareness:
     def _init_database(self):
         """Initialize database tables"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             # Create user profile table
@@ -241,7 +248,7 @@ class AIContextAwareness:
     ) -> Dict:
         """Create or update user profile"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             # Check if profile exists
@@ -295,7 +302,7 @@ class AIContextAwareness:
     async def _initialize_user_context(self, user_id: str, role: UserRole):
         """Initialize default context for user"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             # Default preferences based on role
@@ -406,7 +413,7 @@ class AIContextAwareness:
             context = await self.get_user_context(user_id)
 
             # Store session
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -440,7 +447,7 @@ class AIContextAwareness:
             session_id = payload.get('session_id')
 
             # Check session validity
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             cursor.execute("""
@@ -487,7 +494,7 @@ class AIContextAwareness:
     ) -> Dict:
         """Get comprehensive user context"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get user profile
@@ -579,7 +586,7 @@ class AIContextAwareness:
     ) -> bool:
         """Update user context"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -627,7 +634,7 @@ class AIContextAwareness:
     ) -> str:
         """Track user interaction"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             interaction_id = str(uuid.uuid4())
@@ -713,7 +720,7 @@ class AIContextAwareness:
     ):
         """Update user preference"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -759,7 +766,7 @@ class AIContextAwareness:
             context = await self.get_user_context(user_id)
             user_role = context.get('profile', {}).get('role')
 
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Check permission policies
@@ -865,7 +872,7 @@ class AIContextAwareness:
         """Generate personalized recommendations"""
         try:
             # Get user embedding
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -931,7 +938,7 @@ class AIContextAwareness:
     ) -> List[Dict]:
         """Find users with similar preferences/behavior"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get user embedding
@@ -982,7 +989,7 @@ class AIContextAwareness:
         """Update user embedding based on their activity"""
         try:
             # Get user interactions and preferences
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             cursor.execute("""

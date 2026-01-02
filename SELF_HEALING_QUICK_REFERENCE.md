@@ -121,10 +121,10 @@ result = healer.detect_and_cleanup_memory_leaks('component_name')
 
 ```bash
 # Required
-export DB_PASSWORD="REDACTED_SUPABASE_DB_PASSWORD"
+export DB_PASSWORD="${DB_PASSWORD}"
 
 # Optional
-export RENDER_API_KEY="rnd_xxxxxxxxxxxxx"
+export RENDER_API_KEY="${RENDER_API_KEY}"
 export HEAL_LATENCY_THRESH="5000"
 export HEAL_ERROR_THRESH="0.05"
 export HEAL_MEMORY_THRESH="90"

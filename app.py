@@ -1403,9 +1403,10 @@ app.include_router(gumroad_router)
 app.include_router(erp_event_router)
 
 # Unified Events System - Central event bus for all systems
+# NOTE: /webhook/erp endpoint has its own signature verification, but other endpoints need auth
 if UNIFIED_EVENTS_AVAILABLE and unified_events_router:
-    app.include_router(unified_events_router)
-    logger.info("Mounted: Unified Events API at /events - publish, webhook/erp, recent, stats, replay")
+    app.include_router(unified_events_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: Unified Events API at /events - publish, webhook/erp, recent, stats, replay (SECURED)")
 
 app.include_router(codebase_graph_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(state_sync_router, dependencies=SECURED_DEPENDENCIES)  # Real-time state synchronization

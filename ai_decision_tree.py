@@ -140,12 +140,18 @@ class AIDecisionTree:
     """AI Decision Tree for autonomous decision making"""
 
     def __init__(self):
+        # Validate required environment variables
+        required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+        missing = [var for var in required_vars if not os.getenv(var)]
+        if missing:
+            raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
         self.db_config = {
-            'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
+            'host': os.getenv('DB_HOST'),
             'database': os.getenv('DB_NAME', 'postgres'),
-            'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
+            'user': os.getenv('DB_USER'),
             'password': os.getenv("DB_PASSWORD"),
-            'port': os.getenv('DB_PORT', 5432)
+            'port': int(os.getenv('DB_PORT', '5432'))
         }
         self.decision_trees = {}
         self.active_decisions = {}

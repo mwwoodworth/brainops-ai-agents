@@ -60,7 +60,7 @@ Frontend Applications (Vercel):
 
 | Service | URL | Health Endpoint | Version | Status Check |
 |---------|-----|-----------------|---------|--------------|
-| AI Agents | brainops-ai-agents.onrender.com | /health | v9.1.1 | `curl -s <url>/health -H "X-API-Key: brainops_prod_key_2025"` |
+| AI Agents | brainops-ai-agents.onrender.com | /health | v9.1.1 | `curl -s <url>/health -H "X-API-Key: ${BRAINOPS_API_KEY}"` |
 | Backend | brainops-backend-prod.onrender.com | /health | v163.0.16 | `curl -s <url>/health` |
 | MCP Bridge | brainops-mcp-bridge.onrender.com | /health | v1.0.0 | `curl -s <url>/health` |
 | ERP | weathercraft-erp.vercel.app | /api/health | - | `curl -s <url>/api/health` |
@@ -71,7 +71,7 @@ Frontend Applications (Vercel):
 
 | Service | Key Location | Purpose |
 |---------|--------------|---------|
-| AI Agents | BRAINOPS_API_KEY | `brainops_prod_key_2025` |
+| AI Agents | BRAINOPS_API_KEY | `${BRAINOPS_API_KEY}` |
 | MCP Bridge | MCP_BRIDGE_API_KEY | `brainops_mcp_49209d1d...` |
 | Supabase | SUPABASE_SERVICE_ROLE_KEY | Database admin access |
 | Anthropic | ANTHROPIC_API_KEY | AI model access |
@@ -80,7 +80,7 @@ Frontend Applications (Vercel):
 
 ### Database Connection
 ```bash
-PGPASSWORD=REDACTED_SUPABASE_DB_PASSWORD psql \
+PGPASSWORD=${DB_PASSWORD} psql \
   -h aws-0-us-east-2.pooler.supabase.com \
   -U postgres.yomagoqdmxszqtdwuhab \
   -d postgres
@@ -102,7 +102,7 @@ git push origin main
 
 # 3. Verify deployment
 curl -s "https://brainops-ai-agents.onrender.com/health" \
-  -H "X-API-Key: brainops_prod_key_2025" | jq
+  -H "X-API-Key: ${BRAINOPS_API_KEY}" | jq
 ```
 
 **Emergency Rollback:**
@@ -194,7 +194,7 @@ git push origin feature/my-feature
 ```bash
 # 1. Check AUREA status
 curl -s "https://brainops-ai-agents.onrender.com/systems/usage" \
-  -H "X-API-Key: brainops_prod_key_2025" | jq '.aurea'
+  -H "X-API-Key: ${BRAINOPS_API_KEY}" | jq '.aurea'
 
 # 2. Check app.py line 512 for orchestrate() call
 # 3. Restart service if needed
@@ -208,7 +208,7 @@ curl -s "https://brainops-ai-agents.onrender.com/systems/usage" \
 **Steps:**
 1. Test direct connection:
    ```bash
-   PGPASSWORD=REDACTED_SUPABASE_DB_PASSWORD psql -h aws-0-us-east-2.pooler.supabase.com ...
+   PGPASSWORD=${DB_PASSWORD} psql -h aws-0-us-east-2.pooler.supabase.com ...
    ```
 2. Check Supabase Dashboard for service status
 3. Verify connection string in environment
@@ -223,7 +223,7 @@ curl -s "https://brainops-ai-agents.onrender.com/systems/usage" \
 ```bash
 # 1. Check scheduler status
 curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" \
-  -H "X-API-Key: brainops_prod_key_2025" | jq
+  -H "X-API-Key: ${BRAINOPS_API_KEY}" | jq
 
 # 2. Check next_jobs for upcoming executions
 # 3. Verify agent definitions in agents/ directory
@@ -241,7 +241,7 @@ curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" \
 **Status Check:**
 ```bash
 curl -s "https://brainops-ai-agents.onrender.com/systems/usage" \
-  -H "X-API-Key: brainops_prod_key_2025" | jq '.aurea'
+  -H "X-API-Key: ${BRAINOPS_API_KEY}" | jq '.aurea'
 ```
 
 **Expected Response:**
@@ -266,7 +266,7 @@ curl -s "https://brainops-ai-agents.onrender.com/systems/usage" \
 **Job Status:**
 ```bash
 curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" \
-  -H "X-API-Key: brainops_prod_key_2025" | jq '.next_jobs[0:5]'
+  -H "X-API-Key: ${BRAINOPS_API_KEY}" | jq '.next_jobs[0:5]'
 ```
 
 ### MCP Bridge (245 Tools)
@@ -356,13 +356,13 @@ GROUP BY type;
 ./scripts/verify_ai_os.sh
 
 # Quick health check
-curl -s "https://brainops-ai-agents.onrender.com/health" -H "X-API-Key: brainops_prod_key_2025" | jq '.status'
+curl -s "https://brainops-ai-agents.onrender.com/health" -H "X-API-Key: ${BRAINOPS_API_KEY}" | jq '.status'
 
 # AUREA status
-curl -s "https://brainops-ai-agents.onrender.com/systems/usage" -H "X-API-Key: brainops_prod_key_2025" | jq '.aurea.running'
+curl -s "https://brainops-ai-agents.onrender.com/systems/usage" -H "X-API-Key: ${BRAINOPS_API_KEY}" | jq '.aurea.running'
 
 # Agent count
-curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" -H "X-API-Key: brainops_prod_key_2025" | jq '.apscheduler_jobs_count'
+curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" -H "X-API-Key: ${BRAINOPS_API_KEY}" | jq '.apscheduler_jobs_count'
 ```
 
 ### Emergency Contacts

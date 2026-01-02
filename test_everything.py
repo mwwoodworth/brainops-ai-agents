@@ -13,12 +13,41 @@ from datetime import datetime
 import uuid
 import subprocess
 
-# Set up environment
-os.environ['DB_HOST'] = 'aws-0-us-east-2.pooler.supabase.com'
-os.environ['DB_NAME'] = 'postgres'
-os.environ['DB_USER'] = 'postgres.yomagoqdmxszqtdwuhab'
-os.environ['DB_PASSWORD'] = '<DB_PASSWORD_REDACTED>'
-os.environ['DB_PORT'] = '5432'
+# Database configuration - NO hardcoded credentials
+# All credentials must come from environment variables
+def get_db_config():
+    """Get database configuration from environment variables."""
+    db_host = os.getenv('DB_HOST')
+    db_name = os.getenv('DB_NAME')
+    db_user = os.getenv('DB_USER')
+    db_password = os.getenv('DB_PASSWORD')
+    db_port = os.getenv('DB_PORT', '5432')
+
+    missing = []
+    if not db_host:
+        missing.append('DB_HOST')
+    if not db_name:
+        missing.append('DB_NAME')
+    if not db_user:
+        missing.append('DB_USER')
+    if not db_password:
+        missing.append('DB_PASSWORD')
+
+    if missing:
+        raise RuntimeError(
+            f"Required environment variables not set: {', '.join(missing)}. "
+            "Set these variables before running tests."
+        )
+
+    return {
+        'host': db_host,
+        'database': db_name,
+        'user': db_user,
+        'password': db_password,
+        'port': int(db_port)
+    }
+
+DB_CONFIG = get_db_config()
 
 print("="*80)
 print("COMPLETE SYSTEM TEST - ASSUMING NOTHING")
@@ -41,11 +70,7 @@ print("-"*40)
 try:
     print("   Attempting connection...")
     conn = psycopg2.connect(
-        host='aws-0-us-east-2.pooler.supabase.com',
-        database='postgres',
-        user='postgres.yomagoqdmxszqtdwuhab',
-        password='<DB_PASSWORD_REDACTED>',
-        port=5432,
+        **DB_CONFIG,
         connect_timeout=10
     )
     cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -235,13 +260,7 @@ print("-"*40)
 
 if results['database'].get('connection'):
     try:
-        conn = psycopg2.connect(
-            host='aws-0-us-east-2.pooler.supabase.com',
-            database='postgres',
-            user='postgres.yomagoqdmxszqtdwuhab',
-            password='<DB_PASSWORD_REDACTED>',
-            port=5432
-        )
+        conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
         # Test insert

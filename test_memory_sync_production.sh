@@ -2,7 +2,20 @@
 # Test script for embedded memory sync fix in production
 
 API_BASE="https://brainops-ai-agents.onrender.com"
-API_KEY="brainops_prod_key_2025"
+API_KEY="${BRAINOPS_API_KEY:-}"
+
+# Source environment if available
+if [[ -f "$HOME/dev/_secure/BrainOps.env" ]]; then
+    set -a
+    source "$HOME/dev/_secure/BrainOps.env"
+    set +a
+    API_KEY="${BRAINOPS_API_KEY:-}"
+fi
+
+if [[ -z "$API_KEY" ]]; then
+    echo "ERROR: BRAINOPS_API_KEY not set. Set it or source _secure/BrainOps.env"
+    exit 1
+fi
 
 echo "🧪 Testing Embedded Memory Sync Fix in Production"
 echo "=================================================="
