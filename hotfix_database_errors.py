@@ -5,7 +5,6 @@ Fixes critical errors found in production logs
 """
 
 import os
-from urllib.parse import urlparse as _urlparse
 import sys
 
 import psycopg2

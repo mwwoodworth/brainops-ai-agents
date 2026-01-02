@@ -5,7 +5,6 @@ Complete system test - assume nothing, test everything directly
 
 import json
 import os
-from urllib.parse import urlparse as _urlparse
 import subprocess
 import sys
 import uuid
