@@ -7,7 +7,6 @@ Implements semantic memory with embeddings for true AI memory persistence
 import json
 import logging
 import os
-from urllib.parse import urlparse as _urlparse
 import uuid
 from dataclasses import dataclass
 from datetime import datetime

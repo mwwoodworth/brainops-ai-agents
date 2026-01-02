@@ -7,7 +7,6 @@ Intelligent, personalized customer onboarding with automated workflows and progr
 import json
 import logging
 import os
-from urllib.parse import urlparse as _urlparse
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
