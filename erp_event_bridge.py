@@ -14,6 +14,7 @@ Version: 2.0.0 - Unified Event System Integration
 
 import asyncio
 import logging
+import os
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 

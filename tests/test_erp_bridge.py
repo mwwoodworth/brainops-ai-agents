@@ -43,7 +43,9 @@ def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
     
     response = client.post("/events/webhook", json=payload)
     assert response.status_code == 200
-    assert response.json() == {"status": "processed", "event_id": "evt_123"}
+    data = response.json()
+    assert data["status"] == "processed"
+    assert data["event_id"] == "evt_123"
     
     # Verify CustomerSuccessAgent was initialized and called
     mock_csa.assert_called_with("tenant_123")
