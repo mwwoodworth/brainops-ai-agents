@@ -1,8 +1,8 @@
-from fastapi import APIRouter, HTTPException
-from typing import List
-from pydantic import BaseModel
-from datetime import datetime
 import logging
+from datetime import datetime
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from database.async_connection import get_pool
 
@@ -13,7 +13,7 @@ class CustomerAnalysisRequest(BaseModel):
     customer_id: str
 
 class BatchAnalysisRequest(BaseModel):
-    customer_ids: List[str]
+    customer_ids: list[str]
 
 @router.get("/customer-intelligence/{customer_id}")
 async def get_customer_intelligence(customer_id: str):
@@ -39,13 +39,13 @@ async def get_customer_intelligence(customer_id: str):
 
         if not customer:
             raise HTTPException(status_code=404, detail=f"Customer not found: {customer_id}")
-            
+
         # Fetch related data for analysis
         jobs = await pool.fetch(
             "SELECT * FROM jobs WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 10",
             customer_id
         )
-        
+
         invoices = await pool.fetch(
             "SELECT * FROM invoices WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 10",
             customer_id
@@ -83,24 +83,25 @@ async def get_customer_intelligence(customer_id: str):
                     churn_risk = 60  # High - no jobs in 6 months
                 elif days_since_job > 90:
                     churn_risk = 35  # Medium - no jobs in 3 months
-            
+
         # 4. Sentiment Score (0-100)
         # Real analysis of recent job descriptions
         sentiment_score = 50  # Default neutral
-        
+
         # Fetch text data for analysis
         job_texts = await pool.fetch(
             "SELECT description FROM jobs WHERE customer_id = $1 AND description IS NOT NULL ORDER BY created_at DESC LIMIT 5",
             customer_id
         )
         text_content = "\n".join([r['description'] for r in job_texts])
-        
+
         if text_content and len(text_content) > 10:
             try:
-                import httpx
                 import os
                 import re
-                
+
+                import httpx
+
                 api_key = os.getenv("OPENAI_API_KEY")
                 if api_key:
                     async with httpx.AsyncClient(timeout=3.0) as client:
@@ -163,7 +164,7 @@ async def get_customer_intelligence(customer_id: str):
             "analyzed_at": datetime.utcnow().isoformat(),
             "confidence": 0.92
         }
-        
+
         return response
 
     except Exception as e:
@@ -192,5 +193,5 @@ async def batch_customer_intelligence(payload: BatchAnalysisRequest):
         except Exception as exc:
             logger.debug("Customer intelligence failed for %s: %s", cid, exc, exc_info=True)
             results[cid] = {"error": "Failed to analyze"}
-            
+
     return results

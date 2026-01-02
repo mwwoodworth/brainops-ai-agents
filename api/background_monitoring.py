@@ -5,12 +5,13 @@ Monitors all background tasks (AUREA, Scheduler, etc.) with heartbeats.
 No more fire-and-forget - we know if tasks are alive.
 """
 
-import logging
 import asyncio
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
-from fastapi import APIRouter
+import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+
+from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ class TaskHeartbeat:
     status: str  # "running", "stopped", "error", "unknown"
     iteration_count: int = 0
     last_error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class BackgroundTaskMonitor:
@@ -36,13 +37,13 @@ class BackgroundTaskMonitor:
     """
 
     def __init__(self, heartbeat_timeout_seconds: int = 60):
-        self._tasks: Dict[str, TaskHeartbeat] = {}
+        self._tasks: dict[str, TaskHeartbeat] = {}
         self._timeout = heartbeat_timeout_seconds
         self._monitor_task: Optional[asyncio.Task] = None
-        self._alerts: List[Dict[str, Any]] = []
+        self._alerts: list[dict[str, Any]] = []
         self._started = False
 
-    def register_task(self, task_name: str, metadata: Optional[Dict[str, Any]] = None):
+    def register_task(self, task_name: str, metadata: Optional[dict[str, Any]] = None):
         """Register a new background task for monitoring."""
         self._tasks[task_name] = TaskHeartbeat(
             task_name=task_name,
@@ -52,7 +53,7 @@ class BackgroundTaskMonitor:
         )
         logger.info(f"📋 Background task registered: {task_name}")
 
-    def heartbeat(self, task_name: str, status: str = "running", metadata: Optional[Dict[str, Any]] = None):
+    def heartbeat(self, task_name: str, status: str = "running", metadata: Optional[dict[str, Any]] = None):
         """Record a heartbeat from a background task."""
         now = datetime.now(timezone.utc)
 
@@ -139,7 +140,7 @@ class BackgroundTaskMonitor:
                 logger.debug("Background monitor task cancelled")
         self._started = False
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get the status of all monitored tasks."""
         now = datetime.now(timezone.utc)
 
@@ -171,7 +172,7 @@ class BackgroundTaskMonitor:
             "timestamp": now.isoformat()
         }
 
-    def get_alerts(self, include_resolved: bool = False) -> List[Dict[str, Any]]:
+    def get_alerts(self, include_resolved: bool = False) -> list[dict[str, Any]]:
         """Get all alerts."""
         if include_resolved:
             return self._alerts[-100:]

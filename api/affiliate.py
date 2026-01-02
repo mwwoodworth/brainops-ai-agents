@@ -4,17 +4,19 @@ Secure, authenticated endpoints for the Affiliate Partnership Pipeline
 """
 
 import logging
-from typing import Dict, List, Optional, Any
+import re
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, Security
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Security
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, validator
-import re
 
 logger = logging.getLogger(__name__)
 
 # API Key Security - use centralized config
 from config import config
+
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 VALID_API_KEYS = config.security.valid_api_keys
 # Admin keys: keys containing 'prod' are considered admin keys
@@ -36,10 +38,7 @@ router = APIRouter(prefix="/affiliate", tags=["Affiliate & Partnerships"])
 
 # Import the affiliate pipeline with fallback
 try:
-    from affiliate_partnership_pipeline import (
-        PartnerType,
-        get_affiliate_pipeline
-    )
+    from affiliate_partnership_pipeline import PartnerType, get_affiliate_pipeline
     AFFILIATE_PIPELINE_AVAILABLE = True
     logger.info("Affiliate Partnership Pipeline loaded")
 except ImportError as e:
@@ -55,7 +54,7 @@ class AffiliateRegistrationRequest(BaseModel):
     company: Optional[str] = Field(None, max_length=200)
     website: Optional[str] = Field(None, max_length=500)
     partner_type: str = Field(default="affiliate")
-    marketing_channels: List[str] = Field(default_factory=list, max_items=10)
+    marketing_channels: list[str] = Field(default_factory=list, max_items=10)
     expected_monthly_referrals: int = Field(default=10, ge=1, le=100000)
     notes: Optional[str] = Field(None, max_length=2000)
     tenant_id: str = Field(default="default")
@@ -96,7 +95,7 @@ class ConversionRequest(BaseModel):
     amount: float = Field(..., gt=0, le=1000000)
     product_id: Optional[str] = Field(None, max_length=100)
     customer_email: Optional[str] = Field(None, max_length=255)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.get("/health")
@@ -341,7 +340,7 @@ async def get_pending_commissions(
 
 @router.post("/payouts/process")
 async def process_payouts(
-    affiliate_ids: Optional[List[str]] = None,
+    affiliate_ids: Optional[list[str]] = None,
     tenant_id: str = "default",
     api_key: str = Depends(verify_admin_key)  # Admin only!
 ):

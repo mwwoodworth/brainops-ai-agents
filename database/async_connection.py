@@ -8,14 +8,14 @@ import logging
 import ssl
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import asyncpg
 
 logger = logging.getLogger(__name__)
 
 # Type alias for database records
-DbRecord = Dict[str, Any]
+DbRecord = dict[str, Any]
 
 
 @dataclass
@@ -44,7 +44,7 @@ class BasePool:
     async def close(self) -> None:  # pragma: no cover - interface
         raise NotImplementedError
 
-    async def fetch(self, query: str, *args: Any, timeout: Optional[float] = None) -> List[DbRecord]:
+    async def fetch(self, query: str, *args: Any, timeout: Optional[float] = None) -> list[DbRecord]:
         raise NotImplementedError
 
     async def fetchrow(self, query: str, *args: Any, timeout: Optional[float] = None) -> Optional[DbRecord]:
@@ -62,7 +62,7 @@ class BasePool:
     async def execute(self, query: str, *args: Any, timeout: Optional[float] = None) -> str:
         raise NotImplementedError
 
-    async def executemany(self, command: str, args: List[Any], timeout: Optional[float] = None) -> str:
+    async def executemany(self, command: str, args: list[Any], timeout: Optional[float] = None) -> str:
         raise NotImplementedError
 
     async def test_connection(self) -> bool:
@@ -150,7 +150,7 @@ class AsyncDatabasePool(BasePool):
         query: str,
         *args: Any,
         timeout: Optional[float] = None
-    ) -> List[asyncpg.Record]:
+    ) -> list[asyncpg.Record]:
         """Execute query and return all rows"""
         async with self.pool.acquire() as conn:
             return await conn.fetch(query, *args, timeout=timeout)
@@ -189,7 +189,7 @@ class AsyncDatabasePool(BasePool):
     async def executemany(
         self,
         command: str,
-        args: List[Any],
+        args: list[Any],
         timeout: Optional[float] = None
     ) -> str:
         """Execute query for multiple parameter sets"""
@@ -218,7 +218,7 @@ class InMemoryDatabasePool(BasePool):
 
     def __init__(self) -> None:
         now = datetime.utcnow()
-        self._agents: Dict[str, Dict[str, Any]] = {
+        self._agents: dict[str, dict[str, Any]] = {
             "ops-intel": {
                 "id": "ops-intel",
                 "name": "Operations Intelligence Agent",
@@ -286,8 +286,8 @@ class InMemoryDatabasePool(BasePool):
                 "updated_at": now,
             },
         }
-        self._executions: Dict[str, Dict[str, Any]] = {}
-        self._memories: List[Dict[str, Any]] = [
+        self._executions: dict[str, dict[str, Any]] = {}
+        self._memories: list[dict[str, Any]] = [
             {
                 "id": "mem-ops-1",
                 "user_id": "ops-user",
@@ -312,7 +312,7 @@ class InMemoryDatabasePool(BasePool):
     async def close(self) -> None:
         self._executions.clear()
 
-    async def fetch(self, query: str, *args: Any, timeout: Optional[float] = None) -> List[DbRecord]:
+    async def fetch(self, query: str, *args: Any, timeout: Optional[float] = None) -> list[DbRecord]:
         sql = query.lower().strip()
 
         if "from agents" in sql or "from ai_agents" in sql:
@@ -330,7 +330,7 @@ class InMemoryDatabasePool(BasePool):
         # Default: empty result
         return []
 
-    def _apply_agent_filters(self, args: List[Any]) -> List[Dict[str, Any]]:
+    def _apply_agent_filters(self, args: list[Any]) -> list[dict[str, Any]]:
         agents = list(self._agents.values())
         if not args:
             return agents
@@ -347,9 +347,9 @@ class InMemoryDatabasePool(BasePool):
 
         return filtered
 
-    def _fetch_agents(self, sql: str, args: List[Any]) -> List[DbRecord]:
+    def _fetch_agents(self, sql: str, args: list[Any]) -> list[DbRecord]:
         agents = self._apply_agent_filters(args)
-        result: List[DbRecord] = []
+        result: list[DbRecord] = []
         for agent in agents:
             capabilities = agent.get("capabilities") or []
             if isinstance(capabilities, str):
@@ -373,7 +373,7 @@ class InMemoryDatabasePool(BasePool):
             result.append(parsed_agent)
         return result
 
-    def _search_memories(self, sql: str, args: List[Any]) -> List[DbRecord]:
+    def _search_memories(self, sql: str, args: list[Any]) -> list[DbRecord]:
         importance_threshold = args[0] if args else 0.0
         user_id = None
         query = None
@@ -384,7 +384,7 @@ class InMemoryDatabasePool(BasePool):
         if "content ilike $" in sql:
             query = args[-1].strip("%") if args else None
 
-        matches: List[DbRecord] = []
+        matches: list[DbRecord] = []
         for memory in self._memories:
             if memory["importance"] < importance_threshold:
                 continue
@@ -413,7 +413,7 @@ class InMemoryDatabasePool(BasePool):
 
         return matches[:limit]
 
-    def _fetch_executions(self, sql: str, args: List[Any]) -> List[DbRecord]:
+    def _fetch_executions(self, sql: str, args: list[Any]) -> list[DbRecord]:
         executions = list(self._executions.values())
         if "e.agent_id =" in sql and args:
             executions = [e for e in executions if e["agent_id"] == args[0]]
@@ -426,7 +426,7 @@ class InMemoryDatabasePool(BasePool):
         if "limit $" in sql and args:
             limit = args[-1]
 
-        results: List[DbRecord] = []
+        results: list[DbRecord] = []
         for execution in executions[:limit]:
             agent = self._agents.get(execution["agent_id"])
             results.append(
@@ -527,7 +527,7 @@ class InMemoryDatabasePool(BasePool):
 
         return "OK"
 
-    async def executemany(self, command: str, args: List[Any], timeout: Optional[float] = None) -> str:
+    async def executemany(self, command: str, args: list[Any], timeout: Optional[float] = None) -> str:
         for params in args:
             await self.execute(command, *params, timeout=timeout)
         return f"EXECUTEMANY {len(args)}"

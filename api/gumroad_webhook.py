@@ -3,18 +3,19 @@ Gumroad Sales Funnel Webhook Integration
 Handles Gumroad sales and integrates with ConvertKit, Stripe, SendGrid, and Supabase
 """
 
-import os
-import json
-import hmac
-import hashlib
-import logging
-from datetime import datetime
-from typing import Dict, Any, Optional
-from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
-from pydantic import BaseModel
-import httpx
 import asyncio
+import hashlib
+import hmac
+import json
+import logging
+import os
+from datetime import datetime
 from decimal import Decimal
+from typing import Any, Optional
+
+import httpx
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from pydantic import BaseModel
 
 # Configuration
 CONVERTKIT_API_KEY = os.getenv("CONVERTKIT_API_KEY", "")
@@ -147,7 +148,7 @@ async def add_to_convertkit(email: str, first_name: str, last_name: str, product
         logger.error(f"ConvertKit integration error: {e}")
         return False
 
-async def record_sale_to_database(sale_data: Dict[str, Any]):
+async def record_sale_to_database(sale_data: dict[str, Any]):
     """Record sale in Supabase database"""
     try:
         from database.async_connection import get_pool
@@ -297,7 +298,7 @@ async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundT
         logger.exception("Webhook processing error")
         raise HTTPException(status_code=500, detail="Internal error")
 
-async def process_sale(sale_data: Dict[str, Any], product_code: str, first_name: str, last_name: str):
+async def process_sale(sale_data: dict[str, Any], product_code: str, first_name: str, last_name: str):
     """Process sale through all systems"""
     results = await asyncio.gather(
         add_to_convertkit(sale_data['email'], first_name, last_name, product_code),

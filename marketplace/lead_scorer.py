@@ -1,5 +1,6 @@
 import logging
-from typing import Dict, Any, List
+from typing import Any
+
 from .pricing_engine import PricingEngine
 from .usage_metering import UsageMetering
 
@@ -11,19 +12,19 @@ class LeadScorer:
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
 
-    async def score_leads(self, leads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def score_leads(self, leads: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Scores and enriches a list of leads.
         """
         has_sub = await UsageMetering.check_subscription(self.tenant_id, self.PRODUCT_ID)
         unit_price = PricingEngine.get_price(self.PRODUCT_ID, has_sub)
         total_price = unit_price * len(leads)
-        
+
         if total_price > 0:
             await UsageMetering.record_purchase(self.tenant_id, self.PRODUCT_ID, total_price, 'unit')
 
         logger.info(f"Scoring {len(leads)} leads for tenant {self.tenant_id}")
-        
+
         from ai_core import ai_analyze
 
         scored_leads = []
@@ -48,5 +49,5 @@ class LeadScorer:
             scored_leads.append(lead)
 
         await UsageMetering.record_usage(self.tenant_id, self.PRODUCT_ID, len(leads))
-        
+
         return scored_leads

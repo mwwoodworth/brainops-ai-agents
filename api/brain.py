@@ -4,9 +4,9 @@ Single source of truth for ALL BrainOps memory
 """
 import logging
 from datetime import datetime
-from typing import Any, Optional, Dict, List
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Body, Depends, Security
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Security
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 # API Key Security - use centralized config
 from config import config
+
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 VALID_API_KEYS = config.security.valid_api_keys
 
@@ -48,7 +49,7 @@ class BrainEntry(BaseModel):
     category: str = Field("general", description="Category: system, session, architecture, deployment, issue")
     priority: str = Field("medium", description="Priority: critical, high, medium, low")
     source: str = Field("api", description="Source: claude_code, codex, api, manual, automated")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    metadata: Optional[dict[str, Any]] = Field(default_factory=dict)
     ttl_hours: Optional[int] = Field(None, description="Time-to-live in hours (for temporary data)")
 
 
@@ -121,7 +122,7 @@ async def get_critical_context():
         }
 
 
-@router.get("/category/{category}", response_model=List[Dict[str, Any]])
+@router.get("/category/{category}", response_model=list[dict[str, Any]])
 async def get_by_category(
     category: str,
     limit: int = Query(100, ge=1, le=500)
@@ -137,7 +138,7 @@ async def get_by_category(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/get/{key}", response_model=Dict[str, Any])
+@router.get("/get/{key}", response_model=dict[str, Any])
 async def get_context(
     key: str,
     include_related: bool = Query(False, description="Include related entries")
@@ -158,7 +159,7 @@ async def get_context(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/store", response_model=Dict[str, str])
+@router.post("/store", response_model=dict[str, str])
 async def store_context(entry: BrainEntry):
     """Store or update a piece of context with enhanced features (embeddings, TTL, etc.)"""
     if not BRAIN_AVAILABLE or not brain:
@@ -180,7 +181,7 @@ async def store_context(entry: BrainEntry):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/search", response_model=List[Dict[str, Any]])
+@router.post("/search", response_model=list[dict[str, Any]])
 async def search_context(query: BrainQuery):
     """Search across all context using semantic search, tags, and full-text"""
     if not BRAIN_AVAILABLE or not brain:
@@ -193,10 +194,10 @@ async def search_context(query: BrainQuery):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/session", response_model=Dict[str, str])
+@router.post("/session", response_model=dict[str, str])
 async def record_session(
     session_id: str = Body(..., embed=True),
-    summary: Dict[str, Any] = Body(...)
+    summary: dict[str, Any] = Body(...)
 ):
     """Record a Claude Code session summary"""
     if not BRAIN_AVAILABLE or not brain:
@@ -210,12 +211,12 @@ async def record_session(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/deployment", response_model=Dict[str, str])
+@router.post("/deployment", response_model=dict[str, str])
 async def record_deployment(
     service: str = Body(...),
     version: str = Body(...),
     status: str = Body(...),
-    metadata: Optional[Dict] = Body(None)
+    metadata: Optional[dict] = Body(None)
 ):
     """Record a deployment"""
     if not BRAIN_AVAILABLE or not brain:
@@ -229,10 +230,10 @@ async def record_deployment(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/system-state", response_model=Dict[str, str])
+@router.post("/system-state", response_model=dict[str, str])
 async def update_system_state(
     component: str = Body(...),
-    state: Dict[str, Any] = Body(...)
+    state: dict[str, Any] = Body(...)
 ):
     """Update current system state"""
     if not BRAIN_AVAILABLE or not brain:
@@ -246,7 +247,7 @@ async def update_system_state(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/health", response_model=Dict[str, Any])
+@router.get("/health", response_model=dict[str, Any])
 async def brain_health():
     """Check unified brain health"""
     return {
@@ -256,7 +257,7 @@ async def brain_health():
     }
 
 
-@router.get("/statistics", response_model=Dict[str, Any])
+@router.get("/statistics", response_model=dict[str, Any])
 async def get_statistics():
     """Get comprehensive statistics about the brain"""
     if not BRAIN_AVAILABLE or not brain:
@@ -270,7 +271,7 @@ async def get_statistics():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/similar/{key}", response_model=List[Dict[str, Any]])
+@router.get("/similar/{key}", response_model=list[dict[str, Any]])
 async def find_similar(
     key: str,
     limit: int = Query(10, ge=1, le=50, description="Maximum number of similar entries to return")
@@ -287,7 +288,7 @@ async def find_similar(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/related/{key}", response_model=List[Dict[str, Any]])
+@router.get("/related/{key}", response_model=list[dict[str, Any]])
 async def get_related(
     key: str,
     max_depth: int = Query(2, ge=1, le=5, description="Maximum depth of relationship traversal")
@@ -304,7 +305,7 @@ async def get_related(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/cleanup-expired", response_model=Dict[str, Any])
+@router.post("/cleanup-expired", response_model=dict[str, Any])
 async def cleanup_expired():
     """Remove expired entries and return count of deleted items"""
     if not BRAIN_AVAILABLE or not brain:
@@ -322,7 +323,7 @@ async def cleanup_expired():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/add-reference", response_model=Dict[str, str])
+@router.post("/add-reference", response_model=dict[str, str])
 async def add_reference(
     from_key: str = Body(...),
     to_key: str = Body(...),

@@ -12,8 +12,9 @@ import asyncio
 import statistics
 import time
 from collections import Counter, deque
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Deque, Dict, Optional, Tuple
+from typing import Any, Callable, Deque, Optional
 
 
 @dataclass
@@ -47,7 +48,7 @@ class RequestMetrics:
         async with self._lock:
             self._samples.append(sample)
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         """Return aggregated metrics over the rolling window."""
         samples = list(self._samples)
         durations = [s.duration_ms for s in samples]
@@ -91,10 +92,10 @@ class TTLCache:
     """Minimal async-friendly TTL cache with hit/miss tracking."""
 
     def __init__(self, max_size: int = 256) -> None:
-        self._store: Dict[str, Tuple[Any, float]] = {}
+        self._store: dict[str, tuple[Any, float]] = {}
         self._max_size = max_size
         self._lock = asyncio.Lock()
-        self._key_locks: Dict[str, asyncio.Lock] = {}
+        self._key_locks: dict[str, asyncio.Lock] = {}
         self._hits = 0
         self._misses = 0
 
@@ -141,7 +142,7 @@ class TTLCache:
         key: str,
         ttl_seconds: float,
         loader: Callable[[], Awaitable[Any]],
-    ) -> Tuple[Any, bool]:
+    ) -> tuple[Any, bool]:
         """
         Get a cached value or compute it via loader.
 
@@ -164,7 +165,7 @@ class TTLCache:
         async with self._lock:
             return self._key_locks.setdefault(key, asyncio.Lock())
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         """Return cache stats (non-mutating)."""
         live = 0
         now = time.monotonic()

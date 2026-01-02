@@ -4,9 +4,10 @@ Secure, authenticated endpoints for the Multi-AI Product Generation Pipeline
 """
 
 import logging
-from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, Security, BackgroundTasks
+from typing import Optional
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Security
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # API Key Security - use centralized config
 from config import config
+
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 VALID_API_KEYS = config.security.valid_api_keys
 
@@ -28,8 +30,10 @@ router = APIRouter(prefix="/products", tags=["Product Generation"])
 # Import the product generator with fallback
 try:
     from product_generation_pipeline import (
-        ProductSpec, ProductType,
-        QualityTier, get_product_generator
+        ProductSpec,
+        ProductType,
+        QualityTier,
+        get_product_generator,
     )
     PRODUCT_GENERATOR_AVAILABLE = True
     logger.info("Product Generation Pipeline loaded")
@@ -50,7 +54,7 @@ class ProductRequest(BaseModel):
     style: str = Field(default="professional", max_length=100)
     tone: str = Field(default="authoritative", max_length=100)
     industry: str = Field(default="general", max_length=100)
-    keywords: List[str] = Field(default_factory=list, max_items=20)
+    keywords: list[str] = Field(default_factory=list, max_items=20)
     include_visuals: bool = True
     include_templates: bool = True
     include_examples: bool = True
@@ -73,7 +77,7 @@ class ProductStatusResponse(BaseModel):
     progress_percent: float
     content_preview: Optional[str] = None
     quality_score: Optional[float] = None
-    models_used: List[str] = []
+    models_used: list[str] = []
     created_at: str
     updated_at: Optional[str] = None
 
@@ -193,9 +197,10 @@ async def generate_product(
 
 async def _create_product_record(spec):
     """Create initial product record in database"""
-    import psycopg2
     import json
     import os
+
+    import psycopg2
 
     db_url = os.environ.get('DATABASE_URL') or os.environ.get('SUPABASE_DB_URL')
     if not db_url:

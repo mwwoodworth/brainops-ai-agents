@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from typing import Optional
+
 from database.async_connection import get_pool
 
 logger = logging.getLogger(__name__)
@@ -61,13 +62,13 @@ class UsageMetering:
             # Simple check: active subscription that hasn't expired.
             # Assuming marketplace_purchases handles subscriptions with an expiry or status column in a real scenario.
             # For this prototype, we'll check for a 'subscription' purchase in the last 30 days.
-            
+
             # This is a simplified logic. In production, we'd have a 'subscriptions' table with start/end dates.
             result = await pool.fetchval(
                 """
-                SELECT 1 FROM marketplace_purchases 
-                WHERE tenant_id = $1 
-                AND product_id = $2 
+                SELECT 1 FROM marketplace_purchases
+                WHERE tenant_id = $1
+                AND product_id = $2
                 AND purchase_type = 'subscription'
                 AND created_at > NOW() - INTERVAL '30 days'
                 LIMIT 1

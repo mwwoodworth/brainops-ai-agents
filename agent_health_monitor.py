@@ -5,11 +5,12 @@ Provides automatic restart and healing capabilities
 """
 
 import logging
+import os
+from datetime import datetime
+from typing import Any
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from typing import Dict, Any
-from datetime import datetime
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class AgentHealthMonitor:
             if conn:
                 conn.close()
 
-    def check_all_agents_health(self) -> Dict[str, Any]:
+    def check_all_agents_health(self) -> dict[str, Any]:
         """Check health of all agents and update status"""
         conn = self._get_db_connection()
         if not conn:
@@ -229,7 +230,7 @@ class AgentHealthMonitor:
             if conn:
                 conn.close()
 
-    def _calculate_health_status(self, agent: Dict) -> Dict[str, Any]:
+    def _calculate_health_status(self, agent: dict) -> dict[str, Any]:
         """Calculate health status for an agent"""
         executions_24h = agent.get('executions_24h', 0) or 0
         successes_24h = agent.get('successes_24h', 0) or 0
@@ -267,7 +268,7 @@ class AgentHealthMonitor:
             'consecutive_failures': consecutive_failures
         }
 
-    def _create_health_alert(self, cur, agent: Dict, health_status: Dict):
+    def _create_health_alert(self, cur, agent: dict, health_status: dict):
         """Create a health alert for a critical agent"""
         try:
             message = f"Agent {agent['agent_name']} is in critical state: " \
@@ -289,7 +290,7 @@ class AgentHealthMonitor:
         except Exception as e:
             logger.warning(f"Failed to create health alert: {e}")
 
-    def restart_failed_agent(self, agent_id: str, agent_name: str) -> Dict[str, Any]:
+    def restart_failed_agent(self, agent_id: str, agent_name: str) -> dict[str, Any]:
         """Restart a failed agent"""
         conn = self._get_db_connection()
         if not conn:
@@ -355,7 +356,7 @@ class AgentHealthMonitor:
             if conn:
                 conn.close()
 
-    def auto_restart_critical_agents(self) -> Dict[str, Any]:
+    def auto_restart_critical_agents(self) -> dict[str, Any]:
         """Automatically restart agents in critical state"""
         conn = self._get_db_connection()
         if not conn:
@@ -397,7 +398,7 @@ class AgentHealthMonitor:
             if conn:
                 conn.close()
 
-    def get_agent_health_summary(self) -> Dict[str, Any]:
+    def get_agent_health_summary(self) -> dict[str, Any]:
         """Get comprehensive health summary of all agents"""
         conn = self._get_db_connection()
         if not conn:

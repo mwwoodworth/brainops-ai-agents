@@ -5,13 +5,14 @@ Run this to verify all new capabilities work correctly
 """
 
 import asyncio
-import sys
 import os
+import sys
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from revenue_generation_system import get_revenue_system
+
 
 async def test_enhancements():
     """Test all new revenue enhancement features"""
@@ -121,6 +122,7 @@ async def test_enhancements():
 async def create_test_lead(system):
     """Create a test lead for testing"""
     import uuid
+
     import psycopg2
 
     try:

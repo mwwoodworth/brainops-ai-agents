@@ -13,9 +13,10 @@ Provides:
 """
 
 import logging
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Query
 from fastapi.responses import PlainTextResponse
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -407,7 +408,7 @@ async def run_smoke_test():
 
     # Test 1: Emit a test event and verify it appears in event counts
     try:
-        from ai_observability import EventType, Event, EventBus
+        from ai_observability import Event, EventBus, EventType
         event_bus = EventBus.get_instance()
 
         initial_counts = event_bus.get_event_counts()

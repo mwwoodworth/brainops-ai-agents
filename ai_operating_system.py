@@ -11,30 +11,39 @@ The culmination of all 28 tasks into a unified AI Operating System that provides
 - Seamless integration of all 27 previous components
 """
 
+import asyncio
+import importlib.util
+import logging
 import os
 import sys
-import asyncio
-import logging
-import psycopg2
-from datetime import datetime
-from typing import Dict, List, Optional, Any
+import warnings
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-import importlib.util
-import warnings
+from typing import Any, Optional
+
+import psycopg2
+
 warnings.filterwarnings('ignore')
 
 # Import Enhancements
 try:
     from ai_tracer import BrainOpsTracer, SpanType
-    from self_healing_recovery import get_self_healing_recovery
-    from predictive_analytics_engine import get_predictive_analytics_engine, PredictionType, TimeHorizon
-    from performance_optimization_layer import get_performance_optimizer
     from autonomic_controller import (
-        get_metric_collector, get_event_bus, get_autonomic_manager,
-        PredictiveFailureDetector, ResourceOptimizer
+        PredictiveFailureDetector,
+        ResourceOptimizer,
+        get_autonomic_manager,
+        get_event_bus,
+        get_metric_collector,
     )
+    from performance_optimization_layer import get_performance_optimizer
+    from predictive_analytics_engine import (
+        PredictionType,
+        TimeHorizon,
+        get_predictive_analytics_engine,
+    )
+    from self_healing_recovery import get_self_healing_recovery
     AUTONOMIC_AVAILABLE = True
 except ImportError:
     # Fallback for local testing if not in path
@@ -43,14 +52,21 @@ except ImportError:
     from self_healing_recovery import get_self_healing_recovery
     AUTONOMIC_AVAILABLE = False
     try:
-        from predictive_analytics_engine import get_predictive_analytics_engine, PredictionType, TimeHorizon
         from performance_optimization_layer import get_performance_optimizer
+        from predictive_analytics_engine import (
+            PredictionType,
+            TimeHorizon,
+            get_predictive_analytics_engine,
+        )
     except ImportError:
         logging.warning("Optional analytics modules unavailable during bootstrap")
     try:
         from autonomic_controller import (
-            get_metric_collector, get_event_bus, get_autonomic_manager,
-            PredictiveFailureDetector, ResourceOptimizer
+            PredictiveFailureDetector,
+            ResourceOptimizer,
+            get_autonomic_manager,
+            get_event_bus,
+            get_metric_collector,
         )
         AUTONOMIC_AVAILABLE = True
     except ImportError:
@@ -123,8 +139,8 @@ class ComponentStatus:
     loaded: bool
     version: str
     last_check: datetime
-    metrics: Dict = None
-    
+    metrics: dict = None
+
     def to_dict(self):
         return {
             'name': self.name,
@@ -150,12 +166,12 @@ class SystemMetrics:
 
 class ComponentLoader:
     """Dynamic component loader"""
-    
+
     def __init__(self):
         self.components = {}
         self.component_status = {}
         self.self_healing = get_self_healing_recovery()
-    
+
     @property
     def loaded_components(self):
         return self.components
@@ -165,7 +181,7 @@ class ComponentLoader:
         try:
             module_name = component.value
             module_path = Path(f"/home/matt-woodworth/brainops-ai-agents/{module_name}.py")
-            
+
             # Allow fallback to current directory
             if not module_path.exists():
                 module_path = Path(f"./{module_name}.py")
@@ -173,14 +189,14 @@ class ComponentLoader:
             if not module_path.exists():
                 logger.warning(f"Component file not found: {module_path}")
                 return False
-            
+
             # Load module dynamically
             spec = importlib.util.spec_from_file_location(module_name, module_path)
             module = importlib.util.module_from_spec(spec)
-            
+
             # Store component
             self.components[component] = module
-            
+
             # Update status
             self.component_status[component] = ComponentStatus(
                 name=component.value,
@@ -189,10 +205,10 @@ class ComponentLoader:
                 version='1.0.0',
                 last_check=datetime.utcnow()
             )
-            
+
             logger.info(f"Loaded component: {component.value}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to load {component.value}: {e}")
             self.component_status[component] = ComponentStatus(
@@ -204,11 +220,11 @@ class ComponentLoader:
                 metrics={'error': str(e)}
             )
             return False
-    
+
     def get_component(self, component: SystemComponent) -> Optional[Any]:
         """Get loaded component"""
         return self.components.get(component)
-    
+
     def is_loaded(self, component: SystemComponent) -> bool:
         """Check if component is loaded"""
         return component in self.components
@@ -216,18 +232,18 @@ class ComponentLoader:
 
 class SystemOrchestrator:
     """Main AI OS orchestrator"""
-    
+
     def __init__(self):
         self.loader = ComponentLoader()
         self.start_time = datetime.utcnow()
         self.request_count = 0
         self.error_count = 0
         self.components_initialized = False
-        
+
         # New Capabilities
         self.tracer = BrainOpsTracer()
         self.self_healing = get_self_healing_recovery()
-        
+
         # Advanced Engines
         try:
             self.predictive_engine = get_predictive_analytics_engine()
@@ -236,8 +252,8 @@ class SystemOrchestrator:
             self.predictive_engine = None
             self.performance_optimizer = None
             logger.warning("Advanced engines (Predictive/Performance) not available")
-    
-    async def detect_predictive_failures(self) -> Dict:
+
+    async def detect_predictive_failures(self) -> dict:
         """
         Enhancement 4: Predictive Failure Detection
         Analyze system metrics to predict potential component failures
@@ -246,7 +262,7 @@ class SystemOrchestrator:
             return {'status': 'skipped', 'reason': 'Predictive engine not available'}
 
         logger.info("Running predictive failure detection...")
-        
+
         # 1. Gather current system state as input data
         health = await self.get_system_health()
         input_data = {
@@ -255,12 +271,12 @@ class SystemOrchestrator:
             'total_requests': health['metrics']['total_requests'],
             'timestamp': datetime.utcnow().isoformat()
         }
-        
+
         # 2. Detect Anomalies in recent metrics
         # (Simulating a list of recent data points for the detector)
         data_points = [{'value': health['metrics']['error_rate'], 'timestamp': datetime.utcnow().isoformat()}]
         anomalies = await self.predictive_engine.detect_anomalies(data_points, sensitivity=0.9)
-        
+
         # 3. Create Prediction for System Risk
         prediction_id = await self.predictive_engine.create_prediction(
             prediction_type=PredictionType.RISK,
@@ -269,7 +285,7 @@ class SystemOrchestrator:
             time_horizon=TimeHorizon.HOURLY,
             input_data=input_data
         )
-        
+
         # 4. Generate Report
         return {
             'status': 'completed',
@@ -279,7 +295,7 @@ class SystemOrchestrator:
             'risk_assessment': 'analyzed'
         }
 
-    async def optimize_resources(self) -> Dict:
+    async def optimize_resources(self) -> dict:
         """
         Enhancement 5: Resource Optimization
         Analyze performance and apply proactive resource optimizations
@@ -288,14 +304,14 @@ class SystemOrchestrator:
             return {'status': 'skipped', 'reason': 'Optimization components not available'}
 
         logger.info("Running resource optimization...")
-        
+
         # 1. Reactive: Analyze current performance and apply immediate fixes
         optimization_report = await self.performance_optimizer.get_optimization_report()
-        
+
         # 2. Proactive: Forecast future resource needs
         # We assume some metric like 'cpu_usage' or 'request_load' is relevant
         current_load = {'load': self.request_count} # Simplified
-        
+
         prediction_id = await self.predictive_engine.create_prediction(
             prediction_type=PredictionType.RESOURCE_NEED,
             entity_id="system_resources",
@@ -303,7 +319,7 @@ class SystemOrchestrator:
             time_horizon=TimeHorizon.DAILY,
             input_data=current_load
         )
-        
+
         return {
             'status': 'optimized',
             'reactive_actions': optimization_report.get('applied_optimizations', []),
@@ -312,17 +328,17 @@ class SystemOrchestrator:
             'timestamp': datetime.utcnow().isoformat()
         }
 
-    async def initialize_system(self) -> Dict:
+    async def initialize_system(self) -> dict:
         """Initialize all AI OS components"""
         logger.info("Initializing AI Operating System...")
-        
+
         results = {
             'timestamp': datetime.utcnow().isoformat(),
             'components': {},
             'success_count': 0,
             'failure_count': 0
         }
-        
+
         # Load core components first
         core_components = [
             SystemComponent.ORCHESTRATOR,
@@ -331,44 +347,44 @@ class SystemOrchestrator:
             SystemComponent.DECISION_TREE,
             SystemComponent.PERFORMANCE
         ]
-        
+
         # Load all available components
         all_components = list(SystemComponent)
-        
+
         for component in all_components:
             success = self.loader.load_component(component)
             results['components'][component.value] = success
-            
+
             if success:
                 results['success_count'] += 1
             else:
                 results['failure_count'] += 1
-        
+
         self.components_initialized = True
         logger.info(f"AI OS initialized: {results['success_count']} components loaded")
-        
+
         return results
-    
+
     async def execute_workflow(
         self,
         workflow_type: str,
-        params: Dict
-    ) -> Dict:
+        params: dict
+    ) -> dict:
         """Execute an AI workflow with Tracing and Self-Healing"""
         self.request_count += 1
-        
+
         # Start Trace
         trace_id = self.tracer.start_trace(
             session_id=params.get('session_id', 'system'),
             agent_id='system_orchestrator',
             metadata={'workflow': workflow_type, 'params': params}
         )
-        
+
         try:
             # Wrap execution in self-healing decorator logic manually or via wrapper
             # For simplicity, we call the protected method
             result = await self._execute_protected_workflow(workflow_type, params, trace_id)
-            
+
             self.tracer.end_trace(trace_id, status="success", summary=f"Executed {workflow_type}")
             return result
 
@@ -377,10 +393,10 @@ class SystemOrchestrator:
             logger.error(f"Workflow execution failed: {e}")
             self.tracer.end_trace(trace_id, status="failed", summary=str(e))
             return {'status': 'error', 'message': str(e), 'trace_id': trace_id}
-    
-    async def _execute_protected_workflow(self, workflow_type: str, params: Dict, trace_id: str) -> Dict:
+
+    async def _execute_protected_workflow(self, workflow_type: str, params: dict, trace_id: str) -> dict:
         """Internal workflow execution router"""
-        
+
         with self.tracer.span(trace_id, f"route_{workflow_type}", SpanType.DECISION):
             if workflow_type == "revenue_optimization":
                 return await self._revenue_workflow(params, trace_id)
@@ -396,11 +412,11 @@ class SystemOrchestrator:
     # Apply Self-Healing Decorator to critical workflows
     # Note: Decorator needs instance method handling if used on class methods directly
     # Here we simulate the pattern inside the methods for clarity
-    
-    async def _revenue_workflow(self, params: Dict, trace_id: str) -> Dict:
+
+    async def _revenue_workflow(self, params: dict, trace_id: str) -> dict:
         """Revenue optimization workflow with deep tracing"""
         results = {'workflow': 'revenue_optimization', 'trace_id': trace_id}
-        
+
         with self.tracer.span(trace_id, "analyze_pricing", SpanType.THOUGHT, content="Analyzing pricing strategy"):
             # Use pricing engine
             if self.loader.is_loaded(SystemComponent.PRICING):
@@ -410,7 +426,7 @@ class SystemOrchestrator:
                     'price_adjustment': 0.15,
                     'expected_revenue_increase': 0.22
                 }
-        
+
         with self.tracer.span(trace_id, "generate_revenue", SpanType.TOOL_CALL, content="Executing revenue generation"):
             # Use revenue generation
             if self.loader.is_loaded(SystemComponent.REVENUE_GEN):
@@ -419,14 +435,14 @@ class SystemOrchestrator:
                     'qualified': 12,
                     'expected_value': 125000
                 }
-        
+
         results['status'] = 'success'
         return results
-    
-    async def _customer_workflow(self, params: Dict, trace_id: str) -> Dict:
+
+    async def _customer_workflow(self, params: dict, trace_id: str) -> dict:
         """Customer acquisition workflow"""
         results = {'workflow': 'customer_acquisition'}
-        
+
         with self.tracer.span(trace_id, "activate_channels", SpanType.TOOL_CALL):
             if self.loader.is_loaded(SystemComponent.CUSTOMER_ACQ):
                 results['acquisition'] = {
@@ -434,14 +450,14 @@ class SystemOrchestrator:
                     'leads_generated': 156,
                     'conversion_rate': 0.18
                 }
-        
+
         results['status'] = 'success'
         return results
-    
-    async def _optimization_workflow(self, params: Dict, trace_id: str) -> Dict:
+
+    async def _optimization_workflow(self, params: dict, trace_id: str) -> dict:
         """System optimization workflow"""
         results = {'workflow': 'system_optimization'}
-        
+
         with self.tracer.span(trace_id, "optimize_performance", SpanType.SYSTEM):
             if self.loader.is_loaded(SystemComponent.PERFORMANCE):
                 results['performance'] = {
@@ -449,21 +465,21 @@ class SystemOrchestrator:
                     'latency_reduction': 0.35,
                     'throughput_increase': 0.28
                 }
-        
+
         with self.tracer.span(trace_id, "optimize_cost", SpanType.SYSTEM):
             if self.loader.is_loaded(SystemComponent.COST_OPT):
                 results['cost'] = {
                     'savings_identified': 2500,
                     'resources_optimized': 12
                 }
-        
+
         results['status'] = 'success'
         return results
-    
-    async def _decision_workflow(self, params: Dict, trace_id: str) -> Dict:
+
+    async def _decision_workflow(self, params: dict, trace_id: str) -> dict:
         """Decision making workflow"""
         results = {'workflow': 'decision_making'}
-        
+
         with self.tracer.span(trace_id, "evaluate_decision", SpanType.DECISION, content=f"Evaluating {params.get('decision_type')}"):
             if self.loader.is_loaded(SystemComponent.DECISION_TREE):
                 results['decision'] = {
@@ -472,11 +488,11 @@ class SystemOrchestrator:
                     'recommendation': 'proceed_with_caution',
                     'alternatives': ['defer', 'escalate']
                 }
-        
+
         results['status'] = 'success'
         return results
-    
-    async def _generic_workflow(self, workflow_type: str, params: Dict, trace_id: str) -> Dict:
+
+    async def _generic_workflow(self, workflow_type: str, params: dict, trace_id: str) -> dict:
         """Generic workflow execution"""
         return {
             'workflow': workflow_type,
@@ -485,19 +501,19 @@ class SystemOrchestrator:
             'timestamp': datetime.utcnow().isoformat(),
             'trace_id': trace_id
         }
-    
-    async def get_system_health(self) -> Dict:
+
+    async def get_system_health(self) -> dict:
         """Get overall system health"""
         uptime = (datetime.utcnow() - self.start_time).total_seconds() / 3600
-        
+
         # Count healthy components
-        healthy = sum(1 for status in self.loader.component_status.values() 
+        healthy = sum(1 for status in self.loader.component_status.values()
                      if status.status in ['loaded', 'healthy'])
         total = len(self.loader.component_status)
-        
+
         # Calculate metrics
         error_rate = self.error_count / max(self.request_count, 1)
-        
+
         return {
             'status': 'operational' if healthy > total * 0.7 else 'degraded',
             'uptime_hours': round(uptime, 2),
@@ -513,11 +529,11 @@ class SystemOrchestrator:
             },
             'timestamp': datetime.utcnow().isoformat()
         }
-    
-    async def get_component_status(self) -> List[Dict]:
+
+    async def get_component_status(self) -> list[dict]:
         """Get status of all components"""
         return [
-            status.to_dict() 
+            status.to_dict()
             for status in self.loader.component_status.values()
         ]
 
@@ -545,8 +561,8 @@ class AIOperatingSystem:
             self.predictor = None
             self.optimizer = None
             self.autonomic_enabled = False
-    
-    def _define_capabilities(self) -> Dict:
+
+    def _define_capabilities(self) -> dict:
         """Define AI OS capabilities"""
         return {
             'orchestration': [
@@ -591,17 +607,17 @@ class AIOperatingSystem:
                 'market_analysis'
             ]
         }
-    
-    async def boot(self) -> Dict:
+
+    async def boot(self) -> dict:
         """Boot the AI Operating System"""
         logger.info("Booting AI Operating System...")
-        
+
         boot_sequence = {
             'timestamp': datetime.utcnow().isoformat(),
             'version': '3.0.0',  # Autonomic capabilities added
             'steps': []
         }
-        
+
         # Step 1: Initialize database
         try:
             await self._setup_database()
@@ -615,7 +631,7 @@ class AIOperatingSystem:
                 'status': 'failed',
                 'error': str(e)
             })
-        
+
         # Step 2: Load components
         init_result = await self.orchestrator.initialize_system()
         boot_sequence['steps'].append({
@@ -624,27 +640,27 @@ class AIOperatingSystem:
             'loaded': init_result['success_count'],
             'failed': init_result['failure_count']
         })
-        
+
         # Step 3: System checks
         health = await self.orchestrator.get_system_health()
         boot_sequence['steps'].append({
             'step': 'health_check',
             'status': health['status']
         })
-        
+
         self.initialized = True
         boot_sequence['status'] = 'ready'
         boot_sequence['capabilities'] = list(self.capabilities.keys())
-        
+
         logger.info("AI OS boot complete")
         return boot_sequence
-    
+
     async def _setup_database(self):
         """Setup database for AI OS"""
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-            
+
             # AI OS metadata table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ai_os_metadata (
@@ -657,7 +673,7 @@ class AIOperatingSystem:
                 )
             """
             )
-            
+
             # Workflow execution log
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS workflow_executions (
@@ -670,49 +686,49 @@ class AIOperatingSystem:
                 )
             """
             )
-            
+
             conn.commit()
             cursor.close()
             conn.close()
-            
+
         except Exception as e:
             logger.error(f"Database setup error: {e}")
             raise
-    
+
     async def execute(
         self,
         command: str,
-        params: Dict = None
-    ) -> Dict:
+        params: dict = None
+    ) -> dict:
         """Execute AI OS command"""
         if not self.initialized:
             return {'error': 'System not initialized. Run boot() first.'}
-        
+
         params = params or {}
-        
+
         # Parse command
         if command.startswith('workflow:'):
             workflow_type = command.split(':')[1]
             return await self.orchestrator.execute_workflow(workflow_type, params)
-        
+
         elif command == 'workflow:decision_making':
              return await self.orchestrator.execute_workflow('decision_making', params)
-        
+
         elif command == 'predictive_check':
             return await self.orchestrator.detect_predictive_failures()
-            
+
         elif command == 'optimize_resources':
             return await self.orchestrator.optimize_resources()
 
         elif command == 'status':
             return await self.get_status()
-        
+
         elif command == 'health':
             return await self.orchestrator.get_system_health()
-        
+
         elif command == 'components':
             return await self.orchestrator.get_component_status()
-        
+
         elif command == 'capabilities':
             return self.capabilities
 
@@ -763,12 +779,12 @@ class AIOperatingSystem:
 
         else:
             return {'error': f'Unknown command: {command}'}
-    
-    async def get_status(self) -> Dict:
+
+    async def get_status(self) -> dict:
         """Get comprehensive AI OS status"""
         health = await self.orchestrator.get_system_health()
         components = await self.orchestrator.get_component_status()
-        
+
         return {
             'system': 'AI Operating System',
             'version': '3.0.0',
@@ -792,21 +808,21 @@ class AIOperatingSystem:
             'capabilities': len(self.capabilities),
             'timestamp': datetime.utcnow().isoformat()
         }
-    
-    async def shutdown(self) -> Dict:
+
+    async def shutdown(self) -> dict:
         """Gracefully shutdown AI OS"""
         logger.info("Shutting down AI Operating System...")
-        
+
         shutdown_log = {
             'timestamp': datetime.utcnow().isoformat(),
             'components_unloaded': len(self.orchestrator.loader.components),
             'final_status': await self.orchestrator.get_system_health()
         }
-        
+
         # Clear components
         self.orchestrator.loader.components.clear()
         self.initialized = False
-        
+
         logger.info("AI Operating System shutdown complete")
         return shutdown_log
 
@@ -823,32 +839,32 @@ if __name__ == "__main__":
         print("🤖 AI OPERATING SYSTEM v2.0.0 (Enhanced)")
         print("="*60)
         print("Integrating all 28 AI development tasks + Deep Observability & Self-Healing...\n")
-        
+
         # Initialize AI OS
         ai_os = get_ai_operating_system()
-        
+
         # Boot system
         print("🚀 BOOTING AI OS...")
         boot_result = await ai_os.boot()
         print(f"✅ Boot complete: {boot_result['status']}")
         print(f"   - Components loaded: {boot_result['steps'][1]['loaded']}")
         print(f"   - Capabilities: {', '.join(boot_result['capabilities'])}")
-        
+
         # Test workflows
         print("\n🔄 TESTING WORKFLOWS...")
-        
+
         # Revenue optimization
         result = await ai_os.execute('workflow:revenue_optimization', {'target': 100000})
         print(f"✅ Revenue workflow: {result.get('status', 'unknown')}")
-        
+
         # Customer acquisition
         result = await ai_os.execute('workflow:customer_acquisition', {'channels': ['all']})
         print(f"✅ Customer workflow: {result.get('status', 'unknown')}")
-        
+
         # System optimization
         result = await ai_os.execute('workflow:system_optimization', {})
         print(f"✅ Optimization workflow: {result.get('status', 'unknown')}")
-        
+
         # Decision making
         result = await ai_os.execute('workflow:decision_making', {'decision_type': 'strategic'})
         print(f"✅ Decision workflow: {result.get('status', 'unknown')}")
@@ -866,7 +882,7 @@ if __name__ == "__main__":
         print(f"✅ Optimization: {result.get('status', 'unknown')}")
         if result.get('recommendations'):
             print(f"   💡 Recommendations: {len(result['recommendations'])}")
-        
+
         # Get status
         print("\n📊 SYSTEM STATUS...")
         status = await ai_os.get_status()
@@ -875,23 +891,23 @@ if __name__ == "__main__":
         print(f"   - Components: {status['components']['loaded']}/{status['components']['total']}")
         print(f"   - Requests: {status['performance']['requests']}")
         print(f"   - Error rate: {status['performance']['error_rate']}")
-        
+
         # List capabilities
         capabilities = await ai_os.execute('capabilities')
         print(f"\n🎯 CAPABILITIES ({len(capabilities)} categories):")
         for category, features in capabilities.items():
             print(f"   • {category}: {len(features)} features")
-        
+
         # Shutdown
         print("\n🚪 SHUTTING DOWN...")
         shutdown_result = await ai_os.shutdown()
-        print(f"✅ Shutdown complete")
-        
+        print("✅ Shutdown complete")
+
         print("\n" + "="*60)
         print("🎆 AI OPERATING SYSTEM: FULLY OPERATIONAL!")
         print("="*60)
-        
+
         return True
-    
+
     # Run test
     asyncio.run(test_ai_os())

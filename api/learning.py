@@ -11,10 +11,10 @@ Exposes the learning feedback loop functionality via REST API:
 """
 
 import logging
-from typing import Dict, Any, Optional
 from datetime import datetime, timezone
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ async def get_loop():
 
 
 @router.get("/pending-proposals")
-async def get_pending_proposals() -> Dict[str, Any]:
+async def get_pending_proposals() -> dict[str, Any]:
     """
     Get all proposals awaiting human approval.
 
@@ -99,7 +99,7 @@ async def get_pending_proposals() -> Dict[str, Any]:
 async def approve_proposal(
     proposal_id: str,
     request: ApprovalRequest = Body(default=ApprovalRequest())
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Approve a proposal for implementation.
 
@@ -135,7 +135,7 @@ async def approve_proposal(
 async def reject_proposal(
     proposal_id: str,
     request: RejectionRequest
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Reject a proposal.
 
@@ -168,7 +168,7 @@ async def reject_proposal(
 @router.post("/run-cycle")
 async def run_feedback_cycle(
     request: RunCycleRequest = Body(default=RunCycleRequest())
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Manually trigger a feedback loop cycle.
 
@@ -208,7 +208,7 @@ async def run_feedback_cycle(
 
 
 @router.get("/status")
-async def get_status() -> Dict[str, Any]:
+async def get_status() -> dict[str, Any]:
     """
     Get the current status of the learning feedback loop.
 
@@ -299,7 +299,7 @@ async def get_status() -> Dict[str, Any]:
 async def get_patterns(
     hours: int = Query(default=24, description="Hours to look back for patterns"),
     limit: int = Query(default=20, description="Maximum patterns to return")
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Get recently detected patterns.
 
@@ -348,7 +348,7 @@ async def get_patterns(
 
 
 @router.get("/insights-summary")
-async def get_insights_summary() -> Dict[str, Any]:
+async def get_insights_summary() -> dict[str, Any]:
     """
     Get a summary of all learning insights in the system.
 

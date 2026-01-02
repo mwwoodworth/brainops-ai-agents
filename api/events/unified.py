@@ -13,23 +13,24 @@ The goal is to unify the fragmented event bus systems:
 - AI Agents: Internal in-memory with partially implemented bridge
 """
 
-import os
 import json
 import logging
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
-
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Query
-from pydantic import BaseModel, Field
+import os
 
 # Import unified event schema
 import sys
+from datetime import datetime, timedelta
+from typing import Any, Optional
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from lib.events.schema import (
-    UnifiedEvent,
-    EventSource,
-    EventPriority,
     EventCategory,
+    EventPriority,
+    EventSource,
+    UnifiedEvent,
     get_agents_for_event,
     validate_payload,
 )
@@ -242,7 +243,7 @@ async def store_event(event: UnifiedEvent) -> bool:
 
 async def mark_event_processed(
     event_id: str,
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[dict[str, Any]] = None
 ) -> bool:
     """Mark an event as processed"""
     if not ASYNC_POOL_AVAILABLE or using_fallback():
@@ -267,7 +268,7 @@ async def mark_event_processed(
 # AGENT ROUTING
 # =============================================================================
 
-async def route_event_to_agents(event: UnifiedEvent, background_tasks: BackgroundTasks) -> List[str]:
+async def route_event_to_agents(event: UnifiedEvent, background_tasks: BackgroundTasks) -> list[str]:
     """Route event to appropriate agents for processing"""
     agents = get_agents_for_event(event.event_type)
 
@@ -358,7 +359,7 @@ class PublishEventRequest(BaseModel):
     """Request to publish a new event"""
     event_type: str = Field(..., description="Event type in dot notation (e.g., 'job.created')")
     tenant_id: str = Field(..., description="Tenant ID")
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
 
     # Optional fields
     source: Optional[str] = Field(None, description="Override source system")
@@ -367,7 +368,7 @@ class PublishEventRequest(BaseModel):
     correlation_id: Optional[str] = Field(None, description="Correlation ID for tracing")
     actor_type: Optional[str] = Field(None, description="Type of actor (user, agent, system)")
     actor_id: Optional[str] = Field(None, description="ID of the actor")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+    metadata: Optional[dict[str, Any]] = Field(None, description="Additional metadata")
 
 
 class PublishEventResponse(BaseModel):
@@ -375,7 +376,7 @@ class PublishEventResponse(BaseModel):
     event_id: str
     stored: bool
     broadcast: bool
-    routed_to: List[str]
+    routed_to: list[str]
     timestamp: str
 
 
@@ -444,14 +445,14 @@ class ERPEventWebhook(BaseModel):
     timestamp: str
     source: Optional[str] = None
     origin: Optional[str] = None
-    payload: Dict[str, Any]
-    metadata: Optional[Dict[str, Any]] = None
+    payload: dict[str, Any]
+    metadata: Optional[dict[str, Any]] = None
 
 
 async def verify_erp_signature(request: Request) -> bool:
     """Verify HMAC signature from ERP webhook"""
-    import hmac
     import hashlib
+    import hmac
 
     signature = request.headers.get("X-ERP-Signature") or request.headers.get("X-Webhook-Signature")
     secret = os.getenv("ERP_WEBHOOK_SECRET", "")

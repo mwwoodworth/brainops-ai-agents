@@ -5,10 +5,10 @@ Ensures complete context preservation across conversations and agent handoffs
 """
 
 import asyncio
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, field, asdict
 import logging
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -28,23 +28,23 @@ class SessionState:
     status: str  # active, paused, completed, expired
 
     # Context tracking
-    conversation_history: List[Dict[str, Any]] = field(default_factory=list)
-    active_agents: List[str] = field(default_factory=list)
-    completed_tasks: List[Dict[str, Any]] = field(default_factory=list)
-    pending_tasks: List[Dict[str, Any]] = field(default_factory=list)
+    conversation_history: list[dict[str, Any]] = field(default_factory=list)
+    active_agents: list[str] = field(default_factory=list)
+    completed_tasks: list[dict[str, Any]] = field(default_factory=list)
+    pending_tasks: list[dict[str, Any]] = field(default_factory=list)
 
     # Memory tracking
-    critical_facts: Dict[str, Any] = field(default_factory=dict)
-    working_memory: Dict[str, Any] = field(default_factory=dict)
-    long_term_refs: List[str] = field(default_factory=list)
+    critical_facts: dict[str, Any] = field(default_factory=dict)
+    working_memory: dict[str, Any] = field(default_factory=dict)
+    long_term_refs: list[str] = field(default_factory=list)
 
     # Handoff tracking
-    handoff_history: List[Dict[str, Any]] = field(default_factory=list)
+    handoff_history: list[dict[str, Any]] = field(default_factory=list)
     current_agent: Optional[str] = None
     previous_agent: Optional[str] = None
 
     # Metadata
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     snapshot_version: int = 1
 
 
@@ -54,9 +54,9 @@ class AgentHandoff:
     from_agent: str
     to_agent: str
     timestamp: datetime
-    context_snapshot: Dict[str, Any]
+    context_snapshot: dict[str, Any]
     handoff_reason: str
-    critical_info: Dict[str, Any]
+    critical_info: dict[str, Any]
     continuation_instructions: str
 
 
@@ -72,8 +72,8 @@ class SessionContextManager:
 
     def __init__(self, memory_coordinator):
         self.coordinator = memory_coordinator
-        self.active_sessions: Dict[str, SessionState] = {}
-        self.session_locks: Dict[str, asyncio.Lock] = {}
+        self.active_sessions: dict[str, SessionState] = {}
+        self.session_locks: dict[str, asyncio.Lock] = {}
 
     # ========================================================================
     # SESSION LIFECYCLE
@@ -84,7 +84,7 @@ class SessionContextManager:
         session_id: str,
         tenant_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        initial_context: Optional[Dict[str, Any]] = None
+        initial_context: Optional[dict[str, Any]] = None
     ) -> SessionState:
         """
         Start a new session with full context initialization
@@ -178,7 +178,7 @@ class SessionContextManager:
         session_id: str,
         role: str,
         content: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None
     ):
         """Add a message to conversation history"""
         if session_id not in self.active_sessions:
@@ -208,7 +208,7 @@ class SessionContextManager:
     async def add_task(
         self,
         session_id: str,
-        task: Dict[str, Any],
+        task: dict[str, Any],
         status: str = "pending"
     ):
         """Add a task to session tracking"""
@@ -266,7 +266,7 @@ class SessionContextManager:
 
             if persist:
                 # Store in long-term memory
-                from memory_coordination_system import ContextEntry, MemoryLayer, ContextScope
+                from memory_coordination_system import ContextEntry, ContextScope, MemoryLayer
 
                 entry = ContextEntry(
                     key=f"critical_fact_{session.tenant_id}_{key}",
@@ -307,7 +307,7 @@ class SessionContextManager:
         session_id: str,
         to_agent: str,
         handoff_reason: str,
-        critical_info: Dict[str, Any],
+        critical_info: dict[str, Any],
         continuation_instructions: str
     ) -> AgentHandoff:
         """
@@ -359,7 +359,7 @@ class SessionContextManager:
             logger.info(f"✅ Handoff: {from_agent} → {to_agent} (session: {session_id})")
             return handoff
 
-    async def get_handoff_context(self, session_id: str) -> Optional[Dict[str, Any]]:
+    async def get_handoff_context(self, session_id: str) -> Optional[dict[str, Any]]:
         """Get the latest handoff context for an agent"""
         if session_id not in self.active_sessions:
             return None
@@ -384,7 +384,7 @@ class SessionContextManager:
     # CONTEXT RETRIEVAL
     # ========================================================================
 
-    async def get_full_context(self, session_id: str) -> Dict[str, Any]:
+    async def get_full_context(self, session_id: str) -> dict[str, Any]:
         """Get complete session context"""
         if session_id not in self.active_sessions:
             # Try to load from database
@@ -437,7 +437,7 @@ class SessionContextManager:
 
     async def _persist_session(self, session: SessionState):
         """Persist session to database"""
-        from memory_coordination_system import ContextEntry, MemoryLayer, ContextScope
+        from memory_coordination_system import ContextEntry, ContextScope, MemoryLayer
 
         # Convert session to dict and handle datetime serialization
         session_dict = asdict(session)
@@ -487,7 +487,7 @@ class SessionContextManager:
 
     async def _create_session_snapshot(self, session: SessionState, snapshot_type: str):
         """Create a point-in-time snapshot"""
-        from memory_coordination_system import ContextEntry, MemoryLayer, ContextScope
+        from memory_coordination_system import ContextEntry, ContextScope, MemoryLayer
 
         session.snapshot_version += 1
 
@@ -519,7 +519,7 @@ class SessionContextManager:
 
     async def _archive_session_context(self, session: SessionState):
         """Archive important session context to long-term memory"""
-        from memory_coordination_system import ContextEntry, MemoryLayer, ContextScope
+        from memory_coordination_system import ContextEntry, ContextScope, MemoryLayer
 
         # Archive critical facts
         for key, value in session.critical_facts.items():
@@ -588,7 +588,7 @@ class SessionContextManager:
 
     async def _persist_handoff(self, session_id: str, handoff: AgentHandoff):
         """Persist handoff for audit trail"""
-        from memory_coordination_system import ContextEntry, MemoryLayer, ContextScope
+        from memory_coordination_system import ContextEntry, ContextScope, MemoryLayer
 
         entry = ContextEntry(
             key=f"handoff_{session_id}_{handoff.timestamp.isoformat()}",

@@ -4,13 +4,14 @@ AI Cost Optimization Engine - Task 21
 Intelligent resource management and cost reduction system
 """
 
-import os
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
 from enum import Enum
+from typing import Optional
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -81,8 +82,8 @@ class ResourceMonitor:
         self,
         resource_type: ResourceType,
         amount: float,
-        metadata: Dict
-    ) -> Dict:
+        metadata: dict
+    ) -> dict:
         """Track resource usage"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -150,7 +151,7 @@ class ResourceMonitor:
     async def get_usage_summary(
         self,
         days: int = 7
-    ) -> Dict:
+    ) -> dict:
         """Get usage summary for period"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -226,8 +227,8 @@ class CostOptimizer:
 
     async def analyze_costs(
         self,
-        usage_data: Dict
-    ) -> List[Dict]:
+        usage_data: dict
+    ) -> list[dict]:
         """Analyze costs and identify optimization opportunities"""
         opportunities = []
 
@@ -255,8 +256,8 @@ class CostOptimizer:
     async def _identify_opportunity(
         self,
         resource_type: str,
-        usage: Dict
-    ) -> Optional[Dict]:
+        usage: dict
+    ) -> Optional[dict]:
         """Identify optimization opportunity for resource"""
         if resource_type == ResourceType.AI_TOKENS.value:
             return self._optimize_ai_tokens(usage)
@@ -269,7 +270,7 @@ class CostOptimizer:
         else:
             return None
 
-    def _optimize_ai_tokens(self, usage: Dict) -> Dict:
+    def _optimize_ai_tokens(self, usage: dict) -> dict:
         """Optimize AI token usage"""
         total_cost = float(usage.get('total_cost', 0))
         potential_savings = total_cost * 0.3  # Can save ~30% with optimization
@@ -290,7 +291,7 @@ class CostOptimizer:
             "payback_period_days": 7
         }
 
-    def _optimize_api_calls(self, usage: Dict) -> Dict:
+    def _optimize_api_calls(self, usage: dict) -> dict:
         """Optimize API call costs"""
         total_cost = float(usage.get('total_cost', 0))
         usage_count = usage.get('usage_count', 0)
@@ -319,7 +320,7 @@ class CostOptimizer:
             "payback_period_days": 3
         }
 
-    def _optimize_database(self, usage: Dict) -> Dict:
+    def _optimize_database(self, usage: dict) -> dict:
         """Optimize database costs"""
         total_cost = float(usage.get('total_cost', 0))
 
@@ -339,7 +340,7 @@ class CostOptimizer:
             "payback_period_days": 10
         }
 
-    def _optimize_compute(self, usage: Dict) -> Dict:
+    def _optimize_compute(self, usage: dict) -> dict:
         """Optimize compute costs"""
         total_cost = float(usage.get('total_cost', 0))
 
@@ -363,8 +364,8 @@ class CostOptimizer:
         self,
         optimization_id: str,
         strategy: OptimizationStrategy,
-        parameters: Dict
-    ) -> Dict:
+        parameters: dict
+    ) -> dict:
         """Apply optimization strategy"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -411,7 +412,7 @@ class CostOptimizer:
             logger.error(f"Error applying optimization: {e}")
             raise
 
-    async def _apply_caching(self, parameters: Dict) -> Dict:
+    async def _apply_caching(self, parameters: dict) -> dict:
         """Apply caching optimization"""
         cache_ttl = parameters.get('cache_ttl', 3600)
         cache_size = parameters.get('cache_size', 1000)
@@ -424,7 +425,7 @@ class CostOptimizer:
             "expected_hit_rate": 0.7
         }
 
-    async def _apply_batching(self, parameters: Dict) -> Dict:
+    async def _apply_batching(self, parameters: dict) -> dict:
         """Apply batching optimization"""
         batch_size = parameters.get('batch_size', 100)
         batch_timeout = parameters.get('batch_timeout', 1000)
@@ -435,7 +436,7 @@ class CostOptimizer:
             "batch_timeout_ms": batch_timeout
         }
 
-    async def _apply_scheduling(self, parameters: Dict) -> Dict:
+    async def _apply_scheduling(self, parameters: dict) -> dict:
         """Apply scheduling optimization"""
         off_peak_hours = parameters.get('off_peak_hours', [0, 6])
 
@@ -458,7 +459,7 @@ class BudgetManager:
         service: str,
         monthly_limit: float,
         alert_threshold: float = 0.8
-    ) -> Dict:
+    ) -> dict:
         """Set budget for a service"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -498,7 +499,7 @@ class BudgetManager:
     async def check_budget_status(
         self,
         service: Optional[str] = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Check budget status for services"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -583,7 +584,7 @@ class BudgetManager:
             logger.error(f"Error checking budget: {e}")
             raise
 
-    async def _send_budget_alert(self, budget: Dict):
+    async def _send_budget_alert(self, budget: dict):
         """Send budget alert"""
         service = budget['service']
         alert_key = f"{service}_{datetime.now().strftime('%Y-%m')}"
@@ -605,9 +606,9 @@ class CostRecommendationEngine:
 
     async def generate_recommendations(
         self,
-        usage_data: Dict,
-        optimization_history: List[Dict]
-    ) -> List[Dict]:
+        usage_data: dict,
+        optimization_history: list[dict]
+    ) -> list[dict]:
         """Generate cost-saving recommendations"""
         recommendations = []
 
@@ -636,7 +637,7 @@ class CostRecommendationEngine:
 
         return recommendations[:10]  # Top 10 recommendations
 
-    def _analyze_resource(self, usage: Dict) -> Optional[Dict]:
+    def _analyze_resource(self, usage: dict) -> Optional[dict]:
         """Analyze resource for optimization"""
         resource_type = usage['resource_type']
         total_cost = float(usage.get('total_cost', 0))
@@ -658,7 +659,7 @@ class CostRecommendationEngine:
 
         return None
 
-    async def _check_duplicates(self, usage_data: Dict) -> Optional[Dict]:
+    async def _check_duplicates(self, usage_data: dict) -> Optional[dict]:
         """Check for duplicate operations"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -703,7 +704,7 @@ class CostRecommendationEngine:
 
         return None
 
-    async def _check_idle_resources(self) -> Optional[Dict]:
+    async def _check_idle_resources(self) -> Optional[dict]:
         """Check for idle resources"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -751,7 +752,7 @@ class AICostOptimizationEngine:
         self.budget_manager = BudgetManager()
         self.recommendation_engine = CostRecommendationEngine()
 
-    async def optimize(self) -> Dict:
+    async def optimize(self) -> dict:
         """Run full cost optimization cycle"""
         try:
             # Get current usage
@@ -800,8 +801,8 @@ class AICostOptimizationEngine:
         resource_type: ResourceType,
         amount: float,
         service: str,
-        metadata: Optional[Dict] = None
-    ) -> Dict:
+        metadata: Optional[dict] = None
+    ) -> dict:
         """Track resource usage"""
         full_metadata = metadata or {}
         full_metadata['service'] = service
@@ -816,7 +817,7 @@ class AICostOptimizationEngine:
         self,
         service: str,
         monthly_limit: float
-    ) -> Dict:
+    ) -> dict:
         """Set budget for service"""
         return await self.budget_manager.set_budget(
             service,
@@ -825,8 +826,8 @@ class AICostOptimizationEngine:
 
     async def apply_optimization(
         self,
-        optimization: Dict
-    ) -> Dict:
+        optimization: dict
+    ) -> dict:
         """Apply an optimization"""
         return await self.optimizer.apply_optimization(
             str(uuid.uuid4()),

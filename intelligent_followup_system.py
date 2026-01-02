@@ -4,13 +4,14 @@ Intelligent Follow-up System - Task 17
 Automated follow-up orchestration with AI-powered timing, personalization, and multi-channel delivery
 """
 
-import os
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any
 from enum import Enum
+from typing import Any, Optional
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -111,9 +112,9 @@ class IntelligentFollowUpSystem:
         followup_type: FollowUpType,
         entity_id: str,
         entity_type: str,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         priority: FollowUpPriority = FollowUpPriority.MEDIUM,
-        custom_rules: Optional[Dict] = None
+        custom_rules: Optional[dict] = None
     ) -> str:
         """Create an intelligent follow-up sequence"""
         try:
@@ -166,9 +167,9 @@ class IntelligentFollowUpSystem:
     async def _analyze_followup_strategy(
         self,
         followup_type: FollowUpType,
-        context: Dict,
+        context: dict,
         priority: FollowUpPriority
-    ) -> Dict:
+    ) -> dict:
         """Analyze context to determine optimal follow-up strategy"""
         strategy = {
             "approach": "multi_touch",
@@ -206,9 +207,9 @@ class IntelligentFollowUpSystem:
     async def _generate_touchpoints(
         self,
         followup_type: FollowUpType,
-        strategy: Dict,
-        context: Dict
-    ) -> List[Dict]:
+        strategy: dict,
+        context: dict
+    ) -> list[dict]:
         """Generate intelligent touchpoints for follow-up"""
         touchpoints = []
 
@@ -240,7 +241,7 @@ class IntelligentFollowUpSystem:
 
         return touchpoints
 
-    def _get_touchpoint_templates(self, followup_type: FollowUpType) -> List[Dict]:
+    def _get_touchpoint_templates(self, followup_type: FollowUpType) -> list[dict]:
         """Get touchpoint templates for follow-up type"""
         templates_map = {
             FollowUpType.LEAD_INQUIRY: [
@@ -284,7 +285,7 @@ class IntelligentFollowUpSystem:
     async def _schedule_touchpoint(
         self,
         sequence_id: str,
-        touchpoint: Dict,
+        touchpoint: dict,
         cursor: Any
     ) -> str:
         """Schedule a follow-up touchpoint"""
@@ -310,7 +311,7 @@ class IntelligentFollowUpSystem:
 
         return touchpoint_id
 
-    async def execute_scheduled_followups(self) -> List[Dict]:
+    async def execute_scheduled_followups(self) -> list[dict]:
         """Execute all scheduled follow-ups"""
         try:
             conn = self._get_connection()
@@ -350,7 +351,7 @@ class IntelligentFollowUpSystem:
                 conn.rollback()
             return []
 
-    async def _execute_followup(self, followup: Dict, cursor: Any) -> Dict:
+    async def _execute_followup(self, followup: dict, cursor: Any) -> dict:
         """Execute a single follow-up"""
         try:
             # Update status to in_progress
@@ -425,8 +426,8 @@ class IntelligentFollowUpSystem:
         self,
         channel: str,
         entity_id: str,
-        content: Dict
-    ) -> Dict:
+        content: dict
+    ) -> dict:
         """Send follow-up through specified channel"""
         # Simulate sending for now - integrate with actual channels
         delivery_result = {
@@ -449,8 +450,8 @@ class IntelligentFollowUpSystem:
         self,
         execution_id: str,
         response_type: ResponseType,
-        response_data: Optional[Dict] = None
-    ) -> Dict:
+        response_data: Optional[dict] = None
+    ) -> dict:
         """Track response to follow-up"""
         try:
             conn = self._get_connection()
@@ -512,7 +513,7 @@ class IntelligentFollowUpSystem:
         followup_type: Optional[FollowUpType] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None
-    ) -> Dict:
+    ) -> dict:
         """Get follow-up performance analytics"""
         try:
             conn = self._get_connection()
@@ -600,10 +601,10 @@ class TimingOptimizer:
 
     async def optimize_timing(
         self,
-        entity_profile: Dict,
+        entity_profile: dict,
         followup_type: FollowUpType,
-        historical_data: List[Dict]
-    ) -> Dict:
+        historical_data: list[dict]
+    ) -> dict:
         """Determine optimal timing for follow-up"""
         # Analyze historical response patterns
         best_times = self._analyze_response_patterns(historical_data)
@@ -622,7 +623,7 @@ class TimingOptimizer:
 
         return optimal_timing
 
-    def _analyze_response_patterns(self, historical_data: List[Dict]) -> Dict:
+    def _analyze_response_patterns(self, historical_data: list[dict]) -> dict:
         """Analyze historical response patterns"""
         if not historical_data:
             return {"day": "weekday", "hour": 10}
@@ -658,10 +659,10 @@ class ContentGenerator:
 
     async def generate_content(
         self,
-        template: Dict,
-        context: Dict,
-        personalization: Dict
-    ) -> Dict:
+        template: dict,
+        context: dict,
+        personalization: dict
+    ) -> dict:
         """Generate personalized content for follow-up"""
         # Extract template details
         subject = template.get('subject', 'Follow-up')
@@ -681,9 +682,9 @@ class ContentGenerator:
     async def _generate_ai_content(
         self,
         subject: str,
-        context: Dict,
+        context: dict,
         tone: str
-    ) -> Dict:
+    ) -> dict:
         """Generate AI-powered content"""
         # This would integrate with OpenAI or similar
         # For now, return template-based content
@@ -691,12 +692,12 @@ class ContentGenerator:
             "subject": subject,
             "body": f"Hello {context.get('name', 'there')},\n\n" +
                    f"We wanted to follow up regarding {context.get('topic', 'your inquiry')}.\n\n" +
-                   f"Best regards,\nThe Team",
+                   "Best regards,\nThe Team",
             "tone": tone,
             "personalized": True
         }
 
-    def _generate_template_content(self, template: Dict, context: Dict) -> Dict:
+    def _generate_template_content(self, template: dict, context: dict) -> dict:
         """Generate template-based content"""
         return {
             "subject": template['subject'],
@@ -704,7 +705,7 @@ class ContentGenerator:
             "tone": template.get('tone', 'professional')
         }
 
-    def _apply_personalization(self, content: Dict, context: Dict) -> Dict:
+    def _apply_personalization(self, content: dict, context: dict) -> dict:
         """Apply personalization tokens to content"""
         # Replace tokens in content
         for key, value in context.items():
@@ -742,13 +743,13 @@ class ChannelSelector:
         # Default to email
         return "email"
 
-    async def _get_available_channels(self, entity_id: str) -> List[str]:
+    async def _get_available_channels(self, entity_id: str) -> list[str]:
         """Get available channels for entity"""
         # This would check actual contact information
         # For now, return common channels
         return ["email", "sms", "in_app"]
 
-    def _get_channel_priority(self, followup_type: str) -> List[str]:
+    def _get_channel_priority(self, followup_type: str) -> list[str]:
         """Get channel priority for follow-up type"""
         priorities = {
             "payment_reminder": ["sms", "email", "phone"],
@@ -764,8 +765,8 @@ class ResponseAnalyzer:
     async def analyze_response(
         self,
         response_type: ResponseType,
-        response_data: Optional[Dict]
-    ) -> Dict:
+        response_data: Optional[dict]
+    ) -> dict:
         """Analyze follow-up response"""
         analysis = {
             "sentiment": self._determine_sentiment(response_type),
@@ -795,7 +796,7 @@ class ResponseAnalyzer:
     def _determine_intent(
         self,
         response_type: ResponseType,
-        response_data: Optional[Dict]
+        response_data: Optional[dict]
     ) -> str:
         """Determine intent from response"""
         if response_type == ResponseType.POSITIVE:
@@ -809,7 +810,7 @@ class ResponseAnalyzer:
         else:
             return "unclear"
 
-    def _determine_urgency(self, response_data: Optional[Dict]) -> str:
+    def _determine_urgency(self, response_data: Optional[dict]) -> str:
         """Determine urgency from response"""
         if not response_data:
             return "normal"
@@ -835,7 +836,7 @@ class ResponseAnalyzer:
         }
         return action_map.get(response_type, "review_manually")
 
-    async def _analyze_text(self, text: str) -> Dict:
+    async def _analyze_text(self, text: str) -> dict:
         """Analyze text content using AI"""
         # This would use NLP/AI for deeper analysis
         # For now, return basic analysis
@@ -863,7 +864,7 @@ class AutomatedCheckInScheduler:
         self,
         customer_id: str,
         check_in_strategy: str = "proactive"
-    ) -> Dict:
+    ) -> dict:
         """Schedule automated check-ins for a customer"""
         try:
             conn = self._get_connection()
@@ -920,9 +921,9 @@ class AutomatedCheckInScheduler:
 
     def _determine_checkin_schedule(
         self,
-        customer_data: Dict,
+        customer_data: dict,
         strategy: str
-    ) -> Dict:
+    ) -> dict:
         """Determine appropriate check-in schedule"""
         days_since_last_job = customer_data.get('days_since_last_job', 0) or 0
         total_jobs = customer_data.get('total_jobs', 0)
@@ -971,7 +972,7 @@ class AutomatedCheckInScheduler:
         self,
         sequence_id: str,
         customer_id: str,
-        check_in: Dict,
+        check_in: dict,
         cursor: Any
     ) -> str:
         """Schedule a single check-in"""
@@ -992,7 +993,7 @@ class AutomatedCheckInScheduler:
 
         return check_in_id
 
-    async def execute_due_checkins(self) -> List[Dict]:
+    async def execute_due_checkins(self) -> list[dict]:
         """Execute all due check-ins"""
         try:
             conn = self._get_connection()
@@ -1024,7 +1025,7 @@ class AutomatedCheckInScheduler:
                 conn.rollback()
             return []
 
-    async def _execute_checkin(self, checkin: Dict, cursor: Any) -> Dict:
+    async def _execute_checkin(self, checkin: dict, cursor: Any) -> dict:
         """Execute a single check-in"""
         try:
             # Generate personalized check-in content
@@ -1056,7 +1057,7 @@ class AutomatedCheckInScheduler:
             """, (str(e), checkin['id']))
             return {"checkin_id": checkin['id'], "status": "failed", "error": str(e)}
 
-    def _generate_checkin_content(self, checkin_type: str) -> Dict:
+    def _generate_checkin_content(self, checkin_type: str) -> dict:
         """Generate content for check-in based on type"""
         content_templates = {
             "satisfaction_check": {
@@ -1103,9 +1104,9 @@ class SupportEscalationManager:
     async def analyze_and_escalate(
         self,
         customer_id: str,
-        issue_data: Dict,
-        context: Dict
-    ) -> Dict:
+        issue_data: dict,
+        context: dict
+    ) -> dict:
         """Analyze issue and determine if escalation is needed"""
         try:
             # Analyze issue severity
@@ -1131,7 +1132,7 @@ class SupportEscalationManager:
             logger.error(f"Error analyzing escalation: {e}")
             return {"error": str(e)}
 
-    def _analyze_severity(self, issue_data: Dict, context: Dict) -> Dict:
+    def _analyze_severity(self, issue_data: dict, context: dict) -> dict:
         """Analyze issue severity"""
         severity_score = 0
         factors = []
@@ -1189,7 +1190,7 @@ class SupportEscalationManager:
             "factors": factors
         }
 
-    def _should_escalate(self, severity: Dict, context: Dict) -> bool:
+    def _should_escalate(self, severity: dict, context: dict) -> bool:
         """Determine if issue should be escalated"""
         # Auto-escalate critical issues
         if severity['level'] == 'critical':
@@ -1212,9 +1213,9 @@ class SupportEscalationManager:
     async def _create_escalation(
         self,
         customer_id: str,
-        issue_data: Dict,
-        severity: Dict
-    ) -> Dict:
+        issue_data: dict,
+        severity: dict
+    ) -> dict:
         """Create an escalation record"""
         try:
             conn = self._get_connection()
@@ -1272,7 +1273,7 @@ class SupportEscalationManager:
                 conn.rollback()
             return {"error": str(e)}
 
-    def _get_escalation_tier(self, severity_level: str) -> Dict:
+    def _get_escalation_tier(self, severity_level: str) -> dict:
         """Get escalation tier based on severity"""
         tiers = {
             "critical": {"name": "Tier 3", "sla_hours": 2, "level": 3},
@@ -1282,7 +1283,7 @@ class SupportEscalationManager:
         }
         return tiers.get(severity_level, tiers["low"])
 
-    def _get_assignment(self, severity_level: str, issue_data: Dict) -> Dict:
+    def _get_assignment(self, severity_level: str, issue_data: dict) -> dict:
         """Determine assignment for escalation"""
         assignments = {
             "critical": {
@@ -1309,8 +1310,8 @@ class SupportEscalationManager:
         self,
         escalation_id: str,
         customer_id: str,
-        severity: Dict,
-        assignment: Dict,
+        severity: dict,
+        assignment: dict,
         cursor: Any
     ) -> None:
         """Send notifications for escalation"""
@@ -1343,7 +1344,7 @@ class PerformanceTracker:
     async def track_performance(
         self,
         sequence_id: str,
-        metrics: Dict
+        metrics: dict
     ) -> None:
         """Track performance metrics for follow-up sequence"""
         try:
@@ -1392,7 +1393,7 @@ class PerformanceTracker:
         self,
         sequence_id: Optional[str] = None,
         followup_type: Optional[str] = None
-    ) -> Dict:
+    ) -> dict:
         """Get performance insights for follow-ups"""
         try:
             conn = self._get_connection()
@@ -1428,7 +1429,7 @@ class PerformanceTracker:
             logger.error(f"Error getting performance insights: {e}")
             return {}
 
-    def _generate_insights(self, performance_data: List[Dict]) -> List[str]:
+    def _generate_insights(self, performance_data: list[dict]) -> list[str]:
         """Generate actionable insights from performance data"""
         insights = []
 

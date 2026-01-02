@@ -9,16 +9,17 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import json
 import asyncio
+import json
 import logging
 import threading
-import psutil
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Callable
-from dataclasses import dataclass, field
-from enum import Enum
 from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Callable
+
+import psutil
 
 logger = logging.getLogger("UNIFIED_AWARENESS")
 
@@ -47,11 +48,11 @@ class SystemPulse:
     total_thoughts: int
     thoughts_per_minute: float
     active_predictions: int
-    open_circuits: List[str]
+    open_circuits: list[str]
     active_alerts: int
     uptime_seconds: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "timestamp": self.timestamp.isoformat(),
             "awareness_level": self.awareness_level.value,
@@ -81,7 +82,7 @@ class ModuleStatus:
     error_rate: float
     latency_p95_ms: float
     request_count: int
-    issues: List[str] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)
 
 
 class UnifiedAwareness:
@@ -105,14 +106,14 @@ class UnifiedAwareness:
         self.awareness_level = AwarenessLevel.AWAKENING
 
         # Module status tracking
-        self._module_status: Dict[str, ModuleStatus] = {}
+        self._module_status: dict[str, ModuleStatus] = {}
         self._pulse_history: deque = deque(maxlen=1000)
         self._alert_history: deque = deque(maxlen=500)
         self._thought_history: deque = deque(maxlen=500)
         self._insight_history: deque = deque(maxlen=200)
 
         # Callbacks for real-time notifications
-        self._callbacks: Dict[str, List[Callable]] = {
+        self._callbacks: dict[str, list[Callable]] = {
             "pulse": [],
             "alert": [],
             "insight": [],
@@ -151,7 +152,7 @@ class UnifiedAwareness:
             logger.warning(f"Could not load nerve_center: {e}")
 
         try:
-            from ai_system_enhancements import get_health_scorer, get_alerting
+            from ai_system_enhancements import get_alerting, get_health_scorer
             self._health_scorer = get_health_scorer()
             self._alerting = get_alerting()
         except Exception as e:
@@ -268,7 +269,7 @@ class UnifiedAwareness:
         self._emit_event("pulse", pulse)
         return pulse
 
-    def get_full_status_report(self) -> Dict[str, Any]:
+    def get_full_status_report(self) -> dict[str, Any]:
         """Get a comprehensive status report - everything the AI OS knows"""
         self._load_modules()
 
@@ -340,7 +341,7 @@ class UnifiedAwareness:
 
         return " ".join(parts)
 
-    def _get_all_module_status(self) -> Dict[str, Any]:
+    def _get_all_module_status(self) -> dict[str, Any]:
         """Get status of all modules"""
         modules = {}
 
@@ -369,7 +370,7 @@ class UnifiedAwareness:
 
         return modules
 
-    def _get_consciousness_state(self) -> Dict[str, Any]:
+    def _get_consciousness_state(self) -> dict[str, Any]:
         """Get consciousness state"""
         if not self._alive_core:
             return {"state": "unknown"}
@@ -382,7 +383,7 @@ class UnifiedAwareness:
             "vital_signs": self._alive_core.vital_signs.to_dict() if self._alive_core.vital_signs else None
         }
 
-    def _get_memory_state(self) -> Dict[str, Any]:
+    def _get_memory_state(self) -> dict[str, Any]:
         """Get memory state"""
         if not self._integration:
             return {"status": "unknown"}
@@ -390,7 +391,7 @@ class UnifiedAwareness:
         state = self._integration.get_unified_state()
         return state.get("memory", {})
 
-    def _get_active_predictions(self) -> List[Dict]:
+    def _get_active_predictions(self) -> list[dict]:
         """Get active predictions"""
         if not self._nerve_center or not self._nerve_center.proactive:
             return []
@@ -403,7 +404,7 @@ class UnifiedAwareness:
                 predictions.append({"prediction": str(pred)})
         return predictions
 
-    def _get_active_alerts(self) -> List[Dict]:
+    def _get_active_alerts(self) -> list[dict]:
         """Get active alerts"""
         if not self._alerting:
             return []
@@ -420,14 +421,14 @@ class UnifiedAwareness:
             })
         return alerts
 
-    def _get_recent_thoughts(self, limit: int = 10) -> List[Dict]:
+    def _get_recent_thoughts(self, limit: int = 10) -> list[dict]:
         """Get recent thoughts"""
         if not self._alive_core:
             return []
 
         return self._alive_core.get_recent_thoughts(limit)
 
-    def _generate_insights(self, pulse: SystemPulse) -> List[Dict[str, Any]]:
+    def _generate_insights(self, pulse: SystemPulse) -> list[dict[str, Any]]:
         """Generate insights about current state"""
         insights = []
 
@@ -481,7 +482,7 @@ class UnifiedAwareness:
 
         return insights
 
-    def _generate_recommendations(self, pulse: SystemPulse) -> List[str]:
+    def _generate_recommendations(self, pulse: SystemPulse) -> list[str]:
         """Generate actionable recommendations"""
         recommendations = []
 
@@ -559,7 +560,7 @@ def check_status() -> str:
 
 
 # Full report
-def get_status_report() -> Dict[str, Any]:
+def get_status_report() -> dict[str, Any]:
     return get_unified_awareness().get_full_status_report()
 
 

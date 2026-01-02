@@ -18,18 +18,19 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
-import json
 import asyncio
-import logging
-import time
 import hashlib
-import aiohttp
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, field, asdict
-from enum import Enum
+import json
+import logging
+import os
+import time
 import traceback
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Optional
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -130,9 +131,9 @@ class AlwaysKnowBrain:
 
     def __init__(self):
         self.current_state: SystemState = SystemState()
-        self.state_history: List[SystemState] = []
-        self.alerts: Dict[str, Alert] = {}
-        self.alert_cooldowns: Dict[str, float] = {}
+        self.state_history: list[SystemState] = []
+        self.alerts: dict[str, Alert] = {}
+        self.alert_cooldowns: dict[str, float] = {}
         self._running = False
         self._session: Optional[aiohttp.ClientSession] = None
         self._last_ui_test: float = 0
@@ -412,7 +413,7 @@ class AlwaysKnowBrain:
                 AlertSeverity.CRITICAL,
                 SystemComponent.BACKEND,
                 "Backend Service Down",
-                f"Backend service is not responding."
+                "Backend service is not responding."
             )
 
         if not state.database_connected:
@@ -677,7 +678,7 @@ class AlwaysKnowBrain:
         except Exception as e:
             logger.error(f"UI tests failed: {e}\n{traceback.format_exc()}")
 
-    async def _persist_ui_test_results(self, mrg_results: Dict, erp_results: Dict):
+    async def _persist_ui_test_results(self, mrg_results: dict, erp_results: dict):
         """Persist UI test results to database"""
         try:
             if not self._db_pool:
@@ -724,7 +725,7 @@ class AlwaysKnowBrain:
         except Exception as e:
             logger.error(f"Failed to persist UI test results: {e}")
 
-    def get_current_state(self) -> Dict[str, Any]:
+    def get_current_state(self) -> dict[str, Any]:
         """Get current system state as dict"""
         return asdict(self.current_state)
 
@@ -774,7 +775,7 @@ METRICS:
 ACTIVE ALERTS: {len([a for a in self.alerts.values() if not a.resolved])}
 """
 
-    def get_active_alerts(self) -> List[Dict[str, Any]]:
+    def get_active_alerts(self) -> list[dict[str, Any]]:
         """Get all active (unresolved) alerts"""
         return [
             {
@@ -821,7 +822,7 @@ async def initialize_always_know_brain():
 # API ENDPOINTS (to be added to router)
 # =============================================================================
 
-async def get_system_state() -> Dict[str, Any]:
+async def get_system_state() -> dict[str, Any]:
     """API: Get current system state"""
     brain = get_always_know_brain()
     return brain.get_current_state()
@@ -833,7 +834,7 @@ async def get_system_summary() -> str:
     return brain.get_state_summary()
 
 
-async def get_alerts() -> List[Dict[str, Any]]:
+async def get_alerts() -> list[dict[str, Any]]:
     """API: Get active alerts"""
     brain = get_always_know_brain()
     return brain.get_active_alerts()

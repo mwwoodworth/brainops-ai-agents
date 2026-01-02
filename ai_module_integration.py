@@ -19,16 +19,14 @@ Version: 1.0.0
 
 import asyncio
 import logging
-from typing import Dict, Any, List, Optional, Callable
+import threading
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from collections import defaultdict, deque
-import threading
+from typing import Any, Callable, Optional
 
-from ai_observability import (
-    EventType, Event, get_observability, get_event_bus, publish_event
-)
+from ai_observability import Event, EventType, get_event_bus, get_observability, publish_event
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +52,7 @@ class FeedbackSignal:
     source_module: str
     target_module: str
     signal_value: float  # -1.0 to 1.0 (negative = bad, positive = good)
-    context: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -67,7 +65,7 @@ class LearningOutcome:
     actual_outcome: Any
     success: bool
     confidence_delta: float  # How much to adjust confidence
-    context: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
 
 
 # =============================================================================
@@ -78,28 +76,28 @@ class LearningOutcome:
 class UnifiedSystemState:
     """Unified state across all modules"""
     # OODA state
-    current_observations: List[Dict] = field(default_factory=list)
-    pending_decisions: List[Dict] = field(default_factory=list)
-    active_actions: List[Dict] = field(default_factory=list)
+    current_observations: list[dict] = field(default_factory=list)
+    pending_decisions: list[dict] = field(default_factory=list)
+    active_actions: list[dict] = field(default_factory=list)
 
     # Consciousness state
     awareness_level: str = "reactive"
     consciousness_level: float = 0.5
-    active_intentions: List[Dict] = field(default_factory=list)
+    active_intentions: list[dict] = field(default_factory=list)
 
     # Memory state
     working_memory_count: int = 0
     long_term_memory_count: int = 0
-    recent_contradictions: List[Dict] = field(default_factory=list)
+    recent_contradictions: list[dict] = field(default_factory=list)
 
     # Dependability state
     system_health: str = "OK"
-    guard_violations: List[Dict] = field(default_factory=list)
+    guard_violations: list[dict] = field(default_factory=list)
     recovery_in_progress: bool = False
 
     # Circuit breaker state
-    open_circuits: List[str] = field(default_factory=list)
-    half_open_circuits: List[str] = field(default_factory=list)
+    open_circuits: list[str] = field(default_factory=list)
+    half_open_circuits: list[str] = field(default_factory=list)
 
     # Learning state
     total_decisions: int = 0
@@ -122,9 +120,9 @@ class LearningManager:
 
     def __init__(self):
         self._outcomes: deque = deque(maxlen=10000)
-        self._confidence_adjustments: Dict[str, float] = defaultdict(float)
-        self._success_rates: Dict[str, deque] = defaultdict(lambda: deque(maxlen=100))
-        self._pattern_memory: Dict[str, List[Dict]] = defaultdict(list)
+        self._confidence_adjustments: dict[str, float] = defaultdict(float)
+        self._success_rates: dict[str, deque] = defaultdict(lambda: deque(maxlen=100))
+        self._pattern_memory: dict[str, list[dict]] = defaultdict(list)
         self._lock = threading.Lock()
         self._metrics = get_observability()
 
@@ -189,7 +187,7 @@ class LearningManager:
 
         return None
 
-    def predict_success(self, operation_type: str, context: Dict) -> float:
+    def predict_success(self, operation_type: str, context: dict) -> float:
         """Predict success probability based on similar past contexts"""
         with self._lock:
             patterns = self._pattern_memory.get(operation_type, [])
@@ -215,7 +213,7 @@ class LearningManager:
             weighted_success = sum(s * (1.0 if success else 0.0) for s, success in similar_patterns)
             return weighted_success / total_weight
 
-    def _context_similarity(self, ctx1: Dict, ctx2: Dict) -> float:
+    def _context_similarity(self, ctx1: dict, ctx2: dict) -> float:
         """Calculate similarity between two contexts"""
         if not ctx1 or not ctx2:
             return 0.0
@@ -227,7 +225,7 @@ class LearningManager:
         matches = sum(1 for k in keys if ctx1.get(k) == ctx2.get(k))
         return matches / len(keys)
 
-    def get_learning_summary(self) -> Dict[str, Any]:
+    def get_learning_summary(self) -> dict[str, Any]:
         """Get summary of learning state"""
         with self._lock:
             return {
@@ -250,10 +248,10 @@ class RecoveryCoordinator:
     """
 
     def __init__(self):
-        self._active_recoveries: Dict[str, Dict] = {}
+        self._active_recoveries: dict[str, dict] = {}
         self._recovery_history: deque = deque(maxlen=1000)
         self._recovery_lock = asyncio.Lock()
-        self._recovery_success_rates: Dict[str, deque] = defaultdict(lambda: deque(maxlen=50))
+        self._recovery_success_rates: dict[str, deque] = defaultdict(lambda: deque(maxlen=50))
         self._module_priority = {
             "dependability": 1,
             "circuit_breaker": 2,
@@ -264,7 +262,7 @@ class RecoveryCoordinator:
         }
 
     async def request_recovery(self, module: str, error_type: str,
-                                context: Dict[str, Any]) -> bool:
+                                context: dict[str, Any]) -> bool:
         """
         Request permission to perform recovery.
         Returns True if recovery can proceed.
@@ -292,7 +290,7 @@ class RecoveryCoordinator:
             return True
 
     async def complete_recovery(self, module: str, success: bool,
-                                 result: Dict[str, Any] = None):
+                                 result: dict[str, Any] = None):
         """Mark recovery as complete"""
         async with self._recovery_lock:
             if module in self._active_recoveries:
@@ -318,7 +316,7 @@ class RecoveryCoordinator:
         return sum(rates) / len(rates) if rates else 0.5
 
     def _conflicts_with(self, module: str, error_type: str,
-                        active_module: str, active_recovery: Dict) -> bool:
+                        active_module: str, active_recovery: dict) -> bool:
         """Check if recovery conflicts with active recovery"""
         # Higher priority module always wins
         if self._module_priority.get(active_module, 99) < self._module_priority.get(module, 99):
@@ -334,7 +332,7 @@ class RecoveryCoordinator:
 
         return False
 
-    def get_recovery_summary(self) -> Dict[str, Any]:
+    def get_recovery_summary(self) -> dict[str, Any]:
         """Get summary of recovery state"""
         return {
             "active_recoveries": len(self._active_recoveries),
@@ -374,18 +372,18 @@ class ModuleIntegrationOrchestrator:
         self._state_lock = threading.Lock()
 
         # Module references (lazy loaded)
-        self._modules: Dict[str, Any] = {}
+        self._modules: dict[str, Any] = {}
 
         # Feedback handlers
-        self._feedback_handlers: Dict[str, List[Callable]] = defaultdict(list)
+        self._feedback_handlers: dict[str, list[Callable]] = defaultdict(list)
 
         # Cross-module signal queues - lazy initialization to avoid event loop issues
         # FIX: Don't create asyncio.Queue outside of event loop context
-        self._signal_queues: Dict[str, Optional[asyncio.Queue]] = {}
+        self._signal_queues: dict[str, Optional[asyncio.Queue]] = {}
         self._signal_queue_modules = ["ooda", "consciousness", "memory", "dependability", "circuit_breaker", "hallucination"]
 
         # Signal handlers registered by modules
-        self._signal_handlers: Dict[str, Dict[str, Callable]] = defaultdict(dict)
+        self._signal_handlers: dict[str, dict[str, Callable]] = defaultdict(dict)
 
         # Set up event subscriptions
         self._setup_event_handlers()
@@ -469,7 +467,7 @@ class ModuleIntegrationOrchestrator:
                 logger.error(f"Signal processor error: {e}")
                 await asyncio.sleep(1)
 
-    async def _dispatch_signal(self, module: str, method: str, data: Dict):
+    async def _dispatch_signal(self, module: str, method: str, data: dict):
         """Dispatch a signal to the appropriate handler"""
         handler = self._signal_handlers.get(module, {}).get(method)
         if handler:
@@ -735,7 +733,7 @@ class ModuleIntegrationOrchestrator:
     # PROPAGATION METHODS
     # =========================================================================
 
-    def _propagate_to_module(self, target: str, method: str, data: Dict):
+    def _propagate_to_module(self, target: str, method: str, data: dict):
         """Propagate data to specific module"""
         logger.debug(f"Propagating {method} to {target}")
 
@@ -752,12 +750,12 @@ class ModuleIntegrationOrchestrator:
             except asyncio.QueueFull:
                 logger.warning(f"Signal queue full for {target}")
 
-    def _broadcast_to_all(self, method: str, data: Dict):
+    def _broadcast_to_all(self, method: str, data: dict):
         """Broadcast to all modules"""
         for module in ["ooda", "consciousness", "memory", "dependability", "circuit_breaker", "hallucination"]:
             self._propagate_to_module(module, method, data)
 
-    def _check_intention_alignment(self, decision: Dict) -> float:
+    def _check_intention_alignment(self, decision: dict) -> float:
         """Check how well decision aligns with current intentions"""
         with self._state_lock:
             if not self._state.active_intentions:
@@ -781,7 +779,7 @@ class ModuleIntegrationOrchestrator:
     # RECOVERY COORDINATION
     # =========================================================================
 
-    async def _coordinate_recovery(self, source: str, violation: Dict):
+    async def _coordinate_recovery(self, source: str, violation: dict):
         """Coordinate recovery across modules"""
         error_type = violation.get("type", "unknown")
 
@@ -817,7 +815,7 @@ class ModuleIntegrationOrchestrator:
                 self._state.recovery_in_progress = False
                 self._state.system_health = "OK" if success else "DEGRADED"
 
-    async def _execute_recovery(self, source: str, error_type: str, violation: Dict) -> bool:
+    async def _execute_recovery(self, source: str, error_type: str, violation: dict) -> bool:
         """Execute recovery action"""
         recovery_strategies = {
             "dependability": self._recover_dependability,
@@ -831,7 +829,7 @@ class ModuleIntegrationOrchestrator:
             return await strategy(violation)
         return False
 
-    async def _recover_dependability(self, violation: Dict) -> bool:
+    async def _recover_dependability(self, violation: dict) -> bool:
         """Recover from dependability violation"""
         guard_type = violation.get("guard_type")
 
@@ -843,18 +841,18 @@ class ModuleIntegrationOrchestrator:
             return True
         return False
 
-    async def _recover_circuit(self, violation: Dict) -> bool:
+    async def _recover_circuit(self, violation: dict) -> bool:
         """Recover from circuit breaker trigger"""
         component = violation.get("component")
         self._broadcast_to_all("use_fallback", {"component": component, "reason": "circuit_open"})
         return True
 
-    async def _recover_memory(self, violation: Dict) -> bool:
+    async def _recover_memory(self, violation: dict) -> bool:
         """Recover from memory contradiction"""
         self._propagate_to_module("memory", "consolidate_urgent", {"reason": "contradiction_detected"})
         return True
 
-    async def _recover_hallucination(self, violation: Dict) -> bool:
+    async def _recover_hallucination(self, violation: dict) -> bool:
         """Recover from hallucination detection"""
         self._propagate_to_module("hallucination", "increase_validation", {"reason": "hallucination_detected"})
         return True
@@ -863,7 +861,7 @@ class ModuleIntegrationOrchestrator:
     # STATE ACCESS
     # =========================================================================
 
-    def get_unified_state(self) -> Dict[str, Any]:
+    def get_unified_state(self) -> dict[str, Any]:
         """Get unified state across all modules"""
         with self._state_lock:
             return {
@@ -911,7 +909,7 @@ class ModuleIntegrationOrchestrator:
 
         return max(0.1, min(0.99, adjusted))
 
-    def predict_operation_success(self, module: str, operation: str, context: Dict) -> float:
+    def predict_operation_success(self, module: str, operation: str, context: dict) -> float:
         """Predict success of operation based on learning"""
         operation_key = f"{module}_{operation}"
         return self.learning.predict_success(operation_key, context)
@@ -928,7 +926,7 @@ class OODAIntegrationConnector:
         self.orchestrator = ModuleIntegrationOrchestrator.get_instance()
         self.observability = get_observability()
 
-    def report_observation(self, observation: Dict[str, Any]):
+    def report_observation(self, observation: dict[str, Any]):
         """Report completed observation"""
         publish_event(EventType.OBSERVATION_COMPLETE, "ooda", observation)
         self.observability.ooda.record_observation(
@@ -936,7 +934,7 @@ class OODAIntegrationConnector:
             observation.get("source", "unknown")
         )
 
-    def report_decision(self, decision: Dict[str, Any]):
+    def report_decision(self, decision: dict[str, Any]):
         """Report decision made"""
         # Adjust confidence based on learning
         adjusted_confidence = self.orchestrator.get_adjusted_confidence(
@@ -948,7 +946,7 @@ class OODAIntegrationConnector:
         publish_event(EventType.DECISION_MADE, "ooda", decision)
         self.observability.ooda.record_decision(adjusted_confidence, decision.get("type", "unknown"))
 
-    def report_action(self, action: Dict[str, Any]):
+    def report_action(self, action: dict[str, Any]):
         """Report action executed"""
         publish_event(EventType.ACTION_EXECUTED, "ooda", action)
         self.observability.ooda.record_action(
@@ -957,12 +955,12 @@ class OODAIntegrationConnector:
             action.get("type", "unknown")
         )
 
-    def get_intention_context(self) -> List[Dict]:
+    def get_intention_context(self) -> list[dict]:
         """Get current intentions for decision guidance"""
         state = self.orchestrator.get_unified_state()
         return state.get("consciousness", {}).get("active_intentions", [])
 
-    def get_open_circuits(self) -> List[str]:
+    def get_open_circuits(self) -> list[str]:
         """Get list of open circuits to avoid"""
         state = self.orchestrator.get_unified_state()
         return state.get("health", {}).get("open_circuits", [])
@@ -975,7 +973,7 @@ class ConsciousnessIntegrationConnector:
         self.orchestrator = ModuleIntegrationOrchestrator.get_instance()
         self.observability = get_observability()
 
-    def report_intention(self, intention: Dict[str, Any]):
+    def report_intention(self, intention: dict[str, Any]):
         """Report generated intention"""
         publish_event(EventType.INTENTION_GENERATED, "consciousness", intention)
         self.observability.consciousness.record_intention(intention.get("type", "unknown"))
@@ -988,7 +986,7 @@ class ConsciousnessIntegrationConnector:
         )
         self.observability.consciousness.set_awareness_level(level, numeric)
 
-    def get_recent_observations(self) -> List[Dict]:
+    def get_recent_observations(self) -> list[dict]:
         """Get recent observations for situational awareness"""
         state = self.orchestrator.get_unified_state()
         return state.get("observations", {}).get("recent", [])
@@ -1006,7 +1004,7 @@ class MemoryIntegrationConnector:
         self.orchestrator = ModuleIntegrationOrchestrator.get_instance()
         self.observability = get_observability()
 
-    def report_store(self, memory: Dict[str, Any]):
+    def report_store(self, memory: dict[str, Any]):
         """Report memory stored"""
         publish_event(EventType.MEMORY_STORED, "memory", memory)
         self.observability.memory.record_store(
@@ -1014,12 +1012,12 @@ class MemoryIntegrationConnector:
             memory.get("type", "unknown")
         )
 
-    def report_contradiction(self, contradiction: Dict[str, Any]):
+    def report_contradiction(self, contradiction: dict[str, Any]):
         """Report contradiction detected"""
         publish_event(EventType.CONTRADICTION_DETECTED, "memory", contradiction)
         self.observability.memory.record_contradiction(contradiction.get("resolution", "pending"))
 
-    def get_decision_patterns(self) -> Dict[str, float]:
+    def get_decision_patterns(self) -> dict[str, float]:
         """Get decision success patterns for prediction"""
         state = self.orchestrator.get_unified_state()
         return state.get("learning", {}).get("success_rates", {})
@@ -1032,7 +1030,7 @@ class HallucinationIntegrationConnector:
         self.orchestrator = ModuleIntegrationOrchestrator.get_instance()
         self.observability = get_observability()
 
-    def report_validation(self, result: Dict[str, Any]):
+    def report_validation(self, result: dict[str, Any]):
         """Report validation result"""
         publish_event(EventType.VALIDATION_COMPLETE, "hallucination", result)
         self.observability.hallucination.record_validation(
@@ -1041,7 +1039,7 @@ class HallucinationIntegrationConnector:
             result.get("method", "unknown")
         )
 
-    def report_detection(self, hallucination: Dict[str, Any]):
+    def report_detection(self, hallucination: dict[str, Any]):
         """Report hallucination detected"""
         publish_event(EventType.HALLUCINATION_DETECTED, "hallucination", hallucination)
         self.observability.hallucination.record_detection(

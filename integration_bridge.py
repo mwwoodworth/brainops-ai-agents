@@ -15,9 +15,11 @@ Version: 2.0.0
 """
 
 import asyncio
-import httpx
 import logging
 from datetime import datetime, timezone
+
+import httpx
+
 from memory_system import memory_system
 
 logger = logging.getLogger(__name__)
@@ -25,9 +27,13 @@ logger = logging.getLogger(__name__)
 # Import enhanced orchestration features
 try:
     from autonomous_system_orchestrator import (
-        EventBus, MessageQueue,
-        CircuitBreaker, LoadBalancer, LoadBalancingStrategy,
-        AgentInstance, HealthAggregator
+        AgentInstance,
+        CircuitBreaker,
+        EventBus,
+        HealthAggregator,
+        LoadBalancer,
+        LoadBalancingStrategy,
+        MessageQueue,
     )
     ENHANCED_FEATURES_AVAILABLE = True
 except ImportError:

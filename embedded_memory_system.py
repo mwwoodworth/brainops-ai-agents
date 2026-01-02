@@ -3,15 +3,17 @@ Embedded SQLite Memory System with RAG and Master Sync
 Fast local memory access with bidirectional sync to master Postgres
 """
 
-import sqlite3
 import asyncio
 import json
-import os
 import logging
+import os
+import sqlite3
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Any, Optional
+
 import numpy as np
+
 # Using OpenAI text-embedding-3-small for production-quality semantic embeddings
 # Includes circuit breaker pattern for quota/rate limit handling
 
@@ -265,7 +267,7 @@ class EmbeddedMemorySystem:
         limit: int = 5,
         memory_type: Optional[str] = None,
         min_importance: float = 0.0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         RAG-powered memory search with semantic similarity
 
@@ -362,7 +364,7 @@ class EmbeddedMemorySystem:
         memory_type: str = "general",
         memory_id: Optional[str] = None,
         source_agent: str = "system",
-        metadata: Optional[Dict] = None,
+        metadata: Optional[dict] = None,
         importance_score: float = 0.5
     ) -> bool:
         """
@@ -458,7 +460,7 @@ class EmbeddedMemorySystem:
 
     # ========== Task Queue Operations ==========
 
-    def get_pending_tasks(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_pending_tasks(self, limit: int = 10) -> list[dict[str, Any]]:
         """Get pending tasks from local queue"""
         if not self.sqlite_conn:
             return []
@@ -597,14 +599,14 @@ class EmbeddedMemorySystem:
 
                 cursor = self.sqlite_conn.cursor()
                 generated_count = 0
-                
+
                 for mem in memories:
                     mem_id = str(mem['id'])
-                    
+
                     # Check if we already have a valid embedding locally
                     cursor.execute("SELECT embedding FROM unified_ai_memory WHERE id = ?", (mem_id,))
                     row = cursor.fetchone()
-                    
+
                     embedding = None
                     if row and row[0]:
                         # Reuse existing local embedding
@@ -614,7 +616,7 @@ class EmbeddedMemorySystem:
                         embedding = self._encode_embedding(mem['content'])
                         if embedding:
                             generated_count += 1
-                    
+
                     cursor.execute("""
                         INSERT OR REPLACE INTO unified_ai_memory (
                             id, memory_type, source_agent, content, embedding,
@@ -760,7 +762,7 @@ class EmbeddedMemorySystem:
 
     # ========== Statistics ==========
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get memory system statistics"""
         if not self.sqlite_conn:
             return {}

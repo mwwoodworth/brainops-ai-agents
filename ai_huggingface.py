@@ -4,9 +4,10 @@ Hugging Face AI Alternative
 Using Inference API for when OpenAI/Anthropic have issues
 """
 
-import os
-import requests
 import logging
+import os
+
+import requests
 
 logger = logging.getLogger(__name__)
 

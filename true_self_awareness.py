@@ -16,13 +16,13 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
 import asyncio
-import logging
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, field, asdict
 import json
+import logging
+import os
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 logger = logging.getLogger("TRUE_SELF_AWARENESS")
 
@@ -107,7 +107,7 @@ class SystemTruth:
     stub_agents: int = 0
     active_agents: int = 0
     broken_agents: int = 0
-    agent_details: List[AgentTruth] = field(default_factory=list)
+    agent_details: list[AgentTruth] = field(default_factory=list)
 
     # Database truth
     total_tables: int = 0
@@ -115,7 +115,7 @@ class SystemTruth:
     empty_tables: int = 0
     demo_tables: int = 0
     real_tables: int = 0
-    table_details: List[TableTruth] = field(default_factory=list)
+    table_details: list[TableTruth] = field(default_factory=list)
 
     # Revenue truth
     revenue: RevenueTruth = field(default_factory=RevenueTruth)
@@ -132,7 +132,7 @@ class SystemTruth:
     awareness_level: str = "aware"
 
     # Critical warnings
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def to_dict(self):
         return {
@@ -392,17 +392,17 @@ class TrueSelfAwareness:
 
         lines = [
             f"🧠 AI OS Status @ {truth.timestamp.strftime('%H:%M:%S UTC')}",
-            f"",
+            "",
             f"AGENTS: {truth.real_agents} real / {truth.stub_agents} stubs / {truth.broken_agents} broken",
             f"HEALTH: {truth.stuck_executions} stuck, {truth.pending_tasks} pending, {truth.error_rate*100:.1f}% error rate",
             f"THOUGHTS: {truth.thought_count} total, {truth.thought_rate}/min",
-            f"",
-            f"⚠️  DEMO DATA (NOT REAL):",
+            "",
+            "⚠️  DEMO DATA (NOT REAL):",
             f"   - {truth.revenue.demo_customers:,} customers",
             f"   - {truth.revenue.demo_jobs:,} jobs",
             f"   - ${truth.revenue.demo_total_value:,.0f} fake invoice value",
-            f"",
-            f"✅ REAL REVENUE:",
+            "",
+            "✅ REAL REVENUE:",
             f"   - {truth.revenue.real_gumroad_sales} Gumroad sales",
             f"   - {truth.revenue.real_revenue_leads} pipeline leads (${truth.revenue.real_pipeline_value:,.0f})",
             f"   - {truth.revenue.real_won_deals} won (${truth.revenue.real_won_revenue:,.0f})",
@@ -424,7 +424,7 @@ def get_true_awareness() -> TrueSelfAwareness:
     return TrueSelfAwareness.get_instance()
 
 
-async def get_system_truth() -> Dict[str, Any]:
+async def get_system_truth() -> dict[str, Any]:
     """Get the full system truth as a dictionary"""
     awareness = get_true_awareness()
     truth = await awareness.get_truth()

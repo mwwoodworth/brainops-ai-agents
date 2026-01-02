@@ -2,18 +2,17 @@
 Codebase Graph Crawler
 Crawls specified codebases and populates the codebase_nodes and codebase_edges tables.
 """
-import asyncio
-import os
 import ast
-import re
-import logging
+import asyncio
 import hashlib
-from typing import List, Dict, Tuple
-from pathlib import Path
+import logging
+import os
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from config import config
-from database.async_connection import init_pool, get_pool, PoolConfig, close_pool
+from database.async_connection import PoolConfig, close_pool, get_pool, init_pool
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -27,8 +26,8 @@ class CodeNode:
     repo_name: str
     line_number: int
     content_hash: str
-    metadata: Dict = field(default_factory=dict)
-    
+    metadata: dict = field(default_factory=dict)
+
 @dataclass
 class CodeEdge:
     source_name: str
@@ -36,39 +35,39 @@ class CodeEdge:
     target_name: str
     target_type: str
     edge_type: str # 'imports', 'calls', 'inherits', 'defines', 'contains'
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 class CodebaseCrawler:
-    def __init__(self, directories: List[str]):
+    def __init__(self, directories: list[str]):
         self.directories = directories
-        self.nodes: List[CodeNode] = []
-        self.edges: List[Dict] = [] # Storing as dicts for easier DB insertion: source_id, target_id, etc. 
+        self.nodes: list[CodeNode] = []
+        self.edges: list[dict] = [] # Storing as dicts for easier DB insertion: source_id, target_id, etc.
         # Temporary storage for resolution
-        self.pending_edges: List[Tuple[CodeNode, str, str, str, Dict]] = [] # source_node, target_name, target_type_hint, edge_type, metadata
+        self.pending_edges: list[tuple[CodeNode, str, str, str, dict]] = [] # source_node, target_name, target_type_hint, edge_type, metadata
 
     async def run(self):
         """Main execution flow"""
         logger.info("Starting codebase crawl...")
-        
+
         await self._ensure_schema()
-        
+
         # 1. Clear existing data (optional, or upsert? For now, let's clear to ensure fresh graph)
-        # Actually, let's use ON CONFLICT DO UPDATE in the insert to support incremental, 
+        # Actually, let's use ON CONFLICT DO UPDATE in the insert to support incremental,
         # but for simplicity/cleanliness, a wipe might be safer if we want to remove stale nodes.
         # Given "production-ready", we should probably mark stale nodes or just truncate for this specific task.
         # I'll implement a clean slate approach for this version to avoid zombie nodes.
         await self._clear_tables()
-        
+
         for dir_path in self.directories:
             path = Path(dir_path)
             if not path.exists():
                 logger.warning(f"Directory not found: {dir_path}")
                 continue
-            
+
             repo_name = path.name
             logger.info(f"Processing repository: {repo_name}")
             await self.crawl_repo(path, repo_name)
-            
+
         await self._save_nodes()
         await self._resolve_and_save_edges()
         logger.info("Crawl complete.")
@@ -78,7 +77,7 @@ class CodebaseCrawler:
         logger.info("Ensuring schema exists...")
         migration_path = Path("migrations/create_codebase_graph_tables.sql")
         if migration_path.exists():
-            with open(migration_path, 'r') as f:
+            with open(migration_path) as f:
                 sql = f.read()
                 # Split by statements if needed, but asyncpg execute can handle blocks usually if simple.
                 # Or use execute for the whole block.
@@ -97,15 +96,15 @@ class CodebaseCrawler:
             # Skip common ignore dirs
             if any(ignore in root for ignore in ['.git', 'node_modules', '__pycache__', '.venv', 'dist', 'build', '.next']):
                 continue
-                
+
             for file in files:
                 file_path = Path(root) / file
-                rel_path = str(file_path.relative_to(root_path.parent)) # Store path relative to dev root usually, or repo root? 
-                # Prompt says codebases are in /home/matt-woodworth/dev/. 
+                rel_path = str(file_path.relative_to(root_path.parent)) # Store path relative to dev root usually, or repo root?
+                # Prompt says codebases are in /home/matt-woodworth/dev/.
                 # Let's store relative to the scanned directory or just relative to repo root?
                 # Storing relative to repo root is cleaner: "src/utils.ts" in "myroofgenius-app"
                 rel_path_in_repo = str(file_path.relative_to(root_path))
-                
+
                 if file.endswith('.py'):
                     self.parse_python(file_path, rel_path_in_repo, repo_name)
                 elif file.endswith(('.ts', '.tsx', '.js', '.jsx')):
@@ -116,11 +115,11 @@ class CodebaseCrawler:
 
     def parse_python(self, file_path: Path, rel_path: str, repo_name: str):
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding='utf-8') as f:
                 content = f.read()
-            
+
             tree = ast.parse(content)
-            
+
             # File Node
             file_node = CodeNode(
                 name=file_path.name,
@@ -131,7 +130,7 @@ class CodebaseCrawler:
                 content_hash=self._get_hash(content)
             )
             self.nodes.append(file_node)
-            
+
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
                     class_node = CodeNode(
@@ -145,7 +144,7 @@ class CodebaseCrawler:
                     self.nodes.append(class_node)
                     # Edge: File contains Class
                     self.pending_edges.append((file_node, class_node.name, 'class', 'contains', {}))
-                    
+
                     # Inheritance edges
                     for base in node.bases:
                         if isinstance(base, ast.Name):
@@ -163,7 +162,7 @@ class CodebaseCrawler:
                     self.nodes.append(func_node)
                     # Edge: File contains Function
                     self.pending_edges.append((file_node, func_node.name, 'function', 'contains', {}))
-                    
+
                     # Detect API Endpoint (FastAPI)
                     if node.decorator_list:
                         for dec in node.decorator_list:
@@ -182,7 +181,7 @@ class CodebaseCrawler:
 
                 elif isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
                     # We can store imports. Linking them is hard without resolving.
-                    # For now, just store as metadata on the file node? 
+                    # For now, just store as metadata on the file node?
                     # Or better, create a generic "dependency" edge to the module name.
                     module = getattr(node, 'module', None)
                     if module:
@@ -190,15 +189,15 @@ class CodebaseCrawler:
                     for name in node.names:
                         if not module: # simple import x
                             self.pending_edges.append((file_node, name.name, 'file', 'imports', {}))
-                        
+
         except Exception as e:
             logger.error(f"Error parsing Python file {file_path}: {e}")
 
     def parse_typescript(self, file_path: Path, rel_path: str, repo_name: str):
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding='utf-8') as f:
                 content = f.read()
-                
+
             # File Node
             file_node = CodeNode(
                 name=file_path.name,
@@ -248,7 +247,7 @@ class CodebaseCrawler:
             for match in import_pattern.finditer(content):
                 module = match.group(1)
                 self.pending_edges.append((file_node, module, 'file', 'imports', {}))
-                
+
             # 4. API Endpoints (Next.js App Router / Pages Router)
             # App Router: export async function GET/POST...
             # This is covered by "function" extraction, but we can tag them if name is HTTP method
@@ -266,12 +265,12 @@ class CodebaseCrawler:
     async def _save_nodes(self):
         pool = get_pool()
         logger.info(f"Saving {len(self.nodes)} nodes...")
-        
+
         # Batch insert
-        # We need to fetch back IDs to map for edges. 
+        # We need to fetch back IDs to map for edges.
         # This is tricky with batching.
         # Strategy: Insert, then select all to build an in-memory map of (repo, path, name, type) -> UUID.
-        
+
         values = []
         for n in self.nodes:
             values.append((n.name, n.type, n.file_path, n.repo_name, n.line_number, n.content_hash, json.dumps(n.metadata)))
@@ -279,14 +278,14 @@ class CodebaseCrawler:
         # Asyncpg executemany doesn't return rows.
         # We'll use a loop with ON CONFLICT DO NOTHING for safety, or just copy_records_to_table if we were sure.
         # Let's use executemany with a raw INSERT.
-        
+
         query = """
             INSERT INTO codebase_nodes (name, type, file_path, repo_name, line_number, content_hash, metadata)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (repo_name, file_path, name, type) DO UPDATE 
+            ON CONFLICT (repo_name, file_path, name, type) DO UPDATE
             SET content_hash = EXCLUDED.content_hash, line_number = EXCLUDED.line_number, updated_at = NOW()
         """
-        
+
         # Split into chunks to avoid query size limits
         chunk_size = 1000
         for i in range(0, len(values), chunk_size):
@@ -296,13 +295,13 @@ class CodebaseCrawler:
     async def _resolve_and_save_edges(self):
         pool = get_pool()
         logger.info("Resolving and saving edges...")
-        
+
         # Build Lookup Map
         # (repo_name, file_path, name, type) -> id
         # Wait, for imports (file -> file), we don't know the exact file path of the target sometimes (e.g. "import './utils'").
         # We need a fuzzy lookup or path resolution.
         # For "contains" (file -> class), we know exacts.
-        
+
         # Fetch all nodes
         rows = await pool.fetch("SELECT id, codebase as repo_name, filepath as file_path, name, node_type as type FROM codebase_nodes")
         node_map = {} # (repo, path, name) -> id  -- Type might be ambiguous for imports? No, usually distinct.
@@ -317,27 +316,27 @@ class CodebaseCrawler:
                 node_map[(row['repo_name'], base_path)] = row['id']
 
         edges_to_insert = []
-        
+
         for source_node, target_name, target_type, edge_type, metadata in self.pending_edges:
             source_key = (source_node.repo_name, source_node.file_path, source_node.name)
             if source_node.type == 'file': # File node key is simpler? No, consistent.
                 pass
-                
+
             source_id = node_map.get(source_key)
             if not source_id:
                 # Fallback: maybe it's a file node looking up by (repo, path)
                 source_id = node_map.get((source_node.repo_name, source_node.file_path))
-            
+
             if not source_id:
                 continue
 
             target_id = None
-            
+
             if edge_type == 'contains':
                 # Direct lookup: same file, target name
                 target_key = (source_node.repo_name, source_node.file_path, target_name)
                 target_id = node_map.get(target_key)
-                
+
             elif edge_type == 'imports':
                 # Path resolution
                 # target_name is the module path (e.g. "./utils", "react")
@@ -352,7 +351,7 @@ class CodebaseCrawler:
                         # Wait, we are working with relative strings.
                         # Using python's os.path.normpath
                         resolved_path = os.path.normpath(os.path.join(source_dir, target_name))
-                        
+
                         # Try to find in map
                         # 1. Exact match (unlikely if extension omitted)
                         target_id = node_map.get((source_node.repo_name, resolved_path))
@@ -361,7 +360,7 @@ class CodebaseCrawler:
                             for ext in ['.ts', '.tsx', '.js', '.jsx', '.py']:
                                 target_id = node_map.get((source_node.repo_name, resolved_path + ext))
                                 if target_id: break
-                                
+
                     except (OSError, ValueError) as exc:
                         logger.debug("Failed to resolve import path %s: %s", target_name, exc, exc_info=True)
                 else:
@@ -385,10 +384,11 @@ class CodebaseCrawler:
             for i in range(0, len(edges_to_insert), chunk_size):
                 chunk = edges_to_insert[i:i + chunk_size]
                 await pool.executemany(query, chunk)
-                
+
         logger.info(f"Saved {len(edges_to_insert)} edges.")
 
 import json
+
 
 async def main():
     # Load DB Config
@@ -402,14 +402,14 @@ async def main():
         ssl=db_config.ssl,
         ssl_verify=db_config.ssl_verify
     )
-    
+
     await init_pool(pool_config)
-    
+
     # Directories to crawl (Assuming relative to parent of current dir, based on prompt)
     # But we are in /home/matt-woodworth/dev/brainops-ai-agents
     # And we want to crawl /home/matt-woodworth/dev/weathercraft-erp etc.
     # So we look at ../
-    
+
     dev_root = Path('..').resolve()
     target_repos = [
         'weathercraft-erp',
@@ -418,7 +418,7 @@ async def main():
         'brainops-command-center',
         'mcp-bridge'
     ]
-    
+
     directories_to_crawl = []
     for repo in target_repos:
         path = dev_root / repo
@@ -429,7 +429,7 @@ async def main():
 
     crawler = CodebaseCrawler(directories_to_crawl)
     await crawler.run()
-    
+
     await close_pool()
 
 if __name__ == "__main__":

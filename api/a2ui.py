@@ -5,10 +5,11 @@ RESTful API for generating A2UI-compliant UI responses.
 https://a2ui.org/ | https://github.com/google/A2UI
 """
 
+import logging
+from typing import Any, Optional
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
-import logging
 
 from a2ui_protocol import (
     A2UIBuilder,
@@ -24,27 +25,27 @@ router = APIRouter(prefix="/a2ui", tags=["A2UI Protocol"])
 
 class DashboardRequest(BaseModel):
     title: str = "Dashboard"
-    metrics: Dict[str, Any]
-    actions: Optional[List[Dict[str, str]]] = None
+    metrics: dict[str, Any]
+    actions: Optional[list[dict[str, str]]] = None
 
 
 class TableRequest(BaseModel):
     title: str
-    columns: List[str]
-    rows: List[List[Any]]
-    row_actions: Optional[List[str]] = None
+    columns: list[str]
+    rows: list[list[Any]]
+    row_actions: Optional[list[str]] = None
 
 
 class StatusRequest(BaseModel):
     title: str
     status: str
-    details: Dict[str, Any]
+    details: dict[str, Any]
     severity: str = "info"
 
 
 class FormRequest(BaseModel):
     title: str
-    fields: List[Dict[str, Any]]
+    fields: list[dict[str, Any]]
     submit_action: str
 
 
@@ -57,12 +58,12 @@ class ConfirmationRequest(BaseModel):
 
 class CustomUIRequest(BaseModel):
     surface_id: Optional[str] = None
-    components: List[Dict[str, Any]]
+    components: list[dict[str, Any]]
     root_component_id: Optional[str] = None
 
 
 @router.get("/spec")
-async def get_a2ui_spec() -> Dict[str, Any]:
+async def get_a2ui_spec() -> dict[str, Any]:
     """Get A2UI specification and component catalog"""
     return {
         "protocol": "A2UI",
@@ -87,7 +88,7 @@ async def get_a2ui_spec() -> Dict[str, Any]:
 
 
 @router.get("/health")
-async def a2ui_health() -> Dict[str, Any]:
+async def a2ui_health() -> dict[str, Any]:
     """A2UI module health check"""
     return {
         "status": "operational",
@@ -99,7 +100,7 @@ async def a2ui_health() -> Dict[str, Any]:
 
 
 @router.post("/generate/dashboard")
-async def generate_dashboard(request: DashboardRequest) -> Dict[str, Any]:
+async def generate_dashboard(request: DashboardRequest) -> dict[str, Any]:
     """Generate an A2UI dashboard card"""
     try:
         metric_list = [
@@ -122,7 +123,7 @@ async def generate_dashboard(request: DashboardRequest) -> Dict[str, Any]:
 
 
 @router.post("/generate/table")
-async def generate_table(request: TableRequest) -> Dict[str, Any]:
+async def generate_table(request: TableRequest) -> dict[str, Any]:
     """Generate an A2UI data table"""
     try:
         result = A2UIGenerator.data_table(
@@ -141,7 +142,7 @@ async def generate_table(request: TableRequest) -> Dict[str, Any]:
 
 
 @router.post("/generate/status")
-async def generate_status(request: StatusRequest) -> Dict[str, Any]:
+async def generate_status(request: StatusRequest) -> dict[str, Any]:
     """Generate an A2UI status display"""
     try:
         result = A2UIGenerator.status_display(
@@ -160,7 +161,7 @@ async def generate_status(request: StatusRequest) -> Dict[str, Any]:
 
 
 @router.post("/generate/form")
-async def generate_form(request: FormRequest) -> Dict[str, Any]:
+async def generate_form(request: FormRequest) -> dict[str, Any]:
     """Generate an A2UI form"""
     try:
         result = A2UIGenerator.form(
@@ -178,7 +179,7 @@ async def generate_form(request: FormRequest) -> Dict[str, Any]:
 
 
 @router.post("/generate/confirmation")
-async def generate_confirmation(request: ConfirmationRequest) -> Dict[str, Any]:
+async def generate_confirmation(request: ConfirmationRequest) -> dict[str, Any]:
     """Generate an A2UI confirmation dialog"""
     try:
         result = A2UIGenerator.confirmation_dialog(
@@ -197,7 +198,7 @@ async def generate_confirmation(request: ConfirmationRequest) -> Dict[str, Any]:
 
 
 @router.post("/generate/custom")
-async def generate_custom(request: CustomUIRequest) -> Dict[str, Any]:
+async def generate_custom(request: CustomUIRequest) -> dict[str, Any]:
     """Generate a custom A2UI surface from component definitions"""
     try:
         builder = A2UIBuilder(request.surface_id)
@@ -225,16 +226,15 @@ async def generate_custom(request: CustomUIRequest) -> Dict[str, Any]:
 
 # AUREA-specific endpoints
 @router.get("/aurea/health-dashboard")
-async def aurea_health_dashboard() -> Dict[str, Any]:
+async def aurea_health_dashboard() -> dict[str, Any]:
     """Generate A2UI for current AUREA health status"""
     try:
         # Get actual health data
-        from database.async_connection import get_pool
+        import httpx
 
         # Get actual health data
         from database.async_connection import get_pool
-        import httpx
-        
+
         # 1. Live System Checks
         async with httpx.AsyncClient(timeout=3.0) as client:
             try:
@@ -248,7 +248,7 @@ async def aurea_health_dashboard() -> Dict[str, Any]:
         pool = get_pool()
         active_agents = await pool.fetchval("SELECT COUNT(*) FROM ai_agents WHERE status = 'active'") or 0
         total_executions = await pool.fetchval("SELECT COUNT(*) FROM ai_agent_executions WHERE created_at > NOW() - INTERVAL '24 hours'") or 0
-        
+
         # Calculate scores
         health_score = 98.0 if agents_up else 40.0
         decision_health = min(100.0, float(total_executions) / 10.0) if total_executions else 50.0
@@ -257,7 +257,7 @@ async def aurea_health_dashboard() -> Dict[str, Any]:
             "overall_score": health_score,
             "component_health": {
                 "agents": 100.0 if agents_up else 0.0,
-                "memory": 95.0, 
+                "memory": 95.0,
                 "decisions": decision_health,
                 "performance": 95.0
             },
@@ -277,7 +277,7 @@ async def aurea_health_dashboard() -> Dict[str, Any]:
 
 
 @router.get("/aurea/agent-grid")
-async def aurea_agent_grid(limit: int = Query(default=20, le=100)) -> Dict[str, Any]:
+async def aurea_agent_grid(limit: int = Query(default=20, le=100)) -> dict[str, Any]:
     """Generate A2UI agent grid from live data"""
     try:
         from database.async_connection import get_pool
@@ -314,7 +314,7 @@ async def aurea_agent_grid(limit: int = Query(default=20, le=100)) -> Dict[str, 
 
 
 @router.get("/demo")
-async def demo_a2ui() -> Dict[str, Any]:
+async def demo_a2ui() -> dict[str, Any]:
     """Demo A2UI output showing all component types"""
     builder = A2UIBuilder("demo_surface")
 

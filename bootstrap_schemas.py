@@ -1,20 +1,20 @@
 
-import sys
 import asyncio
 import logging
+import sys
 
 # Add the directory to sys.path
 sys.path.append('/home/matt-woodworth/dev/brainops-ai-agents')
 
-from ai_tracer import BrainOpsTracer
 from ai_operating_system import AIOperatingSystem
+from ai_tracer import BrainOpsTracer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 async def bootstrap_schemas():
     logger.info("Bootstrapping BrainOps schemas...")
-    
+
     # 1. Tracer Schema
     try:
         logger.info("Initializing Tracer schema...")

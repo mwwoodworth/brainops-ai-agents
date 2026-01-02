@@ -11,24 +11,30 @@ The Nerve Center:
 - Enables true emergent intelligence
 """
 
-import json
 import asyncio
+import json
 import logging
 import threading
-from datetime import datetime
-from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
-from database.async_connection import get_pool, using_fallback
+from typing import Any, Callable, Optional
+
+from ai_tracer import BrainOpsTracer
 
 # Import all alive components
-from alive_core import get_alive_core, AliveCore, ConsciousnessState, ThoughtType
+from alive_core import AliveCore, ConsciousnessState, ThoughtType, get_alive_core
 from autonomic_controller import (
-    get_metric_collector, get_event_bus, get_autonomic_manager,
-    EventType, MetricCollector, EventBus, AutonomicManager
+    AutonomicManager,
+    EventBus,
+    EventType,
+    MetricCollector,
+    get_autonomic_manager,
+    get_event_bus,
+    get_metric_collector,
 )
-from proactive_intelligence import get_proactive_intelligence, ProactiveIntelligence
-from ai_tracer import BrainOpsTracer
+from database.async_connection import get_pool, using_fallback
+from proactive_intelligence import ProactiveIntelligence, get_proactive_intelligence
 
 # Try to import optional components
 try:
@@ -73,7 +79,7 @@ class NerveSignal:
     type: SystemSignal
     source: str
     target: str  # "all" for broadcast
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     priority: int
     timestamp: datetime
 
@@ -104,12 +110,12 @@ class NerveCenter:
         self.system_awareness = None
 
         # Signal handlers
-        self._signal_handlers: Dict[SystemSignal, List[Callable]] = {
+        self._signal_handlers: dict[SystemSignal, list[Callable]] = {
             signal: [] for signal in SystemSignal
         }
 
         # Background tasks
-        self._tasks: List[asyncio.Task] = []
+        self._tasks: list[asyncio.Task] = []
         self._shutdown_event = asyncio.Event()
 
         # Schema is pre-created in database - skip blocking init
@@ -531,7 +537,7 @@ class NerveCenter:
 
         logger.info("💤 Nerve Center deactivated")
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         """Get comprehensive status"""
         return {
             'is_online': self.is_online,

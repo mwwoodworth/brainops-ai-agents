@@ -3,11 +3,12 @@
 Monitor deployment status and system health
 """
 
-import time
-import requests
 import json
+import time
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any
+
+import requests
 
 # Service endpoints
 ENDPOINTS = {
@@ -18,7 +19,7 @@ ENDPOINTS = {
     'erp_api': 'https://myroofgenius.com/api/health'
 }
 
-def check_endpoint(name: str, url: str) -> Dict[str, Any]:
+def check_endpoint(name: str, url: str) -> dict[str, Any]:
     """Check a single endpoint"""
     try:
         start = time.time()

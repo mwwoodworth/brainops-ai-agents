@@ -21,16 +21,17 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-import aiohttp
+import os
 import time
 import uuid
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ class OperationResult:
     operation: str
     success: bool
     execution_time_ms: float
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
     evidence: Optional[str] = None  # Proof the operation worked
 
@@ -79,7 +80,7 @@ class TrueOperationalValidator:
     def __init__(self):
         self._session: Optional[aiohttp.ClientSession] = None
         self._db_conn = None
-        self.results: List[OperationResult] = []
+        self.results: list[OperationResult] = []
         self.test_id = f"validator_{int(time.time())}"
 
     async def initialize(self):
@@ -113,7 +114,7 @@ class TrueOperationalValidator:
             await self._db_conn.close()
 
     def _record_result(self, operation: str, success: bool, execution_time: float,
-                       details: Dict = None, error: str = None, evidence: str = None):
+                       details: dict = None, error: str = None, evidence: str = None):
         """Record an operation result"""
         result = OperationResult(
             operation=operation,
@@ -423,7 +424,7 @@ class TrueOperationalValidator:
                 return self._record_result(
                     "ai_generation", True, time.time() - start,
                     details={"keys": list(result.keys())},
-                    evidence=f"AI analysis returned data"
+                    evidence="AI analysis returned data"
                 )
             elif result:
                 return self._record_result(
@@ -485,7 +486,7 @@ class TrueOperationalValidator:
                     if results.get("results") or results.get("memories") or results.get("contexts"):
                         return self._record_result(
                             "memory_embed_retrieve", True, time.time() - start,
-                            evidence=f"Memory search returned results"
+                            evidence="Memory search returned results"
                         )
 
             # Check bleeding-edge memory recall
@@ -750,7 +751,7 @@ class TrueOperationalValidator:
     # RUN ALL VALIDATIONS
     # =========================================================================
 
-    async def run_all_validations(self) -> Dict[str, Any]:
+    async def run_all_validations(self) -> dict[str, Any]:
         """Run ALL true operational validations"""
         logger.info(f"=== TRUE OPERATIONAL VALIDATION ({self.test_id}) ===")
         start_time = time.time()
@@ -821,7 +822,7 @@ class TrueOperationalValidator:
 # API FUNCTIONS
 # =============================================================================
 
-async def run_true_validation() -> Dict[str, Any]:
+async def run_true_validation() -> dict[str, Any]:
     """Run complete true operational validation"""
     validator = TrueOperationalValidator()
     await validator.initialize()

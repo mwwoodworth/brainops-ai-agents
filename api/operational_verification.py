@@ -5,11 +5,12 @@ PROVES systems work, doesn't assume they do.
 Tests each component with real operations.
 """
 
-import logging
 import asyncio
+import logging
 import time
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from typing import Any, Optional
+
 from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)
@@ -21,10 +22,10 @@ class OperationalVerifier:
     """Verifies systems are actually operational, not just initialized."""
 
     def __init__(self):
-        self._last_verification: Optional[Dict[str, Any]] = None
-        self._verification_history: List[Dict[str, Any]] = []
+        self._last_verification: Optional[dict[str, Any]] = None
+        self._verification_history: list[dict[str, Any]] = []
 
-    async def verify_database(self) -> Dict[str, Any]:
+    async def verify_database(self) -> dict[str, Any]:
         """Actually test database read/write."""
         start = time.time()
         try:
@@ -57,7 +58,7 @@ class OperationalVerifier:
                 "latency_ms": round((time.time() - start) * 1000, 2)
             }
 
-    async def verify_ai_core(self) -> Dict[str, Any]:
+    async def verify_ai_core(self) -> dict[str, Any]:
         """Actually make an AI call to verify it works."""
         start = time.time()
         try:
@@ -84,12 +85,12 @@ class OperationalVerifier:
                 "latency_ms": round((time.time() - start) * 1000, 2)
             }
 
-    async def verify_memory_system(self) -> Dict[str, Any]:
+    async def verify_memory_system(self) -> dict[str, Any]:
         """Test memory store and retrieve."""
         start = time.time()
         try:
-            from unified_memory_manager import UnifiedMemoryManager
             from config import config
+            from unified_memory_manager import UnifiedMemoryManager
 
             # Use default tenant_id from config (required for multi-tenancy)
             tenant_id = config.tenant.default_tenant_id or "system_verification"
@@ -120,7 +121,7 @@ class OperationalVerifier:
                 "latency_ms": round((time.time() - start) * 1000, 2)
             }
 
-    async def verify_agent_executor(self) -> Dict[str, Any]:
+    async def verify_agent_executor(self) -> dict[str, Any]:
         """Test that agent executor can actually run agents."""
         start = time.time()
         try:
@@ -156,7 +157,7 @@ class OperationalVerifier:
                 "latency_ms": round((time.time() - start) * 1000, 2)
             }
 
-    async def verify_scheduler(self, app_state) -> Dict[str, Any]:
+    async def verify_scheduler(self, app_state) -> dict[str, Any]:
         """Verify scheduler is running and processing jobs."""
         start = time.time()
         try:
@@ -185,7 +186,7 @@ class OperationalVerifier:
                 "latency_ms": round((time.time() - start) * 1000, 2)
             }
 
-    async def verify_aurea(self, app_state) -> Dict[str, Any]:
+    async def verify_aurea(self, app_state) -> dict[str, Any]:
         """Verify AUREA orchestration loop is running."""
         start = time.time()
         try:
@@ -212,7 +213,7 @@ class OperationalVerifier:
                 "latency_ms": round((time.time() - start) * 1000, 2)
             }
 
-    async def verify_training_pipeline(self, app_state) -> Dict[str, Any]:
+    async def verify_training_pipeline(self, app_state) -> dict[str, Any]:
         """Verify training pipeline can process data."""
         start = time.time()
         try:
@@ -241,7 +242,7 @@ class OperationalVerifier:
                 "latency_ms": round((time.time() - start) * 1000, 2)
             }
 
-    async def verify_learning_system(self, app_state) -> Dict[str, Any]:
+    async def verify_learning_system(self, app_state) -> dict[str, Any]:
         """Verify learning system can learn from interactions."""
         start = time.time()
         try:
@@ -268,7 +269,7 @@ class OperationalVerifier:
                 "latency_ms": round((time.time() - start) * 1000, 2)
             }
 
-    async def verify_specialized_agents(self, app_state) -> Dict[str, Any]:
+    async def verify_specialized_agents(self, app_state) -> dict[str, Any]:
         """Verify all specialized agents are operational."""
         start = time.time()
         results = {}
@@ -317,7 +318,7 @@ class OperationalVerifier:
             "latency_ms": round((time.time() - start) * 1000, 2)
         }
 
-    async def full_verification(self, app_state) -> Dict[str, Any]:
+    async def full_verification(self, app_state) -> dict[str, Any]:
         """Run complete system verification."""
         start = time.time()
 

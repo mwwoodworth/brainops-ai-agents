@@ -3,9 +3,10 @@
 Monitor v4.0.1 deployment with REAL AI
 """
 
-import requests
 import time
 from datetime import datetime
+
+import requests
 
 BASE_URL = "https://brainops-ai-agents.onrender.com"
 
@@ -25,14 +26,14 @@ def check_deployment():
             print(f"  AI Enabled: {'✅ YES' if ai_enabled else '❌ NO'}")
 
             if data.get('features', {}).get('gpt4'):
-                print(f"  GPT-4: ✅ Available")
+                print("  GPT-4: ✅ Available")
             else:
-                print(f"  GPT-4: ❌ Not configured")
+                print("  GPT-4: ❌ Not configured")
 
             if data.get('features', {}).get('claude'):
-                print(f"  Claude: ✅ Available")
+                print("  Claude: ✅ Available")
             else:
-                print(f"  Claude: ❌ Not configured")
+                print("  Claude: ❌ Not configured")
 
             if version == "4.0.1" and ai_enabled:
                 return True

@@ -5,9 +5,10 @@ API endpoints for comprehensive end-to-end system verification.
 Ensures 100% operational status across ALL BrainOps systems.
 """
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
-import logging
 import asyncio
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +238,7 @@ async def list_verified_systems():
 async def debug_api_key():
     """Debug endpoint to check which API key the E2E module is using"""
     import os
+
     from e2e_system_verification import API_KEY, _api_keys_list
 
     api_keys_env = os.getenv("API_KEYS", "NOT SET")
@@ -282,7 +284,7 @@ async def run_ui_test(
         )
 
     try:
-        from ui_tester_agent import UITesterAgent, PLAYWRIGHT_AVAILABLE
+        from ui_tester_agent import PLAYWRIGHT_AVAILABLE, UITesterAgent
 
         if not PLAYWRIGHT_AVAILABLE:
             return {
@@ -313,7 +315,7 @@ async def run_all_ui_tests():
     Tests: weathercraft-erp, myroofgenius, brainops-command-center
     """
     try:
-        from ui_tester_agent import UITesterAgent, PLAYWRIGHT_AVAILABLE
+        from ui_tester_agent import PLAYWRIGHT_AVAILABLE, UITesterAgent
 
         if not PLAYWRIGHT_AVAILABLE:
             return {
@@ -355,7 +357,7 @@ async def run_all_ui_tests():
 async def get_ui_test_status():
     """Check if UI testing (Playwright) is available"""
     try:
-        from ui_tester_agent import UITesterAgent, PLAYWRIGHT_AVAILABLE
+        from ui_tester_agent import PLAYWRIGHT_AVAILABLE, UITesterAgent
 
         if not PLAYWRIGHT_AVAILABLE:
             return {
@@ -413,7 +415,7 @@ async def run_visual_ai_analysis(app_name: str):
         )
 
     try:
-        from ui_tester_agent import UITesterAgent, PLAYWRIGHT_AVAILABLE, GEMINI_VISION_AVAILABLE
+        from ui_tester_agent import GEMINI_VISION_AVAILABLE, PLAYWRIGHT_AVAILABLE, UITesterAgent
 
         if not PLAYWRIGHT_AVAILABLE:
             return {"status": "error", "error": "Playwright not available"}
@@ -451,7 +453,7 @@ async def run_all_visual_ai_analysis():
     Returns comprehensive AI insights for the entire frontend ecosystem.
     """
     try:
-        from ui_tester_agent import UITesterAgent, PLAYWRIGHT_AVAILABLE, GEMINI_VISION_AVAILABLE
+        from ui_tester_agent import GEMINI_VISION_AVAILABLE, PLAYWRIGHT_AVAILABLE, UITesterAgent
 
         if not PLAYWRIGHT_AVAILABLE or not GEMINI_VISION_AVAILABLE:
             return {
@@ -517,7 +519,7 @@ async def complete_verification():
 
     # Run UI verification
     try:
-        from ui_tester_agent import UITesterAgent, PLAYWRIGHT_AVAILABLE
+        from ui_tester_agent import PLAYWRIGHT_AVAILABLE, UITesterAgent
 
         if PLAYWRIGHT_AVAILABLE:
             tester = UITesterAgent()

@@ -26,11 +26,10 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import httpx
 from loguru import logger
-
 
 # =============================================================================
 # ENUMERATIONS
@@ -93,10 +92,10 @@ class SOPSection:
     content: str = ""
     order: int = 0
     section_type: str = "content"  # purpose, scope, steps, warnings, etc.
-    subsections: List["SOPSection"] = field(default_factory=list)
-    media: List[Dict[str, str]] = field(default_factory=list)  # images, videos
-    warnings: List[str] = field(default_factory=list)
-    tips: List[str] = field(default_factory=list)
+    subsections: list["SOPSection"] = field(default_factory=list)
+    media: list[dict[str, str]] = field(default_factory=list)  # images, videos
+    warnings: list[str] = field(default_factory=list)
+    tips: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -110,25 +109,25 @@ class SOPStep:
     estimated_time_minutes: int = 0
 
     # Sub-steps
-    substeps: List[str] = field(default_factory=list)
+    substeps: list[str] = field(default_factory=list)
 
     # Conditionals
-    prerequisites: List[str] = field(default_factory=list)
-    conditions: List[str] = field(default_factory=list)  # if/when conditions
+    prerequisites: list[str] = field(default_factory=list)
+    conditions: list[str] = field(default_factory=list)  # if/when conditions
 
     # References
-    tools_required: List[str] = field(default_factory=list)
-    roles_responsible: List[str] = field(default_factory=list)
-    related_sops: List[str] = field(default_factory=list)
+    tools_required: list[str] = field(default_factory=list)
+    roles_responsible: list[str] = field(default_factory=list)
+    related_sops: list[str] = field(default_factory=list)
 
     # Warnings and notes
-    warnings: List[str] = field(default_factory=list)
-    cautions: List[str] = field(default_factory=list)
-    notes: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    cautions: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
     # Media
-    screenshots: List[str] = field(default_factory=list)
-    video_links: List[str] = field(default_factory=list)
+    screenshots: list[str] = field(default_factory=list)
+    video_links: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -149,35 +148,35 @@ class SOP:
     priority: SOPPriority = SOPPriority.MEDIUM
     department: str = ""
     category: str = ""
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
     # Content
-    sections: List[SOPSection] = field(default_factory=list)
-    steps: List[SOPStep] = field(default_factory=list)
+    sections: list[SOPSection] = field(default_factory=list)
+    steps: list[SOPStep] = field(default_factory=list)
 
     # References
-    definitions: Dict[str, str] = field(default_factory=dict)
-    references: List[str] = field(default_factory=list)
-    related_sops: List[str] = field(default_factory=list)
-    forms_templates: List[str] = field(default_factory=list)
+    definitions: dict[str, str] = field(default_factory=dict)
+    references: list[str] = field(default_factory=list)
+    related_sops: list[str] = field(default_factory=list)
+    forms_templates: list[str] = field(default_factory=list)
 
     # Responsibilities
     owner: str = ""
-    reviewers: List[str] = field(default_factory=list)
-    approvers: List[str] = field(default_factory=list)
-    target_audience: List[str] = field(default_factory=list)
+    reviewers: list[str] = field(default_factory=list)
+    approvers: list[str] = field(default_factory=list)
+    target_audience: list[str] = field(default_factory=list)
 
     # Versioning
     version: str = "1.0.0"
-    version_history: List[Dict[str, Any]] = field(default_factory=list)
+    version_history: list[dict[str, Any]] = field(default_factory=list)
 
     # Compliance
-    compliance_standards: List[str] = field(default_factory=list)
-    audit_requirements: List[str] = field(default_factory=list)
+    compliance_standards: list[str] = field(default_factory=list)
+    audit_requirements: list[str] = field(default_factory=list)
 
     # Generation
     generation_source: GenerationSource = GenerationSource.MANUAL
-    source_documents: List[str] = field(default_factory=list)
+    source_documents: list[str] = field(default_factory=list)
     ai_confidence_score: float = 1.0
 
     # Metrics
@@ -201,7 +200,7 @@ class SOP:
     approval_date: Optional[datetime] = None
 
     # Metadata
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -213,21 +212,21 @@ class SOPTemplate:
     sop_type: SOPType = SOPType.OPERATIONAL
 
     # Template structure
-    required_sections: List[str] = field(default_factory=list)
-    optional_sections: List[str] = field(default_factory=list)
-    section_templates: Dict[str, str] = field(default_factory=dict)
+    required_sections: list[str] = field(default_factory=list)
+    optional_sections: list[str] = field(default_factory=list)
+    section_templates: dict[str, str] = field(default_factory=dict)
 
     # Placeholders
-    placeholders: Dict[str, str] = field(default_factory=dict)
+    placeholders: dict[str, str] = field(default_factory=dict)
 
     # Defaults
     default_priority: SOPPriority = SOPPriority.MEDIUM
     default_review_days: int = 90
 
     # Compliance
-    required_compliance_fields: List[str] = field(default_factory=list)
+    required_compliance_fields: list[str] = field(default_factory=list)
 
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -235,21 +234,21 @@ class ProcessMiningResult:
     """Result of process mining from logs."""
     mining_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     source_type: str = ""  # logs, recordings, conversations
-    source_files: List[str] = field(default_factory=list)
+    source_files: list[str] = field(default_factory=list)
 
     # Extracted data
     process_name: str = ""
-    steps_identified: List[Dict[str, Any]] = field(default_factory=list)
-    actors_identified: List[str] = field(default_factory=list)
-    systems_used: List[str] = field(default_factory=list)
-    decision_points: List[Dict[str, Any]] = field(default_factory=list)
-    exceptions_found: List[str] = field(default_factory=list)
+    steps_identified: list[dict[str, Any]] = field(default_factory=list)
+    actors_identified: list[str] = field(default_factory=list)
+    systems_used: list[str] = field(default_factory=list)
+    decision_points: list[dict[str, Any]] = field(default_factory=list)
+    exceptions_found: list[str] = field(default_factory=list)
 
     # Metrics
     avg_duration_minutes: float = 0.0
     frequency_per_day: float = 0.0
     success_rate: float = 0.0
-    common_errors: List[str] = field(default_factory=list)
+    common_errors: list[str] = field(default_factory=list)
 
     # Quality
     confidence_score: float = 0.0
@@ -262,7 +261,7 @@ class ProcessMiningResult:
 # SOP TEMPLATES
 # =============================================================================
 
-DEFAULT_TEMPLATES: Dict[SOPType, SOPTemplate] = {
+DEFAULT_TEMPLATES: dict[SOPType, SOPTemplate] = {
     SOPType.TECHNICAL: SOPTemplate(
         name="Technical Procedure Template",
         description="Template for IT and engineering procedures",
@@ -387,9 +386,9 @@ class MultiAISOPGenerator:
         title: str,
         description: str,
         sop_type: SOPType,
-        context: Dict[str, Any] = None,
+        context: dict[str, Any] = None,
         template: SOPTemplate = None,
-        existing_docs: List[str] = None
+        existing_docs: list[str] = None
     ) -> SOP:
         """Generate a complete SOP using multi-AI approach."""
 
@@ -431,8 +430,8 @@ class MultiAISOPGenerator:
         description: str,
         sop_type: SOPType,
         template: SOPTemplate,
-        context: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        context: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """Claude generates initial SOP structure and content."""
 
         sections = template.required_sections + template.optional_sections
@@ -488,10 +487,10 @@ Requirements:
 
     async def _gpt_enhance_content(
         self,
-        content: Dict[str, Any],
+        content: dict[str, Any],
         sop_type: SOPType,
-        context: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        context: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """GPT reviews and enhances the SOP content."""
 
         prompt = f"""Review and enhance this SOP content for completeness and technical accuracy:
@@ -524,9 +523,9 @@ If you add new content, mark it with a note like "(Enhanced: reason)".
 
     async def _gemini_optimize(
         self,
-        content: Dict[str, Any],
+        content: dict[str, Any],
         sop_type: SOPType
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Gemini optimizes the SOP for clarity and efficiency."""
 
         prompt = f"""Analyze and optimize this SOP for maximum effectiveness:
@@ -595,7 +594,7 @@ Return optimized content in the same JSON format with:
         if self.openai_api_key:
             logger.info("Falling back to OpenAI for SOP generation")
             return await self._call_gpt(prompt)
-            
+
         # If we have a Gemini key, try that
         if self.gemini_api_key:
             logger.info("Falling back to Gemini for SOP generation")
@@ -605,7 +604,7 @@ Return optimized content in the same JSON format with:
         logger.error("No AI providers available for SOP generation")
         raise RuntimeError("No AI providers available. Please set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY.")
 
-    def _parse_json_response(self, response: str) -> Dict[str, Any]:
+    def _parse_json_response(self, response: str) -> dict[str, Any]:
         """Parse JSON from AI response."""
         try:
             json_match = re.search(r'\{[\s\S]*\}', response)
@@ -620,7 +619,7 @@ Return optimized content in the same JSON format with:
         title: str,
         description: str,
         sop_type: SOPType,
-        content: Dict[str, Any],
+        content: dict[str, Any],
         template: SOPTemplate
     ) -> SOP:
         """Build SOP object from generated content."""
@@ -860,7 +859,7 @@ Return as JSON:
             logger.error(f"Claude API error: {e}")
             return "{}"
 
-    def _parse_json_response(self, response: str) -> Dict[str, Any]:
+    def _parse_json_response(self, response: str) -> dict[str, Any]:
         """Parse JSON from response."""
         try:
             json_match = re.search(r'\{[\s\S]*\}', response)
@@ -1088,8 +1087,8 @@ class AutomatedSOPGenerator:
         self.db_url = db_url or os.getenv("DATABASE_URL")
 
         # Storage
-        self.sops: Dict[str, SOP] = {}
-        self.templates: Dict[str, SOPTemplate] = {}
+        self.sops: dict[str, SOP] = {}
+        self.templates: dict[str, SOPTemplate] = {}
 
         # Components
         self.generator = MultiAISOPGenerator()
@@ -1107,7 +1106,7 @@ class AutomatedSOPGenerator:
         title: str,
         description: str,
         sop_type: SOPType,
-        context: Dict[str, Any] = None,
+        context: dict[str, Any] = None,
         template_id: str = None,
         created_by: str = "system"
     ) -> SOP:
@@ -1176,7 +1175,7 @@ class AutomatedSOPGenerator:
     async def update_sop(
         self,
         sop_id: str,
-        updates: Dict[str, Any],
+        updates: dict[str, Any],
         updated_by: str = "system",
         create_version: bool = True
     ) -> SOP:
@@ -1242,7 +1241,7 @@ class AutomatedSOPGenerator:
             raise ValueError(f"SOP {sop_id} not found")
 
         if sop.status not in [SOPStatus.APPROVED, SOPStatus.NEEDS_UPDATE]:
-            raise ValueError(f"SOP must be approved before publishing")
+            raise ValueError("SOP must be approved before publishing")
 
         sop.status = SOPStatus.PUBLISHED
         sop.published_at = datetime.utcnow()
@@ -1281,7 +1280,7 @@ class AutomatedSOPGenerator:
         sop_type: SOPType = None,
         status: SOPStatus = None,
         department: str = None
-    ) -> List[SOP]:
+    ) -> list[SOP]:
         """Search SOPs."""
         results = []
 
@@ -1304,7 +1303,7 @@ class AutomatedSOPGenerator:
 
         return results
 
-    async def get_statistics(self) -> Dict[str, Any]:
+    async def get_statistics(self) -> dict[str, Any]:
         """Get SOP statistics."""
         by_type = {}
         by_status = {}
@@ -1558,7 +1557,7 @@ async def main():
     # Export
     print("\n4. Exporting to Markdown...")
     markdown = manager.export_sop(sop1.sop_id, "markdown")
-    print(f"   Preview (first 500 chars):")
+    print("   Preview (first 500 chars):")
     print("   " + "-" * 50)
     for line in markdown[:500].split("\n"):
         print(f"   {line}")

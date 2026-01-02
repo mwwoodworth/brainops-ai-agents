@@ -1,6 +1,8 @@
 import asyncio
-import asyncpg
 import os
+
+import asyncpg
+
 
 # Build DB URL from environment variables - NO hardcoded credentials
 def get_db_url() -> str:
@@ -28,9 +30,9 @@ async def setup_db():
         return
 
     try:
-        with open("consciousness_schema.sql", "r") as f:
+        with open("consciousness_schema.sql") as f:
             schema_sql = f.read()
-            
+
         print("Executing schema...")
         await conn.execute(schema_sql)
         print("Schema executed successfully.")

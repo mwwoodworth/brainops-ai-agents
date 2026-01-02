@@ -11,13 +11,13 @@ This module implements bleeding-edge lead scoring using:
 - Machine learning predictions
 """
 
-import os
 import json
 import logging
-from datetime import datetime
-from typing import Dict, List, Optional
+import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
+from typing import Optional
 
 # Database
 import psycopg2
@@ -152,7 +152,7 @@ class LeadScoreResult:
     expected_deal_size: float = field(init=False)
     next_best_action: str = field(init=False)
     recommended_touch_frequency: int = field(init=False)
-    scoring_factors: Dict = field(default_factory=dict)
+    scoring_factors: dict = field(default_factory=dict)
     calculated_at: datetime = field(default_factory=datetime.utcnow)
 
     def __post_init__(self):
@@ -335,7 +335,7 @@ class AdvancedLeadScoringEngine:
         finally:
             conn.close()
 
-    async def calculate_behavioral_score(self, lead_id: str, lead_data: Dict) -> BehavioralScore:
+    async def calculate_behavioral_score(self, lead_id: str, lead_data: dict) -> BehavioralScore:
         """Calculate behavioral engagement score (0-30 points)"""
 
         # Get engagement history
@@ -384,7 +384,7 @@ class AdvancedLeadScoringEngine:
             support_interaction=support_score
         )
 
-    async def calculate_firmographic_score(self, lead_id: str, lead_data: Dict) -> FirmographicScore:
+    async def calculate_firmographic_score(self, lead_id: str, lead_data: dict) -> FirmographicScore:
         """Calculate company fit score (0-25 points)"""
 
         company = lead_data.get('company', {})
@@ -431,7 +431,7 @@ class AdvancedLeadScoringEngine:
             tech_maturity=tech_score
         )
 
-    async def calculate_intent_score(self, lead_id: str, lead_data: Dict) -> IntentScore:
+    async def calculate_intent_score(self, lead_id: str, lead_data: dict) -> IntentScore:
         """Calculate buying intent score (0-25 points)"""
 
         intent_signals = lead_data.get('intent_signals', {})
@@ -469,7 +469,7 @@ class AdvancedLeadScoringEngine:
             social_activity=social_score
         )
 
-    async def calculate_velocity_score(self, lead_id: str, lead_data: Dict) -> VelocityScore:
+    async def calculate_velocity_score(self, lead_id: str, lead_data: dict) -> VelocityScore:
         """Calculate deal velocity score (0-15 points)"""
 
         velocity_data = lead_data.get('velocity', {})
@@ -518,7 +518,7 @@ class AdvancedLeadScoringEngine:
             sales_cycle_pace=pace_score
         )
 
-    async def calculate_financial_score(self, lead_id: str, lead_data: Dict) -> FinancialScore:
+    async def calculate_financial_score(self, lead_id: str, lead_data: dict) -> FinancialScore:
         """Calculate financial health score (0-5 points)"""
 
         financial_data = lead_data.get('financial', {})
@@ -542,7 +542,7 @@ class AdvancedLeadScoringEngine:
             churn_risk=churn_score
         )
 
-    async def calculate_multi_factor_score(self, lead_id: str, lead_data: Optional[Dict] = None) -> LeadScoreResult:
+    async def calculate_multi_factor_score(self, lead_id: str, lead_data: Optional[dict] = None) -> LeadScoreResult:
         """
         Calculate comprehensive multi-factor lead score
 
@@ -609,7 +609,7 @@ class AdvancedLeadScoringEngine:
 
         return result
 
-    async def _fetch_lead_data(self, lead_id: str) -> Dict:
+    async def _fetch_lead_data(self, lead_id: str) -> dict:
         """Fetch lead data from database"""
         conn = self._get_connection()
         try:
@@ -681,7 +681,7 @@ class AdvancedLeadScoringEngine:
             conn.close()
 
     async def record_engagement(self, lead_id: str, event_type: str,
-                                event_data: Dict = None, engagement_value: float = 1.0,
+                                event_data: dict = None, engagement_value: float = 1.0,
                                 channel: str = None):
         """Record a new engagement event for a lead"""
         await self.initialize_tables()
@@ -711,7 +711,7 @@ class AdvancedLeadScoringEngine:
         finally:
             conn.close()
 
-    async def get_hot_leads(self, limit: int = 50) -> List[Dict]:
+    async def get_hot_leads(self, limit: int = 50) -> list[dict]:
         """Get top hot leads requiring immediate action"""
         await self.initialize_tables()
 
@@ -730,7 +730,7 @@ class AdvancedLeadScoringEngine:
         finally:
             conn.close()
 
-    async def get_leads_by_tier(self, tier: LeadTier, limit: int = 100) -> List[Dict]:
+    async def get_leads_by_tier(self, tier: LeadTier, limit: int = 100) -> list[dict]:
         """Get leads by tier"""
         await self.initialize_tables()
 
@@ -749,7 +749,7 @@ class AdvancedLeadScoringEngine:
         finally:
             conn.close()
 
-    async def get_scoring_summary(self) -> Dict:
+    async def get_scoring_summary(self) -> dict:
         """Get overall scoring summary"""
         await self.initialize_tables()
 

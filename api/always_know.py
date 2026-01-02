@@ -7,9 +7,10 @@ Provides instant access to system state without querying.
 """
 
 import logging
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
-from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/always-know", tags=["Always-Know Observability"])
@@ -30,7 +31,7 @@ def get_brain():
 
 
 @router.get("/state")
-async def get_current_state() -> Dict[str, Any]:
+async def get_current_state() -> dict[str, Any]:
     """
     Get the current system state.
     This is cached and updated every 30 seconds - no need to query services.
@@ -56,7 +57,7 @@ async def get_state_summary() -> str:
 
 
 @router.get("/alerts")
-async def get_active_alerts() -> List[Dict[str, Any]]:
+async def get_active_alerts() -> list[dict[str, Any]]:
     """
     Get all active (unresolved) alerts.
     """
@@ -68,7 +69,7 @@ async def get_active_alerts() -> List[Dict[str, Any]]:
 
 
 @router.get("/health")
-async def get_quick_health() -> Dict[str, Any]:
+async def get_quick_health() -> dict[str, Any]:
     """
     Get a quick health check based on cached state.
     Much faster than hitting all services.
@@ -114,7 +115,7 @@ async def get_quick_health() -> Dict[str, Any]:
 
 
 @router.post("/test-ui")
-async def trigger_ui_tests() -> Dict[str, Any]:
+async def trigger_ui_tests() -> dict[str, Any]:
     """
     Trigger manual UI tests for all frontends.
     """
@@ -198,7 +199,7 @@ async def get_prometheus_metrics() -> str:
 
 
 @router.get("/history")
-async def get_state_history(limit: int = 100) -> List[Dict[str, Any]]:
+async def get_state_history(limit: int = 100) -> list[dict[str, Any]]:
     """
     Get historical state snapshots.
     """
@@ -211,7 +212,7 @@ async def get_state_history(limit: int = 100) -> List[Dict[str, Any]]:
 
 
 @router.post("/chatgpt-agent-test")
-async def run_chatgpt_agent_test(full: bool = False) -> Dict[str, Any]:
+async def run_chatgpt_agent_test(full: bool = False) -> dict[str, Any]:
     """
     Run ChatGPT-Agent-Level UI tests.
     These are real human-like tests that login, navigate, fill forms, etc.

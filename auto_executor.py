@@ -4,10 +4,11 @@ Automatic Agent Executor
 Ensures agents are continuously working
 """
 
-import os
 import asyncio
-import httpx
 import logging
+import os
+
+import httpx
 import psycopg2
 from psycopg2.extras import RealDictCursor
 

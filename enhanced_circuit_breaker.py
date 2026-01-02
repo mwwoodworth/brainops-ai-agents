@@ -18,18 +18,19 @@ Author: BrainOps AI System
 Version: 1.0.0 (2025-12-27)
 """
 
-import json
 import asyncio
+import json
 import logging
-import time
 import random  # ENHANCEMENT: For jitter in recovery timeouts
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Callable, Awaitable, Set
-from dataclasses import dataclass, field
-from enum import Enum
-from collections import deque
-import threading
 import statistics
+import threading
+import time
+from collections import deque
+from collections.abc import Awaitable
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Callable, Optional
 
 # OPTIMIZATION: Sliding window counters for O(1) memory and updates
 
@@ -57,7 +58,7 @@ class SlidingWindowCounter:
         self.bucket_seconds = bucket_seconds
         self.num_buckets = window_seconds // bucket_seconds
         # Buckets: each contains [success_count, failure_count, total_time_ms]
-        self._buckets: List[List[int]] = [[0, 0, 0] for _ in range(self.num_buckets)]
+        self._buckets: list[list[int]] = [[0, 0, 0] for _ in range(self.num_buckets)]
         self._current_bucket_idx = 0
         self._last_bucket_time = time.time()
         self._lock = threading.Lock()
@@ -93,7 +94,7 @@ class SlidingWindowCounter:
             self._buckets[idx][1] += 1  # failure count
             self._buckets[idx][2] += int(response_time_ms)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get aggregated statistics for the window"""
         with self._lock:
             self._rotate_if_needed()
@@ -266,14 +267,14 @@ class DynamicCircuitBreaker:
 
         # ENHANCEMENT: State persistence
         self._state_history: deque = deque(maxlen=20)  # Last 20 state changes
-        self._last_persisted_state: Optional[Dict] = None
+        self._last_persisted_state: Optional[dict] = None
 
         # Prediction
         self._enable_prediction = enable_prediction
         self._prediction_window = prediction_window_ms
 
         # Alert handlers
-        self._alert_handlers: List[Callable[[CircuitAlert], None]] = []
+        self._alert_handlers: list[Callable[[CircuitAlert], None]] = []
 
         # Timestamps
         self._last_failure_time: Optional[datetime] = None
@@ -528,7 +529,7 @@ class DynamicCircuitBreaker:
         """ENHANCEMENT: Get current health score (0-100)"""
         return self._health_score
 
-    def persist_state(self) -> Dict[str, Any]:
+    def persist_state(self) -> dict[str, Any]:
         """
         ENHANCEMENT: Get state for persistence.
         Can be stored in database/file and restored on restart.
@@ -548,7 +549,7 @@ class DynamicCircuitBreaker:
         }
         return self._last_persisted_state
 
-    def restore_state(self, state: Dict[str, Any]):
+    def restore_state(self, state: dict[str, Any]):
         """ENHANCEMENT: Restore state from persistence"""
         with self._lock:
             if state.get("component_id") != self.component_id:
@@ -689,13 +690,13 @@ class DeadlockDetector:
     def __init__(self, detection_interval: float = 5.0):
         self.detection_interval = detection_interval
         self._lock = threading.Lock()
-        self._pending_requests: Dict[str, DependencyEdge] = {}
-        self._component_priorities: Dict[str, int] = {}
+        self._pending_requests: dict[str, DependencyEdge] = {}
+        self._component_priorities: dict[str, int] = {}
         self._running = False
         self._detection_task: Optional[asyncio.Task] = None
         self._deadlocks_detected = 0
         self._deadlocks_resolved = 0
-        self._alert_handlers: List[Callable[[str, List[str]], None]] = []
+        self._alert_handlers: list[Callable[[str, list[str]], None]] = []
 
     async def start(self):
         """Start the deadlock detection loop"""
@@ -742,7 +743,7 @@ class DeadlockDetector:
             if request_id in self._pending_requests:
                 del self._pending_requests[request_id]
 
-    def add_alert_handler(self, handler: Callable[[str, List[str]], None]):
+    def add_alert_handler(self, handler: Callable[[str, list[str]], None]):
         """Add handler for deadlock alerts"""
         self._alert_handlers.append(handler)
 
@@ -785,9 +786,9 @@ class DeadlockDetector:
                         except Exception as e:
                             logger.error(f"Deadlock alert handler error: {e}")
 
-    def _build_wait_graph(self) -> Dict[str, Set[str]]:
+    def _build_wait_graph(self) -> dict[str, set[str]]:
         """Build wait-for graph from pending requests"""
-        graph: Dict[str, Set[str]] = {}
+        graph: dict[str, set[str]] = {}
 
         now = datetime.now()
         for edge in self._pending_requests.values():
@@ -802,7 +803,7 @@ class DeadlockDetector:
 
         return graph
 
-    def _find_cycles(self, graph: Dict[str, Set[str]]) -> List[List[str]]:
+    def _find_cycles(self, graph: dict[str, set[str]]) -> list[list[str]]:
         """Find all cycles in the graph using DFS"""
         cycles = []
         visited = set()
@@ -835,7 +836,7 @@ class DeadlockDetector:
 
         return cycles
 
-    def _select_victim(self, cycle: List[str]) -> str:
+    def _select_victim(self, cycle: list[str]) -> str:
         """Select which component to cancel to break deadlock"""
         # Use priority (lowest priority = victim)
         min_priority = float('inf')
@@ -849,7 +850,7 @@ class DeadlockDetector:
 
         return victim
 
-    async def _resolve_deadlock(self, cycle: List[str], victim: str):
+    async def _resolve_deadlock(self, cycle: list[str], victim: str):
         """Resolve deadlock by cancelling victim's requests"""
         cancelled = []
 
@@ -861,7 +862,7 @@ class DeadlockDetector:
         self._deadlocks_resolved += 1
         logger.info(f"Deadlock resolved: cancelled {len(cancelled)} requests from {victim}")
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get deadlock detection statistics"""
         return {
             "pending_requests": len(self._pending_requests),
@@ -886,9 +887,9 @@ class CascadeProtector:
     """
 
     def __init__(self):
-        self._circuits: Dict[str, DynamicCircuitBreaker] = {}
-        self._dependencies: Dict[str, Set[str]] = {}  # component -> dependencies
-        self._dependents: Dict[str, Set[str]] = {}    # component -> who depends on it
+        self._circuits: dict[str, DynamicCircuitBreaker] = {}
+        self._dependencies: dict[str, set[str]] = {}  # component -> dependencies
+        self._dependents: dict[str, set[str]] = {}    # component -> who depends on it
         self._cascade_factor = 0.5  # Reduce threshold by 50% on cascade
 
     def register_circuit(self, circuit: DynamicCircuitBreaker):
@@ -934,7 +935,7 @@ class CascadeProtector:
                         f"due to {failed_component} failure"
                     )
 
-    def get_dependency_graph(self) -> Dict[str, Any]:
+    def get_dependency_graph(self) -> dict[str, Any]:
         """Get the dependency graph"""
         return {
             "dependencies": {k: list(v) for k, v in self._dependencies.items()},
@@ -974,20 +975,20 @@ class SidecarHealthMonitor:
         self._running = False
         self._check_task: Optional[asyncio.Task] = None
         self._health_history: deque = deque(maxlen=100)  # Already bounded
-        self._current_health: Dict[str, Any] = {
+        self._current_health: dict[str, Any] = {
             "status": "unknown",
             "latency_ok": True,
             "error_rate_ok": True,
             "last_check": None
         }
-        self._alert_handlers: List[Callable[[str, Dict], Awaitable[None]]] = []
-        self._health_checker: Optional[Callable[[], Awaitable[Dict]]] = None
+        self._alert_handlers: list[Callable[[str, dict], Awaitable[None]]] = []
+        self._health_checker: Optional[Callable[[], Awaitable[dict]]] = None
 
-    def set_health_checker(self, checker: Callable[[], Awaitable[Dict]]):
+    def set_health_checker(self, checker: Callable[[], Awaitable[dict]]):
         """Set the health check function"""
         self._health_checker = checker
 
-    def add_alert_handler(self, handler: Callable[[str, Dict], Awaitable[None]]):
+    def add_alert_handler(self, handler: Callable[[str, dict], Awaitable[None]]):
         """Add handler for health alerts"""
         self._alert_handlers.append(handler)
 
@@ -1079,7 +1080,7 @@ class SidecarHealthMonitor:
         if old_status != health["status"]:
             await self._emit_alert(health)
 
-    async def _emit_alert(self, health: Dict[str, Any]):
+    async def _emit_alert(self, health: dict[str, Any]):
         """Emit health alert"""
         for handler in self._alert_handlers:
             try:
@@ -1087,11 +1088,11 @@ class SidecarHealthMonitor:
             except Exception as e:
                 logger.error(f"Sidecar alert handler error: {e}")
 
-    def get_health(self) -> Dict[str, Any]:
+    def get_health(self) -> dict[str, Any]:
         """Get current health status"""
         return self._current_health
 
-    def get_health_history(self) -> List[Dict[str, Any]]:
+    def get_health_history(self) -> list[dict[str, Any]]:
         """Get health check history"""
         return list(self._health_history)
 
@@ -1114,8 +1115,8 @@ class SelfHealingController:
     """
 
     def __init__(self):
-        self._circuits: Dict[str, DynamicCircuitBreaker] = {}
-        self._sidecars: Dict[str, SidecarHealthMonitor] = {}
+        self._circuits: dict[str, DynamicCircuitBreaker] = {}
+        self._sidecars: dict[str, SidecarHealthMonitor] = {}
         self._deadlock_detector = DeadlockDetector()
         self._cascade_protector = CascadeProtector()
         self._running = False
@@ -1145,8 +1146,8 @@ class SelfHealingController:
     def register_component(
         self,
         component_id: str,
-        health_checker: Optional[Callable[[], Awaitable[Dict]]] = None,
-        dependencies: Optional[List[str]] = None,
+        health_checker: Optional[Callable[[], Awaitable[dict]]] = None,
+        dependencies: Optional[list[str]] = None,
         priority: int = 5
     ):
         """Register a component for self-healing"""
@@ -1188,7 +1189,7 @@ class SelfHealingController:
             "timestamp": alert.timestamp.isoformat()
         })
 
-    async def _on_sidecar_alert(self, component_id: str, health: Dict[str, Any]):
+    async def _on_sidecar_alert(self, component_id: str, health: dict[str, Any]):
         """Handle sidecar health alerts"""
         self._healing_history.append({
             "type": "sidecar_alert",
@@ -1202,7 +1203,7 @@ class SelfHealingController:
         if health.get("status") == "unhealthy":
             await self._attempt_healing(component_id, health)
 
-    async def _attempt_healing(self, component_id: str, health: Dict[str, Any]):
+    async def _attempt_healing(self, component_id: str, health: dict[str, Any]):
         """Attempt to heal an unhealthy component"""
         logger.info(f"Attempting to heal {component_id}")
 
@@ -1229,7 +1230,7 @@ class SelfHealingController:
             "timestamp": datetime.now().isoformat()
         })
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get overall self-healing status"""
         circuit_status = {}
         for comp_id, circuit in self._circuits.items():

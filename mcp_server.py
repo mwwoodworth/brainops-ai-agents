@@ -14,22 +14,24 @@ Enhancements:
 - Enhanced monitoring and diagnostics
 """
 
-import os
 import asyncio
 import logging
+import os
 import re
 import shlex
-from typing import Any, Dict, List
-from datetime import datetime
-from fastapi import FastAPI, WebSocket, HTTPException, Depends, Request, Security
-from fastapi.security import APIKeyHeader
-from fastapi.middleware.cors import CORSMiddleware
-import psycopg2
-from psycopg2.extras import RealDictCursor
-import httpx
-from pathlib import Path
-from config import config
 from collections import defaultdict, deque
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import httpx
+import psycopg2
+from fastapi import Depends, FastAPI, HTTPException, Request, Security, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
+from psycopg2.extras import RealDictCursor
+
+from config import config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -336,8 +338,8 @@ class MCPServer:
         self.execution_history = deque(maxlen=1000)  # Keep last 1000 executions
 
         # Enhanced features
-        self._registered_tools: Dict[str, Dict] = {}
-        self._tool_metrics: Dict[str, Dict] = defaultdict(lambda: {
+        self._registered_tools: dict[str, dict] = {}
+        self._tool_metrics: dict[str, dict] = defaultdict(lambda: {
             "total_calls": 0,
             "successful_calls": 0,
             "failed_calls": 0,
@@ -345,14 +347,14 @@ class MCPServer:
             "avg_duration_ms": 0.0,
             "last_execution": None
         })
-        self._chain_executions: List[Dict] = []
+        self._chain_executions: list[dict] = []
         self._cache_stats = {
             "hits": 0,
             "misses": 0,
             "evictions": 0
         }
 
-    async def get_system_status(self) -> Dict[str, Any]:
+    async def get_system_status(self) -> dict[str, Any]:
         """Get comprehensive system status"""
         status = {
             'timestamp': datetime.utcnow().isoformat(),
@@ -408,7 +410,7 @@ class MCPServer:
 
         return status
 
-    async def execute_tool(self, tool: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_tool(self, tool: str, params: dict[str, Any]) -> dict[str, Any]:
         """Execute an MCP tool with full transparency"""
         execution_id = datetime.utcnow().isoformat()
 
@@ -502,7 +504,7 @@ class MCPServer:
                         result['status'] = 'blocked'
                         return result
 
-                    with open(file_path, 'r') as f:
+                    with open(file_path) as f:
                         content = f.read()
                     result['result'] = {'content': content, 'size': len(content)}
                     result['status'] = 'success'
@@ -582,9 +584,9 @@ class MCPServer:
                 body = params.get('body', None)
 
                 # SSRF Protection: Validate URL
-                from urllib.parse import urlparse
                 import ipaddress
                 import socket
+                from urllib.parse import urlparse
 
                 parsed = urlparse(url)
                 if not parsed.scheme or parsed.scheme not in ('http', 'https'):
@@ -643,7 +645,7 @@ class MCPServer:
 
         return result
 
-    async def get_file_tree(self, path: str, max_depth: int = 3) -> Dict[str, Any]:
+    async def get_file_tree(self, path: str, max_depth: int = 3) -> dict[str, Any]:
         """Get file tree structure for transparency"""
         def build_tree(dir_path: Path, current_depth: int = 0):
             tree = {
@@ -680,7 +682,7 @@ class MCPServer:
 
         return build_tree(root_path)
 
-    async def monitor_logs(self, service: str, lines: int = 100) -> List[str]:
+    async def monitor_logs(self, service: str, lines: int = 100) -> list[str]:
         """Monitor service logs in real-time"""
         if service == 'ai_agents':
             # Get Render logs via API
@@ -754,7 +756,7 @@ async def get_status():
     return await mcp_server.get_system_status()
 
 @app.post("/execute", dependencies=[Depends(verify_api_key)])
-async def execute_tool(request: Dict[str, Any]):
+async def execute_tool(request: dict[str, Any]):
     """Execute an MCP tool"""
     tool = request.get('tool')
     params = request.get('params', {})
@@ -872,7 +874,7 @@ async def get_mcp_tools():
     }
 
 @app.post("/mcp/execute", dependencies=[Depends(verify_api_key)])
-async def mcp_execute(request: Dict[str, Any]):
+async def mcp_execute(request: dict[str, Any]):
     """Execute MCP tool via Vercel adapter"""
     return await execute_tool(request)
 
@@ -986,7 +988,7 @@ async def mcp_get_execution_history(limit: int = 100):
 
 
 @app.post("/mcp/chain", dependencies=[Depends(verify_api_key)])
-async def mcp_execute_chain(request: Dict[str, Any]):
+async def mcp_execute_chain(request: dict[str, Any]):
     """
     Execute a chain of MCP tools in sequence
 
@@ -1014,7 +1016,7 @@ async def mcp_execute_chain(request: Dict[str, Any]):
     - Total duration and success status
     """
     try:
-        from mcp_integration import get_mcp_client, MCPServer
+        from mcp_integration import MCPServer, get_mcp_client
 
         client = get_mcp_client()
 
@@ -1157,7 +1159,7 @@ async def mcp_get_workflows():
 
 
 @app.post("/mcp/workflow/execute", dependencies=[Depends(verify_api_key)])
-async def mcp_execute_workflow(request: Dict[str, Any]):
+async def mcp_execute_workflow(request: dict[str, Any]):
     """
     Execute a pre-defined workflow template
 

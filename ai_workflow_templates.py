@@ -4,16 +4,16 @@ AI Workflow Templates
 Reusable workflow templates for common AI operations
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
+import os
 import uuid
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, Callable
-from dataclasses import dataclass, field, asdict
-from enum import Enum
 from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -78,15 +78,15 @@ class WorkflowStep:
     name: str
     step_type: StepType
     handler: Optional[str] = None  # Handler function name
-    config: Dict[str, Any] = field(default_factory=dict)
-    inputs: Dict[str, str] = field(default_factory=dict)  # Input mappings
-    outputs: Dict[str, str] = field(default_factory=dict)  # Output mappings
-    conditions: List[Dict[str, Any]] = field(default_factory=list)
+    config: dict[str, Any] = field(default_factory=dict)
+    inputs: dict[str, str] = field(default_factory=dict)  # Input mappings
+    outputs: dict[str, str] = field(default_factory=dict)  # Output mappings
+    conditions: list[dict[str, Any]] = field(default_factory=list)
     retry_count: int = 0
     max_retries: int = 3
     timeout_seconds: int = 300
     on_failure: str = "fail"  # fail, skip, retry, continue
-    next_steps: List[str] = field(default_factory=list)
+    next_steps: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -97,11 +97,11 @@ class WorkflowTemplate:
     description: str
     category: WorkflowCategory
     version: str = "1.0.0"
-    steps: List[WorkflowStep] = field(default_factory=list)
-    input_schema: Dict[str, Any] = field(default_factory=dict)
-    output_schema: Dict[str, Any] = field(default_factory=dict)
-    variables: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    steps: list[WorkflowStep] = field(default_factory=list)
+    input_schema: dict[str, Any] = field(default_factory=dict)
+    output_schema: dict[str, Any] = field(default_factory=dict)
+    variables: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -112,17 +112,17 @@ class WorkflowExecution:
     execution_id: str
     template_id: str
     status: WorkflowStatus = WorkflowStatus.PENDING
-    inputs: Dict[str, Any] = field(default_factory=dict)
-    outputs: Dict[str, Any] = field(default_factory=dict)
-    context: Dict[str, Any] = field(default_factory=dict)
+    inputs: dict[str, Any] = field(default_factory=dict)
+    outputs: dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
     current_step: Optional[str] = None
-    step_results: Dict[str, Any] = field(default_factory=dict)
+    step_results: dict[str, Any] = field(default_factory=dict)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
     correlation_id: Optional[str] = None
     tenant_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -133,8 +133,8 @@ class StepExecution:
     status: StepStatus = StepStatus.PENDING
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    inputs: Dict[str, Any] = field(default_factory=dict)
-    outputs: Dict[str, Any] = field(default_factory=dict)
+    inputs: dict[str, Any] = field(default_factory=dict)
+    outputs: dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
     retry_count: int = 0
 
@@ -150,9 +150,9 @@ class StepHandler(ABC):
     async def execute(
         self,
         step: WorkflowStep,
-        context: Dict[str, Any],
-        inputs: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        context: dict[str, Any],
+        inputs: dict[str, Any]
+    ) -> dict[str, Any]:
         """Execute the step and return outputs"""
         pass
 
@@ -160,7 +160,7 @@ class StepHandler(ABC):
 class ActionHandler(StepHandler):
     """Handler for action steps"""
 
-    def __init__(self, action_registry: Dict[str, Callable] = None):
+    def __init__(self, action_registry: dict[str, Callable] = None):
         self.actions = action_registry or {}
 
     def register_action(self, name: str, func: Callable):
@@ -170,9 +170,9 @@ class ActionHandler(StepHandler):
     async def execute(
         self,
         step: WorkflowStep,
-        context: Dict[str, Any],
-        inputs: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        context: dict[str, Any],
+        inputs: dict[str, Any]
+    ) -> dict[str, Any]:
         if step.handler not in self.actions:
             raise ValueError(f"Unknown action: {step.handler}")
 
@@ -192,9 +192,9 @@ class DecisionHandler(StepHandler):
     async def execute(
         self,
         step: WorkflowStep,
-        context: Dict[str, Any],
-        inputs: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        context: dict[str, Any],
+        inputs: dict[str, Any]
+    ) -> dict[str, Any]:
         # Evaluate conditions
         for condition in step.conditions:
             field = condition.get("field")
@@ -233,9 +233,9 @@ class ParallelHandler(StepHandler):
     async def execute(
         self,
         step: WorkflowStep,
-        context: Dict[str, Any],
-        inputs: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        context: dict[str, Any],
+        inputs: dict[str, Any]
+    ) -> dict[str, Any]:
         parallel_steps = step.config.get("steps", [])
 
         tasks = []
@@ -265,9 +265,9 @@ class LoopHandler(StepHandler):
     async def execute(
         self,
         step: WorkflowStep,
-        context: Dict[str, Any],
-        inputs: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        context: dict[str, Any],
+        inputs: dict[str, Any]
+    ) -> dict[str, Any]:
         items = inputs.get(step.config.get("items_field", "items"), [])
         loop_step_id = step.config.get("loop_step")
         results = []
@@ -289,9 +289,9 @@ class WaitHandler(StepHandler):
     async def execute(
         self,
         step: WorkflowStep,
-        context: Dict[str, Any],
-        inputs: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        context: dict[str, Any],
+        inputs: dict[str, Any]
+    ) -> dict[str, Any]:
         wait_type = step.config.get("wait_type", "duration")
 
         if wait_type == "duration":
@@ -325,27 +325,27 @@ class WorkflowEngine:
         self._db_config = None
 
         # Template storage
-        self._templates: Dict[str, WorkflowTemplate] = {}
+        self._templates: dict[str, WorkflowTemplate] = {}
 
         # Execution tracking
-        self._executions: Dict[str, WorkflowExecution] = {}
-        self._step_executions: Dict[str, Dict[str, StepExecution]] = {}
+        self._executions: dict[str, WorkflowExecution] = {}
+        self._step_executions: dict[str, dict[str, StepExecution]] = {}
 
         # Handlers
         self._action_handler = ActionHandler()
         self._decision_handler = DecisionHandler()
-        self._handlers: Dict[StepType, StepHandler] = {
+        self._handlers: dict[StepType, StepHandler] = {
             StepType.ACTION: self._action_handler,
             StepType.DECISION: self._decision_handler,
         }
 
         # Callbacks
-        self._on_step_complete: List[Callable] = []
-        self._on_workflow_complete: List[Callable] = []
+        self._on_step_complete: list[Callable] = []
+        self._on_workflow_complete: list[Callable] = []
 
         self._lock = asyncio.Lock()
 
-    def _get_db_config(self) -> Dict[str, Any]:
+    def _get_db_config(self) -> dict[str, Any]:
         """Get database configuration lazily with validation"""
         if not self._db_config:
             required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
@@ -961,7 +961,7 @@ class WorkflowEngine:
     async def list_templates(
         self,
         category: Optional[WorkflowCategory] = None
-    ) -> List[WorkflowTemplate]:
+    ) -> list[WorkflowTemplate]:
         """List workflow templates"""
         templates = list(self._templates.values())
         if category:
@@ -1018,10 +1018,10 @@ class WorkflowEngine:
     async def execute_workflow(
         self,
         template_id: str,
-        inputs: Dict[str, Any],
+        inputs: dict[str, Any],
         correlation_id: Optional[str] = None,
         tenant_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None
     ) -> WorkflowExecution:
         """Execute a workflow"""
         await self.initialize()
@@ -1111,9 +1111,9 @@ class WorkflowEngine:
     async def _execute_step(
         self,
         step: WorkflowStep,
-        context: Dict[str, Any],
-        inputs: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        context: dict[str, Any],
+        inputs: dict[str, Any]
+    ) -> dict[str, Any]:
         """Execute a single step"""
         handler = self._handlers.get(step.step_type)
         if not handler:
@@ -1242,7 +1242,7 @@ class WorkflowEngine:
         template_id: Optional[str] = None,
         status: Optional[WorkflowStatus] = None,
         limit: int = 100
-    ) -> List[WorkflowExecution]:
+    ) -> list[WorkflowExecution]:
         """List executions"""
         executions = list(self._executions.values())
 
@@ -1288,7 +1288,7 @@ class WorkflowEngine:
     # HEALTH & STATS
     # ========================================================================
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Get workflow engine statistics"""
         return {
             "templates_count": len(self._templates),
@@ -1299,7 +1299,7 @@ class WorkflowEngine:
             "registered_actions": len(self._action_handler.actions)
         }
 
-    async def get_health_status(self) -> Dict[str, Any]:
+    async def get_health_status(self) -> dict[str, Any]:
         """Get health status"""
         stats = await self.get_stats()
 
@@ -1331,7 +1331,7 @@ def get_workflow_engine() -> WorkflowEngine:
 
 async def execute_workflow(
     template_id: str,
-    inputs: Dict[str, Any]
+    inputs: dict[str, Any]
 ) -> WorkflowExecution:
     """Execute a workflow"""
     engine = get_workflow_engine()
@@ -1344,13 +1344,13 @@ async def get_template(template_id: str) -> Optional[WorkflowTemplate]:
     return await engine.get_template(template_id)
 
 
-async def list_templates() -> List[WorkflowTemplate]:
+async def list_templates() -> list[WorkflowTemplate]:
     """List all templates"""
     engine = get_workflow_engine()
     return await engine.list_templates()
 
 
-async def get_workflow_stats() -> Dict[str, Any]:
+async def get_workflow_stats() -> dict[str, Any]:
     """Get workflow statistics"""
     engine = get_workflow_engine()
     return await engine.get_stats()

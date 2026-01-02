@@ -4,16 +4,17 @@ REAL AI Core - No fake implementations
 Uses actual API keys from production environment
 """
 
-import os
-import json
 import asyncio
-from typing import Optional, List, Dict, Any
-from openai import OpenAI, AsyncOpenAI
-from anthropic import Anthropic, AsyncAnthropic
-import psycopg2
-from datetime import datetime
-import uuid
+import json
 import logging
+import os
+import uuid
+from datetime import datetime
+from typing import Any, Optional
+
+import psycopg2
+from anthropic import Anthropic, AsyncAnthropic
+from openai import AsyncOpenAI, OpenAI
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -184,7 +185,7 @@ class RealAICore:
         """Check if model is an o-series reasoning model (requires different API params)."""
         return model in {"o1", "o1-preview", "o1-mini", "o3", "o3-mini", "o4-mini"}
 
-    def _safe_json(self, text: str) -> Dict[str, Any]:
+    def _safe_json(self, text: str) -> dict[str, Any]:
         """Parse JSON content without failing the caller."""
         try:
             return json.loads(text)
@@ -373,10 +374,10 @@ class RealAICore:
     async def reason(
         self,
         problem: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[dict[str, Any]] = None,
         max_tokens: int = 4000,
         model: str = "o3-mini"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Use o3-mini reasoning model for complex multi-step problems.
 
         This method is specifically designed for tasks requiring:
@@ -449,7 +450,7 @@ class RealAICore:
             )
             return {"reasoning": response, "conclusion": response, "model_used": "gpt-4-0125-preview (fallback)", "error": str(e)}
 
-    async def route_agent(self, task: Dict[str, Any], candidate_agents: List[str]) -> Dict[str, Any]:
+    async def route_agent(self, task: dict[str, Any], candidate_agents: list[str]) -> dict[str, Any]:
         """Use a cheap model to route work to the right agent."""
         if not candidate_agents:
             return {"agent": None, "reason": "no candidates provided"}
@@ -483,13 +484,13 @@ class RealAICore:
     async def review_and_refine(
         self,
         draft: str,
-        context: Optional[Dict[str, Any]] = None,
-        criteria: Optional[List[str]] = None,
+        context: Optional[dict[str, Any]] = None,
+        criteria: Optional[list[str]] = None,
         max_iterations: int = 2
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run an AI review loop that can suggest fixes before finalizing output."""
         criteria = criteria or ["accuracy", "safety", "actionability"]
-        feedback_history: List[Dict[str, Any]] = []
+        feedback_history: list[dict[str, Any]] = []
         if not isinstance(draft, str):
             try:
                 draft = json.dumps(draft)
@@ -557,9 +558,9 @@ class RealAICore:
     async def quality_gate(
         self,
         output: str,
-        criteria: Optional[List[str]] = None,
+        criteria: Optional[list[str]] = None,
         min_score: int = 70
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Score output with a quality gate before returning it downstream."""
         # If no models are available, skip gating but signal that it was skipped
         if not self.async_openai and not self.async_anthropic:
@@ -619,7 +620,7 @@ class RealAICore:
             "actions": parsed.get("actions", [])
         }
 
-    async def generate_embeddings(self, text: str) -> List[float]:
+    async def generate_embeddings(self, text: str) -> list[float]:
         """Generate REAL embeddings for vector search"""
         try:
             response = await self.async_openai.embeddings.create(
@@ -650,7 +651,7 @@ class RealAICore:
             logger.error(f"Image analysis error: {e}")
             raise e
 
-    async def analyze_roofing_job(self, job_data: Dict) -> Dict:
+    async def analyze_roofing_job(self, job_data: dict) -> dict:
         """REAL AI analysis for roofing jobs"""
         prompt = f"""
         Analyze this roofing job and provide detailed insights:
@@ -706,7 +707,7 @@ class RealAICore:
                 "model": "gpt-4"
             }
 
-    async def generate_proposal(self, customer_data: Dict, job_data: Dict) -> str:
+    async def generate_proposal(self, customer_data: dict, job_data: dict) -> str:
         """Generate REAL AI-powered proposal"""
         prompt = f"""
         Create a professional roofing proposal for:
@@ -740,7 +741,7 @@ class RealAICore:
             system_prompt="You are an expert roofing sales professional creating winning proposals."
         )
 
-    async def score_lead(self, lead_data: Dict) -> Dict:
+    async def score_lead(self, lead_data: dict) -> dict:
         """REAL AI lead scoring"""
         prompt = f"""
         Score this lead from 0-100 based on conversion probability.
@@ -790,7 +791,7 @@ class RealAICore:
             "model": "gpt-4"
         }
 
-    async def optimize_schedule(self, jobs: List[Dict], crews: List[Dict]) -> Dict:
+    async def optimize_schedule(self, jobs: list[dict], crews: list[dict]) -> dict:
         """REAL AI scheduling optimization"""
         prompt = f"""
         Optimize the scheduling for these roofing jobs:
@@ -827,8 +828,8 @@ class RealAICore:
 
     async def chat_with_context(
         self,
-        messages: List[Dict[str, str]],
-        context: Optional[Dict] = None
+        messages: list[dict[str, str]],
+        context: Optional[dict] = None
     ) -> str:
         """REAL conversational AI with context"""
 
@@ -916,7 +917,7 @@ async def ai_generate(prompt: str, **kwargs) -> str:
     """Quick function for AI generation"""
     return await ai_core.generate(prompt, **kwargs)
 
-async def ai_analyze(data: Dict, analysis_type: str = "general") -> Dict:
+async def ai_analyze(data: dict, analysis_type: str = "general") -> dict:
     """Quick function for AI analysis"""
     if analysis_type == "roofing":
         return await ai_core.analyze_roofing_job(data)

@@ -4,17 +4,17 @@ Automated Lead Nurturing Sequences
 Build multi-touch automated follow-up campaigns
 """
 
-import os
+import asyncio
 import json
 import logging
+import os
 import uuid
-import asyncio
-from typing import Dict, List
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
 from openai import OpenAI
+from psycopg2.extras import Json, RealDictCursor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -303,7 +303,7 @@ class LeadNurturingSystem:
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
 
-    def _load_default_templates(self) -> Dict:
+    def _load_default_templates(self) -> dict:
         """Load default sequence templates"""
         return {
             NurtureSequenceType.WELCOME: {
@@ -338,9 +338,9 @@ class LeadNurturingSystem:
         name: str,
         sequence_type: NurtureSequenceType,
         target_segment: LeadSegment,
-        touchpoints: List[Dict],
-        success_criteria: Dict = None,
-        configuration: Dict = None
+        touchpoints: list[dict],
+        success_criteria: dict = None,
+        configuration: dict = None
     ) -> str:
         """Create a new nurture sequence"""
         try:
@@ -409,7 +409,7 @@ class LeadNurturingSystem:
         self,
         lead_id: str,
         sequence_id: str,
-        metadata: Dict = None
+        metadata: dict = None
     ) -> str:
         """Enroll a lead in a nurture sequence"""
         try:
@@ -574,7 +574,7 @@ class LeadNurturingSystem:
         self,
         execution_id: str,
         engagement_type: str,
-        engagement_data: Dict = None
+        engagement_data: dict = None
     ) -> bool:
         """Track engagement for a touchpoint execution"""
         try:
@@ -627,7 +627,7 @@ class LeadNurturingSystem:
             logger.error(f"Failed to track engagement: {e}")
             return False
 
-    async def optimize_sequence(self, sequence_id: str) -> Dict:
+    async def optimize_sequence(self, sequence_id: str) -> dict:
         """Optimize a nurture sequence based on performance"""
         try:
             conn = _get_db_connection()
@@ -714,8 +714,8 @@ class LeadNurturingSystem:
         self,
         sequence_id: str,
         test_name: str,
-        variant_a: Dict,
-        variant_b: Dict,
+        variant_a: dict,
+        variant_b: dict,
         test_metric: str,
         sample_size: int = 100
     ) -> str:
@@ -764,7 +764,7 @@ class LeadNurturingSystem:
         sequence_id: str,
         start_date: datetime = None,
         end_date: datetime = None
-    ) -> Dict:
+    ) -> dict:
         """Get comprehensive metrics for a nurture sequence"""
         try:
             conn = _get_db_connection()
@@ -824,8 +824,8 @@ class PersonalizationEngine:
         lead_id: str,
         template: str,
         subject: str = None,
-        tokens: List[str] = None
-    ) -> Dict:
+        tokens: list[str] = None
+    ) -> dict:
         """Personalize content for a specific lead"""
         try:
             # Get lead data
@@ -859,7 +859,7 @@ class PersonalizationEngine:
             logger.error(f"Failed to personalize content: {e}")
             return {'content': template, 'subject': subject}
 
-    async def _get_lead_data(self, lead_id: str) -> Dict:
+    async def _get_lead_data(self, lead_id: str) -> dict:
         """Get lead data for personalization"""
         try:
             conn = _get_db_connection()
@@ -882,7 +882,7 @@ class PersonalizationEngine:
             logger.error(f"Failed to get lead data: {e}")
             return {'lead_id': lead_id}
 
-    async def _ai_enhance(self, content: str, preferences: Dict) -> str:
+    async def _ai_enhance(self, content: str, preferences: dict) -> str:
         """Use AI to enhance personalization"""
         try:
             prompt = f"""
@@ -913,8 +913,8 @@ class DeliveryManager:
         self,
         channel: str,
         lead_id: str,
-        content: Dict
-    ) -> Dict:
+        content: dict
+    ) -> dict:
         """Deliver content through specified channel"""
         try:
             if channel == TouchPointType.EMAIL.value:
@@ -929,7 +929,7 @@ class DeliveryManager:
             logger.error(f"Failed to deliver: {e}")
             return {'success': False, 'error': str(e)}
 
-    async def _deliver_email(self, lead_id: str, content: Dict) -> Dict:
+    async def _deliver_email(self, lead_id: str, content: dict) -> dict:
         """Deliver email via queue for scheduler daemon to process"""
         try:
             # Get recipient email from lead_data in content, fallback to lead_id if it looks like an email
@@ -976,7 +976,7 @@ class DeliveryManager:
             logger.error(f"Failed to queue email for {lead_id}: {e}")
             return {'success': False, 'error': str(e)}
 
-    async def _deliver_sms(self, lead_id: str, content: Dict) -> Dict:
+    async def _deliver_sms(self, lead_id: str, content: dict) -> dict:
         """Deliver SMS via Twilio if configured, otherwise log and skip"""
         twilio_sid = os.getenv('TWILIO_ACCOUNT_SID')
         twilio_token = os.getenv('TWILIO_AUTH_TOKEN')

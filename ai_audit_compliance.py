@@ -4,15 +4,16 @@ AI Audit and Compliance System - Task 19
 Comprehensive audit trail and compliance tracking for AI operations
 """
 
-import os
 import logging
+import os
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
-from enum import Enum
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Optional
+
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from psycopg2.extras import Json, RealDictCursor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -97,12 +98,12 @@ class AuditEvent:
     action: str
     resource: str
     resource_id: Optional[str] = None
-    details: Dict = field(default_factory=dict)
+    details: dict = field(default_factory=dict)
     risk_level: RiskLevel = RiskLevel.INFO
     outcome: str = "success"
     ip_address: Optional[str] = None
     session_id: Optional[str] = None
-    compliance_tags: List[str] = field(default_factory=list)
+    compliance_tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -114,7 +115,7 @@ class ComplianceRule:
     standard: ComplianceStandard
     check_type: str  # continuous, periodic, on_demand
     severity: RiskLevel
-    conditions: Dict
+    conditions: dict
     remediation: str
     enabled: bool = True
 
@@ -126,8 +127,8 @@ class ComplianceCheck:
     rule_id: str
     timestamp: datetime
     status: ComplianceStatus
-    findings: List[Dict]
-    evidence: Dict
+    findings: list[dict]
+    evidence: dict
     remediation_required: bool
     remediation_deadline: Optional[datetime] = None
 
@@ -140,18 +141,18 @@ class AuditReport:
     period_start: datetime
     period_end: datetime
     generated_at: datetime
-    summary: Dict
-    findings: List[Dict]
-    recommendations: List[str]
+    summary: dict
+    findings: list[dict]
+    recommendations: list[str]
     compliance_score: float
-    risk_summary: Dict
+    risk_summary: dict
 
 
 class AuditLogger:
     """Handles audit event logging"""
 
     def __init__(self):
-        self.buffer: List[AuditEvent] = []
+        self.buffer: list[AuditEvent] = []
         self.buffer_size = 100
         self.flush_interval = 60  # seconds
 
@@ -162,10 +163,10 @@ class AuditLogger:
         action: str,
         resource: str,
         resource_id: Optional[str] = None,
-        details: Optional[Dict] = None,
+        details: Optional[dict] = None,
         risk_level: RiskLevel = RiskLevel.INFO,
         outcome: str = "success",
-        compliance_tags: Optional[List[str]] = None
+        compliance_tags: Optional[list[str]] = None
     ) -> str:
         """Log an audit event"""
         event = AuditEvent(
@@ -234,7 +235,7 @@ class ComplianceChecker:
     """Checks compliance against defined rules"""
 
     def __init__(self):
-        self.rules: Dict[str, ComplianceRule] = {}
+        self.rules: dict[str, ComplianceRule] = {}
         self._load_default_rules()
 
     def _load_default_rules(self):
@@ -298,7 +299,7 @@ class ComplianceChecker:
     async def run_check(
         self,
         rule_id: str,
-        context: Optional[Dict] = None
+        context: Optional[dict] = None
     ) -> ComplianceCheck:
         """Run a compliance check"""
         rule = self.rules.get(rule_id)
@@ -367,7 +368,7 @@ class ComplianceChecker:
     async def _check_data_retention(
         self,
         rule: ComplianceRule,
-        context: Optional[Dict]
+        context: Optional[dict]
     ) -> tuple:
         """Check data retention compliance"""
         findings = []
@@ -415,7 +416,7 @@ class ComplianceChecker:
     async def _check_decision_logging(
         self,
         rule: ComplianceRule,
-        context: Optional[Dict]
+        context: Optional[dict]
     ) -> tuple:
         """Check AI decision logging compliance"""
         findings = []
@@ -467,7 +468,7 @@ class ComplianceChecker:
             cursor.close()
             conn.close()
 
-        except Exception as e:
+        except Exception:
             # Table might not exist
             evidence = {"note": "Decision history table not found or empty"}
 
@@ -476,7 +477,7 @@ class ComplianceChecker:
     async def _check_encryption(
         self,
         rule: ComplianceRule,
-        context: Optional[Dict]
+        context: Optional[dict]
     ) -> tuple:
         """Check encryption compliance - VERIFIED via actual DB connection"""
         findings = []
@@ -531,7 +532,7 @@ class ComplianceChecker:
     async def _check_access_control(
         self,
         rule: ComplianceRule,
-        context: Optional[Dict]
+        context: Optional[dict]
     ) -> tuple:
         """Check access control compliance - VERIFIED via actual DB check"""
         findings = []
@@ -595,7 +596,7 @@ class ComplianceChecker:
     async def _check_consent(
         self,
         rule: ComplianceRule,
-        context: Optional[Dict]
+        context: Optional[dict]
     ) -> tuple:
         """Check consent tracking compliance - VERIFIED via actual DB check"""
         findings = []
@@ -653,12 +654,12 @@ class ComplianceChecker:
     async def _generic_check(
         self,
         rule: ComplianceRule,
-        context: Optional[Dict]
+        context: Optional[dict]
     ) -> tuple:
         """Generic compliance check"""
         return [], {"note": "Generic check - manual review required"}
 
-    async def run_all_checks(self) -> List[ComplianceCheck]:
+    async def run_all_checks(self) -> list[ComplianceCheck]:
         """Run all enabled compliance checks"""
         results = []
 
@@ -956,7 +957,7 @@ class AIAuditComplianceSystem:
         self,
         decision_type: str,
         actor: str,
-        context: Dict,
+        context: dict,
         decision: str,
         reasoning: Optional[str] = None,
         confidence: Optional[float] = None
@@ -1004,7 +1005,7 @@ class AIAuditComplianceSystem:
         self,
         event_type: str,
         actor: str,
-        details: Dict,
+        details: dict,
         risk_level: RiskLevel = RiskLevel.HIGH
     ) -> str:
         """Log a security event"""
@@ -1020,8 +1021,8 @@ class AIAuditComplianceSystem:
 
     async def run_compliance_audit(
         self,
-        standards: Optional[List[ComplianceStandard]] = None
-    ) -> Dict:
+        standards: Optional[list[ComplianceStandard]] = None
+    ) -> dict:
         """Run a full compliance audit"""
         results = await self.compliance_checker.run_all_checks()
 
@@ -1064,7 +1065,7 @@ class AIAuditComplianceSystem:
             ]
         }
 
-    async def _store_compliance_results(self, results: List[ComplianceCheck]):
+    async def _store_compliance_results(self, results: list[ComplianceCheck]):
         """Store compliance check results"""
         try:
             conn = self._get_connection()
@@ -1152,7 +1153,7 @@ class AIAuditComplianceSystem:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         limit: int = 100
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Get audit trail with filters"""
         try:
             conn = self._get_connection()
@@ -1198,7 +1199,7 @@ class AIAuditComplianceSystem:
             logger.error(f"Failed to get audit trail: {e}")
             return []
 
-    async def get_compliance_status(self) -> Dict:
+    async def get_compliance_status(self) -> dict:
         """Get current compliance status"""
         try:
             conn = self._get_connection()

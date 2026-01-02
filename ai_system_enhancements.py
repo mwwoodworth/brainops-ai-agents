@@ -17,17 +17,17 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import json
 import asyncio
+import hashlib
+import json
 import logging
 import threading
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Callable, Set, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
-from collections import defaultdict, deque
-import hashlib
 import uuid
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +53,8 @@ class ModuleHealth:
     error_rate: float
     latency_p95_ms: float
     availability: float  # Uptime percentage
-    issues: List[str] = field(default_factory=list)
-    metrics: Dict[str, float] = field(default_factory=dict)
+    issues: list[str] = field(default_factory=list)
+    metrics: dict[str, float] = field(default_factory=dict)
 
 
 class HealthScorer:
@@ -64,8 +64,8 @@ class HealthScorer:
     """
 
     def __init__(self):
-        self._module_health: Dict[str, ModuleHealth] = {}
-        self._health_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=100))
+        self._module_health: dict[str, ModuleHealth] = {}
+        self._health_history: dict[str, deque] = defaultdict(lambda: deque(maxlen=100))
         self._weights = {
             "error_rate": 0.35,
             "latency": 0.25,
@@ -88,8 +88,8 @@ class HealthScorer:
         error_rate: float = 0.0,
         latency_p95_ms: float = 0.0,
         availability: float = 1.0,
-        custom_metrics: Dict[str, float] = None,
-        issues: List[str] = None
+        custom_metrics: dict[str, float] = None,
+        issues: list[str] = None
     ) -> ModuleHealth:
         """Update health metrics for a module"""
         with self._lock:
@@ -162,7 +162,7 @@ class HealthScorer:
                          (self._thresholds["availability_degraded"] - self._thresholds["availability_critical"])) * 50
         return 100
 
-    def _score_custom(self, metrics: Dict[str, float]) -> float:
+    def _score_custom(self, metrics: dict[str, float]) -> float:
         """Score custom metrics (normalized 0-100)"""
         if not metrics:
             return 100
@@ -173,11 +173,11 @@ class HealthScorer:
         """Get current health for a module"""
         return self._module_health.get(module_name)
 
-    def get_all_health(self) -> Dict[str, ModuleHealth]:
+    def get_all_health(self) -> dict[str, ModuleHealth]:
         """Get health for all modules"""
         return dict(self._module_health)
 
-    def get_aggregate_health(self) -> Dict[str, Any]:
+    def get_aggregate_health(self) -> dict[str, Any]:
         """Get aggregate system health"""
         with self._lock:
             if not self._module_health:
@@ -209,7 +209,7 @@ class HealthScorer:
                 "module_scores": {name: h.score for name, h in self._module_health.items()}
             }
 
-    def get_health_history(self, module_name: str, limit: int = 100) -> List[Dict]:
+    def get_health_history(self, module_name: str, limit: int = 100) -> list[dict]:
         """Get health history for a module"""
         # FIX: Add thread safety for reading health history
         with self._lock:
@@ -242,7 +242,7 @@ class Alert:
     acknowledged: bool = False
     resolved: bool = False
     resolution_time: Optional[datetime] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class AlertingSystem:
@@ -252,12 +252,12 @@ class AlertingSystem:
     """
 
     def __init__(self):
-        self._thresholds: Dict[str, Dict[str, Any]] = {}
-        self._active_alerts: Dict[str, Alert] = {}
+        self._thresholds: dict[str, dict[str, Any]] = {}
+        self._active_alerts: dict[str, Alert] = {}
         self._alert_history: deque = deque(maxlen=1000)
-        self._handlers: List[Callable] = []
+        self._handlers: list[Callable] = []
         self._dedupe_window_seconds = 300  # 5 minute deduplication
-        self._last_alert_time: Dict[str, datetime] = {}
+        self._last_alert_time: dict[str, datetime] = {}
         self._lock = threading.Lock()
 
     def register_threshold(
@@ -282,7 +282,7 @@ class AlertingSystem:
             "auto_resolve": auto_resolve
         }
 
-    def check_value(self, name: str, value: float, metadata: Dict = None) -> Optional[Alert]:
+    def check_value(self, name: str, value: float, metadata: dict = None) -> Optional[Alert]:
         """Check a value against registered thresholds"""
         if name not in self._thresholds:
             return None
@@ -400,7 +400,7 @@ class AlertingSystem:
                 return True
             return False
 
-    def get_active_alerts(self, severity: AlertSeverity = None) -> List[Alert]:
+    def get_active_alerts(self, severity: AlertSeverity = None) -> list[Alert]:
         """Get active alerts"""
         with self._lock:
             alerts = [a for a in self._active_alerts.values() if not a.resolved]
@@ -408,7 +408,7 @@ class AlertingSystem:
                 alerts = [a for a in alerts if a.severity == severity]
             return alerts
 
-    def get_alert_history(self, limit: int = 100) -> List[Dict]:
+    def get_alert_history(self, limit: int = 100) -> list[dict]:
         """Get alert history"""
         return list(self._alert_history)[-limit:]
 
@@ -422,8 +422,8 @@ class EventChain:
     """Represents a chain of correlated events"""
     chain_id: str
     root_event_id: str
-    events: List[str]
-    modules_involved: Set[str]
+    events: list[str]
+    modules_involved: set[str]
     start_time: datetime
     end_time: Optional[datetime]
     duration_ms: float = 0
@@ -437,9 +437,9 @@ class EventCorrelator:
     """
 
     def __init__(self):
-        self._active_chains: Dict[str, EventChain] = {}
+        self._active_chains: dict[str, EventChain] = {}
         self._completed_chains: deque = deque(maxlen=500)
-        self._event_to_chain: Dict[str, str] = {}
+        self._event_to_chain: dict[str, str] = {}
         self._correlation_window_ms = 5000  # 5 seconds
         self._lock = threading.Lock()
 
@@ -495,7 +495,7 @@ class EventCorrelator:
                 chain.duration_ms = (chain.end_time - chain.start_time).total_seconds() * 1000
                 self._completed_chains.append(chain)
 
-    def get_active_chains(self) -> List[EventChain]:
+    def get_active_chains(self) -> list[EventChain]:
         """Get active event chains"""
         return list(self._active_chains.values())
 
@@ -506,7 +506,7 @@ class EventCorrelator:
             return self._active_chains.get(chain_id)
         return None
 
-    def get_chain_stats(self) -> Dict[str, Any]:
+    def get_chain_stats(self) -> dict[str, Any]:
         """Get correlation statistics"""
         with self._lock:
             completed = list(self._completed_chains)
@@ -529,7 +529,7 @@ class EventCorrelator:
                 "modules_distribution": self._get_module_distribution(completed)
             }
 
-    def _get_module_distribution(self, chains: List[EventChain]) -> Dict[str, int]:
+    def _get_module_distribution(self, chains: list[EventChain]) -> dict[str, int]:
         """Get distribution of modules in chains"""
         distribution = defaultdict(int)
         for chain in chains:
@@ -571,11 +571,11 @@ class AutoRecoveryEngine:
     """
 
     def __init__(self):
-        self._rules: Dict[str, RecoveryRule] = {}
-        self._last_trigger: Dict[str, datetime] = {}
-        self._trigger_counts: Dict[str, int] = defaultdict(int)
+        self._rules: dict[str, RecoveryRule] = {}
+        self._last_trigger: dict[str, datetime] = {}
+        self._trigger_counts: dict[str, int] = defaultdict(int)
         self._recovery_history: deque = deque(maxlen=500)
-        self._handlers: Dict[RecoveryAction, Callable] = {}
+        self._handlers: dict[RecoveryAction, Callable] = {}
         self._lock = threading.Lock()
 
     def register_rule(self, rule: RecoveryRule):
@@ -589,8 +589,8 @@ class AutoRecoveryEngine:
     async def evaluate_and_recover(
         self,
         module: str,
-        metrics: Dict[str, float]
-    ) -> Optional[Dict[str, Any]]:
+        metrics: dict[str, float]
+    ) -> Optional[dict[str, Any]]:
         """Evaluate metrics and trigger recovery if needed"""
         triggered_rule = None
         triggered_action = None
@@ -645,7 +645,7 @@ class AutoRecoveryEngine:
 
         return result
 
-    def _evaluate_condition(self, condition: str, metrics: Dict[str, float]) -> bool:
+    def _evaluate_condition(self, condition: str, metrics: dict[str, float]) -> bool:
         """Evaluate a trigger condition"""
         try:
             # Parse simple conditions like "error_rate > 0.1"
@@ -676,8 +676,8 @@ class AutoRecoveryEngine:
         self,
         rule: RecoveryRule,
         action: RecoveryAction,
-        metrics: Dict[str, float]
-    ) -> Dict[str, Any]:
+        metrics: dict[str, float]
+    ) -> dict[str, Any]:
         """Execute a recovery action"""
         handler = self._handlers.get(action)
         result = {
@@ -703,7 +703,7 @@ class AutoRecoveryEngine:
 
         return result
 
-    def get_recovery_history(self, limit: int = 100) -> List[Dict]:
+    def get_recovery_history(self, limit: int = 100) -> list[dict]:
         """Get recovery history"""
         return list(self._recovery_history)[-limit:]
 
@@ -725,7 +725,7 @@ class PatternMatch:
     outcome: str
     success_rate: float
     sample_size: int
-    context: Dict[str, Any]
+    context: dict[str, Any]
 
 
 class EnhancedLearningEngine:
@@ -735,16 +735,16 @@ class EnhancedLearningEngine:
     """
 
     def __init__(self):
-        self._patterns: Dict[str, List[Dict]] = defaultdict(list)
-        self._pattern_outcomes: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        self._context_vectors: Dict[str, List[float]] = {}
-        self._feature_weights: Dict[str, float] = {}
+        self._patterns: dict[str, list[dict]] = defaultdict(list)
+        self._pattern_outcomes: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        self._context_vectors: dict[str, list[float]] = {}
+        self._feature_weights: dict[str, float] = {}
         self._lock = threading.Lock()
 
     def learn_pattern(
         self,
         operation_type: str,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         outcome: str,
         success: bool
     ):
@@ -769,9 +769,9 @@ class EnhancedLearningEngine:
     def predict_outcome(
         self,
         operation_type: str,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         top_k: int = 5
-    ) -> Tuple[float, List[PatternMatch]]:
+    ) -> tuple[float, list[PatternMatch]]:
         """Predict success probability based on similar patterns"""
         with self._lock:
             patterns = self._patterns.get(operation_type, [])
@@ -817,7 +817,7 @@ class EnhancedLearningEngine:
 
             return round(prediction, 3), pattern_matches
 
-    def _context_similarity(self, ctx1: Dict, ctx2: Dict) -> float:
+    def _context_similarity(self, ctx1: dict, ctx2: dict) -> float:
         """Calculate similarity between contexts"""
         if not ctx1 or not ctx2:
             return 0.0
@@ -848,7 +848,7 @@ class EnhancedLearningEngine:
         """Set importance weight for a feature"""
         self._feature_weights[feature] = weight
 
-    def get_learning_stats(self) -> Dict[str, Any]:
+    def get_learning_stats(self) -> dict[str, Any]:
         """Get learning statistics"""
         with self._lock:
             return {
@@ -894,7 +894,7 @@ class ModuleWiringBridge:
         self._integration = None
 
         # Module references
-        self._modules: Dict[str, Any] = {}
+        self._modules: dict[str, Any] = {}
 
         # Setup default thresholds and rules
         self._setup_defaults()
@@ -942,7 +942,7 @@ class ModuleWiringBridge:
     def connect_observability(self):
         """Connect to the observability layer"""
         try:
-            from ai_observability import ObservabilityController, EventBus, EventType
+            from ai_observability import EventBus, EventType, ObservabilityController
             self._observability = ObservabilityController.get_instance()
             self._event_bus = EventBus.get_instance()
 
@@ -991,7 +991,7 @@ class ModuleWiringBridge:
         latency_p95_ms: float,
         request_count: int,
         success_count: int,
-        custom_metrics: Dict[str, float] = None
+        custom_metrics: dict[str, float] = None
     ):
         """Update metrics for a module"""
         availability = success_count / request_count if request_count > 0 else 1.0
@@ -1019,11 +1019,11 @@ class ModuleWiringBridge:
 
         return health
 
-    async def check_and_recover(self, module: str, metrics: Dict[str, float]):
+    async def check_and_recover(self, module: str, metrics: dict[str, float]):
         """Check metrics and trigger auto-recovery if needed"""
         return await self.auto_recovery.evaluate_and_recover(module, metrics)
 
-    def get_system_status(self) -> Dict[str, Any]:
+    def get_system_status(self) -> dict[str, Any]:
         """Get comprehensive system status"""
         return {
             "health": self.health_scorer.get_aggregate_health(),

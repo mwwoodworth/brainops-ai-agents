@@ -4,12 +4,13 @@ Database-Driven Scheduled Executor
 Executes agents based on database schedules to prevent duplicates
 """
 
-import os
 import asyncio
+import logging
+import os
+
 import httpx
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import logging
 
 logger = logging.getLogger(__name__)
 

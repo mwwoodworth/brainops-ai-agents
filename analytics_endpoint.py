@@ -2,10 +2,11 @@
 AI Agent Analytics Endpoint
 Provides comprehensive analytics for agent executions and performance
 """
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Query
 import logging
+from datetime import datetime, timedelta
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException, Query
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ async def agent_analytics(
     period: str = "current_month",
     metric: Optional[str] = "revenue",
     agent_id: Optional[str] = None,
-    data: Optional[Dict[str, Any]] = None
+    data: Optional[dict[str, Any]] = None
 ):
     """
     AI Agent Analytics Endpoint
@@ -215,7 +216,7 @@ async def agent_analytics(
 
         elif action == "predict":
             # Predictive analytics based on real data
-            
+
             # 1. Get current month revenue
             current_start = datetime(now.year, now.month, 1)
             revenue_query = """
@@ -225,7 +226,7 @@ async def agent_analytics(
             """
             current_rev_row = await pool.fetchrow(revenue_query, current_start)
             current_rev = float(current_rev_row["total"] or 0)
-            
+
             # 2. Get previous month revenue
             if now.month == 1:
                 prev_start = datetime(now.year - 1, 12, 1)
@@ -233,22 +234,22 @@ async def agent_analytics(
             else:
                 prev_start = datetime(now.year, now.month - 1, 1)
                 prev_end = datetime(now.year, now.month, 1) - timedelta(seconds=1)
-                
+
             prev_rev_row = await pool.fetchrow(
                 "SELECT SUM(CASE WHEN amount IS NOT NULL THEN amount ELSE 0 END) as total FROM invoices WHERE invoice_date >= $1 AND invoice_date <= $2",
                 prev_start, prev_end
             )
             prev_rev = float(prev_rev_row["total"] or 0)
-            
+
             # 3. Calculate growth and projection
             growth = 0.0
             if prev_rev > 0:
                 growth = ((current_rev - prev_rev) / prev_rev) * 100
-                
+
             # Simple projection: Apply growth rate to current revenue
             # Note: This is a basic linear projection.
             next_month_projection = current_rev * (1 + (growth / 100)) if growth > 0 else current_rev
-            
+
             response["prediction"] = {
                 "period": period,
                 "forecast": {
@@ -493,7 +494,7 @@ async def get_dashboard_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def generate_automated_insights(dashboard_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+async def generate_automated_insights(dashboard_data: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Generate automated insights from dashboard data using AI
 
@@ -596,7 +597,7 @@ async def generate_automated_insights(dashboard_data: Dict[str, Any]) -> List[Di
     return insights
 
 
-async def generate_predictions(dashboard_data: Dict[str, Any], pool, start_time) -> Dict[str, Any]:
+async def generate_predictions(dashboard_data: dict[str, Any], pool, start_time) -> dict[str, Any]:
     """
     Generate predictive analytics based on historical trends
     """
@@ -657,7 +658,7 @@ async def generate_predictions(dashboard_data: Dict[str, Any], pool, start_time)
         }
 
 
-def _get_trend_recommendation(trend: str, slope: float, data: List[int]) -> str:
+def _get_trend_recommendation(trend: str, slope: float, data: list[int]) -> str:
     """Generate recommendation based on trend"""
     if trend == "increasing":
         return "Activity is growing - consider scaling resources and monitoring capacity"

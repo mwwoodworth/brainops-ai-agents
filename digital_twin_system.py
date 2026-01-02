@@ -10,14 +10,14 @@ Creates and maintains virtual replicas of production systems for:
 Based on 2025 best practices from IBM, Siemens, and Microsoft Azure Digital Twins.
 """
 
-import json
 import hashlib
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field, asdict
-from enum import Enum
-import os
+import json
 import logging
+import os
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ class SystemMetrics:
     throughput_rps: float = 0.0
     active_connections: int = 0
     queue_depth: int = 0
-    custom_metrics: Dict[str, float] = field(default_factory=dict)
+    custom_metrics: dict[str, float] = field(default_factory=dict)
     timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
 
 
@@ -85,7 +85,7 @@ class FailurePrediction:
     impact_severity: str  # low, medium, high, critical
     recommended_action: str
     confidence: float
-    contributing_factors: List[str] = field(default_factory=list)
+    contributing_factors: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -94,8 +94,8 @@ class StatePrediction:
     prediction_time: str
     predicted_metrics: SystemMetrics
     confidence: float
-    contributing_trends: List[str] = field(default_factory=list)
-    risk_factors: List[str] = field(default_factory=list)
+    contributing_trends: list[str] = field(default_factory=list)
+    risk_factors: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -117,7 +117,7 @@ class StateHistoryEntry:
     """Historical state snapshot for debugging and rollback"""
     snapshot_id: str
     timestamp: str
-    state_snapshot: Dict[str, Any]
+    state_snapshot: dict[str, Any]
     metrics: SystemMetrics
     health_score: float
     change_reason: str
@@ -134,18 +134,18 @@ class DigitalTwin:
     created_at: str
     last_sync: str
     sync_frequency_seconds: int
-    state_snapshot: Dict[str, Any]
-    metrics_history: List[SystemMetrics] = field(default_factory=list)
-    failure_predictions: List[FailurePrediction] = field(default_factory=list)
-    simulation_results: List[Dict[str, Any]] = field(default_factory=list)
-    state_predictions: List[StatePrediction] = field(default_factory=list)
-    divergence_alerts: List[DivergenceAlert] = field(default_factory=list)
-    state_history: List[StateHistoryEntry] = field(default_factory=list)
+    state_snapshot: dict[str, Any]
+    metrics_history: list[SystemMetrics] = field(default_factory=list)
+    failure_predictions: list[FailurePrediction] = field(default_factory=list)
+    simulation_results: list[dict[str, Any]] = field(default_factory=list)
+    state_predictions: list[StatePrediction] = field(default_factory=list)
+    divergence_alerts: list[DivergenceAlert] = field(default_factory=list)
+    state_history: list[StateHistoryEntry] = field(default_factory=list)
     health_score: float = 100.0
     drift_detected: bool = False
     drift_details: Optional[str] = None
     auto_correction_enabled: bool = True
-    expected_state: Optional[Dict[str, Any]] = None
+    expected_state: Optional[dict[str, Any]] = None
 
 
 class DigitalTwinEngine:
@@ -160,16 +160,16 @@ class DigitalTwinEngine:
     """
 
     def __init__(self):
-        self.twins: Dict[str, DigitalTwin] = {}
+        self.twins: dict[str, DigitalTwin] = {}
         self.db_url = os.getenv("DATABASE_URL")
-        self.prediction_models: Dict[str, Any] = {}
+        self.prediction_models: dict[str, Any] = {}
         self.simulation_engine = SimulationEngine()
         self.failure_predictor = FailurePredictor()
         self.state_predictor = StatePredictor()
         self.divergence_detector = DivergenceDetector()
         self.auto_corrector = AutoCorrector()
         self._initialized = False
-        self._sync_in_progress: Dict[str, bool] = {}  # Track sync to prevent loops
+        self._sync_in_progress: dict[str, bool] = {}  # Track sync to prevent loops
 
     async def initialize(self):
         """Initialize the Digital Twin Engine"""
@@ -286,7 +286,7 @@ class DigitalTwinEngine:
         self,
         source_system: str,
         system_type: SystemType,
-        initial_state: Dict[str, Any],
+        initial_state: dict[str, Any],
         maturity_level: TwinMaturityLevel = TwinMaturityLevel.PREDICTIVE,
         sync_frequency_seconds: int = 60
     ) -> DigitalTwin:
@@ -427,7 +427,7 @@ class DigitalTwinEngine:
         except Exception as e:
             logger.error(f"Error persisting twin: {e}")
 
-    async def deduplicate_twins(self) -> Dict[str, Any]:
+    async def deduplicate_twins(self) -> dict[str, Any]:
         """
         Clean up duplicate twins in the database.
         Keeps only the most recent twin per source_system.
@@ -476,7 +476,7 @@ class DigitalTwinEngine:
             logger.error(f"Error deduplicating twins: {e}")
             return {"error": str(e)}
 
-    async def sync_twin(self, twin_id: str, current_metrics: SystemMetrics, source: str = "external") -> Dict[str, Any]:
+    async def sync_twin(self, twin_id: str, current_metrics: SystemMetrics, source: str = "external") -> dict[str, Any]:
         """
         Synchronize a digital twin with current production metrics
 
@@ -560,7 +560,7 @@ class DigitalTwinEngine:
             # Always release the lock
             self._sync_in_progress[twin_id] = False
 
-    def _detect_drift(self, twin: DigitalTwin, metrics: SystemMetrics) -> Dict[str, Any]:
+    def _detect_drift(self, twin: DigitalTwin, metrics: SystemMetrics) -> dict[str, Any]:
         """Detect if system has drifted from expected behavior"""
         if len(twin.metrics_history) < 10:
             return {"detected": False}
@@ -607,7 +607,7 @@ class DigitalTwinEngine:
             }
         }
 
-    async def _predict_failures(self, twin: DigitalTwin, metrics: SystemMetrics) -> List[FailurePrediction]:
+    async def _predict_failures(self, twin: DigitalTwin, metrics: SystemMetrics) -> list[FailurePrediction]:
         """Run failure prediction models"""
         predictions = []
 
@@ -708,7 +708,7 @@ class DigitalTwinEngine:
         self,
         twin: DigitalTwin,
         current_metrics: SystemMetrics
-    ) -> List[StatePrediction]:
+    ) -> list[StatePrediction]:
         """Predict future system states"""
         try:
             return self.state_predictor.predict_future_states(
@@ -723,7 +723,7 @@ class DigitalTwinEngine:
         self,
         twin: DigitalTwin,
         current_metrics: SystemMetrics
-    ) -> List[DivergenceAlert]:
+    ) -> list[DivergenceAlert]:
         """Detect divergence from expected state"""
         try:
             return self.divergence_detector.detect_divergence(
@@ -737,8 +737,8 @@ class DigitalTwinEngine:
     async def _apply_auto_corrections(
         self,
         twin: DigitalTwin,
-        alerts: List[DivergenceAlert]
-    ) -> List[Dict[str, Any]]:
+        alerts: list[DivergenceAlert]
+    ) -> list[dict[str, Any]]:
         """Apply automatic corrections for divergence alerts"""
         try:
             return await self.auto_corrector.apply_corrections(twin, alerts)
@@ -750,7 +750,7 @@ class DigitalTwinEngine:
         self,
         twin_id: str,
         snapshot_id: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Rollback twin to a previous state snapshot"""
         if twin_id not in self.twins:
             return {"error": f"Twin {twin_id} not found"}
@@ -797,8 +797,8 @@ class DigitalTwinEngine:
     async def set_expected_state(
         self,
         twin_id: str,
-        expected_state: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        expected_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Set the expected state for divergence detection"""
         if twin_id not in self.twins:
             return {"error": f"Twin {twin_id} not found"}
@@ -850,7 +850,7 @@ class DigitalTwinEngine:
         self,
         twin: DigitalTwin,
         metrics: SystemMetrics,
-        predictions: List[FailurePrediction]
+        predictions: list[FailurePrediction]
     ) -> float:
         """Calculate overall health score (0-100)"""
         score = 100.0
@@ -889,8 +889,8 @@ class DigitalTwinEngine:
     def _generate_recommendations(
         self,
         twin: DigitalTwin,
-        predictions: List[FailurePrediction]
-    ) -> List[Dict[str, str]]:
+        predictions: list[FailurePrediction]
+    ) -> list[dict[str, str]]:
         """Generate actionable recommendations"""
         recommendations = []
 
@@ -916,8 +916,8 @@ class DigitalTwinEngine:
     async def simulate_scenario(
         self,
         twin_id: str,
-        scenario: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        scenario: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Run a simulation scenario on the digital twin
 
@@ -954,8 +954,8 @@ class DigitalTwinEngine:
     async def test_update(
         self,
         twin_id: str,
-        update_config: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        update_config: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Test a system update on the digital twin before production deployment
 
@@ -997,7 +997,7 @@ class DigitalTwinEngine:
             "recommendations": impact_analysis.get("recommendations", [])
         }
 
-    def get_twin_status(self, twin_id: str) -> Optional[Dict[str, Any]]:
+    def get_twin_status(self, twin_id: str) -> Optional[dict[str, Any]]:
         """Get current status of a digital twin"""
         if twin_id not in self.twins:
             return None
@@ -1017,7 +1017,7 @@ class DigitalTwinEngine:
             "simulations_run": len(twin.simulation_results)
         }
 
-    def list_twins(self) -> List[Dict[str, Any]]:
+    def list_twins(self) -> list[dict[str, Any]]:
         """List all digital twins"""
         return [self.get_twin_status(tid) for tid in self.twins.keys()]
 
@@ -1026,14 +1026,14 @@ class DigitalTwinEngine:
 class BasePredictionModel:
     """Base class for failure prediction models"""
 
-    def predict(self, history: List[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
+    def predict(self, history: list[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
         raise NotImplementedError
 
 
 class CPUSaturationPredictor(BasePredictionModel):
     """Predicts CPU saturation based on trend analysis"""
 
-    def predict(self, history: List[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
+    def predict(self, history: list[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
         if len(history) < 10:
             return None
 
@@ -1063,7 +1063,7 @@ class CPUSaturationPredictor(BasePredictionModel):
 class MemoryLeakPredictor(BasePredictionModel):
     """Predicts memory leaks based on steady growth patterns"""
 
-    def predict(self, history: List[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
+    def predict(self, history: list[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
         if len(history) < 20:
             return None
 
@@ -1096,7 +1096,7 @@ class MemoryLeakPredictor(BasePredictionModel):
 class DiskExhaustionPredictor(BasePredictionModel):
     """Predicts disk space exhaustion"""
 
-    def predict(self, history: List[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
+    def predict(self, history: list[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
         if current.disk_usage > 80:
             if len(history) >= 10:
                 disk_values = [m.disk_usage for m in history[-20:]]
@@ -1122,7 +1122,7 @@ class DiskExhaustionPredictor(BasePredictionModel):
 class LatencyDegradationPredictor(BasePredictionModel):
     """Predicts latency degradation"""
 
-    def predict(self, history: List[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
+    def predict(self, history: list[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
         if len(history) < 10:
             return None
 
@@ -1150,7 +1150,7 @@ class LatencyDegradationPredictor(BasePredictionModel):
 class ErrorRateSpikePredictor(BasePredictionModel):
     """Predicts error rate spikes"""
 
-    def predict(self, history: List[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
+    def predict(self, history: list[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
         if current.error_rate > 0.05:  # >5% error rate
             return FailurePrediction(
                 component="application",
@@ -1168,7 +1168,7 @@ class ErrorRateSpikePredictor(BasePredictionModel):
 class ConnectionExhaustionPredictor(BasePredictionModel):
     """Predicts connection pool exhaustion"""
 
-    def predict(self, history: List[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
+    def predict(self, history: list[SystemMetrics], current: SystemMetrics) -> Optional[FailurePrediction]:
         if len(history) < 5:
             return None
 
@@ -1199,7 +1199,7 @@ class SimulationEngine:
     def __init__(self):
         self.scenarios = {}
 
-    async def run_simulation(self, twin: DigitalTwin, scenario: Dict[str, Any]) -> Dict[str, Any]:
+    async def run_simulation(self, twin: DigitalTwin, scenario: dict[str, Any]) -> dict[str, Any]:
         """Run a simulation scenario"""
         scenario_type = scenario.get("type", "traffic_spike")
 
@@ -1214,7 +1214,7 @@ class SimulationEngine:
         else:
             return {"error": f"Unknown scenario type: {scenario_type}"}
 
-    def _simulate_traffic_spike(self, twin: DigitalTwin, scenario: Dict[str, Any]) -> Dict[str, Any]:
+    def _simulate_traffic_spike(self, twin: DigitalTwin, scenario: dict[str, Any]) -> dict[str, Any]:
         """Simulate a traffic spike"""
         multiplier = scenario.get("traffic_multiplier", 3)
         duration_minutes = scenario.get("duration_minutes", 30)
@@ -1245,7 +1245,7 @@ class SimulationEngine:
             }
         return {"error": "No historical metrics available for simulation"}
 
-    def _simulate_failure(self, twin: DigitalTwin, scenario: Dict[str, Any]) -> Dict[str, Any]:
+    def _simulate_failure(self, twin: DigitalTwin, scenario: dict[str, Any]) -> dict[str, Any]:
         """Simulate a component failure"""
         component = scenario.get("component", "database")
 
@@ -1264,7 +1264,7 @@ class SimulationEngine:
             }
         }
 
-    def _simulate_resource_constraint(self, twin: DigitalTwin, scenario: Dict[str, Any]) -> Dict[str, Any]:
+    def _simulate_resource_constraint(self, twin: DigitalTwin, scenario: dict[str, Any]) -> dict[str, Any]:
         """Simulate resource constraints"""
         constraint_type = scenario.get("constraint", "memory")
         reduction_percent = scenario.get("reduction_percent", 50)
@@ -1280,7 +1280,7 @@ class SimulationEngine:
             }
         }
 
-    def _simulate_load_test(self, twin: DigitalTwin, scenario: Dict[str, Any]) -> Dict[str, Any]:
+    def _simulate_load_test(self, twin: DigitalTwin, scenario: dict[str, Any]) -> dict[str, Any]:
         """Simulate load testing"""
         concurrent_users = scenario.get("concurrent_users", 1000)
         duration_minutes = scenario.get("duration_minutes", 10)
@@ -1310,7 +1310,7 @@ class SimulationEngine:
             }
         return {"error": "No baseline metrics available"}
 
-    def apply_update(self, current_state: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
+    def apply_update(self, current_state: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
         """Apply an update to simulated state"""
         new_state = current_state.copy()
         new_state.update(update)
@@ -1319,10 +1319,10 @@ class SimulationEngine:
 
     def analyze_impact(
         self,
-        before: Dict[str, Any],
-        after: Dict[str, Any],
-        historical_metrics: List[SystemMetrics]
-    ) -> Dict[str, Any]:
+        before: dict[str, Any],
+        after: dict[str, Any],
+        historical_metrics: list[SystemMetrics]
+    ) -> dict[str, Any]:
         """Analyze the impact of a state change"""
         changes = {}
         for key in set(list(before.keys()) + list(after.keys())):
@@ -1362,7 +1362,7 @@ class FailurePredictor:
     def add_model(self, name: str, model: BasePredictionModel):
         self.models[name] = model
 
-    async def predict_all(self, history: List[SystemMetrics], current: SystemMetrics) -> List[FailurePrediction]:
+    async def predict_all(self, history: list[SystemMetrics], current: SystemMetrics) -> list[FailurePrediction]:
         predictions = []
         for name, model in self.models.items():
             try:
@@ -1379,10 +1379,10 @@ class StatePredictor:
 
     def predict_future_states(
         self,
-        history: List[SystemMetrics],
+        history: list[SystemMetrics],
         current: SystemMetrics,
-        prediction_windows: List[int] = [5, 15, 30, 60]  # minutes
-    ) -> List[StatePrediction]:
+        prediction_windows: list[int] = [5, 15, 30, 60]  # minutes
+    ) -> list[StatePrediction]:
         """Predict future states at various time intervals"""
         if len(history) < 10:
             return []
@@ -1426,7 +1426,7 @@ class StatePredictor:
                     risks.append(f"Latency may exceed 1000ms in {minutes_ahead} minutes")
 
             if error_trend > 0.001:
-                trends.append(f"Error rate increasing")
+                trends.append("Error rate increasing")
                 risks.append("Error rate trending upward")
 
             prediction = StatePrediction(
@@ -1451,7 +1451,7 @@ class StatePredictor:
 
         return predictions
 
-    def _calculate_trend(self, values: List[float]) -> float:
+    def _calculate_trend(self, values: list[float]) -> float:
         """Calculate linear trend from values"""
         if len(values) < 2:
             return 0.0
@@ -1471,7 +1471,7 @@ class StatePredictor:
         slope = numerator / denominator
         return slope
 
-    def _calculate_confidence(self, metrics: List[SystemMetrics]) -> float:
+    def _calculate_confidence(self, metrics: list[SystemMetrics]) -> float:
         """Calculate prediction confidence based on data consistency"""
         if len(metrics) < 10:
             return 0.3
@@ -1492,8 +1492,8 @@ class DivergenceDetector:
         self,
         twin: DigitalTwin,
         current_metrics: SystemMetrics,
-        thresholds: Optional[Dict[str, float]] = None
-    ) -> List[DivergenceAlert]:
+        thresholds: Optional[dict[str, float]] = None
+    ) -> list[DivergenceAlert]:
         """Detect divergence between expected and actual state"""
         alerts = []
 
@@ -1602,8 +1602,8 @@ class AutoCorrector:
     async def apply_corrections(
         self,
         twin: DigitalTwin,
-        alerts: List[DivergenceAlert]
-    ) -> List[Dict[str, Any]]:
+        alerts: list[DivergenceAlert]
+    ) -> list[dict[str, Any]]:
         """Apply automatic corrections for eligible divergences"""
         corrections = []
 
@@ -1622,7 +1622,7 @@ class AutoCorrector:
         self,
         twin: DigitalTwin,
         alert: DivergenceAlert
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[dict[str, Any]]:
         """Apply a specific correction"""
         try:
             if alert.component == "cpu" and alert.actual_value > alert.expected_value:
@@ -1662,8 +1662,8 @@ digital_twin_engine = DigitalTwinEngine()
 async def create_system_twin(
     source_system: str,
     system_type: str,
-    initial_state: Dict[str, Any]
-) -> Dict[str, Any]:
+    initial_state: dict[str, Any]
+) -> dict[str, Any]:
     """Create a new digital twin for a system"""
     await digital_twin_engine.initialize()
     twin = await digital_twin_engine.create_twin(
@@ -1674,14 +1674,14 @@ async def create_system_twin(
     return digital_twin_engine.get_twin_status(twin.twin_id)
 
 
-async def sync_system_twin(twin_id: str, metrics: Dict[str, Any]) -> Dict[str, Any]:
+async def sync_system_twin(twin_id: str, metrics: dict[str, Any]) -> dict[str, Any]:
     """Sync a digital twin with current metrics"""
     await digital_twin_engine.initialize()
     system_metrics = SystemMetrics(**metrics)
     return await digital_twin_engine.sync_twin(twin_id, system_metrics)
 
 
-async def get_twin_health(twin_id: str = None) -> Dict[str, Any]:
+async def get_twin_health(twin_id: str = None) -> dict[str, Any]:
     """Get health status of twins"""
     await digital_twin_engine.initialize()
     if twin_id:
@@ -1689,13 +1689,13 @@ async def get_twin_health(twin_id: str = None) -> Dict[str, Any]:
     return {"twins": digital_twin_engine.list_twins()}
 
 
-async def simulate_on_twin(twin_id: str, scenario: Dict[str, Any]) -> Dict[str, Any]:
+async def simulate_on_twin(twin_id: str, scenario: dict[str, Any]) -> dict[str, Any]:
     """Run simulation on a digital twin"""
     await digital_twin_engine.initialize()
     return await digital_twin_engine.simulate_scenario(twin_id, scenario)
 
 
-async def test_update_on_twin(twin_id: str, update_config: Dict[str, Any]) -> Dict[str, Any]:
+async def test_update_on_twin(twin_id: str, update_config: dict[str, Any]) -> dict[str, Any]:
     """Test an update on a digital twin before production"""
     await digital_twin_engine.initialize()
     return await digital_twin_engine.test_update(twin_id, update_config)

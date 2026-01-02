@@ -5,10 +5,11 @@ API endpoints for the Digital Twin System - virtual replicas of production syste
 Fully operational with proper error handling and fallbacks.
 """
 
-from fastapi import APIRouter, HTTPException
-from typing import Optional, Dict, Any
-from pydantic import BaseModel
 import logging
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -46,17 +47,17 @@ class CreateTwinRequest(BaseModel):
     system_type: str
     maturity_level: str = "status"
     sync_frequency_seconds: int = 60
-    initial_state: Optional[Dict[str, Any]] = None
+    initial_state: Optional[dict[str, Any]] = None
 
 
 class SimulationRequest(BaseModel):
     scenario_type: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
 
 
 class UpdateTestRequest(BaseModel):
     update_type: str
-    changes: Dict[str, Any]
+    changes: dict[str, Any]
 
 
 @router.get("/status")

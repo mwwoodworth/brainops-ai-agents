@@ -4,15 +4,15 @@ Autonomous Revenue Generation System
 Implements AI-driven revenue workflows for automatic lead-to-close operations
 """
 
-import os
+import asyncio
 import json
 import logging
+import os
 import uuid
-import asyncio
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timezone, timedelta
-from enum import Enum
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Any, Optional
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -39,14 +39,14 @@ def _is_test_email(email: str | None) -> bool:
 
 # Use unified AI core instead of direct clients
 try:
-    from ai_core import ai_generate, ai_analyze, RealAICore
+    from ai_core import RealAICore, ai_analyze, ai_generate
     _ai_core = RealAICore()
     AI_CORE_AVAILABLE = True
     logger.info("Revenue System using unified AI Core")
 except ImportError:
     AI_CORE_AVAILABLE = False
-    import openai
     import anthropic
+    import openai
     openai.api_key = os.getenv("OPENAI_API_KEY")
     anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     logger.warning("AI Core not available - using direct clients")
@@ -156,7 +156,7 @@ class Lead:
     stage: LeadStage
     score: float
     value_estimate: float
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     created_at: datetime
     last_contact: Optional[datetime]
     next_action: Optional[RevenueAction]
@@ -345,7 +345,7 @@ class AutonomousRevenueSystem:
         cursor.close()
         conn.close()
 
-    async def identify_new_leads(self, criteria: Dict[str, Any]) -> List[Lead]:
+    async def identify_new_leads(self, criteria: dict[str, Any]) -> list[Lead]:
         """Autonomously identify new leads based on criteria"""
         try:
             # Use AI to generate lead search parameters
@@ -383,7 +383,7 @@ class AutonomousRevenueSystem:
             logger.error(f"Failed to identify leads: {e}")
             return []
 
-    async def qualify_lead(self, lead_id: str) -> Tuple[float, Dict]:
+    async def qualify_lead(self, lead_id: str) -> tuple[float, dict]:
         """Autonomously qualify a lead using AI analysis with advanced ML-based scoring"""
         try:
             # Get lead data
@@ -484,7 +484,7 @@ class AutonomousRevenueSystem:
             )
             return 0.0, {}
 
-    async def create_personalized_outreach(self, lead_id: str) -> Dict:
+    async def create_personalized_outreach(self, lead_id: str) -> dict:
         """Create personalized outreach using AI"""
         try:
             lead = await self._get_lead(lead_id)
@@ -539,7 +539,7 @@ class AutonomousRevenueSystem:
             logger.error(f"Failed to create outreach: {e}")
             return {}
 
-    async def generate_proposal(self, lead_id: str, requirements: Dict) -> Dict:
+    async def generate_proposal(self, lead_id: str, requirements: dict) -> dict:
         """Generate AI-powered proposal"""
         try:
             lead = await self._get_lead(lead_id)
@@ -598,7 +598,7 @@ class AutonomousRevenueSystem:
             logger.error(f"Failed to generate proposal: {e}")
             return {}
 
-    async def handle_negotiation(self, lead_id: str, client_response: str) -> Dict:
+    async def handle_negotiation(self, lead_id: str, client_response: str) -> dict:
         """AI-powered negotiation handling"""
         try:
             # Analyze client response
@@ -642,7 +642,7 @@ class AutonomousRevenueSystem:
             logger.error(f"Failed to handle negotiation: {e}")
             return {}
 
-    async def close_deal(self, lead_id: str, terms: Dict) -> bool:
+    async def close_deal(self, lead_id: str, terms: dict) -> bool:
         """Autonomously close the deal"""
         try:
             # Generate closing documents
@@ -740,7 +740,7 @@ class AutonomousRevenueSystem:
             self.active_workflows[workflow_id]['status'] = 'failed'
 
     # Helper methods
-    async def _get_lead(self, lead_id: str) -> Optional[Dict]:
+    async def _get_lead(self, lead_id: str) -> Optional[dict]:
         """Get lead data from database"""
         try:
             conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
@@ -754,7 +754,7 @@ class AutonomousRevenueSystem:
             logger.error(f"Failed to get lead: {e}")
             return None
 
-    async def _store_lead(self, lead_data: Dict) -> Optional[str]:
+    async def _store_lead(self, lead_data: dict) -> Optional[str]:
         """Store new lead in database"""
         try:
             conn = psycopg2.connect(**DB_CONFIG)
@@ -786,7 +786,7 @@ class AutonomousRevenueSystem:
             logger.error(f"Failed to store lead: {e}")
             return None
 
-    async def _log_action(self, lead_id: str, action: RevenueAction, data: Dict):
+    async def _log_action(self, lead_id: str, action: RevenueAction, data: dict):
         """Log revenue action"""
         try:
             conn = psycopg2.connect(**DB_CONFIG)
@@ -829,7 +829,7 @@ class AutonomousRevenueSystem:
         except Exception as e:
             logger.error(f"Failed to update lead stage: {e}")
 
-    async def _discover_leads(self, search_params: Dict) -> List[Dict]:
+    async def _discover_leads(self, search_params: dict) -> list[dict]:
         """Discover leads using Perplexity AI for real-time web search"""
         try:
             from ai_advanced_providers import advanced_ai
@@ -902,6 +902,7 @@ Return ONLY valid JSON array, no other text."""
             try:
                 import psycopg2
                 from psycopg2.extras import RealDictCursor
+
                 # Use the validated DB config - no hardcoded defaults
                 from revenue_generation_system import DB_CONFIG
                 conn = psycopg2.connect(**DB_CONFIG)
@@ -975,7 +976,7 @@ Return ONLY valid JSON array, no other text."""
             logger.error(f"Lead discovery failed: {e}")
             return []
 
-    async def _calculate_dynamic_pricing(self, requirements: Dict) -> Dict:
+    async def _calculate_dynamic_pricing(self, requirements: dict) -> dict:
         """Calculate dynamic pricing using AI analysis of requirements"""
         try:
             prompt = f"""Calculate dynamic pricing for a roofing software project based on these requirements:
@@ -999,7 +1000,7 @@ Return ONLY valid JSON array, no other text."""
                 ],
                 temperature=0.3
             )
-            
+
             pricing = json.loads(response.choices[0].message.content)
             return pricing
         except Exception as e:
@@ -1014,7 +1015,7 @@ Return ONLY valid JSON array, no other text."""
                 'reasoning': 'Fallback pricing due to AI error'
             }
 
-    async def _schedule_email(self, email_data: Dict):
+    async def _schedule_email(self, email_data: dict):
         """Schedule email for sending"""
         try:
             recipient = email_data.get('to')
@@ -1125,7 +1126,7 @@ Return ONLY valid JSON array, no other text."""
         except Exception as e:
             logger.error(f"Failed to schedule nurture campaign: {e}")
 
-    async def _generate_closing_documents(self, lead_id: str, terms: Dict) -> Dict:
+    async def _generate_closing_documents(self, lead_id: str, terms: dict) -> dict:
         """Generate closing documents using AI"""
         try:
             lead = await self._get_lead(lead_id)
@@ -1148,11 +1149,11 @@ Return ONLY valid JSON array, no other text."""
                 ],
                 temperature=0.3
             )
-            
+
             docs = json.loads(response.choices[0].message.content)
             docs['generated_at'] = datetime.now(timezone.utc).isoformat()
             return docs
-            
+
         except Exception as e:
             logger.error(f"Document generation failed: {e}")
             return {
@@ -1214,7 +1215,7 @@ Return ONLY valid JSON array, no other text."""
             logger.error(f"Failed to initiate onboarding: {e}")
             return None
 
-    async def _generate_negotiation_response(self, lead_id: str, analysis: Dict) -> Dict:
+    async def _generate_negotiation_response(self, lead_id: str, analysis: dict) -> dict:
         """Generate negotiation response based on analysis"""
         return {
             'response': "We understand your concerns and are happy to work with you...",
@@ -1242,7 +1243,7 @@ Return ONLY valid JSON array, no other text."""
 
     # NEW ENHANCEMENTS
 
-    async def generate_email_sequence(self, lead_id: str, sequence_type: str = "nurture") -> Dict:
+    async def generate_email_sequence(self, lead_id: str, sequence_type: str = "nurture") -> dict:
         """Generate automated multi-touch email sequence using AI"""
         try:
             lead = await self._get_lead(lead_id)
@@ -1317,7 +1318,7 @@ Return ONLY valid JSON array, no other text."""
             logger.error(f"Failed to generate email sequence: {e}")
             return {}
 
-    async def analyze_competitor_pricing(self, lead_id: str, competitors: List[str] = None) -> Dict:
+    async def analyze_competitor_pricing(self, lead_id: str, competitors: list[str] = None) -> dict:
         """Analyze competitor pricing and positioning using AI"""
         try:
             lead = await self._get_lead(lead_id)
@@ -1379,7 +1380,7 @@ Return ONLY valid JSON array, no other text."""
             logger.error(f"Competitor analysis failed: {e}")
             return {}
 
-    async def predict_churn_risk(self, lead_id: str) -> Dict:
+    async def predict_churn_risk(self, lead_id: str) -> dict:
         """Predict churn risk for a lead/customer using AI"""
         try:
             lead = await self._get_lead(lead_id)
@@ -1469,7 +1470,7 @@ Return ONLY valid JSON array, no other text."""
             logger.error(f"Churn prediction failed: {e}")
             return {}
 
-    async def generate_upsell_recommendations(self, lead_id: str) -> Dict:
+    async def generate_upsell_recommendations(self, lead_id: str) -> dict:
         """Generate AI-powered upsell and cross-sell recommendations"""
         try:
             lead = await self._get_lead(lead_id)
@@ -1545,7 +1546,7 @@ Return ONLY valid JSON array, no other text."""
             logger.error(f"Upsell recommendations failed: {e}")
             return {}
 
-    async def forecast_revenue(self, months_ahead: int = 6) -> Dict:
+    async def forecast_revenue(self, months_ahead: int = 6) -> dict:
         """Generate AI-powered revenue forecast"""
         try:
             # Get historical data

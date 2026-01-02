@@ -3,9 +3,10 @@
 Monitor Real AI Deployment Progress
 """
 
-import requests
 import time
 from datetime import datetime
+
+import requests
 
 BASE_URL = "https://brainops-ai-agents.onrender.com"
 
@@ -23,7 +24,7 @@ def check_deployment():
             status = data.get('status', 'unknown')
 
             if version == "4.0.0":
-                print(f"✅ DEPLOYED! Version 4.0.0 with REAL AI is live!")
+                print("✅ DEPLOYED! Version 4.0.0 with REAL AI is live!")
                 return True
             else:
                 print(f"⏳ Still on version {version} (waiting for 4.0.0)")

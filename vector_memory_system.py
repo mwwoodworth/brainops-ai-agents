@@ -4,19 +4,19 @@ Vector-Based Persistent Memory System
 Implements semantic memory with embeddings for true AI memory persistence
 """
 
-import os
 import json
 import logging
+import os
 import uuid
-import numpy as np
-from typing import Dict, List, Optional, Any
-from datetime import datetime
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Optional
 
+import numpy as np
 import openai
 import psycopg2
+from psycopg2.extensions import AsIs, register_adapter
 from psycopg2.extras import RealDictCursor
-from psycopg2.extensions import register_adapter, AsIs
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -57,8 +57,8 @@ class Memory:
     """Represents a memory item with embedding"""
     id: str
     content: str
-    embedding: List[float]
-    metadata: Dict[str, Any]
+    embedding: list[float]
+    metadata: dict[str, Any]
     importance_score: float
     created_at: datetime
     last_accessed: datetime
@@ -132,7 +132,7 @@ class VectorMemorySystem:
         cursor.close()
         conn.close()
 
-    def _get_embedding(self, text: str) -> List[float]:
+    def _get_embedding(self, text: str) -> list[float]:
         """Generate embedding for text using OpenAI"""
         try:
             response = openai.embeddings.create(
@@ -148,7 +148,7 @@ class VectorMemorySystem:
         self,
         content: str,
         memory_type: str = "general",
-        metadata: Dict = None,
+        metadata: dict = None,
         importance: float = 0.5
     ) -> str:
         """Store a new memory with embedding"""
@@ -192,7 +192,7 @@ class VectorMemorySystem:
         limit: int = 10,
         memory_type: Optional[str] = None,
         threshold: float = 0.7
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Recall relevant memories using semantic similarity"""
         try:
             # Generate query embedding
@@ -286,7 +286,7 @@ class VectorMemorySystem:
 
     def consolidate_memories(
         self,
-        memory_ids: List[str],
+        memory_ids: list[str],
         consolidation_type: str = "summary"
     ) -> Optional[str]:
         """Consolidate multiple memories into a single memory"""
@@ -394,7 +394,7 @@ class VectorMemorySystem:
         except Exception as e:
             logger.error(f"Failed to decay memories: {e}")
 
-    def get_memory_statistics(self) -> Dict:
+    def get_memory_statistics(self) -> dict:
         """Get statistics about the memory system"""
         try:
             conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)

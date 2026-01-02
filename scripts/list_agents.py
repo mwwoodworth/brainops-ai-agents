@@ -6,11 +6,12 @@ Usage:
 """
 
 from typing import Any
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from config import config
 from agent_executor import AgentExecutor
+from config import config
 
 
 def list_registered_agents() -> list[str]:
