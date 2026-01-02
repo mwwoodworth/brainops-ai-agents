@@ -417,8 +417,8 @@ class NotebookLMPlus:
                 kwargs['source'].value,
                 kwargs['confidence'],
                 kwargs['importance'],
-                json.dumps(kwargs.get('connections', [])),
-                json.dumps(kwargs.get('metadata', {})),
+                json.dumps(kwargs.get('connections', []), default=str),
+                json.dumps(kwargs.get('metadata', {}), default=str),
                 embedding_str
             ))
 

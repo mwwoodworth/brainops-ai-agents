@@ -42,6 +42,11 @@ SMTP_FROM_EMAIL = os.getenv('SMTP_FROM_EMAIL', SENDGRID_FROM_EMAIL)
 SMTP_FROM_NAME = os.getenv('SMTP_FROM_NAME', SENDGRID_FROM_NAME)
 SMTP_USE_TLS = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
 
+# Test data safeguards
+TEST_EMAIL_SUFFIXES = (".test", ".example", ".invalid")
+TEST_EMAIL_TOKENS = ("@example.", "@test.", "@demo.", "@invalid.")
+TEST_EMAIL_DOMAINS = ("test.com", "example.com", "localhost", "demo@roofing.com")
+
 # Database configuration
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
@@ -54,6 +59,19 @@ DB_CONFIG = {
 # Processing configuration
 BATCH_SIZE = int(os.getenv('EMAIL_BATCH_SIZE', '10'))
 MAX_RETRIES = int(os.getenv('EMAIL_MAX_RETRIES', '3'))
+
+
+def _is_test_recipient(recipient: str | None, metadata: Dict[str, Any] | None = None) -> bool:
+    if metadata and (metadata.get("is_test") is True or metadata.get("test") is True):
+        return True
+    if not recipient:
+        return True
+    lowered = recipient.lower().strip()
+    if any(lowered.endswith(suffix) for suffix in TEST_EMAIL_SUFFIXES):
+        return True
+    if any(token in lowered for token in TEST_EMAIL_TOKENS):
+        return True
+    return any(domain in lowered for domain in TEST_EMAIL_DOMAINS)
 
 
 def get_db_connection():
@@ -227,6 +245,11 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> Dict[s
             subject = email['subject']
             body = email['body'] or ''
             metadata = email['metadata'] or {}
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except json.JSONDecodeError:
+                    metadata = {}
 
             # Mark as processing with timestamp
             if not dry_run:
@@ -255,9 +278,7 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> Dict[s
                 stats["emails"].append({"id": email_id, "recipient": recipient, "status": "failed", "reason": "invalid_recipient"})
                 continue
 
-            # Skip known test/demo emails in production
-            test_domains = ['test.com', 'example.com', 'localhost', 'demo@roofing.com']
-            if any(domain in recipient.lower() for domain in test_domains):
+            if _is_test_recipient(recipient, metadata):
                 logger.info(f"Skipping test email {email_id}: {recipient}")
                 if not dry_run:
                     cursor.execute("""

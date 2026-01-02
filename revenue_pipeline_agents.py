@@ -476,16 +476,16 @@ class NurtureExecutorAgentReal(BaseAgent):
             sequence = self._generate_sequence(sequence_type, lead_data)
 
             sequence_id = str(uuid.uuid4())
-            # Use correct column names matching ai_nurture_sequences table schema:
-            # name (not sequence_name), is_active (not active)
-            # touchpoint_count and days_duration go in configuration JSON
+            # Populate shared nurture sequence schema for downstream analytics
             await pool.execute("""
                 INSERT INTO ai_nurture_sequences (
-                    id, name, sequence_type, target_segment,
-                    configuration, is_active, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, true, NOW(), NOW())
+                    id, name, sequence_name, sequence_type, target_segment,
+                    configuration, is_active, active, status, trigger_type,
+                    touchpoint_count, days_duration, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, true, true, $7, $8, $9, $10, NOW(), NOW())
             """,
                 sequence_id,
+                f"{sequence_type.title()} Sequence for {lead_data.get('contact_name', 'Lead')}",
                 f"{sequence_type.title()} Sequence for {lead_data.get('contact_name', 'Lead')}",
                 sequence_type,
                 sequence_type,
@@ -494,7 +494,11 @@ class NurtureExecutorAgentReal(BaseAgent):
                     "touchpoints": sequence['touchpoints'],
                     "touchpoint_count": len(sequence['touchpoints']),
                     "days_duration": sequence['duration_days']
-                })
+                }),
+                "active",
+                "ai_task_queue",
+                len(sequence['touchpoints']),
+                sequence['duration_days'],
             )
 
             emails_queued = await self._queue_sequence_emails(
@@ -589,6 +593,16 @@ class NurtureExecutorAgentReal(BaseAgent):
         try:
             pool = get_pool()
             emails_queued = 0
+            lead_is_test = bool(lead_data.get('is_test'))
+            lead_metadata = lead_data.get('metadata') or {}
+            if isinstance(lead_metadata, str):
+                try:
+                    lead_metadata = json.loads(lead_metadata)
+                except json.JSONDecodeError:
+                    lead_metadata = {}
+            if not isinstance(lead_metadata, dict):
+                lead_metadata = {}
+            lead_type = lead_metadata.get('lead_type', 'unknown')
 
             for touchpoint in touchpoints:
                 if touchpoint.get('type') != 'email':
@@ -615,7 +629,8 @@ class NurtureExecutorAgentReal(BaseAgent):
                         "sequence_id": sequence_id,
                         "lead_id": lead_id,
                         "touchpoint_day": days_delay,
-                        "lead_type": lead_data.get('metadata', {}).get('lead_type', 'unknown')
+                        "lead_type": lead_type,
+                        "is_test": lead_is_test
                     })
                 )
 
@@ -636,7 +651,7 @@ class NurtureExecutorAgentReal(BaseAgent):
             sequences = await pool.fetch("""
                 SELECT id, configuration
                 FROM ai_nurture_sequences
-                WHERE active = true
+                WHERE COALESCE(is_active, active, true)
                   AND created_at > NOW() - INTERVAL '30 days'
             """)
 

@@ -1160,6 +1160,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Task Queue Consumer failed to start: {e}")
 
+    # Start AI Task Queue Consumer (public.ai_task_queue)
+    try:
+        from ai_task_queue_consumer import start_ai_task_queue_consumer
+        await start_ai_task_queue_consumer()
+        logger.info("🧩 AI Task Queue Consumer STARTED")
+    except Exception as e:
+        logger.error(f"❌ AI Task Queue Consumer failed to start: {e}")
+
     # Start Email Scheduler Daemon for nurture campaigns
     try:
         from email_scheduler_daemon import start_email_scheduler
@@ -1243,6 +1251,14 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Task Queue Consumer stopped")
     except Exception as e:
         logger.error(f"❌ Task Queue Consumer shutdown error: {e}")
+
+    # Stop AI Task Queue Consumer
+    try:
+        from ai_task_queue_consumer import stop_ai_task_queue_consumer
+        await stop_ai_task_queue_consumer()
+        logger.info("✅ AI Task Queue Consumer stopped")
+    except Exception as e:
+        logger.error(f"❌ AI Task Queue Consumer shutdown error: {e}")
 
     # Stop Email Scheduler Daemon
     try:
