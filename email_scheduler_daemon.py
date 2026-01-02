@@ -30,6 +30,30 @@ SENDGRID_FROM_EMAIL = os.getenv('SENDGRID_FROM_EMAIL', 'noreply@brainops.ai')
 SENDGRID_FROM_NAME = os.getenv('SENDGRID_FROM_NAME', 'BrainOps AI')
 
 
+TEST_EMAIL_SUFFIXES = (".test", ".example", ".invalid")
+TEST_EMAIL_TOKENS = ("@example.", "@test.", "@demo.", "@invalid.")
+TEST_EMAIL_DOMAINS = ("test.com", "example.com", "localhost", "demo@roofing.com")
+
+
+def _is_test_recipient(recipient: str | None) -> bool:
+    if not recipient:
+        return True
+    lowered = recipient.lower().strip()
+    if any(lowered.endswith(suffix) for suffix in TEST_EMAIL_SUFFIXES):
+        return True
+    if any(token in lowered for token in TEST_EMAIL_TOKENS):
+        return True
+    return any(domain in lowered for domain in TEST_EMAIL_DOMAINS)
+
+
+def _get_skip_reason(email: "EmailJob") -> str | None:
+    if email.metadata.get("is_test") is True or email.metadata.get("test") is True:
+        return "is_test_metadata"
+    if _is_test_recipient(email.recipient):
+        return "test_recipient"
+    return None
+
+
 @dataclass
 class EmailJob:
     """Represents an email job from the queue"""
@@ -164,6 +188,20 @@ class EmailSchedulerDaemon:
     async def _send_email(self, email: EmailJob):
         """Send a single email via SendGrid"""
         try:
+            skip_reason = _get_skip_reason(email)
+            if skip_reason:
+                logger.info(f"Skipping email {email.id} ({skip_reason})")
+                await self._update_email_status(
+                    email.id,
+                    'skipped',
+                    {
+                        **email.metadata,
+                        'skip_reason': skip_reason,
+                        'skipped_at': datetime.now(timezone.utc).isoformat()
+                    }
+                )
+                return
+
             if not SENDGRID_API_KEY:
                 logger.warning(f"SendGrid not configured - skipping email {email.id}")
                 await self._update_email_status(email.id, 'skipped', {'reason': 'no_api_key'})

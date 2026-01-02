@@ -1,5 +1,49 @@
 -- Create missing tables for Lead Nurturing System
 
+-- Core Nurture Sequences (shared schema for all agents)
+CREATE TABLE IF NOT EXISTS ai_nurture_sequences (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT,
+    sequence_name VARCHAR(255),
+    sequence_type VARCHAR(50),
+    target_segment VARCHAR(100),
+    touchpoint_count INT DEFAULT 0,
+    days_duration INT,
+    success_criteria JSONB DEFAULT '{}'::jsonb,
+    configuration JSONB DEFAULT '{}'::jsonb,
+    effectiveness_score FLOAT DEFAULT 0.5,
+    is_active BOOLEAN DEFAULT TRUE,
+    active BOOLEAN DEFAULT TRUE,
+    status VARCHAR(50) DEFAULT 'active',
+    trigger_type VARCHAR(50) DEFAULT 'manual',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE ai_nurture_sequences
+    ADD COLUMN IF NOT EXISTS name TEXT,
+    ADD COLUMN IF NOT EXISTS sequence_name VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS sequence_type VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS target_segment VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS touchpoint_count INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS days_duration INT,
+    ADD COLUMN IF NOT EXISTS success_criteria JSONB DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS configuration JSONB DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS effectiveness_score FLOAT DEFAULT 0.5,
+    ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active',
+    ADD COLUMN IF NOT EXISTS trigger_type VARCHAR(50) DEFAULT 'manual',
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+UPDATE ai_nurture_sequences
+SET name = COALESCE(name, sequence_name),
+    sequence_name = COALESCE(sequence_name, name),
+    is_active = COALESCE(is_active, active, TRUE),
+    active = COALESCE(active, is_active, TRUE),
+    status = COALESCE(status, CASE WHEN COALESCE(is_active, active, TRUE) THEN 'active' ELSE 'inactive' END);
+
 -- Sequence Touchpoints
 CREATE TABLE IF NOT EXISTS ai_sequence_touchpoints (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -91,6 +135,22 @@ CREATE TABLE IF NOT EXISTS ai_nurture_metrics (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(sequence_id, metric_date)
 );
+
+ALTER TABLE ai_nurture_metrics
+    ADD COLUMN IF NOT EXISTS metric_date DATE,
+    ADD COLUMN IF NOT EXISTS enrollments INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS completions INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS opt_outs INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS total_touches INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS opens INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS clicks INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS responses INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS conversions INT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS revenue_generated DECIMAL(10,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS avg_engagement_score FLOAT DEFAULT 0.0;
+
+UPDATE ai_nurture_metrics
+SET metric_date = COALESCE(metric_date, date_recorded);
 
 -- Content Library
 CREATE TABLE IF NOT EXISTS ai_nurture_content (
