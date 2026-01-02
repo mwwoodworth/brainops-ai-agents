@@ -4,17 +4,18 @@ AI Knowledge Graph - Task 22
 Build comprehensive knowledge graph from all system interactions
 """
 
-import os
+import hashlib
 import json
 import logging
+import os
+from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
 from enum import Enum
+from typing import Any, Optional
+
+import networkx as nx
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import hashlib
-import networkx as nx
-from collections import defaultdict
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -96,7 +97,7 @@ class KnowledgeExtractor:
     async def extract_from_executions(
         self,
         days: int = 30
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Extract knowledge from agent executions"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -137,8 +138,8 @@ class KnowledgeExtractor:
 
     async def _extract_from_execution(
         self,
-        execution: Dict
-    ) -> List[Dict]:
+        execution: dict
+    ) -> list[dict]:
         """Extract knowledge from single execution"""
         items = []
 
@@ -207,7 +208,7 @@ class KnowledgeExtractor:
 
         return items
 
-    def extract_entities(self, text: str) -> List[Dict]:
+    def extract_entities(self, text: str) -> list[dict]:
         """Extract entities from text with NER-like functionality"""
         entities = []
         import re
@@ -265,7 +266,7 @@ class KnowledgeExtractor:
 
         return entities
 
-    def extract_relationships(self, text: str, entities: List[Dict]) -> List[Dict]:
+    def extract_relationships(self, text: str, entities: list[dict]) -> list[dict]:
         """Extract relationships between entities"""
         relationships = []
         import re
@@ -297,7 +298,7 @@ class KnowledgeExtractor:
 
         return relationships
 
-    def _extract_concepts(self, text: str) -> List[str]:
+    def _extract_concepts(self, text: str) -> list[str]:
         """Extract concepts from text"""
         concepts = []
 
@@ -315,7 +316,7 @@ class KnowledgeExtractor:
 
         return concepts
 
-    def _extract_patterns(self, result: Any) -> List[Dict]:
+    def _extract_patterns(self, result: Any) -> list[dict]:
         """Extract patterns from execution results"""
         patterns = []
 
@@ -344,7 +345,7 @@ class KnowledgeExtractor:
 
         return patterns
 
-    async def extract_from_conversations(self) -> List[Dict]:
+    async def extract_from_conversations(self) -> list[dict]:
         """Extract knowledge from conversations"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -384,7 +385,7 @@ class KnowledgeExtractor:
             logger.error(f"Error extracting from conversations: {e}")
             return []
 
-    def _extract_from_context(self, context: Any) -> List[Dict]:
+    def _extract_from_context(self, context: Any) -> list[dict]:
         """Extract knowledge from conversation context"""
         items = []
 
@@ -409,7 +410,7 @@ class KnowledgeExtractor:
 
         return items
 
-    async def extract_from_business_data(self) -> List[Dict]:
+    async def extract_from_business_data(self) -> list[dict]:
         """Extract knowledge from business data"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -478,8 +479,8 @@ class KnowledgeGraphBuilder:
 
     async def build_graph(
         self,
-        knowledge_items: List[Dict]
-    ) -> Dict:
+        knowledge_items: list[dict]
+    ) -> dict:
         """Build graph from knowledge items"""
         try:
             # Add nodes
@@ -513,7 +514,7 @@ class KnowledgeGraphBuilder:
             logger.error(f"Error building graph: {e}")
             raise
 
-    def _create_node_id(self, item: Dict) -> str:
+    def _create_node_id(self, item: dict) -> str:
         """Create unique node ID"""
         unique_string = f"{item['type']}_{item['name']}"
         return hashlib.md5(unique_string.encode()).hexdigest()
@@ -540,8 +541,8 @@ class KnowledgeGraphBuilder:
 
     def _check_relationship(
         self,
-        node1: Dict,
-        node2: Dict
+        node1: dict,
+        node2: dict
     ) -> Optional[str]:
         """Check if two nodes are related"""
         # Customer owns Job
@@ -579,7 +580,7 @@ class KnowledgeGraphBuilder:
         intersection = words1.intersection(words2)
         return len(intersection) / min(len(words1), len(words2))
 
-    def _calculate_metrics(self) -> Dict:
+    def _calculate_metrics(self) -> dict:
         """Calculate graph metrics"""
         metrics = {}
 
@@ -749,7 +750,7 @@ class KnowledgeQueryEngine:
         self,
         source_name: str,
         target_name: str
-    ) -> Optional[List[str]]:
+    ) -> Optional[list[str]]:
         """Find path between two nodes"""
         if not self.graph:
             await self.load_graph()
@@ -777,7 +778,7 @@ class KnowledgeQueryEngine:
         self,
         node_name: str,
         max_distance: int = 2
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Get nodes related to given node"""
         if not self.graph:
             await self.load_graph()
@@ -815,7 +816,7 @@ class KnowledgeQueryEngine:
 
         return related
 
-    async def semantic_query(self, query_text: str, limit: int = 10) -> List[Dict]:
+    async def semantic_query(self, query_text: str, limit: int = 10) -> list[dict]:
         """Perform semantic search using vector embeddings"""
         if not self.openai_client:
             logger.warning("OpenAI not available, falling back to keyword search")
@@ -865,7 +866,7 @@ class KnowledgeQueryEngine:
             logger.error(f"Semantic query failed: {e}")
             return []
 
-    async def keyword_search(self, query_text: str, limit: int = 10) -> List[Dict]:
+    async def keyword_search(self, query_text: str, limit: int = 10) -> list[dict]:
         """Fallback keyword-based search"""
         if not self.graph:
             await self.load_graph()
@@ -896,7 +897,7 @@ class KnowledgeQueryEngine:
         results.sort(key=lambda x: x['score'], reverse=True)
         return results[:limit]
 
-    async def get_insights(self) -> List[Dict]:
+    async def get_insights(self) -> list[dict]:
         """Extract insights from graph structure with pattern recognition"""
         if not self.graph:
             await self.load_graph()
@@ -941,7 +942,7 @@ class KnowledgeQueryEngine:
             "title": f"Knowledge focus: {dominant_type[0]}",
             "description": f"{dominant_type[1]} nodes of this type ({int(dominant_type[1]/self.graph.number_of_nodes()*100)}%)",
             "importance": 0.5,
-            "recommendation": f"Diversify knowledge base by adding more varied node types"
+            "recommendation": "Diversify knowledge base by adding more varied node types"
         })
 
         # Detect knowledge gaps
@@ -1003,7 +1004,7 @@ class AIKnowledgeGraph:
         self.builder = KnowledgeGraphBuilder()
         self.query_engine = KnowledgeQueryEngine()
 
-    async def build_from_all_sources(self) -> Dict:
+    async def build_from_all_sources(self) -> dict:
         """Build knowledge graph from all available sources"""
         try:
             knowledge_items = []
@@ -1036,7 +1037,7 @@ class AIKnowledgeGraph:
     async def query(
         self,
         query_type: str,
-        parameters: Dict
+        parameters: dict
     ) -> Any:
         """Query knowledge graph"""
         if query_type == "find_path":

@@ -4,16 +4,16 @@ Monitoring Dashboard Data Provider
 System monitoring, metrics collection, and dashboard data API
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List, Tuple
-from dataclasses import dataclass, field, asdict
-from enum import Enum
-from collections import defaultdict
+import os
 import statistics
+from collections import defaultdict
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ class MetricValue:
     name: str
     value: float
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    labels: Dict[str, str] = field(default_factory=dict)
+    labels: dict[str, str] = field(default_factory=dict)
     metric_type: MetricType = MetricType.GAUGE
 
 
@@ -73,8 +73,8 @@ class MetricValue:
 class MetricSeries:
     """Time series of metric values"""
     name: str
-    values: List[Tuple[datetime, float]] = field(default_factory=list)
-    labels: Dict[str, str] = field(default_factory=dict)
+    values: list[tuple[datetime, float]] = field(default_factory=list)
+    labels: dict[str, str] = field(default_factory=dict)
     aggregation: str = "avg"  # avg, sum, min, max, count
 
 
@@ -88,7 +88,7 @@ class ServiceStatus:
     response_time_ms: float
     error_rate: float
     request_count: int
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -102,7 +102,7 @@ class DashboardAlert:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     acknowledged: bool = False
     resolved: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -111,10 +111,10 @@ class DashboardPanel:
     panel_id: str
     title: str
     panel_type: str  # chart, stat, table, gauge, alert
-    metrics: List[str]
+    metrics: list[str]
     query: Optional[str] = None
     refresh_interval: int = 60  # seconds
-    options: Dict[str, Any] = field(default_factory=dict)
+    options: dict[str, Any] = field(default_factory=dict)
 
 
 # ============================================================================
@@ -132,30 +132,30 @@ class MonitoringDashboard:
         self._db_config = None
 
         # Metrics storage
-        self._metrics: Dict[str, List[MetricValue]] = defaultdict(list)
-        self._counters: Dict[str, float] = defaultdict(float)
-        self._gauges: Dict[str, float] = {}
-        self._histograms: Dict[str, List[float]] = defaultdict(list)
+        self._metrics: dict[str, list[MetricValue]] = defaultdict(list)
+        self._counters: dict[str, float] = defaultdict(float)
+        self._gauges: dict[str, float] = {}
+        self._histograms: dict[str, list[float]] = defaultdict(list)
 
         # Service tracking
-        self._services: Dict[str, ServiceStatus] = {}
-        self._service_history: Dict[str, List[ServiceStatus]] = defaultdict(list)
+        self._services: dict[str, ServiceStatus] = {}
+        self._service_history: dict[str, list[ServiceStatus]] = defaultdict(list)
 
         # Alerts
-        self._alerts: List[DashboardAlert] = []
-        self._alert_rules: Dict[str, Dict[str, Any]] = {}
+        self._alerts: list[DashboardAlert] = []
+        self._alert_rules: dict[str, dict[str, Any]] = {}
 
         # Dashboard configuration
-        self._panels: Dict[str, DashboardPanel] = {}
+        self._panels: dict[str, DashboardPanel] = {}
 
         # Cache
-        self._cache: Dict[str, Tuple[datetime, Any]] = {}
+        self._cache: dict[str, tuple[datetime, Any]] = {}
         self._cache_ttl = 60  # seconds
 
         self._lock = asyncio.Lock()
         self._collection_task: Optional[asyncio.Task] = None
 
-    def _get_db_config(self) -> Dict[str, Any]:
+    def _get_db_config(self) -> dict[str, Any]:
         """Get database configuration lazily with validation"""
         if not self._db_config:
             required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
@@ -408,7 +408,7 @@ class MonitoringDashboard:
         name: str,
         value: float,
         metric_type: MetricType = MetricType.GAUGE,
-        labels: Optional[Dict[str, str]] = None
+        labels: Optional[dict[str, str]] = None
     ):
         """Record a metric value"""
         await self.initialize()
@@ -438,15 +438,15 @@ class MonitoringDashboard:
         if len(self._metrics[name]) % 100 == 0:
             await self._persist_metrics(name)
 
-    async def increment_counter(self, name: str, value: float = 1, labels: Optional[Dict[str, str]] = None):
+    async def increment_counter(self, name: str, value: float = 1, labels: Optional[dict[str, str]] = None):
         """Increment a counter metric"""
         await self.record_metric(name, value, MetricType.COUNTER, labels)
 
-    async def set_gauge(self, name: str, value: float, labels: Optional[Dict[str, str]] = None):
+    async def set_gauge(self, name: str, value: float, labels: Optional[dict[str, str]] = None):
         """Set a gauge metric"""
         await self.record_metric(name, value, MetricType.GAUGE, labels)
 
-    async def observe_histogram(self, name: str, value: float, labels: Optional[Dict[str, str]] = None):
+    async def observe_histogram(self, name: str, value: float, labels: Optional[dict[str, str]] = None):
         """Record a histogram observation"""
         await self.record_metric(name, value, MetricType.HISTOGRAM, labels)
 
@@ -489,7 +489,7 @@ class MonitoringDashboard:
         self,
         name: str,
         time_range: TimeRange = TimeRange.LAST_HOUR
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Get statistical summary of a metric"""
         series = await self.get_metric(name, time_range)
         if not series or not series.values:
@@ -704,7 +704,7 @@ class MonitoringDashboard:
         response_time_ms: float = 0,
         error_rate: float = 0,
         request_count: int = 0,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None
     ):
         """Update service status"""
         await self.initialize()
@@ -757,7 +757,7 @@ class MonitoringDashboard:
         """Get current service status"""
         return self._services.get(service_name)
 
-    async def get_all_service_statuses(self) -> Dict[str, ServiceStatus]:
+    async def get_all_service_statuses(self) -> dict[str, ServiceStatus]:
         """Get all service statuses"""
         return self._services.copy()
 
@@ -805,7 +805,7 @@ class MonitoringDashboard:
         title: str,
         message: str,
         source: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None
     ) -> DashboardAlert:
         """Create a new alert"""
         await self.initialize()
@@ -853,14 +853,14 @@ class MonitoringDashboard:
     async def get_active_alerts(
         self,
         severity: Optional[AlertSeverity] = None
-    ) -> List[DashboardAlert]:
+    ) -> list[DashboardAlert]:
         """Get active (unresolved) alerts"""
         alerts = [a for a in self._alerts if not a.resolved]
         if severity:
             alerts = [a for a in alerts if a.severity == severity]
         return sorted(alerts, key=lambda a: a.created_at, reverse=True)
 
-    async def get_alert_count(self) -> Dict[str, int]:
+    async def get_alert_count(self) -> dict[str, int]:
         """Get alert counts by severity"""
         counts = defaultdict(int)
         for alert in self._alerts:
@@ -966,7 +966,7 @@ class MonitoringDashboard:
     # DASHBOARD DATA
     # ========================================================================
 
-    async def get_dashboard_data(self) -> Dict[str, Any]:
+    async def get_dashboard_data(self) -> dict[str, Any]:
         """Get complete dashboard data"""
         await self.initialize()
 
@@ -1013,7 +1013,7 @@ class MonitoringDashboard:
         self,
         panel_id: str,
         time_range: TimeRange = TimeRange.LAST_HOUR
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get data for a specific panel"""
         if panel_id not in self._panels:
             return {}
@@ -1038,7 +1038,7 @@ class MonitoringDashboard:
 
         return data
 
-    async def get_health_status(self) -> Dict[str, Any]:
+    async def get_health_status(self) -> dict[str, Any]:
         """Get monitoring system health status"""
         health_score = await self.get_metric_value("system.health_score") or 100
 
@@ -1093,7 +1093,7 @@ async def create_alert(
     return await dashboard.create_alert(severity, title, message, source)
 
 
-async def get_dashboard_data() -> Dict[str, Any]:
+async def get_dashboard_data() -> dict[str, Any]:
     """Get dashboard data"""
     dashboard = get_monitoring_dashboard()
     return await dashboard.get_dashboard_data()

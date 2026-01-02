@@ -12,19 +12,20 @@ Features:
 - Never sleeps, always watching
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
+import os
 import threading
-import psutil
-from datetime import datetime
-from typing import Dict, List, Any, Optional, Callable
-from dataclasses import dataclass, field
-from enum import Enum
 from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Optional
+
+import psutil
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from psycopg2.extras import Json, RealDictCursor
 
 # Configure logging
 logging.basicConfig(
@@ -107,11 +108,11 @@ class Thought:
     id: str
     type: ThoughtType
     content: str
-    context: Dict[str, Any]
+    context: dict[str, Any]
     confidence: float  # 0-1
     priority: int      # 1-10
     timestamp: datetime = field(default_factory=datetime.utcnow)
-    related_thoughts: List[str] = field(default_factory=list)
+    related_thoughts: list[str] = field(default_factory=list)
 
     def to_dict(self):
         return {
@@ -182,8 +183,8 @@ class AliveCore:
         self.is_alive = False
         # Lazily initialize asyncio.Event() to avoid "no running event loop" errors
         self._shutdown_event: Optional[asyncio.Event] = None
-        self._tasks: List[asyncio.Task] = []
-        self._callbacks: Dict[str, List[Callable]] = {
+        self._tasks: list[asyncio.Task] = []
+        self._callbacks: dict[str, list[Callable]] = {
             'thought': [],
             'state_change': [],
             'vital_update': [],
@@ -339,7 +340,7 @@ class AliveCore:
                 logger.error(f"Callback error for {event}: {e}")
 
     def think(self, thought_type: ThoughtType, content: str,
-              context: Dict = None, confidence: float = 0.8,
+              context: dict = None, confidence: float = 0.8,
               priority: int = 5) -> Thought:
         """Generate a thought and add it to the stream"""
         self.thought_counter += 1
@@ -734,7 +735,7 @@ class AliveCore:
         logger.info("💤 DORMANT: AliveCore state preserved. Ready for next awakening.")
 
     def trigger_wake(self, trigger_type: str, source: str,
-                     severity: str, description: str, data: Dict = None):
+                     severity: str, description: str, data: dict = None):
         """Create a wake trigger to get the AI's attention"""
         try:
             with self._get_connection() as conn:
@@ -754,11 +755,11 @@ class AliveCore:
         except Exception as e:
             logger.error(f"Failed to create wake trigger: {e}")
 
-    def get_recent_thoughts(self, limit: int = 50) -> List[Dict]:
+    def get_recent_thoughts(self, limit: int = 50) -> list[dict]:
         """Get recent thoughts from the stream"""
         return [t.to_dict() for t in list(self.thought_stream)[-limit:]]
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         """Get current status of the alive core"""
         return {
             'is_alive': self.is_alive,

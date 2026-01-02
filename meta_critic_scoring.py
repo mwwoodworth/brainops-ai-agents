@@ -13,13 +13,13 @@ Scores candidate outputs on:
 Based on Perplexity research on AI agent orchestration patterns 2025.
 """
 
-import os
 import logging
+import os
 import uuid
-from datetime import datetime
-from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
+from typing import Any, Optional
 
 import psycopg2
 from psycopg2.extras import Json
@@ -60,9 +60,9 @@ class CandidateScore:
     candidate_id: str
     model: str
     provider: str
-    scores: Dict[str, float]  # dimension -> score (0-1)
+    scores: dict[str, float]  # dimension -> score (0-1)
     weighted_total: float
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     timestamp: datetime
 
 
@@ -71,14 +71,14 @@ class MetaCriticResult:
     """Result from meta-critic evaluation"""
     winner_id: str
     winner_score: float
-    all_scores: List[CandidateScore]
+    all_scores: list[CandidateScore]
     consensus_method: str
     adjudication_reason: str
     requires_human_review: bool
     timestamp: datetime
     # Enhanced fields
     confidence_score: float = 0.0
-    risk_assessment: Optional[Dict[str, Any]] = None
+    risk_assessment: Optional[dict[str, Any]] = None
     outcome_tracking_id: Optional[str] = None
 
 
@@ -188,8 +188,8 @@ class MetaCriticScorer:
 
     async def score_candidates(
         self,
-        candidates: List[Dict[str, Any]],
-        task_context: Dict[str, Any],
+        candidates: list[dict[str, Any]],
+        task_context: dict[str, Any],
         consensus_method: str = "weighted_score"
     ) -> MetaCriticResult:
         """
@@ -206,7 +206,7 @@ class MetaCriticScorer:
         if not candidates:
             raise ValueError("No candidates to score")
 
-        scored_candidates: List[CandidateScore] = []
+        scored_candidates: list[CandidateScore] = []
 
         for candidate in candidates:
             score = await self._score_single_candidate(candidate, task_context)
@@ -251,12 +251,12 @@ class MetaCriticScorer:
 
     async def _score_single_candidate(
         self,
-        candidate: Dict[str, Any],
-        task_context: Dict[str, Any]
+        candidate: dict[str, Any],
+        task_context: dict[str, Any]
     ) -> CandidateScore:
         """Score a single candidate output across all dimensions"""
 
-        scores: Dict[str, float] = {}
+        scores: dict[str, float] = {}
 
         # Correctness score (based on validation signals if available)
         scores[ScoreDimension.CORRECTNESS.value] = self._score_correctness(candidate, task_context)
@@ -296,7 +296,7 @@ class MetaCriticScorer:
             timestamp=datetime.now()
         )
 
-    def _score_correctness(self, candidate: Dict[str, Any], context: Dict[str, Any]) -> float:
+    def _score_correctness(self, candidate: dict[str, Any], context: dict[str, Any]) -> float:
         """Score correctness based on validation signals"""
         # Check for explicit validation results
         if "validation" in candidate:
@@ -312,7 +312,7 @@ class MetaCriticScorer:
 
         return 0.5  # Neutral
 
-    def _score_risk(self, candidate: Dict[str, Any], context: Dict[str, Any]) -> float:
+    def _score_risk(self, candidate: dict[str, Any], context: dict[str, Any]) -> float:
         """Score risk level (0 = no risk, 1 = high risk)"""
         risk = 0.0
         content = str(candidate.get("output", "")).lower()
@@ -335,7 +335,7 @@ class MetaCriticScorer:
 
         return min(risk, 1.0)
 
-    def _score_business_value(self, candidate: Dict[str, Any], context: Dict[str, Any]) -> float:
+    def _score_business_value(self, candidate: dict[str, Any], context: dict[str, Any]) -> float:
         """Score business value impact"""
         value = 0.5  # Base
 
@@ -352,7 +352,7 @@ class MetaCriticScorer:
 
         return min(value, 1.0)
 
-    def _score_confidence(self, candidate: Dict[str, Any]) -> float:
+    def _score_confidence(self, candidate: dict[str, Any]) -> float:
         """Score model confidence"""
         # Check for explicit confidence
         if "confidence" in candidate:
@@ -365,7 +365,7 @@ class MetaCriticScorer:
 
         return 0.5  # Neutral
 
-    def _score_provenance(self, candidate: Dict[str, Any]) -> float:
+    def _score_provenance(self, candidate: dict[str, Any]) -> float:
         """Score based on provider reliability and audit trail"""
         provider = candidate.get("provider", "unknown").lower()
         reliability = self.provider_reliability.get(provider, 0.5)
@@ -376,23 +376,23 @@ class MetaCriticScorer:
 
         return reliability
 
-    def _score_latency(self, candidate: Dict[str, Any]) -> float:
+    def _score_latency(self, candidate: dict[str, Any]) -> float:
         """Score latency (faster is better)"""
         latency_ms = candidate.get("latency_ms", 1000)
         # Normalize: 0ms = 1.0, 5000ms+ = 0.0
         return max(0, 1.0 - (latency_ms / 5000))
 
-    def _score_token_cost(self, candidate: Dict[str, Any]) -> float:
+    def _score_token_cost(self, candidate: dict[str, Any]) -> float:
         """Score token cost (cheaper is better)"""
         tokens = candidate.get("total_tokens", 1000)
         # Normalize: 0 tokens = 1.0, 10000+ = 0.0
         return max(0, 1.0 - (tokens / 10000))
 
-    def _select_by_weighted_score(self, candidates: List[CandidateScore]) -> CandidateScore:
+    def _select_by_weighted_score(self, candidates: list[CandidateScore]) -> CandidateScore:
         """Select winner by highest weighted score"""
         return max(candidates, key=lambda c: c.weighted_total)
 
-    def _select_by_plurality(self, candidates: List[CandidateScore]) -> CandidateScore:
+    def _select_by_plurality(self, candidates: list[CandidateScore]) -> CandidateScore:
         """Select by plurality vote across dimensions"""
         # Count how many dimensions each candidate wins
         wins = {c.candidate_id: 0 for c in candidates}
@@ -407,8 +407,8 @@ class MetaCriticScorer:
 
     async def _select_by_debate(
         self,
-        candidates: List[CandidateScore],
-        context: Dict[str, Any]
+        candidates: list[CandidateScore],
+        context: dict[str, Any]
     ) -> CandidateScore:
         """Select winner through iterative debate (advanced pattern)"""
         # For now, fall back to weighted score
@@ -418,8 +418,8 @@ class MetaCriticScorer:
     def _check_human_review_needed(
         self,
         winner: CandidateScore,
-        all_candidates: List[CandidateScore],
-        context: Dict[str, Any]
+        all_candidates: list[CandidateScore],
+        context: dict[str, Any]
     ) -> bool:
         """Determine if human review is required"""
         # Low confidence winner
@@ -447,7 +447,7 @@ class MetaCriticScorer:
     def _generate_adjudication_reason(
         self,
         winner: CandidateScore,
-        all_candidates: List[CandidateScore]
+        all_candidates: list[CandidateScore]
     ) -> str:
         """Generate human-readable reason for selection"""
         reasons = []
@@ -462,7 +462,7 @@ class MetaCriticScorer:
 
         return f"Highest weighted score: {winner.weighted_total:.2f}"
 
-    def _store_evaluation(self, result: MetaCriticResult, context: Dict[str, Any]):
+    def _store_evaluation(self, result: MetaCriticResult, context: dict[str, Any]):
         """Store evaluation for learning"""
         try:
             conn = psycopg2.connect(**_get_db_config())
@@ -513,7 +513,7 @@ class MetaCriticScorer:
     def _calculate_confidence(
         self,
         winner: CandidateScore,
-        all_candidates: List[CandidateScore]
+        all_candidates: list[CandidateScore]
     ) -> float:
         """Calculate confidence in the winning selection"""
         confidence_factors = []
@@ -540,8 +540,8 @@ class MetaCriticScorer:
     def _assess_decision_risk(
         self,
         winner: CandidateScore,
-        task_context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        task_context: dict[str, Any]
+    ) -> dict[str, Any]:
         """Assess risk of the selected candidate"""
         risk_assessment = {
             'overall_risk': 0.0,
@@ -581,8 +581,8 @@ class MetaCriticScorer:
     def record_outcome(
         self,
         outcome_tracking_id: str,
-        actual_outcome: Dict[str, Any],
-        expected_outcome: Dict[str, Any],
+        actual_outcome: dict[str, Any],
+        expected_outcome: dict[str, Any],
         success_score: float
     ):
         """Record actual outcome for learning"""
@@ -698,7 +698,7 @@ class MetaCriticScorer:
                 cur.close()
                 conn.close()
 
-    def update_weights_from_feedback(self, evaluation_id: str, outcome: str, feedback: Dict[str, Any]):
+    def update_weights_from_feedback(self, evaluation_id: str, outcome: str, feedback: dict[str, Any]):
         """Update dimension weights based on human feedback (learning)"""
         try:
             conn = psycopg2.connect(**_get_db_config())

@@ -4,9 +4,10 @@ Secure, authenticated endpoints for the Master Knowledge Base
 """
 
 import logging
-from typing import Dict, List, Optional, Any
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, Security
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Security
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # API Key Security - use centralized config
 from config import config
+
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 VALID_API_KEYS = config.security.valid_api_keys
 
@@ -27,10 +29,7 @@ router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base"])
 
 # Import the knowledge base with fallback
 try:
-    from master_knowledge_base import (
-        KnowledgeType, AccessLevel,
-        get_knowledge_base
-    )
+    from master_knowledge_base import AccessLevel, KnowledgeType, get_knowledge_base
     KNOWLEDGE_BASE_AVAILABLE = True
     logger.info("Master Knowledge Base loaded")
 except ImportError as e:
@@ -46,20 +45,20 @@ class KnowledgeEntryRequest(BaseModel):
     knowledge_type: str = Field(default="guide")
     category: str = Field(default="general", max_length=100)
     subcategory: Optional[str] = Field(None, max_length=100)
-    tags: List[str] = Field(default_factory=list, max_items=20)
+    tags: list[str] = Field(default_factory=list, max_items=20)
     access_level: str = Field(default="internal")
     department: Optional[str] = Field(None, max_length=100)
     author: str = Field(default="system", max_length=200)
     tenant_id: str = Field(default="default")
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class KnowledgeSearchRequest(BaseModel):
     """Request to search knowledge base"""
     query: str = Field(..., min_length=2, max_length=1000)
-    knowledge_types: Optional[List[str]] = None
-    categories: Optional[List[str]] = None
-    tags: Optional[List[str]] = None
+    knowledge_types: Optional[list[str]] = None
+    categories: Optional[list[str]] = None
+    tags: Optional[list[str]] = None
     access_level: Optional[str] = None
     top_k: int = Field(default=10, ge=1, le=100)
     semantic_search: bool = True
@@ -71,7 +70,7 @@ class AgentQueryRequest(BaseModel):
     agent_id: str = Field(..., max_length=100)
     query: str = Field(..., min_length=2, max_length=2000)
     context: Optional[str] = Field(None, max_length=5000)
-    required_types: Optional[List[str]] = None
+    required_types: Optional[list[str]] = None
     tenant_id: str = Field(default="default")
 
 

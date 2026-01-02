@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Comprehensive Production Endpoint Testing"""
-import requests
 import json
 from datetime import datetime
+
+import requests
+
 
 def test_endpoint(name, url, method="GET", data=None):
     """Test an endpoint and return status"""
@@ -11,10 +13,10 @@ def test_endpoint(name, url, method="GET", data=None):
             response = requests.get(url, timeout=5)
         elif method == "POST":
             response = requests.post(url, json=data, timeout=5)
-        
+
         status = "✅" if response.status_code < 400 else "❌"
         print(f"{status} [{response.status_code}] {name}: {url}")
-        
+
         if response.status_code < 400 and response.text:
             try:
                 data = response.json()

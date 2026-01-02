@@ -18,16 +18,16 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
-import json
 import asyncio
-import logging
 import base64
+import json
+import logging
+import os
 import time
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +69,9 @@ class FlowResult:
     steps_failed: int
     duration_seconds: float
     error_message: Optional[str] = None
-    screenshots: List[str] = field(default_factory=list)
-    ai_analysis: Optional[Dict[str, Any]] = None
-    performance_metrics: Optional[Dict[str, Any]] = None
+    screenshots: list[str] = field(default_factory=list)
+    ai_analysis: Optional[dict[str, Any]] = None
+    performance_metrics: Optional[dict[str, Any]] = None
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -86,7 +86,7 @@ class ChatGPTAgentTester:
         self._context = None
         self._page = None
         self._playwright = None
-        self.results: List[FlowResult] = []
+        self.results: list[FlowResult] = []
 
     async def initialize(self):
         """Initialize Playwright browser"""
@@ -136,7 +136,7 @@ class ChatGPTAgentTester:
             logger.warning(f"Screenshot failed: {e}")
             return ""
 
-    async def _analyze_with_ai(self, screenshot_b64: str, context: str) -> Dict[str, Any]:
+    async def _analyze_with_ai(self, screenshot_b64: str, context: str) -> dict[str, Any]:
         """Analyze screenshot with AI vision"""
         if not OPENAI_API_KEY or not screenshot_b64:
             return {"status": "skipped", "reason": "No API key or screenshot"}
@@ -180,7 +180,7 @@ class ChatGPTAgentTester:
             logger.warning(f"AI analysis failed: {e}")
             return {"error": str(e)}
 
-    async def run_flow(self, flow_name: str, steps: List[FlowStep]) -> FlowResult:
+    async def run_flow(self, flow_name: str, steps: list[FlowStep]) -> FlowResult:
         """Execute a test flow"""
         start_time = time.time()
         steps_passed = 0
@@ -317,7 +317,7 @@ class ChatGPTAgentTester:
         self.results.append(result)
         return result
 
-    async def _get_performance_metrics(self) -> Dict[str, Any]:
+    async def _get_performance_metrics(self) -> dict[str, Any]:
         """Get page performance metrics"""
         try:
             if not self._page:
@@ -423,7 +423,7 @@ class ChatGPTAgentTester:
         ]
         return await self.run_flow("ERP Login Page", steps)
 
-    async def run_full_test_suite(self) -> Dict[str, Any]:
+    async def run_full_test_suite(self) -> dict[str, Any]:
         """Run all test flows"""
         logger.info("Starting full ChatGPT-Agent test suite...")
         start_time = time.time()
@@ -476,7 +476,7 @@ class ChatGPTAgentTester:
 # API FUNCTIONS
 # =============================================================================
 
-async def run_chatgpt_agent_tests() -> Dict[str, Any]:
+async def run_chatgpt_agent_tests() -> dict[str, Any]:
     """Run full ChatGPT-Agent test suite"""
     tester = ChatGPTAgentTester()
     try:
@@ -486,7 +486,7 @@ async def run_chatgpt_agent_tests() -> Dict[str, Any]:
         await tester.close()
 
 
-async def run_quick_health_test() -> Dict[str, Any]:
+async def run_quick_health_test() -> dict[str, Any]:
     """Run quick health test (homepage only)"""
     tester = ChatGPTAgentTester()
     try:

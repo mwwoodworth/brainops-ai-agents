@@ -4,25 +4,24 @@ LangChain/LangGraph Orchestration Layer
 Implements graph-based AI agent workflow orchestration
 """
 
-import os
 import json
 import logging
-from typing import Dict, List, Any, TypedDict, Sequence
+import os
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, TypedDict
+
+import psycopg2
+from langchain.schema import Document
+from langchain_anthropic import ChatAnthropic
+from langchain_community.vectorstores import SupabaseVectorStore
 
 # LangChain/LangGraph imports
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
-from langchain.schema import Document
-from langchain_community.vectorstores import SupabaseVectorStore
-from langchain_openai import OpenAIEmbeddings
-
-from langgraph.graph import StateGraph, END
-
-import psycopg2
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langgraph.graph import END, StateGraph
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -47,14 +46,14 @@ def _get_db_config():
 class AgentState(TypedDict):
     """State for AI agent workflows"""
     messages: Sequence[BaseMessage]
-    context: Dict[str, Any]
+    context: dict[str, Any]
     current_agent: str
     workflow_stage: str
-    memory_context: List[Dict]
-    decisions: List[Dict]
-    outputs: List[Any]
-    errors: List[str]
-    metadata: Dict[str, Any]
+    memory_context: list[dict]
+    decisions: list[dict]
+    outputs: list[Any]
+    errors: list[str]
+    metadata: dict[str, Any]
 
 class WorkflowStage(Enum):
     """Workflow stages for agent orchestration"""
@@ -105,8 +104,9 @@ class LangGraphOrchestrator:
         """Initialize Supabase vector store for semantic memory"""
         try:
             # Try to import supabase client for vector store
-            from supabase import create_client
             import os
+
+            from supabase import create_client
 
             supabase_url = os.getenv('SUPABASE_URL', '')
             supabase_key = os.getenv('SUPABASE_KEY', '')
@@ -386,7 +386,7 @@ class LangGraphOrchestrator:
         except Exception as e:
             logger.error(f"Failed to store execution: {e}")
 
-    async def run_workflow(self, messages: List[BaseMessage], metadata: Dict = None) -> Dict:
+    async def run_workflow(self, messages: list[BaseMessage], metadata: dict = None) -> dict:
         """Run the complete workflow"""
         initial_state = AgentState(
             messages=messages,
@@ -411,7 +411,7 @@ class LangGraphOrchestrator:
             "execution_time": final_state["metadata"].get("end_time")
         }
 
-    async def execute(self, agent_name: str, prompt: str, tenant_id: str = None, context: Dict = None) -> Dict:
+    async def execute(self, agent_name: str, prompt: str, tenant_id: str = None, context: dict = None) -> dict:
         """
         Execute an agent task - main entry point called by external systems.
 

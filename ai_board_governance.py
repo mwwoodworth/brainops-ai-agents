@@ -4,23 +4,26 @@ AI Board of Directors - Autonomous Business Governance System
 Multiple specialized AI directors that govern different business aspects autonomously
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
+import os
 import re
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict
-from enum import Enum
-import psycopg2
-from psycopg2.extras import RealDictCursor, Json
-from contextlib import contextmanager
-from ai_core import ai_core
-from ai_advanced_providers import advanced_ai
-from unified_memory_manager import get_memory_manager, Memory, MemoryType
-from agent_activation_system import get_activation_system, json_safe_serialize
 import warnings
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Optional
+
+import psycopg2
+from psycopg2.extras import Json, RealDictCursor
+
+from agent_activation_system import get_activation_system, json_safe_serialize
+from ai_advanced_providers import advanced_ai
+from ai_core import ai_core
+from unified_memory_manager import Memory, MemoryType, get_memory_manager
+
 warnings.filterwarnings('ignore')
 
 # ============================================================================
@@ -110,11 +113,11 @@ class BoardMember:
     """An AI Board Member"""
     role: BoardRole
     name: str
-    responsibilities: List[str]
-    authority_domains: List[str]
+    responsibilities: list[str]
+    authority_domains: list[str]
     decision_weight: float  # Voting weight
     veto_power: bool
-    personality_traits: Dict[str, float]  # Risk tolerance, innovation, etc.
+    personality_traits: dict[str, float]  # Risk tolerance, innovation, etc.
     current_focus: Optional[str] = None
     last_decision: Optional[str] = None
 
@@ -127,11 +130,11 @@ class Proposal:
     title: str
     description: str
     proposed_by: str
-    impact_analysis: Dict[str, Any]
-    required_resources: Dict[str, Any]
+    impact_analysis: dict[str, Any]
+    required_resources: dict[str, Any]
     timeline: str
-    alternatives: List[str]
-    supporting_data: Dict[str, Any]
+    alternatives: list[str]
+    supporting_data: dict[str, Any]
     urgency: int  # 1-10
     created_at: datetime
 
@@ -141,20 +144,20 @@ class BoardDecision:
     """A decision made by the board"""
     proposal_id: str
     decision: str  # approved, rejected, deferred
-    vote_results: Dict[str, VoteOption]
+    vote_results: dict[str, VoteOption]
     consensus_level: float
-    dissenting_opinions: List[str]
-    conditions: List[str]
-    implementation_plan: Dict[str, Any]
-    debate_transcript: Dict[str, Any]
+    dissenting_opinions: list[str]
+    conditions: list[str]
+    implementation_plan: dict[str, Any]
+    debate_transcript: dict[str, Any]
     follow_up_date: Optional[datetime]
     decided_at: datetime
     # Enhanced fields
     confidence_score: float = 0.0  # 0-1 confidence in the decision
-    risk_assessment: Optional[Dict[str, Any]] = None
+    risk_assessment: Optional[dict[str, Any]] = None
     human_escalation_required: bool = False
     escalation_reason: Optional[str] = None
-    decision_criteria_scores: Optional[Dict[str, float]] = None
+    decision_criteria_scores: Optional[dict[str, float]] = None
 
 
 class AIBoardOfDirectors:
@@ -202,7 +205,7 @@ class AIBoardOfDirectors:
 
         logger.info("🏛️ AI Board of Directors initialized")
 
-    def _initialize_board(self) -> Dict[BoardRole, BoardMember]:
+    def _initialize_board(self) -> dict[BoardRole, BoardMember]:
         """Initialize the board members with their personalities and roles"""
         return {
             BoardRole.CEO: BoardMember(
@@ -400,7 +403,7 @@ class AIBoardOfDirectors:
             logger.error(f"❌ Failed to initialize board database: {e}")
 
     async def convene_meeting(self, meeting_type: str = "regular",
-                            agenda_items: List[Proposal] = None) -> Dict[str, Any]:
+                            agenda_items: list[Proposal] = None) -> dict[str, Any]:
         """Convene a board meeting"""
         if self.meeting_in_progress:
             return {"error": "Meeting already in progress"}
@@ -448,7 +451,7 @@ class AIBoardOfDirectors:
             self.meeting_in_progress = False
             return {"error": str(e)}
 
-    async def _prepare_agenda(self) -> List[Proposal]:
+    async def _prepare_agenda(self) -> list[Proposal]:
         """Prepare meeting agenda based on pending items"""
         proposals = []
 
@@ -494,7 +497,7 @@ class AIBoardOfDirectors:
 
         return proposals
 
-    def _safe_json_from_text(self, text: str) -> Dict[str, Any]:
+    def _safe_json_from_text(self, text: str) -> dict[str, Any]:
         if not text:
             return {}
         try:
@@ -556,7 +559,7 @@ class AIBoardOfDirectors:
 
         return VoteOption.ABSTAIN
 
-    def _model_config_for_role(self, role: BoardRole) -> Dict[str, str]:
+    def _model_config_for_role(self, role: BoardRole) -> dict[str, str]:
         return self.role_models.get(role, {"provider": "openai", "model": "gpt-4-0125-preview"})
 
     def _provider_ready(self, provider: str) -> bool:
@@ -584,7 +587,7 @@ class AIBoardOfDirectors:
             "Be direct, practical, and avoid inventing facts not present in the proposal."
         )
 
-    def _proposal_brief(self, proposal: Proposal) -> Dict[str, Any]:
+    def _proposal_brief(self, proposal: Proposal) -> dict[str, Any]:
         return {
             "id": proposal.id,
             "type": proposal.type.value,
@@ -604,11 +607,11 @@ class AIBoardOfDirectors:
         member: BoardMember,
         proposal: Proposal,
         round_number: int,
-        prior_round: Dict[BoardRole, Dict[str, Any]],
+        prior_round: dict[BoardRole, dict[str, Any]],
     ) -> str:
         proposal_json = json.dumps(self._proposal_brief(proposal), ensure_ascii=False)[:6000]
 
-        other_views: List[Dict[str, Any]] = []
+        other_views: list[dict[str, Any]] = []
         if prior_round:
             for role, parsed in prior_round.items():
                 if role == member.role:
@@ -701,8 +704,8 @@ Output MUST be valid JSON only (no markdown) with this schema:
         member: BoardMember,
         proposal: Proposal,
         round_number: int,
-        prior_round: Dict[BoardRole, Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        prior_round: dict[BoardRole, dict[str, Any]],
+    ) -> dict[str, Any]:
         config = self._model_config_for_role(member.role)
         provider = config.get("provider", "openai")
         model = config.get("model", "gpt-4-0125-preview")
@@ -711,7 +714,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
         prompt = self._member_prompt(member, proposal, round_number, prior_round)
 
         raw_response: str = ""
-        parsed: Dict[str, Any] = {}
+        parsed: dict[str, Any] = {}
         vote = VoteOption.ABSTAIN
         error: Optional[str] = None
 
@@ -757,9 +760,9 @@ Output MUST be valid JSON only (no markdown) with this schema:
             "timestamp": datetime.now().isoformat(),
         }
 
-    async def _run_debate(self, proposal: Proposal) -> Tuple[Dict[str, Any], Dict[BoardRole, VoteOption], float, str, Dict[BoardRole, Dict[str, Any]]]:
+    async def _run_debate(self, proposal: Proposal) -> tuple[dict[str, Any], dict[BoardRole, VoteOption], float, str, dict[BoardRole, dict[str, Any]]]:
         """Run multi-round, multi-model debate and return transcript + final votes."""
-        transcript: Dict[str, Any] = {
+        transcript: dict[str, Any] = {
             "proposal": self._proposal_brief(proposal),
             "config": {
                 "rounds": self.debate_rounds,
@@ -771,9 +774,9 @@ Output MUST be valid JSON only (no markdown) with this schema:
             "started_at": datetime.now().isoformat(),
         }
 
-        prior_round_parsed: Dict[BoardRole, Dict[str, Any]] = {}
-        latest_parsed: Dict[BoardRole, Dict[str, Any]] = {}
-        latest_votes: Dict[BoardRole, VoteOption] = {}
+        prior_round_parsed: dict[BoardRole, dict[str, Any]] = {}
+        latest_parsed: dict[BoardRole, dict[str, Any]] = {}
+        latest_votes: dict[BoardRole, VoteOption] = {}
         consensus: float = 0.0
         decision_text: str = "deferred"
 
@@ -784,7 +787,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
             ]
             statements = await asyncio.gather(*tasks, return_exceptions=False)
 
-            round_entry: Dict[str, Any] = {
+            round_entry: dict[str, Any] = {
                 "round": round_number,
                 "statements": statements,
                 "consensus": None,
@@ -908,7 +911,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
 
         return decision
 
-    async def _analyze_proposal(self, member: BoardMember, proposal: Proposal) -> Dict[str, Any]:
+    async def _analyze_proposal(self, member: BoardMember, proposal: Proposal) -> dict[str, Any]:
         """Individual board member analyzes a proposal"""
         analysis = {
             "member": member.name,
@@ -951,7 +954,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
 
         return analysis
 
-    def _conduct_discussion(self, analyses: Dict[BoardRole, Dict]) -> List[str]:
+    def _conduct_discussion(self, analyses: dict[BoardRole, dict]) -> list[str]:
         """Simulate board discussion"""
         discussion_points = []
 
@@ -974,7 +977,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
         return discussion_points
 
     def _cast_vote(self, member: BoardMember, proposal: Proposal,
-                  analyses: Dict, discussion: List[str]) -> VoteOption:
+                  analyses: dict, discussion: list[str]) -> VoteOption:
         """Board member casts their vote"""
         analysis = analyses[member.role]
         support_level = analysis["support_level"]
@@ -996,7 +999,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
         else:
             return VoteOption.STRONGLY_REJECT
 
-    def _calculate_consensus(self, votes: Dict[BoardRole, VoteOption]) -> float:
+    def _calculate_consensus(self, votes: dict[BoardRole, VoteOption]) -> float:
         """Calculate consensus level from votes"""
         # Check for veto
         if any(v == VoteOption.VETO for v in votes.values()):
@@ -1016,7 +1019,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
         consensus = (weighted_sum / total_weight + 2) / 4
         return max(0, min(1, consensus))
 
-    def _determine_decision(self, votes: Dict[BoardRole, VoteOption], consensus: float) -> str:
+    def _determine_decision(self, votes: dict[BoardRole, VoteOption], consensus: float) -> str:
         """Determine final decision based on votes and consensus"""
         if consensus < 0:  # Veto
             return "rejected"
@@ -1029,7 +1032,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
         else:
             return "rejected"
 
-    def _create_implementation_plan(self, proposal: Proposal, analyses: Dict) -> Dict[str, Any]:
+    def _create_implementation_plan(self, proposal: Proposal, analyses: dict) -> dict[str, Any]:
         """Create implementation plan for approved proposal"""
         plan = {
             "phases": [],
@@ -1065,8 +1068,8 @@ Output MUST be valid JSON only (no markdown) with this schema:
 
         return plan
 
-    def _extract_dissent(self, votes: Dict[BoardRole, VoteOption],
-                        analyses: Dict) -> List[str]:
+    def _extract_dissent(self, votes: dict[BoardRole, VoteOption],
+                        analyses: dict) -> list[str]:
         """Extract dissenting opinions"""
         dissent = []
 
@@ -1082,7 +1085,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
 
         return dissent
 
-    def _extract_conditions(self, analyses: Dict) -> List[str]:
+    def _extract_conditions(self, analyses: dict) -> list[str]:
         """Extract conditions for approval"""
         conditions = []
 
@@ -1111,7 +1114,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
 
         return conditions
 
-    async def _identify_issues_for_discussion(self) -> List[Proposal]:
+    async def _identify_issues_for_discussion(self) -> list[Proposal]:
         """Identify issues that need board attention"""
         proposals = []
 
@@ -1151,7 +1154,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
 
         return proposals
 
-    def _record_meeting_start(self, meeting_type: str, agenda: List[Proposal]) -> str:
+    def _record_meeting_start(self, meeting_type: str, agenda: list[Proposal]) -> str:
         """Record meeting start in database"""
         try:
             with self._get_db_context() as conn:
@@ -1177,8 +1180,8 @@ Output MUST be valid JSON only (no markdown) with this schema:
             logger.error(f"Failed to record meeting start: {e}")
             return f"meeting-{datetime.now().timestamp()}"
 
-    def _record_meeting_end(self, meeting_id: str, decisions: List[BoardDecision],
-                           outcomes: Dict, duration: float):
+    def _record_meeting_end(self, meeting_id: str, decisions: list[BoardDecision],
+                           outcomes: dict, duration: float):
         """Record meeting end in database"""
         try:
             with self._get_db_context() as conn:
@@ -1204,10 +1207,10 @@ Output MUST be valid JSON only (no markdown) with this schema:
 
     def _calculate_decision_confidence(
         self,
-        votes: Dict[BoardRole, VoteOption],
+        votes: dict[BoardRole, VoteOption],
         consensus: float,
-        latest_parsed: Dict[BoardRole, Dict[str, Any]],
-        debate_transcript: Dict[str, Any]
+        latest_parsed: dict[BoardRole, dict[str, Any]],
+        debate_transcript: dict[str, Any]
     ) -> float:
         """Calculate overall confidence in the board decision"""
         confidence_factors = []
@@ -1246,9 +1249,9 @@ Output MUST be valid JSON only (no markdown) with this schema:
     def _assess_proposal_risk(
         self,
         proposal: Proposal,
-        votes: Dict[BoardRole, VoteOption],
-        latest_parsed: Dict[BoardRole, Dict[str, Any]]
-    ) -> Dict[str, Any]:
+        votes: dict[BoardRole, VoteOption],
+        latest_parsed: dict[BoardRole, dict[str, Any]]
+    ) -> dict[str, Any]:
         """Comprehensive risk assessment of the proposal"""
         risk_assessment = {
             'overall_risk': 0.0,
@@ -1308,9 +1311,9 @@ Output MUST be valid JSON only (no markdown) with this schema:
     def _evaluate_decision_criteria(
         self,
         proposal: Proposal,
-        votes: Dict[BoardRole, VoteOption],
-        latest_parsed: Dict[BoardRole, Dict[str, Any]]
-    ) -> Dict[str, float]:
+        votes: dict[BoardRole, VoteOption],
+        latest_parsed: dict[BoardRole, dict[str, Any]]
+    ) -> dict[str, float]:
         """Evaluate decision across multiple criteria"""
         criteria_scores = {}
 
@@ -1348,7 +1351,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
         self,
         proposal: Proposal,
         confidence_score: float,
-        risk_assessment: Dict[str, Any],
+        risk_assessment: dict[str, Any],
         consensus: float
     ) -> tuple[bool, Optional[str]]:
         """Determine if human (owner) escalation is required"""
@@ -1432,7 +1435,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
         except Exception as e:
             logger.error(f"Failed to record decision: {e}")
 
-    def _persist_board_decision_to_ai_decisions(self, cur, decision: BoardDecision, vote_results: Dict) -> None:
+    def _persist_board_decision_to_ai_decisions(self, cur, decision: BoardDecision, vote_results: dict) -> None:
         """
         Persist board decision to the ai_decisions table for centralized visibility.
         This ensures all AI Board governance decisions are tracked in the main AI decisions table.
@@ -1479,7 +1482,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
             # Don't fail the main decision logging if ai_decisions insert fails
             logger.warning(f"Failed to persist board decision to ai_decisions: {e}")
 
-    def _generate_board_decision_reasoning(self, decision: BoardDecision, vote_results: Dict) -> str:
+    def _generate_board_decision_reasoning(self, decision: BoardDecision, vote_results: dict) -> str:
         """
         Generate human-readable reasoning explaining WHY this board decision was made.
         This provides transparency into the AI Board's governance process.
@@ -1530,7 +1533,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
 
         return " | ".join(reasoning_parts)
 
-    def _synthesize_outcomes(self, decisions: List[BoardDecision]) -> Dict[str, Any]:
+    def _synthesize_outcomes(self, decisions: list[BoardDecision]) -> dict[str, Any]:
         """Synthesize meeting outcomes"""
         outcomes = {
             "total_decisions": len(decisions),
@@ -1588,7 +1591,7 @@ Output MUST be valid JSON only (no markdown) with this schema:
             logger.error(f"Failed to submit proposal: {e}")
             raise
 
-    def get_board_status(self) -> Dict[str, Any]:
+    def get_board_status(self) -> dict[str, Any]:
         """Get current board status"""
         status = {
             "board_members": {},

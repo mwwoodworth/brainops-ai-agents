@@ -4,18 +4,19 @@ Data Pipeline Automation System - Task 17
 Automated data pipeline management for ETL, data transformation, and workflow orchestration
 """
 
-import os
+import hashlib
 import json
 import logging
-import uuid
-import hashlib
+import os
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Callable
-from enum import Enum
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Any, Callable, Optional
+
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from psycopg2.extras import Json, RealDictCursor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -117,11 +118,11 @@ class DataSource:
     """Data source configuration"""
     source_id: str
     source_type: DataSourceType
-    connection_config: Dict
+    connection_config: dict
     name: str
     description: Optional[str] = None
-    schema: Optional[Dict] = None
-    metadata: Dict = field(default_factory=dict)
+    schema: Optional[dict] = None
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -129,12 +130,12 @@ class TransformationStep:
     """A single transformation step in the pipeline"""
     step_id: str
     transformation_type: TransformationType
-    config: Dict
+    config: dict
     order: int
     name: str
     description: Optional[str] = None
-    input_schema: Optional[Dict] = None
-    output_schema: Optional[Dict] = None
+    input_schema: Optional[dict] = None
+    output_schema: Optional[dict] = None
 
 
 @dataclass
@@ -143,13 +144,13 @@ class PipelineConfig:
     pipeline_id: str
     name: str
     pipeline_type: PipelineType
-    sources: List[DataSource]
-    transformations: List[TransformationStep]
+    sources: list[DataSource]
+    transformations: list[TransformationStep]
     destination: DataSource
-    schedule: Optional[Dict] = None
-    retry_config: Optional[Dict] = None
-    alerts: Optional[Dict] = None
-    metadata: Dict = field(default_factory=dict)
+    schedule: Optional[dict] = None
+    retry_config: Optional[dict] = None
+    alerts: Optional[dict] = None
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -163,15 +164,15 @@ class PipelineRun:
     records_processed: int = 0
     records_failed: int = 0
     error_message: Optional[str] = None
-    step_results: List[Dict] = field(default_factory=list)
-    metrics: Dict = field(default_factory=dict)
+    step_results: list[dict] = field(default_factory=list)
+    metrics: dict = field(default_factory=dict)
 
 
 class DataExtractor:
     """Extract data from various sources"""
 
     def __init__(self):
-        self.extractors: Dict[DataSourceType, Callable] = {
+        self.extractors: dict[DataSourceType, Callable] = {
             DataSourceType.POSTGRESQL: self._extract_postgresql,
             DataSourceType.API: self._extract_api,
             DataSourceType.CSV: self._extract_csv,
@@ -183,7 +184,7 @@ class DataExtractor:
         source: DataSource,
         incremental_key: Optional[str] = None,
         last_value: Optional[Any] = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Extract data from a source"""
         extractor = self.extractors.get(source.source_type)
         if not extractor:
@@ -196,7 +197,7 @@ class DataExtractor:
         source: DataSource,
         incremental_key: Optional[str],
         last_value: Optional[Any]
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Extract data from PostgreSQL"""
         try:
             config = source.connection_config
@@ -242,7 +243,7 @@ class DataExtractor:
         source: DataSource,
         incremental_key: Optional[str],
         last_value: Optional[Any]
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Extract data from API"""
         try:
             import httpx
@@ -285,7 +286,7 @@ class DataExtractor:
         source: DataSource,
         incremental_key: Optional[str],
         last_value: Optional[Any]
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Extract data from CSV"""
         try:
             import csv
@@ -293,7 +294,7 @@ class DataExtractor:
             file_path = config.get('file_path')
 
             data = []
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     if incremental_key and last_value:
@@ -313,13 +314,13 @@ class DataExtractor:
         source: DataSource,
         incremental_key: Optional[str],
         last_value: Optional[Any]
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Extract data from JSON file"""
         try:
             config = source.connection_config
             file_path = config.get('file_path')
 
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 data = json.load(f)
 
             if not isinstance(data, list):
@@ -339,7 +340,7 @@ class DataTransformer:
     """Transform data through pipeline steps"""
 
     def __init__(self):
-        self.transformers: Dict[TransformationType, Callable] = {
+        self.transformers: dict[TransformationType, Callable] = {
             TransformationType.FILTER: self._filter,
             TransformationType.MAP: self._map,
             TransformationType.AGGREGATE: self._aggregate,
@@ -351,9 +352,9 @@ class DataTransformer:
 
     async def transform(
         self,
-        data: List[Dict],
+        data: list[dict],
         step: TransformationStep
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Apply a transformation step to data"""
         transformer = self.transformers.get(step.transformation_type)
         if not transformer:
@@ -363,7 +364,7 @@ class DataTransformer:
 
         return await transformer(data, step.config)
 
-    async def _filter(self, data: List[Dict], config: Dict) -> List[Dict]:
+    async def _filter(self, data: list[dict], config: dict) -> list[dict]:
         """Filter data based on conditions"""
         field = config.get('field')
         operator = config.get('operator', 'eq')
@@ -385,7 +386,7 @@ class DataTransformer:
         op_func = operators.get(operator, operators['eq'])
         return [d for d in data if op_func(d.get(field), value)]
 
-    async def _map(self, data: List[Dict], config: Dict) -> List[Dict]:
+    async def _map(self, data: list[dict], config: dict) -> list[dict]:
         """Map/transform field values"""
         mappings = config.get('mappings', {})
         result = []
@@ -418,7 +419,7 @@ class DataTransformer:
 
         return result
 
-    async def _aggregate(self, data: List[Dict], config: Dict) -> List[Dict]:
+    async def _aggregate(self, data: list[dict], config: dict) -> list[dict]:
         """Aggregate data"""
         group_by = config.get('group_by', [])
         aggregations = config.get('aggregations', {})
@@ -449,7 +450,7 @@ class DataTransformer:
 
         return results
 
-    def _calculate_aggregate(self, values: List[Any], function: str) -> Any:
+    def _calculate_aggregate(self, values: list[Any], function: str) -> Any:
         """Calculate aggregate value"""
         if not values:
             return None
@@ -471,7 +472,7 @@ class DataTransformer:
         else:
             return None
 
-    async def _deduplicate(self, data: List[Dict], config: Dict) -> List[Dict]:
+    async def _deduplicate(self, data: list[dict], config: dict) -> list[dict]:
         """Remove duplicate records"""
         key_fields = config.get('key_fields', [])
         keep = config.get('keep', 'first')  # first or last
@@ -499,7 +500,7 @@ class DataTransformer:
 
         return list(seen.values())
 
-    async def _normalize(self, data: List[Dict], config: Dict) -> List[Dict]:
+    async def _normalize(self, data: list[dict], config: dict) -> list[dict]:
         """Normalize data values"""
         fields = config.get('fields', {})
         result = []
@@ -524,7 +525,7 @@ class DataTransformer:
 
         return result
 
-    async def _enrich(self, data: List[Dict], config: Dict) -> List[Dict]:
+    async def _enrich(self, data: list[dict], config: dict) -> list[dict]:
         """Enrich data with additional fields"""
         enrichments = config.get('enrichments', [])
         result = []
@@ -550,7 +551,7 @@ class DataTransformer:
 
         return result
 
-    async def _validate(self, data: List[Dict], config: Dict) -> List[Dict]:
+    async def _validate(self, data: list[dict], config: dict) -> list[dict]:
         """Validate data and filter invalid records"""
         rules = config.get('rules', [])
         valid_records = []
@@ -583,7 +584,7 @@ class DataTransformer:
 
         return valid_records
 
-    async def _custom_transform(self, data: List[Dict], config: Dict) -> List[Dict]:
+    async def _custom_transform(self, data: list[dict], config: dict) -> list[dict]:
         """Apply custom transformation"""
         # Placeholder for custom transformation logic
         logger.info("Custom transformation applied")
@@ -594,17 +595,17 @@ class DataLoader:
     """Load data to destination"""
 
     def __init__(self):
-        self.loaders: Dict[DataSourceType, Callable] = {
+        self.loaders: dict[DataSourceType, Callable] = {
             DataSourceType.POSTGRESQL: self._load_postgresql,
             DataSourceType.API: self._load_api,
         }
 
     async def load(
         self,
-        data: List[Dict],
+        data: list[dict],
         destination: DataSource,
         mode: str = "append"  # append, replace, upsert
-    ) -> Dict:
+    ) -> dict:
         """Load data to destination"""
         loader = self.loaders.get(destination.source_type)
         if not loader:
@@ -614,10 +615,10 @@ class DataLoader:
 
     async def _load_postgresql(
         self,
-        data: List[Dict],
+        data: list[dict],
         destination: DataSource,
         mode: str
-    ) -> Dict:
+    ) -> dict:
         """Load data to PostgreSQL"""
         if not data:
             return {"records_loaded": 0}
@@ -678,10 +679,10 @@ class DataLoader:
 
     async def _load_api(
         self,
-        data: List[Dict],
+        data: list[dict],
         destination: DataSource,
         mode: str
-    ) -> Dict:
+    ) -> dict:
         """Load data via API"""
         try:
             import httpx
@@ -712,14 +713,14 @@ class PipelineScheduler:
     """Schedule and manage pipeline executions"""
 
     def __init__(self):
-        self.schedules: Dict[str, Dict] = {}
+        self.schedules: dict[str, dict] = {}
         self._running = False
 
     async def schedule_pipeline(
         self,
         pipeline_id: str,
         frequency: ScheduleFrequency,
-        config: Optional[Dict] = None
+        config: Optional[dict] = None
     ) -> str:
         """Schedule a pipeline for execution"""
         schedule_id = str(uuid.uuid4())
@@ -761,7 +762,7 @@ class PipelineScheduler:
     def _calculate_next_run(
         self,
         frequency: ScheduleFrequency,
-        config: Optional[Dict]
+        config: Optional[dict]
     ) -> datetime:
         """Calculate next run time"""
         now = datetime.now(timezone.utc)
@@ -894,12 +895,12 @@ class DataPipelineAutomation:
         self,
         name: str,
         pipeline_type: PipelineType,
-        sources: List[Dict],
-        transformations: List[Dict],
-        destination: Dict,
-        schedule: Optional[Dict] = None,
-        retry_config: Optional[Dict] = None,
-        alerts: Optional[Dict] = None
+        sources: list[dict],
+        transformations: list[dict],
+        destination: dict,
+        schedule: Optional[dict] = None,
+        retry_config: Optional[dict] = None,
+        alerts: Optional[dict] = None
     ) -> str:
         """Create a new data pipeline"""
         try:
@@ -938,7 +939,7 @@ class DataPipelineAutomation:
     async def run_pipeline(
         self,
         pipeline_id: str,
-        parameters: Optional[Dict] = None
+        parameters: Optional[dict] = None
     ) -> PipelineRun:
         """Execute a data pipeline"""
         run_id = str(uuid.uuid4())
@@ -1090,7 +1091,7 @@ class DataPipelineAutomation:
                 error_message=str(e)
             )
 
-    async def get_pipeline_status(self, pipeline_id: str) -> Dict:
+    async def get_pipeline_status(self, pipeline_id: str) -> dict:
         """Get status of a pipeline"""
         try:
             conn = self._get_connection()
@@ -1132,7 +1133,7 @@ class DataPipelineAutomation:
         self,
         status: Optional[str] = None,
         limit: int = 50
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """List all pipelines"""
         try:
             conn = self._get_connection()

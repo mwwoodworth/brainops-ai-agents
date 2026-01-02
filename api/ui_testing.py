@@ -5,14 +5,15 @@ Endpoints for running and managing AI-powered UI tests.
 Includes database persistence, scheduled testing, and health monitoring.
 """
 
-import logging
 import asyncio
 import hashlib
 import json
+import logging
 import os
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -20,9 +21,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ui-testing", tags=["UI Testing"])
 
 # In-memory cache with database backup
-_test_results: Dict[str, Dict[str, Any]] = {}
-_running_tests: Dict[str, bool] = {}
-_scheduled_tests: Dict[str, Dict[str, Any]] = {}
+_test_results: dict[str, dict[str, Any]] = {}
+_running_tests: dict[str, bool] = {}
+_scheduled_tests: dict[str, dict[str, Any]] = {}
 
 # Database configuration - ALL values MUST come from environment variables (no hardcoded defaults)
 DB_CONFIG = {
@@ -41,7 +42,7 @@ class TestRequest(BaseModel):
 
 class ApplicationTestRequest(BaseModel):
     base_url: str
-    routes: List[str]
+    routes: list[str]
     app_name: str
 
 
@@ -108,7 +109,7 @@ async def _ensure_tables():
         logger.warning(f"Could not ensure UI testing tables: {e}")
 
 
-async def _persist_result(test_id: str, result: Dict[str, Any]):
+async def _persist_result(test_id: str, result: dict[str, Any]):
     """Persist test result to database"""
     try:
         import psycopg2
@@ -193,7 +194,7 @@ async def _run_test_background(test_id: str, url: str, test_name: str):
 async def _run_application_test_background(
     test_id: str,
     base_url: str,
-    routes: List[str],
+    routes: list[str],
     app_name: str,
     max_timeout_seconds: int = 300  # 5 minute max timeout for entire test
 ):
@@ -274,7 +275,7 @@ async def _run_application_test_background(
 async def run_single_test(
     request: TestRequest,
     background_tasks: BackgroundTasks
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Run a UI test on a single URL.
     Returns immediately with a test_id for polling.
@@ -300,7 +301,7 @@ async def run_single_test(
 
 
 @router.post("/test/sync")
-async def run_single_test_sync(request: TestRequest) -> Dict[str, Any]:
+async def run_single_test_sync(request: TestRequest) -> dict[str, Any]:
     """
     Run a UI test synchronously and wait for results.
     Use for immediate feedback (may timeout for slow pages).
@@ -324,7 +325,7 @@ async def run_single_test_sync(request: TestRequest) -> Dict[str, Any]:
 async def run_application_test(
     request: ApplicationTestRequest,
     background_tasks: BackgroundTasks
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Run comprehensive UI tests on multiple routes of an application.
     """
@@ -350,7 +351,7 @@ async def run_application_test(
 
 
 @router.post("/test/mrg")
-async def run_mrg_test(background_tasks: BackgroundTasks) -> Dict[str, Any]:
+async def run_mrg_test(background_tasks: BackgroundTasks) -> dict[str, Any]:
     """
     Run comprehensive UI tests on MyRoofGenius.
     Tests all public routes with AI vision analysis.
@@ -380,7 +381,7 @@ async def run_mrg_test(background_tasks: BackgroundTasks) -> Dict[str, Any]:
 
 
 @router.post("/test/erp")
-async def run_erp_test(background_tasks: BackgroundTasks) -> Dict[str, Any]:
+async def run_erp_test(background_tasks: BackgroundTasks) -> dict[str, Any]:
     """
     Run comprehensive UI tests on Weathercraft ERP.
     Tests all public routes with AI vision analysis.
@@ -410,7 +411,7 @@ async def run_erp_test(background_tasks: BackgroundTasks) -> Dict[str, Any]:
 
 
 @router.get("/result/{test_id}")
-async def get_test_result(test_id: str) -> Dict[str, Any]:
+async def get_test_result(test_id: str) -> dict[str, Any]:
     """
     Get the result of a UI test by ID.
     Checks in-memory cache first, then database.
@@ -477,7 +478,7 @@ async def get_test_result(test_id: str) -> Dict[str, Any]:
 async def get_all_results(
     limit: int = Query(default=50, le=200),
     app_name: Optional[str] = None
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Get all recent test results from database.
     """
@@ -543,7 +544,7 @@ async def get_all_results(
 
 
 @router.get("/status")
-async def get_testing_status() -> Dict[str, Any]:
+async def get_testing_status() -> dict[str, Any]:
     """
     Get the current status of the UI testing system.
     """
@@ -591,7 +592,7 @@ async def get_testing_status() -> Dict[str, Any]:
 
 
 @router.post("/schedule")
-async def create_schedule(config: ScheduledTestConfig) -> Dict[str, Any]:
+async def create_schedule(config: ScheduledTestConfig) -> dict[str, Any]:
     """
     Create or update a scheduled test configuration.
     """
@@ -640,7 +641,7 @@ async def create_schedule(config: ScheduledTestConfig) -> Dict[str, Any]:
 
 
 @router.get("/schedules")
-async def get_schedules() -> Dict[str, Any]:
+async def get_schedules() -> dict[str, Any]:
     """
     Get all scheduled test configurations.
     """
@@ -676,7 +677,7 @@ async def get_schedules() -> Dict[str, Any]:
 
 
 @router.delete("/results")
-async def clear_results(keep_db: bool = False) -> Dict[str, str]:
+async def clear_results(keep_db: bool = False) -> dict[str, str]:
     """
     Clear all stored test results.
     By default also clears database. Set keep_db=true to only clear cache.
@@ -701,7 +702,7 @@ async def clear_results(keep_db: bool = False) -> Dict[str, str]:
 
 
 @router.get("/health")
-async def health_check() -> Dict[str, Any]:
+async def health_check() -> dict[str, Any]:
     """
     Health check for the UI testing system.
     """
@@ -748,7 +749,7 @@ async def health_check() -> Dict[str, Any]:
 
 
 @router.post("/cancel/{test_id}")
-async def cancel_test(test_id: str) -> Dict[str, Any]:
+async def cancel_test(test_id: str) -> dict[str, Any]:
     """
     Cancel a running test and clean up its state.
     """
@@ -768,7 +769,7 @@ async def cancel_test(test_id: str) -> Dict[str, Any]:
 
 
 @router.post("/cancel-all")
-async def cancel_all_tests() -> Dict[str, Any]:
+async def cancel_all_tests() -> dict[str, Any]:
     """
     Cancel all running tests.
     """
@@ -785,12 +786,12 @@ async def cancel_all_tests() -> Dict[str, Any]:
 
 
 @router.get("/diagnostics")
-async def get_diagnostics() -> Dict[str, Any]:
+async def get_diagnostics() -> dict[str, Any]:
     """
     Detailed diagnostics for UI testing system.
     """
-    import os
     import glob
+    import os
 
     # Check Playwright
     playwright_info = {"installed": False, "browser_paths": []}

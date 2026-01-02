@@ -3,14 +3,15 @@ BrainOps Knowledge Agent - Permanent Memory & Context Manager
 Provides permanent knowledge storage with vector embeddings for Claude Code sessions
 """
 
-import logging
 import json
+import logging
+import os
 import uuid
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Any, Optional
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import os
 
 # AI imports
 try:
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 class KnowledgeAgent:
     """Permanent knowledge and context manager for Claude Code sessions with AUREA integration"""
 
-    def __init__(self, db_config: Dict[str, Any], tenant_id: str = "default"):
+    def __init__(self, db_config: dict[str, Any], tenant_id: str = "default"):
         self.db_config = db_config
         self.tenant_id = tenant_id
         self.agent_type = "knowledge"
@@ -65,7 +66,7 @@ class KnowledgeAgent:
             logger.error(f"Database connection failed: {e}")
             return None
 
-    async def generate_embedding(self, text: str) -> List[float]:
+    async def generate_embedding(self, text: str) -> list[float]:
         """Generate vector embedding for text"""
         if not self.openai_client:
             logger.warning("OpenAI not available, returning zero vector")
@@ -81,7 +82,7 @@ class KnowledgeAgent:
             logger.error(f"Embedding generation failed: {e}")
             return [0.0] * 1536
 
-    async def store_knowledge(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+    async def store_knowledge(self, entry: dict[str, Any]) -> dict[str, Any]:
         """Store knowledge entry with vector embedding"""
         conn = self.get_db_connection()
         if not conn:
@@ -124,7 +125,7 @@ class KnowledgeAgent:
             logger.error(f"Knowledge storage error: {e}")
             raise
 
-    async def query_knowledge(self, query: str, filters: Optional[Dict] = None) -> List[Dict]:
+    async def query_knowledge(self, query: str, filters: Optional[dict] = None) -> list[dict]:
         """Semantic search across knowledge base"""
         conn = self.get_db_connection()
         if not conn:
@@ -182,7 +183,7 @@ class KnowledgeAgent:
             logger.error(f"Knowledge query error: {e}")
             raise
 
-    async def get_context_summary(self) -> Dict[str, Any]:
+    async def get_context_summary(self) -> dict[str, Any]:
         """Get comprehensive context summary for Claude sessions"""
         conn = self.get_db_connection()
         if not conn:
@@ -267,7 +268,7 @@ class KnowledgeAgent:
             logger.error(f"Context summary error: {e}")
             raise
 
-    async def generate_insights(self) -> List[Dict[str, Any]]:
+    async def generate_insights(self) -> list[dict[str, Any]]:
         """Generate insights from knowledge base patterns"""
         conn = self.get_db_connection()
         if not conn:
@@ -354,7 +355,7 @@ class KnowledgeAgent:
             logger.error(f"Insight generation error: {e}")
             raise
 
-    async def generate_recommendations(self, context: Optional[Dict] = None) -> List[Dict[str, Any]]:
+    async def generate_recommendations(self, context: Optional[dict] = None) -> list[dict[str, Any]]:
         """Generate actionable recommendations based on knowledge base"""
         conn = self.get_db_connection()
         if not conn:
@@ -433,7 +434,7 @@ class KnowledgeAgent:
             logger.error(f"Recommendation generation error: {e}")
             raise
 
-    async def ask(self, question: str, context: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def ask(self, question: str, context: Optional[list[str]] = None) -> dict[str, Any]:
         """AI-powered question answering using knowledge base with insights"""
         # First, search knowledge base
         relevant_knowledge = await self.query_knowledge(question, {'limit': 5})
@@ -484,7 +485,7 @@ Include actionable recommendations if applicable."""
 # Global instance
 _knowledge_agent = None
 
-def get_knowledge_agent(db_config: Dict[str, Any]) -> KnowledgeAgent:
+def get_knowledge_agent(db_config: dict[str, Any]) -> KnowledgeAgent:
     """Get or create global knowledge agent instance"""
     global _knowledge_agent
     if _knowledge_agent is None:

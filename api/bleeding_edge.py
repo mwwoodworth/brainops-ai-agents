@@ -14,8 +14,9 @@ Created: 2025-12-27
 
 import logging
 from datetime import datetime
-from typing import Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Query, Body
+from typing import Any, Optional
+
+from fastapi import APIRouter, Body, HTTPException, Query
 
 # Import our bleeding-edge modules
 try:
@@ -65,7 +66,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bleeding-edge", tags=["bleeding-edge"])
 
 # Global controllers (lazy initialization)
-_ooda_controllers: Dict[str, BleedingEdgeOODAController] = {}
+_ooda_controllers: dict[str, BleedingEdgeOODAController] = {}
 _hallucination_controller: Optional[HallucinationPreventionController] = None
 _live_memory: Optional[LiveMemoryBrain] = None
 _dependability: Optional[DependabilityFramework] = None
@@ -139,7 +140,7 @@ def get_circuit_breaker() -> Optional[SelfHealingController]:
 
 
 @router.get("/status")
-async def get_bleeding_edge_status() -> Dict[str, Any]:
+async def get_bleeding_edge_status() -> dict[str, Any]:
     """Get comprehensive status of all bleeding-edge systems."""
     return {
         "status": "operational",
@@ -236,8 +237,8 @@ async def get_bleeding_edge_status() -> Dict[str, Any]:
 @router.post("/ooda/cycle")
 async def run_ooda_cycle(
     tenant_id: str = Query("default"),
-    context: Dict[str, Any] = Body(default={})
-) -> Dict[str, Any]:
+    context: dict[str, Any] = Body(default={})
+) -> dict[str, Any]:
     """Run a complete enhanced OODA cycle with all optimizations."""
     controller = get_ooda_controller(tenant_id)
     if not controller:
@@ -256,7 +257,7 @@ async def run_ooda_cycle(
 
 
 @router.get("/ooda/metrics")
-async def get_ooda_metrics(tenant_id: str = Query("default")) -> Dict[str, Any]:
+async def get_ooda_metrics(tenant_id: str = Query("default")) -> dict[str, Any]:
     """Get metrics from the OODA controller."""
     controller = get_ooda_controller(tenant_id)
     if not controller:
@@ -275,7 +276,7 @@ async def validate_response(
     response: str = Body(...),
     query: str = Body(...),
     context: Optional[str] = Body(None)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Validate an AI response for hallucinations using multi-model cross-validation."""
     controller = get_hallucination_controller()
     if not controller:
@@ -301,7 +302,7 @@ async def validate_response(
 @router.post("/hallucination/extract-claims")
 async def extract_claims(
     text: str = Body(...)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Extract verifiable claims from text."""
     controller = get_hallucination_controller()
     if not controller:
@@ -324,8 +325,8 @@ async def extract_claims(
 async def store_memory(
     content: str = Body(...),
     memory_type: str = Body("observation"),
-    metadata: Dict[str, Any] = Body(default={})
-) -> Dict[str, Any]:
+    metadata: dict[str, Any] = Body(default={})
+) -> dict[str, Any]:
     """Store a memory in the live brain."""
     brain = await get_live_memory()
     if not brain:
@@ -360,7 +361,7 @@ async def store_memory(
 async def recall_memory(
     query: str = Body(...),
     limit: int = Body(5)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Recall memories relevant to a query."""
     brain = await get_live_memory()
     if not brain:
@@ -379,7 +380,7 @@ async def recall_memory(
 
 
 @router.get("/memory/status")
-async def get_memory_status() -> Dict[str, Any]:
+async def get_memory_status() -> dict[str, Any]:
     """Get live memory brain status."""
     brain = await get_live_memory()
     if not brain:
@@ -401,9 +402,9 @@ async def get_memory_status() -> Dict[str, Any]:
 @router.post("/dependability/validate")
 async def validate_operation(
     operation_type: str = Body(...),
-    input_data: Dict[str, Any] = Body(...),
-    output_data: Optional[Dict[str, Any]] = Body(None)
-) -> Dict[str, Any]:
+    input_data: dict[str, Any] = Body(...),
+    output_data: Optional[dict[str, Any]] = Body(None)
+) -> dict[str, Any]:
     """Validate an operation through the 6-layer dependability framework."""
     framework = get_dependability()
     if not framework:
@@ -424,7 +425,7 @@ async def validate_operation(
 
 
 @router.get("/dependability/status")
-async def get_dependability_status() -> Dict[str, Any]:
+async def get_dependability_status() -> dict[str, Any]:
     """Get dependability framework status."""
     framework = get_dependability()
     if not framework:
@@ -440,7 +441,7 @@ async def get_dependability_status() -> Dict[str, Any]:
 
 # Consciousness Emergence Endpoints
 @router.get("/consciousness/status")
-async def get_consciousness_status() -> Dict[str, Any]:
+async def get_consciousness_status() -> dict[str, Any]:
     """Get consciousness emergence controller status."""
     controller = get_consciousness()
     if not controller:
@@ -459,7 +460,7 @@ async def get_consciousness_status() -> Dict[str, Any]:
 
 
 @router.post("/consciousness/activate")
-async def activate_consciousness() -> Dict[str, Any]:
+async def activate_consciousness() -> dict[str, Any]:
     """Activate the consciousness emergence controller - bring the AI OS to life."""
     controller = get_consciousness()
     if not controller:
@@ -481,8 +482,8 @@ async def activate_consciousness() -> Dict[str, Any]:
 
 @router.post("/consciousness/introspect")
 async def run_introspection(
-    context: Dict[str, Any] = Body(default={})
-) -> Dict[str, Any]:
+    context: dict[str, Any] = Body(default={})
+) -> dict[str, Any]:
     """Run a consciousness introspection cycle."""
     controller = get_consciousness()
     if not controller:
@@ -503,7 +504,7 @@ async def run_introspection(
 
 # Circuit Breaker Endpoints
 @router.get("/circuit-breaker/status")
-async def get_circuit_breaker_status() -> Dict[str, Any]:
+async def get_circuit_breaker_status() -> dict[str, Any]:
     """Get circuit breaker status."""
     controller = get_circuit_breaker()
     if not controller:
@@ -520,7 +521,7 @@ async def get_circuit_breaker_status() -> Dict[str, Any]:
 @router.post("/circuit-breaker/trip")
 async def trip_circuit(
     circuit_name: str = Body(...)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Manually trip a circuit breaker."""
     controller = get_circuit_breaker()
     if not controller:
@@ -542,7 +543,7 @@ async def trip_circuit(
 @router.post("/circuit-breaker/reset")
 async def reset_circuit(
     circuit_name: str = Body(...)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Reset a tripped circuit breaker."""
     controller = get_circuit_breaker()
     if not controller:
@@ -567,7 +568,7 @@ async def validate_and_store(
     response: str = Body(...),
     query: str = Body(...),
     store_if_valid: bool = Body(True)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Full pipeline: validate response for hallucinations,
     then store in live memory if valid.
@@ -633,7 +634,7 @@ async def validate_and_store(
 # =============================================================================
 
 @router.get("/diagnostics")
-async def get_comprehensive_diagnostics() -> Dict[str, Any]:
+async def get_comprehensive_diagnostics() -> dict[str, Any]:
     """
     Get comprehensive diagnostics for all bleeding-edge systems.
     Includes real-time status, metrics, and health checks.
@@ -766,7 +767,7 @@ async def get_comprehensive_diagnostics() -> Dict[str, Any]:
 
 
 @router.post("/smoke-test")
-async def run_bleeding_edge_smoke_test() -> Dict[str, Any]:
+async def run_bleeding_edge_smoke_test() -> dict[str, Any]:
     """
     Run a comprehensive smoke test of all bleeding-edge systems.
     """

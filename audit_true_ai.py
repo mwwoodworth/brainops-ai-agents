@@ -4,15 +4,16 @@ Comprehensive audit of all systems for TRUE AI capabilities
 Identifies mock data, predefined responses, and fake AI implementations
 """
 
-import os
-import sys
-import re
-import json
 import glob
+import json
+import os
+import re
+import sys
+from datetime import datetime
+from typing import Any
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from typing import Dict, Any
-from datetime import datetime
 
 # Database configuration - NO hardcoded credentials
 DB_CONFIG = {
@@ -37,7 +38,7 @@ class AISystemAuditor:
         self.ai_agents_path = '/home/matt-woodworth/brainops-ai-agents'
         self.erp_path = '/home/matt-woodworth/myroofgenius-app'
 
-    def audit_python_file(self, filepath: str) -> Dict[str, Any]:
+    def audit_python_file(self, filepath: str) -> dict[str, Any]:
         """Audit a Python file for AI authenticity"""
         findings = {
             'file': filepath,
@@ -50,7 +51,7 @@ class AISystemAuditor:
         }
 
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath) as f:
                 content = f.read()
 
             # Check for mock data patterns
@@ -224,7 +225,7 @@ class AISystemAuditor:
                     'count': test_customers
                 })
             else:
-                print(f"✅ No obvious test customers")
+                print("✅ No obvious test customers")
 
             # Check for test patterns in AI tables
             cursor.execute("""
@@ -240,7 +241,7 @@ class AISystemAuditor:
             if test_context > 0:
                 print(f"⚠️  Test AI context entries: {test_context}")
             else:
-                print(f"✅ No test AI context entries")
+                print("✅ No test AI context entries")
 
             # Check agent executions for patterns
             cursor.execute("""
@@ -256,7 +257,7 @@ class AISystemAuditor:
             """)
 
             results = cursor.fetchall()
-            print(f"\nRecent Agent Executions Analysis:")
+            print("\nRecent Agent Executions Analysis:")
             for row in results:
                 avg_len = row['avg_response_length'] or 0
                 if avg_len < 50:
@@ -309,7 +310,7 @@ class AISystemAuditor:
 
         for filepath in set(llm_files):
             filename = os.path.basename(filepath)
-            with open(filepath, 'r') as f:
+            with open(filepath) as f:
                 content = f.read()
 
             # Check for actual API calls
@@ -408,7 +409,7 @@ class AISystemAuditor:
                 print(f"  ❌ {filename}: File not found")
                 continue
 
-            with open(filepath, 'r') as f:
+            with open(filepath) as f:
                 content = f.read()
 
             issues = []
@@ -509,14 +510,14 @@ class AISystemAuditor:
 
         total_ai_features = len(self.findings['true_ai'])
 
-        print(f"\nISSUES FOUND:")
+        print("\nISSUES FOUND:")
         print(f"  Mock Data Instances:        {len(self.findings['mock_data'])}")
         print(f"  Predefined Responses:       {len(self.findings['predefined_responses'])}")
         print(f"  Fake AI Implementations:    {len(self.findings['fake_ai'])}")
         print(f"  Random Generators:          {len(self.findings['random_generators'])}")
         print(f"  TOTAL ISSUES:              {total_issues}")
 
-        print(f"\nTRUE AI FEATURES:")
+        print("\nTRUE AI FEATURES:")
         print(f"  AI Feature Instances:       {total_ai_features}")
         print(f"  LLM Integrations:          {len(self.findings['llm_integrations'])}")
 
@@ -537,7 +538,7 @@ class AISystemAuditor:
             score = 20
             verdict = "MOSTLY FAKE AI"
 
-        print(f"\n" + "="*50)
+        print("\n" + "="*50)
         print(f"AI AUTHENTICITY SCORE: {score}/100")
         print(f"VERDICT: {verdict}")
         print("="*50)

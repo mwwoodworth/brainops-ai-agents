@@ -4,31 +4,32 @@ BrainOps AI Operating System - Modular Architecture
 Full LangGraph orchestration with 50+ agents for comprehensive business automation
 """
 
-import os
-import json
 import asyncio
-import uuid
+import json
 import logging
+import os
+import uuid
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, TypedDict
 from enum import Enum
-# random removed to ensure deterministic, real logic
+from typing import Any, TypedDict
 
+# random removed to ensure deterministic, real logic
 # Core dependencies
 from psycopg2.pool import ThreadedConnectionPool
+
 try:
     from langchain_openai import ChatOpenAI
 except ImportError:
     from langchain.chat_models import ChatOpenAI
 try:
-    from langchain.agents import initialize_agent, Tool
+    from langchain.agents import Tool, initialize_agent
     from langchain.memory import ConversationBufferMemory
 except ImportError:
     initialize_agent = None
     Tool = None
     ConversationBufferMemory = None
 try:
-    from langgraph.graph import StateGraph, END
+    from langgraph.graph import END, StateGraph
     from langgraph.prebuilt import ToolExecutor
 except ImportError:
     StateGraph = None
@@ -80,12 +81,12 @@ llm = ChatOpenAI(temperature=0.7, api_key=OPENAI_API_KEY) if OPENAI_API_KEY else
 
 class WorkflowState(TypedDict):
     """Universal workflow state for LangGraph"""
-    messages: List[Dict]
+    messages: list[dict]
     current_step: str
-    context: Dict[str, Any]
-    results: List[Dict]
+    context: dict[str, Any]
+    results: list[dict]
     next_action: str
-    metadata: Dict
+    metadata: dict
 
 class AgentType(Enum):
     """Complete agent type enumeration"""
@@ -204,7 +205,7 @@ class IntelligentAgent:
             state["results"].append({"error": str(e)})
             return state
 
-    async def _llm_process(self, state: WorkflowState) -> Dict:
+    async def _llm_process(self, state: WorkflowState) -> dict:
         """Process using LLM reasoning"""
         prompt = f"""
         As an AI {self.agent_type.value} agent, analyze this context and provide actions:
@@ -221,7 +222,7 @@ class IntelligentAgent:
         response = await self.llm.apredict(prompt)
         return {"llm_response": response, "processed": True}
 
-    async def _rule_process(self, state: WorkflowState) -> Dict:
+    async def _rule_process(self, state: WorkflowState) -> dict:
         """Process using rule-based logic"""
         # Specific agents override this.
         # If not overridden, we acknowledge correct routing but mark as generic processing.
@@ -235,7 +236,7 @@ class EstimationAgent(IntelligentAgent):
     def __init__(self):
         super().__init__(AgentType.ESTIMATION)
 
-    async def _rule_process(self, state: WorkflowState) -> Dict:
+    async def _rule_process(self, state: WorkflowState) -> dict:
         """Generate intelligent estimates"""
         # If LLM is available, use it (inherited behavior usually, but we call it explicitly if needed)
         if self.llm:
@@ -248,7 +249,7 @@ class EstimationAgent(IntelligentAgent):
             "processed": False
         }
 
-    async def _store_estimate(self, estimate: Dict, customer_data: Dict):
+    async def _store_estimate(self, estimate: dict, customer_data: dict):
         """Store estimate in database"""
         conn = self.get_connection()
         try:
@@ -275,7 +276,7 @@ class SchedulingAgent(IntelligentAgent):
     def __init__(self):
         super().__init__(AgentType.SCHEDULING)
 
-    async def _rule_process(self, state: WorkflowState) -> Dict:
+    async def _rule_process(self, state: WorkflowState) -> dict:
         """Optimize scheduling with real data"""
         context = state.get("context", {})
 
@@ -288,7 +289,7 @@ class SchedulingAgent(IntelligentAgent):
 
         if available_slots:
             best_slot = available_slots[0]
-            
+
             # Assign real or placeholder crew (no random names)
             assigned_crew = await self._assign_crew(3, [])
 
@@ -308,7 +309,7 @@ class SchedulingAgent(IntelligentAgent):
 
         return {"error": "No suitable slots available (checked database)"}
 
-    async def _find_optimal_slots(self, duration: int) -> List[Dict]:
+    async def _find_optimal_slots(self, duration: int) -> list[dict]:
         """Find optimal scheduling slots using database availability"""
         conn = self.get_connection()
         try:
@@ -317,32 +318,32 @@ class SchedulingAgent(IntelligentAgent):
             cursor.execute("SELECT MAX(end_time) FROM schedules")
             result = cursor.fetchone()
             last_end = result[0] if result and result[0] else datetime.now()
-            
+
             if isinstance(last_end, str):
                 try:
                     last_end = datetime.fromisoformat(last_end)
                 except ValueError:
                     last_end = datetime.now()
-            
+
             # Schedule for next available work day (skip weekends)
             next_start = last_end + timedelta(days=1)
             next_start = next_start.replace(hour=8, minute=0, second=0, microsecond=0)
-            
+
             while next_start.weekday() >= 5: # 5=Sat, 6=Sun
                 next_start += timedelta(days=1)
-                
+
             return [{
                 "start": next_start.isoformat(),
                 "end": (next_start + timedelta(hours=duration)).isoformat()
             }]
-            
+
         except Exception as e:
             self.logger.error(f"Error finding slots: {e}")
             return []
         finally:
             self.return_connection(conn)
 
-    async def _assign_crew(self, size: int, skills: List[str]) -> List[Dict]:
+    async def _assign_crew(self, size: int, skills: list[str]) -> list[dict]:
         """Assign crew members from database"""
         conn = self.get_connection()
         try:
@@ -357,16 +358,16 @@ class SchedulingAgent(IntelligentAgent):
                 # Table might not exist or schema differs
                 conn.rollback()
                 logger.debug("Crew lookup failed; returning placeholder crew: %s", exc, exc_info=True)
-            
+
             return [{"id": "pending", "name": "To Be Assigned", "role": "technician"}]
         finally:
             self.return_connection(conn)
 
-    async def _check_weather(self, date: str) -> Dict:
+    async def _check_weather(self, date: str) -> dict:
         """Check weather suitability"""
         return {"status": "skipped", "reason": "Weather API not configured"}
 
-    async def _store_schedule(self, schedule: Dict):
+    async def _store_schedule(self, schedule: dict):
         """Store schedule in database"""
         conn = self.get_connection()
         try:
@@ -399,7 +400,7 @@ class WorkflowOrchestrator:
         self.agents = self._initialize_agents()
         self.graph = self._build_graph()
 
-    def _initialize_agents(self) -> Dict[str, IntelligentAgent]:
+    def _initialize_agents(self) -> dict[str, IntelligentAgent]:
         """Initialize all 50+ agents"""
         agents = {}
 
@@ -456,7 +457,7 @@ class WorkflowOrchestrator:
         else:
             return "followup"
 
-    async def execute_workflow(self, initial_context: Dict) -> Dict:
+    async def execute_workflow(self, initial_context: dict) -> dict:
         """Execute complete workflow"""
         initial_state = WorkflowState(
             messages=[],
@@ -613,7 +614,7 @@ class AIOperatingSystem:
 
             await asyncio.sleep(60)
 
-    async def process_business_event(self, event_type: str, data: Dict):
+    async def process_business_event(self, event_type: str, data: dict):
         """Process business events through appropriate workflows"""
         logger.info(f"Processing {event_type} event")
 
@@ -657,7 +658,7 @@ class AIOperatingSystem:
 
                 # Note: Assuming customers table structure
                 # Will catch error if fails in loop
-                
+
                 new_customers = cursor.fetchall()
                 for customer in new_customers:
                     await self.process_business_event("new_lead", {

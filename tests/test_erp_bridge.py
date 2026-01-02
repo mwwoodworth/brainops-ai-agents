@@ -1,15 +1,17 @@
 
-from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime
-import sys
 import os
+import sys
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from fastapi.testclient import TestClient
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from erp_event_bridge import router
 from fastapi import FastAPI
+
+from erp_event_bridge import router
 
 app = FastAPI()
 app.include_router(router)
@@ -24,10 +26,10 @@ def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
     mock_csa_instance = MagicMock()
     mock_csa_instance.generate_onboarding_plan = AsyncMock()
     mock_csa.return_value = mock_csa_instance
-    
+
     mock_revenue_instance = MagicMock()
     mock_revenue.return_value = mock_revenue_instance
-    
+
     mock_followup_instance = MagicMock()
     mock_followup_instance.create_followup_sequence = AsyncMock()
     mock_followup.return_value = mock_followup_instance
@@ -40,16 +42,16 @@ def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
         "tenant_id": "tenant_123",
         "timestamp": datetime.utcnow().isoformat()
     }
-    
+
     response = client.post("/events/webhook", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "processed"
     assert data["event_id"] == "evt_123"
-    
+
     # Verify CustomerSuccessAgent was initialized and called
     mock_csa.assert_called_with("tenant_123")
-    
+
     # Test JOB_COMPLETED
     payload_job = {
         "id": "evt_456",
@@ -58,9 +60,9 @@ def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
         "tenant_id": "tenant_123",
         "timestamp": datetime.utcnow().isoformat()
     }
-    
+
     response = client.post("/events/webhook", json=payload_job)
     assert response.status_code == 200
-    
+
     # Verify Followup System called
     mock_followup.assert_called()

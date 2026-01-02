@@ -5,23 +5,25 @@ Wires together all components into a unified, production-ready system
 Deployed on Render.com from Docker Hub
 """
 
-import os
 import asyncio
 import logging
+import os
 from datetime import datetime
-from typing import Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from typing import Any, Optional
+
+import psycopg2
+import uvicorn
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import uvicorn
+
+from agent_activation_system import BusinessEventType, get_activation_system
+from ai_board_governance import Proposal, ProposalType, get_ai_board
+from aurea_orchestrator import AutonomyLevel, get_aurea
 
 # Import all our components
-from unified_memory_manager import get_memory_manager, Memory, MemoryType, DB_CONFIG
-import psycopg2
-from agent_activation_system import get_activation_system, BusinessEventType
-from aurea_orchestrator import get_aurea, AutonomyLevel
-from ai_board_governance import get_ai_board, Proposal, ProposalType
+from unified_memory_manager import DB_CONFIG, Memory, MemoryType, get_memory_manager
 
 # Configure logging
 logging.basicConfig(
@@ -63,8 +65,8 @@ system_initialized = False
 class SystemStatusResponse(BaseModel):
     status: str
     version: str
-    components: Dict[str, Any]
-    health: Dict[str, float]
+    components: dict[str, Any]
+    health: dict[str, float]
     timestamp: str
 
 
@@ -75,8 +77,8 @@ class AutonomyRequest(BaseModel):
 class AgentActivationRequest(BaseModel):
     agent_name: Optional[str] = None
     event_type: Optional[str] = None  # Alternative field name
-    data: Optional[Dict[str, Any]] = {}  # Alternative to context
-    context: Optional[Dict[str, Any]] = {}
+    data: Optional[dict[str, Any]] = {}  # Alternative to context
+    context: Optional[dict[str, Any]] = {}
     tenant_id: str
 
 
@@ -84,13 +86,13 @@ class ProposalRequest(BaseModel):
     type: Optional[str] = "STRATEGIC"
     title: str
     description: str
-    impact_analysis: Optional[Dict[str, Any]] = {}
+    impact_analysis: Optional[dict[str, Any]] = {}
     urgency: int = 5
 
 
 class BusinessEventRequest(BaseModel):
     event_type: str
-    event_data: Dict[str, Any]
+    event_data: dict[str, Any]
 
 
 class MemoryQueryRequest(BaseModel):
@@ -409,7 +411,7 @@ async def get_system_status(request: Request):
     """Get comprehensive system status"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
-    
+
     tenant_id = request.headers.get("x-tenant-id")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
@@ -573,7 +575,7 @@ async def execute_task_endpoint(task_request: TaskExecutionRequest, background_t
     """
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
-    
+
     tenant_id = request.headers.get("x-tenant-id")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
@@ -605,7 +607,7 @@ async def get_memory_stats(request: Request):
     """Get memory system statistics"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
-    
+
     tenant_id = request.headers.get("x-tenant-id")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
@@ -618,7 +620,7 @@ async def query_memory_get(request: Request, query: Optional[str] = None, limit:
     """Query the unified memory system via GET"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
-    
+
     tenant_id = request.headers.get("x-tenant-id")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
@@ -645,7 +647,7 @@ async def query_memory(request: Request, query_request: MemoryQueryRequest):
     """Query the unified memory system"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
-    
+
     tenant_id = request.headers.get("x-tenant-id")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
@@ -673,7 +675,7 @@ async def synthesize_insights(request: Request):
     """Synthesize insights from memories"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
-    
+
     tenant_id = request.headers.get("x-tenant-id")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
@@ -691,11 +693,11 @@ async def synthesize_insights(request: Request):
 
 
 @app.post("/memory/store")
-async def store_memory(request: Request, memory_data: Dict[str, Any]):
+async def store_memory(request: Request, memory_data: dict[str, Any]):
     """Store a memory in the unified system"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
-    
+
     tenant_id = request.headers.get("x-tenant-id")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
@@ -734,7 +736,7 @@ async def recall_memory(
     """Recall memories from the unified system"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
-    
+
     tenant_id = request.headers.get("x-tenant-id")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
@@ -795,7 +797,7 @@ async def start_aurea(background_tasks: BackgroundTasks, request: Request):
     """Start AUREA orchestration"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
-    
+
     tenant_id = request.headers.get("x-tenant-id")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
@@ -907,17 +909,17 @@ async def run_aurea_background(tenant_id: str):
 
 # Scheduler endpoint for Render (legacy compatibility)
 @app.post("/scheduler/execute/{agent_id}")
-async def execute_agent_legacy(agent_id: str, request: Dict[str, Any], req: Request):
+async def execute_agent_legacy(agent_id: str, request: dict[str, Any], req: Request):
     """Legacy endpoint for agent execution (maintains compatibility)"""
     if not system_initialized:
         raise HTTPException(status_code=503, detail="System not initialized")
-    
+
     tenant_id = req.headers.get("x-tenant-id")
     # Legacy endpoint might not have tenant_id, check body or fail gracefully if critical
     # For legacy support, we might need to accept it in body if header missing
     if not tenant_id:
         tenant_id = request.get("tenant_id")
-    
+
     if not tenant_id:
          raise HTTPException(status_code=400, detail="Tenant ID required in header or body")
 
@@ -945,13 +947,13 @@ async def execute_agent_legacy(agent_id: str, request: Dict[str, Any], req: Requ
 
 # Special endpoints for Weathercraft ERP support
 @app.post("/weathercraft/enhance")
-async def enhance_weathercraft_operation_v1(request: Dict[str, Any]):
+async def enhance_weathercraft_operation_v1(request: dict[str, Any]):
     """Enhance Weathercraft operations (AI assists, doesn't replace) - without /api prefix"""
     return await enhance_weathercraft_operation(request)
 
 
 @app.post("/api/weathercraft/enhance")
-async def enhance_weathercraft_operation(request: Dict[str, Any]):
+async def enhance_weathercraft_operation(request: dict[str, Any]):
     """Enhance Weathercraft operations (AI assists, doesn't replace)"""
     operation_type = request.get("operation")
     data = request.get("data", {})
@@ -984,13 +986,13 @@ async def enhance_weathercraft_operation(request: Dict[str, Any]):
 
 # Special endpoints for MyRoofGenius automation
 @app.post("/myroofgenius/automate")
-async def automate_myroofgenius_operation_v1(request: Dict[str, Any], background_tasks: BackgroundTasks):
+async def automate_myroofgenius_operation_v1(request: dict[str, Any], background_tasks: BackgroundTasks):
     """Automate MyRoofGenius operations (as autonomous as legally possible) - without /api prefix"""
     return await automate_myroofgenius_operation(request, background_tasks)
 
 
 @app.post("/api/myroofgenius/automate")
-async def automate_myroofgenius_operation(request: Dict[str, Any], background_tasks: BackgroundTasks):
+async def automate_myroofgenius_operation(request: dict[str, Any], background_tasks: BackgroundTasks):
     """Automate MyRoofGenius operations (as autonomous as legally possible)"""
     operation_type = request.get("operation")
     data = request.get("data", {})
@@ -1046,7 +1048,7 @@ if __name__ == "__main__":
     # Run the service
     port = int(os.getenv("PORT", 8000))
 
-    print("""
+    print(f"""
     ╔══════════════════════════════════════════════════════════════════╗
     ║                                                                  ║
     ║     🧠 BrainOps AI OS v3.0                                      ║
@@ -1065,7 +1067,7 @@ if __name__ == "__main__":
     ╚══════════════════════════════════════════════════════════════════╝
 
     Starting service on port {port}...
-    """.format(port=port))
+    """)
 
     uvicorn.run(app, host="0.0.0.0", port=port)
 API_KEY_EXEMPT_PATHS = {
@@ -1084,7 +1086,7 @@ async def enforce_api_key(request: Request, call_next):
     if request.url.path not in API_KEY_EXEMPT_PATHS:
         if not API_KEY_VALUE:
             # Allow passing if no key configured, but log warning
-            pass 
+            pass
         else:
             provided = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
             if not provided or provided.strip() != API_KEY_VALUE.strip():

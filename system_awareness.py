@@ -11,14 +11,15 @@ Unlike the skeleton code, this ACTUALLY:
 - Shifts attention based on real events
 """
 
-import json
 import asyncio
+import json
 import logging
 import time
-from datetime import datetime
-from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
+from typing import Any, Optional
+
 import httpx
 
 from database.async_connection import get_pool, using_fallback
@@ -41,7 +42,7 @@ class Insight:
     title: str
     description: str
     severity: str  # info, warning, critical
-    data: Dict[str, Any]
+    data: dict[str, Any]
     action_recommended: Optional[str] = None
     timestamp: datetime = None
 
@@ -67,7 +68,7 @@ class SystemAwareness:
     """
 
     def __init__(self):
-        self.insights: List[Insight] = []
+        self.insights: list[Insight] = []
         self.last_scan = {}
         self.anomalies = []
         self.services = {
@@ -90,14 +91,14 @@ class SystemAwareness:
             raise
 
     @staticmethod
-    def _row_to_dict(row: Any) -> Optional[Dict[str, Any]]:
+    def _row_to_dict(row: Any) -> Optional[dict[str, Any]]:
         if row is None:
             return None
         if isinstance(row, dict):
             return row
         return dict(row)
 
-    async def scan_business_metrics(self) -> List[Insight]:
+    async def scan_business_metrics(self) -> list[Insight]:
         """Scan real business data for insights"""
         insights = []
         try:
@@ -231,7 +232,7 @@ class SystemAwareness:
 
         return insights
 
-    async def scan_devops_status(self) -> List[Insight]:
+    async def scan_devops_status(self) -> list[Insight]:
         """Check all services and infrastructure"""
         insights = []
 
@@ -246,8 +247,8 @@ class SystemAwareness:
 
         return insights
 
-    async def _check_service_health(self, client: httpx.AsyncClient, service_name: str, url: str) -> List[Insight]:
-        insights: List[Insight] = []
+    async def _check_service_health(self, client: httpx.AsyncClient, service_name: str, url: str) -> list[Insight]:
+        insights: list[Insight] = []
         try:
             start = time.perf_counter()
             response = await client.get(f"{url}/health")
@@ -294,7 +295,7 @@ class SystemAwareness:
 
         return insights
 
-    async def scan_error_rates(self) -> List[Insight]:
+    async def scan_error_rates(self) -> list[Insight]:
         """Analyze error patterns"""
         insights = []
 
@@ -335,7 +336,7 @@ class SystemAwareness:
 
         return insights
 
-    async def scan_security(self) -> List[Insight]:
+    async def scan_security(self) -> list[Insight]:
         """Check for security concerns"""
         insights = []
 
@@ -374,7 +375,7 @@ class SystemAwareness:
 
         return insights
 
-    async def run_full_scan(self) -> Dict[str, Any]:
+    async def run_full_scan(self) -> dict[str, Any]:
         """Run a complete system awareness scan"""
         logger.info("🔍 Running full system awareness scan...")
         start_time = datetime.utcnow()
@@ -424,7 +425,7 @@ class SystemAwareness:
 
         return summary
 
-    async def _persist_insights(self, insights: List[Insight]):
+    async def _persist_insights(self, insights: list[Insight]):
         """Store insights in database"""
         try:
             if not insights:
@@ -473,7 +474,7 @@ class SystemAwareness:
         except Exception as e:
             logger.error(f"Failed to persist insights: {e}")
 
-    def get_attention_priority(self) -> Tuple[str, str, int]:
+    def get_attention_priority(self) -> tuple[str, str, int]:
         """Determine what should have attention right now"""
         if not self.insights:
             return ("system_initialization", "No scan data yet", 5)

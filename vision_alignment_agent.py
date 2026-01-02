@@ -4,13 +4,14 @@ AI agent for aligning company vision with operational execution.
 Uses OpenAI for real analysis and persists results to database.
 """
 
-import os
 import json
 import logging
+import os
+from datetime import datetime
+from typing import Any
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from typing import Dict, Any, List
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class VisionAlignmentAgent:
             logger.error(f"Database connection failed: {e}")
             return None
 
-    async def analyze_alignment(self, decisions: List[Dict[str, Any]], vision_doc: str) -> Dict[str, Any]:
+    async def analyze_alignment(self, decisions: list[dict[str, Any]], vision_doc: str) -> dict[str, Any]:
         """Analyze alignment between decisions and company vision using AI"""
         try:
             results = {
@@ -127,7 +128,7 @@ Respond with JSON only:
             logger.error(f"Vision alignment analysis failed: {e}")
             return {"error": str(e), "alignment_score": 0}
 
-    async def check_goal_progress(self, goals: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def check_goal_progress(self, goals: list[dict[str, Any]]) -> dict[str, Any]:
         """Check progress against strategic goals using AI analysis"""
         try:
             results = {
@@ -232,7 +233,7 @@ Respond with JSON only:
             logger.error(f"Goal progress check failed: {e}")
             return {"error": str(e)}
 
-    async def generate_vision_report(self) -> Dict[str, Any]:
+    async def generate_vision_report(self) -> dict[str, Any]:
         """Generate comprehensive vision alignment report"""
         try:
             results = {
@@ -304,7 +305,7 @@ Respond with JSON only:
             logger.error(f"Vision report generation failed: {e}")
             return {"error": str(e)}
 
-    async def _save_analysis(self, analysis_type: str, results: Dict[str, Any]):
+    async def _save_analysis(self, analysis_type: str, results: dict[str, Any]):
         """Save analysis results to database"""
         conn = self._get_db_connection()
         if not conn:

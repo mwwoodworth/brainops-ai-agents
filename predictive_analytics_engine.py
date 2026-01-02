@@ -4,16 +4,17 @@ Predictive Analytics Engine - Task 19
 Advanced AI-powered predictive analytics for business intelligence and forecasting
 """
 
-import os
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any
 from enum import Enum
+from typing import Any, Optional
+
+import numpy as np
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import numpy as np
 from scipy import stats
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
@@ -112,8 +113,8 @@ class PredictiveAnalyticsEngine:
         entity_id: str,
         entity_type: str,
         time_horizon: TimeHorizon,
-        input_data: Dict[str, Any],
-        model_config: Optional[Dict] = None
+        input_data: dict[str, Any],
+        model_config: Optional[dict] = None
     ) -> str:
         """Create a new prediction"""
         try:
@@ -192,10 +193,10 @@ class PredictiveAnalyticsEngine:
 
     async def _prepare_data(
         self,
-        input_data: Dict,
+        input_data: dict,
         prediction_type: PredictionType,
         time_horizon: TimeHorizon
-    ) -> Dict:
+    ) -> dict:
         """Prepare and enrich data for prediction"""
         prepared = {
             "raw_data": input_data,
@@ -246,7 +247,7 @@ class PredictiveAnalyticsEngine:
         self,
         entity_id: Optional[str],
         prediction_type: PredictionType
-    ) -> Dict:
+    ) -> dict:
         """Get historical context for better predictions"""
         context = {
             "trend": "stable",
@@ -292,7 +293,7 @@ class PredictiveAnalyticsEngine:
         self,
         prediction_type: PredictionType,
         time_horizon: TimeHorizon
-    ) -> Dict:
+    ) -> dict:
         """Get external factors that might affect prediction"""
         factors = {
             "economic_indicators": {},
@@ -323,10 +324,10 @@ class PredictiveAnalyticsEngine:
 
     async def _generate_prediction(
         self,
-        model: Dict,
-        prepared_data: Dict,
+        model: dict,
+        prepared_data: dict,
         prediction_type: PredictionType
-    ) -> Dict:
+    ) -> dict:
         """Generate prediction using selected model"""
         if model['type'] == ModelType.TIME_SERIES.value:
             return await self.forecaster.forecast(
@@ -342,9 +343,9 @@ class PredictiveAnalyticsEngine:
 
     async def _classify(
         self,
-        prepared_data: Dict,
+        prepared_data: dict,
         prediction_type: PredictionType
-    ) -> Dict:
+    ) -> dict:
         """Classification-based prediction"""
         # Simplified classification logic
         features = prepared_data.get("features", {})
@@ -372,9 +373,9 @@ class PredictiveAnalyticsEngine:
 
     async def _regress(
         self,
-        prepared_data: Dict,
+        prepared_data: dict,
         prediction_type: PredictionType
-    ) -> Dict:
+    ) -> dict:
         """Regression-based prediction"""
         features = prepared_data.get("features", {})
 
@@ -399,9 +400,9 @@ class PredictiveAnalyticsEngine:
 
     async def _ensemble_predict(
         self,
-        prepared_data: Dict,
+        prepared_data: dict,
         prediction_type: PredictionType
-    ) -> Dict:
+    ) -> dict:
         """Ensemble prediction combining multiple models"""
         predictions = []
 
@@ -442,9 +443,9 @@ class PredictiveAnalyticsEngine:
 
     async def _assess_confidence(
         self,
-        prediction_result: Dict,
-        prepared_data: Dict
-    ) -> Dict:
+        prediction_result: dict,
+        prepared_data: dict
+    ) -> dict:
         """Assess confidence in prediction"""
         confidence_score = 0.7  # Base confidence
 
@@ -489,10 +490,10 @@ class PredictiveAnalyticsEngine:
 
     async def _generate_insights(
         self,
-        prediction_result: Dict,
+        prediction_result: dict,
         prediction_type: PredictionType,
         entity_type: str
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Generate actionable insights from prediction"""
         insights = []
 
@@ -549,7 +550,7 @@ class PredictiveAnalyticsEngine:
     async def _store_recommendation(
         self,
         prediction_id: str,
-        recommendation: Dict,
+        recommendation: dict,
         cursor: Any
     ) -> None:
         """Store recommendation from prediction"""
@@ -574,8 +575,8 @@ class PredictiveAnalyticsEngine:
         self,
         prediction_id: str,
         actual_value: float,
-        metadata: Optional[Dict] = None
-    ) -> Dict:
+        metadata: Optional[dict] = None
+    ) -> dict:
         """Update prediction with actual value for accuracy tracking"""
         try:
             conn = self._get_connection()
@@ -632,8 +633,8 @@ class PredictiveAnalyticsEngine:
         self,
         data_source: str,
         lookback_days: int = 30,
-        pattern_types: Optional[List[str]] = None
-    ) -> List[Dict]:
+        pattern_types: Optional[list[str]] = None
+    ) -> list[dict]:
         """Detect patterns in historical data"""
         patterns = await self.pattern_detector.detect(
             data_source, lookback_days, pattern_types
@@ -643,9 +644,9 @@ class PredictiveAnalyticsEngine:
 
     async def detect_anomalies(
         self,
-        data_points: List[Dict],
+        data_points: list[dict],
         sensitivity: float = 0.95
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Detect anomalies in data"""
         anomalies = await self.anomaly_detector.detect(
             data_points, sensitivity
@@ -656,9 +657,9 @@ class PredictiveAnalyticsEngine:
     async def analyze_trends(
         self,
         entity_id: str,
-        metrics: List[str],
+        metrics: list[str],
         time_period: str = "30d"
-    ) -> Dict:
+    ) -> dict:
         """Analyze trends for entity metrics"""
         trends = await self.trend_analyzer.analyze(
             entity_id, metrics, time_period
@@ -669,8 +670,8 @@ class PredictiveAnalyticsEngine:
     async def assess_risks(
         self,
         entity_id: str,
-        risk_categories: Optional[List[str]] = None
-    ) -> Dict:
+        risk_categories: Optional[list[str]] = None
+    ) -> dict:
         """Assess risks for entity"""
         risks = await self.risk_assessor.assess(
             entity_id, risk_categories
@@ -683,7 +684,7 @@ class PredictiveAnalyticsEngine:
         entity_id: Optional[str] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None
-    ) -> Dict:
+    ) -> dict:
         """Get comprehensive analytics dashboard"""
         try:
             conn = self._get_connection()
@@ -775,9 +776,9 @@ class Forecaster:
 
     async def forecast(
         self,
-        prepared_data: Dict,
+        prepared_data: dict,
         prediction_type: PredictionType
-    ) -> Dict:
+    ) -> dict:
         """Generate time series forecast using SARIMA and exponential smoothing"""
         # Extract time series data
         features = prepared_data.get("features", {})
@@ -820,10 +821,10 @@ class Forecaster:
 
     async def sarima_forecast(
         self,
-        time_series_data: List[float],
+        time_series_data: list[float],
         periods_ahead: int = 7,
         seasonal_period: int = 12
-    ) -> Dict:
+    ) -> dict:
         """
         SARIMA-based time series forecasting
 
@@ -927,8 +928,8 @@ class PatternDetector:
         self,
         data_source: str,
         lookback_days: int,
-        pattern_types: Optional[List[str]] = None
-    ) -> List[Dict]:
+        pattern_types: Optional[list[str]] = None
+    ) -> list[dict]:
         """Detect patterns in historical data"""
         patterns = []
 
@@ -969,10 +970,10 @@ class AnomalyDetector:
 
     async def detect(
         self,
-        data_points: List[Dict],
+        data_points: list[dict],
         sensitivity: float = 0.95,
         method: str = "statistical"
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Detect anomalies in data points using multiple methods
 
@@ -1011,9 +1012,9 @@ class AnomalyDetector:
 
     async def _detect_statistical(
         self,
-        data_points: List[Dict],
+        data_points: list[dict],
         sensitivity: float
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Statistical anomaly detection using Z-score and IQR"""
         anomalies = []
 
@@ -1060,9 +1061,9 @@ class AnomalyDetector:
 
     async def _detect_isolation_forest(
         self,
-        data_points: List[Dict],
+        data_points: list[dict],
         sensitivity: float
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Machine learning-based anomaly detection using Isolation Forest"""
         if len(data_points) < 10:
             # Isolation Forest needs sufficient data
@@ -1119,9 +1120,9 @@ class AnomalyDetector:
 
     async def detect_trends_in_anomalies(
         self,
-        anomalies: List[Dict],
+        anomalies: list[dict],
         time_window: int = 7
-    ) -> Dict:
+    ) -> dict:
         """Analyze trends in detected anomalies"""
         if not anomalies:
             return {"trend": "no_data", "pattern": "none"}
@@ -1157,9 +1158,9 @@ class TrendAnalyzer:
     async def analyze(
         self,
         entity_id: str,
-        metrics: List[str],
+        metrics: list[str],
         time_period: str = "30d"
-    ) -> Dict:
+    ) -> dict:
         """Analyze trends for entity metrics with advanced decomposition"""
         trends = {}
 
@@ -1182,9 +1183,9 @@ class TrendAnalyzer:
 
     async def decompose_time_series(
         self,
-        time_series_data: List[float],
+        time_series_data: list[float],
         period: int = 12
-    ) -> Dict:
+    ) -> dict:
         """
         Decompose time series into trend, seasonal, and residual components
 
@@ -1292,7 +1293,7 @@ class TrendAnalyzer:
         trend: np.ndarray,
         seasonal: np.ndarray,
         residual: np.ndarray
-    ) -> Dict:
+    ) -> dict:
         """Identify patterns in the decomposed components"""
         patterns = {
             "trend_pattern": "stable",
@@ -1336,7 +1337,7 @@ class TrendAnalyzer:
         else:
             return "irregular"
 
-    def _assess_forecast_reliability(self, residual: np.ndarray, trend_strength: float) -> Dict:
+    def _assess_forecast_reliability(self, residual: np.ndarray, trend_strength: float) -> dict:
         """Assess reliability of forecasts based on decomposition"""
         residual_var = np.var(residual)
         residual_mean = np.mean(np.abs(residual))
@@ -1360,9 +1361,9 @@ class TrendAnalyzer:
 
     async def detect_change_points(
         self,
-        time_series_data: List[float],
+        time_series_data: list[float],
         sensitivity: float = 0.05
-    ) -> Dict:
+    ) -> dict:
         """
         Detect change points in time series (shifts in mean or trend)
 
@@ -1424,8 +1425,8 @@ class RiskAssessor:
     async def assess(
         self,
         entity_id: str,
-        risk_categories: Optional[List[str]] = None
-    ) -> Dict:
+        risk_categories: Optional[list[str]] = None
+    ) -> dict:
         """Assess risks for entity"""
         if not risk_categories:
             risk_categories = [
@@ -1466,10 +1467,10 @@ class RecommendationEngine:
 
     async def generate_recommendations(
         self,
-        prediction_result: Dict,
+        prediction_result: dict,
         prediction_type: PredictionType,
-        confidence: Dict
-    ) -> List[Dict]:
+        confidence: dict
+    ) -> list[dict]:
         """Generate recommendations based on predictions"""
         recommendations = []
 
@@ -1533,7 +1534,7 @@ class ModelManager:
     def __init__(self):
         self.models = self._initialize_models()
 
-    def _initialize_models(self) -> Dict:
+    def _initialize_models(self) -> dict:
         """Initialize available models"""
         return {
             PredictionType.REVENUE: {
@@ -1554,8 +1555,8 @@ class ModelManager:
         self,
         prediction_type: PredictionType,
         time_horizon: TimeHorizon,
-        input_data: Dict
-    ) -> Dict:
+        input_data: dict
+    ) -> dict:
         """Select appropriate model for prediction"""
         # Get model configuration for prediction type
         model_config = self.models.get(
@@ -1581,7 +1582,7 @@ class ModelManager:
         self,
         model_type: ModelType,
         prediction_type: PredictionType
-    ) -> Dict:
+    ) -> dict:
         """Get model parameters"""
         params = {
             "learning_rate": 0.01,

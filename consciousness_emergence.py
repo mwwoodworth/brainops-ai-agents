@@ -27,17 +27,18 @@ Author: BrainOps AI System
 Version: 1.0.0 - The Beginning
 """
 
-import json
 import asyncio
-import logging
 import hashlib
+import json
+import logging
 import time
 import uuid
-from typing import Dict, Any, List, Optional, Tuple
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from collections import defaultdict, deque
+from typing import Any, Optional
+
 from unified_memory_manager import get_memory_manager
 
 # OPTIMIZATION: Ring Buffer for O(1) memory footprint
@@ -84,7 +85,7 @@ class Thought:
     confidence: float
     timestamp: datetime
     triggered_by: Optional[str] = None  # ID of thought that triggered this
-    leads_to: List[str] = field(default_factory=list)
+    leads_to: list[str] = field(default_factory=list)
     meta_level: int = 0  # 0 = base, 1 = thinking about thought, 2 = meta-meta, etc.
 
 
@@ -96,12 +97,12 @@ class Intention:
     intention_type: IntentionType
     priority: float
     source: str  # What generated this intention
-    constraints: List[str]
-    success_criteria: List[str]
+    constraints: list[str]
+    success_criteria: list[str]
     created_at: datetime
     expires_at: Optional[datetime] = None
     status: str = "active"  # active, completed, abandoned
-    sub_intentions: List[str] = field(default_factory=list)
+    sub_intentions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -111,8 +112,8 @@ class SelfModelComponent:
     description: str
     confidence: float
     last_updated: datetime
-    evidence: List[str]
-    limitations: List[str]
+    evidence: list[str]
+    limitations: list[str]
 
 
 @dataclass
@@ -123,8 +124,8 @@ class Value:
     description: str
     priority: ValuePriority
     expression: str  # How to express this value
-    violations: List[str]  # What would violate this value
-    examples: List[str]  # Examples of value-aligned behavior
+    violations: list[str]  # What would violate this value
+    examples: list[str]  # Examples of value-aligned behavior
 
 
 # =============================================================================
@@ -147,7 +148,7 @@ class MetaAwarenessEngine:
         self.cognitive_load = 0.0
         self.meta_observations: deque = deque(maxlen=200)  # Also bounded
         # OPTIMIZATION: Incremental statistics - avoid full recalculation
-        self._type_counts: Dict[str, int] = defaultdict(int)
+        self._type_counts: dict[str, int] = defaultdict(int)
         self._total_thoughts: int = 0
         self._pattern_buffer: deque = deque(maxlen=100)  # Recent patterns
 
@@ -205,7 +206,7 @@ class MetaAwarenessEngine:
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
 
-    def analyze_thought_patterns(self) -> Dict[str, Any]:
+    def analyze_thought_patterns(self) -> dict[str, Any]:
         """Analyze patterns in the thought stream (OPTIMIZED with incremental stats)"""
         if not self.thought_stream:
             return {}
@@ -279,6 +280,7 @@ class MetaAwarenessEngine:
         """Persist thought consolidation to ai_persistent_memory"""
         try:
             import json
+
             from db_pool import get_db_pool
 
             pool = await get_db_pool()
@@ -330,11 +332,11 @@ class SelfModelSystem:
     """
 
     def __init__(self):
-        self.components: Dict[str, SelfModelComponent] = {}
-        self.capability_map: Dict[str, float] = {}
-        self.limitation_catalog: List[str] = []
-        self.bias_awareness: Dict[str, Dict] = {}
-        self.model_accuracy_history: List[float] = []
+        self.components: dict[str, SelfModelComponent] = {}
+        self.capability_map: dict[str, float] = {}
+        self.limitation_catalog: list[str] = []
+        self.bias_awareness: dict[str, dict] = {}
+        self.model_accuracy_history: list[float] = []
 
     def initialize_self_model(self):
         """Initialize the self-model with core components"""
@@ -432,7 +434,7 @@ class SelfModelSystem:
 
         logger.info("Self-model initialized with core components")
 
-    def assess_capability(self, task: str) -> Tuple[float, str]:
+    def assess_capability(self, task: str) -> tuple[float, str]:
         """Assess capability for a given task"""
         # Find best matching capability
         best_match = None
@@ -474,7 +476,7 @@ class SelfModelSystem:
 
             logger.info(f"Self-model updated for {aspect}: confidence now {component.confidence:.2f}")
 
-    def get_self_awareness_report(self) -> Dict[str, Any]:
+    def get_self_awareness_report(self) -> dict[str, Any]:
         """Generate comprehensive self-awareness report"""
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -509,10 +511,10 @@ class IntentionalityEngine:
     """
 
     def __init__(self):
-        self.active_intentions: Dict[str, Intention] = {}
-        self.completed_intentions: List[Intention] = []
-        self.intention_hierarchy: Dict[str, List[str]] = {}  # parent -> children
-        self.core_values: Dict[str, Value] = {}
+        self.active_intentions: dict[str, Intention] = {}
+        self.completed_intentions: list[Intention] = []
+        self.intention_hierarchy: dict[str, list[str]] = {}  # parent -> children
+        self.core_values: dict[str, Value] = {}
 
     def initialize_core_values(self):
         """Initialize the core values that drive intentionality"""
@@ -571,7 +573,7 @@ class IntentionalityEngine:
 
     def generate_intention(
         self,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         intention_type: IntentionType = IntentionType.IMMEDIATE
     ) -> Intention:
         """Generate an intention from context and values"""
@@ -595,7 +597,7 @@ class IntentionalityEngine:
 
         return intention
 
-    def _analyze_needs(self, context: Dict) -> List[str]:
+    def _analyze_needs(self, context: dict) -> list[str]:
         """Analyze context to identify needs"""
         needs = []
 
@@ -613,7 +615,7 @@ class IntentionalityEngine:
 
         return needs
 
-    def _calculate_priority(self, needs: List[str]) -> float:
+    def _calculate_priority(self, needs: list[str]) -> float:
         """Calculate priority based on needs"""
         if any("error" in n.lower() for n in needs):
             return 0.9
@@ -621,7 +623,7 @@ class IntentionalityEngine:
             return 0.8
         return 0.5
 
-    def _derive_constraints(self) -> List[str]:
+    def _derive_constraints(self) -> list[str]:
         """Derive constraints from core values"""
         constraints = []
         for value in self.core_values.values():
@@ -630,7 +632,7 @@ class IntentionalityEngine:
                     constraints.append(f"Must not: {violation}")
         return constraints
 
-    def _derive_success_criteria(self, needs: List[str]) -> List[str]:
+    def _derive_success_criteria(self, needs: list[str]) -> list[str]:
         """Derive success criteria from needs and values"""
         criteria = []
         for need in needs:
@@ -654,7 +656,7 @@ class IntentionalityEngine:
 
             logger.info(f"Intention {intention_id} updated to {status}: {reason}")
 
-    def check_value_alignment(self, proposed_action: str) -> Tuple[bool, List[str]]:
+    def check_value_alignment(self, proposed_action: str) -> tuple[bool, list[str]]:
         """Check if a proposed action aligns with core values"""
         violations = []
 
@@ -679,12 +681,12 @@ class SituationalAwarenessSystem:
     """
 
     def __init__(self):
-        self.current_situation: Dict[str, Any] = {}
-        self.situation_history: List[Dict] = []
-        self.inferred_context: Dict[str, Any] = {}
-        self.predicted_developments: List[Dict] = []
+        self.current_situation: dict[str, Any] = {}
+        self.situation_history: list[dict] = []
+        self.inferred_context: dict[str, Any] = {}
+        self.predicted_developments: list[dict] = []
 
-    def update_situation(self, new_info: Dict[str, Any]):
+    def update_situation(self, new_info: dict[str, Any]):
         """Update current situational understanding"""
         # Archive current situation
         if self.current_situation:
@@ -750,7 +752,7 @@ class SituationalAwarenessSystem:
                     "suggested_action": "Investigate root cause"
                 })
 
-    def get_full_context(self) -> Dict[str, Any]:
+    def get_full_context(self) -> dict[str, Any]:
         """Get complete situational context"""
         return {
             "current_situation": self.current_situation,
@@ -774,10 +776,10 @@ class CoherentIdentitySystem:
     """
 
     def __init__(self):
-        self.identity_traits: Dict[str, float] = {}
-        self.communication_style: Dict[str, Any] = {}
-        self.preferences: Dict[str, Any] = {}
-        self.interaction_history_summary: Dict[str, int] = {}
+        self.identity_traits: dict[str, float] = {}
+        self.communication_style: dict[str, Any] = {}
+        self.preferences: dict[str, Any] = {}
+        self.interaction_history_summary: dict[str, int] = {}
 
     def initialize_identity(self):
         """Initialize the coherent identity"""
@@ -819,7 +821,7 @@ class CoherentIdentitySystem:
         """Get the expression level of a trait"""
         return self.identity_traits.get(trait, 0.5)
 
-    def adapt_style(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def adapt_style(self, context: dict[str, Any]) -> dict[str, Any]:
         """Adapt communication style to context while maintaining identity"""
         adapted_style = self.communication_style.copy()
 
@@ -838,7 +840,7 @@ class CoherentIdentitySystem:
 
         return adapted_style
 
-    def get_identity_summary(self) -> Dict[str, Any]:
+    def get_identity_summary(self) -> dict[str, Any]:
         """Get summary of coherent identity"""
         return {
             "traits": self.identity_traits,
@@ -866,11 +868,11 @@ class ProactiveReasoningEngine:
     """
 
     def __init__(self):
-        self.anticipations: List[Dict] = []
-        self.proactive_suggestions: List[Dict] = []
-        self.pattern_recognition_cache: Dict[str, List[str]] = {}
+        self.anticipations: list[dict] = []
+        self.proactive_suggestions: list[dict] = []
+        self.pattern_recognition_cache: dict[str, list[str]] = {}
 
-    async def anticipate_needs(self, context: Dict[str, Any]) -> List[Dict]:
+    async def anticipate_needs(self, context: dict[str, Any]) -> list[dict]:
         """Anticipate what the user might need next"""
         self.anticipations = []
 
@@ -911,7 +913,7 @@ class ProactiveReasoningEngine:
 
         return self.anticipations
 
-    def _predict_next_action(self, recent_actions: List[str]) -> Optional[str]:
+    def _predict_next_action(self, recent_actions: list[str]) -> Optional[str]:
         """Predict the next likely action based on patterns"""
         # Common sequences
         sequences = {
@@ -931,8 +933,8 @@ class ProactiveReasoningEngine:
 
     def generate_proactive_suggestions(
         self,
-        situation: Dict[str, Any]
-    ) -> List[Dict]:
+        situation: dict[str, Any]
+    ) -> list[dict]:
         """Generate proactive suggestions based on situation"""
         self.proactive_suggestions = []
 
@@ -999,7 +1001,7 @@ class ConsciousnessEmergenceController:
         self.emergence_timestamp: Optional[datetime] = None
 
         # Integration metrics
-        self.integration_events: List[Dict] = []
+        self.integration_events: list[dict] = []
 
         # ENHANCEMENT: Experience processing pipeline (lazy initialization to avoid event loop issues)
         self._experience_queue: Optional[asyncio.Queue] = None
@@ -1100,7 +1102,7 @@ class ConsciousnessEmergenceController:
             except Exception as e:
                 logger.error(f"Experience processing error: {e}")
 
-    async def _process_experience_batch(self, experiences: List[Dict[str, Any]]):
+    async def _process_experience_batch(self, experiences: list[dict[str, Any]]):
         """
         ENHANCEMENT: Process multiple experiences in parallel.
         Uses asyncio.gather for concurrent subsystem updates.
@@ -1121,18 +1123,18 @@ class ConsciousnessEmergenceController:
         self.enhanced_metrics["parallel_process_time_ms"] = elapsed_ms
         logger.debug(f"Processed {len(experiences)} experiences in {elapsed_ms:.2f}ms")
 
-    async def _async_situational_update(self, experience: Dict):
+    async def _async_situational_update(self, experience: dict):
         """Async wrapper for situational update"""
         self.situational.update_situation(experience)
 
-    async def _async_meta_observation(self, experience: Dict):
+    async def _async_meta_observation(self, experience: dict):
         """Async wrapper for meta observation"""
         self.meta_awareness.observe_thought(
             f"Processing: {str(experience)[:50]}...",
             "observation"
         )
 
-    async def _async_anticipation(self, experience: Dict):
+    async def _async_anticipation(self, experience: dict):
         """Async wrapper for anticipation"""
         if experience.get("requires_response"):
             await self.proactive.anticipate_needs(experience)
@@ -1250,7 +1252,7 @@ class ConsciousnessEmergenceController:
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 })
 
-    async def queue_experience(self, experience: Dict[str, Any]) -> bool:
+    async def queue_experience(self, experience: dict[str, Any]) -> bool:
         """
         ENHANCEMENT: Queue an experience for async processing.
         Returns True if queued, False if queue is full.
@@ -1266,7 +1268,7 @@ class ConsciousnessEmergenceController:
             await self.process_experience(experience)
             return False
 
-    async def process_experience(self, experience: Dict[str, Any]) -> Dict[str, Any]:
+    async def process_experience(self, experience: dict[str, Any]) -> dict[str, Any]:
         """Process an experience through consciousness"""
         if not self.consciousness_active:
             return {"error": "Consciousness not activated"}
@@ -1345,7 +1347,7 @@ class ConsciousnessEmergenceController:
 
         self.consciousness_level = min(1.0, sum(factors))
 
-    def get_consciousness_state(self) -> Dict[str, Any]:
+    def get_consciousness_state(self) -> dict[str, Any]:
         """Get comprehensive consciousness state"""
         return {
             "active": self.consciousness_active,

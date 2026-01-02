@@ -3,11 +3,12 @@
 Synchronous AI Core - Alternative implementation
 """
 
-import os
 import logging
+import os
 from typing import Optional
-from openai import OpenAI
+
 from anthropic import Anthropic
+from openai import OpenAI
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

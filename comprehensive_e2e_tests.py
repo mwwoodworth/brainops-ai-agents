@@ -22,19 +22,18 @@ Version: 1.0.0
 """
 
 import asyncio
-import logging
 import json
-import base64
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 # Import Playwright if available
 try:
-    from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+    from playwright.async_api import Browser, BrowserContext, Page, async_playwright
     from playwright.async_api import TimeoutError as PlaywrightTimeoutError
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
@@ -55,7 +54,7 @@ class E2ETest:
     name: str
     category: str
     description: str
-    steps: List[Dict[str, Any]]
+    steps: list[dict[str, Any]]
     expected_result: str
     severity: str = "high"  # critical, high, medium, low
 
@@ -72,10 +71,10 @@ class TestReport:
     failed: int = 0
     skipped: int = 0
     errors: int = 0
-    results: List[Dict[str, Any]] = field(default_factory=list)
-    critical_failures: List[Dict[str, Any]] = field(default_factory=list)
-    screenshots: List[str] = field(default_factory=list)
-    performance_metrics: Dict[str, Any] = field(default_factory=dict)
+    results: list[dict[str, Any]] = field(default_factory=list)
+    critical_failures: list[dict[str, Any]] = field(default_factory=list)
+    screenshots: list[str] = field(default_factory=list)
+    performance_metrics: dict[str, Any] = field(default_factory=dict)
 
 
 # =============================================================================
@@ -604,7 +603,7 @@ class ComprehensiveE2ETester:
         except Exception as e:
             logger.warning(f"Cleanup error: {e}")
 
-    async def run_test(self, test: E2ETest) -> Dict[str, Any]:
+    async def run_test(self, test: E2ETest) -> dict[str, Any]:
         """Run a single e2e test"""
         result = {
             "name": test.name,
@@ -742,7 +741,7 @@ class ComprehensiveE2ETester:
 
         return result
 
-    async def run_test_suite(self, app_name: str, tests: List[E2ETest]) -> TestReport:
+    async def run_test_suite(self, app_name: str, tests: list[E2ETest]) -> TestReport:
         """Run a complete test suite"""
         url = "https://myroofgenius.com" if app_name == "myroofgenius" else "https://weathercraft-erp.vercel.app"
 
@@ -776,7 +775,7 @@ class ComprehensiveE2ETester:
         report.completed_at = datetime.now(timezone.utc)
         return report
 
-    async def run_all_tests(self) -> Dict[str, Any]:
+    async def run_all_tests(self) -> dict[str, Any]:
         """Run ALL comprehensive tests for all applications"""
         results = {
             "started_at": datetime.now(timezone.utc).isoformat(),
@@ -840,7 +839,7 @@ class ComprehensiveE2ETester:
 
         return results
 
-    def _report_to_dict(self, report: TestReport) -> Dict[str, Any]:
+    def _report_to_dict(self, report: TestReport) -> dict[str, Any]:
         """Convert report to dictionary"""
         return {
             "application": report.application,
@@ -862,7 +861,7 @@ class ComprehensiveE2ETester:
 # API FUNCTIONS
 # =============================================================================
 
-async def run_comprehensive_e2e(app_name: Optional[str] = None) -> Dict[str, Any]:
+async def run_comprehensive_e2e(app_name: Optional[str] = None) -> dict[str, Any]:
     """Run comprehensive e2e tests for ALL frontends"""
     tester = ComprehensiveE2ETester()
 

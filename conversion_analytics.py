@@ -11,12 +11,11 @@ Features:
 - Revenue forecasting
 """
 
-import os
 import json
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List
+import os
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from enum import Enum
 
 # Database
@@ -52,7 +51,7 @@ class StageMetrics:
 @dataclass
 class FunnelMetrics:
     """Complete funnel metrics"""
-    stages: List[StageMetrics]
+    stages: list[StageMetrics]
     overall_conversion: float = 0.0
     total_pipeline_value: float = 0.0
     total_won_value: float = 0.0
@@ -67,9 +66,9 @@ class WinLossAnalysis:
     won_count: int = 0
     lost_count: int = 0
     win_rate: float = 0.0
-    won_reasons: List[Dict] = field(default_factory=list)
-    lost_reasons: List[Dict] = field(default_factory=list)
-    competitor_wins: Dict = field(default_factory=dict)
+    won_reasons: list[dict] = field(default_factory=list)
+    lost_reasons: list[dict] = field(default_factory=list)
+    competitor_wins: dict = field(default_factory=dict)
     avg_won_deal_size: float = 0.0
     avg_lost_deal_size: float = 0.0
 
@@ -343,7 +342,7 @@ class ConversionAnalyticsEngine:
         finally:
             conn.close()
 
-    def _calculate_velocity_score(self, stage_metrics: List[StageMetrics]) -> float:
+    def _calculate_velocity_score(self, stage_metrics: list[StageMetrics]) -> float:
         """Calculate velocity score compared to benchmarks"""
         scores = []
 
@@ -359,7 +358,7 @@ class ConversionAnalyticsEngine:
 
         return sum(scores) / len(scores) if scores else 50
 
-    async def identify_bottlenecks(self) -> List[Dict]:
+    async def identify_bottlenecks(self) -> list[dict]:
         """
         Identify funnel bottlenecks and optimization opportunities
         """
@@ -391,7 +390,7 @@ class ConversionAnalyticsEngine:
 
         return bottlenecks
 
-    def _get_stage_recommendations(self, stage: str, metrics: StageMetrics) -> List[str]:
+    def _get_stage_recommendations(self, stage: str, metrics: StageMetrics) -> list[str]:
         """Get recommendations for improving a specific stage"""
         recommendations = {
             'new': [
@@ -516,7 +515,7 @@ class ConversionAnalyticsEngine:
         finally:
             conn.close()
 
-    async def predict_conversion(self, lead_id: str) -> Dict:
+    async def predict_conversion(self, lead_id: str) -> dict:
         """
         Predict conversion probability for a specific lead
         """
@@ -613,7 +612,7 @@ class ConversionAnalyticsEngine:
         finally:
             conn.close()
 
-    async def forecast_revenue(self, period: str = 'month') -> Dict:
+    async def forecast_revenue(self, period: str = 'month') -> dict:
         """
         Generate revenue forecast
 
@@ -774,7 +773,7 @@ class ConversionAnalyticsEngine:
         finally:
             conn.close()
 
-    async def get_summary(self) -> Dict:
+    async def get_summary(self) -> dict:
         """Get analytics summary"""
         funnel = await self.calculate_funnel_metrics()
         bottlenecks = await self.identify_bottlenecks()

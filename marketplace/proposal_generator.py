@@ -1,5 +1,6 @@
 import logging
-from typing import Dict, Any
+from typing import Any
+
 from .pricing_engine import PricingEngine
 from .usage_metering import UsageMetering
 
@@ -11,14 +12,14 @@ class ProposalGenerator:
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
 
-    async def generate_proposal(self, project_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def generate_proposal(self, project_data: dict[str, Any]) -> dict[str, Any]:
         """
         Generates a roofing proposal.
         """
         # Check subscription or charge
         has_sub = await UsageMetering.check_subscription(self.tenant_id, self.PRODUCT_ID)
         price = PricingEngine.get_price(self.PRODUCT_ID, has_sub)
-        
+
         if price > 0:
             # In a real system, we'd charge the card here.
             # For now, we record the purchase as pending/completed.
@@ -26,24 +27,24 @@ class ProposalGenerator:
 
         # Logic to generate proposal
         logger.info(f"Generating proposal for tenant {self.tenant_id} with data: {project_data}")
-        
+
         # Calculate estimate based on provided data
         roof_area = float(project_data.get('roof_area', 2500)) # Default for calculation if missing
         material_cost_per_sq = float(project_data.get('material_cost_sq', 300))
         labor_cost_per_sq = float(project_data.get('labor_cost_sq', 200))
-        
+
         squares = roof_area / 100
         total_estimate = (squares * material_cost_per_sq) + (squares * labor_cost_per_sq)
-        
+
         # Generate content sections
         customer_name = project_data.get('customer_name', 'Valued Customer')
         shingle_type = project_data.get('shingle_type', 'Architectural Shingles')
         address = project_data.get('address', 'Project Site')
-        
+
         content_intro = f"Proposal for {customer_name}"
         content_scope = f"Scope of work: Replace {roof_area} sq ft roof using {shingle_type}."
         content_pricing = f"Total Investment: ${total_estimate:,.2f}"
-        
+
         proposal = {
             "proposal_id": f"prop_{self.tenant_id}_{project_data.get('id', 'new')}",
             "title": f"Roof Replacement Proposal - {address}",
@@ -65,5 +66,5 @@ class ProposalGenerator:
         }
 
         await UsageMetering.record_usage(self.tenant_id, self.PRODUCT_ID, 1, {"proposal_id": proposal["proposal_id"]})
-        
+
         return proposal

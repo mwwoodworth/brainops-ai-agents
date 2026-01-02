@@ -3,12 +3,12 @@
 Fixed version of unified_memory_manager with proper type handling
 """
 
-import os
-import json
 import asyncio
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
+import json
 import logging
+import os
+from datetime import datetime, timedelta
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ class UnifiedMemoryManager:
         context_id: str = None,
         importance: int = 5,
         expires_in_hours: Optional[int] = None,
-        tags: List[str] = None
+        tags: list[str] = None
     ) -> bool:
         """Store memory with proper type conversion"""
         if not self.pool:
@@ -120,7 +120,7 @@ class UnifiedMemoryManager:
         context_id: str = None,
         limit: int = 10,
         min_importance: int = 0
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Recall memories with proper type handling"""
         if not self.pool:
             await self.initialize()
@@ -165,10 +165,10 @@ class UnifiedMemoryManager:
                     params.append(f"%{query}%")
 
                 # Add ordering and limit
-                sql += """
+                sql += f"""
                     ORDER BY importance_score DESC, last_accessed DESC
-                    LIMIT ${}
-                """.format(param_count + 1)
+                    LIMIT ${param_count + 1}
+                """
                 params.append(limit)
 
                 # Execute query
@@ -201,7 +201,7 @@ class UnifiedMemoryManager:
                 logger.error(f"❌ Failed to recall memories: {e}")
                 return []
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Get memory statistics with proper aggregation (using CANONICAL unified_ai_memory)"""
         if not self.pool:
             await self.initialize()

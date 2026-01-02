@@ -15,14 +15,15 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
 import json
 import logging
+import os
 import smtplib
-from email.mime.text import MIMEText
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Tuple
+from email.mime.text import MIMEText
+from typing import Any
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -88,7 +89,7 @@ BATCH_SIZE = int(os.getenv('EMAIL_BATCH_SIZE', '10'))
 MAX_RETRIES = int(os.getenv('EMAIL_MAX_RETRIES', '3'))
 
 
-def _is_test_recipient(recipient: str | None, metadata: Dict[str, Any] | None = None) -> bool:
+def _is_test_recipient(recipient: str | None, metadata: dict[str, Any] | None = None) -> bool:
     if metadata and (metadata.get("is_test") is True or metadata.get("test") is True):
         return True
     if not recipient:
@@ -107,14 +108,14 @@ def get_db_connection():
     return psycopg2.connect(**db_config)
 
 
-def send_via_sendgrid(recipient: str, subject: str, body: str, metadata: Dict = None) -> Tuple[bool, str]:
+def send_via_sendgrid(recipient: str, subject: str, body: str, metadata: dict = None) -> tuple[bool, str]:
     """Send email via SendGrid API"""
     if not SENDGRID_API_KEY:
         return False, "SENDGRID_API_KEY not configured"
 
     try:
         from sendgrid import SendGridAPIClient
-        from sendgrid.helpers.mail import Mail, Email, To, Content
+        from sendgrid.helpers.mail import Content, Email, Mail, To
 
         # Determine if body is HTML or plain text
         content_type = "text/html" if "<" in body and ">" in body else "text/plain"
@@ -146,7 +147,7 @@ def send_via_sendgrid(recipient: str, subject: str, body: str, metadata: Dict = 
         return False, error_msg
 
 
-def send_via_smtp(recipient: str, subject: str, body: str, metadata: Dict = None) -> Tuple[bool, str]:
+def send_via_smtp(recipient: str, subject: str, body: str, metadata: dict = None) -> tuple[bool, str]:
     """Send email via SMTP as fallback"""
     if not SMTP_HOST or not SMTP_USER:
         return False, "SMTP not configured (SMTP_HOST and SMTP_USER required)"
@@ -184,7 +185,7 @@ def send_via_smtp(recipient: str, subject: str, body: str, metadata: Dict = None
         return False, error_msg
 
 
-def send_email(recipient: str, subject: str, body: str, metadata: Dict = None) -> Tuple[bool, str]:
+def send_email(recipient: str, subject: str, body: str, metadata: dict = None) -> tuple[bool, str]:
     """Send email using available method (SendGrid or SMTP)"""
     # Try SendGrid first
     if SENDGRID_API_KEY:
@@ -200,7 +201,7 @@ def send_email(recipient: str, subject: str, body: str, metadata: Dict = None) -
     return False, "No email provider configured (need SENDGRID_API_KEY or SMTP_HOST)"
 
 
-def process_email_queue(batch_size: int = None, dry_run: bool = False) -> Dict[str, Any]:
+def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[str, Any]:
     """
     Process pending emails from the queue.
 
@@ -412,7 +413,7 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> Dict[s
     return stats
 
 
-def get_queue_status() -> Dict[str, Any]:
+def get_queue_status() -> dict[str, Any]:
     """Get current email queue status"""
     try:
         conn = get_db_connection()

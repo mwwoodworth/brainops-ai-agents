@@ -4,16 +4,17 @@ Tracks and manages overall system state, health, and operational status
 """
 
 import json
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from datetime import datetime
-from typing import Dict, List, Optional, Any
-from enum import Enum
-import os
-from dotenv import load_dotenv
-import aiohttp
-from dataclasses import dataclass, asdict
 import logging
+import os
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
+import aiohttp
+import psycopg2
+from dotenv import load_dotenv
+from psycopg2.extras import RealDictCursor
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -51,8 +52,8 @@ class ComponentState:
     error_count: int
     success_rate: float
     latency_ms: float
-    metadata: Dict[str, Any]
-    dependencies: List[str]
+    metadata: dict[str, Any]
+    dependencies: list[str]
     health_score: float
 
 @dataclass
@@ -65,8 +66,8 @@ class SystemSnapshot:
     failed_components: int
     warning_count: int
     error_count: int
-    performance_metrics: Dict[str, float]
-    resource_usage: Dict[str, float]
+    performance_metrics: dict[str, float]
+    resource_usage: dict[str, float]
     active_sessions: int
     pending_tasks: int
     completed_tasks: int
@@ -561,7 +562,7 @@ class SystemStateManager:
 
         return snapshot
 
-    def _get_task_metrics(self) -> Dict[str, int]:
+    def _get_task_metrics(self) -> dict[str, int]:
         """Get task execution metrics"""
         try:
             conn = self._get_connection()
@@ -601,7 +602,7 @@ class SystemStateManager:
             logger.warning("Failed to get DB connection count: %s", exc, exc_info=True)
             return 0
 
-    def _store_snapshot(self, snapshot: SystemSnapshot, component_states: List[ComponentState]):
+    def _store_snapshot(self, snapshot: SystemSnapshot, component_states: list[ComponentState]):
         """Store system snapshot to database"""
         try:
             conn = self._get_connection()
@@ -676,7 +677,7 @@ class SystemStateManager:
 
         return False
 
-    async def _execute_recovery_action(self, component: SystemComponent, procedure: Dict) -> bool:
+    async def _execute_recovery_action(self, component: SystemComponent, procedure: dict) -> bool:
         """Execute a recovery action"""
         start_time = datetime.now()
         success = False
@@ -795,7 +796,7 @@ class SystemStateManager:
             logger.error(f"Error logging recovery action: {e}")
 
     def create_alert(self, alert_type: str, severity: str, component: Optional[str],
-                    message: str, details: Dict = None):
+                    message: str, details: dict = None):
         """Create a system alert"""
         try:
             conn = self._get_connection()
@@ -813,7 +814,7 @@ class SystemStateManager:
         except Exception as e:
             logger.error(f"Error creating alert: {e}")
 
-    def get_system_status(self) -> Dict[str, Any]:
+    def get_system_status(self) -> dict[str, Any]:
         """Get current system status"""
         if not self.current_state:
             return {

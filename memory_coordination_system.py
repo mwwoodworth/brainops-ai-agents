@@ -4,19 +4,20 @@ MEMORY COORDINATION SYSTEM - Perfect E2E Context Management
 Ensures seamless coordination across all memory systems, sessions, and agents
 """
 
-import os
-import json
 import asyncio
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List, Set
-from dataclasses import dataclass, asdict, field
-from enum import Enum
 import hashlib
+import json
+import logging
+import os
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Any, Optional
 from uuid import UUID
+
 import psycopg2
 from psycopg2 import extensions
 from psycopg2.extras import RealDictCursor
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class SimpleFallbackCoordinator:
     """
 
     def __init__(self):
-        self.memory_cache: Dict[str, Any] = {}
+        self.memory_cache: dict[str, Any] = {}
         self.created_at = datetime.now(timezone.utc)
         logger.info("🔄 Using SimpleFallbackCoordinator (in-memory only)")
 
@@ -56,7 +57,7 @@ class SimpleFallbackCoordinator:
         except AttributeError:
             return self.memory_cache.get(key)
 
-    async def search_context(self, query: str, **kwargs) -> List[Any]:
+    async def search_context(self, query: str, **kwargs) -> list[Any]:
         """Simple search in memory cache"""
         results = []
         for entry in self.memory_cache.values():
@@ -64,7 +65,7 @@ class SimpleFallbackCoordinator:
                 results.append(entry)
         return results[:kwargs.get('limit', 20)]
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Return memory-only stats"""
         return {
             "mode": "fallback",
@@ -122,7 +123,7 @@ class ContextEntry:
     user_id: Optional[str] = None
     session_id: Optional[str] = None
     agent_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: Optional[datetime] = None
@@ -137,9 +138,9 @@ class SyncEvent:
     event_type: str  # create, update, delete, merge
     context_key: str
     source_system: str
-    target_systems: List[str]
+    target_systems: list[str]
     priority: SyncPriority
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     processed: bool = False
 
@@ -154,7 +155,7 @@ class UnifiedMemoryCoordinator:
     across all memory systems and agents
     """
 
-    def __init__(self, db_config: Dict[str, Any]):
+    def __init__(self, db_config: dict[str, Any]):
         self.db_config = db_config
         self.conn = None
         self.cursor = None
@@ -166,12 +167,12 @@ class UnifiedMemoryCoordinator:
         self.conversation_memory = None
 
         # In-memory caches for performance
-        self.ephemeral_cache: Dict[str, ContextEntry] = {}
-        self.session_cache: Dict[str, Dict[str, ContextEntry]] = {}
+        self.ephemeral_cache: dict[str, ContextEntry] = {}
+        self.session_cache: dict[str, dict[str, ContextEntry]] = {}
 
         # Sync tracking
-        self.pending_syncs: List[SyncEvent] = []
-        self.sync_locks: Set[str] = set()
+        self.pending_syncs: list[SyncEvent] = []
+        self.sync_locks: set[str] = set()
 
         self._ensure_tables()
         self._init_memory_systems()
@@ -561,7 +562,7 @@ class UnifiedMemoryCoordinator:
         logger.warning(f"⚠️ Context not found: {key}")
         return None
 
-    async def get_session_context(self, session_id: str) -> Dict[str, Any]:
+    async def get_session_context(self, session_id: str) -> dict[str, Any]:
         """
         Get complete context for a session
         Returns all relevant context entries organized by category
@@ -651,7 +652,7 @@ class UnifiedMemoryCoordinator:
         category: Optional[str] = None,
         tenant_id: Optional[str] = None,
         limit: int = 20
-    ) -> List[ContextEntry]:
+    ) -> list[ContextEntry]:
         """
         Search across all context with filtering
         """
@@ -726,7 +727,7 @@ class UnifiedMemoryCoordinator:
         search_all_systems: bool = True,
         tenant_id: Optional[str] = None,
         limit: int = 20
-    ) -> Dict[str, List[Any]]:
+    ) -> dict[str, list[Any]]:
         """
         Search across ALL memory systems and return unified results
         Returns results organized by source system
@@ -871,7 +872,7 @@ class UnifiedMemoryCoordinator:
         context_key: str,
         source_system: str,
         priority: SyncPriority,
-        payload: Dict[str, Any]
+        payload: dict[str, Any]
     ):
         """Create synchronization event for cross-system coordination"""
         event_id = hashlib.sha256(
@@ -967,7 +968,7 @@ class UnifiedMemoryCoordinator:
         logger.info(f"✅ Cleaned up {deleted} expired context entries")
         return deleted
 
-    async def sync_master_to_embedded(self, limit: int = 1000) -> Dict[str, int]:
+    async def sync_master_to_embedded(self, limit: int = 1000) -> dict[str, int]:
         """
         Sync entries from master registry to embedded memory
         Returns: dict with sync statistics
@@ -1074,7 +1075,7 @@ class UnifiedMemoryCoordinator:
         logger.info(f"✅ Deduplication complete: {removed} duplicates removed")
         return removed
 
-    async def garbage_collect(self, retention_days: int = 90, min_importance: float = 0.3) -> Dict[str, int]:
+    async def garbage_collect(self, retention_days: int = 90, min_importance: float = 0.3) -> dict[str, int]:
         """
         Remove old, low-importance memories
         Returns: dict with GC statistics
@@ -1116,7 +1117,7 @@ class UnifiedMemoryCoordinator:
         logger.info(f"✅ GC complete: {result['total_removed']} entries removed")
         return result
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Get memory coordination statistics"""
         conn, cursor = self._get_connection()
 
@@ -1169,7 +1170,7 @@ class UnifiedMemoryCoordinator:
 
         return stats
 
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> dict[str, Any]:
         """
         Comprehensive health check of all memory systems
         """

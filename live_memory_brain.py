@@ -29,18 +29,19 @@ Author: BrainOps AI System
 Version: 1.0.0 - World-Changing
 """
 
-import os
-import json
 import asyncio
-import logging
 import hashlib
-import time
-from typing import Dict, Any, List, Optional, Tuple, Set, Callable
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from enum import Enum
-from collections import defaultdict
+import json
+import logging
+import os
 import threading
+import time
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Any, Callable, Optional
+
 from psycopg2.pool import ThreadedConnectionPool
 
 # OPTIMIZATION: asyncpg for non-blocking database operations
@@ -120,12 +121,12 @@ class MemoryNode:
     created_at: datetime
     last_accessed: datetime
     access_count: int
-    embedding: Optional[List[float]] = None
-    provenance: Dict[str, Any] = field(default_factory=dict)  # Where it came from
-    connections: Set[str] = field(default_factory=set)  # Connected memory IDs
-    temporal_context: Dict[str, Any] = field(default_factory=dict)  # Time-related context
-    predictions: List[Dict] = field(default_factory=list)  # What this memory predicts
-    contradictions: List[str] = field(default_factory=list)  # Known contradictions
+    embedding: Optional[list[float]] = None
+    provenance: dict[str, Any] = field(default_factory=dict)  # Where it came from
+    connections: set[str] = field(default_factory=set)  # Connected memory IDs
+    temporal_context: dict[str, Any] = field(default_factory=dict)  # Time-related context
+    predictions: list[dict] = field(default_factory=list)  # What this memory predicts
+    contradictions: list[str] = field(default_factory=list)  # Known contradictions
     crystallization_count: int = 0  # Times this pattern has occurred
 
 
@@ -134,9 +135,9 @@ class TemporalMarker:
     """Marks a point in time for the brain"""
     timestamp: datetime
     event_type: str
-    context: Dict[str, Any]
+    context: dict[str, Any]
     caused_by: Optional[str] = None  # ID of event that caused this
-    leads_to: List[str] = field(default_factory=list)  # IDs of events this leads to
+    leads_to: list[str] = field(default_factory=list)  # IDs of events this leads to
 
 
 @dataclass
@@ -146,7 +147,7 @@ class ContextPrediction:
     probability: float
     reasoning: str
     time_horizon: timedelta
-    source_memories: List[str]
+    source_memories: list[str]
 
 
 # =============================================================================
@@ -163,14 +164,14 @@ class TemporalConsciousness:
     """
 
     def __init__(self):
-        self.temporal_markers: List[TemporalMarker] = []
-        self.patterns: Dict[str, Dict] = {}  # Detected temporal patterns
-        self.causality_graph: Dict[str, List[str]] = defaultdict(list)
+        self.temporal_markers: list[TemporalMarker] = []
+        self.patterns: dict[str, dict] = {}  # Detected temporal patterns
+        self.causality_graph: dict[str, list[str]] = defaultdict(list)
 
     def record_moment(
         self,
         event_type: str,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         caused_by: Optional[str] = None
     ) -> str:
         """Record a moment in time with full temporal context"""
@@ -226,7 +227,7 @@ class TemporalConsciousness:
                     "confidence": min(most_common[1] / 10, 1.0)
                 }
 
-    def predict_next(self, current_context: Dict) -> List[ContextPrediction]:
+    def predict_next(self, current_context: dict) -> list[ContextPrediction]:
         """Predict what will happen/be needed next based on temporal patterns"""
         predictions = []
         current_hour = datetime.now().hour
@@ -283,16 +284,16 @@ class PredictiveContextEngine:
 
     def __init__(self, temporal: TemporalConsciousness):
         self.temporal = temporal
-        self.prefetch_cache: Dict[str, Any] = {}
+        self.prefetch_cache: dict[str, Any] = {}
         self.cache_hits = 0
         self.cache_misses = 0
-        self.prediction_accuracy: List[bool] = []
+        self.prediction_accuracy: list[bool] = []
 
     async def predict_and_prefetch(
         self,
-        current_context: Dict,
+        current_context: dict,
         memory_retriever: Callable
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Predict what context will be needed and pre-fetch it"""
         predictions = self.temporal.predict_next(current_context)
 
@@ -333,7 +334,7 @@ class PredictiveContextEngine:
         self.cache_misses += 1
         return None
 
-    def get_metrics(self) -> Dict:
+    def get_metrics(self) -> dict:
         """Get predictive context metrics"""
         total_attempts = self.cache_hits + self.cache_misses
         return {
@@ -358,12 +359,12 @@ class CrossSystemOmniscience:
     """
 
     def __init__(self):
-        self.systems: Dict[str, Dict] = {}
-        self.cross_references: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
-        self.unified_state: Dict[str, Any] = {}
+        self.systems: dict[str, dict] = {}
+        self.cross_references: dict[str, list[tuple[str, str]]] = defaultdict(list)
+        self.unified_state: dict[str, Any] = {}
         self._sync_lock = threading.Lock()
 
-    def register_system(self, system_id: str, config: Dict):
+    def register_system(self, system_id: str, config: dict):
         """Register a system for omniscient awareness"""
         self.systems[system_id] = {
             "config": config,
@@ -373,7 +374,7 @@ class CrossSystemOmniscience:
         }
         logger.info(f"Registered system for omniscience: {system_id}")
 
-    async def sync_all_systems(self) -> Dict[str, Any]:
+    async def sync_all_systems(self) -> dict[str, Any]:
         """Sync state from all registered systems"""
         sync_results = {}
 
@@ -405,7 +406,7 @@ class CrossSystemOmniscience:
 
         return sync_results
 
-    async def _fetch_system_state(self, system_id: str, config: Dict) -> Dict:
+    async def _fetch_system_state(self, system_id: str, config: dict) -> dict:
         """Fetch REAL state from a specific system via HTTP or database"""
         import aiohttp
 
@@ -473,11 +474,11 @@ class CrossSystemOmniscience:
 
         return state
 
-    def _detect_changes(self, old_state: Dict, new_state: Dict) -> List[Dict]:
+    def _detect_changes(self, old_state: dict, new_state: dict) -> list[dict]:
         """Detect changes between states"""
         changes = []
 
-        def compare_dicts(old: Dict, new: Dict, path: str = ""):
+        def compare_dicts(old: dict, new: dict, path: str = ""):
             for key in set(list(old.keys()) + list(new.keys())):
                 current_path = f"{path}.{key}" if path else key
 
@@ -507,7 +508,7 @@ class CrossSystemOmniscience:
         compare_dicts(old_state, new_state)
         return changes
 
-    def _create_cross_references(self, system_id: str, changes: List[Dict]):
+    def _create_cross_references(self, system_id: str, changes: list[dict]):
         """Create cross-references from detected changes"""
         for change in changes:
             # Create reference
@@ -529,7 +530,7 @@ class CrossSystemOmniscience:
                     "state_summary": self._summarize_state(info["last_state"])
                 }
 
-    def _summarize_state(self, state: Dict, max_depth: int = 2) -> Dict:
+    def _summarize_state(self, state: dict, max_depth: int = 2) -> dict:
         """Create a summary of a state dict"""
         if max_depth == 0 or not isinstance(state, dict):
             return {"_type": type(state).__name__}
@@ -545,7 +546,7 @@ class CrossSystemOmniscience:
 
         return summary
 
-    def query_across_systems(self, query: str) -> Dict[str, Any]:
+    def query_across_systems(self, query: str) -> dict[str, Any]:
         """Query all systems for matching data"""
         results = {}
 
@@ -556,7 +557,7 @@ class CrossSystemOmniscience:
 
         return results
 
-    def _search_state(self, state: Dict, query: str, path: str = "") -> List[Dict]:
+    def _search_state(self, state: dict, query: str, path: str = "") -> list[dict]:
         """Search state dict for query matches"""
         matches = []
         query_lower = query.lower()
@@ -592,15 +593,15 @@ class SelfHealingMemory:
     """
 
     def __init__(self):
-        self.contradiction_log: List[Dict] = []
-        self.resolution_history: List[Dict] = []
-        self.confidence_matrix: Dict[str, Dict[str, float]] = {}
+        self.contradiction_log: list[dict] = []
+        self.resolution_history: list[dict] = []
+        self.confidence_matrix: dict[str, dict[str, float]] = {}
 
     async def check_consistency(
         self,
         new_memory: MemoryNode,
-        existing_memories: List[MemoryNode]
-    ) -> Tuple[bool, List[Dict]]:
+        existing_memories: list[MemoryNode]
+    ) -> tuple[bool, list[dict]]:
         """Check if new memory is consistent with existing memories"""
         contradictions = []
 
@@ -627,7 +628,7 @@ class SelfHealingMemory:
         self,
         mem1: MemoryNode,
         mem2: MemoryNode
-    ) -> Optional[Dict]:
+    ) -> Optional[dict]:
         """Detect if two memories contradict each other"""
         # Check for temporal contradictions
         if mem1.memory_type == mem2.memory_type == MemoryType.EPISODIC:
@@ -660,7 +661,7 @@ class SelfHealingMemory:
                 if len(overlap) > 3:  # Significant overlap
                     return {
                         "type": "logical",
-                        "description": f"Potential logical contradiction detected",
+                        "description": "Potential logical contradiction detected",
                         "severity": "medium"
                     }
 
@@ -668,9 +669,9 @@ class SelfHealingMemory:
 
     async def resolve_contradiction(
         self,
-        contradiction: Dict,
+        contradiction: dict,
         strategy: str = "recency"
-    ) -> Dict:
+    ) -> dict:
         """Resolve a detected contradiction"""
         resolution = {
             "contradiction": contradiction,
@@ -704,7 +705,7 @@ class SelfHealingMemory:
 
         return resolution
 
-    def get_health_report(self) -> Dict:
+    def get_health_report(self) -> dict:
         """Get memory health report"""
         return {
             "total_contradictions_detected": len(self.contradiction_log),
@@ -735,9 +736,9 @@ class SemanticCompressor:
 
     async def compress_memories(
         self,
-        memories: List[MemoryNode],
+        memories: list[MemoryNode],
         threshold: float = 0.8
-    ) -> Tuple[List[MemoryNode], Optional[MemoryNode]]:
+    ) -> tuple[list[MemoryNode], Optional[MemoryNode]]:
         """Compress similar memories into a single consolidated memory"""
         if len(memories) < 2:
             return memories, None
@@ -770,9 +771,9 @@ class SemanticCompressor:
 
     def _group_by_similarity(
         self,
-        memories: List[MemoryNode],
+        memories: list[MemoryNode],
         threshold: float
-    ) -> List[List[MemoryNode]]:
+    ) -> list[list[MemoryNode]]:
         """
         Group memories by semantic similarity.
         OPTIMIZED: Uses locality-sensitive hashing for O(n) average case instead of O(n²).
@@ -781,8 +782,8 @@ class SemanticCompressor:
             return []
 
         # OPTIMIZATION: Build word-to-memory index for faster lookups
-        word_index: Dict[str, List[int]] = defaultdict(list)
-        memory_words: List[Set[str]] = []
+        word_index: dict[str, list[int]] = defaultdict(list)
+        memory_words: list[set[str]] = []
 
         for i, mem in enumerate(memories):
             words = set(str(mem.content).lower().split())
@@ -803,7 +804,7 @@ class SemanticCompressor:
             words1 = memory_words[i]
 
             # OPTIMIZATION: Only check candidates that share words (O(k) instead of O(n))
-            candidate_indices: Set[int] = set()
+            candidate_indices: set[int] = set()
             for word in words1:
                 candidate_indices.update(word_index.get(word, []))
 
@@ -824,7 +825,7 @@ class SemanticCompressor:
 
         return groups
 
-    async def _consolidate_group(self, group: List[MemoryNode]) -> MemoryNode:
+    async def _consolidate_group(self, group: list[MemoryNode]) -> MemoryNode:
         """Consolidate a group of similar memories"""
         # Use the most important memory as base
         base = max(group, key=lambda m: m.importance)
@@ -848,7 +849,7 @@ class SemanticCompressor:
             connections=combined_connections
         )
 
-    async def _crystallize_wisdom(self, group: List[MemoryNode]) -> MemoryNode:
+    async def _crystallize_wisdom(self, group: list[MemoryNode]) -> MemoryNode:
         """Crystallize repeated patterns into wisdom"""
         # Extract the pattern
         contents = [str(m.content) for m in group]
@@ -874,7 +875,7 @@ class SemanticCompressor:
             provenance={"crystallized_from": [m.id for m in group]}
         )
 
-    def get_compression_stats(self) -> Dict:
+    def get_compression_stats(self) -> dict:
         """Get compression statistics"""
         return {
             "compression_ratio": self.compression_ratio,
@@ -896,10 +897,10 @@ class KnowledgeCrystallizer:
     """
 
     def __init__(self):
-        self.patterns: Dict[str, Dict] = {}
-        self.wisdom_bank: List[Dict] = []
+        self.patterns: dict[str, dict] = {}
+        self.wisdom_bank: list[dict] = []
 
-    async def observe_experience(self, experience: Dict) -> Optional[Dict]:
+    async def observe_experience(self, experience: dict) -> Optional[dict]:
         """Observe an experience and potentially crystallize wisdom"""
         # Extract pattern signature
         pattern_sig = self._extract_pattern_signature(experience)
@@ -926,14 +927,14 @@ class KnowledgeCrystallizer:
 
         return None
 
-    def _extract_pattern_signature(self, experience: Dict) -> str:
+    def _extract_pattern_signature(self, experience: dict) -> str:
         """Extract a signature that identifies the pattern type"""
         # Create signature from experience structure
         keys = sorted(experience.keys())
         types = [type(experience[k]).__name__ for k in keys]
         return hashlib.md5(f"{keys}{types}".encode()).hexdigest()[:12]
 
-    async def _crystallize_pattern(self, pattern: Dict) -> Dict:
+    async def _crystallize_pattern(self, pattern: dict) -> dict:
         """Crystallize a pattern into wisdom"""
         examples = pattern["examples"]
 
@@ -958,7 +959,7 @@ class KnowledgeCrystallizer:
         logger.info(f"Crystallized wisdom: {wisdom['insight']}")
         return wisdom
 
-    def get_wisdom(self, query: Optional[str] = None) -> List[Dict]:
+    def get_wisdom(self, query: Optional[str] = None) -> list[dict]:
         """Get crystallized wisdom, optionally filtered by query"""
         if not query:
             return self.wisdom_bank
@@ -995,8 +996,8 @@ class LiveMemoryBrain:
         self.crystallizer = KnowledgeCrystallizer()
 
         # Memory stores
-        self.working_memory: List[MemoryNode] = []
-        self.long_term_memory: Dict[str, MemoryNode] = {}
+        self.working_memory: list[MemoryNode] = []
+        self.long_term_memory: dict[str, MemoryNode] = {}
 
         # Sync state
         self._sync_task: Optional[asyncio.Task] = None
@@ -1007,7 +1008,7 @@ class LiveMemoryBrain:
         self._async_pool: Optional[asyncpg.Pool] = None  # ENHANCEMENT: Async pool
 
         # ENHANCEMENT: Embedding batch queue
-        self._embedding_queue: List[Tuple[str, str]] = []
+        self._embedding_queue: list[tuple[str, str]] = []
         self._embedding_batch_size = 20
         self._embedding_lock = asyncio.Lock()
 
@@ -1236,7 +1237,7 @@ class LiveMemoryBrain:
         content: Any,
         memory_type: MemoryType = MemoryType.EPISODIC,
         importance: float = 0.5,
-        context: Optional[Dict] = None
+        context: Optional[dict] = None
     ) -> str:
         """Store a new memory"""
         memory_id = hashlib.md5(f"{content}{time.time()}".encode()).hexdigest()[:16]
@@ -1298,7 +1299,7 @@ class LiveMemoryBrain:
         query: str,
         limit: int = 10,
         use_prediction: bool = True
-    ) -> List[MemoryNode]:
+    ) -> list[MemoryNode]:
         """Retrieve relevant memories"""
         # Check predictive cache first
         if use_prediction:
@@ -1380,7 +1381,7 @@ class LiveMemoryBrain:
         except Exception as e:
             logger.error(f"Failed to persist memory: {e}")
 
-    def get_unified_context(self) -> Dict[str, Any]:
+    def get_unified_context(self) -> dict[str, Any]:
         """Get the complete unified context across all systems"""
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1395,7 +1396,7 @@ class LiveMemoryBrain:
             "metrics": self.metrics
         }
 
-    def get_wisdom(self, query: Optional[str] = None) -> List[Dict]:
+    def get_wisdom(self, query: Optional[str] = None) -> list[dict]:
         """Get crystallized wisdom"""
         return self.crystallizer.get_wisdom(query)
 

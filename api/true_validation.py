@@ -4,9 +4,9 @@ TRUE OPERATIONAL VALIDATION API
 NOT HTTP status checks. ACTUAL operation execution and verification.
 """
 
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
 import logging
+
+from fastapi import APIRouter, HTTPException
 
 logger = logging.getLogger(__name__)
 

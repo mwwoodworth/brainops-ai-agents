@@ -15,8 +15,9 @@ print("Forcing app.py v2.0.3 execution")
 print("="*50)
 
 # Import and run the correct app
-from app import app
 import uvicorn
+
+from app import app
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))

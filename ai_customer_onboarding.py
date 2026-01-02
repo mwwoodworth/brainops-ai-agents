@@ -4,13 +4,14 @@ AI-Powered Customer Onboarding System - Task 18
 Intelligent, personalized customer onboarding with automated workflows and progress tracking
 """
 
-import os
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
 from enum import Enum
+from typing import Any, Optional
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -123,9 +124,9 @@ class AICustomerOnboarding:
     async def create_onboarding_journey(
         self,
         customer_id: str,
-        customer_data: Dict[str, Any],
+        customer_data: dict[str, Any],
         segment: CustomerSegment,
-        custom_requirements: Optional[Dict] = None
+        custom_requirements: Optional[dict] = None
     ) -> str:
         """Create personalized onboarding journey for customer"""
         try:
@@ -181,9 +182,9 @@ class AICustomerOnboarding:
 
     async def _analyze_customer_profile(
         self,
-        customer_data: Dict,
+        customer_data: dict,
         segment: CustomerSegment
-    ) -> Dict:
+    ) -> dict:
         """Analyze customer profile for personalization"""
         analysis = {
             "segment": segment.value,
@@ -204,7 +205,7 @@ class AICustomerOnboarding:
 
         return analysis
 
-    def _assess_technical_level(self, customer_data: Dict) -> str:
+    def _assess_technical_level(self, customer_data: dict) -> str:
         """Assess customer's technical sophistication"""
         indicators = {
             'has_api_experience': 'advanced',
@@ -230,7 +231,7 @@ class AICustomerOnboarding:
         }
         return pace_map.get(segment, 'moderate')
 
-    def _identify_risk_factors(self, customer_data: Dict) -> List[str]:
+    def _identify_risk_factors(self, customer_data: dict) -> list[str]:
         """Identify potential churn risk factors"""
         risk_factors = []
 
@@ -245,7 +246,7 @@ class AICustomerOnboarding:
 
         return risk_factors
 
-    def _define_success_indicators(self, segment: CustomerSegment) -> List[str]:
+    def _define_success_indicators(self, segment: CustomerSegment) -> list[str]:
         """Define success indicators for segment"""
         base_indicators = [
             'account_activated',
@@ -265,7 +266,7 @@ class AICustomerOnboarding:
     async def _create_journey_stage(
         self,
         journey_id: str,
-        stage_config: Dict,
+        stage_config: dict,
         cursor: Any
     ) -> str:
         """Create a stage in the onboarding journey"""
@@ -297,7 +298,7 @@ class AICustomerOnboarding:
     async def _create_stage_task(
         self,
         stage_id: str,
-        task_config: Dict,
+        task_config: dict,
         cursor: Any
     ) -> str:
         """Create a task within an onboarding stage"""
@@ -351,8 +352,8 @@ class AICustomerOnboarding:
         self,
         journey_id: str,
         event_type: str,
-        event_data: Dict[str, Any]
-    ) -> Dict:
+        event_data: dict[str, Any]
+    ) -> dict:
         """Track progress in onboarding journey"""
         try:
             conn = self._get_connection()
@@ -405,7 +406,7 @@ class AICustomerOnboarding:
 
     async def _execute_intervention(
         self,
-        intervention: Dict,
+        intervention: dict,
         cursor: Any
     ) -> None:
         """Execute an intervention to help customer progress"""
@@ -430,7 +431,7 @@ class AICustomerOnboarding:
 
     async def _execute_action(
         self,
-        action: Dict,
+        action: dict,
         cursor: Any
     ) -> None:
         """Execute a specific onboarding action"""
@@ -443,7 +444,7 @@ class AICustomerOnboarding:
         segment: Optional[CustomerSegment] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None
-    ) -> Dict:
+    ) -> dict:
         """Get onboarding analytics"""
         try:
             conn = self._get_connection()
@@ -498,7 +499,7 @@ class AICustomerOnboarding:
             stage_performance = cursor.fetchall()
 
             # Get intervention effectiveness
-            cursor.execute(f"""
+            cursor.execute("""
                 SELECT
                     intervention_type,
                     COUNT(*) as intervention_count,
@@ -526,8 +527,8 @@ class AICustomerOnboarding:
     async def personalize_experience(
         self,
         journey_id: str,
-        interaction_data: Dict
-    ) -> Dict:
+        interaction_data: dict
+    ) -> dict:
         """Personalize onboarding experience based on behavior"""
         try:
             conn = self._get_connection()
@@ -575,7 +576,7 @@ class AICustomerOnboarding:
     async def _apply_personalization(
         self,
         journey_id: str,
-        personalization: Dict,
+        personalization: dict,
         cursor: Any
     ) -> None:
         """Apply personalization to journey actions"""
@@ -604,7 +605,7 @@ class JourneyDesigner:
     def __init__(self):
         self.stage_templates = self._load_stage_templates()
 
-    def _load_stage_templates(self) -> Dict:
+    def _load_stage_templates(self) -> dict:
         """Load stage templates for different segments"""
         return {
             CustomerSegment.ENTERPRISE: [
@@ -633,9 +634,9 @@ class JourneyDesigner:
     async def design_journey(
         self,
         segment: CustomerSegment,
-        profile_analysis: Dict,
-        custom_requirements: Optional[Dict]
-    ) -> Dict:
+        profile_analysis: dict,
+        custom_requirements: Optional[dict]
+    ) -> dict:
         """Design personalized journey based on segment and profile"""
         # Get base template
         base_stages = self.stage_templates.get(
@@ -680,7 +681,7 @@ class JourneyDesigner:
             "risk_mitigation": self._generate_risk_mitigation(profile_analysis)
         }
 
-    def _get_required_actions(self, stage_type: str, profile: Dict) -> List[str]:
+    def _get_required_actions(self, stage_type: str, profile: dict) -> list[str]:
         """Get required actions for stage"""
         base_actions = {
             "registration": ["create_account", "verify_email"],
@@ -697,7 +698,7 @@ class JourneyDesigner:
         self,
         stage_type: str,
         segment: CustomerSegment
-    ) -> Dict:
+    ) -> dict:
         """Get success criteria for stage"""
         return {
             "completion_threshold": 0.8,
@@ -716,7 +717,7 @@ class JourneyDesigner:
         }
         return engagement_map.get(segment, 5)
 
-    def _generate_tasks(self, stage_type: str, profile: Dict) -> List[Dict]:
+    def _generate_tasks(self, stage_type: str, profile: dict) -> list[dict]:
         """Generate tasks for stage based on profile"""
         tasks = []
 
@@ -753,9 +754,9 @@ class JourneyDesigner:
 
     def _apply_custom_requirements(
         self,
-        stages: List[Dict],
-        custom_requirements: Dict
-    ) -> List[Dict]:
+        stages: list[dict],
+        custom_requirements: dict
+    ) -> list[dict]:
         """Apply custom requirements to journey stages"""
         # Add custom stages if needed
         if custom_requirements.get('additional_stages'):
@@ -770,7 +771,7 @@ class JourneyDesigner:
 
         return sorted(stages, key=lambda x: x['order'])
 
-    def _generate_optimization_notes(self, profile: Dict) -> List[str]:
+    def _generate_optimization_notes(self, profile: dict) -> list[str]:
         """Generate optimization notes for journey"""
         notes = []
 
@@ -785,7 +786,7 @@ class JourneyDesigner:
 
         return notes
 
-    def _generate_risk_mitigation(self, profile: Dict) -> Dict:
+    def _generate_risk_mitigation(self, profile: dict) -> dict:
         """Generate risk mitigation strategies"""
         strategies = {}
 
@@ -807,9 +808,9 @@ class ProgressTracker:
         self,
         journey_id: str,
         event_type: str,
-        event_data: Dict,
+        event_data: dict,
         cursor: Any
-    ) -> Dict:
+    ) -> dict:
         """Update journey progress based on event"""
         # Get current progress
         cursor.execute("""
@@ -841,7 +842,7 @@ class ProgressTracker:
 
         return progress
 
-    def _calculate_completion_rate(self, journey: Dict, event_type: str) -> float:
+    def _calculate_completion_rate(self, journey: dict, event_type: str) -> float:
         """Calculate overall completion rate"""
         # This would involve checking completed stages/tasks
         # Simplified for demonstration
@@ -855,7 +856,7 @@ class ProgressTracker:
 
         return min(100, base_rate + event_values.get(event_type, 0.01))
 
-    def _calculate_expected_rate(self, journey: Dict) -> float:
+    def _calculate_expected_rate(self, journey: dict) -> float:
         """Calculate expected progress rate"""
         created_at = journey.get('created_at')
         expected_duration = journey.get('expected_duration_days', 14)
@@ -866,12 +867,12 @@ class ProgressTracker:
 
         return 0
 
-    def _determine_current_stage(self, journey: Dict, event_type: str) -> str:
+    def _determine_current_stage(self, journey: dict, event_type: str) -> str:
         """Determine current onboarding stage"""
         # This would check actual stage completion
         return journey.get('current_stage', 'registration')
 
-    def _calculate_time_spent(self, journey: Dict) -> float:
+    def _calculate_time_spent(self, journey: dict) -> float:
         """Calculate total time spent in onboarding"""
         created_at = journey.get('created_at')
         if created_at:
@@ -881,8 +882,8 @@ class ProgressTracker:
 
     def _calculate_engagement_score(
         self,
-        journey: Dict,
-        event_data: Dict
+        journey: dict,
+        event_data: dict
     ) -> float:
         """Calculate engagement score"""
         # Factor in various engagement metrics
@@ -900,7 +901,7 @@ class ProgressTracker:
 
         return min(100, base_score)
 
-    def _calculate_velocity(self, journey: Dict) -> str:
+    def _calculate_velocity(self, journey: dict) -> str:
         """Calculate progress velocity"""
         progress = journey.get('progress_score', 0)
         expected_rate = self._calculate_expected_rate(journey)
@@ -918,9 +919,9 @@ class PersonalizationEngine:
 
     async def generate_personalization(
         self,
-        journey: Dict,
-        interaction_data: Dict
-    ) -> Dict:
+        journey: dict,
+        interaction_data: dict
+    ) -> dict:
         """Generate personalization based on behavior"""
         personalization = {
             "content_adjustments": {},
@@ -954,7 +955,7 @@ class PersonalizationEngine:
 
         return personalization
 
-    def _analyze_patterns(self, interaction_data: Dict) -> Dict:
+    def _analyze_patterns(self, interaction_data: dict) -> dict:
         """Analyze user interaction patterns"""
         patterns = {}
 
@@ -979,9 +980,9 @@ class InterventionManager:
     async def assess_intervention(
         self,
         journey_id: str,
-        progress: Dict,
+        progress: dict,
         cursor: Any
-    ) -> Optional[Dict]:
+    ) -> Optional[dict]:
         """Assess if intervention is needed"""
         # Check intervention triggers
         if progress['completion_rate'] < progress['expected_rate'] - 20:
@@ -1015,8 +1016,8 @@ class InterventionManager:
         journey_id: str,
         intervention_type: InterventionType,
         reason: str,
-        actions: List[Dict]
-    ) -> Dict:
+        actions: list[dict]
+    ) -> dict:
         """Create intervention plan"""
         return {
             "journey_id": journey_id,
@@ -1026,7 +1027,7 @@ class InterventionManager:
             "created_at": datetime.now(timezone.utc).isoformat()
         }
 
-    def _get_acceleration_actions(self) -> List[Dict]:
+    def _get_acceleration_actions(self) -> list[dict]:
         """Get actions to accelerate progress"""
         return [
             {"type": "send_email", "content": "quick_win_tips"},
@@ -1034,7 +1035,7 @@ class InterventionManager:
             {"type": "schedule_call", "purpose": "remove_blockers"}
         ]
 
-    def _get_engagement_actions(self) -> List[Dict]:
+    def _get_engagement_actions(self) -> list[dict]:
         """Get actions to increase engagement"""
         return [
             {"type": "send_sms", "content": "value_reminder"},
@@ -1042,7 +1043,7 @@ class InterventionManager:
             {"type": "provide_resource", "resource": "success_stories"}
         ]
 
-    def _get_human_touch_actions(self) -> List[Dict]:
+    def _get_human_touch_actions(self) -> list[dict]:
         """Get human intervention actions"""
         return [
             {"type": "assign_csm", "priority": "high"},
@@ -1057,7 +1058,7 @@ class SuccessPredictor:
     async def predict_success(
         self,
         journey_id: str,
-        progress: Dict
+        progress: dict
     ) -> float:
         """Predict probability of successful onboarding"""
         # Base probability
@@ -1101,8 +1102,8 @@ class FeatureAdoptionTracker:
         journey_id: str,
         customer_id: str,
         feature_name: str,
-        usage_context: Dict
-    ) -> Dict:
+        usage_context: dict
+    ) -> dict:
         """Track when a customer uses a feature"""
         try:
             conn = self._get_connection()
@@ -1159,7 +1160,7 @@ class FeatureAdoptionTracker:
         customer_id: str,
         feature_name: str,
         cursor: Any
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Check if feature usage unlocks any achievements"""
         achievements = []
 
@@ -1241,7 +1242,7 @@ class FeatureAdoptionTracker:
         self,
         customer_id: str,
         journey_id: Optional[str] = None
-    ) -> Dict:
+    ) -> dict:
         """Get comprehensive feature adoption analysis"""
         try:
             conn = self._get_connection()
@@ -1300,9 +1301,9 @@ class FeatureAdoptionTracker:
     async def _get_recommended_features(
         self,
         customer_id: str,
-        current_features: List[Dict],
+        current_features: list[dict],
         cursor: Any
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Get recommended features based on current usage"""
         used_features = [f['feature_name'] for f in current_features]
 
@@ -1344,10 +1345,10 @@ class PersonalizedOnboardingFlows:
     async def create_personalized_flow(
         self,
         customer_id: str,
-        customer_profile: Dict,
-        business_goals: List[str],
+        customer_profile: dict,
+        business_goals: list[str],
         experience_level: str
-    ) -> Dict:
+    ) -> dict:
         """Create a fully personalized onboarding flow"""
         try:
             conn = self._get_connection()
@@ -1413,10 +1414,10 @@ class PersonalizedOnboardingFlows:
 
     def _analyze_customer_needs(
         self,
-        profile: Dict,
-        goals: List[str],
+        profile: dict,
+        goals: list[str],
         experience_level: str
-    ) -> Dict:
+    ) -> dict:
         """Analyze customer needs to determine flow type"""
         analysis = {
             "flow_type": "standard",
@@ -1455,10 +1456,10 @@ class PersonalizedOnboardingFlows:
 
     def _generate_personalized_milestones(
         self,
-        goals: List[str],
+        goals: list[str],
         experience_level: str,
-        analysis: Dict
-    ) -> List[Dict]:
+        analysis: dict
+    ) -> list[dict]:
         """Generate milestones tailored to customer goals"""
         milestones = []
 
@@ -1532,9 +1533,9 @@ class PersonalizedOnboardingFlows:
 
     def _create_content_sequence(
         self,
-        profile: Dict,
-        analysis: Dict
-    ) -> List[Dict]:
+        profile: dict,
+        analysis: dict
+    ) -> list[dict]:
         """Create personalized content delivery sequence"""
         sequence = []
 
@@ -1582,9 +1583,9 @@ class PersonalizedOnboardingFlows:
 
     def _define_success_metrics(
         self,
-        goals: List[str],
+        goals: list[str],
         experience_level: str
-    ) -> Dict:
+    ) -> dict:
         """Define success metrics for the personalized flow"""
         metrics = {
             "completion_threshold": 80 if experience_level == "beginner" else 90,
@@ -1616,9 +1617,9 @@ class OnboardingContentGenerator:
     async def generate_content(
         self,
         content_type: str,
-        context: Dict,
-        personalization: Dict
-    ) -> Dict:
+        context: dict,
+        personalization: dict
+    ) -> dict:
         """Generate personalized onboarding content"""
         base_content = self._get_base_content(content_type)
 
@@ -1635,7 +1636,7 @@ class OnboardingContentGenerator:
 
         return content
 
-    def _get_base_content(self, content_type: str) -> Dict:
+    def _get_base_content(self, content_type: str) -> dict:
         """Get base content template"""
         templates = {
             "welcome_email": {
@@ -1653,18 +1654,18 @@ class OnboardingContentGenerator:
         }
         return templates.get(content_type, {"subject": "Update", "body": "Content"})
 
-    def _simplify_content(self, content: Dict) -> Dict:
+    def _simplify_content(self, content: dict) -> dict:
         """Simplify content for technical users"""
         content['subject'] = content['subject'].replace('Journey', 'Setup')
         content['body'] = "Quick start: " + content['body']
         return content
 
-    def _add_support_content(self, content: Dict) -> Dict:
+    def _add_support_content(self, content: dict) -> dict:
         """Add supportive elements to content"""
         content['body'] += "\n\nNeed help? We're here for you 24/7."
         return content
 
-    def _add_context(self, content: Dict, context: Dict) -> Dict:
+    def _add_context(self, content: dict, context: dict) -> dict:
         """Add context-specific information"""
         for key, value in context.items():
             placeholder = f"{{{key}}}"

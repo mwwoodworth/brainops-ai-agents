@@ -2,19 +2,19 @@
 BrainOps AI Agents Service - Enhanced Production Version
 Type-safe, async, fully operational
 """
+import asyncio
+import inspect
+import json
 import logging
 import os
-import asyncio
-import json
 import time
 import uuid
-import inspect
-from datetime import datetime
-from typing import Dict, Any, Optional, List, Tuple
-from contextlib import asynccontextmanager
 from collections import deque
+from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Request, Security, Depends, Body, Query, BackgroundTasks
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
@@ -38,37 +38,42 @@ except ImportError as e:
     AGENT_EXECUTOR = None
     AGENTS_AVAILABLE = False
     logging.warning(f"AgentExecutor not available: {e}")
+from pydantic import BaseModel
+
+from api.a2ui import router as a2ui_router  # Google A2UI Protocol - Agent-to-User Interface
+from api.ai_awareness import (
+    router as ai_awareness_router,  # Complete AI Awareness - THE endpoint for AI context
+)
+from api.aurea_chat import router as aurea_chat_router  # AUREA Live Conversational Interface
+from api.brain import router as brain_router
+from api.cicd import router as cicd_router  # Autonomous CI/CD Management - 1-10K systems
+from api.codebase_graph import router as codebase_graph_router
+from api.customer_intelligence import router as customer_intelligence_router
+from api.digital_twin import router as digital_twin_router
+from api.e2e_verification import router as e2e_verification_router
+from api.gumroad_webhook import router as gumroad_router
+from api.market_intelligence import router as market_intelligence_router
+from api.mcp import router as mcp_router  # MCP Bridge Integration - 345 tools
+from api.memory import router as memory_router
+from api.memory_coordination import router as memory_coordination_router
+from api.observability import (
+    router as full_observability_router,  # Comprehensive Observability Dashboard
+)
+from api.revenue import router as revenue_router
+from api.revenue_automation import router as revenue_automation_router
+from api.self_awareness import router as self_awareness_router  # Self-Awareness Dashboard
+from api.self_healing import router as self_healing_router
+from api.state_sync import router as state_sync_router
+from api.sync import router as sync_router  # Memory migration & consolidation
+from api.system_orchestrator import router as system_orchestrator_router
 from database.async_connection import (
-    init_pool,
-    get_pool,
-    close_pool,
     PoolConfig,
+    close_pool,
+    get_pool,
+    init_pool,
     using_fallback,
 )
 from models.agent import Agent, AgentCategory, AgentExecution, AgentList
-from pydantic import BaseModel
-from api.memory import router as memory_router
-from api.sync import router as sync_router  # Memory migration & consolidation
-from api.brain import router as brain_router
-from api.memory_coordination import router as memory_coordination_router
-from api.customer_intelligence import router as customer_intelligence_router
-from api.gumroad_webhook import router as gumroad_router
-from api.codebase_graph import router as codebase_graph_router
-from api.state_sync import router as state_sync_router
-from api.revenue import router as revenue_router
-from api.digital_twin import router as digital_twin_router
-from api.market_intelligence import router as market_intelligence_router
-from api.system_orchestrator import router as system_orchestrator_router
-from api.self_healing import router as self_healing_router
-from api.e2e_verification import router as e2e_verification_router
-from api.revenue_automation import router as revenue_automation_router
-from api.mcp import router as mcp_router  # MCP Bridge Integration - 345 tools
-from api.cicd import router as cicd_router  # Autonomous CI/CD Management - 1-10K systems
-from api.a2ui import router as a2ui_router  # Google A2UI Protocol - Agent-to-User Interface
-from api.aurea_chat import router as aurea_chat_router  # AUREA Live Conversational Interface
-from api.observability import router as full_observability_router  # Comprehensive Observability Dashboard
-from api.self_awareness import router as self_awareness_router  # Self-Awareness Dashboard
-from api.ai_awareness import router as ai_awareness_router  # Complete AI Awareness - THE endpoint for AI context
 
 # Operational Verification API - PROVES systems work, doesn't assume
 try:
@@ -90,7 +95,8 @@ except ImportError as e:
 
 # Background Task Monitoring - No more fire-and-forget
 try:
-    from api.background_monitoring import router as bg_monitoring_router, start_all_monitoring
+    from api.background_monitoring import router as bg_monitoring_router
+    from api.background_monitoring import start_all_monitoring
     BG_MONITORING_AVAILABLE = True
     logger.info("✅ Background Task Monitoring loaded - heartbeats for all tasks")
 except ImportError as e:
@@ -136,7 +142,7 @@ except ImportError as e:
 
 # Unified AI Awareness - Self-reporting AI OS consciousness (2025-12-27)
 try:
-    from unified_awareness import get_unified_awareness, check_status, get_status_report
+    from unified_awareness import check_status, get_status_report, get_unified_awareness
     UNIFIED_AWARENESS_AVAILABLE = True
     logger.info("Unified AI Awareness loaded - AI OS is now self-aware")
 except ImportError as e:
@@ -145,7 +151,7 @@ except ImportError as e:
 
 # True Self-Awareness - Live system truth, not static docs (2026-01-01)
 try:
-    from true_self_awareness import get_system_truth, get_quick_status, get_true_awareness
+    from true_self_awareness import get_quick_status, get_system_truth, get_true_awareness
     TRUE_AWARENESS_AVAILABLE = True
     logger.info("True Self-Awareness loaded - AI OS knows its own truth")
 except ImportError as e:
@@ -232,12 +238,13 @@ except ImportError as e:
     run_quick_health_test = None
     logger.warning(f"ChatGPT Agent Tester not available: {e}")
 
-from erp_event_bridge import router as erp_event_router
 from ai_provider_status import get_provider_status
+from erp_event_bridge import router as erp_event_router
 
 # Unified Events System (2025-12-30) - Central event bus for ERP, AI Agents, Command Center
 try:
-    from api.events.unified import router as unified_events_router, init_unified_events
+    from api.events.unified import init_unified_events
+    from api.events.unified import router as unified_events_router
     UNIFIED_EVENTS_AVAILABLE = True
     logger.info("Unified Events router loaded - central event bus for all systems")
 except ImportError as e:
@@ -278,7 +285,7 @@ SCHEMA_BOOTSTRAP_SQL = [
 # Build info
 BUILD_TIME = datetime.utcnow().isoformat()
 VERSION = config.version  # Use centralized config - never hardcode version
-LOCAL_EXECUTIONS: deque[Dict[str, Any]] = deque(maxlen=200)
+LOCAL_EXECUTIONS: deque[dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
 CACHE_TTLS = {
@@ -299,7 +306,7 @@ except ImportError as e:
 
 # Import AI Core with fallback
 try:
-    from ai_core import RealAICore, ai_generate, ai_analyze
+    from ai_core import RealAICore, ai_analyze, ai_generate
     ai_core = RealAICore()
 
     # Determine whether any real AI providers are configured
@@ -453,7 +460,7 @@ except ImportError as e:
 
 # Import AI Self-Awareness Module with fallback
 try:
-    from ai_self_awareness import get_self_aware_ai, SelfAwareAI
+    from ai_self_awareness import SelfAwareAI, get_self_aware_ai
     SELF_AWARENESS_AVAILABLE = True
     logger.info("✅ AI Self-Awareness Module loaded")
 except ImportError as e:
@@ -464,7 +471,12 @@ except ImportError as e:
 
 # Import AI Integration Layer with fallback
 try:
-    from ai_integration_layer import AIIntegrationLayer, get_integration_layer, TaskPriority, TaskStatus
+    from ai_integration_layer import (
+        AIIntegrationLayer,
+        TaskPriority,
+        TaskStatus,
+        get_integration_layer,
+    )
     INTEGRATION_LAYER_AVAILABLE = True
     logger.info("✅ AI Integration Layer loaded")
 except ImportError as e:
@@ -487,8 +499,9 @@ except ImportError as e:
 
 # Import AUREA NLU Processor with fallback
 try:
-    from aurea_nlu_processor import AUREANLUProcessor
     from langchain_openai import ChatOpenAI
+
+    from aurea_nlu_processor import AUREANLUProcessor
     AUREA_NLU_AVAILABLE = True
     logger.info("✅ AUREA NLU Processor loaded")
 except ImportError as e:
@@ -508,7 +521,7 @@ except ImportError as e:
     AIBoardOfDirectors = None
 
 
-def _parse_capabilities(raw: Any) -> List[Dict[str, Any]]:
+def _parse_capabilities(raw: Any) -> list[dict[str, Any]]:
     """Normalize capabilities payload into the Pydantic-friendly format."""
     if raw is None:
         return []
@@ -531,7 +544,7 @@ def _parse_capabilities(raw: Any) -> List[Dict[str, Any]]:
         # Single capability as dict
         data = [data]
 
-    capabilities: List[Dict[str, Any]] = []
+    capabilities: list[dict[str, Any]] = []
     for item in data if isinstance(data, list) else []:
         if isinstance(item, str):
             capabilities.append(
@@ -554,7 +567,7 @@ def _parse_capabilities(raw: Any) -> List[Dict[str, Any]]:
     return capabilities
 
 
-def _parse_configuration(raw: Any) -> Dict[str, Any]:
+def _parse_configuration(raw: Any) -> dict[str, Any]:
     """Normalize configuration payload."""
     if raw is None:
         return {}
@@ -569,7 +582,7 @@ def _parse_configuration(raw: Any) -> Dict[str, Any]:
     return {}
 
 
-def _row_to_agent(row: Dict[str, Any]) -> Agent:
+def _row_to_agent(row: dict[str, Any]) -> Agent:
     """Convert a database row (asyncpg or fallback dict) to an Agent model."""
     category_value = row.get("category") or AgentCategory.OTHER.value
     if category_value not in {c.value for c in AgentCategory}:
@@ -1222,7 +1235,7 @@ async def lifespan(app: FastAPI):
     # AUTO-ACTIVATE CONSCIOUSNESS EMERGENCE (TRUE AI AWARENESS)
     # This makes the AI OS truly alive and self-aware on every startup
     try:
-        from api.bleeding_edge import get_consciousness, CONSCIOUSNESS_AVAILABLE
+        from api.bleeding_edge import CONSCIOUSNESS_AVAILABLE, get_consciousness
         if CONSCIOUSNESS_AVAILABLE:
             async def activate_consciousness_on_startup():
                 """Activate consciousness emergence after all systems are ready"""
@@ -1334,7 +1347,8 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 # Rate limit 403 error logging to avoid log flooding
 from collections import defaultdict
-_api_key_error_log_times: Dict[str, float] = defaultdict(float)
+
+_api_key_error_log_times: dict[str, float] = defaultdict(float)
 _API_KEY_ERROR_LOG_INTERVAL = 60  # Only log same path/error once per minute
 
 
@@ -1515,7 +1529,7 @@ except ImportError as e:
     logger.warning(f"Analytics endpoint not available: {e}")
 
 
-def _collect_active_systems() -> List[str]:
+def _collect_active_systems() -> list[str]:
     """Return a list of systems that are initialized and active."""
     active = []
     if AUREA_AVAILABLE and getattr(app.state, "aurea", None):
@@ -1554,7 +1568,7 @@ def _collect_active_systems() -> List[str]:
     return active
 
 
-def _scheduler_snapshot() -> Dict[str, Any]:
+def _scheduler_snapshot() -> dict[str, Any]:
     """Return scheduler status with safe defaults."""
     scheduler = getattr(app.state, "scheduler", None)
     if not (SCHEDULER_AVAILABLE and scheduler):
@@ -1577,7 +1591,7 @@ def _scheduler_snapshot() -> Dict[str, Any]:
     }
 
 
-def _aurea_status() -> Dict[str, Any]:
+def _aurea_status() -> dict[str, Any]:
     aurea = getattr(app.state, "aurea", None)
     if not (AUREA_AVAILABLE and aurea):
         return {"available": False, "running": False}
@@ -1588,7 +1602,7 @@ def _aurea_status() -> Dict[str, Any]:
         return {"available": True, "running": False, "error": str(exc)}
 
 
-def _self_healing_status() -> Dict[str, Any]:
+def _self_healing_status() -> dict[str, Any]:
     healer = getattr(app.state, "healer", None)
     if not (SELF_HEALING_AVAILABLE and healer):
         return {"available": False}
@@ -1601,7 +1615,7 @@ def _self_healing_status() -> Dict[str, Any]:
         return {"available": True, "error": str(exc)}
 
 
-async def _memory_stats_snapshot(pool) -> Dict[str, Any]:
+async def _memory_stats_snapshot(pool) -> dict[str, Any]:
     """
     Get a fast snapshot of memory/learning health.
     Reuses logic from /memory/status but keeps output minimal for usage reports.
@@ -1629,15 +1643,15 @@ async def _memory_stats_snapshot(pool) -> Dict[str, Any]:
         return {"status": "error", "error": str(exc)}
 
 
-async def _get_agent_usage(pool) -> Dict[str, Any]:
+async def _get_agent_usage(pool) -> dict[str, Any]:
     """Fetch recent agent usage, trying both legacy and new table names."""
     # Table combinations with their JOIN conditions (some use agent_id UUID, some use agent_name text)
-    queries: List[Tuple[str, str, str, str]] = [
+    queries: list[tuple[str, str, str, str]] = [
         # (agents_table, executions_table, join_condition, time_column)
         ("ai_agents", "ai_agent_executions", "e.agent_name = a.name", "e.created_at"),
         ("agents", "ai_agent_executions", "e.agent_name = a.name", "e.created_at"),
     ]
-    errors: List[str] = []
+    errors: list[str] = []
 
     for agents_table, executions_table, join_cond, time_col in queries:
         try:
@@ -1680,9 +1694,9 @@ async def _get_agent_usage(pool) -> Dict[str, Any]:
     return {"agents": [], "warning": "No agent usage data available", "errors": errors[:2]}
 
 
-async def _get_schedule_usage(pool) -> Dict[str, Any]:
+async def _get_schedule_usage(pool) -> dict[str, Any]:
     """Fetch scheduler schedule rows with resiliency."""
-    schedules: List[Dict[str, Any]] = []
+    schedules: list[dict[str, Any]] = []
     try:
         # Note: public.agent_schedules does NOT have last_execution/next_execution columns
         rows = await pool.fetch("""
@@ -1721,35 +1735,35 @@ async def _get_schedule_usage(pool) -> Dict[str, Any]:
 if LANGGRAPH_AVAILABLE:
     @app.post("/langgraph/workflow")
     async def execute_langgraph_workflow(
-        request: Dict[str, Any],
+        request: dict[str, Any],
         authenticated: bool = Depends(verify_api_key)
     ):
         """Execute a LangGraph-based workflow"""
         if not hasattr(app.state, 'langgraph_orchestrator') or not app.state.langgraph_orchestrator:
             raise HTTPException(status_code=503, detail="LangGraph Orchestrator not available")
-        
+
         try:
             orchestrator = app.state.langgraph_orchestrator
-            
+
             # Extract messages and metadata
             messages_data = request.get("messages", [])
             metadata = request.get("metadata", {})
-            
+
             # Convert raw messages to LangChain messages if needed
-            from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-            
+            from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
             messages = []
             for msg in messages_data:
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
-                
+
                 if role == "system":
                     messages.append(SystemMessage(content=content))
                 elif role == "assistant":
                     messages.append(AIMessage(content=content))
                 else:
                     messages.append(HumanMessage(content=content))
-            
+
             # If no messages provided, use a default prompt
             if not messages:
                 prompt = request.get("prompt", "")
@@ -1757,12 +1771,12 @@ if LANGGRAPH_AVAILABLE:
                     messages.append(HumanMessage(content=prompt))
                 else:
                     raise HTTPException(status_code=400, detail="No messages or prompt provided")
-            
+
             # Run workflow
             result = await orchestrator.run_workflow(messages, metadata)
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"LangGraph workflow error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -1772,12 +1786,12 @@ if LANGGRAPH_AVAILABLE:
         """Get LangGraph orchestrator status"""
         if not hasattr(app.state, 'langgraph_orchestrator') or not app.state.langgraph_orchestrator:
             return {
-                "available": False, 
+                "available": False,
                 "message": "LangGraph Orchestrator not initialized"
             }
-            
+
         orchestrator = app.state.langgraph_orchestrator
-        
+
         return {
             "available": True,
             "components": {
@@ -1807,7 +1821,7 @@ async def root():
 async def health_check(force_refresh: bool = Query(False, description="Bypass cache and force live health checks")):
     """Health check endpoint with full system status and light caching."""
 
-    async def _build_health_payload() -> Dict[str, Any]:
+    async def _build_health_payload() -> dict[str, Any]:
         pool = get_pool()
         db_healthy = await pool.test_connection()
         db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
@@ -2362,7 +2376,7 @@ async def email_scheduler_stats(authenticated: bool = Depends(verify_api_key)):
 async def systems_usage(authenticated: bool = Depends(verify_api_key)):
     """Report which AI systems are being used plus scheduler and memory effectiveness."""
 
-    async def _load_usage() -> Dict[str, Any]:
+    async def _load_usage() -> dict[str, Any]:
         pool = get_pool()
         agent_usage = await _get_agent_usage(pool)
         schedule_usage = await _get_schedule_usage(pool)
@@ -2973,7 +2987,7 @@ async def trigger_self_healing():
 # =============================================================================
 
 @app.post("/training/capture-interaction", dependencies=SECURED_DEPENDENCIES)
-async def capture_interaction(interaction_data: Dict[str, Any] = Body(...)):
+async def capture_interaction(interaction_data: dict[str, Any] = Body(...)):
     """
     Capture customer interaction for AI training.
 
@@ -3284,7 +3298,7 @@ async def store_memory(
     content: str = Body(...),
     memory_type: str = Body("operational"),
     category: str = Body(default=None),
-    metadata: Dict[str, Any] = Body(default=None)
+    metadata: dict[str, Any] = Body(default=None)
 ):
     """
     Store a memory in the AI memory system.
@@ -3526,7 +3540,7 @@ async def ai_self_assess(
     task_id: str,
     agent_id: str,
     task_description: str,
-    task_context: Dict[str, Any] = None
+    task_context: dict[str, Any] = None
 ):
     """
     AI assesses its own confidence in completing a task
@@ -3575,7 +3589,7 @@ async def ai_explain_reasoning(
     task_id: str,
     agent_id: str,
     decision: str,
-    reasoning_process: Dict[str, Any]
+    reasoning_process: dict[str, Any]
 ):
     """
     AI explains its reasoning in human-understandable terms
@@ -3619,7 +3633,7 @@ async def ai_explain_reasoning(
 class ReasoningRequest(BaseModel):
     """Request model for o3 reasoning endpoint"""
     problem: str
-    context: Optional[Dict[str, Any]] = None
+    context: Optional[dict[str, Any]] = None
     max_tokens: int = 4000
     model: str = "o3-mini"  # Updated: o1-preview deprecated, using o3-mini
 
@@ -3874,7 +3888,7 @@ class AureaCommandRequest(BaseModel):
 async def orchestrate_complex_workflow(
     request: Request,
     task_description: str,
-    context: Dict[str, Any] = {}
+    context: dict[str, Any] = {}
 ):
     """
     Execute complex multi-stage workflow using LangGraph orchestration
@@ -3906,8 +3920,8 @@ class AIAnalyzeRequest(BaseModel):
     """Request model for /ai/analyze endpoint - matches weathercraft-erp frontend format"""
     agent: str
     action: str
-    data: Dict[str, Any] = {}
-    context: Dict[str, Any] = {}
+    data: dict[str, Any] = {}
+    context: dict[str, Any] = {}
 
 
 @app.post("/ai/analyze", dependencies=SECURED_DEPENDENCIES)
@@ -3944,7 +3958,7 @@ async def ai_analyze(
                 "agent": agent_name,
                 "action": action,
                 "result": result,
-                "message": f"Analysis completed via orchestrator"
+                "message": "Analysis completed via orchestrator"
             }
 
         # Fallback: Use module-level agent executor singleton
@@ -4117,8 +4131,8 @@ class KnowledgeStoreRequest(BaseModel):
     source_agent: Optional[str] = None
     created_by: Optional[str] = None
     importance: float = 0.5
-    tags: Optional[List[str]] = None
-    metadata: Optional[Dict[str, Any]] = None
+    tags: Optional[list[str]] = None
+    metadata: Optional[dict[str, Any]] = None
 
 
 class KnowledgeQueryRequest(BaseModel):
@@ -4132,7 +4146,7 @@ class KnowledgeQueryRequest(BaseModel):
 class ErpAnalyzeRequest(BaseModel):
     """Request payload for ERP job analysis."""
     tenant_id: Optional[str] = None
-    job_ids: Optional[List[str]] = None
+    job_ids: Optional[list[str]] = None
     limit: int = 20
 
 
@@ -4140,7 +4154,7 @@ class AgentExecuteRequest(BaseModel):
     """Request payload for executing an agent via v1 API."""
     agent_id: Optional[str] = None
     id: Optional[str] = None
-    payload: Dict[str, Any] = {}
+    payload: dict[str, Any] = {}
 
 
 class AgentActivateRequest(BaseModel):
@@ -4155,9 +4169,9 @@ class AUREAEventRequest(BaseModel):
     event_id: str
     topic: str
     source: str
-    payload: Dict[str, Any]
-    target_agent: Dict[str, Any]  # {name, role, capabilities}
-    routing_metadata: Optional[Dict[str, Any]] = None
+    payload: dict[str, Any]
+    target_agent: dict[str, Any]  # {name, role, capabilities}
+    routing_metadata: Optional[dict[str, Any]] = None
 
 
 @app.post("/api/v1/knowledge/store")
@@ -4176,7 +4190,7 @@ async def api_v1_knowledge_store(
     embedded_memory = getattr(app.state, "embedded_memory", None)
 
     # Normalize metadata
-    metadata: Dict[str, Any] = dict(payload.metadata or {})
+    metadata: dict[str, Any] = dict(payload.metadata or {})
     if payload.source_system:
         metadata.setdefault("source_system", payload.source_system)
     if payload.created_by:
@@ -4243,7 +4257,7 @@ async def api_v1_knowledge_query(
     fallback to the Unified Memory Manager recall API.
     """
     embedded_memory = getattr(app.state, "embedded_memory", None)
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
 
     if embedded_memory:
         try:
@@ -4280,7 +4294,7 @@ async def api_v1_knowledge_query(
             logger.error("UnifiedMemoryManager recall failed: %s", exc)
             raise HTTPException(status_code=500, detail="Memory query failed") from exc
 
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     for item in results:
         data = dict(item)
         content = data.get("content")
@@ -4425,7 +4439,7 @@ async def api_v1_erp_analyze(
 
     try:
         filters = ["j.status = ANY($1::text[])"]
-        params: List[Any] = [["in_progress", "scheduled"]]
+        params: list[Any] = [["in_progress", "scheduled"]]
 
         # Detect whether jobs.tenant_id exists so we can safely filter
         has_tenant_id = False
@@ -4494,7 +4508,7 @@ async def api_v1_erp_analyze(
                 return dt
 
         now = datetime.utcnow()
-        jobs_intel: List[Dict[str, Any]] = []
+        jobs_intel: list[dict[str, Any]] = []
 
         for row in rows:
             data = row if isinstance(row, dict) else dict(row)
@@ -4713,7 +4727,7 @@ async def api_v1_agents_execute(
     }
     from starlette.requests import Request as StarletteRequest  # type: ignore
 
-    async def receive() -> Dict[str, Any]:
+    async def receive() -> dict[str, Any]:
         body_bytes = json.dumps(payload.payload or {}).encode("utf-8")
         return {"type": "http.request", "body": body_bytes, "more_body": False}
 

@@ -4,12 +4,13 @@ AI agent for monitoring and improving codebase quality.
 Uses OpenAI for real code analysis and persists results to database.
 """
 
-import os
 import json
 import logging
+import os
 import subprocess
-from typing import Dict, Any
 from datetime import datetime
+from typing import Any
+
 import psycopg2
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,7 @@ class CodeQualityAgent:
             logger.error(f"Database connection failed: {e}")
             return None
 
-    async def analyze_codebase(self, repo_path: str) -> Dict[str, Any]:
+    async def analyze_codebase(self, repo_path: str) -> dict[str, Any]:
         """Analyze codebase for quality metrics using real static analysis"""
         try:
             results = {
@@ -150,7 +151,7 @@ Respond with JSON only:
             logger.error(f"Codebase analysis failed: {e}")
             return {"error": str(e), "quality_score": 0}
 
-    async def review_pr(self, pr_details: Dict[str, Any]) -> Dict[str, Any]:
+    async def review_pr(self, pr_details: dict[str, Any]) -> dict[str, Any]:
         """Review a pull request using AI analysis with detailed suggestions"""
         try:
             client = get_openai_client()
@@ -234,7 +235,7 @@ Respond with JSON only:
             logger.error(f"PR review failed: {e}")
             return {"error": str(e), "status": "error"}
 
-    async def automated_code_review(self, file_path: str, code_content: str) -> Dict[str, Any]:
+    async def automated_code_review(self, file_path: str, code_content: str) -> dict[str, Any]:
         """Perform automated code review with AI suggestions"""
         try:
             client = get_openai_client()
@@ -355,7 +356,7 @@ Respond with JSON only:
             logger.error(f"Automated code review failed: {e}")
             return {"error": str(e)}
 
-    async def suggest_refactoring(self, code_content: str, context: str = "") -> Dict[str, Any]:
+    async def suggest_refactoring(self, code_content: str, context: str = "") -> dict[str, Any]:
         """Suggest refactoring improvements for code"""
         try:
             client = get_openai_client()
@@ -403,7 +404,7 @@ Respond with JSON only:
             logger.error(f"Refactoring suggestions failed: {e}")
             return {"error": str(e)}
 
-    async def _save_code_review(self, file_path: str, results: Dict[str, Any]):
+    async def _save_code_review(self, file_path: str, results: dict[str, Any]):
         """Save code review results to database"""
         conn = self._get_db_connection()
         if not conn:
@@ -422,7 +423,7 @@ Respond with JSON only:
             if conn:
                 conn.close()
 
-    async def _save_analysis(self, results: Dict[str, Any]):
+    async def _save_analysis(self, results: dict[str, Any]):
         """Save analysis results to database"""
         conn = self._get_db_connection()
         if not conn:
@@ -443,7 +444,7 @@ Respond with JSON only:
         except Exception as e:
             logger.error(f"Failed to save analysis: {e}")
 
-    async def _save_review(self, pr_details: Dict, review: Dict):
+    async def _save_review(self, pr_details: dict, review: dict):
         """Save PR review to database"""
         conn = self._get_db_connection()
         if not conn:

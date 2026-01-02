@@ -1,5 +1,6 @@
 import logging
-from typing import Dict, Any, List
+from typing import Any
+
 from .usage_metering import UsageMetering
 
 logger = logging.getLogger(__name__)
@@ -10,16 +11,16 @@ class FollowUpEngine:
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
 
-    async def generate_sequence(self, customer_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def generate_sequence(self, customer_data: dict[str, Any]) -> list[dict[str, Any]]:
         """
         Generates a follow-up sequence (Email/SMS).
         """
         # Follow up is subscription only generally, but let's check.
         # Logic: If no subscription, maybe fail or charge a one-time fee if implemented?
         # The prompt says "$99/month", implying subscription only.
-        
+
         has_sub = await UsageMetering.check_subscription(self.tenant_id, self.PRODUCT_ID)
-        
+
         if not has_sub:
             # Check if they want to buy it now? For this API, we might just fail or return a demo.
             logger.warning(f"Tenant {self.tenant_id} attempted to use FollowUpEngine without subscription.")
@@ -27,7 +28,7 @@ class FollowUpEngine:
             # For now, we proceed but log it, or perhaps we just assume the 'check_subscription' mocks a positive for demo.
             # But let's be strict:
             # raise PermissionError("Subscription required for Follow-Up Engine")
-            pass 
+            pass
 
         logger.info(f"Generating follow-up sequence for tenant {self.tenant_id}")
 
@@ -38,5 +39,5 @@ class FollowUpEngine:
         ]
 
         await UsageMetering.record_usage(self.tenant_id, self.PRODUCT_ID, 1, {"customer_id": customer_data.get("id")})
-        
+
         return sequence

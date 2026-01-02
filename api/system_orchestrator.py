@@ -5,10 +5,11 @@ API endpoints for centralized command and control of 1-10,000+ systems.
 Fully operational with proper error handling and fallbacks.
 """
 
-from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel
 import logging
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class RegisterSystemRequest(BaseModel):
     provider: str
     endpoint: str
     health_endpoint: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
     auto_scaling: bool = True
     auto_remediation: bool = True
 
@@ -60,10 +61,10 @@ class DeploymentRequest(BaseModel):
 
 
 class BulkCommandRequest(BaseModel):
-    system_ids: Optional[List[str]] = None
+    system_ids: Optional[list[str]] = None
     group: Optional[str] = None
     command: str
-    parameters: Optional[Dict[str, Any]] = None
+    parameters: Optional[dict[str, Any]] = None
 
 
 @router.get("/status")

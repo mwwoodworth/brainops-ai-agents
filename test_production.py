@@ -4,9 +4,8 @@ Production Test Suite - Comprehensive Testing
 Verifies all components work end-to-end
 """
 import asyncio
-import sys
 import logging
-from typing import List
+import sys
 
 # Setup logging
 logging.basicConfig(
@@ -43,8 +42,8 @@ async def test_database_connection() -> bool:
     """Test database connectivity"""
     logger.info("Testing database connection...")
     try:
-        from database.async_connection import AsyncDatabasePool, PoolConfig
         from config import config
+        from database.async_connection import AsyncDatabasePool, PoolConfig
 
         pool_config = PoolConfig(
             host=config.database.host,
@@ -84,7 +83,7 @@ async def test_models() -> bool:
     """Test Pydantic models"""
     logger.info("Testing type-safe models...")
     try:
-        from models.agent import Agent, AgentCategory, AgentCapability
+        from models.agent import Agent, AgentCapability, AgentCategory
 
         # Test Agent model
         agent = Agent(
@@ -123,9 +122,9 @@ async def test_memory_endpoint() -> bool:
     """Test memory endpoint functionality"""
     logger.info("Testing memory endpoints...")
     try:
-        from database.async_connection import PoolConfig, init_pool
-        from config import config
         from api.memory import get_memory_status
+        from config import config
+        from database.async_connection import PoolConfig, init_pool
 
         # Initialize pool
         pool_config = PoolConfig(
@@ -244,7 +243,7 @@ async def run_all_tests() -> int:
         ("Memory Tables", test_memory_tables)
     ]
 
-    results: List[bool] = []
+    results: list[bool] = []
 
     for test_name, test_func in tests:
         logger.info(f"\n🔍 Running: {test_name}")

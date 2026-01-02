@@ -20,20 +20,20 @@ import asyncio
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
-import os
-import stripe
-from email_sender import send_email
-from ai_core import ai_generate
+from typing import Any, Optional
 
+import stripe
 from loguru import logger
 
+from ai_core import ai_generate
+from email_sender import send_email
 
 # =============================================================================
 # ENUMERATIONS
@@ -109,12 +109,12 @@ class CommissionStructure:
     name: str = ""
     commission_type: CommissionType = CommissionType.PERCENTAGE
     base_rate: Decimal = Decimal("0.20")  # 20% default
-    tier_rates: Dict[str, Decimal] = field(default_factory=dict)  # tier -> rate
+    tier_rates: dict[str, Decimal] = field(default_factory=dict)  # tier -> rate
     recurring_months: int = 12  # How long recurring commissions last
     minimum_payout: Decimal = Decimal("50.00")
     payout_frequency: str = "monthly"  # weekly, bi-weekly, monthly
     cookie_duration_days: int = 90  # Attribution window
-    products: List[str] = field(default_factory=list)  # Specific products or "all"
+    products: list[str] = field(default_factory=list)  # Specific products or "all"
 
     def get_rate_for_tier(self, tier: PartnerTier) -> Decimal:
         """Get commission rate for a specific tier."""
@@ -142,14 +142,14 @@ class Affiliate:
 
     # Tracking
     affiliate_code: str = field(default_factory=lambda: secrets.token_urlsafe(8))
-    tracking_links: Dict[str, str] = field(default_factory=dict)  # campaign -> link
+    tracking_links: dict[str, str] = field(default_factory=dict)  # campaign -> link
     referral_source: str = ""
 
     # Commission Settings
     commission_structure_id: str = ""
     custom_commission_rate: Optional[Decimal] = None
     payout_method: str = "stripe"  # stripe, paypal, wire, check
-    payout_details: Dict[str, Any] = field(default_factory=dict)
+    payout_details: dict[str, Any] = field(default_factory=dict)
 
     # Multi-tier tracking
     parent_affiliate_id: Optional[str] = None  # Who referred this affiliate
@@ -169,9 +169,9 @@ class Affiliate:
     next_payout_date: Optional[datetime] = None
 
     # Metadata
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
     notes: str = ""
-    custom_data: Dict[str, Any] = field(default_factory=dict)
+    custom_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -214,7 +214,7 @@ class Referral:
     # Attribution
     attribution_model: AttributionModel = AttributionModel.LAST_CLICK
     attribution_weight: float = 1.0
-    touchpoints: List[Dict[str, Any]] = field(default_factory=list)
+    touchpoints: list[dict[str, Any]] = field(default_factory=list)
 
     # Dates
     click_date: datetime = field(default_factory=datetime.utcnow)
@@ -250,7 +250,7 @@ class Commission:
 
     # Metadata
     description: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -265,7 +265,7 @@ class Payout:
     net_amount: Decimal = Decimal("0")
 
     # Commissions included
-    commission_ids: List[str] = field(default_factory=list)
+    commission_ids: list[str] = field(default_factory=list)
     commission_count: int = 0
 
     # Payment
@@ -313,7 +313,7 @@ class PayoutQueueItem:
     completed_at: Optional[datetime] = None
 
     # Metadata
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -328,7 +328,7 @@ class PartnerContent:
     content: str = ""
 
     # Assets
-    images: List[str] = field(default_factory=list)
+    images: list[str] = field(default_factory=list)
     tracking_link: str = ""
 
     # Performance
@@ -346,7 +346,7 @@ class PartnerContent:
 # CONFIGURATION
 # =============================================================================
 
-DEFAULT_COMMISSION_STRUCTURES: Dict[PartnerType, CommissionStructure] = {
+DEFAULT_COMMISSION_STRUCTURES: dict[PartnerType, CommissionStructure] = {
     PartnerType.AFFILIATE: CommissionStructure(
         name="Standard Affiliate",
         commission_type=CommissionType.RECURRING,
@@ -444,7 +444,7 @@ class FraudDetector:
     """Detects fraudulent affiliate activity."""
 
     # Known fraud patterns
-    SUSPICIOUS_IP_RANGES: Set[str] = {
+    SUSPICIOUS_IP_RANGES: set[str] = {
         "10.0.0.",
         "192.168.",
         "172.16.",
@@ -457,14 +457,14 @@ class FraudDetector:
     MAX_REFUND_RATE = 0.15  # 15%
 
     def __init__(self):
-        self.ip_click_counts: Dict[str, List[datetime]] = {}
-        self.ip_conversion_counts: Dict[str, List[datetime]] = {}
+        self.ip_click_counts: dict[str, list[datetime]] = {}
+        self.ip_conversion_counts: dict[str, list[datetime]] = {}
 
     async def analyze_click(
         self,
         referral: Referral,
         affiliate: Affiliate
-    ) -> List[FraudSignal]:
+    ) -> list[FraudSignal]:
         """Analyze a click for fraud signals."""
         signals = []
 
@@ -525,7 +525,7 @@ class FraudDetector:
         self,
         referral: Referral,
         affiliate: Affiliate
-    ) -> List[FraudSignal]:
+    ) -> list[FraudSignal]:
         """Analyze a conversion for fraud signals."""
         signals = []
 
@@ -568,7 +568,7 @@ class FraudDetector:
 
         return signals
 
-    def calculate_fraud_score(self, signals: List[FraudSignal]) -> float:
+    def calculate_fraud_score(self, signals: list[FraudSignal]) -> float:
         """Calculate overall fraud score from signals."""
         if not signals:
             return 0.0
@@ -638,7 +638,7 @@ Format as ready-to-send email with clear sections."""
             content_type="email",
             title=f"Email Template: {product_name}",
             content=content,
-            tracking_link=f"{{TRACKING_LINK}}",
+            tracking_link="{TRACKING_LINK}",
             ai_model_used="claude-3-opus",
             generation_prompt=prompt[:500],
         )
@@ -647,9 +647,9 @@ Format as ready-to-send email with clear sections."""
         self,
         affiliate: Affiliate,
         product_name: str,
-        key_benefits: List[str],
-        platforms: List[str] = None
-    ) -> List[PartnerContent]:
+        key_benefits: list[str],
+        platforms: list[str] = None
+    ) -> list[PartnerContent]:
         """Generate social media posts for multiple platforms."""
         platforms = platforms or ["twitter", "linkedin", "facebook", "instagram"]
         contents = []
@@ -676,7 +676,7 @@ Make it sound authentic, not salesy."""
                 content_type=f"social_{platform}",
                 title=f"{platform.title()} Post: {product_name}",
                 content=content,
-                tracking_link=f"{{TRACKING_LINK}}",
+                tracking_link="{TRACKING_LINK}",
                 ai_model_used="claude-3-opus",
                 generation_prompt=prompt[:500],
             ))
@@ -687,8 +687,8 @@ Make it sound authentic, not salesy."""
         self,
         affiliate: Affiliate,
         product_name: str,
-        product_features: List[str],
-        target_keywords: List[str],
+        product_features: list[str],
+        target_keywords: list[str],
         word_count: int = 1500
     ) -> PartnerContent:
         """Generate SEO-optimized blog review article."""
@@ -726,7 +726,7 @@ Write authentically, as if you've genuinely used the product."""
             content_type="blog_review",
             title=f"Blog Review: {product_name}",
             content=content,
-            tracking_link=f"{{TRACKING_LINK}}",
+            tracking_link="{TRACKING_LINK}",
             ai_model_used="claude-3-opus",
             generation_prompt=prompt[:500],
         )
@@ -735,8 +735,8 @@ Write authentically, as if you've genuinely used the product."""
         self,
         affiliate: Affiliate,
         main_product: str,
-        competitors: List[str],
-        comparison_criteria: List[str]
+        competitors: list[str],
+        comparison_criteria: list[str]
     ) -> PartnerContent:
         """Generate product comparison content."""
         prompt = f"""Create a detailed product comparison article:
@@ -765,7 +765,7 @@ even though we favor the main product where justified."""
             content_type="comparison",
             title=f"Comparison: {main_product} vs {', '.join(competitors)}",
             content=content,
-            tracking_link=f"{{TRACKING_LINK}}",
+            tracking_link="{TRACKING_LINK}",
             ai_model_used="claude-3-opus",
             generation_prompt=prompt[:500],
         )
@@ -1122,19 +1122,19 @@ class AffiliatePartnershipPipeline:
         self.db_url = db_url or os.getenv("DATABASE_URL")
 
         # In-memory storage (would be database in production)
-        self.affiliates: Dict[str, Affiliate] = {}
-        self.referrals: Dict[str, Referral] = {}
-        self.commissions: Dict[str, Commission] = {}
-        self.payouts: Dict[str, Payout] = {}
-        self.content: Dict[str, PartnerContent] = {}
-        self.payout_queue: Dict[str, PayoutQueueItem] = {}  # Payout queue for batch processing
+        self.affiliates: dict[str, Affiliate] = {}
+        self.referrals: dict[str, Referral] = {}
+        self.commissions: dict[str, Commission] = {}
+        self.payouts: dict[str, Payout] = {}
+        self.content: dict[str, PartnerContent] = {}
+        self.payout_queue: dict[str, PayoutQueueItem] = {}  # Payout queue for batch processing
 
         # Components
         self.fraud_detector = FraudDetector()
         self.content_generator = AffiliateContentGenerator()
 
         # Tracking code -> affiliate_id mapping
-        self.tracking_codes: Dict[str, str] = {}
+        self.tracking_codes: dict[str, str] = {}
 
         # Commission structures
         self.commission_structures = DEFAULT_COMMISSION_STRUCTURES.copy()
@@ -1187,7 +1187,7 @@ class AffiliatePartnershipPipeline:
             logger.error(f"Failed to initialize affiliate tables: {e}")
             return False
 
-    async def sync_to_database(self) -> Dict[str, int]:
+    async def sync_to_database(self) -> dict[str, int]:
         """
         Sync in-memory data to database.
 
@@ -1315,7 +1315,7 @@ class AffiliatePartnershipPipeline:
             logger.error(f"Failed to sync to database: {e}")
             return {"error": str(e)}
 
-    async def load_from_database(self) -> Dict[str, int]:
+    async def load_from_database(self) -> dict[str, int]:
         """
         Load data from database into in-memory storage.
 
@@ -1418,7 +1418,7 @@ class AffiliatePartnershipPipeline:
         partner_type: PartnerType = PartnerType.AFFILIATE,
         website: str = "",
         parent_affiliate_code: str = None,
-        metadata: Dict[str, Any] = None
+        metadata: dict[str, Any] = None
     ) -> Affiliate:
         """Register a new affiliate."""
 
@@ -1501,7 +1501,7 @@ class AffiliatePartnershipPipeline:
             return self.affiliates.get(affiliate_id)
         return None
 
-    async def auto_tier_affiliates(self) -> List[Tuple[str, PartnerTier, PartnerTier]]:
+    async def auto_tier_affiliates(self) -> list[tuple[str, PartnerTier, PartnerTier]]:
         """Automatically update affiliate tiers based on monthly revenue."""
         changes = []
 
@@ -1558,8 +1558,8 @@ class AffiliatePartnershipPipeline:
         user_agent: str,
         landing_page: str,
         referrer_url: str = "",
-        utm_params: Dict[str, str] = None
-    ) -> Tuple[Referral, List[FraudSignal]]:
+        utm_params: dict[str, str] = None
+    ) -> tuple[Referral, list[FraudSignal]]:
         """Track an affiliate click."""
 
         # Get affiliate
@@ -1813,8 +1813,8 @@ class AffiliatePartnershipPipeline:
         self,
         order_value: Decimal,
         affiliate_monthly_volume: Decimal,
-        custom_tiers: Dict[Tuple[Decimal, Decimal], Decimal] = None
-    ) -> Tuple[Decimal, Decimal]:
+        custom_tiers: dict[tuple[Decimal, Decimal], Decimal] = None
+    ) -> tuple[Decimal, Decimal]:
         """
         Calculate commission based on tiered volume thresholds.
         Higher monthly sales volume = higher commission rate.
@@ -1847,7 +1847,7 @@ class AffiliatePartnershipPipeline:
         self,
         order_value: Decimal,
         affiliate_monthly_volume: Decimal
-    ) -> Tuple[Decimal, Dict[str, Any]]:
+    ) -> tuple[Decimal, dict[str, Any]]:
         """
         Calculate commission using progressive tiers (like tax brackets).
         Each portion of the sale is taxed at the rate for that tier.
@@ -1906,7 +1906,7 @@ class AffiliatePartnershipPipeline:
         order_value: Decimal,
         affiliate_id: str,
         max_levels: int = 3
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Calculate multi-level marketing (MLM) style commissions for an affiliate chain.
         Up to 3 levels of upline affiliates receive a portion of the commission.
@@ -2006,7 +2006,7 @@ class AffiliatePartnershipPipeline:
         self,
         referral: Referral,
         order_value: Decimal
-    ) -> List[Commission]:
+    ) -> list[Commission]:
         """Process multi-tier commissions for parent affiliates."""
         tier_commissions = []
 
@@ -2079,8 +2079,8 @@ class AffiliatePartnershipPipeline:
 
     async def process_payouts(
         self,
-        affiliate_ids: List[str] = None
-    ) -> List[Payout]:
+        affiliate_ids: list[str] = None
+    ) -> list[Payout]:
         """Process pending payouts for affiliates."""
         payouts = []
 
@@ -2183,22 +2183,22 @@ class AffiliatePartnershipPipeline:
         self,
         payout: Payout,
         affiliate: Affiliate
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Process actual payment using Stripe Connect."""
         stripe_api_key = os.getenv("STRIPE_API_KEY") or os.getenv("STRIPE_SECRET_KEY")
-        
+
         method = payout.payment_method
 
         if method == "stripe":
             if not stripe_api_key:
                 return {"success": False, "error": "Stripe API key not configured"}
-                
+
             stripe.api_key = stripe_api_key
-            
+
             try:
                 # Expect 'stripe_account_id' in payout_details for Stripe Connect
                 destination = affiliate.payout_details.get("stripe_account_id")
-                
+
                 if not destination:
                      return {"success": False, "error": "No Stripe Connect account ID found in payout_details"}
 
@@ -2210,7 +2210,7 @@ class AffiliatePartnershipPipeline:
                     description=f"Payout {payout.payout_id} for {affiliate.company_name}",
                     metadata={"payout_id": payout.payout_id}
                 )
-                
+
                 return {
                     "success": True,
                     "reference": transfer.id,
@@ -2219,7 +2219,7 @@ class AffiliatePartnershipPipeline:
             except Exception as e:
                 logger.error(f"Stripe payout error: {e}")
                 return {"success": False, "error": str(e)}
-        
+
         elif method == "paypal":
             return {
                 "success": True,
@@ -2333,7 +2333,7 @@ class AffiliatePartnershipPipeline:
     async def process_payout_queue(
         self,
         batch_size: int = 10
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Process pending payouts from the queue.
 
@@ -2360,7 +2360,7 @@ class AffiliatePartnershipPipeline:
     async def _process_queue_item(
         self,
         queue_item: PayoutQueueItem
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Process a single payout queue item."""
         queue_item.status = "processing"
         queue_item.started_at = datetime.utcnow()
@@ -2487,7 +2487,7 @@ class AffiliatePartnershipPipeline:
                 "error": str(e),
             }
 
-    async def get_payout_queue_status(self) -> Dict[str, Any]:
+    async def get_payout_queue_status(self) -> dict[str, Any]:
         """Get the current status of the payout queue."""
         queue_items = list(self.payout_queue.values())
 
@@ -2563,7 +2563,7 @@ class AffiliatePartnershipPipeline:
         self,
         affiliate_id: str,
         period_days: int = 30
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get affiliate dashboard data."""
         affiliate = self.affiliates.get(affiliate_id)
         if not affiliate:
@@ -2638,7 +2638,7 @@ class AffiliatePartnershipPipeline:
     async def get_program_analytics(
         self,
         period_days: int = 30
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get overall affiliate program analytics."""
         now = datetime.utcnow()
         period_start = now - timedelta(days=period_days)
@@ -2732,7 +2732,7 @@ class AffiliatePartnershipPipeline:
         self,
         affiliate_id: str,
         content_type: str,
-        product_info: Dict[str, Any]
+        product_info: dict[str, Any]
     ) -> PartnerContent:
         """Generate marketing content for an affiliate."""
         affiliate = self.affiliates.get(affiliate_id)
@@ -2999,7 +2999,7 @@ def create_affiliate_router():
             raise HTTPException(status_code=400, detail=str(e))
 
     @router.post("/payouts/process")
-    async def process_payouts(affiliate_ids: List[str] = None):
+    async def process_payouts(affiliate_ids: list[str] = None):
         """Process pending payouts."""
         payouts = await pipeline.process_payouts(affiliate_ids)
         return {

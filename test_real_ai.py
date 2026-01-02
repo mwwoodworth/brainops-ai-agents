@@ -4,9 +4,10 @@ Test REAL AI Implementation in Production
 Verifies that all AI endpoints are using actual LLMs
 """
 
-import requests
 import time
 from datetime import datetime
+
+import requests
 
 # Production URL
 BASE_URL = "https://brainops-ai-agents.onrender.com"

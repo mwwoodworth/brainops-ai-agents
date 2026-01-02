@@ -4,16 +4,17 @@ Conversation Memory Persistence System
 Stores and retrieves all conversation context across sessions
 """
 
-import os
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Optional
+
 import psycopg2
-from psycopg2.extras import RealDictCursor
 from openai import OpenAI
+from psycopg2.extras import RealDictCursor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -77,10 +78,10 @@ class Message:
     conversation_id: str
     role: MessageRole
     content: str
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     timestamp: datetime
     token_count: int
-    embedding: Optional[List[float]] = None
+    embedding: Optional[list[float]] = None
 
 @dataclass
 class Conversation:
@@ -93,9 +94,9 @@ class Conversation:
     last_message_at: datetime
     message_count: int
     total_tokens: int
-    context: Dict[str, Any]
+    context: dict[str, Any]
     summary: Optional[str] = None
-    topics: List[str] = None
+    topics: list[str] = None
     sentiment: float = 0.0
 
 class ConversationMemory:
@@ -204,7 +205,7 @@ class ConversationMemory:
             logger.error(f"Failed to create tables: {e}")
             raise
 
-    def start_conversation(self, user_id: str, title: str = None, context: Dict[str, Any] = None) -> str:
+    def start_conversation(self, user_id: str, title: str = None, context: dict[str, Any] = None) -> str:
         """Start a new conversation"""
         try:
             conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
@@ -245,7 +246,7 @@ class ConversationMemory:
                    conversation_id: str,
                    role: MessageRole,
                    content: str,
-                   metadata: Dict[str, Any] = None) -> Optional[str]:
+                   metadata: dict[str, Any] = None) -> Optional[str]:
         """Add a message to conversation"""
         try:
             # Calculate token count (approximate)
@@ -321,7 +322,7 @@ class ConversationMemory:
 
     def get_conversation_context(self,
                                  conversation_id: str,
-                                 num_messages: int = None) -> Dict[str, Any]:
+                                 num_messages: int = None) -> dict[str, Any]:
         """Get conversation context with recent messages"""
         try:
             conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
@@ -384,7 +385,7 @@ class ConversationMemory:
     def search_conversations(self,
                            user_id: str,
                            query: str,
-                           limit: int = 10) -> List[Dict]:
+                           limit: int = 10) -> list[dict]:
         """Search through conversation history"""
         try:
             # Generate query embedding
@@ -433,7 +434,7 @@ class ConversationMemory:
             logger.error(f"Search failed: {e}")
             return []
 
-    def get_related_conversations(self, conversation_id: str) -> List[Dict]:
+    def get_related_conversations(self, conversation_id: str) -> list[dict]:
         """Get conversations related to the current one"""
         try:
             conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
@@ -530,7 +531,7 @@ class ConversationMemory:
         except Exception as e:
             logger.error(f"Failed to create snapshot: {e}")
 
-    def _extract_key_points(self, messages: List[Dict]) -> List[str]:
+    def _extract_key_points(self, messages: list[dict]) -> list[str]:
         """Extract key points from messages"""
         key_points = []
 
@@ -547,7 +548,7 @@ class ConversationMemory:
 
         return key_points[:5]  # Limit to 5 key points
 
-    def _generate_embedding(self, text: str) -> List[float]:
+    def _generate_embedding(self, text: str) -> list[float]:
         """Generate embedding for text"""
         try:
             client = get_openai_client()
@@ -621,7 +622,7 @@ class ConversationMemory:
             logger.error(f"Failed to end conversation: {e}")
             return False
 
-    def get_user_statistics(self, user_id: str) -> Dict[str, Any]:
+    def get_user_statistics(self, user_id: str) -> dict[str, Any]:
         """Get conversation statistics for a user"""
         try:
             conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)

@@ -3,15 +3,17 @@
 Complete system test - assume nothing, test everything directly
 """
 
-import os
-import sys
-import psycopg2
-from psycopg2.extras import RealDictCursor
-import requests
 import json
-from datetime import datetime
-import uuid
+import os
 import subprocess
+import sys
+import uuid
+from datetime import datetime
+
+import psycopg2
+import requests
+from psycopg2.extras import RealDictCursor
+
 
 # Database configuration - NO hardcoded credentials
 # All credentials must come from environment variables
@@ -145,7 +147,7 @@ try:
     health_data = response.json()
 
     if response.status_code == 200:
-        print(f"   ✅ Health check passed")
+        print("   ✅ Health check passed")
         print(f"      Version: {health_data.get('version')}")
         print(f"      Database: {health_data.get('database')}")
         print(f"      Status: {health_data.get('status')}")
@@ -168,12 +170,12 @@ try:
     if response.status_code == 200:
         agents_data = response.json()
         agent_count = agents_data.get('count', 0)
-        print(f"   ✅ Agents endpoint working")
+        print("   ✅ Agents endpoint working")
         print(f"      Agents returned: {agent_count}")
         results['ai_agents']['agents_endpoint'] = True
         results['ai_agents']['agent_count'] = agent_count
     elif response.status_code == 503:
-        print(f"   ⚠️  Agents endpoint: Database unavailable")
+        print("   ⚠️  Agents endpoint: Database unavailable")
         results['ai_agents']['agents_endpoint'] = False
         results['ai_agents']['agents_error'] = 'Database unavailable'
     else:
@@ -220,7 +222,7 @@ try:
 
         # Check for error indicators
         if "Application error" in response.text:
-            print(f"   ⚠️  Found 'Application error' in response")
+            print("   ⚠️  Found 'Application error' in response")
             results['erp']['has_errors'] = True
         else:
             results['erp']['has_errors'] = False
@@ -250,7 +252,7 @@ for endpoint in api_endpoints:
         else:
             print(f"   ❌ {endpoint}: {response.status_code}")
             results['erp'][endpoint] = False
-    except Exception as e:
+    except Exception:
         print(f"   ❌ {endpoint}: Error")
         results['erp'][endpoint] = False
 
@@ -289,10 +291,10 @@ if results['database'].get('connection'):
 
         data = cursor.fetchone()
         if data:
-            print(f"   ✅ Select successful")
+            print("   ✅ Select successful")
             results['data']['select'] = True
         else:
-            print(f"   ❌ Select failed")
+            print("   ❌ Select failed")
             results['data']['select'] = False
 
         # Test delete
@@ -301,7 +303,7 @@ if results['database'].get('connection'):
             WHERE id = %s
         """, (result_id,))
         conn.commit()
-        print(f"   ✅ Delete successful")
+        print("   ✅ Delete successful")
         results['data']['delete'] = True
 
         cursor.close()
@@ -334,7 +336,7 @@ try:
 
     if response.status_code == 200:
         result = response.json()
-        print(f"   ✅ Agent execution successful")
+        print("   ✅ Agent execution successful")
         print(f"      Analysis ID: {result.get('analysis_id', 'N/A')}")
         results['integrations']['agent_execution'] = True
     else:

@@ -4,16 +4,17 @@ Manages the lifecycle and activation of AI agents.
 Implements real database operations for agent state management.
 """
 
-import os
 import json
 import logging
+import os
+from contextlib import contextmanager
+from datetime import datetime
+from decimal import Decimal
+from enum import Enum
+from typing import Any
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from typing import Dict, Any, List
-from datetime import datetime
-from enum import Enum
-from decimal import Decimal
-from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ class BusinessEventType(Enum):
 
 
 # Singleton instances per tenant
-_activation_systems: Dict[str, "AgentActivationSystem"] = {}
+_activation_systems: dict[str, "AgentActivationSystem"] = {}
 
 
 def get_activation_system(tenant_id: str = "default") -> "AgentActivationSystem":
@@ -134,7 +135,7 @@ class AgentActivationSystem:
                         conn.close()
             return _fallback()
 
-    async def activate_agent(self, agent_id: str) -> Dict[str, Any]:
+    async def activate_agent(self, agent_id: str) -> dict[str, Any]:
         """Activate an agent with real database update"""
         result = {
             "agent_id": agent_id,
@@ -187,7 +188,7 @@ class AgentActivationSystem:
 
         return result
 
-    async def deactivate_agent(self, agent_id: str) -> Dict[str, Any]:
+    async def deactivate_agent(self, agent_id: str) -> dict[str, Any]:
         """Deactivate an agent with real database update"""
         result = {
             "agent_id": agent_id,
@@ -239,7 +240,7 @@ class AgentActivationSystem:
 
         return result
 
-    async def get_agent_status(self, agent_id: str) -> Dict[str, Any]:
+    async def get_agent_status(self, agent_id: str) -> dict[str, Any]:
         """Get current status of an agent from database"""
         result = {
             "agent_id": agent_id,
@@ -285,7 +286,7 @@ class AgentActivationSystem:
 
         return result
 
-    async def get_all_agents_status(self) -> Dict[str, Any]:
+    async def get_all_agents_status(self) -> dict[str, Any]:
         """Get status of all agents"""
         result = {
             "timestamp": datetime.utcnow().isoformat(),
@@ -336,7 +337,7 @@ class AgentActivationSystem:
 
         return result
 
-    async def trigger_agent_by_event(self, event_type: BusinessEventType, event_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def trigger_agent_by_event(self, event_type: BusinessEventType, event_data: dict[str, Any]) -> dict[str, Any]:
         """Trigger appropriate agents based on business event"""
         result = {
             "event_type": event_type.value,
@@ -422,7 +423,7 @@ class AgentActivationSystem:
 
         return result
 
-    def get_agent_stats(self) -> Dict[str, Any]:
+    def get_agent_stats(self) -> dict[str, Any]:
         """Get statistics about agents for this tenant"""
         stats = {
             "total_agents": 0,
@@ -472,8 +473,8 @@ class AgentActivationSystem:
     async def handle_business_event(
         self,
         event_type: BusinessEventType,
-        event_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        event_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Handle business events from AUREA orchestration.
         This is the main entry point for AUREA decisions to trigger agent activation.
@@ -519,7 +520,7 @@ class AgentActivationSystem:
 
         return result
 
-    def _get_agent_types_for_event(self, event_type: BusinessEventType) -> List[str]:
+    def _get_agent_types_for_event(self, event_type: BusinessEventType) -> list[str]:
         """Get the agent types that would be triggered for an event"""
         event_agent_mapping = {
             BusinessEventType.CUSTOMER_INQUIRY: ["customer_success", "support"],
@@ -545,8 +546,8 @@ class AgentActivationSystem:
     def _log_business_event(
         self,
         event_type: BusinessEventType,
-        event_data: Dict[str, Any],
-        result: Dict[str, Any]
+        event_data: dict[str, Any],
+        result: dict[str, Any]
     ):
         """Log business event handling to database for observability"""
         try:

@@ -3,7 +3,7 @@ class PricingEngine:
     """
     Handles pricing calculations for marketplace products.
     """
-    
+
     PRODUCTS = {
         "proposal_generator": {
             "name": "AI Proposal Generator",
@@ -46,10 +46,10 @@ class PricingEngine:
         product = cls.PRODUCTS.get(product_id)
         if not product:
             raise ValueError(f"Unknown product: {product_id}")
-            
+
         if subscription_active:
             return 0.0
-            
+
         return product["unit_price"]
 
     @classmethod

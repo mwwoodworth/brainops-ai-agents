@@ -1,9 +1,10 @@
 
+import asyncio
+import logging
 import os
 import sys
-import asyncio
+
 import psycopg2
-import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -55,7 +56,7 @@ async def verify_db():
         cur.execute("SELECT version();")
         version = cur.fetchone()
         logger.info(f"✅ Database connected: {version[0]}")
-        
+
         # Check for key tables (hardcoded whitelist - no injection risk)
         tables = ["ai_agents", "agent_executions", "ai_error_logs", "ai_component_health"]
         for table in tables:
@@ -67,7 +68,7 @@ async def verify_db():
             except Exception as e:
                 logger.warning(f"⚠️ Table '{table}' check failed: {e}")
                 conn.rollback() # Reset transaction
-        
+
         conn.close()
         return True
     except Exception as e:
@@ -80,13 +81,13 @@ async def verify_ai_core():
         from ai_core import RealAICore
         ai = RealAICore()
         logger.info("✅ RealAICore instantiated")
-        
+
         # We might not have API keys in this env, so just checking instantiation and logic
         if not ai.openai_client and not ai.anthropic_client:
              logger.warning("⚠️ No AI Clients initialized (API keys likely missing)")
         else:
              logger.info("✅ AI Clients initialized")
-             
+
     except Exception as e:
         logger.error(f"❌ AI Core verification failed: {e}")
 
@@ -110,15 +111,15 @@ async def verify_self_healing():
         # We need to monkeypatch the DB config in the class or instance because it reads from env
         # The class __init__ reads env vars - ensure DB_HOST, DB_USER, DB_PASSWORD are set
         # Password must be set via DB_PASSWORD environment variable
-        
+
         # We'll set the env var for the process
         os.environ['DB_PASSWORD'] = DB_CONFIG['password']
-        
+
         healer = SelfHealingRecovery()
         logger.info("✅ SelfHealingRecovery instantiated")
         report = healer.get_health_report()
         logger.info(f"✅ Health Report generated: {list(report.keys())}")
-        
+
     except Exception as e:
         logger.error(f"❌ Self Healing verification failed: {e}")
 

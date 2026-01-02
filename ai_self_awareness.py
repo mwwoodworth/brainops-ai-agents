@@ -11,15 +11,15 @@ This module enables AI agents to:
 5. Understand their strengths and weaknesses
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-from datetime import datetime
-from typing import Dict, List, Optional, Any
+import os
 from dataclasses import dataclass
-from enum import Enum
+from datetime import datetime
 from decimal import Decimal
+from enum import Enum
+from typing import Any, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -85,15 +85,15 @@ class SelfAssessment:
     can_complete_alone: bool
     estimated_accuracy: Decimal  # 0-100
     estimated_time_seconds: int
-    limitations: List[LimitationType]
-    strengths_applied: List[str]
-    weaknesses_identified: List[str]
+    limitations: list[LimitationType]
+    strengths_applied: list[str]
+    weaknesses_identified: list[str]
     requires_human_review: bool
     human_help_reason: Optional[str]
     similar_past_tasks: int
     past_success_rate: Decimal  # 0-100
     risk_level: str  # low, medium, high, critical
-    mitigation_strategies: List[str]
+    mitigation_strategies: list[str]
     timestamp: datetime
 
 
@@ -103,14 +103,14 @@ class ReasoningExplanation:
     task_id: str
     agent_id: str
     decision_made: str
-    reasoning_steps: List[Dict[str, Any]]
-    evidence_used: List[Dict[str, Any]]
-    assumptions_made: List[str]
-    alternatives_considered: List[Dict[str, Any]]
+    reasoning_steps: list[dict[str, Any]]
+    evidence_used: list[dict[str, Any]]
+    assumptions_made: list[str]
+    alternatives_considered: list[dict[str, Any]]
     why_chosen: str
     confidence_in_decision: Decimal
-    potential_errors: List[str]
-    verification_methods: List[str]
+    potential_errors: list[str]
+    verification_methods: list[str]
     human_review_recommended: bool
     timestamp: datetime
 
@@ -126,13 +126,13 @@ class LearningFromMistake:
     how_detected: str
     impact_level: str  # minor, moderate, major, critical
     should_have_known: bool
-    warning_signs_missed: List[str]
+    warning_signs_missed: list[str]
     what_learned: str
-    how_to_prevent: List[str]
+    how_to_prevent: list[str]
     confidence_before: Decimal
     confidence_after: Decimal
     similar_mistakes_count: int
-    applied_to_agents: List[str]  # Which agents learned from this
+    applied_to_agents: list[str]  # Which agents learned from this
     timestamp: datetime
 
 
@@ -260,7 +260,7 @@ class SelfAwareAI:
         task_id: str,
         agent_id: str,
         task_description: str,
-        task_context: Dict[str, Any]
+        task_context: dict[str, Any]
     ) -> SelfAssessment:
         """
         AI assesses its own confidence in completing a task
@@ -276,7 +276,7 @@ class SelfAwareAI:
         # 3. Extract metrics from introspection
         complexity = introspection.get("complexity", "medium")
         limitations_list = introspection.get("limitations", [])
-        
+
         # Map string limitations to Enum
         limitations = []
         for lim in limitations_list:
@@ -285,12 +285,12 @@ class SelfAwareAI:
                 limitations.append(getattr(LimitationType, lim.upper(), LimitationType.KNOWLEDGE_GAP))
             except (AttributeError, TypeError) as exc:
                 logger.debug("Invalid limitation value %s: %s", lim, exc)
-                
+
         # 4. Calculate final confidence score (Blending History + Introspection)
         # We trust the AI's self-assessment heavily (70%) but weight it with past reality (30%)
         ai_confidence = float(introspection.get("confidence_score", 50))
         history_confidence = float(past_performance.get("success_rate", 50))
-        
+
         # If history is sparse, trust AI more
         if past_performance['count'] < 5:
             confidence_score = ai_confidence
@@ -370,21 +370,21 @@ class SelfAwareAI:
 
         return assessment
 
-    async def _ai_introspect(self, agent_id: str, task_description: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def _ai_introspect(self, agent_id: str, task_description: str, context: dict[str, Any]) -> dict[str, Any]:
         """
         Ask the AI to introspect and assess its own ability to perform the task.
         """
         try:
             from ai_core import ai_core
-            
+
             prompt = f"""
             You are {agent_id}, an advanced AI agent. You need to assess your ability to perform the following task.
-            
+
             TASK: {task_description}
             CONTEXT: {json.dumps(context, default=str)[:1000]}
-            
+
             Be critically honest about your capabilities. Do not be overconfident.
-            
+
             Respond in valid JSON format with the following fields:
             {{
                 "confidence_score": (0-100 number),
@@ -398,17 +398,17 @@ class SelfAwareAI:
                 "help_needed_reason": "reason if confidence < 85",
                 "reasoning": "brief explanation of your assessment"
             }}
-            
+
             Limitation Types to choose from: KNOWLEDGE_GAP, CONTEXT_INSUFFICIENT, COMPLEXITY_TOO_HIGH, AMBIGUITY_TOO_MUCH, ETHICAL_CONCERN, SAFETY_RISK, OUTSIDE_TRAINING, REQUIRES_HUMAN_JUDGMENT.
             """
-            
+
             response = await ai_core.generate(
                 prompt,
                 model="gpt-4", # Use smart model for introspection
                 temperature=0.2, # Low temp for consistent, honest assessment
                 intent="quality_gate"
             )
-            
+
             # Parse JSON
             try:
                 if isinstance(response, str):
@@ -419,7 +419,7 @@ class SelfAwareAI:
             except json.JSONDecodeError:
                 logger.warning("Failed to parse AI introspection JSON, using fallbacks")
                 return {"confidence_score": 50, "complexity": "high", "risk_level": "medium"}
-                
+
         except Exception as e:
             logger.error(f"Introspection failed: {e}")
             return {"confidence_score": 50, "complexity": "high", "risk_level": "medium"}
@@ -429,7 +429,7 @@ class SelfAwareAI:
         task_id: str,
         agent_id: str,
         decision: str,
-        reasoning_process: Dict[str, Any]
+        reasoning_process: dict[str, Any]
     ) -> ReasoningExplanation:
         """
         AI explains its reasoning in human-understandable terms
@@ -591,7 +591,7 @@ class SelfAwareAI:
 
     # Helper methods (REAL IMPLEMENTATIONS)
 
-    async def _get_past_performance(self, agent_id: str, task_description: str) -> Dict[str, Any]:
+    async def _get_past_performance(self, agent_id: str, task_description: str) -> dict[str, Any]:
         """Get agent's historical performance from DB"""
         default_perf = {
             'count': 0,
@@ -608,19 +608,19 @@ class SelfAwareAI:
                 # Query recent executions for this agent
                 rows = await conn.fetch("""
                     SELECT status, execution_time_ms
-                    FROM ai_agent_executions 
-                    WHERE agent_name = $1 
-                    ORDER BY created_at DESC 
+                    FROM ai_agent_executions
+                    WHERE agent_name = $1
+                    ORDER BY created_at DESC
                     LIMIT 50
                 """, agent_id)
-                
+
                 if not rows:
                     return default_perf
-                
+
                 total = len(rows)
                 success = sum(1 for r in rows if r['status'] == 'completed')
                 total_time = sum(r['execution_time_ms'] or 0 for r in rows)
-                
+
                 return {
                     'count': total,
                     'success_rate': (success / total) * 100,
@@ -631,7 +631,7 @@ class SelfAwareAI:
             logger.error(f"Failed to fetch past performance: {e}")
             return default_perf
 
-    async def _analyze_task_complexity(self, task_description: str, context: Dict[str, Any]) -> str:
+    async def _analyze_task_complexity(self, task_description: str, context: dict[str, Any]) -> str:
         """Analyze complexity of the task using AI"""
         # This is now largely handled by _ai_introspect, but kept for fallback compatibility
         word_count = len(task_description.split())
@@ -649,16 +649,16 @@ class SelfAwareAI:
         self,
         agent_id: str,
         task_description: str,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         complexity: str
-    ) -> List[LimitationType]:
+    ) -> list[LimitationType]:
         """Identify AI's limitations for this task"""
         # Handled by _ai_introspect
         return []
 
     async def _calculate_confidence(
         self,
-        past_performance: Dict[str, Any],
+        past_performance: dict[str, Any],
         complexity: str,
         in_training_domain: bool,
         limitations_count: int
@@ -669,7 +669,7 @@ class SelfAwareAI:
 
     async def _generate_help_reason(
         self,
-        limitations: List[LimitationType],
+        limitations: list[LimitationType],
         confidence_score: float,
         complexity: str
     ) -> str:
@@ -690,12 +690,12 @@ class SelfAwareAI:
 
         return "; ".join(reasons) if reasons else "Precautionary human review recommended"
 
-    async def _identify_strengths(self, agent_id: str, task_description: str) -> List[str]:
+    async def _identify_strengths(self, agent_id: str, task_description: str) -> list[str]:
         """Identify agent's strengths applicable to this task"""
         # Handled by _ai_introspect
         return []
 
-    async def _identify_weaknesses(self, agent_id: str, task_description: str) -> List[str]:
+    async def _identify_weaknesses(self, agent_id: str, task_description: str) -> list[str]:
         """Identify agent's weaknesses relevant to this task"""
         # Handled by _ai_introspect
         return []
@@ -703,7 +703,7 @@ class SelfAwareAI:
     async def _assess_risk_level(
         self,
         confidence_score: float,
-        limitations: List[LimitationType],
+        limitations: list[LimitationType],
         complexity: str
     ) -> str:
         """Assess risk level of proceeding"""
@@ -719,10 +719,10 @@ class SelfAwareAI:
 
     async def _generate_mitigation_strategies(
         self,
-        limitations: List[LimitationType],
-        weaknesses: List[str],
+        limitations: list[LimitationType],
+        weaknesses: list[str],
         risk_level: str
-    ) -> List[str]:
+    ) -> list[str]:
         """Generate strategies to mitigate risks"""
         strategies = []
 
@@ -778,7 +778,7 @@ class SelfAwareAI:
     # Additional helper methods for reasoning explanation and learning
     # (Simplified implementations - full versions would be more sophisticated)
 
-    async def _break_down_reasoning(self, reasoning_process: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def _break_down_reasoning(self, reasoning_process: dict[str, Any]) -> list[dict[str, Any]]:
         """Break down reasoning into steps"""
         return [
             {"step": 1, "action": "Analyzed input data", "outcome": "Identified key patterns"},
@@ -786,14 +786,14 @@ class SelfAwareAI:
             {"step": 3, "action": "Applied decision rules", "outcome": "Selected best option"}
         ]
 
-    async def _identify_evidence(self, reasoning_process: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def _identify_evidence(self, reasoning_process: dict[str, Any]) -> list[dict[str, Any]]:
         """Identify evidence used in reasoning"""
         return [
             {"type": "historical_data", "source": "database", "confidence": 0.9},
             {"type": "user_input", "source": "current_context", "confidence": 1.0}
         ]
 
-    async def _list_assumptions(self, reasoning_process: Dict[str, Any]) -> List[str]:
+    async def _list_assumptions(self, reasoning_process: dict[str, Any]) -> list[str]:
         """List assumptions made during reasoning"""
         return [
             "Customer behavior remains consistent with past patterns",
@@ -801,7 +801,7 @@ class SelfAwareAI:
             "Input data is accurate and complete"
         ]
 
-    async def _find_alternatives(self, reasoning_process: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def _find_alternatives(self, reasoning_process: dict[str, Any]) -> list[dict[str, Any]]:
         """Find alternatives that were considered"""
         return [
             {"option": "Alternative A", "pros": ["Faster"], "cons": ["Less accurate"], "score": 0.7},
@@ -811,8 +811,8 @@ class SelfAwareAI:
     async def _explain_choice(
         self,
         decision: str,
-        alternatives: List[Dict[str, Any]],
-        evidence: List[Dict[str, Any]]
+        alternatives: list[dict[str, Any]],
+        evidence: list[dict[str, Any]]
     ) -> str:
         """Explain why this choice was made using AI introspection"""
         # Use AI for real explanation when available
@@ -836,9 +836,9 @@ Provide a 1-2 sentence explanation focusing on the key reasoning."""
 
     async def _calculate_decision_confidence(
         self,
-        evidence: List[Dict[str, Any]],
-        assumptions: List[str],
-        alternatives: List[Dict[str, Any]]
+        evidence: list[dict[str, Any]],
+        assumptions: list[str],
+        alternatives: list[dict[str, Any]]
     ) -> Decimal:
         """Calculate confidence in the decision using AI analysis"""
         # Use AI for real confidence calculation when available
@@ -913,9 +913,9 @@ Reply with the new confidence percentage (0-100)."""
     async def _identify_potential_errors(
         self,
         decision: str,
-        assumptions: List[str],
-        evidence: List[Dict[str, Any]]
-    ) -> List[str]:
+        assumptions: list[str],
+        evidence: list[dict[str, Any]]
+    ) -> list[str]:
         """Identify potential errors in reasoning using AI analysis"""
         if AI_CORE_AVAILABLE:
             try:
@@ -946,8 +946,8 @@ List 3-5 specific potential errors or blind spots. Be concise."""
     async def _suggest_verification(
         self,
         decision: str,
-        potential_errors: List[str]
-    ) -> List[str]:
+        potential_errors: list[str]
+    ) -> list[str]:
         """Suggest ways to verify the decision"""
         return [
             "A/B test the decision with small sample first",
@@ -1007,7 +1007,7 @@ List 3-5 specific potential errors or blind spots. Be concise."""
         similar_count = await self._count_similar_mistakes(agent_id, root_cause)
         return similar_count > 0
 
-    async def _identify_warning_signs(self, task_id: str, agent_id: str, root_cause: str) -> List[str]:
+    async def _identify_warning_signs(self, task_id: str, agent_id: str, root_cause: str) -> list[str]:
         """Identify warning signs that were missed"""
         return [
             "Low confidence score was ignored",
@@ -1019,12 +1019,12 @@ List 3-5 specific potential errors or blind spots. Be concise."""
         self,
         what_went_wrong: str,
         root_cause: str,
-        warning_signs: List[str]
+        warning_signs: list[str]
     ) -> str:
         """Extract key learning from mistake"""
         return f"When {root_cause}, must {warning_signs[0] if warning_signs else 'proceed with caution'}"
 
-    async def _generate_prevention_strategies(self, root_cause: str, what_learned: str) -> List[str]:
+    async def _generate_prevention_strategies(self, root_cause: str, what_learned: str) -> list[str]:
         """Generate strategies to prevent similar mistakes"""
         return [
             "Require higher confidence threshold for similar tasks",
@@ -1049,8 +1049,8 @@ List 3-5 specific potential errors or blind spots. Be concise."""
         self,
         agent_id: str,
         what_learned: str,
-        how_to_prevent: List[str]
-    ) -> List[str]:
+        how_to_prevent: list[str]
+    ) -> list[str]:
         """Share learning with other agents"""
         # In production, this would broadcast to all relevant agents
         # For now, return list of agents that should learn from this

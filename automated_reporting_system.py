@@ -4,16 +4,17 @@ Automated Reporting System - Task 20
 Real-time business intelligence and automated report generation
 """
 
-import os
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any
+from decimal import Decimal
 from enum import Enum
+from typing import Any, Optional
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from decimal import Decimal
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -121,7 +122,7 @@ class AutomatedReportingSystem:
     async def create_report(
         self,
         report_type: ReportType,
-        parameters: Dict[str, Any],
+        parameters: dict[str, Any],
         format: ReportFormat = ReportFormat.JSON,
         schedule: Optional[ReportSchedule] = None
     ) -> str:
@@ -223,8 +224,8 @@ class AutomatedReportingSystem:
     async def _generate_report_data(
         self,
         report_type: ReportType,
-        parameters: Dict
-    ) -> Dict:
+        parameters: dict
+    ) -> dict:
         """Generate data for specific report type"""
         conn = self._get_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -249,8 +250,8 @@ class AutomatedReportingSystem:
     async def _get_daily_summary(
         self,
         cursor: Any,
-        parameters: Dict
-    ) -> Dict:
+        parameters: dict
+    ) -> dict:
         """Get daily summary data"""
         date = parameters.get('date', datetime.now(timezone.utc).date())
 
@@ -292,8 +293,8 @@ class AutomatedReportingSystem:
     async def _get_weekly_performance(
         self,
         cursor: Any,
-        parameters: Dict
-    ) -> Dict:
+        parameters: dict
+    ) -> dict:
         """Get weekly performance metrics"""
         end_date = parameters.get('end_date', datetime.now(timezone.utc).date())
         start_date = end_date - timedelta(days=7)
@@ -351,8 +352,8 @@ class AutomatedReportingSystem:
     async def _get_monthly_financial(
         self,
         cursor: Any,
-        parameters: Dict
-    ) -> Dict:
+        parameters: dict
+    ) -> dict:
         """Get monthly financial report"""
         month = parameters.get('month', datetime.now(timezone.utc).month)
         year = parameters.get('year', datetime.now(timezone.utc).year)
@@ -398,8 +399,8 @@ class AutomatedReportingSystem:
     async def _get_customer_analytics(
         self,
         cursor: Any,
-        parameters: Dict
-    ) -> Dict:
+        parameters: dict
+    ) -> dict:
         """Get customer analytics"""
         # Customer acquisition and retention
         cursor.execute("""
@@ -463,8 +464,8 @@ class AutomatedReportingSystem:
     async def _get_agent_performance(
         self,
         cursor: Any,
-        parameters: Dict
-    ) -> Dict:
+        parameters: dict
+    ) -> dict:
         """Get AI agent performance metrics"""
         lookback_days = parameters.get('days', 7)
 
@@ -525,8 +526,8 @@ class AutomatedReportingSystem:
     async def _get_lead_pipeline(
         self,
         cursor: Any,
-        parameters: Dict
-    ) -> Dict:
+        parameters: dict
+    ) -> dict:
         """Get lead pipeline analytics"""
         # Lead funnel
         cursor.execute("""
@@ -578,8 +579,8 @@ class AutomatedReportingSystem:
     async def _get_ai_system_status(
         self,
         cursor: Any,
-        parameters: Dict
-    ) -> Dict:
+        parameters: dict
+    ) -> dict:
         """Get comprehensive AI system status"""
         # System health
         cursor.execute("""
@@ -645,9 +646,9 @@ class AutomatedReportingSystem:
     async def _generate_insights(
         self,
         report_type: ReportType,
-        metrics: Dict,
-        report_data: Dict
-    ) -> List[Dict]:
+        metrics: dict,
+        report_data: dict
+    ) -> list[dict]:
         """Generate actionable insights from report data"""
         insights = []
 
@@ -699,7 +700,7 @@ class AutomatedReportingSystem:
         self,
         report_id: str,
         report_type: ReportType,
-        parameters: Dict,
+        parameters: dict,
         schedule: ReportSchedule,
         cursor: Any
     ) -> None:
@@ -737,7 +738,7 @@ class AutomatedReportingSystem:
 
     async def _handle_alerts(
         self,
-        alerts: List[Dict],
+        alerts: list[dict],
         report_id: str,
         cursor: Any
     ) -> None:
@@ -761,7 +762,7 @@ class AutomatedReportingSystem:
             if alert['severity'] == 'critical':
                 await self.distribution_manager.send_alert(alert)
 
-    async def get_report(self, report_id: str) -> Dict:
+    async def get_report(self, report_id: str) -> dict:
         """Retrieve a generated report"""
         try:
             conn = self._get_connection()
@@ -791,7 +792,7 @@ class AutomatedReportingSystem:
             logger.error(f"Error retrieving report: {e}")
             return {"error": str(e)}
 
-    async def execute_scheduled_reports(self) -> List[str]:
+    async def execute_scheduled_reports(self) -> list[str]:
         """Execute all due scheduled reports"""
         try:
             conn = self._get_connection()
@@ -849,9 +850,9 @@ class ReportGenerator:
 
     async def format_report(
         self,
-        data: Dict,
-        metrics: Dict,
-        insights: List[Dict],
+        data: dict,
+        metrics: dict,
+        insights: list[dict],
         format: ReportFormat
     ) -> str:
         """Format report in requested format"""
@@ -874,9 +875,9 @@ class ReportGenerator:
 
     def _generate_html_report(
         self,
-        data: Dict,
-        metrics: Dict,
-        insights: List[Dict]
+        data: dict,
+        metrics: dict,
+        insights: list[dict]
     ) -> str:
         """Generate HTML formatted report"""
         html = f"""
@@ -909,7 +910,7 @@ class ReportGenerator:
         html += "</body></html>"
         return html
 
-    def _generate_csv_report(self, data: Dict) -> str:
+    def _generate_csv_report(self, data: dict) -> str:
         """Generate CSV formatted report"""
         # Simple CSV generation - would be expanded based on data structure
         csv_lines = []
@@ -935,8 +936,8 @@ class MetricCalculator:
     async def calculate_metrics(
         self,
         report_type: ReportType,
-        data: Dict
-    ) -> Dict:
+        data: dict
+    ) -> dict:
         """Calculate relevant metrics for report type"""
         metrics = {}
 
@@ -975,9 +976,9 @@ class VisualizationEngine:
 
     async def create_visualization(
         self,
-        data: Dict,
+        data: dict,
         viz_type: str
-    ) -> Dict:
+    ) -> dict:
         """Create visualization configuration"""
         # This would integrate with charting libraries
         return {
@@ -996,9 +997,9 @@ class DistributionManager:
     async def distribute_report(
         self,
         report_id: str,
-        recipients: List[str],
+        recipients: list[str],
         format: ReportFormat
-    ) -> Dict:
+    ) -> dict:
         """Distribute report to recipients"""
         # This would integrate with email/notification services
         return {
@@ -1008,7 +1009,7 @@ class DistributionManager:
             "sent_at": datetime.now(timezone.utc).isoformat()
         }
 
-    async def send_alert(self, alert: Dict) -> None:
+    async def send_alert(self, alert: dict) -> None:
         """Send critical alert"""
         logger.warning(f"ALERT: {alert.get('message')}")
         # Would integrate with notification services
@@ -1020,8 +1021,8 @@ class AlertSystem:
     async def check_alerts(
         self,
         report_type: ReportType,
-        metrics: Dict
-    ) -> List[Dict]:
+        metrics: dict
+    ) -> list[dict]:
         """Check if metrics trigger any alerts"""
         alerts = []
 

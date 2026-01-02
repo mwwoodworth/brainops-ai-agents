@@ -4,18 +4,18 @@ Customer Acquisition AI Agents
 Autonomous agents that find, qualify, and convert leads automatically
 """
 
-import os
+import asyncio
 import json
 import logging
+import os
 import uuid
-import asyncio
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timezone, timedelta
-from enum import Enum
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Any, Optional
 
-import openai
 import anthropic
+import openai
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -94,13 +94,13 @@ class AcquisitionTarget:
     size: str
     location: str
     website: Optional[str]
-    social_profiles: Dict[str, str]
-    decision_makers: List[Dict]
-    pain_points: List[str]
-    budget_range: Tuple[float, float]
+    social_profiles: dict[str, str]
+    decision_makers: list[dict]
+    pain_points: list[str]
+    budget_range: tuple[float, float]
     intent_score: float
     acquisition_channel: AcquisitionChannel
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
 class CustomerAcquisitionAgent:
     """Base agent for customer acquisition"""
@@ -186,7 +186,7 @@ class WebSearchAgent(CustomerAcquisitionAgent):
     def __init__(self):
         super().__init__("WebSearchAgent")
 
-    async def search_for_leads(self, criteria: Dict) -> List[AcquisitionTarget]:
+    async def search_for_leads(self, criteria: dict) -> list[AcquisitionTarget]:
         """Search web for potential customers matching criteria"""
         try:
             # Generate search queries using AI
@@ -235,7 +235,7 @@ class WebSearchAgent(CustomerAcquisitionAgent):
             logger.error(f"Web search failed: {e}")
             return []
 
-    async def _execute_search(self, query: str) -> List[Dict]:
+    async def _execute_search(self, query: str) -> list[dict]:
         """Execute web search using Perplexity AI for real-time results"""
         try:
             from ai_advanced_providers import advanced_ai
@@ -301,7 +301,7 @@ Return JSON array with company_name, location, website, and buying_signals for e
             logger.error(f"Web search execution failed: {e}")
             return []
 
-    async def _analyze_target(self, target_data: Dict) -> AcquisitionTarget:
+    async def _analyze_target(self, target_data: dict) -> AcquisitionTarget:
         """Analyze target company for fit and intent"""
         try:
             # Use AI to analyze company
@@ -395,7 +395,7 @@ class SocialMediaAgent(CustomerAcquisitionAgent):
     def __init__(self):
         super().__init__("SocialMediaAgent")
 
-    async def monitor_social_signals(self) -> List[Dict]:
+    async def monitor_social_signals(self) -> list[dict]:
         """Monitor social media for buying signals"""
         try:
             # Social media monitoring logic
@@ -430,7 +430,7 @@ class SocialMediaAgent(CustomerAcquisitionAgent):
             logger.error(f"Social monitoring failed: {e}")
             return []
 
-    async def _search_social_platforms(self, keyword: str) -> List[Dict]:
+    async def _search_social_platforms(self, keyword: str) -> list[dict]:
         """Search social platforms for buying signals using Perplexity AI"""
         try:
             from ai_advanced_providers import advanced_ai
@@ -492,7 +492,7 @@ Return ONLY valid JSON array, no other text."""
             logger.error(f"Social platform search failed: {e}")
             return []
 
-    async def _process_social_signal(self, signal: Dict) -> Optional[Dict]:
+    async def _process_social_signal(self, signal: dict) -> Optional[dict]:
         """Process social signal into lead"""
         try:
             # Analyze social signal
@@ -527,7 +527,7 @@ class OutreachAgent(CustomerAcquisitionAgent):
     def __init__(self):
         super().__init__("OutreachAgent")
 
-    async def create_outreach_sequence(self, target_id: str) -> Dict:
+    async def create_outreach_sequence(self, target_id: str) -> dict:
         """Create multi-touch outreach sequence"""
         try:
             # Get target data
@@ -573,7 +573,7 @@ class OutreachAgent(CustomerAcquisitionAgent):
             logger.error(f"Failed to create outreach sequence: {e}")
             return {}
 
-    async def _get_target(self, target_id: str) -> Optional[Dict]:
+    async def _get_target(self, target_id: str) -> Optional[dict]:
         """Get target data from database"""
         try:
             conn = _get_db_connection(cursor_factory=RealDictCursor)
@@ -587,7 +587,7 @@ class OutreachAgent(CustomerAcquisitionAgent):
             logger.error(f"Failed to get target: {e}")
             return None
 
-    async def _store_outreach_sequence(self, target_id: str, sequence: Dict):
+    async def _store_outreach_sequence(self, target_id: str, sequence: dict):
         """Store outreach sequence"""
         try:
             conn = _get_db_connection()
@@ -611,7 +611,7 @@ class OutreachAgent(CustomerAcquisitionAgent):
         except Exception as e:
             logger.error(f"Failed to store sequence: {e}")
 
-    async def _schedule_outreach(self, target_id: str, touch: Dict, delay_hours: int):
+    async def _schedule_outreach(self, target_id: str, touch: dict, delay_hours: int):
         """Schedule outreach touch"""
         try:
             conn = _get_db_connection()
@@ -649,7 +649,7 @@ class ConversionAgent(CustomerAcquisitionAgent):
     def __init__(self):
         super().__init__("ConversionAgent")
 
-    async def optimize_conversion_path(self, target_id: str) -> Dict:
+    async def optimize_conversion_path(self, target_id: str) -> dict:
         """Optimize the conversion path for a target"""
         try:
             # Analyze target's engagement
@@ -689,7 +689,7 @@ class ConversionAgent(CustomerAcquisitionAgent):
             logger.error(f"Conversion optimization failed: {e}")
             return {}
 
-    async def _analyze_engagement(self, target_id: str) -> Dict:
+    async def _analyze_engagement(self, target_id: str) -> dict:
         """Analyze target's engagement history"""
         try:
             conn = _get_db_connection(cursor_factory=RealDictCursor)
@@ -716,7 +716,7 @@ class ConversionAgent(CustomerAcquisitionAgent):
             logger.error(f"Failed to analyze engagement: {e}")
             return {}
 
-    async def _execute_conversion_strategy(self, target_id: str, strategy: Dict) -> Dict:
+    async def _execute_conversion_strategy(self, target_id: str, strategy: dict) -> dict:
         """Execute the conversion strategy"""
         # Implement conversion strategy execution
         return {"status": "executed", "strategy": strategy}
@@ -731,7 +731,7 @@ class AcquisitionOrchestrator:
         self.conversion_agent = ConversionAgent()
         logger.info("Customer Acquisition Orchestrator initialized")
 
-    async def run_acquisition_pipeline(self, criteria: Dict):
+    async def run_acquisition_pipeline(self, criteria: dict):
         """Run full customer acquisition pipeline"""
         try:
             logger.info("Starting customer acquisition pipeline")
@@ -763,7 +763,7 @@ class AcquisitionOrchestrator:
             logger.error(f"Acquisition pipeline failed: {e}")
             return {"status": "failed", "error": str(e)}
 
-    async def get_acquisition_metrics(self) -> Dict:
+    async def get_acquisition_metrics(self) -> dict:
         """Get acquisition performance metrics"""
         try:
             conn = _get_db_connection(cursor_factory=RealDictCursor)

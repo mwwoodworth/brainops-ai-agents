@@ -16,8 +16,8 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from database.async_connection import get_pool
 
@@ -32,10 +32,10 @@ class BaseAgent:
         self.type = agent_type
         self.logger = logging.getLogger(f"Agent.{name}")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError(f"Agent {self.name} must implement execute method")
 
-    async def log_execution(self, task: Dict, result: Dict):
+    async def log_execution(self, task: dict, result: dict):
         """Log execution to database"""
         try:
             pool = get_pool()
@@ -70,7 +70,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
     def __init__(self):
         super().__init__("LeadDiscoveryAgentReal", "revenue")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute lead discovery from real customer data"""
         action = task.get('action', 'discover_all')
 
@@ -87,7 +87,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
             self.logger.error(f"Lead discovery failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def discover_all_leads(self) -> Dict[str, Any]:
+    async def discover_all_leads(self) -> dict[str, Any]:
         """Run all lead discovery methods and aggregate results"""
         results = {
             "status": "completed",
@@ -118,7 +118,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
         await self.log_execution({"action": "discover_all"}, results)
         return results
 
-    async def discover_reengagement_leads(self) -> Dict[str, Any]:
+    async def discover_reengagement_leads(self) -> dict[str, Any]:
         """Find customers who haven't had jobs in 12+ months."""
         try:
             pool = get_pool()
@@ -169,7 +169,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
             self.logger.error(f"Re-engagement discovery failed: {e}")
             return {"status": "error", "error": str(e), "leads_found": 0, "leads_stored": 0}
 
-    async def discover_upsell_leads(self) -> Dict[str, Any]:
+    async def discover_upsell_leads(self) -> dict[str, Any]:
         """Find high-value customers for upselling premium services."""
         try:
             pool = get_pool()
@@ -236,7 +236,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
             self.logger.error(f"Upsell discovery failed: {e}")
             return {"status": "error", "error": str(e), "leads_found": 0, "leads_stored": 0}
 
-    async def discover_referral_leads(self) -> Dict[str, Any]:
+    async def discover_referral_leads(self) -> dict[str, Any]:
         """Find active, satisfied customers who could provide referrals."""
         try:
             pool = get_pool()
@@ -374,7 +374,7 @@ class NurtureExecutorAgentReal(BaseAgent):
     def __init__(self):
         super().__init__("NurtureExecutorAgentReal", "revenue")
 
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute nurture sequence creation and email queueing"""
         action = task.get('action', 'nurture_new_leads')
 
@@ -393,7 +393,7 @@ class NurtureExecutorAgentReal(BaseAgent):
             self.logger.error(f"Nurture execution failed: {e}")
             return {"status": "error", "error": str(e)}
 
-    async def nurture_new_leads(self) -> Dict[str, Any]:
+    async def nurture_new_leads(self) -> dict[str, Any]:
         """Process all new leads and create nurture sequences"""
         try:
             pool = get_pool()
@@ -458,7 +458,7 @@ class NurtureExecutorAgentReal(BaseAgent):
         lead_id: str,
         sequence_type: str,
         lead_data: dict = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a nurture sequence for a specific lead"""
         try:
             pool = get_pool()
@@ -643,7 +643,7 @@ class NurtureExecutorAgentReal(BaseAgent):
             self.logger.error(f"Failed to queue emails: {e}")
             return 0
 
-    async def queue_pending_emails(self) -> Dict[str, Any]:
+    async def queue_pending_emails(self) -> dict[str, Any]:
         """Process any pending emails that haven't been queued yet"""
         try:
             pool = get_pool()

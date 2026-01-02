@@ -4,16 +4,17 @@ Predictive Scheduling System - Task 18
 AI-powered predictive scheduling for optimal task execution and resource allocation
 """
 
-import os
 import logging
+import os
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
-from enum import Enum
-from dataclasses import dataclass, field
 from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Optional
+
 import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+from psycopg2.extras import Json, RealDictCursor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -95,12 +96,12 @@ class SchedulableTask:
     task_type: TaskType
     priority: TaskPriority
     estimated_duration_minutes: float
-    resource_requirements: Dict[ResourceType, float]
-    dependencies: List[str] = field(default_factory=list)
+    resource_requirements: dict[ResourceType, float]
+    dependencies: list[str] = field(default_factory=list)
     deadline: Optional[datetime] = None
-    preferred_time_windows: List[Dict] = field(default_factory=list)
-    constraints: Dict = field(default_factory=dict)
-    metadata: Dict = field(default_factory=dict)
+    preferred_time_windows: list[dict] = field(default_factory=list)
+    constraints: dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -110,7 +111,7 @@ class ScheduleSlot:
     start_time: datetime
     end_time: datetime
     task_id: Optional[str] = None
-    available_resources: Dict[ResourceType, float] = field(default_factory=dict)
+    available_resources: dict[ResourceType, float] = field(default_factory=dict)
     predicted_load: float = 0.0
     confidence: PredictionConfidence = PredictionConfidence.MEDIUM
 
@@ -122,19 +123,19 @@ class SchedulePrediction:
     recommended_slot: ScheduleSlot
     success_probability: float
     completion_time_estimate: datetime
-    resource_utilization: Dict[ResourceType, float]
+    resource_utilization: dict[ResourceType, float]
     confidence: PredictionConfidence
-    alternative_slots: List[ScheduleSlot] = field(default_factory=list)
-    risk_factors: List[str] = field(default_factory=list)
+    alternative_slots: list[ScheduleSlot] = field(default_factory=list)
+    risk_factors: list[str] = field(default_factory=list)
 
 
 class LoadPredictor:
     """Predicts system load based on historical data"""
 
     def __init__(self):
-        self.historical_data: Dict[str, List[float]] = defaultdict(list)
-        self.hourly_patterns: Dict[int, float] = {}
-        self.daily_patterns: Dict[int, float] = {}
+        self.historical_data: dict[str, list[float]] = defaultdict(list)
+        self.hourly_patterns: dict[int, float] = {}
+        self.daily_patterns: dict[int, float] = {}
 
     async def learn_from_history(self, lookback_days: int = 30):
         """Learn load patterns from historical data"""
@@ -184,7 +185,7 @@ class LoadPredictor:
     def predict_load(
         self,
         target_time: datetime
-    ) -> Tuple[float, PredictionConfidence]:
+    ) -> tuple[float, PredictionConfidence]:
         """Predict system load at a given time"""
         hour = target_time.hour
         day = target_time.weekday()
@@ -210,7 +211,7 @@ class LoadPredictor:
         start_time: datetime,
         end_time: datetime,
         duration_minutes: int
-    ) -> List[Tuple[datetime, float]]:
+    ) -> list[tuple[datetime, float]]:
         """Get optimal scheduling windows based on predicted load"""
         windows = []
         current = start_time
@@ -230,7 +231,7 @@ class ResourceManager:
     """Manages resource allocation and availability"""
 
     def __init__(self):
-        self.resource_limits: Dict[ResourceType, float] = {
+        self.resource_limits: dict[ResourceType, float] = {
             ResourceType.CPU: 100.0,
             ResourceType.MEMORY: 16384.0,  # MB
             ResourceType.GPU: 1.0,
@@ -238,13 +239,13 @@ class ResourceManager:
             ResourceType.DATABASE_CONNECTIONS: 100.0,
             ResourceType.NETWORK: 1000.0  # Mbps
         }
-        self.current_usage: Dict[ResourceType, float] = {r: 0.0 for r in ResourceType}
-        self.reservations: Dict[str, Dict[ResourceType, float]] = {}
+        self.current_usage: dict[ResourceType, float] = {r: 0.0 for r in ResourceType}
+        self.reservations: dict[str, dict[ResourceType, float]] = {}
 
     def check_availability(
         self,
-        requirements: Dict[ResourceType, float]
-    ) -> Tuple[bool, List[str]]:
+        requirements: dict[ResourceType, float]
+    ) -> tuple[bool, list[str]]:
         """Check if resources are available"""
         unavailable = []
 
@@ -258,7 +259,7 @@ class ResourceManager:
     def reserve_resources(
         self,
         task_id: str,
-        requirements: Dict[ResourceType, float]
+        requirements: dict[ResourceType, float]
     ) -> bool:
         """Reserve resources for a task"""
         available, _ = self.check_availability(requirements)
@@ -280,7 +281,7 @@ class ResourceManager:
                 )
             del self.reservations[task_id]
 
-    def get_utilization(self) -> Dict[ResourceType, float]:
+    def get_utilization(self) -> dict[ResourceType, float]:
         """Get current resource utilization percentages"""
         return {
             r: (self.current_usage.get(r, 0) / self.resource_limits.get(r, 1)) * 100
@@ -292,10 +293,10 @@ class DependencyResolver:
     """Resolves task dependencies"""
 
     def __init__(self):
-        self.task_graph: Dict[str, List[str]] = {}
+        self.task_graph: dict[str, list[str]] = {}
         self.completed_tasks: set = set()
 
-    def add_task(self, task_id: str, dependencies: List[str]):
+    def add_task(self, task_id: str, dependencies: list[str]):
         """Add a task with its dependencies"""
         self.task_graph[task_id] = dependencies
 
@@ -303,13 +304,13 @@ class DependencyResolver:
         """Mark a task as completed"""
         self.completed_tasks.add(task_id)
 
-    def can_schedule(self, task_id: str) -> Tuple[bool, List[str]]:
+    def can_schedule(self, task_id: str) -> tuple[bool, list[str]]:
         """Check if a task's dependencies are satisfied"""
         dependencies = self.task_graph.get(task_id, [])
         pending = [d for d in dependencies if d not in self.completed_tasks]
         return len(pending) == 0, pending
 
-    def get_execution_order(self, tasks: List[str]) -> List[str]:
+    def get_execution_order(self, tasks: list[str]) -> list[str]:
         """Get optimal execution order respecting dependencies (topological sort)"""
         # Build in-degree map
         in_degree = {t: 0 for t in tasks}
@@ -353,9 +354,9 @@ class ScheduleOptimizer:
 
     async def optimize_schedule(
         self,
-        tasks: List[SchedulableTask],
+        tasks: list[SchedulableTask],
         planning_horizon_hours: int = 24
-    ) -> List[SchedulePrediction]:
+    ) -> list[SchedulePrediction]:
         """Generate optimized schedule for tasks"""
         predictions = []
         start_time = datetime.now(timezone.utc)
@@ -519,7 +520,7 @@ class ScheduleOptimizer:
         self,
         task: SchedulableTask,
         slot: ScheduleSlot
-    ) -> List[str]:
+    ) -> list[str]:
         """Identify potential risks"""
         risks = []
 
@@ -677,10 +678,10 @@ class PredictiveSchedulingSystem:
         task_type: TaskType,
         priority: TaskPriority,
         estimated_duration: float,
-        resource_requirements: Optional[Dict[str, float]] = None,
-        dependencies: Optional[List[str]] = None,
+        resource_requirements: Optional[dict[str, float]] = None,
+        dependencies: Optional[list[str]] = None,
         deadline: Optional[datetime] = None,
-        metadata: Optional[Dict] = None
+        metadata: Optional[dict] = None
     ) -> str:
         """Create a new schedulable task"""
         try:
@@ -831,7 +832,7 @@ class PredictiveSchedulingSystem:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         status: Optional[ScheduleStatus] = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Get scheduled tasks"""
         try:
             conn = self._get_connection()
@@ -873,7 +874,7 @@ class PredictiveSchedulingSystem:
             logger.error(f"Failed to get schedule: {e}")
             return []
 
-    async def execute_scheduled_tasks(self) -> List[Dict]:
+    async def execute_scheduled_tasks(self) -> list[dict]:
         """Execute all due scheduled tasks"""
         try:
             conn = self._get_connection()
@@ -959,7 +960,7 @@ class PredictiveSchedulingSystem:
     async def get_load_forecast(
         self,
         hours_ahead: int = 24
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Get load forecast for upcoming hours"""
         forecast = []
         current = datetime.now(timezone.utc)
@@ -981,7 +982,7 @@ class PredictiveSchedulingSystem:
 
         return forecast
 
-    async def get_scheduling_metrics(self) -> Dict:
+    async def get_scheduling_metrics(self) -> dict:
         """Get scheduling performance metrics"""
         try:
             conn = self._get_connection()

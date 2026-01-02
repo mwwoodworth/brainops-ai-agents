@@ -14,10 +14,10 @@ The system finally ACTS on the insights it generates.
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
-from enum import Enum
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Optional
 
 from database.async_connection import get_pool
 
@@ -58,7 +58,7 @@ class Pattern:
     occurrence_count: int
     confidence: float
     time_window: str
-    evidence: Dict[str, Any]
+    evidence: dict[str, Any]
 
 
 @dataclass
@@ -70,10 +70,10 @@ class Proposal:
     risk_level: RiskLevel
     estimated_impact: str
     estimated_effort_hours: float
-    benefits: List[str]
-    risks: List[str]
-    implementation_steps: List[str]
-    success_criteria: List[str]
+    benefits: list[str]
+    risks: list[str]
+    implementation_steps: list[str]
+    success_criteria: list[str]
     auto_approvable: bool
     pattern_source: Optional[Pattern] = None
 
@@ -184,7 +184,7 @@ class LearningFeedbackLoop:
             logger.error(f"Failed to initialize database: {e}")
             raise
 
-    async def analyze_insights(self, hours: int = 24) -> List[Pattern]:
+    async def analyze_insights(self, hours: int = 24) -> list[Pattern]:
         """
         Analyze recent insights to identify actionable patterns.
 
@@ -218,7 +218,7 @@ class LearningFeedbackLoop:
             logger.error(f"Failed to analyze insights: {e}")
             return []
 
-    async def _analyze_agent_failures(self, pool, hours: int) -> List[Pattern]:
+    async def _analyze_agent_failures(self, pool, hours: int) -> list[Pattern]:
         """Identify agents with high failure rates"""
         patterns = []
 
@@ -270,7 +270,7 @@ class LearningFeedbackLoop:
 
         return patterns
 
-    async def _analyze_performance_patterns(self, pool, hours: int) -> List[Pattern]:
+    async def _analyze_performance_patterns(self, pool, hours: int) -> list[Pattern]:
         """Identify performance degradation patterns"""
         patterns = []
 
@@ -344,7 +344,7 @@ class LearningFeedbackLoop:
 
         return patterns
 
-    async def _analyze_insight_trends(self, pool, hours: int) -> List[Pattern]:
+    async def _analyze_insight_trends(self, pool, hours: int) -> list[Pattern]:
         """Analyze the insights themselves - meta-learning"""
         patterns = []
 
@@ -395,7 +395,7 @@ class LearningFeedbackLoop:
 
         return patterns
 
-    async def _analyze_execution_cycles(self, pool, hours: int) -> List[Pattern]:
+    async def _analyze_execution_cycles(self, pool, hours: int) -> list[Pattern]:
         """Analyze execution cycle patterns (the bulk of our insights)"""
         patterns = []
 
@@ -445,7 +445,7 @@ class LearningFeedbackLoop:
 
         return patterns
 
-    async def generate_proposals(self, patterns: List[Pattern]) -> List[Proposal]:
+    async def generate_proposals(self, patterns: list[Pattern]) -> list[Proposal]:
         """Generate improvement proposals from detected patterns"""
         await self._init_database()
         proposals = []
@@ -601,7 +601,7 @@ class LearningFeedbackLoop:
 
         return None
 
-    async def save_proposals(self, proposals: List[Proposal]) -> List[str]:
+    async def save_proposals(self, proposals: list[Proposal]) -> list[str]:
         """Save proposals to database and return their IDs"""
         await self._init_database()
         pool = get_pool()
@@ -657,7 +657,7 @@ class LearningFeedbackLoop:
 
         return saved_ids
 
-    async def auto_approve_eligible(self) -> Dict[str, Any]:
+    async def auto_approve_eligible(self) -> dict[str, Any]:
         """Auto-approve eligible low-risk proposals"""
         await self._init_database()
         pool = get_pool()
@@ -703,7 +703,7 @@ class LearningFeedbackLoop:
 
         return results
 
-    async def apply_approved_proposals(self) -> Dict[str, Any]:
+    async def apply_approved_proposals(self) -> dict[str, Any]:
         """Apply approved proposals (implement the improvements)"""
         await self._init_database()
         pool = get_pool()
@@ -847,7 +847,7 @@ class LearningFeedbackLoop:
             logger.error(f"Failed to apply improvement: {e}")
             return False
 
-    async def run_feedback_loop(self) -> Dict[str, Any]:
+    async def run_feedback_loop(self) -> dict[str, Any]:
         """
         Run the complete feedback loop cycle.
 
@@ -917,7 +917,7 @@ class LearningFeedbackLoop:
 
         return results
 
-    async def _record_cycle(self, results: Dict[str, Any]):
+    async def _record_cycle(self, results: dict[str, Any]):
         """Record this feedback loop cycle for tracking"""
         try:
             pool = get_pool()
@@ -938,7 +938,7 @@ class LearningFeedbackLoop:
         except Exception as e:
             logger.warning(f"Failed to record cycle: {e}")
 
-    async def get_pending_proposals(self) -> List[Dict[str, Any]]:
+    async def get_pending_proposals(self) -> list[dict[str, Any]]:
         """Get proposals awaiting human approval"""
         await self._init_database()
         pool = get_pool()
@@ -1018,7 +1018,7 @@ async def get_feedback_loop() -> LearningFeedbackLoop:
 
 
 # Scheduled task function for agent scheduler
-async def run_scheduled_feedback_loop() -> Dict[str, Any]:
+async def run_scheduled_feedback_loop() -> dict[str, Any]:
     """Entry point for scheduled execution"""
     loop = await get_feedback_loop()
     return await loop.run_feedback_loop()

@@ -19,16 +19,17 @@ Author: BrainOps AI System
 Version: 1.0.0
 """
 
-import os
-import json
 import asyncio
-import logging
 import base64
 import hashlib
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Tuple
+import json
+import logging
+import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Optional
+
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -64,10 +65,10 @@ class UITestResult:
     severity: TestSeverity
     message: str
     screenshot_path: Optional[str] = None
-    ai_analysis: Optional[Dict[str, Any]] = None
-    performance_metrics: Optional[Dict[str, Any]] = None
-    accessibility_issues: List[Dict[str, Any]] = field(default_factory=list)
-    suggestions: List[str] = field(default_factory=list)
+    ai_analysis: Optional[dict[str, Any]] = None
+    performance_metrics: Optional[dict[str, Any]] = None
+    accessibility_issues: list[dict[str, Any]] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -78,11 +79,11 @@ class PageAnalysis:
     title: str
     description: str
     usability_score: float  # 0-100
-    visual_issues: List[Dict[str, Any]]
-    functional_issues: List[Dict[str, Any]]
-    accessibility_issues: List[Dict[str, Any]]
-    performance_issues: List[Dict[str, Any]]
-    suggestions: List[str]
+    visual_issues: list[dict[str, Any]]
+    functional_issues: list[dict[str, Any]]
+    accessibility_issues: list[dict[str, Any]]
+    performance_issues: list[dict[str, Any]]
+    suggestions: list[str]
     elements_found: int
     interactive_elements: int
     forms_count: int
@@ -103,8 +104,8 @@ class AIVisionAnalyzer:
     async def analyze_screenshot(
         self,
         screenshot_base64: str,
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        context: dict[str, Any]
+    ) -> dict[str, Any]:
         """Analyze a screenshot using AI vision"""
         if self.preferred_model == "openai" and OPENAI_API_KEY:
             return await self._analyze_with_openai(screenshot_base64, context)
@@ -119,8 +120,8 @@ class AIVisionAnalyzer:
     async def _analyze_with_openai(
         self,
         screenshot_base64: str,
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        context: dict[str, Any]
+    ) -> dict[str, Any]:
         """Analyze using OpenAI GPT-4V"""
         try:
             import openai
@@ -163,8 +164,8 @@ class AIVisionAnalyzer:
     async def _analyze_with_anthropic(
         self,
         screenshot_base64: str,
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        context: dict[str, Any]
+    ) -> dict[str, Any]:
         """Analyze using Anthropic Claude"""
         try:
             import anthropic
@@ -206,8 +207,8 @@ class AIVisionAnalyzer:
     async def _analyze_with_gemini(
         self,
         screenshot_base64: str,
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        context: dict[str, Any]
+    ) -> dict[str, Any]:
         """Analyze using Google Gemini"""
         try:
             import google.generativeai as genai
@@ -234,7 +235,7 @@ class AIVisionAnalyzer:
             logger.error(f"Gemini analysis failed: {e}")
             return self._basic_analysis(context)
 
-    def _build_analysis_prompt(self, context: Dict[str, Any]) -> str:
+    def _build_analysis_prompt(self, context: dict[str, Any]) -> str:
         """Build the analysis prompt"""
         url = context.get("url", "unknown")
         page_title = context.get("title", "")
@@ -265,7 +266,7 @@ Format your response as JSON:
 
 Be thorough but concise. Focus on actionable issues."""
 
-    def _parse_analysis(self, analysis_text: str) -> Dict[str, Any]:
+    def _parse_analysis(self, analysis_text: str) -> dict[str, Any]:
         """Parse the AI analysis response"""
         try:
             # Try to extract JSON from the response
@@ -292,7 +293,7 @@ Be thorough but concise. Focus on actionable issues."""
                 "parse_error": True
             }
 
-    def _basic_analysis(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _basic_analysis(self, context: dict[str, Any]) -> dict[str, Any]:
         """Basic analysis without AI vision"""
         return {
             "usability_score": 50,
@@ -314,7 +315,7 @@ class AIUITestingEngine:
 
     def __init__(self):
         self.vision_analyzer = AIVisionAnalyzer()
-        self.test_results: List[UITestResult] = []
+        self.test_results: list[UITestResult] = []
         self.screenshot_dir = "/tmp/ai_ui_tests"
         self._browser = None
         self._context = None
@@ -593,7 +594,7 @@ class AIUITestingEngine:
         finally:
             await page.close()
 
-    async def _collect_performance_metrics(self, page) -> Dict[str, Any]:
+    async def _collect_performance_metrics(self, page) -> dict[str, Any]:
         """Collect performance metrics from the page"""
         try:
             metrics = await page.evaluate("""
@@ -616,7 +617,7 @@ class AIUITestingEngine:
             logger.warning(f"Failed to collect performance metrics: {e}")
             return {}
 
-    async def _check_accessibility(self, page) -> List[Dict[str, Any]]:
+    async def _check_accessibility(self, page) -> list[dict[str, Any]]:
         """Run accessibility checks using axe-core if available, with fallback"""
         try:
             # Try to inject axe-core (may fail due to CSP on target site)
@@ -639,12 +640,12 @@ class AIUITestingEngine:
         except Exception as e:
             # CSP often blocks external scripts - use basic fallback checks
             if "Content Security Policy" in str(e) or "script" in str(e).lower():
-                logger.debug(f"axe-core blocked by CSP, using basic accessibility checks")
+                logger.debug("axe-core blocked by CSP, using basic accessibility checks")
                 return await self._basic_accessibility_check(page)
             logger.warning(f"Accessibility check failed: {e}")
             return []
 
-    async def _basic_accessibility_check(self, page) -> List[Dict[str, Any]]:
+    async def _basic_accessibility_check(self, page) -> list[dict[str, Any]]:
         """Basic accessibility checks when axe-core is blocked by CSP"""
         issues = []
         try:
@@ -704,10 +705,10 @@ class AIUITestingEngine:
 
     def _evaluate_results(
         self,
-        ai_analysis: Dict[str, Any],
-        accessibility_issues: List[Dict],
-        performance_metrics: Optional[Dict]
-    ) -> Tuple[TestStatus, TestSeverity, str]:
+        ai_analysis: dict[str, Any],
+        accessibility_issues: list[dict],
+        performance_metrics: Optional[dict]
+    ) -> tuple[TestStatus, TestSeverity, str]:
         """Evaluate test results and determine overall status"""
         issues = []
         max_severity = TestSeverity.INFO
@@ -765,9 +766,9 @@ class AIUITestingEngine:
     async def test_application(
         self,
         base_url: str,
-        routes: List[str],
+        routes: list[str],
         app_name: str = "Application"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Test an entire application with multiple routes.
         """
@@ -821,7 +822,7 @@ class AIUITestingEngine:
 
         return summary
 
-    def get_test_report(self) -> Dict[str, Any]:
+    def get_test_report(self) -> dict[str, Any]:
         """Generate a comprehensive test report"""
         return {
             "total_tests": len(self.test_results),
@@ -923,7 +924,7 @@ async def get_testing_engine() -> AIUITestingEngine:
     return _testing_engine
 
 
-async def run_ui_test(url: str, test_name: str = "UI Test") -> Dict[str, Any]:
+async def run_ui_test(url: str, test_name: str = "UI Test") -> dict[str, Any]:
     """Run a single UI test"""
     engine = await get_testing_engine()
     result = await engine.test_url(url, test_name)

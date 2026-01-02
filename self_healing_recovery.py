@@ -3,23 +3,24 @@ Self-Healing AI Error Recovery System
 Implements automatic error detection, recovery, and retry mechanisms
 """
 
-import json
 import asyncio
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
-from enum import Enum
-from dataclasses import dataclass, field
-import os
-from dotenv import load_dotenv
+import json
 import logging
+import os
+import time
 import traceback
 import uuid
 from collections import defaultdict, deque
-import time
-from functools import wraps
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from functools import wraps
+from typing import Any, Callable, Optional
+
+import psycopg2
+from dotenv import load_dotenv
+from psycopg2.extras import RealDictCursor
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -103,7 +104,7 @@ class ErrorContext:
     timestamp: datetime
     severity: ErrorSeverity
     retry_count: int = 0
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 @dataclass
 class RecoveryAction:
@@ -116,7 +117,7 @@ class RecoveryAction:
     retry_delay: float
     timeout: float
     success_threshold: float
-    metadata: Dict
+    metadata: dict
 
 @dataclass
 class RecoveryResult:
@@ -567,7 +568,7 @@ class SelfHealingRecovery:
             metadata={}
         )
 
-    def _match_error_pattern(self, error_context: ErrorContext) -> Optional[Dict]:
+    def _match_error_pattern(self, error_context: ErrorContext) -> Optional[dict]:
         """Match error against known patterns"""
         try:
             with self._get_connection() as conn:
@@ -731,7 +732,7 @@ class SelfHealingRecovery:
 
         return False
 
-    def _evaluate_healing_rule_safe(self, rule: Dict, error_context: ErrorContext) -> bool:
+    def _evaluate_healing_rule_safe(self, rule: dict, error_context: ErrorContext) -> bool:
         """Evaluate if healing rule applies using safe string matching - NO eval()"""
         try:
             condition = rule.get('condition', '')
@@ -1003,7 +1004,7 @@ class SelfHealingRecovery:
 
         # Would send alert to monitoring system in production
 
-    def get_health_report(self) -> Dict[str, Any]:
+    def get_health_report(self) -> dict[str, Any]:
         """Get system health report"""
         try:
             with self._get_connection() as conn:
@@ -1084,7 +1085,7 @@ class SelfHealingRecovery:
     # PROACTIVE HEALTH MONITORING
     # ============================================
 
-    def monitor_proactive_health(self, component: str, metrics: Dict[str, float]) -> Dict[str, Any]:
+    def monitor_proactive_health(self, component: str, metrics: dict[str, float]) -> dict[str, Any]:
         """
         Proactive health monitoring - detect issues BEFORE they occur
         Returns health status and early warnings
@@ -1133,7 +1134,7 @@ class SelfHealingRecovery:
             logger.error(f"Proactive health monitoring failed: {e}")
             return {'error': str(e)}
 
-    def _calculate_health_score(self, component: str, metrics: Dict[str, float]) -> float:
+    def _calculate_health_score(self, component: str, metrics: dict[str, float]) -> float:
         """Calculate overall health score (0-100)"""
         score = 100.0
 
@@ -1198,7 +1199,7 @@ class SelfHealingRecovery:
     # PREDICTIVE FAILURE DETECTION
     # ============================================
 
-    def _predict_failure(self, component: str, current_metrics: Dict[str, float]) -> Dict[str, Any]:
+    def _predict_failure(self, component: str, current_metrics: dict[str, float]) -> dict[str, Any]:
         """Predict potential failures before they occur"""
         try:
             history = list(self.health_metrics[component])
@@ -1246,7 +1247,7 @@ class SelfHealingRecovery:
             logger.error(f"Failure prediction error: {e}")
             return {'probability': 0.0, 'time_to_failure': 'unknown', 'reasons': []}
 
-    def _detect_memory_leak(self, memory_values: List[float]) -> bool:
+    def _detect_memory_leak(self, memory_values: list[float]) -> bool:
         """Detect memory leak by analyzing memory trend"""
         if len(memory_values) < 10:
             return False
@@ -1264,7 +1265,7 @@ class SelfHealingRecovery:
     # AUTOMATIC ROLLBACK CAPABILITIES
     # ============================================
 
-    async def rollback_component(self, component: str, rollback_type: str = 'previous_state') -> Dict[str, Any]:
+    async def rollback_component(self, component: str, rollback_type: str = 'previous_state') -> dict[str, Any]:
         """Automatic rollback to previous working state"""
         try:
             logger.info(f"Initiating rollback for {component} ({rollback_type})")
@@ -1304,7 +1305,7 @@ class SelfHealingRecovery:
             logger.error(f"Rollback failed for {component}: {e}")
             return {'success': False, 'error': str(e)}
 
-    async def _get_previous_state(self, component: str) -> Optional[Dict]:
+    async def _get_previous_state(self, component: str) -> Optional[dict]:
         """Retrieve previous working state"""
         try:
             with self._get_connection() as conn:
@@ -1326,11 +1327,11 @@ class SelfHealingRecovery:
             logger.error(f"Failed to get previous state: {e}")
             return None
 
-    async def _get_current_state(self, component: str) -> Dict:
+    async def _get_current_state(self, component: str) -> dict:
         """Get current component state"""
         return {'component': component, 'timestamp': datetime.now().isoformat()}
 
-    async def _rollback_config(self, component: str, previous_state: Dict) -> bool:
+    async def _rollback_config(self, component: str, previous_state: dict) -> bool:
         """Rollback configuration"""
         logger.info(f"Rolling back configuration for {component}")
         return True
@@ -1341,13 +1342,13 @@ class SelfHealingRecovery:
         # This would integrate with Render API or deployment system
         return True
 
-    async def _rollback_to_state(self, component: str, state: Dict) -> bool:
+    async def _rollback_to_state(self, component: str, state: dict) -> bool:
         """Rollback to specific state"""
         logger.info(f"Rolling back {component} to state: {state}")
         return True
 
-    def _log_rollback(self, component: str, rollback_type: str, from_state: Dict,
-                     to_state: Dict, success: bool):
+    def _log_rollback(self, component: str, rollback_type: str, from_state: dict,
+                     to_state: dict, success: bool):
         """Log rollback to database"""
         try:
             with self._get_connection() as conn:
@@ -1369,7 +1370,7 @@ class SelfHealingRecovery:
     # RENDER API SERVICE RESTART
     # ============================================
 
-    async def restart_service_via_render(self, service_id: str, component: str) -> Dict[str, Any]:
+    async def restart_service_via_render(self, service_id: str, component: str) -> dict[str, Any]:
         """Restart service using Render API"""
         try:
             if not self.render_api_key:
@@ -1417,7 +1418,7 @@ class SelfHealingRecovery:
     # DATABASE CONNECTION RECOVERY
     # ============================================
 
-    def recover_database_connection(self) -> Dict[str, Any]:
+    def recover_database_connection(self) -> dict[str, Any]:
         """Recover database connections with advanced retry logic"""
         try:
             logger.info("Attempting database connection recovery")
@@ -1445,7 +1446,7 @@ class SelfHealingRecovery:
                         'message': 'Connection recovered'
                     }
 
-                except Exception as e:
+                except Exception:
                     if attempt < max_retries - 1:
                         wait_time = 2 ** attempt
                         logger.warning(f"Connection attempt {attempt + 1} failed, retrying in {wait_time}s")
@@ -1472,10 +1473,11 @@ class SelfHealingRecovery:
     # MEMORY LEAK DETECTION AND CLEANUP
     # ============================================
 
-    def detect_and_cleanup_memory_leaks(self, component: str) -> Dict[str, Any]:
+    def detect_and_cleanup_memory_leaks(self, component: str) -> dict[str, Any]:
         """Detect memory leaks and perform cleanup"""
         try:
             import gc
+
             import psutil
 
             # Get current memory usage
@@ -1551,7 +1553,7 @@ class SelfHealingRecovery:
     # UNIFIED BRAIN LOGGING
     # ============================================
 
-    def _log_to_unified_brain(self, action_type: str, data: Dict[str, Any]):
+    def _log_to_unified_brain(self, action_type: str, data: dict[str, Any]):
         """Log all healing actions to unified_brain table"""
         try:
             with self._get_connection() as conn:
@@ -1589,7 +1591,7 @@ class SelfHealingRecovery:
             logger.debug(f"Failed to log to unified_brain: {e}")
 
     def _store_proactive_health(self, component: str, health_score: float,
-                               trend: str, failure_prediction: Dict, warnings: List[str]):
+                               trend: str, failure_prediction: dict, warnings: list[str]):
         """Store proactive health monitoring data"""
         try:
             with self._get_connection() as conn:
