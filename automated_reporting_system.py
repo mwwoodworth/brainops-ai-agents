@@ -7,7 +7,6 @@ Real-time business intelligence and automated report generation
 import json
 import logging
 import os
-from urllib.parse import urlparse as _urlparse
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal

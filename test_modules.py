@@ -50,7 +50,6 @@ def main():
     print("\nTesting database connection...")
     try:
         import os
-from urllib.parse import urlparse as _urlparse
 
         import psycopg2
         from dotenv import load_dotenv

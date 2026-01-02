@@ -6,7 +6,6 @@ Run this to verify all new capabilities work correctly
 
 import asyncio
 import os
-from urllib.parse import urlparse as _urlparse
 import sys
 
 # Add parent directory to path

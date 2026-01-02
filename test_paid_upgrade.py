@@ -7,7 +7,6 @@ Tests performance improvements, consistency, and identifies any runtime errors
 import asyncio
 import json
 import os
-from urllib.parse import urlparse as _urlparse
 import statistics
 import sys
 import time

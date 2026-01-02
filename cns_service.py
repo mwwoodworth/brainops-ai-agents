@@ -19,7 +19,6 @@ import hashlib
 import json
 import logging
 import os
-from urllib.parse import urlparse as _urlparse
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
