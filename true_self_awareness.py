@@ -288,22 +288,36 @@ class TrueSelfAwareness:
             truth.revenue.demo_invoices = demo_stats['invoices']
             truth.revenue.demo_total_value = float(demo_stats['invoice_total'] or 0)
 
-            # Get REAL revenue data
+            # Get REAL revenue data - ONLY non-test records count as real
             real_stats = await conn.fetchrow("""
                 SELECT
-                    (SELECT COUNT(*) FROM gumroad_sales) as gumroad_count,
-                    (SELECT COUNT(*) FROM revenue_leads) as leads_count,
-                    (SELECT COUNT(*) FROM revenue_leads WHERE stage = 'won') as won_count,
-                    (SELECT COALESCE(SUM(estimated_value), 0) FROM revenue_leads) as pipeline_value,
-                    (SELECT COALESCE(SUM(estimated_value), 0) FROM revenue_leads WHERE stage = 'won') as won_value,
-                    (SELECT COUNT(*) FROM mrg_users WHERE subscription_status = 'active') as mrg_subs
+                    (SELECT COUNT(*) FROM gumroad_sales WHERE NOT COALESCE(is_test, FALSE)) as gumroad_real,
+                    (SELECT COUNT(*) FROM gumroad_sales WHERE COALESCE(is_test, FALSE)) as gumroad_test,
+                    (SELECT COALESCE(SUM(price), 0) FROM gumroad_sales WHERE NOT COALESCE(is_test, FALSE)) as gumroad_revenue,
+                    (SELECT COUNT(*) FROM revenue_leads WHERE NOT COALESCE(is_test, FALSE)) as leads_real,
+                    (SELECT COUNT(*) FROM revenue_leads WHERE COALESCE(is_test, FALSE)) as leads_test,
+                    (SELECT COUNT(*) FROM revenue_leads WHERE stage = 'won' AND NOT COALESCE(is_test, FALSE)) as won_real,
+                    (SELECT COUNT(*) FROM revenue_leads WHERE stage = 'won' AND COALESCE(is_test, FALSE)) as won_test,
+                    (SELECT COALESCE(SUM(estimated_value), 0) FROM revenue_leads WHERE NOT COALESCE(is_test, FALSE)) as pipeline_value,
+                    (SELECT COALESCE(SUM(estimated_value), 0) FROM revenue_leads WHERE stage = 'won' AND NOT COALESCE(is_test, FALSE)) as won_value
             """)
-            truth.revenue.real_gumroad_sales = real_stats['gumroad_count'] or 0
-            truth.revenue.real_revenue_leads = real_stats['leads_count'] or 0
-            truth.revenue.real_won_deals = real_stats['won_count'] or 0
+            # REAL = only non-test data
+            truth.revenue.real_gumroad_sales = real_stats['gumroad_real'] or 0
+            truth.revenue.real_gumroad_revenue = float(real_stats['gumroad_revenue'] or 0)
+            truth.revenue.real_revenue_leads = real_stats['leads_real'] or 0
+            truth.revenue.real_won_deals = real_stats['won_real'] or 0
             truth.revenue.real_pipeline_value = float(real_stats['pipeline_value'] or 0)
             truth.revenue.real_won_revenue = float(real_stats['won_value'] or 0)
-            truth.revenue.real_mrg_subscribers = real_stats['mrg_subs'] or 0
+            truth.revenue.real_mrg_subscribers = 0  # No MRG subscriptions table yet
+
+            # Track test data separately
+            test_gumroad = real_stats['gumroad_test'] or 0
+            test_leads = real_stats['leads_test'] or 0
+            test_won = real_stats['won_test'] or 0
+            if test_gumroad > 0:
+                warnings.append(f"{test_gumroad} Gumroad sales are TEST (is_test=TRUE)")
+            if test_won > 0:
+                warnings.append(f"{test_won} 'won' deals are TEST (is_test=TRUE)")
 
             # Actual revenue = Gumroad completed sales + MRG subscriptions
             # (Won deals in pipeline are not yet revenue until closed)
