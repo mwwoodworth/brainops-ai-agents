@@ -15,17 +15,38 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 # Configuration - ALL values MUST come from environment variables (no hardcoded defaults)
+# Support DATABASE_URL fallback (Render provides DATABASE_URL)
+from urllib.parse import urlparse as _urlparse
+
+_db_host = os.getenv("DB_HOST")
+_db_name = os.getenv("DB_NAME", "postgres")
+_db_user = os.getenv("DB_USER")
+_db_password = os.getenv("DB_PASSWORD")
+_db_port = os.getenv("DB_PORT", "5432")
+
+# Fallback to DATABASE_URL if individual vars not set
+if not all([_db_host, _db_user, _db_password]):
+    _database_url = os.getenv("DATABASE_URL", "")
+    if _database_url:
+        _parsed = _urlparse(_database_url)
+        _db_host = _parsed.hostname or _db_host
+        _db_name = _parsed.path.lstrip("/") if _parsed.path else _db_name
+        _db_user = _parsed.username or _db_user
+        _db_password = _parsed.password or _db_password
+        _db_port = str(_parsed.port) if _parsed.port else _db_port
+        logger.info(f"sync_pool: Parsed DATABASE_URL: host={_db_host}, db={_db_name}")
+
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST"),  # Required - no default
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER"),  # Required - no default
-    "password": os.getenv("DB_PASSWORD"),  # Required - no default
-    "port": int(os.getenv("DB_PORT", "5432"))
+    "host": _db_host,
+    "database": _db_name,
+    "user": _db_user,
+    "password": _db_password,
+    "port": int(_db_port)
 }
 
 # Validate password is set
 if not DB_CONFIG["password"]:
-    logger.warning("⚠️ DB_PASSWORD environment variable not set - sync pool may fail")
+    logger.warning("⚠️ DB_PASSWORD or DATABASE_URL not set - sync pool may fail")
 
 # Pool settings - CRITICAL: Keep these low to prevent MaxClientsInSessionMode
 # Supabase session mode has limited connections - sync+async pools share the limit
