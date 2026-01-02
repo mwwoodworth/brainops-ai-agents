@@ -63,18 +63,19 @@ echo ""
 echo "=== 1. RENDER SERVICES ==="
 
 # AI Agents
-AI_HEALTH=$(curl -s "https://brainops-ai-agents.onrender.com/health" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null)
+AGENTS_API_KEY="${BRAINOPS_API_KEY:-${AGENTS_API_KEY:-}}"
+AI_HEALTH=$(curl -s "https://brainops-ai-agents.onrender.com/health" -H "X-API-Key: ${AGENTS_API_KEY}" 2>/dev/null)
 check "AI Agents Health" "$AI_HEALTH" '"status":"healthy"'
 
 AI_VERSION=$(echo "$AI_HEALTH" | jq -r '.version' 2>/dev/null)
 echo "   Version: $AI_VERSION"
 
 # AUREA Status
-AUREA=$(curl -s "https://brainops-ai-agents.onrender.com/systems/usage" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null | jq '.aurea.running' 2>/dev/null)
+AUREA=$(curl -s "https://brainops-ai-agents.onrender.com/systems/usage" -H "X-API-Key: ${AGENTS_API_KEY}" 2>/dev/null | jq '.aurea.running' 2>/dev/null)
 check "AUREA Running" "$AUREA" "true"
 
 # Scheduler
-SCHEDULER=$(curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null)
+SCHEDULER=$(curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" -H "X-API-Key: ${AGENTS_API_KEY}" 2>/dev/null)
 JOBS=$(echo "$SCHEDULER" | jq '.apscheduler_jobs_count' 2>/dev/null)
 check_number_min "Scheduler Jobs ($JOBS)" "$JOBS" "50"
 
@@ -135,7 +136,7 @@ fi
 echo ""
 echo "=== 4. BRAIN API ==="
 
-BRAIN=$(curl -s "https://brainops-ai-agents.onrender.com/brain/critical" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null | jq 'length' 2>/dev/null)
+BRAIN=$(curl -s "https://brainops-ai-agents.onrender.com/brain/critical" -H "X-API-Key: ${AGENTS_API_KEY}" 2>/dev/null | jq 'length' 2>/dev/null)
 check "Brain Critical Entries: $BRAIN" "$BRAIN" ""
 
 echo ""

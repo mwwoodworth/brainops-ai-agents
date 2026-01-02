@@ -82,34 +82,29 @@ class ObservabilityPersistence:
             logger.info("ObservabilityPersistence initialized with database connection")
 
     def _get_db_config(self) -> Optional[Dict[str, Any]]:
-        """Get database configuration from environment with hardcoded fallback"""
-        # Try environment variables first
+        """Get database configuration from environment - no hardcoded fallbacks"""
         host = os.environ.get("DB_HOST")
-        database = os.environ.get("DB_NAME")
+        database = os.environ.get("DB_NAME", "postgres")
         user = os.environ.get("DB_USER")
         password = os.environ.get("DB_PASSWORD")
         port = int(os.environ.get("DB_PORT", "5432"))
 
-        # Hardcoded fallback for Supabase production
-        if not all([host, database, user, password]):
-            host = "aws-0-us-east-2.pooler.supabase.com"
-            database = "postgres"
-            user = "postgres.yomagoqdmxszqtdwuhab"
-            password = os.environ.get("SUPABASE_DB_PASSWORD", os.environ.get("DB_PASSWORD"))
-            port = 5432
-            logger.info("Using hardcoded Supabase fallback config for observability")
+        # Validate required environment variables
+        required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+        missing = [var for var in required_vars if not os.environ.get(var)]
 
-        if all([host, database, user, password]):
-            return {
-                "host": host,
-                "database": database,
-                "user": user,
-                "password": password,
-                "port": port,
-                "sslmode": "require"
-            }
-        logger.warning("No database configuration available for observability persistence")
-        return None
+        if missing:
+            logger.warning(f"Missing required environment variables for observability persistence: {', '.join(missing)}")
+            return None
+
+        return {
+            "host": host,
+            "database": database,
+            "user": user,
+            "password": password,
+            "port": port,
+            "sslmode": "require"
+        }
 
     def _get_connection(self):
         """Get a database connection"""

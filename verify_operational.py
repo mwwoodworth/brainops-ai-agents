@@ -3,6 +3,7 @@
 Verify complete operational status - final test
 """
 
+import os
 import sys
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -12,14 +13,40 @@ import uuid
 from datetime import datetime
 from typing import Tuple
 
-# Database config
-DB_CONFIG = {
-    'host': 'aws-0-us-east-2.pooler.supabase.com',
-    'database': 'postgres',
-    'user': 'postgres.yomagoqdmxszqtdwuhab',
-    'password': '<DB_PASSWORD_REDACTED>',
-    'port': 5432
-}
+# Database config - NO hardcoded credentials
+def get_db_config():
+    """Get database configuration from environment variables."""
+    db_host = os.getenv('DB_HOST')
+    db_name = os.getenv('DB_NAME')
+    db_user = os.getenv('DB_USER')
+    db_password = os.getenv('DB_PASSWORD')
+    db_port = os.getenv('DB_PORT', '5432')
+
+    missing = []
+    if not db_host:
+        missing.append('DB_HOST')
+    if not db_name:
+        missing.append('DB_NAME')
+    if not db_user:
+        missing.append('DB_USER')
+    if not db_password:
+        missing.append('DB_PASSWORD')
+
+    if missing:
+        raise RuntimeError(
+            f"Required environment variables not set: {', '.join(missing)}. "
+            "Set these variables before running tests."
+        )
+
+    return {
+        'host': db_host,
+        'database': db_name,
+        'user': db_user,
+        'password': db_password,
+        'port': int(db_port)
+    }
+
+DB_CONFIG = get_db_config()
 
 def test_database() -> Tuple[bool, str]:
     """Test database connectivity and operations"""

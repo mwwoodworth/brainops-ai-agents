@@ -153,7 +153,7 @@ OPTIONAL (for semantic search):
 ALREADY CONFIGURED:
   DB_HOST=aws-0-us-east-2.pooler.supabase.com
   DB_USER=postgres.yomagoqdmxszqtdwuhab
-  DB_PASSWORD=REDACTED_SUPABASE_DB_PASSWORD
+  DB_PASSWORD=${DB_PASSWORD}
 
 ================================================================================
 PERFORMANCE

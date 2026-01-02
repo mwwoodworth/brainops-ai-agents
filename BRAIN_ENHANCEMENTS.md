@@ -351,7 +351,7 @@ OPENAI_API_KEY=sk-...
 # Database (already configured)
 DB_HOST=aws-0-us-east-2.pooler.supabase.com
 DB_USER=postgres.yomagoqdmxszqtdwuhab
-DB_PASSWORD=REDACTED_SUPABASE_DB_PASSWORD
+DB_PASSWORD=${DB_PASSWORD}
 ```
 
 ### Graceful Degradation

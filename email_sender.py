@@ -47,14 +47,41 @@ TEST_EMAIL_SUFFIXES = (".test", ".example", ".invalid")
 TEST_EMAIL_TOKENS = ("@example.", "@test.", "@demo.", "@invalid.")
 TEST_EMAIL_DOMAINS = ("test.com", "example.com", "localhost", "demo@roofing.com")
 
-# Database configuration
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-    'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv('DB_PASSWORD'),
-    'port': int(os.getenv('DB_PORT', 5432))
-}
+
+# Database configuration - NO hardcoded fallback credentials
+def _get_db_config():
+    """Get database configuration from environment variables."""
+    db_host = os.getenv('DB_HOST')
+    db_name = os.getenv('DB_NAME')
+    db_user = os.getenv('DB_USER')
+    db_password = os.getenv('DB_PASSWORD')
+    db_port = os.getenv('DB_PORT', '5432')
+
+    missing = []
+    if not db_host:
+        missing.append('DB_HOST')
+    if not db_name:
+        missing.append('DB_NAME')
+    if not db_user:
+        missing.append('DB_USER')
+    if not db_password:
+        missing.append('DB_PASSWORD')
+
+    if missing:
+        raise RuntimeError(
+            f"Required environment variables not set: {', '.join(missing)}. "
+            "Set these variables before using email sender."
+        )
+
+    return {
+        'host': db_host,
+        'database': db_name,
+        'user': db_user,
+        'password': db_password,
+        'port': int(db_port)
+    }
+
+
 
 # Processing configuration
 BATCH_SIZE = int(os.getenv('EMAIL_BATCH_SIZE', '10'))
@@ -76,7 +103,8 @@ def _is_test_recipient(recipient: str | None, metadata: Dict[str, Any] | None = 
 
 def get_db_connection():
     """Get database connection"""
-    return psycopg2.connect(**DB_CONFIG)
+    db_config = _get_db_config()
+    return psycopg2.connect(**db_config)
 
 
 def send_via_sendgrid(recipient: str, subject: str, body: str, metadata: Dict = None) -> Tuple[bool, str]:
@@ -195,9 +223,12 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> Dict[s
         "provider": "sendgrid" if SENDGRID_API_KEY else ("smtp" if SMTP_HOST else "none")
     }
 
-    if not DB_CONFIG.get('password'):
-        logger.error("DB_PASSWORD not set, cannot process email queue")
-        stats["error"] = "DB_PASSWORD not configured"
+    # Validate DB config early
+    try:
+        _get_db_config()
+    except RuntimeError as e:
+        logger.error(f"Database not configured: {e}")
+        stats["error"] = str(e)
         return stats
 
     try:

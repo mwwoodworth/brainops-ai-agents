@@ -52,7 +52,7 @@ def _get_pooled_connection():
         with pool.get_connection() as conn:
             yield conn
     else:
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = psycopg2.connect(**_get_db_config())
         try:
             yield conn
         finally:
@@ -98,13 +98,23 @@ def json_safe_serialize(obj: Any) -> Any:
     else:
         return str(obj)
 
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD"),
-    "port": int(os.getenv("DB_PORT", 5432))
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        "host": os.getenv("DB_HOST"),
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": int(os.getenv("DB_PORT", "5432"))
+    }
+
+DB_CONFIG = None  # Lazy initialization - use _get_db_config() instead
 
 
 class HealthStatus(Enum):

@@ -37,14 +37,45 @@ def _is_test_email(email: str | None) -> bool:
     return any(domain in lowered for domain in TEST_EMAIL_DOMAINS)
 
 
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD"),
-    "port": int(os.getenv("DB_PORT", 5432))
-}
+# Database configuration - NO hardcoded fallback credentials
+def _get_db_config():
+    """Get database configuration from environment variables."""
+    db_host = os.getenv("DB_HOST")
+    db_name = os.getenv("DB_NAME")
+    db_user = os.getenv("DB_USER")
+    db_password = os.getenv("DB_PASSWORD")
+    db_port = os.getenv("DB_PORT", "5432")
+
+    missing = []
+    if not db_host:
+        missing.append("DB_HOST")
+    if not db_name:
+        missing.append("DB_NAME")
+    if not db_user:
+        missing.append("DB_USER")
+    if not db_password:
+        missing.append("DB_PASSWORD")
+
+    if missing:
+        raise RuntimeError(
+            f"Required environment variables not set: {', '.join(missing)}. "
+            "Set these variables before using lead nurturing system."
+        )
+
+    return {
+        "host": db_host,
+        "database": db_name,
+        "user": db_user,
+        "password": db_password,
+        "port": int(db_port)
+    }
+
+
+def _get_db_connection():
+    """Get database connection with validated config."""
+    return psycopg2.connect(**_get_db_config())
+
+
 
 # OpenAI configuration
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -114,7 +145,7 @@ class LeadNurturingSystem:
     def _init_database(self):
         """Initialize database tables"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = _get_db_connection()
             cursor = conn.cursor()
 
             # Create nurture sequences table
@@ -313,7 +344,7 @@ class LeadNurturingSystem:
     ) -> str:
         """Create a new nurture sequence"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = _get_db_connection()
             cursor = conn.cursor()
 
             sequence_id = str(uuid.uuid4())
@@ -382,7 +413,7 @@ class LeadNurturingSystem:
     ) -> str:
         """Enroll a lead in a nurture sequence"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = _get_db_connection()
             cursor = conn.cursor()
 
             # Check if already enrolled
@@ -453,7 +484,7 @@ class LeadNurturingSystem:
     async def execute_scheduled_touches(self) -> int:
         """Execute all scheduled touchpoints that are due"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = _get_db_connection()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get due touchpoints
@@ -547,7 +578,7 @@ class LeadNurturingSystem:
     ) -> bool:
         """Track engagement for a touchpoint execution"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = _get_db_connection()
             cursor = conn.cursor()
 
             # Record engagement (use correct column name: metadata instead of engagement_data)
@@ -599,7 +630,7 @@ class LeadNurturingSystem:
     async def optimize_sequence(self, sequence_id: str) -> Dict:
         """Optimize a nurture sequence based on performance"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = _get_db_connection()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get sequence performance
@@ -690,7 +721,7 @@ class LeadNurturingSystem:
     ) -> str:
         """Run an A/B test on a nurture sequence"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = _get_db_connection()
             cursor = conn.cursor()
 
             test_id = str(uuid.uuid4())
@@ -736,7 +767,7 @@ class LeadNurturingSystem:
     ) -> Dict:
         """Get comprehensive metrics for a nurture sequence"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = _get_db_connection()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Build date filter
@@ -831,7 +862,7 @@ class PersonalizationEngine:
     async def _get_lead_data(self, lead_id: str) -> Dict:
         """Get lead data for personalization"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = _get_db_connection()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get lead info (simplified - would join with actual lead table)
@@ -916,7 +947,7 @@ class DeliveryManager:
             is_test = bool(lead_data.get('is_test')) or _is_test_email(recipient)
 
             # Store in email queue
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = _get_db_connection()
             cursor = conn.cursor()
 
             cursor.execute("""

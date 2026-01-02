@@ -286,7 +286,8 @@ class TrueOperationalValidator:
             if isinstance(value, str):
                 try:
                     value = json.loads(value)
-                except:
+                except Exception as e:
+                    logger.debug(f"Could not parse value as JSON, keeping as string: {e}")
                     pass
 
             if isinstance(value, dict) and value.get("validated") == True:

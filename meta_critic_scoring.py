@@ -26,13 +26,21 @@ from psycopg2.extras import Json
 
 logger = logging.getLogger(__name__)
 
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD"),
-    "port": int(os.getenv("DB_PORT", 5432))
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        "host": os.getenv("DB_HOST"),
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": int(os.getenv("DB_PORT", "5432"))
+    }
 
 
 class ScoreDimension(Enum):
@@ -111,7 +119,7 @@ class MetaCriticScorer:
     def _init_database(self):
         """Initialize meta-critic tables"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cur = conn.cursor()
 
             cur.execute("""
@@ -457,7 +465,7 @@ class MetaCriticScorer:
     def _store_evaluation(self, result: MetaCriticResult, context: Dict[str, Any]):
         """Store evaluation for learning"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cur = conn.cursor()
 
             # Store evaluation
@@ -579,7 +587,7 @@ class MetaCriticScorer:
     ):
         """Record actual outcome for learning"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cur = conn.cursor()
 
             # Find evaluation by outcome tracking ID
@@ -635,7 +643,7 @@ class MetaCriticScorer:
     def _optimize_weights_from_outcome(self, evaluation_id: str, success_score: float):
         """Automatically adjust dimension weights based on poor outcomes"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cur = conn.cursor()
 
             # Analyze which dimensions were weak in the winning candidate
@@ -693,7 +701,7 @@ class MetaCriticScorer:
     def update_weights_from_feedback(self, evaluation_id: str, outcome: str, feedback: Dict[str, Any]):
         """Update dimension weights based on human feedback (learning)"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cur = conn.cursor()
 
             # Update the evaluation with outcome

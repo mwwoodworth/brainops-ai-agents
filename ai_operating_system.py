@@ -60,13 +60,26 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration
+# Database configuration - NO hardcoded credentials
+# All values MUST come from environment variables
+_DB_HOST = os.getenv('DB_HOST')
+_DB_NAME = os.getenv('DB_NAME')
+_DB_USER = os.getenv('DB_USER')
+_DB_PASSWORD = os.getenv('DB_PASSWORD')
+_DB_PORT = os.getenv('DB_PORT', '5432')
+
+if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
+    raise RuntimeError(
+        "Database configuration is incomplete. "
+        "Ensure DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD environment variables are set."
+    )
+
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-    'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-    'password': os.getenv("DB_PASSWORD"),
-    'port': int(os.getenv('DB_PORT', 5432))
+    'host': _DB_HOST,
+    'database': _DB_NAME,
+    'user': _DB_USER,
+    'password': _DB_PASSWORD,
+    'port': int(_DB_PORT)
 }
 
 

@@ -41,18 +41,35 @@ import websockets
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Environment configuration
+# Database configuration - NO hardcoded credentials
+# All values MUST come from environment variables
+_DB_HOST = os.environ.get("DB_HOST")
+_DB_NAME = os.environ.get("DB_NAME")
+_DB_USER = os.environ.get("DB_USER")
+_DB_PASSWORD = os.environ.get("DB_PASSWORD")
+_DB_PORT = os.environ.get("DB_PORT", "5432")
+
+if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
+    raise RuntimeError(
+        "Database configuration is incomplete. "
+        "Ensure DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD environment variables are set."
+    )
+
 DB_CONFIG = {
-    "host": os.environ.get("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.environ.get("DB_NAME", "postgres"),
-    "user": os.environ.get("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.environ.get("DB_PASSWORD", "<DB_PASSWORD_REDACTED>"),
-    "port": int(os.environ.get("DB_PORT", "5432"))
+    "host": _DB_HOST,
+    "database": _DB_NAME,
+    "user": _DB_USER,
+    "password": _DB_PASSWORD,
+    "port": int(_DB_PORT)
 }
 
 SYSTEM_USER_ID = os.environ.get("SYSTEM_USER_ID", "44491c1c-0e28-4aa1-ad33-552d1386769c")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-REDIS_URL = os.environ.get("REDIS_URL", "redis://default:NBUl3B1zlWXPY6MXuMFLAwSrAcNphvnJ@redis-14008.c289.us-west-1-2.ec2.redns.redis-cloud.com:14008")
+
+# Redis configuration - NO hardcoded credentials
+REDIS_URL = os.environ.get("REDIS_URL")
+if not REDIS_URL:
+    logger.warning("REDIS_URL not set - Redis features will be disabled")
 
 # Initialize connections
 db_pool = ThreadedConnectionPool(minconn=2, maxconn=10, **DB_CONFIG)

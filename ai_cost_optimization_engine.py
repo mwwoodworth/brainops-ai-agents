@@ -18,13 +18,21 @@ from psycopg2.extras import RealDictCursor
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-    "database": os.getenv("DB_NAME", "postgres"),
-    "user": os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-    "password": os.getenv("DB_PASSWORD")
-}
+# Database configuration - validate required environment variables
+def _get_db_config():
+    """Get database configuration with validation for required env vars."""
+    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    return {
+        "host": os.getenv("DB_HOST"),
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": int(os.getenv("DB_PORT", "5432"))
+    }
 
 class ResourceType(Enum):
     """Types of resources to optimize"""
@@ -77,7 +85,7 @@ class ResourceMonitor:
     ) -> Dict:
         """Track resource usage"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             usage_id = str(uuid.uuid4())
@@ -145,7 +153,7 @@ class ResourceMonitor:
     ) -> Dict:
         """Get usage summary for period"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get usage by resource type
@@ -359,7 +367,7 @@ class CostOptimizer:
     ) -> Dict:
         """Apply optimization strategy"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             # Record optimization
@@ -453,7 +461,7 @@ class BudgetManager:
     ) -> Dict:
         """Set budget for a service"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             budget_id = str(uuid.uuid4())
@@ -493,7 +501,7 @@ class BudgetManager:
     ) -> List[Dict]:
         """Check budget status for services"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get budget status
@@ -653,7 +661,7 @@ class CostRecommendationEngine:
     async def _check_duplicates(self, usage_data: Dict) -> Optional[Dict]:
         """Check for duplicate operations"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             # Check for duplicate API calls
@@ -698,7 +706,7 @@ class CostRecommendationEngine:
     async def _check_idle_resources(self) -> Optional[Dict]:
         """Check for idle resources"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
             # Check for idle agents

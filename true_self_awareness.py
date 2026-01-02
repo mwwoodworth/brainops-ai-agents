@@ -207,14 +207,20 @@ class TrueSelfAwareness:
         return cls._instance
 
     async def _get_db_connection(self):
-        """Get database connection"""
+        """Get database connection with validation"""
         try:
             import asyncpg
+            # Validate required environment variables
+            required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
+            missing = [var for var in required_vars if not os.getenv(var)]
+            if missing:
+                raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
             return await asyncpg.connect(
-                host=os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com"),
-                port=int(os.getenv("DB_PORT", "6543")),
-                user=os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab"),
-                password=os.getenv("DB_PASSWORD", os.getenv("PGPASSWORD", "")),
+                host=os.getenv("DB_HOST"),
+                port=int(os.getenv("DB_PORT", "5432")),
+                user=os.getenv("DB_USER"),
+                password=os.getenv("DB_PASSWORD"),
                 database=os.getenv("DB_NAME", "postgres"),
                 ssl="require"
             )

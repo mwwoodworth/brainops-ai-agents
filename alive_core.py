@@ -33,30 +33,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ALIVE_CORE")
 
-# Database configuration with DATABASE_URL fallback
+# Database configuration - NO hardcoded credentials
+# All values MUST come from environment variables
 def _build_db_config():
     """Build database config, supporting both individual vars and DATABASE_URL"""
-    config = {
-        'host': os.getenv('DB_HOST', 'aws-0-us-east-2.pooler.supabase.com'),
-        'database': os.getenv('DB_NAME', 'postgres'),
-        'user': os.getenv('DB_USER', 'postgres.yomagoqdmxszqtdwuhab'),
-        'password': os.getenv('DB_PASSWORD'),
-        'port': int(os.getenv('DB_PORT', 5432))
-    }
-    if not config['password']:
-        database_url = os.getenv('DATABASE_URL', '')
+    # Try individual environment variables first
+    host = os.getenv('DB_HOST')
+    database = os.getenv('DB_NAME')
+    user = os.getenv('DB_USER')
+    password = os.getenv('DB_PASSWORD')
+    port = os.getenv('DB_PORT', '5432')
+
+    # Fallback to DATABASE_URL if individual vars not set
+    if not all([host, database, user, password]):
+        database_url = os.getenv('DATABASE_URL')
         if database_url:
             from urllib.parse import urlparse
             try:
                 parsed = urlparse(database_url)
-                config['host'] = parsed.hostname or config['host']
-                config['database'] = parsed.path.lstrip('/') or config['database']
-                config['user'] = parsed.username or config['user']
-                config['password'] = parsed.password or ''
-                config['port'] = parsed.port or config['port']
+                host = parsed.hostname
+                database = parsed.path.lstrip('/')
+                user = parsed.username
+                password = parsed.password
+                port = str(parsed.port) if parsed.port else '5432'
             except Exception as e:
                 logger.error(f"Failed to parse DATABASE_URL: {e}")
-    return config
+
+    # Validate required configuration
+    if not all([host, database, user, password]):
+        raise RuntimeError(
+            "Database configuration is incomplete. "
+            "Ensure DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD environment variables are set, "
+            "or provide a valid DATABASE_URL."
+        )
+
+    return {
+        'host': host,
+        'database': database,
+        'user': user,
+        'password': password,
+        'port': int(port)
+    }
 
 DB_CONFIG = _build_db_config()
 
