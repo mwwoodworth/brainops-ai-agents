@@ -1,5 +1,6 @@
 import asyncio
 import os
+from urllib.parse import urlparse as _urlparse
 
 import asyncpg
 

@@ -5,6 +5,7 @@ Final operational test - verify everything works as expected
 
 import json
 import os
+from urllib.parse import urlparse as _urlparse
 import statistics
 import sys
 import time
