@@ -142,7 +142,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.99.12')  # Product UUID + Affiliate methods
+        self.version = os.getenv('VERSION', '9.99.17')  # SQL injection fix, async/sync DB fix
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
