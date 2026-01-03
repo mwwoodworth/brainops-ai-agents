@@ -2797,6 +2797,123 @@ class AffiliatePartnershipPipeline:
         return content
 
     # =========================================================================
+    # LEADERBOARD AND COMMISSIONS
+    # =========================================================================
+
+    async def get_leaderboard(
+        self,
+        period: str = "month",
+        limit: int = 10,
+        tenant_id: str = None
+    ) -> list[dict]:
+        """
+        Get affiliate leaderboard by performance.
+
+        Args:
+            period: Time period - "week", "month", "quarter", "year", "all"
+            limit: Maximum number of affiliates to return
+            tenant_id: Optional tenant filter
+
+        Returns:
+            List of affiliate performance dicts sorted by revenue
+        """
+        from datetime import timedelta
+
+        now = datetime.utcnow()
+
+        # Determine date cutoff based on period
+        if period == "week":
+            cutoff = now - timedelta(days=7)
+        elif period == "month":
+            cutoff = now - timedelta(days=30)
+        elif period == "quarter":
+            cutoff = now - timedelta(days=90)
+        elif period == "year":
+            cutoff = now - timedelta(days=365)
+        else:  # "all"
+            cutoff = datetime.min
+
+        # Calculate performance for each affiliate
+        leaderboard = []
+        for affiliate_id, affiliate in self.affiliates.items():
+            # Get conversions in period
+            conversions = [
+                r for r in self.referrals.values()
+                if r.affiliate_id == affiliate_id and
+                r.converted and
+                r.clicked_at and r.clicked_at >= cutoff
+            ]
+
+            # Get commissions in period
+            commissions = [
+                c for c in self.commissions.values()
+                if c.affiliate_id == affiliate_id and
+                c.created_at >= cutoff
+            ]
+
+            total_revenue = sum(
+                Decimal(str(r.order_value or 0)) for r in conversions
+            )
+            total_commissions = sum(c.net_amount for c in commissions)
+
+            if total_revenue > 0 or len(conversions) > 0:
+                leaderboard.append({
+                    "rank": 0,  # Will be set after sorting
+                    "affiliate_id": affiliate_id,
+                    "name": affiliate.contact_name or affiliate.company_name or "Anonymous",
+                    "tier": affiliate.tier.value if hasattr(affiliate.tier, 'value') else str(affiliate.tier),
+                    "conversions": len(conversions),
+                    "revenue": float(total_revenue),
+                    "commissions": float(total_commissions),
+                    "conversion_rate": round(
+                        len(conversions) / max(affiliate.total_clicks, 1) * 100, 2
+                    ),
+                })
+
+        # Sort by revenue descending
+        leaderboard.sort(key=lambda x: x["revenue"], reverse=True)
+
+        # Assign ranks and limit
+        for i, entry in enumerate(leaderboard[:limit], 1):
+            entry["rank"] = i
+
+        return leaderboard[:limit]
+
+    async def get_pending_commissions(
+        self,
+        tenant_id: str = None
+    ) -> list[dict]:
+        """
+        Get all pending commissions awaiting payout.
+
+        Args:
+            tenant_id: Optional tenant filter
+
+        Returns:
+            List of pending commission dicts
+        """
+        pending = []
+
+        for commission in self.commissions.values():
+            if commission.status == PayoutStatus.PENDING:
+                affiliate = self.affiliates.get(commission.affiliate_id)
+                pending.append({
+                    "commission_id": commission.commission_id,
+                    "affiliate_id": commission.affiliate_id,
+                    "affiliate_name": affiliate.contact_name if affiliate else "Unknown",
+                    "amount": float(commission.net_amount),
+                    "commission_type": commission.commission_type.value if hasattr(commission.commission_type, 'value') else str(commission.commission_type),
+                    "created_at": commission.created_at.isoformat() if commission.created_at else None,
+                    "available_date": commission.available_date.isoformat() if commission.available_date else None,
+                    "description": commission.description,
+                })
+
+        # Sort by created date
+        pending.sort(key=lambda x: x["created_at"] or "", reverse=True)
+
+        return pending
+
+    # =========================================================================
     # UTILITIES
     # =========================================================================
 
