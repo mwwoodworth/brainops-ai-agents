@@ -191,7 +191,8 @@ async def migrate_memories_table(
         total_limit = limit or 1_000_000
 
         while True:
-            query = f"""
+            # Use parameterized query for batch_size and offset
+            query = """
                 SELECT
                     m.id::text as original_id,
                     m.tenant_id,
@@ -210,10 +211,10 @@ async def migrate_memories_table(
                     AND u.migrated_from = 'memories'
                 )
                 ORDER BY m.created_at DESC
-                LIMIT {batch_size} OFFSET {offset}
+                LIMIT $1 OFFSET $2
             """
 
-            rows = await pool.fetch(query)
+            rows = await pool.fetch(query, batch_size, offset)
             if not rows:
                 break
 
@@ -352,7 +353,8 @@ async def migrate_production_memory_table(
         total_limit = limit or 1_000_000
 
         while True:
-            query = f"""
+            # Use parameterized query for batch_size and offset
+            query = """
                 SELECT
                     p.id::text as original_id,
                     p.memory_type,
@@ -372,10 +374,10 @@ async def migrate_production_memory_table(
                     AND u.migrated_from = 'production_memory'
                 )
                 ORDER BY p.importance DESC, p.created_at DESC
-                LIMIT {batch_size} OFFSET {offset}
+                LIMIT $1 OFFSET $2
             """
 
-            rows = await pool.fetch(query)
+            rows = await pool.fetch(query, batch_size, offset)
             if not rows:
                 break
 
@@ -508,7 +510,8 @@ async def migrate_cns_memory_table(
         total_limit = limit or 1_000_000
 
         while True:
-            query = f"""
+            # Use parameterized query for batch_size and offset
+            query = """
                 SELECT
                     c.memory_id::text as original_id,
                     c.memory_type,
@@ -530,10 +533,10 @@ async def migrate_cns_memory_table(
                     AND u.migrated_from = 'cns_memory'
                 )
                 ORDER BY c.importance_score DESC
-                LIMIT {batch_size} OFFSET {offset}
+                LIMIT $1 OFFSET $2
             """
 
-            rows = await pool.fetch(query)
+            rows = await pool.fetch(query, batch_size, offset)
             if not rows:
                 break
 
@@ -772,7 +775,7 @@ async def preview_migration(
 
     except Exception as e:
         logger.error(f"Preview failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/migrate")
@@ -930,4 +933,4 @@ async def migrate_single_table(
 
     except Exception as e:
         logger.error(f"Migration of {table_name} failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

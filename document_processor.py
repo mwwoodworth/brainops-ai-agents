@@ -22,8 +22,13 @@ import httpx
 import openpyxl
 import PyPDF2
 import pytesseract
-from openai import OpenAI
 from PIL import Image
+
+# Optional OpenAI dependency
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 # Import async database connection
 from database.async_connection import get_pool
@@ -38,7 +43,15 @@ SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 STORAGE_BUCKET = "documents"
 
 # OpenAI configuration
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+if OpenAI and OPENAI_API_KEY:
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+else:
+    openai_client = None
+    if not OPENAI_API_KEY:
+        logger.warning("OpenAI API key not found - AI document analysis disabled")
+    elif OpenAI is None:
+        logger.warning("OpenAI SDK not installed - AI document analysis disabled")
 
 class DocumentType(Enum):
     """Types of documents"""
@@ -604,6 +617,15 @@ class DocumentProcessor:
     async def _extract_with_ai_vision(self, content: bytes) -> dict:
         """Extract text using AI vision API"""
         try:
+            if openai_client is None:
+                logger.warning("OpenAI client unavailable - skipping AI vision extraction")
+                return {
+                    'text': '',
+                    'method': ExtractionMethod.AI_VISION.value,
+                    'confidence': 0.0,
+                    'error': 'OpenAI client unavailable'
+                }
+
             # Convert to base64
             base64_image = base64.b64encode(content).decode('utf-8')
 
@@ -646,6 +668,10 @@ class DocumentProcessor:
     ) -> dict:
         """Analyze document content using AI"""
         try:
+            if openai_client is None:
+                logger.warning("OpenAI client unavailable - skipping document analysis")
+                return {}
+
             # Prepare analysis prompt
             prompt = f"""
             Analyze this document and extract:
@@ -709,6 +735,10 @@ class DocumentProcessor:
     async def _create_embeddings(self, document_id: str, text: str):
         """Create embeddings for document chunks"""
         try:
+            if openai_client is None:
+                logger.warning("OpenAI client unavailable - skipping embeddings for %s", document_id)
+                return
+
             # Split text into chunks
             chunk_size = 1000
             chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
@@ -789,6 +819,10 @@ class DocumentProcessor:
     ) -> list[dict]:
         """Search documents using semantic search"""
         try:
+            if openai_client is None:
+                logger.warning("OpenAI client unavailable - semantic search disabled")
+                return []
+
             # Generate query embedding
             response = openai_client.embeddings.create(
                 input=query,

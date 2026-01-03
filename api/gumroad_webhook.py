@@ -296,7 +296,7 @@ async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundT
         raise
     except Exception:
         logger.exception("Webhook processing error")
-        raise HTTPException(status_code=500, detail="Internal error")
+        raise HTTPException(status_code=500, detail="Internal error") from None
 
 async def process_sale(sale_data: dict[str, Any], product_code: str, first_name: str, last_name: str):
     """Process sale through all systems"""
@@ -362,7 +362,7 @@ async def get_sales_analytics():
 
     except Exception as e:
         logger.error(f"Analytics error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/test")
 async def test_webhook(background_tasks: BackgroundTasks):

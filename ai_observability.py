@@ -1276,7 +1276,6 @@ def seed_observability_data() -> dict[str, Any]:
 
         # Seed metrics for each module
         modules = ["ooda", "hallucination", "memory", "consciousness", "dependability", "circuit_breaker"]
-        metric_types = ["counter", "gauge", "histogram"]
         metric_names = [
             ("requests_total", "counter", 100.0),
             ("errors_total", "counter", 5.0),

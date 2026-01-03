@@ -288,8 +288,7 @@ class TrueOperationalValidator:
                 try:
                     value = json.loads(value)
                 except Exception as e:
-                    logger.debug(f"Could not parse value as JSON, keeping as string: {e}")
-                    pass
+                    logger.debug("Could not parse value as JSON, keeping as string: %s", e)
 
             if isinstance(value, dict) and value.get("validated") == True:
                 return self._record_result(

@@ -154,7 +154,7 @@ class StepHandler(ABC):
         inputs: dict[str, Any]
     ) -> dict[str, Any]:
         """Execute the step and return outputs"""
-        pass
+        raise NotImplementedError("StepHandler.execute must be implemented by subclasses")
 
 
 class ActionHandler(StepHandler):
@@ -301,7 +301,7 @@ class WaitHandler(StepHandler):
 
         elif wait_type == "condition":
             # Would poll for condition
-            max_wait = step.config.get("max_wait_seconds", 300)
+            step.config.get("max_wait_seconds", 300)
             return {"condition_met": True, "waited_seconds": 0}
 
         elif wait_type == "event":

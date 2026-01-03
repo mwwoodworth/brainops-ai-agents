@@ -11,10 +11,16 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from typing import Optional
 
 import psycopg2
-from openai import OpenAI
 from psycopg2.extras import Json, RealDictCursor
+
+# Optional OpenAI dependency
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -78,7 +84,15 @@ def _get_db_connection():
 
 
 # OpenAI configuration
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+if OpenAI and OPENAI_API_KEY:
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+else:
+    openai_client = None
+    if not OPENAI_API_KEY:
+        logger.warning("OpenAI API key not found - AI personalization disabled")
+    elif OpenAI is None:
+        logger.warning("OpenAI SDK not installed - AI personalization disabled")
 
 class NurtureSequenceType(Enum):
     """Types of nurture sequences"""
@@ -718,7 +732,7 @@ class LeadNurturingSystem:
         variant_b: dict,
         test_metric: str,
         sample_size: int = 100
-    ) -> str:
+    ) -> Optional[str]:
         """Run an A/B test on a nurture sequence"""
         try:
             conn = _get_db_connection()
@@ -754,10 +768,36 @@ class LeadNurturingSystem:
             logger.error(f"Failed to create A/B test: {e}")
             return None
 
-    async def _execute_ab_test(self, test_id: str):
+    async def _execute_ab_test(self, test_id: str) -> None:
         """Execute an A/B test"""
-        # Implementation would handle test execution
-        pass
+        conn = None
+        cursor = None
+        try:
+            conn = _get_db_connection()
+            cursor = conn.cursor()
+            placeholder = Json({"status": "not_implemented"})
+
+            cursor.execute(
+                """
+                UPDATE ai_nurture_ab_tests
+                SET variant_a_results = %s,
+                    variant_b_results = %s,
+                    completed_at = NOW(),
+                    winner = NULL,
+                    confidence_level = NULL
+                WHERE id = %s
+                """,
+                (placeholder, placeholder, test_id),
+            )
+            conn.commit()
+            logger.info("Marked A/B test %s as completed (placeholder results)", test_id)
+        except Exception as e:
+            logger.error("Failed to execute A/B test %s: %s", test_id, e)
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
     async def get_sequence_metrics(
         self,
@@ -885,6 +925,10 @@ class PersonalizationEngine:
     async def _ai_enhance(self, content: str, preferences: dict) -> str:
         """Use AI to enhance personalization"""
         try:
+            if openai_client is None:
+                logger.warning("OpenAI client unavailable - returning original content")
+                return content
+
             prompt = f"""
             Enhance this email content based on lead preferences:
             Content: {content}

@@ -21,7 +21,7 @@ def check_deployment():
         if response.status_code == 200:
             data = response.json()
             version = data.get('version', 'unknown')
-            status = data.get('status', 'unknown')
+            data.get('status', 'unknown')
 
             if version == "4.0.0":
                 print("✅ DEPLOYED! Version 4.0.0 with REAL AI is live!")

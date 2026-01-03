@@ -1061,9 +1061,10 @@ class DevOpsLoop:
                     "category": "devops"
                 }
             ) as resp:
-                pass  # Fire and forget
-        except Exception:
-            pass  # Don't fail the loop for thought logging
+                if resp.status >= 400:
+                    logger.debug("Thought log failed with status %s", resp.status)
+        except Exception as exc:
+            logger.debug("Thought log failed: %s", exc)
 
 
 # =============================================================================

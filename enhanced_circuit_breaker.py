@@ -411,7 +411,7 @@ class DynamicCircuitBreaker:
             return False
 
         recent_times = list(self._response_times)[-10:]
-        avg_time = statistics.mean(recent_times)
+        statistics.mean(recent_times)
 
         # Check for degradation pattern (increasing response times)
         first_half = recent_times[:5]

@@ -29,7 +29,7 @@ async def _get_system():
             await _system.initialize()
         except Exception as e:
             logger.error(f"Failed to initialize Ultimate E2E System: {e}")
-            raise HTTPException(status_code=503, detail=f"System not available: {str(e)}")
+            raise HTTPException(status_code=503, detail=f"System not available: {str(e)}") from e
     return _system
 
 

@@ -135,11 +135,11 @@ class AIProvider(ABC):
     @abstractmethod
     async def generate(self, prompt: str, system_prompt: str = None,
                        max_tokens: int = 4000) -> str:
-        pass
+        raise NotImplementedError("AIProvider.generate must be implemented by subclasses")
 
     @abstractmethod
     async def analyze(self, content: str, instruction: str) -> dict:
-        pass
+        raise NotImplementedError("AIProvider.analyze must be implemented by subclasses")
 
 
 class ClaudeProvider(AIProvider):

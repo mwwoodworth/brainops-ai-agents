@@ -7,8 +7,16 @@ import logging
 import os
 from typing import Optional
 
-from anthropic import Anthropic
-from openai import OpenAI
+# Optional AI providers
+try:
+    from anthropic import Anthropic
+except ImportError:
+    Anthropic = None
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -56,19 +64,25 @@ class SyncAICore:
 
     def __init__(self):
         # Initialize clients
-        if OPENAI_API_KEY:
+        if OPENAI_API_KEY and OpenAI is not None:
             self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
             logger.info("OpenAI client initialized (sync)")
         else:
             self.openai_client = None
-            logger.warning("OpenAI API key not found")
+            if not OPENAI_API_KEY:
+                logger.warning("OpenAI API key not found")
+            else:
+                logger.warning("OpenAI SDK not installed")
 
-        if ANTHROPIC_API_KEY:
+        if ANTHROPIC_API_KEY and Anthropic is not None:
             self.anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
             logger.info("Anthropic client initialized (sync)")
         else:
             self.anthropic_client = None
-            logger.warning("Anthropic API key not found")
+            if not ANTHROPIC_API_KEY:
+                logger.warning("Anthropic API key not found")
+            else:
+                logger.warning("Anthropic SDK not installed")
 
     def generate(
         self,

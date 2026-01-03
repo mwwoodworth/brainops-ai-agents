@@ -14,8 +14,15 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
 
-import anthropic
-import openai
+try:
+    import anthropic
+except ImportError:
+    anthropic = None
+
+try:
+    import openai
+except ImportError:
+    openai = None
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -64,8 +71,36 @@ def _get_db_connection(**kwargs):
     return psycopg2.connect(**db_config)
 
 # AI Configuration
-openai.api_key = os.getenv("OPENAI_API_KEY")
-anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_AVAILABLE = openai is not None and bool(OPENAI_API_KEY)
+if openai is not None and OPENAI_API_KEY:
+    openai.api_key = OPENAI_API_KEY
+elif openai is None:
+    logger.warning("OpenAI SDK not installed - OpenAI features disabled")
+else:
+    logger.warning("OpenAI API key not found - OpenAI features disabled")
+
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_AVAILABLE = anthropic is not None and bool(ANTHROPIC_API_KEY)
+anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_AVAILABLE else None
+if anthropic is None:
+    logger.warning("Anthropic SDK not installed - Anthropic features disabled")
+elif not ANTHROPIC_API_KEY:
+    logger.warning("Anthropic API key not found - Anthropic features disabled")
+
+
+def _require_openai(feature: str) -> bool:
+    if not OPENAI_AVAILABLE:
+        logger.warning("OpenAI unavailable - %s", feature)
+        return False
+    return True
+
+
+def _require_anthropic(feature: str) -> bool:
+    if not ANTHROPIC_AVAILABLE:
+        logger.warning("Anthropic unavailable - %s", feature)
+        return False
+    return True
 
 class AcquisitionChannel(Enum):
     """Customer acquisition channels"""
@@ -189,6 +224,9 @@ class WebSearchAgent(CustomerAcquisitionAgent):
     async def search_for_leads(self, criteria: dict) -> list[AcquisitionTarget]:
         """Search web for potential customers matching criteria"""
         try:
+            if not _require_openai("lead search query generation"):
+                return []
+
             # Generate search queries using AI
             prompt = f"""Generate 10 specific Google search queries to find roofing contractors that need:
             {json.dumps(criteria)}
@@ -280,6 +318,9 @@ Return ONLY valid JSON array, no other text."""
 
 Return JSON array with company_name, location, website, and buying_signals for each."""
 
+                if not _require_openai("search result extraction"):
+                    return []
+
                 extraction_response = openai.chat.completions.create(
                     model="gpt-4-turbo-preview",
                     messages=[
@@ -304,6 +345,23 @@ Return JSON array with company_name, location, website, and buying_signals for e
     async def _analyze_target(self, target_data: dict) -> AcquisitionTarget:
         """Analyze target company for fit and intent"""
         try:
+            if not _require_openai("target analysis"):
+                return AcquisitionTarget(
+                    id=str(uuid.uuid4()),
+                    company_name=target_data.get('company_name', 'Unknown'),
+                    industry="roofing",
+                    size=target_data.get('estimated_size', 'unknown'),
+                    location=target_data.get('location', ''),
+                    website=target_data.get('website'),
+                    social_profiles={},
+                    decision_makers=[],
+                    pain_points=target_data.get('buying_signals', []),
+                    budget_range=(0.0, 0.0),
+                    intent_score=0.0,
+                    acquisition_channel=AcquisitionChannel.WEB_SEARCH,
+                    metadata={"fallback": "openai_unavailable"}
+                )
+
             # Use AI to analyze company
             prompt = f"""Analyze this company for roofing software potential:
             {json.dumps(target_data)}
@@ -471,6 +529,9 @@ Return ONLY valid JSON array, no other text."""
                     logger.warning("Could not parse social search response as JSON")
 
                 # Fallback: use AI to extract structured data
+                if not _require_openai("social signal extraction"):
+                    return []
+
                 extraction_response = openai.chat.completions.create(
                     model="gpt-4-turbo-preview",
                     messages=[
@@ -495,6 +556,9 @@ Return ONLY valid JSON array, no other text."""
     async def _process_social_signal(self, signal: dict) -> Optional[dict]:
         """Process social signal into lead"""
         try:
+            if not _require_anthropic("social signal analysis"):
+                return None
+
             # Analyze social signal
             prompt = f"""Analyze this social media post for sales potential:
             {json.dumps(signal)}
@@ -530,6 +594,9 @@ class OutreachAgent(CustomerAcquisitionAgent):
     async def create_outreach_sequence(self, target_id: str) -> dict:
         """Create multi-touch outreach sequence"""
         try:
+            if not _require_anthropic("outreach sequence generation"):
+                return {}
+
             # Get target data
             target = await self._get_target(target_id)
             if not target:
@@ -652,6 +719,9 @@ class ConversionAgent(CustomerAcquisitionAgent):
     async def optimize_conversion_path(self, target_id: str) -> dict:
         """Optimize the conversion path for a target"""
         try:
+            if not _require_openai("conversion optimization"):
+                return {}
+
             # Analyze target's engagement
             engagement = await self._analyze_engagement(target_id)
 

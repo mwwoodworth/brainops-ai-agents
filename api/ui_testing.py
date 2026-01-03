@@ -318,7 +318,7 @@ async def run_single_test_sync(request: TestRequest) -> dict[str, Any]:
         raise HTTPException(
             status_code=408,
             detail="Test timed out after 120s. Use async /test endpoint for long-running tests."
-        )
+        ) from None
 
 
 @router.post("/test/application")
@@ -637,7 +637,7 @@ async def create_schedule(config: ScheduledTestConfig) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Failed to create schedule: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/schedules")

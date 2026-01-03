@@ -153,7 +153,7 @@ class BrainOpsCore:
                 if "revenue" in decision.description.lower() or "collection" in decision.description.lower():
                      # Example: Trigger revenue workflow
                      # await self.revenue.run_revenue_workflow(...)
-                     pass
+                     logger.info("Revenue workflow hook not implemented; skipping revenue-specific execution")
 
                 # Standard AUREA execution
                 await self.aurea._execute_decision(decision)

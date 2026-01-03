@@ -20,9 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, TypedDict, TypeVar
 
-import anthropic
 import httpx
-import openai
 
 from ai_self_awareness import SelfAwareAI as SelfAwareness
 from ai_self_awareness import get_self_aware_ai
@@ -46,6 +44,19 @@ def _handle_optional_import(feature: str, exc: Exception) -> None:
     if STRICT_STARTUP:
         raise RuntimeError(f"{feature} failed to load in strict mode: {exc}") from exc
     logger.warning("%s not available: %s", feature, exc)
+
+# Optional AI SDKs
+try:
+    import anthropic
+except Exception as exc:
+    anthropic = None
+    _handle_optional_import("Anthropic SDK", exc)
+
+try:
+    import openai
+except Exception as exc:
+    openai = None
+    _handle_optional_import("OpenAI SDK", exc)
 
 # Graph Context Provider for Phase 2 enhancements
 try:
@@ -202,10 +213,12 @@ BACKEND_URL = os.getenv("BACKEND_URL", "https://brainops-backend-prod.onrender.c
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 # Initialize AI clients
-if OPENAI_API_KEY:
+if OPENAI_API_KEY and openai is not None:
     openai.api_key = OPENAI_API_KEY
+elif OPENAI_API_KEY:
+    logger.warning("OpenAI SDK unavailable; skipping API key setup")
 
-if ANTHROPIC_API_KEY:
+if ANTHROPIC_API_KEY and anthropic is not None:
     anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 else:
     anthropic_client = None
@@ -921,7 +934,7 @@ class AgentExecutor:
 
                 workflow_start = datetime.now(timezone.utc)
                 result = await runner.run(agent_name, task)
-                workflow_duration = (datetime.now(timezone.utc) - workflow_start).total_seconds() * 1000
+                (datetime.now(timezone.utc) - workflow_start).total_seconds() * 1000
 
                 # Log workflow completion
                 total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
@@ -970,7 +983,6 @@ class AgentExecutor:
             # RETRY LOGIC for Agent Execution
             RETRY_ATTEMPTS = 3
             last_exception = None
-            successful_attempt = 0
 
             # Resolve agent name aliases to actual implementations
             original_agent_name = agent_name
@@ -1005,7 +1017,7 @@ class AgentExecutor:
                         duration_ms=attempt_duration,
                         success=True
                     )
-                    successful_attempt = attempt + 1
+                    attempt + 1
 
                     # If successful, break the retry loop
                     break
@@ -1028,7 +1040,7 @@ class AgentExecutor:
                         await asyncio.sleep(wait_time)
                     else:
                         logger.error(f"Agent {agent_name} execution failed after {RETRY_ATTEMPTS} attempts.")
-                        raise last_exception
+                        raise last_exception from e
 
             # Calculate total duration
             total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000

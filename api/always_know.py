@@ -131,7 +131,7 @@ async def trigger_ui_tests() -> dict[str, Any]:
             "message": "UI tests started in background. Check /always-know/state for results."
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/metrics/prometheus", response_class=PlainTextResponse)
@@ -228,6 +228,6 @@ async def run_chatgpt_agent_test(full: bool = False) -> dict[str, Any]:
         else:
             return await run_quick_health_test()
     except ImportError:
-        raise HTTPException(status_code=503, detail="ChatGPT Agent Tester not available (Playwright not installed)")
+        raise HTTPException(status_code=503, detail="ChatGPT Agent Tester not available (Playwright not installed)") from None
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

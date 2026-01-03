@@ -612,7 +612,6 @@ class ComplianceChecker:
         """Check consent tracking compliance - VERIFIED via actual DB check"""
         findings = []
         consent_verified = False
-        consent_records = 0
 
         try:
             import asyncpg
@@ -689,7 +688,7 @@ class AuditReporter:
     """Generates audit reports"""
 
     def __init__(self):
-        pass
+        self._db_config = None
 
     async def generate_report(
         self,

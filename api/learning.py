@@ -54,7 +54,7 @@ async def get_loop():
             raise HTTPException(
                 status_code=503,
                 detail=f"Learning feedback loop not available: {e}"
-            )
+            ) from e
     return _feedback_loop
 
 
@@ -92,7 +92,7 @@ async def get_pending_proposals() -> dict[str, Any]:
         raise
     except Exception as e:
         logger.error(f"Failed to get pending proposals: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/approve/{proposal_id}")
@@ -128,7 +128,7 @@ async def approve_proposal(
         raise
     except Exception as e:
         logger.error(f"Failed to approve proposal {proposal_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/reject/{proposal_id}")
@@ -162,7 +162,7 @@ async def reject_proposal(
         raise
     except Exception as e:
         logger.error(f"Failed to reject proposal {proposal_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/run-cycle")
@@ -204,7 +204,7 @@ async def run_feedback_cycle(
         raise
     except Exception as e:
         logger.error(f"Failed to run feedback cycle: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/status")
@@ -292,7 +292,7 @@ async def get_status() -> dict[str, Any]:
         raise
     except Exception as e:
         logger.error(f"Failed to get status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/patterns")
@@ -344,7 +344,7 @@ async def get_patterns(
         raise
     except Exception as e:
         logger.error(f"Failed to get patterns: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/insights-summary")
@@ -415,4 +415,4 @@ async def get_insights_summary() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to get insights summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

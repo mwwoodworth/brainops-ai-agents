@@ -135,7 +135,7 @@ async def get_by_category(
         return await brain.get_by_category(category, limit)
     except Exception as e:
         logger.error(f"Failed to get category: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/get/{key}", response_model=dict[str, Any])
@@ -156,7 +156,7 @@ async def get_context(
         raise
     except Exception as e:
         logger.error(f"Failed to get context: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/store", response_model=dict[str, str])
@@ -178,7 +178,7 @@ async def store_context(entry: BrainEntry):
         return {"id": entry_id, "key": entry.key, "status": "stored"}
     except Exception as e:
         logger.error(f"Failed to store context: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/search", response_model=list[dict[str, Any]])
@@ -191,7 +191,7 @@ async def search_context(query: BrainQuery):
         return await brain.search(query.query, query.limit, use_semantic=query.use_semantic)
     except Exception as e:
         logger.error(f"Failed to search: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/session", response_model=dict[str, str])
@@ -208,7 +208,7 @@ async def record_session(
         return {"session_id": session_id, "status": "recorded"}
     except Exception as e:
         logger.error(f"Failed to record session: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/deployment", response_model=dict[str, str])
@@ -227,7 +227,7 @@ async def record_deployment(
         return {"service": service, "version": version, "status": "recorded"}
     except Exception as e:
         logger.error(f"Failed to record deployment: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/system-state", response_model=dict[str, str])
@@ -244,7 +244,7 @@ async def update_system_state(
         return {"component": component, "status": "updated"}
     except Exception as e:
         logger.error(f"Failed to update system state: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/health", response_model=dict[str, Any])
@@ -268,7 +268,7 @@ async def get_statistics():
         return stats
     except Exception as e:
         logger.error(f"Failed to get statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/similar/{key}", response_model=list[dict[str, Any]])
@@ -285,7 +285,7 @@ async def find_similar(
         return results
     except Exception as e:
         logger.error(f"Failed to find similar entries: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/related/{key}", response_model=list[dict[str, Any]])
@@ -302,7 +302,7 @@ async def get_related(
         return results
     except Exception as e:
         logger.error(f"Failed to get related entries: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/cleanup-expired", response_model=dict[str, Any])
@@ -320,7 +320,7 @@ async def cleanup_expired():
         }
     except Exception as e:
         logger.error(f"Failed to cleanup expired entries: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/add-reference", response_model=dict[str, str])
@@ -344,4 +344,4 @@ async def add_reference(
         }
     except Exception as e:
         logger.error(f"Failed to add reference: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

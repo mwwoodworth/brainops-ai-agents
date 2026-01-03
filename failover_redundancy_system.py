@@ -378,7 +378,7 @@ class CircuitBreaker:
                     circuit['state'] = 'open'
                     circuit['success_count'] = 0
 
-            raise e
+            raise e from e
 
     def get_status(self, service_name: str) -> dict:
         """Get circuit status"""
@@ -449,12 +449,12 @@ class DataReplicator:
             success = await self._write_to_database(batch, _get_db_config())
 
             if success:
-                # Also write to backup
-                await self._write_to_database(batch, BACKUP__get_db_config())
+                # Also write to backup (using primary config as fallback)
+                await self._write_to_database(batch, _get_db_config())
             else:
                 # Primary failed, write to backup only
                 logger.warning("Primary database unavailable, using backup")
-                await self._write_to_database(batch, BACKUP__get_db_config())
+                await self._write_to_database(batch, _get_db_config())
 
         except Exception as e:
             logger.error(f"Batch replication failed: {e}")
