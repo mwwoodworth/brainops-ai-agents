@@ -1020,16 +1020,21 @@ class EnhancedSelfHealing:
                     params={"component": component, "target": rollback_to}
                 )
 
-            # Log rollback in database for audit
+            # Log rollback in database for audit - use parameterized query
+            # Sanitize component name to prevent SQL injection
+            import re
+            safe_component = re.sub(r'[^a-zA-Z0-9_\-]', '', str(component))[:100]
+            safe_platform = re.sub(r'[^a-zA-Z0-9_\-]', '', str(platform))[:50]
             await self._execute_mcp_tool(
                 platform="supabase",
                 tool="execute_sql",
                 params={
-                    "query": f"""
+                    "query": """
                         INSERT INTO remediation_history
                         (incident_type, component, action_taken, success, recovery_time_seconds)
-                        VALUES ('rollback', '{component}', 'rollback_{platform}', true, 0)
-                    """
+                        VALUES ($1, $2, $3, true, 0)
+                    """,
+                    "params": ['rollback', safe_component, f'rollback_{safe_platform}']
                 }
             )
 
@@ -1062,17 +1067,25 @@ class EnhancedSelfHealing:
         try:
             if platform == "supabase":
                 # Terminate idle connections in PostgreSQL
+                # Validate max_age_seconds is a safe integer to prevent SQL injection
+                try:
+                    safe_max_age = int(max_age_seconds)
+                    if safe_max_age < 0 or safe_max_age > 86400:  # Max 24 hours
+                        safe_max_age = 300  # Default to 5 minutes
+                except (ValueError, TypeError):
+                    safe_max_age = 300
+
                 mcp_result = await self._execute_mcp_tool(
                     platform="supabase",
                     tool="execute_sql",
                     params={
-                        "query": f"""
+                        "query": """
                             SELECT pg_terminate_backend(pid)
                             FROM pg_stat_activity
                             WHERE state = 'idle'
-                            AND query_start < NOW() - INTERVAL '{max_age_seconds} seconds'
+                            AND query_start < NOW() - INTERVAL '%s seconds'
                             AND pid <> pg_backend_pid()
-                        """,
+                        """ % safe_max_age,
                         "reason": f"Self-healing connection flush for {component}"
                     }
                 )

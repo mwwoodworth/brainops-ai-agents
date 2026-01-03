@@ -52,19 +52,22 @@ if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
         _DB_PASSWORD = _parsed.password or ''
         _DB_PORT = str(_parsed.port) if _parsed.port else '5432'
 
-if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
-    raise RuntimeError(
+DB_CONFIG_AVAILABLE = all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD])
+if not DB_CONFIG_AVAILABLE:
+    logger.warning(
         "Database configuration is incomplete. "
-        "Set DB_HOST/DB_NAME/DB_USER/DB_PASSWORD or DATABASE_URL."
+        "Set DB_HOST/DB_NAME/DB_USER/DB_PASSWORD or DATABASE_URL. "
+        "Vector memory operations will be unavailable."
     )
-
-DB_CONFIG = {
-    "host": _DB_HOST,
-    "database": _DB_NAME,
-    "user": _DB_USER,
-    "password": _DB_PASSWORD,
-    "port": int(_DB_PORT)
-}
+    DB_CONFIG = {}
+else:
+    DB_CONFIG = {
+        "host": _DB_HOST,
+        "database": _DB_NAME,
+        "user": _DB_USER,
+        "password": _DB_PASSWORD,
+        "port": int(_DB_PORT)
+    }
 
 # OpenAI configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
