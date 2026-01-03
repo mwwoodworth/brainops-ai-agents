@@ -751,9 +751,9 @@ class PerformanceOptimizer:
             metrics = {}
             for row in cursor.fetchall():
                 metrics[row['metric_type']] = {
-                    'avg': float(row['avg_value']),
-                    'max': float(row['max_value']),
-                    'min': float(row['min_value']),
+                    'avg': float(row['avg_value'] or 0),
+                    'max': float(row['max_value'] or 0),
+                    'min': float(row['min_value'] or 0),
                     'samples': row['data_points']
                 }
 

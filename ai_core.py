@@ -701,7 +701,7 @@ class RealAICore:
         try:
             # Try to extract JSON from response
             import re
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            json_match = re.search(r'\{[\s\S]*?\}', response)
             if json_match:
                 return json.loads(json_match.group())
             else:
@@ -791,7 +791,7 @@ class RealAICore:
 
         try:
             import re
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            json_match = re.search(r'\{[\s\S]*?\}', response)
             if json_match:
                 return json.loads(json_match.group())
         except (json.JSONDecodeError, TypeError, ValueError, AttributeError) as parse_error:

@@ -387,7 +387,7 @@ class UnifiedMemoryManager:
                     self.log_to_brain("memory_system", "memory_recalled", {
                         "query": query if isinstance(query, str) else "vector",
                         "count": len(memories),
-                        "top_score": float(memories[0]['similarity']) if 'similarity' in memories[0] else 0.0
+                        "top_score": float(memories[0].get('similarity') or 0.0)
                     })
 
                 logger.info(f"📚 Recalled {len(memories)} relevant memories")
@@ -888,7 +888,7 @@ class UnifiedMemoryManager:
                 high_threshold = 0.8 if aggressive else 0.9
 
                 for mem in memories:
-                    retention_score = float(mem['retention_score'])
+                    retention_score = float(mem.get('retention_score') or 0.0)
 
                     # Remove very low value memories
                     if retention_score < low_threshold and mem['age_days'] > 30:

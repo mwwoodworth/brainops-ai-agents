@@ -261,14 +261,15 @@ class NotebookLMPlus:
             """, (json.dumps(topics or []),))
 
             result = cursor.fetchone()
-            self.active_session = result['session_id']
+            session_id = result.get('session_id') if result else None
+            self.active_session = session_id
 
             conn.commit()
             cursor.close()
             conn.close()
 
             logger.info(f"Started learning session: {self.active_session}")
-            return self.active_session
+            return session_id
 
         except Exception as e:
             logger.error(f"Failed to start session: {e}")
@@ -290,13 +291,14 @@ class NotebookLMPlus:
             related = self._find_related_knowledge(embedding, limit=5)
 
             # Store the knowledge
+            related_ids = [r.get('id') for r in related if r.get('id') is not None]
             knowledge_id = self._store_knowledge(
                 content=analysis['processed_content'],
                 knowledge_type=analysis['type'],
                 source=source,
                 confidence=analysis['confidence'],
                 importance=analysis['importance'],
-                connections=[r['id'] for r in related],
+                connections=related_ids,
                 metadata={**context, 'analysis': analysis},
                 embedding=embedding
             )
@@ -305,12 +307,12 @@ class NotebookLMPlus:
             self._update_connections(knowledge_id, related)
 
             # Check for synthesis opportunities
-            if len(related) >= self.synthesis_threshold:
-                self._attempt_synthesis([knowledge_id] + [r['id'] for r in related])
+            if len(related_ids) >= self.synthesis_threshold:
+                self._attempt_synthesis([knowledge_id] + related_ids)
 
             # Update session stats
             if self.active_session:
-                self._update_session_stats(nodes_created=1, connections_made=len(related))
+                self._update_session_stats(nodes_created=1, connections_made=len(related_ids))
 
             return knowledge_id
 
@@ -405,7 +407,7 @@ class NotebookLMPlus:
             cursor.close()
             conn.close()
 
-            return [r for r in related if r['similarity'] > 0.7]
+            return [r for r in related if (r.get('similarity') or 0) > 0.7]
 
         except Exception as e:
             logger.error(f"Failed to find related knowledge: {e}")
@@ -443,7 +445,8 @@ class NotebookLMPlus:
             cursor.close()
             conn.close()
 
-            return str(result['id'])
+            knowledge_id = result.get('id') if result else None
+            return str(knowledge_id) if knowledge_id is not None else None
 
         except Exception as e:
             logger.error(f"Failed to store knowledge: {e}")
@@ -468,7 +471,7 @@ class NotebookLMPlus:
                 return  # Not enough for synthesis
 
             # Use AI to synthesize
-            combined_content = "\n".join([n['content'] for n in nodes])
+            combined_content = "\n".join([n.get('content') or '' for n in nodes])
 
             client = get_openai_client()
             if not client:
@@ -486,8 +489,8 @@ class NotebookLMPlus:
             insight = response.choices[0].message.content
 
             # Calculate confidence and impact
-            avg_confidence = np.mean([n['confidence'] for n in nodes])
-            avg_importance = np.mean([n['importance'] for n in nodes])
+            avg_confidence = np.mean([n.get('confidence') or 0 for n in nodes])
+            avg_importance = np.mean([n.get('importance') or 0 for n in nodes])
             impact_score = avg_confidence * avg_importance
 
             # Store the insight
@@ -527,6 +530,9 @@ class NotebookLMPlus:
             cursor = conn.cursor()
 
             for r in related:
+                related_id = r.get('id')
+                if related_id is None:
+                    continue
                 # Update the related node to include this connection
                 cursor.execute("""
                     UPDATE notebook_lm_knowledge
@@ -534,7 +540,7 @@ class NotebookLMPlus:
                     WHERE id = %s AND NOT connections @> %s::jsonb
                 """, (
                     json.dumps([knowledge_id]),
-                    r['id'],
+                    related_id,
                     json.dumps([knowledge_id])
                 ))
 
@@ -609,13 +615,14 @@ class NotebookLMPlus:
             results = cursor.fetchall()
 
             # Update access counts
-            if results:
+            result_ids = [r.get('id') for r in results if r.get('id') is not None]
+            if result_ids:
                 cursor.execute("""
                     UPDATE notebook_lm_knowledge
                     SET accessed_count = accessed_count + 1,
                         last_accessed = NOW()
                     WHERE id = ANY(%s)
-                """, ([r['id'] for r in results],))
+                """, (result_ids,))
 
                 conn.commit()
 
@@ -683,6 +690,10 @@ class NotebookLMPlus:
             patterns = []
 
             for pattern in type_patterns:
+                pattern_count = pattern.get('count') or 0
+                avg_confidence = pattern.get('avg_confidence') or 0
+                knowledge_type = pattern.get('knowledge_type') or 'unknown'
+                node_ids = pattern.get('node_ids') or []
                 # Store pattern
                 cursor.execute("""
                     INSERT INTO notebook_lm_patterns
@@ -696,18 +707,18 @@ class NotebookLMPlus:
                     RETURNING id
                 """, (
                     'knowledge_type_frequency',
-                    f"frequent_{pattern['knowledge_type']}",
-                    f"Frequent occurrence of {pattern['knowledge_type']} knowledge",
-                    pattern['count'],
-                    pattern['avg_confidence'],
-                    json.dumps([str(nid) for nid in pattern['node_ids']])
+                    f"frequent_{knowledge_type}",
+                    f"Frequent occurrence of {knowledge_type} knowledge",
+                    pattern_count,
+                    avg_confidence,
+                    json.dumps([str(nid) for nid in node_ids])
                 ))
 
                 patterns.append({
                     "type": "frequency",
-                    "pattern": pattern['knowledge_type'],
-                    "count": pattern['count'],
-                    "confidence": float(pattern['avg_confidence'])
+                    "pattern": knowledge_type,
+                    "count": pattern_count,
+                    "confidence": float(avg_confidence or 0)
                 })
 
             # Identify temporal patterns
@@ -725,11 +736,15 @@ class NotebookLMPlus:
 
             temporal_patterns = cursor.fetchall()
             for tpattern in temporal_patterns[:5]:  # Top 5
+                hour_value = tpattern.get('hour')
+                hour = hour_value.hour if hour_value else 0
+                knowledge_type = tpattern.get('knowledge_type') or 'unknown'
+                count = tpattern.get('count') or 0
                 patterns.append({
                     "type": "temporal",
-                    "pattern": f"{tpattern['knowledge_type']}_at_{tpattern['hour'].hour}h",
-                    "count": tpattern['count'],
-                    "hour": tpattern['hour'].hour
+                    "pattern": f"{knowledge_type}_at_{hour}h",
+                    "count": count,
+                    "hour": hour
                 })
 
             conn.commit()
@@ -805,12 +820,14 @@ class NotebookLMPlus:
 
             high_value = cursor.fetchall()
             for item in high_value:
+                knowledge_type = item.get('knowledge_type') or 'unknown'
+                content = item.get('content') or ''
                 recommendations.append({
                     "type": "apply_knowledge",
                     "priority": "high",
-                    "recommendation": f"Apply high-confidence {item['knowledge_type']}: {item['content'][:100]}",
-                    "confidence": float(item['confidence']),
-                    "knowledge_id": str(item['id'])
+                    "recommendation": f"Apply high-confidence {knowledge_type}: {content[:100]}",
+                    "confidence": float(item.get('confidence') or 0),
+                    "knowledge_id": str(item.get('id'))
                 })
 
             # Recommend based on successful outcomes
@@ -827,12 +844,14 @@ class NotebookLMPlus:
 
             proven_knowledge = cursor.fetchall()
             for item in proven_knowledge:
+                knowledge_type = item.get('knowledge_type') or 'unknown'
+                content = item.get('content') or ''
                 recommendations.append({
                     "type": "proven_strategy",
                     "priority": "high",
-                    "recommendation": f"Repeat successful {item['knowledge_type']}: {item['content'][:100]}",
-                    "success_count": item['success_count'],
-                    "knowledge_id": str(item['id'])
+                    "recommendation": f"Repeat successful {knowledge_type}: {content[:100]}",
+                    "success_count": item.get('success_count') or 0,
+                    "knowledge_id": str(item.get('id'))
                 })
 
             # Recommend pattern-based actions
@@ -846,12 +865,13 @@ class NotebookLMPlus:
 
             patterns = cursor.fetchall()
             for pattern in patterns:
+                description = pattern.get('description') or ''
                 recommendations.append({
                     "type": "pattern_based",
                     "priority": "medium",
-                    "recommendation": f"Leverage pattern: {pattern['description']}",
-                    "confidence": float(pattern['confidence']),
-                    "occurrences": pattern['occurrences']
+                    "recommendation": f"Leverage pattern: {description}",
+                    "confidence": float(pattern.get('confidence') or 0),
+                    "occurrences": pattern.get('occurrences') or 0
                 })
 
             cursor.close()
@@ -879,6 +899,10 @@ class NotebookLMPlus:
             """, (self.active_session,))
 
             session = cursor.fetchone()
+            if not session:
+                cursor.close()
+                conn.close()
+                return {"error": "Session not found"}
 
             # Recognize patterns from this session
             patterns = self.recognize_patterns(timeframe_days=1)
@@ -887,9 +911,9 @@ class NotebookLMPlus:
             recommendations = self.generate_recommendations()
 
             # Generate summary
-            summary = f"Learning session completed. Created {session['nodes_created']} knowledge nodes, "
-            summary += f"made {session['connections_made']} connections, "
-            summary += f"and generated {session['insights_generated']} insights. "
+            summary = f"Learning session completed. Created {session.get('nodes_created') or 0} knowledge nodes, "
+            summary += f"made {session.get('connections_made') or 0} connections, "
+            summary += f"and generated {session.get('insights_generated') or 0} insights. "
             summary += f"Recognized {len(patterns)} patterns and generated {len(recommendations)} recommendations."
 
             # Update session
@@ -1057,7 +1081,8 @@ if __name__ == "__main__":
     # Query knowledge
     results = nlm.query_knowledge("How long do deployments take?")
     for r in results:
-        print(f"- {r['content']} (relevance: {r['relevance']:.2f})")
+        relevance = (r.get('relevance') or 0)
+        print(f"- {r.get('content') or ''} (relevance: {relevance:.2f})")
 
     # End session
     summary = nlm.end_learning_session()

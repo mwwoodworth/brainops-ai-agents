@@ -96,19 +96,12 @@ async def get_database_state():
     return await system.get_database_state()
 
 
-@router.post("/database/query")
-async def query_database(query: str):
-    """
-    Execute a read-only database query.
-    Only SELECT queries are allowed for safety.
-    """
-    system = await _get_system()
-
-    if not query.strip().upper().startswith("SELECT"):
-        raise HTTPException(status_code=400, detail="Only SELECT queries allowed")
-
-    result = await system.query_database(query)
-    return {"query": query, "results": result, "count": len(result)}
+# SECURITY: /database/query endpoint DISABLED - Raw SQL execution is a security risk
+# @router.post("/database/query")
+# async def query_database(query: str):
+#     """Execute a read-only database query - DISABLED FOR SECURITY."""
+#     pass
+# Use specific, parameterized endpoints instead of raw SQL access
 
 
 @router.post("/ui-tests")
