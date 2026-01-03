@@ -155,13 +155,18 @@ class KnowledgeExtractor:
         items = []
 
         # Extract agent as entity
+        agent_type = execution.get('agent_type') or 'unknown_agent'
+        execution_id = execution.get('id')
+        status = execution.get('status') or 'unknown'
+        created_at = execution.get('created_at') or datetime.now(timezone.utc)
+
         agent_node = {
             "type": NodeType.AGENT.value,
-            "name": execution['agent_type'],
+            "name": agent_type,
             "properties": {
-                "execution_id": execution['id'],
-                "status": execution['status'],
-                "timestamp": execution['created_at'].isoformat()
+                "execution_id": execution_id,
+                "status": status,
+                "timestamp": created_at.isoformat()
             }
         }
         items.append(agent_node)
@@ -403,21 +408,25 @@ class KnowledgeExtractor:
         if isinstance(context, dict):
             # Extract topics
             if 'topics' in context:
-                for topic in context['topics']:
-                    items.append({
-                        "type": NodeType.CONCEPT.value,
-                        "name": topic,
-                        "properties": {"source": "conversation"}
-                    })
+                    for topic in context.get('topics') or []:
+                        if not topic:
+                            continue
+                        items.append({
+                            "type": NodeType.CONCEPT.value,
+                            "name": topic,
+                            "properties": {"source": "conversation"}
+                        })
 
             # Extract insights
             if 'insights' in context:
-                for insight in context['insights']:
-                    items.append({
-                        "type": NodeType.INSIGHT.value,
-                        "name": insight.get('title', 'insight'),
-                        "properties": insight
-                    })
+                    for insight in context.get('insights') or []:
+                        if not isinstance(insight, dict):
+                            continue
+                        items.append({
+                            "type": NodeType.INSIGHT.value,
+                            "name": insight.get('title', 'insight'),
+                            "properties": insight
+                        })
 
         return items
 
@@ -448,26 +457,32 @@ class KnowledgeExtractor:
             customers = cursor.fetchall()
 
             for customer in customers:
+                total_revenue = customer.get('total_revenue') or 0
+                job_count = customer.get('job_count') or 0
+                invoice_count = customer.get('invoice_count') or 0
+                customer_id = customer.get('customer_id')
+                customer_name = customer.get('customer_name') or f"Customer_{customer_id}"
+
                 # Create customer node
                 knowledge_items.append({
                     "type": NodeType.CUSTOMER.value,
-                    "name": customer['customer_name'] or f"Customer_{customer['customer_id']}",
+                    "name": customer_name,
                     "properties": {
-                        "id": customer['customer_id'],
-                        "job_count": customer['job_count'],
-                        "invoice_count": customer['invoice_count'],
-                        "total_revenue": float(customer['total_revenue'] or 0)
+                        "id": customer_id,
+                        "job_count": job_count,
+                        "invoice_count": invoice_count,
+                        "total_revenue": float(total_revenue or 0)
                     }
                 })
 
                 # Create value pattern if high revenue
-                if customer['total_revenue'] and customer['total_revenue'] > 1000:
+                if total_revenue > 1000:
                     knowledge_items.append({
                         "type": NodeType.PATTERN.value,
                         "name": "high_value_customer",
                         "properties": {
-                            "customer_id": customer['customer_id'],
-                            "revenue": float(customer['total_revenue'])
+                            "customer_id": customer_id,
+                            "revenue": float(total_revenue or 0)
                         }
                     })
 
@@ -563,7 +578,9 @@ class KnowledgeGraphBuilder:
 
         # Agent executed Workflow
         if node1['type'] == NodeType.AGENT.value and node2['type'] == NodeType.WORKFLOW.value:
-            if node1.get('name') in node2.get('name', ''):
+            node1_name = node1.get('name') or ''
+            node2_name = node2.get('name') or ''
+            if node1_name and node1_name in node2_name:
                 return EdgeType.EXECUTED.value
 
         # Pattern similar to Pattern
@@ -574,7 +591,7 @@ class KnowledgeGraphBuilder:
         # Concept references Concept
         if node1['type'] == NodeType.CONCEPT.value and node2['type'] == NodeType.CONCEPT.value:
             # Check semantic similarity
-            if self._semantic_similarity(node1['name'], node2['name']) > 0.7:
+            if self._semantic_similarity(node1.get('name'), node2.get('name')) > 0.7:
                 return EdgeType.REFERENCES.value
 
         return None
@@ -582,8 +599,11 @@ class KnowledgeGraphBuilder:
     def _semantic_similarity(self, text1: str, text2: str) -> float:
         """Calculate semantic similarity between texts"""
         # Simple overlap coefficient
-        words1 = set(text1.lower().split())
-        words2 = set(text2.lower().split())
+        if not text1 or not text2:
+            return 0.0
+
+        words1 = set(str(text1).lower().split())
+        words2 = set(str(text2).lower().split())
 
         if not words1 or not words2:
             return 0.0
@@ -743,7 +763,7 @@ class KnowledgeQueryEngine:
                     edge['source_id'],
                     edge['target_id'],
                     type=edge['edge_type'],
-                    weight=float(edge['weight']),
+                    weight=float(edge['weight'] or 0),
                     **properties
                 )
 
@@ -870,7 +890,7 @@ class KnowledgeQueryEngine:
                 "type": r['node_type'],
                 "name": r['name'],
                 "properties": r['properties'],
-                "similarity": float(r['similarity'])
+                "similarity": float(r['similarity'] or 0)
             } for r in results]
 
         except Exception as e:
@@ -880,14 +900,19 @@ class KnowledgeQueryEngine:
     async def keyword_search(self, query_text: str, limit: int = 10) -> list[dict]:
         """Fallback keyword-based search"""
         if not self.graph:
-            await self.load_graph()
+            try:
+                await self.load_graph()
+            except Exception as e:
+                logger.error(f"Keyword search failed to load graph: {e}")
+                return []
 
         results = []
         query_lower = query_text.lower()
 
         for node_id, data in self.graph.nodes(data=True):
             score = 0
-            if query_lower in data.get('name', '').lower():
+            name = (data.get('name') or '')
+            if query_lower in name.lower():
                 score += 1.0
 
             # Check properties
@@ -911,7 +936,11 @@ class KnowledgeQueryEngine:
     async def get_insights(self) -> list[dict]:
         """Extract insights from graph structure with pattern recognition"""
         if not self.graph:
-            await self.load_graph()
+            try:
+                await self.load_graph()
+            except Exception as e:
+                logger.error(f"Insight extraction failed to load graph: {e}")
+                return []
 
         insights = []
 

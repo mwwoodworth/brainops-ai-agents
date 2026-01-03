@@ -245,7 +245,7 @@ class CostOptimizer:
 
         for usage in usage_data.get('usage_by_type', []):
             resource_type = usage['resource_type']
-            total_cost = float(usage.get('total_cost', 0))
+            total_cost = float(usage.get('total_cost') or 0)
 
             # Check if optimization needed
             if total_cost > 10:  # More than $10
@@ -283,7 +283,7 @@ class CostOptimizer:
 
     def _optimize_ai_tokens(self, usage: dict) -> dict:
         """Optimize AI token usage"""
-        total_cost = float(usage.get('total_cost', 0))
+        total_cost = float(usage.get('total_cost') or 0)
         potential_savings = total_cost * 0.3  # Can save ~30% with optimization
 
         return {
@@ -304,7 +304,7 @@ class CostOptimizer:
 
     def _optimize_api_calls(self, usage: dict) -> dict:
         """Optimize API call costs"""
-        total_cost = float(usage.get('total_cost', 0))
+        total_cost = float(usage.get('total_cost') or 0)
         usage_count = usage.get('usage_count', 0)
 
         # Check if batching would help
@@ -333,7 +333,7 @@ class CostOptimizer:
 
     def _optimize_database(self, usage: dict) -> dict:
         """Optimize database costs"""
-        total_cost = float(usage.get('total_cost', 0))
+        total_cost = float(usage.get('total_cost') or 0)
 
         return {
             "resource_type": ResourceType.DATABASE.value,
@@ -353,7 +353,7 @@ class CostOptimizer:
 
     def _optimize_compute(self, usage: dict) -> dict:
         """Optimize compute costs"""
-        total_cost = float(usage.get('total_cost', 0))
+        total_cost = float(usage.get('total_cost') or 0)
 
         return {
             "resource_type": ResourceType.COMPUTE.value,
@@ -651,7 +651,7 @@ class CostRecommendationEngine:
     def _analyze_resource(self, usage: dict) -> Optional[dict]:
         """Analyze resource for optimization"""
         resource_type = usage['resource_type']
-        total_cost = float(usage.get('total_cost', 0))
+        total_cost = float(usage.get('total_cost') or 0)
 
         if resource_type == ResourceType.AI_TOKENS.value:
             if total_cost > 50:

@@ -464,16 +464,28 @@ class AITrainingPipeline:
                 LIMIT 10000
             """, model_type.value)
 
-            if len(training_data) < self.min_samples_for_training and not force:
+            filtered_rows = [
+                row for row in training_data
+                if row.get('feature_vector') is not None and row.get('label') is not None
+            ]
+
+            if len(filtered_rows) < self.min_samples_for_training and not force:
                 return {
                     'status': 'insufficient_data',
-                    'samples': len(training_data),
+                    'samples': len(filtered_rows),
+                    'required': self.min_samples_for_training
+                }
+
+            if not filtered_rows:
+                return {
+                    'status': 'insufficient_data',
+                    'samples': 0,
                     'required': self.min_samples_for_training
                 }
 
             # Prepare data for training
-            X = [row['feature_vector'] for row in training_data]
-            y = [row['label'] for row in training_data]
+            X = [row['feature_vector'] for row in filtered_rows]
+            y = [row['label'] for row in filtered_rows]
 
             # Train model (simplified - would use real ML libraries)
             model_data, metrics = await self._train_sklearn_model(X, y, model_type)
@@ -490,7 +502,7 @@ class AITrainingPipeline:
                 model_id,
                 model_type.value,
                 f"v1.{datetime.now().strftime('%Y%m%d')}",
-                len(training_data),
+                len(filtered_rows),
                 metrics.get('accuracy', 0),
                 metrics.get('precision', 0),
                 metrics.get('recall', 0),
@@ -512,7 +524,7 @@ class AITrainingPipeline:
                 'status': 'success',
                 'model_id': model_id,
                 'metrics': metrics,
-                'samples_used': len(training_data)
+                'samples_used': len(filtered_rows)
             }
 
         except Exception as e:
@@ -931,23 +943,27 @@ class AITrainingPipeline:
             """)
 
             for model in underperforming:
-                lesson = f"Model {model['model_type']} showing poor performance with avg accuracy delta {model['avg_accuracy_delta']:.2f}"
+                avg_accuracy_delta = model.get('avg_accuracy_delta')
+                avg_accuracy_delta_val = avg_accuracy_delta if avg_accuracy_delta is not None else 0
+                feedback_count = model.get('feedback_count') or 0
+                model_type = model.get('model_type') or 'unknown'
+                lesson = f"Model {model_type} showing poor performance with avg accuracy delta {avg_accuracy_delta_val:.2f}"
 
                 await pool.execute("""
                     INSERT INTO ai_learning_history
                     (model_type, lesson_learned, evidence, impact_score)
                     VALUES ($1, $2, $3, $4)
                 """,
-                    model['model_type'],
+                    model_type,
                     lesson,
-                    json.dumps({'feedback_count': model['feedback_count'], 'avg_delta': float(model['avg_accuracy_delta'])}),
-                    abs(float(model['avg_accuracy_delta']))
+                    json.dumps({'feedback_count': feedback_count, 'avg_delta': float(avg_accuracy_delta_val or 0)}),
+                    abs(float(avg_accuracy_delta_val or 0))
                 )
 
                 lessons.append({
-                    "model_type": model['model_type'],
+                    "model_type": model_type,
                     "lesson": lesson,
-                    "impact": abs(float(model['avg_accuracy_delta']))
+                    "impact": abs(float(avg_accuracy_delta_val or 0))
                 })
 
             # Learn from successful patterns
@@ -972,17 +988,17 @@ class AITrainingPipeline:
                     json.dumps({
                         'pattern_type': pattern['pattern_type'],
                         'signature': pattern['pattern_signature'],
-                        'success_rate': float(pattern['success_rate']),
+                        'success_rate': float(pattern['success_rate'] or 0),
                         'count': pattern['occurrence_count']
                     }),
-                    float(pattern['success_rate']),
+                    float(pattern['success_rate'] or 0),
                     False
                 )
 
                 lessons.append({
                     "type": "successful_pattern",
                     "lesson": lesson,
-                    "impact": float(pattern['success_rate'])
+                    "impact": float(pattern['success_rate'] or 0)
                 })
 
             # Detect outcome patterns

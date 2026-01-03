@@ -213,10 +213,11 @@ class TrafficSplitter:
 
             existing = cursor.fetchone()
             if existing:
-                self.assignment_cache[cache_key] = existing['variant_name']
+                existing_variant = existing.get('variant_name') or 'control'
+                self.assignment_cache[cache_key] = existing_variant
                 cursor.close()
                 conn.close()
-                return existing['variant_name']
+                return existing_variant
 
             # Get experiment allocation
             cursor.execute("""
@@ -232,9 +233,10 @@ class TrafficSplitter:
                 return "control"  # Default to control if experiment not running
 
             # Assign based on hash
+            allocation = experiment.get('allocation') or {}
             assignment = self._hash_assignment(
                 user_id,
-                experiment['allocation']
+                allocation
             )
 
             # Store assignment
@@ -262,6 +264,13 @@ class TrafficSplitter:
         allocation: dict
     ) -> str:
         """Hash-based variant assignment"""
+        if not allocation:
+            return "control"
+        if isinstance(allocation, str):
+            try:
+                allocation = json.loads(allocation)
+            except (TypeError, json.JSONDecodeError):
+                return "control"
         # Create hash
         hash_input = f"{user_id}".encode()
         hash_value = int(hashlib.md5(hash_input).hexdigest(), 16)
@@ -428,7 +437,10 @@ class StatisticalAnalyzer:
                 }
 
             # Perform statistical tests
-            control = next((r for r in results if 'control' in r['variant_name'].lower()), results[0])
+            control = next(
+                (r for r in results if 'control' in (r.get('variant_name') or '').lower()),
+                results[0]
+            )
             treatments = [r for r in results if r != control]
 
             analysis = {
@@ -466,13 +478,18 @@ class StatisticalAnalyzer:
 
     def _format_variant_stats(self, variant: dict) -> dict:
         """Format variant statistics"""
+        users = variant.get('users') or 0
+        conversions = variant.get('conversions') or 0
+        mean_value = variant.get('mean_value') or 0
+        std_value = variant.get('std_value') or 0
+
         return {
-            "name": variant['variant_name'],
-            "users": int(variant['users']),
-            "conversions": int(variant['conversions']),
-            "conversion_rate": (variant['conversions'] / variant['users'] * 100) if variant['users'] > 0 else 0,
-            "mean_value": float(variant['mean_value'] or 0),
-            "std_value": float(variant['std_value'] or 0)
+            "name": variant.get('variant_name') or 'unknown',
+            "users": int(users or 0),
+            "conversions": int(conversions or 0),
+            "conversion_rate": (conversions / users * 100) if users > 0 else 0,
+            "mean_value": float(mean_value or 0),
+            "std_value": float(std_value or 0)
         }
 
     def _compare_variants(
@@ -482,8 +499,13 @@ class StatisticalAnalyzer:
     ) -> dict:
         """Compare treatment to control"""
         # Conversion rate comparison
-        control_rate = control['conversions'] / control['users'] if control['users'] > 0 else 0
-        treatment_rate = treatment['conversions'] / treatment['users'] if treatment['users'] > 0 else 0
+        control_users = control.get('users') or 0
+        control_conversions = control.get('conversions') or 0
+        treatment_users = treatment.get('users') or 0
+        treatment_conversions = treatment.get('conversions') or 0
+
+        control_rate = control_conversions / control_users if control_users > 0 else 0
+        treatment_rate = treatment_conversions / treatment_users if treatment_users > 0 else 0
 
         # Calculate lift
         lift = ((treatment_rate - control_rate) / control_rate * 100) if control_rate > 0 else 0
@@ -492,8 +514,8 @@ class StatisticalAnalyzer:
         from scipy.stats import chi2_contingency
 
         contingency_table = [
-            [control['conversions'], control['users'] - control['conversions']],
-            [treatment['conversions'], treatment['users'] - treatment['conversions']]
+            [control_conversions, control_users - control_conversions],
+            [treatment_conversions, treatment_users - treatment_conversions]
         ]
 
         chi2, p_value, dof, expected = chi2_contingency(contingency_table)

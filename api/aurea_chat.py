@@ -419,6 +419,19 @@ async def get_aurea_status():
     """
     try:
         state = await state_provider.get_live_state()
+
+        # Check for critical errors (state provider returns alerts on failure)
+        if state.alerts:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "error",
+                    "message": "System state retrieval failed",
+                    "alerts": state.alerts,
+                    "timestamp": state.timestamp
+                }
+            )
+
         return {
             "status": "operational",
             "active_agents": state.active_agents,
@@ -850,21 +863,9 @@ async def get_aurea_capabilities():
         }
 
 
-@router.post("/power/database")
-async def power_database_query(sql: str = Query(..., description="SQL query to execute")):
-    """Direct database query via Power Layer (SELECT only by default)."""
-    try:
-        from aurea_power_layer import get_power_layer
-        power = get_power_layer()
-        result = await power.query_database(sql)
-        return {
-            "success": result.success,
-            "result": result.result,
-            "duration_ms": result.duration_ms,
-            "error": result.error
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+# SECURITY: /power/database endpoint REMOVED - Raw SQL execution is a critical security vulnerability
+# If database access is needed, use proper ORM/parameterized queries through specific endpoints
+# @router.post("/power/database") - DISABLED FOR SECURITY
 
 
 @router.get("/power/health")

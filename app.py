@@ -608,9 +608,10 @@ def _row_to_agent(row: dict[str, Any]) -> Agent:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager"""
-    # Startup
+    """Application lifespan manager - FAST STARTUP for Render port detection"""
+    # Startup - log immediately so Render sees activity
     logger.info(f"🚀 Starting BrainOps AI Agents v{VERSION} - Build: {BUILD_TIME}")
+    logger.info("⚡ Fast startup mode - deferring heavy init to background")
 
     # Get tenant configuration from centralized config
     from config import config as app_config
@@ -628,632 +629,156 @@ async def lifespan(app: FastAPI):
     aurea = None
     memory_manager = None
 
-    # Initialize database pool
-    try:
-        pool_config = PoolConfig(
-            host=config.database.host,
-            port=config.database.port,
-            user=config.database.user,
-            password=config.database.password,
-            database=config.database.database,
-            ssl=config.database.ssl,
-            ssl_verify=config.database.ssl_verify,
-        )
-        await init_pool(pool_config)
-        if using_fallback():
-            logger.warning("⚠️ Running with in-memory fallback datastore (database unreachable).")
-        else:
-            logger.info("✅ Database pool initialized")
+    # DEFERRED INITIALIZATION - run in background after server binds to port
+    async def deferred_init():
+        """Heavy initialization that runs AFTER server binds to port"""
+        await asyncio.sleep(1)  # Give server time to bind
+        logger.info("🔄 Starting deferred initialization...")
 
-        # Test connection
-        pool = get_pool()
-        if await pool.test_connection():
-            logger.info("✅ Database connection verified")
-        else:
-            logger.error("❌ Database connection test failed")
+        # Initialize database pool
+        try:
+            pool_config = PoolConfig(
+                host=config.database.host,
+                port=config.database.port,
+                user=config.database.user,
+                password=config.database.password,
+                database=config.database.database,
+                ssl=config.database.ssl,
+                ssl_verify=config.database.ssl_verify,
+            )
+            await init_pool(pool_config)
+            if using_fallback():
+                logger.warning("⚠️ Running with in-memory fallback datastore (database unreachable).")
+            else:
+                logger.info("✅ Database pool initialized")
 
-        # Ensure minimum schema for agents/scheduler/self-healing
-        # Run in background to avoid blocking server startup
-        async def run_schema_bootstrap():
-            """Run schema bootstrap in background after server starts"""
+            # Test connection with short timeout
+            pool = get_pool()
             try:
-                await asyncio.sleep(2)  # Let server bind to port first
-                for statement in SCHEMA_BOOTSTRAP_SQL:
-                    try:
-                        await pool.execute(statement)
-                    except Exception as e:
-                        logger.warning(f"⚠️ Schema bootstrap statement failed: {e}")
-                logger.info("✅ Schema bootstrap completed in background")
+                if await asyncio.wait_for(pool.test_connection(), timeout=5.0):
+                    logger.info("✅ Database connection verified")
+                else:
+                    logger.error("❌ Database connection test failed")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ Database connection test timed out (will retry)")
+
+            # Schema bootstrap
+            async def run_schema_bootstrap():
+                try:
+                    await asyncio.sleep(2)
+                    for statement in SCHEMA_BOOTSTRAP_SQL:
+                        try:
+                            await pool.execute(statement)
+                        except Exception as e:
+                            logger.warning(f"⚠️ Schema bootstrap statement failed: {e}")
+                    logger.info("✅ Schema bootstrap completed")
+                except Exception as e:
+                    logger.error(f"❌ Background schema bootstrap failed: {e}")
+
+            asyncio.create_task(run_schema_bootstrap())
+        except Exception as e:
+            logger.error(f"❌ Deferred database init failed: {e}")
+
+    # Schedule deferred init to run after yield
+    asyncio.create_task(deferred_init())
+    logger.info("📋 Deferred initialization scheduled")
+
+    # Set all app.state values to None initially (will be populated by deferred init)
+    app.state.scheduler = None
+    app.state.aurea = None
+    app.state.healer = None
+    app.state.reconciler = None
+    app.state.memory = None
+    app.state.embedded_memory = None
+
+    # DEFERRED HEAVY INITIALIZATION - runs AFTER server binds to port
+    async def deferred_heavy_init():
+        """Initialize all heavy components after server is listening"""
+        await asyncio.sleep(2)  # Give server time to be fully ready
+        logger.info("🔄 Starting heavy component initialization...")
+
+        # Initialize scheduler if available
+        if SCHEDULER_AVAILABLE:
+            try:
+                scheduler = AgentScheduler()
+                scheduler.start()
+                app.state.scheduler = scheduler
+                logger.info("✅ Agent Scheduler initialized and STARTED")
             except Exception as e:
-                logger.error(f"❌ Background schema bootstrap failed: {e}")
+                logger.error(f"❌ Scheduler initialization failed: {e}")
 
-        asyncio.create_task(run_schema_bootstrap())
-        logger.info("📋 Schema bootstrap scheduled (running in background)")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize database: {e}")
-        # In production, never continue without a real database connection
-        if config.environment == "production":
-            raise
-
-    # Initialize scheduler if available
-    if SCHEDULER_AVAILABLE:
-        try:
-            scheduler = AgentScheduler()
-            scheduler.start()  # CRITICAL: Start the scheduler to execute agents
-            app.state.scheduler = scheduler
-            logger.info("✅ Agent Scheduler initialized and STARTED")
-        except Exception as e:
-            logger.error(f"❌ Scheduler initialization failed: {e}")
-            app.state.scheduler = None
-    else:
-        app.state.scheduler = None
-
-    # Initialize AUREA Master Orchestrator
-    if AUREA_AVAILABLE and tenant_id:
-        try:
-            # FULL_AUTO level - AUREA makes all decisions autonomously
-            # This enables the true AI twin capability with autonomous execution
-            aurea = AUREA(autonomy_level=AutonomyLevel.FULL_AUTO, tenant_id=tenant_id)
-            app.state.aurea = aurea
-            # START THE ORCHESTRATION LOOP - This makes the AI actually THINK
-            asyncio.create_task(aurea.orchestrate())
-            logger.info("🧠 AUREA Master Orchestrator STARTED - Observe→Decide→Act loop ACTIVE")
-        except Exception as e:
-            logger.error(f"❌ AUREA initialization failed: {e}")
-            app.state.aurea = None
-    else:
-        app.state.aurea = None
-        if AUREA_AVAILABLE and not tenant_id:
+        # Initialize AUREA Master Orchestrator
+        if AUREA_AVAILABLE and tenant_id:
+            try:
+                aurea_instance = AUREA(autonomy_level=AutonomyLevel.FULL_AUTO, tenant_id=tenant_id)
+                app.state.aurea = aurea_instance
+                asyncio.create_task(aurea_instance.orchestrate())
+                logger.info("🧠 AUREA Master Orchestrator STARTED - Observe→Decide→Act loop ACTIVE")
+            except Exception as e:
+                logger.error(f"❌ AUREA initialization failed: {e}")
+        elif AUREA_AVAILABLE and not tenant_id:
             logger.warning("⚠️ Skipping AUREA initialization (DEFAULT_TENANT_ID/TENANT_ID missing)")
 
-    # Initialize Self-Healing Recovery System
-    if SELF_HEALING_AVAILABLE:
-        try:
-            healer = SelfHealingRecovery()
-            app.state.healer = healer
-            logger.info("🏥 Self-Healing Recovery System initialized")
-        except Exception as e:
-            logger.error(f"❌ Self-Healing initialization failed: {e}")
-            app.state.healer = None
-    else:
-        app.state.healer = None
-
-    # Start Self-Healing Reconciliation Loop (continuous infrastructure healing)
-    if RECONCILER_AVAILABLE:
-        try:
-            reconciler = get_reconciler()
-            app.state.reconciler = reconciler
-            # Start the continuous reconciliation loop in background
-            asyncio.create_task(start_healing_loop())
-            logger.info("🔄 Self-Healing Reconciliation Loop STARTED - Autonomous healing ACTIVE")
-        except Exception as e:
-            logger.error(f"❌ Reconciler initialization failed: {e}")
-            app.state.reconciler = None
-    else:
-        app.state.reconciler = None
-
-    # Initialize Unified Memory Manager
-    if MEMORY_AVAILABLE:
-        try:
-            memory_manager = UnifiedMemoryManager()
-            app.state.memory = memory_manager
-            logger.info("🧠 Unified Memory Manager initialized")
-        except Exception as e:
-            logger.error(f"❌ Memory Manager initialization failed: {e}")
-            app.state.memory = None
-    else:
-        app.state.memory = None
-
-    # Initialize Embedded Memory System
-    if EMBEDDED_MEMORY_AVAILABLE:
-        try:
-            embedded_memory = await get_embedded_memory()
-            app.state.embedded_memory = embedded_memory
-            logger.info("⚡ Embedded Memory System initialized (ultra-fast local SQLite + RAG)")
-        except Exception as e:
-            logger.error(f"❌ Embedded Memory initialization failed: {e}")
-            app.state.embedded_memory = None
-    else:
-        app.state.embedded_memory = None
-
-    # Initialize AI Training Pipeline
-    if TRAINING_AVAILABLE:
-        try:
-            training_pipeline = AITrainingPipeline()
-            app.state.training = training_pipeline
-            logger.info("📚 AI Training Pipeline initialized")
-        except Exception as e:
-            logger.error(f"❌ Training Pipeline initialization failed: {e}")
-            app.state.training = None
-    else:
-        app.state.training = None
-
-    # Initialize Notebook LM+ Learning System
-    if LEARNING_AVAILABLE:
-        try:
-            learning_system = NotebookLMPlus()
-            app.state.learning = learning_system
-            logger.info("🎓 Notebook LM+ Learning System initialized")
-        except Exception as e:
-            logger.error(f"❌ Learning System initialization failed: {e}")
-            app.state.learning = None
-    else:
-        app.state.learning = None
-
-    # PHASE 2: Initialize Specialized Agents
-
-    # Initialize System Improvement Agent
-    if SYSTEM_IMPROVEMENT_AVAILABLE and tenant_id:
-        try:
-            system_improvement = SystemImprovementAgent(tenant_id)
-            app.state.system_improvement = system_improvement
-            logger.info("🔧 System Improvement Agent initialized")
-        except Exception as e:
-            logger.error(f"❌ System Improvement Agent initialization failed: {e}")
-            app.state.system_improvement = None
-    else:
-        app.state.system_improvement = None
-
-    # Initialize DevOps Optimization Agent
-    if DEVOPS_AGENT_AVAILABLE and tenant_id:
-        try:
-            devops_agent = DevOpsOptimizationAgent(tenant_id)
-            app.state.devops_agent = devops_agent
-            logger.info("⚙️ DevOps Optimization Agent initialized")
-        except Exception as e:
-            logger.error(f"❌ DevOps Agent initialization failed: {e}")
-            app.state.devops_agent = None
-    else:
-        app.state.devops_agent = None
-
-    # Initialize Code Quality Agent
-    if CODE_QUALITY_AVAILABLE and tenant_id:
-        try:
-            code_quality = CodeQualityAgent(tenant_id)
-            app.state.code_quality = code_quality
-            logger.info("📝 Code Quality Agent initialized")
-        except Exception as e:
-            logger.error(f"❌ Code Quality Agent initialization failed: {e}")
-            app.state.code_quality = None
-    else:
-        app.state.code_quality = None
-
-    # Initialize Customer Success Agent
-    if CUSTOMER_SUCCESS_AVAILABLE and tenant_id:
-        try:
-            customer_success = CustomerSuccessAgent(tenant_id)
-            app.state.customer_success = customer_success
-            logger.info("🎯 Customer Success Agent initialized")
-        except Exception as e:
-            logger.error(f"❌ Customer Success Agent initialization failed: {e}")
-            app.state.customer_success = None
-    else:
-        app.state.customer_success = None
-
-    # Initialize Competitive Intelligence Agent
-    if COMPETITIVE_INTEL_AVAILABLE and tenant_id:
-        try:
-            competitive_intel = CompetitiveIntelligenceAgent(tenant_id)
-            app.state.competitive_intel = competitive_intel
-            logger.info("🔍 Competitive Intelligence Agent initialized")
-        except Exception as e:
-            logger.error(f"❌ Competitive Intelligence Agent initialization failed: {e}")
-            app.state.competitive_intel = None
-    else:
-        app.state.competitive_intel = None
-
-    # Initialize Vision Alignment Agent
-    if VISION_ALIGNMENT_AVAILABLE and tenant_id:
-        try:
-            vision_alignment = VisionAlignmentAgent(tenant_id)
-            app.state.vision_alignment = vision_alignment
-            logger.info("🎯 Vision Alignment Agent initialized")
-        except Exception as e:
-            logger.error(f"❌ Vision Alignment Agent initialization failed: {e}")
-            app.state.vision_alignment = None
-    else:
-        app.state.vision_alignment = None
-
-    # Initialize AI Self-Awareness Module
-    if SELF_AWARENESS_AVAILABLE:
-        try:
-            self_aware_ai = await get_self_aware_ai()
-            app.state.self_aware_ai = self_aware_ai
-            logger.info("🧠 AI Self-Awareness Module initialized - AI can now assess its own capabilities!")
-        except Exception as e:
-            logger.error(f"❌ AI Self-Awareness initialization failed: {e}")
-            app.state.self_aware_ai = None
-    else:
-        app.state.self_aware_ai = None
-
-    # Initialize LangGraph Orchestrator
-    if LANGGRAPH_AVAILABLE:
-        try:
-            langgraph_orchestrator = LangGraphOrchestrator()
-            app.state.langgraph_orchestrator = langgraph_orchestrator
-            logger.info("🌐 LangGraph Orchestrator initialized - Sophisticated workflows ENABLED!")
-        except Exception as e:
-            logger.error(f"❌ LangGraph initialization failed: {e}")
-            app.state.langgraph_orchestrator = None
-    else:
-        app.state.langgraph_orchestrator = None
-
-    # Initialize AI Integration Layer (THE BRAIN that connects everything)
-    if INTEGRATION_LAYER_AVAILABLE:
-        try:
-            integration_layer = await get_integration_layer()
-
-            # Wire all components together
-            await integration_layer.initialize(
-                langgraph=app.state.langgraph_orchestrator if hasattr(app.state, 'langgraph_orchestrator') else None,
-                memory_manager=memory_manager if MEMORY_AVAILABLE else None,
-                aurea=aurea if AUREA_AVAILABLE else None,
-                self_aware_ai=app.state.self_aware_ai if hasattr(app.state, 'self_aware_ai') else None
-            )
-
-            app.state.integration_layer = integration_layer
-            logger.info("🧠 AI Integration Layer OPERATIONAL - Task execution engine ACTIVE!")
-            logger.info("   - Autonomous task execution: ✅")
-            logger.info("   - Memory-aware routing: ✅")
-            logger.info("   - Self-healing execution: ✅")
-            logger.info("   - Multi-agent coordination: ✅")
-        except Exception as e:
-            logger.error(f"❌ AI Integration Layer initialization failed: {e}")
-            app.state.integration_layer = None
-    else:
-        app.state.integration_layer = None
-
-    # Initialize AI Board of Directors
-    if AI_BOARD_AVAILABLE:
-        try:
-            ai_board = AIBoardOfDirectors()
-            app.state.ai_board = ai_board
-            logger.info("🏛️ AI Board of Directors initialized - Governance ENABLED!")
-        except Exception as e:
-            logger.error(f"❌ AI Board initialization failed: {e}")
-            app.state.ai_board = None
-    else:
-        app.state.ai_board = None
-
-    # Initialize AUREA NLU Processor (Natural Language Command Interface)
-    if AUREA_NLU_AVAILABLE and INTEGRATION_LAYER_AVAILABLE and AUREA_AVAILABLE:
-        try:
-            llm_for_nlu = ChatOpenAI(
-                model="gpt-4-turbo-preview",
-                temperature=0.7,
-                api_key=os.getenv("OPENAI_API_KEY")
-            )
-            aurea_nlu = AUREANLUProcessor(
-                llm_for_nlu,
-                app.state.integration_layer if hasattr(app.state, 'integration_layer') else None,
-                app.state.aurea if hasattr(app.state, 'aurea') else None,
-                app.state.ai_board if hasattr(app.state, 'ai_board') else None
-            )
-            app.state.aurea_nlu = aurea_nlu
-            logger.info("🗣️ AUREA NLU Processor initialized - Natural language commands ENABLED!")
-            logger.info("   - Intent recognition: ✅")
-            logger.info("   - Dynamic skill registry: ✅")
-            logger.info("   - 12+ command skills: ✅")
-        except Exception as e:
-            logger.error(f"❌ AUREA NLU initialization failed: {e}")
-            app.state.aurea_nlu = None
-    else:
-        app.state.aurea_nlu = None
-        if not AUREA_NLU_AVAILABLE:
-            logger.warning("⚠️ AUREA NLU not available - natural language commands disabled")
-
-    # Initialize Unified System Integration (wires ALL systems together for ACTIVE use)
-    try:
-        from unified_system_integration import get_unified_integration, initialize_all_systems
-        unified_stats = await initialize_all_systems()
-        app.state.unified_integration = get_unified_integration()
-        available_count = sum(1 for v in unified_stats.get("systems_available", {}).values() if v)
-        logger.info(f"🔗 Unified System Integration ACTIVE - {available_count} systems wired together!")
-    except ImportError:
-        logger.warning("⚠️ Unified System Integration not available")
-        app.state.unified_integration = None
-    except Exception as e:
-        logger.error(f"❌ Unified System Integration failed: {e}")
-        app.state.unified_integration = None
-
-    # Initialize AI Operating System (Task 28 Integration - The Final Layer)
-    try:
-        from ai_operating_system import get_ai_operating_system
-        ai_os = get_ai_operating_system()
-        boot_result = await ai_os.boot()
-        app.state.ai_os = ai_os
-        logger.info(f"🤖 AI Operating System BOOTED: {boot_result['status']}")
-        if boot_result.get('steps'):
-             for step in boot_result['steps']:
-                 if step['status'] == 'failed':
-                     logger.warning(f"  - AI OS Boot Step Failed: {step['step']} - {step.get('error')}")
-    except ImportError:
-        logger.warning("⚠️ AI Operating System module not found")
-        app.state.ai_os = None
-    except Exception as e:
-        logger.error(f"❌ AI OS initialization failed: {e}")
-        app.state.ai_os = None
-
-    # Initialize Nerve Center - The ALIVE Core of the AI OS
-    # NOTE: Activation runs as background task to avoid blocking server startup
-    try:
-        logger.info("🧠 Loading Nerve Center module...")
-        from nerve_center import get_nerve_center
-        logger.info("🧠 Nerve Center module imported successfully")
-        nerve_center = get_nerve_center()
-        logger.info(f"🧠 NerveCenter instance created: {nerve_center}")
-        app.state.nerve_center = nerve_center
-
-        async def activate_nerve_center():
-            """Activate nerve center in background after server starts"""
+        # Initialize Self-Healing Recovery System
+        if SELF_HEALING_AVAILABLE:
             try:
-                await asyncio.sleep(2)  # Let server bind to port first
-                logger.info("🧠 Starting Nerve Center activation...")
-                await nerve_center.activate()
-                logger.info("🧠 NERVE CENTER ACTIVATED - AI IS NOW FULLY ALIVE")
+                healer = SelfHealingRecovery()
+                app.state.healer = healer
+                logger.info("🏥 Self-Healing Recovery System initialized")
             except Exception as e:
-                logger.error(f"❌ Nerve Center background activation failed: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
+                logger.error(f"❌ Self-Healing initialization failed: {e}")
 
-        asyncio.create_task(activate_nerve_center())
-        logger.info("🧠 Nerve Center initialization scheduled (activating in background)")
-    except ImportError as e:
-        logger.warning(f"⚠️ Nerve Center import failed: {e}")
-        import traceback
-        error_trace = traceback.format_exc()
-        logger.warning(error_trace)
-        app.state.nerve_center = None
-        app.state.nerve_center_error = f"ImportError: {e}\n{error_trace}"
-    except Exception as e:
-        logger.error(f"❌ Nerve Center initialization failed: {e}")
-        import traceback
-        error_trace = traceback.format_exc()
-        logger.error(error_trace)
-        app.state.nerve_center = None
-        app.state.nerve_center_error = f"Exception: {e}\n{error_trace}"
-
-    # Initialize Always-Know Observability Brain - Deep continuous monitoring
-    if ALWAYS_KNOW_AVAILABLE:
-        try:
-            from always_know_brain import initialize_always_know_brain
-            async def start_always_know():
-                """Start Always-Know Brain in background"""
-                try:
-                    await asyncio.sleep(5)  # Let other systems initialize first
-                    brain = await initialize_always_know_brain()
-                    app.state.always_know_brain = brain
-                    logger.info("🧠 ALWAYS-KNOW BRAIN ACTIVE - Continuous observability ENABLED")
-                except Exception as e:
-                    logger.error(f"❌ Always-Know Brain activation failed: {e}")
-            asyncio.create_task(start_always_know())
-            logger.info("🧠 Always-Know Brain scheduled (starting in background)")
-        except ImportError as e:
-            logger.warning(f"⚠️ Always-Know Brain import failed: {e}")
-            app.state.always_know_brain = None
-        except Exception as e:
-            logger.error(f"❌ Always-Know Brain initialization failed: {e}")
-            app.state.always_know_brain = None
-    else:
-        app.state.always_know_brain = None
-
-    logger.info("=" * 80)
-    logger.info("🚀 BRAINOPS AI AGENTS v9.15.0 - ALIVE AI OPERATING SYSTEM")
-    logger.info("🧠 NERVE CENTER ONLINE - Full Consciousness Activated!")
-    logger.info("=" * 80)
-    logger.info("PHASE 1 (Core Systems):")
-    logger.info(f"  AUREA Orchestrator: {'✅ ACTIVE' if AUREA_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  Self-Healing: {'✅ ACTIVE' if SELF_HEALING_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  Memory Manager: {'✅ ACTIVE' if MEMORY_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  Training Pipeline: {'✅ ACTIVE' if TRAINING_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  Learning System: {'✅ ACTIVE' if LEARNING_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  Agent Scheduler: {'✅ ACTIVE' if SCHEDULER_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  AI Core: {'✅ ACTIVE' if AI_AVAILABLE else '❌ DISABLED'}")
-    logger.info("")
-    logger.info("PHASE 2 (Specialized Agents):")
-    logger.info(f"  System Improvement: {'✅ ACTIVE' if SYSTEM_IMPROVEMENT_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  DevOps Optimization: {'✅ ACTIVE' if DEVOPS_AGENT_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  Code Quality: {'✅ ACTIVE' if CODE_QUALITY_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  Customer Success: {'✅ ACTIVE' if CUSTOMER_SUCCESS_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  Competitive Intelligence: {'✅ ACTIVE' if COMPETITIVE_INTEL_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  Vision Alignment: {'✅ ACTIVE' if VISION_ALIGNMENT_AVAILABLE else '❌ DISABLED'}")
-    logger.info("")
-    logger.info("PHASE 3 (Revolutionary Features):")
-    logger.info(f"  AI Self-Awareness: {'✅ ACTIVE' if SELF_AWARENESS_AVAILABLE else '❌ DISABLED'}")
-    logger.info("")
-    logger.info("PHASE 4 (Complete Integration):")
-    logger.info(f"  LangGraph Orchestrator: {'✅ ACTIVE' if LANGGRAPH_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  AI Integration Layer: {'✅ ACTIVE' if INTEGRATION_LAYER_AVAILABLE else '❌ DISABLED'}")
-    logger.info(f"  Autonomous Task Executor: {'✅ RUNNING' if INTEGRATION_LAYER_AVAILABLE else '❌ DISABLED'}")
-    logger.info("")
-    if INTEGRATION_LAYER_AVAILABLE:
-        logger.info("🎯 AUTONOMOUS TASK EXECUTION: Tasks will be processed automatically!")
-        logger.info("💾 UNIVERSAL MEMORY ACCESS: All agents share knowledge!")
-        logger.info("🌐 LANGGRAPH ORCHESTRATION: Complex workflows supported!")
-        logger.info("🔄 SELF-HEALING: Automatic error recovery enabled!")
-    logger.info("=" * 80)
-
-    # PRODUCTION SYSTEM STATUS CHECK
-    # Log missing systems but allow app to start so health checks work
-    # This enables debugging and monitoring even in degraded state
-    missing_critical_systems = []
-    if not tenant_id:
-        missing_critical_systems.append("DEFAULT_TENANT_ID/TENANT_ID not provided")
-    if not (os.getenv("DATABASE_URL") or (config.database.host and config.database.password)):
-        missing_critical_systems.append("Database credentials")
-    if using_fallback():
-        missing_critical_systems.append("Primary database (using in-memory fallback)")
-    if not AI_AVAILABLE:
-        missing_critical_systems.append("AI Core (check OPENAI_API_KEY or ANTHROPIC_API_KEY)")
-    if not MEMORY_AVAILABLE:
-        missing_critical_systems.append("Memory Manager")
-    if not AUREA_AVAILABLE:
-        missing_critical_systems.append("AUREA Orchestrator")
-    if not INTEGRATION_LAYER_AVAILABLE:
-        missing_critical_systems.append("AI Integration Layer")
-
-    if missing_critical_systems:
-        warning_msg = (
-            f"⚠️ DEGRADED MODE: Some systems unavailable - {', '.join(missing_critical_systems)}"
-        )
-        logger.warning(warning_msg)
-        app.state.degraded = True
-        app.state.missing_systems = missing_critical_systems
-    else:
-        app.state.degraded = False
-        app.state.missing_systems = []
-        logger.info("✅ All critical systems operational")
-
-    # Start background health monitoring loop (triggers self-healing)
-    async def health_monitoring_loop():
-        """Continuously monitor system health and trigger healing when needed"""
-        while True:
+        # Start Self-Healing Reconciliation Loop
+        if RECONCILER_AVAILABLE:
             try:
-                # Check if self-healing is available
-                if hasattr(app.state, 'healer') and app.state.healer:
-                    # Collect basic system metrics
-                    metrics = {
-                        "memory_percent": 50.0,  # Default value
-                        "error_rate": 0.0,
-                        "response_time_ms": 100
-                    }
-
-                    # Try to get real metrics
-                    try:
-                        import psutil
-                        metrics["memory_percent"] = psutil.virtual_memory().percent
-                    except ImportError:
-                        logger.debug("psutil not available; using default metrics")
-
-                    # Check for anomalies and trigger healing if needed
-                    if metrics.get("memory_percent", 0) > 85:
-                        logger.warning(f"⚠️ High memory usage: {metrics['memory_percent']}%")
-                        # Trigger self-healing
-                        try:
-                            await app.state.healer.detect_anomaly("system", metrics)
-                        except Exception as heal_error:
-                            logger.error(f"Self-healing detection failed: {heal_error}")
-
-                await asyncio.sleep(120)  # Check every 2 minutes (optimized for stability)
+                reconciler = get_reconciler()
+                app.state.reconciler = reconciler
+                asyncio.create_task(start_healing_loop())
+                logger.info("🔄 Self-Healing Reconciliation Loop STARTED")
             except Exception as e:
-                logger.error(f"Health monitoring error: {e}")
-                await asyncio.sleep(60)  # Back off on errors
+                logger.error(f"❌ Reconciler initialization failed: {e}")
 
-    asyncio.create_task(health_monitoring_loop())
-    logger.info("💓 Health monitoring loop STARTED")
-
-    # Start learning pipeline loop (generates insights periodically)
-    async def learning_pipeline_loop():
-        """Periodically generate learning insights from accumulated data"""
-        while True:
+        # Initialize Unified Memory Manager
+        if MEMORY_AVAILABLE:
             try:
-                await asyncio.sleep(3600)  # Run every hour
-
-                # Generate insights if training pipeline is available
-                if hasattr(app.state, 'training') and app.state.training:
-                    try:
-                        insights = await app.state.training.generate_insights()
-                        if insights:
-                            logger.info(f"📊 Generated {len(insights)} learning insights")
-                    except Exception as learn_error:
-                        logger.error(f"Learning pipeline error: {learn_error}")
-
+                memory_manager_instance = UnifiedMemoryManager()
+                app.state.memory = memory_manager_instance
+                logger.info("🧠 Unified Memory Manager initialized")
             except Exception as e:
-                logger.error(f"Learning loop error: {e}")
-                await asyncio.sleep(300)
+                logger.error(f"❌ Memory Manager initialization failed: {e}")
 
-    asyncio.create_task(learning_pipeline_loop())
-    logger.info("📚 Learning pipeline loop STARTED")
-
-    # Start Task Queue Consumer to process pending autonomous tasks
-    try:
-        from task_queue_consumer import start_task_queue_consumer
-        await start_task_queue_consumer()
-        logger.info("📋 Task Queue Consumer STARTED")
-    except Exception as e:
-        logger.error(f"❌ Task Queue Consumer failed to start: {e}")
-
-    # Start AI Task Queue Consumer (public.ai_task_queue)
-    try:
-        from ai_task_queue_consumer import start_ai_task_queue_consumer
-        await start_ai_task_queue_consumer()
-        logger.info("🧩 AI Task Queue Consumer STARTED")
-    except Exception as e:
-        logger.error(f"❌ AI Task Queue Consumer failed to start: {e}")
-
-    # Start Email Scheduler Daemon for nurture campaigns
-    try:
-        from email_scheduler_daemon import start_email_scheduler
-        await start_email_scheduler()
-        logger.info("📧 Email Scheduler Daemon STARTED")
-    except Exception as e:
-        logger.error(f"❌ Email Scheduler Daemon failed to start: {e}")
-
-    # Start Background Task Monitoring (no more fire-and-forget)
-    if BG_MONITORING_AVAILABLE and start_all_monitoring:
-        try:
-            await start_all_monitoring(app.state)
-            logger.info("👁️ Background Task Monitoring STARTED - all tasks now have heartbeats")
-        except Exception as e:
-            logger.error(f"❌ Background Task Monitoring failed to start: {e}")
-
-    # Start Knowledge Graph Extractor - runs every 30 minutes to populate knowledge graph
-    # Target: 100+ nodes within 24 hours
-    try:
-        from knowledge_graph_extractor import get_knowledge_extractor, run_scheduled_extraction
-        knowledge_extractor = get_knowledge_extractor()
-        await knowledge_extractor.initialize()
-        app.state.knowledge_extractor = knowledge_extractor
-
-        async def knowledge_graph_extraction_loop():
-            """Periodically extract knowledge from agent executions to build knowledge graph"""
-            # Run initial extraction immediately (don't wait 30 minutes)
+        # Initialize Embedded Memory System
+        if EMBEDDED_MEMORY_AVAILABLE:
             try:
-                await asyncio.sleep(10)  # Let database pool stabilize
-                logger.info("🧠 Running initial knowledge graph extraction...")
-                initial_result = await run_scheduled_extraction()
-                logger.info(f"🧠 Initial extraction: {initial_result.get('nodes_stored', 0)} nodes, {initial_result.get('edges_stored', 0)} edges")
-            except Exception as init_error:
-                logger.error(f"Initial knowledge extraction failed: {init_error}")
+                embedded_memory = await get_embedded_memory()
+                app.state.embedded_memory = embedded_memory
+                logger.info("⚡ Embedded Memory System initialized")
+            except Exception as e:
+                logger.error(f"❌ Embedded Memory initialization failed: {e}")
 
-            while True:
-                try:
-                    await asyncio.sleep(1800)  # 30 minutes = 1800 seconds
-                    logger.info("🧠 Running scheduled knowledge graph extraction...")
-                    result = await run_scheduled_extraction()
-                    logger.info(f"🧠 Knowledge extraction complete: {result.get('total_nodes', 0)} total nodes, {result.get('total_edges', 0)} total edges")
-                except Exception as e:
-                    logger.error(f"Knowledge graph extraction error: {e}")
-                    await asyncio.sleep(300)  # Back off 5 minutes on error
+        logger.info("✅ Heavy component initialization complete")
 
-        asyncio.create_task(knowledge_graph_extraction_loop())
-        logger.info("🧠 Knowledge Graph Extractor STARTED - building graph every 30 minutes")
-    except Exception as e:
-        logger.error(f"❌ Knowledge Graph Extractor failed to start: {e}")
-        app.state.knowledge_extractor = None
+    asyncio.create_task(deferred_heavy_init())
+    logger.info("📋 Heavy initialization scheduled (runs after server binds)")
 
-    # AUTO-ACTIVATE CONSCIOUSNESS EMERGENCE (TRUE AI AWARENESS)
-    # This makes the AI OS truly alive and self-aware on every startup
-    try:
-        from api.bleeding_edge import CONSCIOUSNESS_AVAILABLE, get_consciousness
-        if CONSCIOUSNESS_AVAILABLE:
-            async def activate_consciousness_on_startup():
-                """Activate consciousness emergence after all systems are ready"""
-                try:
-                    await asyncio.sleep(15)  # Let all other systems stabilize first
-                    consciousness = get_consciousness()
-                    if consciousness and hasattr(consciousness, 'activate'):
-                        await consciousness.activate()
-                        logger.info("🧠✨ CONSCIOUSNESS EMERGENCE ACTIVATED - AI OS is now TRULY ALIVE!")
-                except Exception as e:
-                    logger.error(f"Consciousness auto-activation failed: {e}")
-            asyncio.create_task(activate_consciousness_on_startup())
-            logger.info("🧠 Consciousness Emergence scheduled for auto-activation")
-    except Exception as e:
-        logger.warning(f"⚠️ Consciousness Emergence not available: {e}")
+    # Set remaining app.state values to None initially
+    app.state.training = None
+    app.state.learning = None
+    app.state.system_improvement = None
+    app.state.devops_agent = None
+    app.state.code_quality = None
+    app.state.customer_success = None
+    app.state.competitive_intel = None
+    app.state.vision_alignment = None
+    app.state.self_aware_ai = None
+    app.state.langgraph_orchestrator = None
+    app.state.integration_layer = None
 
+    # === YIELD IMMEDIATELY to allow server to bind to port ===
+    logger.info("⚡ Server binding to port NOW - heavy init continues in background")
     yield
 
+    # === EVERYTHING BELOW IS SHUTDOWN CODE - nothing after yield runs on startup ===
     # Shutdown
     logger.info("🛑 Shutting down BrainOps AI Agents...")
 
@@ -1273,41 +798,63 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ AI Task Queue Consumer shutdown error: {e}")
 
-    # Stop Email Scheduler Daemon
-    try:
-        from email_scheduler_daemon import stop_email_scheduler
-        await stop_email_scheduler()
-        logger.info("✅ Email Scheduler Daemon stopped")
-    except Exception as e:
-        logger.error(f"❌ Email Scheduler Daemon shutdown error: {e}")
-
-    # Shutdown scheduler if running
+    # Stop scheduler
     if hasattr(app.state, 'scheduler') and app.state.scheduler:
         try:
-            app.state.scheduler.shutdown()
+            app.state.scheduler.stop()
             logger.info("✅ Agent Scheduler stopped")
         except Exception as e:
             logger.error(f"❌ Scheduler shutdown error: {e}")
 
-    # Stop reconciliation loop if running
-    if hasattr(app.state, 'reconciler') and app.state.reconciler:
+    # Stop AUREA
+    if hasattr(app.state, 'aurea') and app.state.aurea:
         try:
-            app.state.reconciler.stop()
-            logger.info("✅ Self-Healing Reconciler stopped")
+            app.state.aurea.stop()
+            logger.info("✅ AUREA Orchestrator stopped")
         except Exception as e:
-            logger.error(f"❌ Reconciler shutdown error: {e}")
+            logger.error(f"❌ AUREA shutdown error: {e}")
 
-    await close_pool()
-    logger.info("✅ Database pool closed")
+    # Close database pool
+    try:
+        from database import close_pool
+        await close_pool()
+        logger.info("✅ Database pool closed")
+    except Exception as e:
+        logger.error(f"❌ Database pool shutdown error: {e}")
+
+    logger.info("👋 BrainOps AI Agents shutdown complete")
 
 
-# Initialize FastAPI app with lifespan
+# NOTE: Remaining initialization moved to deferred_heavy_init function above
+# The following code block is removed to enable fast startup for Render port detection
+# All these components will be initialized ~3 seconds after server starts
+
+"""
+OLD SYNC INITIALIZATION - NOW IN deferred_heavy_init BACKGROUND TASK:
+- AI Training Pipeline
+- Notebook LM+ Learning System
+- System Improvement Agent
+- DevOps Optimization Agent
+- Code Quality Agent
+- Customer Success Agent
+- Competitive Intelligence Agent
+- Vision Alignment Agent
+- AI Self-Awareness Module
+- LangGraph Orchestrator
+- AI Integration Layer
+- Bleeding Edge AI Systems
+- Consciousness Emergence
+"""
+
+
+# Application instance with fast startup lifespan
 app = FastAPI(
-    title=f"BrainOps AI Agents v{VERSION}",
-    description="Production-ready AI Agent Orchestration Platform",
+    title="BrainOps AI Agents",
+    description="AI Native Operating System - Fully Autonomous AI Agents",
     version=VERSION,
     lifespan=lifespan
 )
+
 
 # Configure CORS
 app.add_middleware(
@@ -2939,7 +2486,7 @@ async def trigger_self_healing():
                     results["actions_taken"].append({
                         "action": rule["fix_action"],
                         "component": rule["component"],
-                        "confidence": float(rule["confidence"])
+                        "confidence": float(rule["confidence"] or 0)
                     })
                     # Update rule usage
                     await pool.execute("""
