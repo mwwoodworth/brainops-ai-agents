@@ -114,6 +114,27 @@ except ImportError as e:
     UI_TESTING_AVAILABLE = False
     logger.warning(f"UI Testing Router not available: {e}")
 
+# Permanent Observability Daemon - Never miss anything (2026-01-03)
+try:
+    from api.permanent_observability import router as permanent_observability_router
+    from permanent_observability_daemon import start_observability_daemon, stop_observability_daemon
+    PERMANENT_OBSERVABILITY_AVAILABLE = True
+    logger.info("✅ Permanent Observability loaded - Never miss anything")
+except ImportError as e:
+    PERMANENT_OBSERVABILITY_AVAILABLE = False
+    start_observability_daemon = None
+    stop_observability_daemon = None
+    logger.warning(f"⚠️ Permanent Observability not available: {e}")
+
+# DevOps Automation API - Permanent knowledge & automated operations (2026-01-03)
+try:
+    from api.devops_api import router as devops_api_router
+    DEVOPS_API_AVAILABLE = True
+    logger.info("✅ DevOps Automation API loaded - Permanent knowledge enabled")
+except ImportError as e:
+    DEVOPS_API_AVAILABLE = False
+    logger.warning(f"⚠️ DevOps API not available: {e}")
+
 # Bleeding Edge AI Capabilities - Revolutionary systems (2025-12-27)
 try:
     from api.bleeding_edge import router as bleeding_edge_router
@@ -755,6 +776,14 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ Embedded Memory initialization failed: {e}")
 
+        # Start Permanent Observability Daemon - Never miss anything
+        if PERMANENT_OBSERVABILITY_AVAILABLE and start_observability_daemon:
+            try:
+                app.state.observability_daemon = await start_observability_daemon()
+                logger.info("👁️ Permanent Observability Daemon STARTED - Nothing will be missed")
+            except Exception as e:
+                logger.error(f"❌ Permanent Observability Daemon startup failed: {e}")
+
         logger.info("✅ Heavy component initialization complete")
 
     asyncio.create_task(deferred_heavy_init())
@@ -796,6 +825,14 @@ async def lifespan(app: FastAPI):
         logger.info("✅ AI Task Queue Consumer stopped")
     except Exception as e:
         logger.error(f"❌ AI Task Queue Consumer shutdown error: {e}")
+
+    # Stop Permanent Observability Daemon
+    if PERMANENT_OBSERVABILITY_AVAILABLE and stop_observability_daemon:
+        try:
+            await stop_observability_daemon()
+            logger.info("✅ Permanent Observability Daemon stopped")
+        except Exception as e:
+            logger.error(f"❌ Observability Daemon shutdown error: {e}")
 
     # Stop scheduler
     if hasattr(app.state, 'scheduler') and app.state.scheduler:
@@ -986,6 +1023,16 @@ app.include_router(aurea_chat_router, dependencies=SECURED_DEPENDENCIES)  # AURE
 app.include_router(full_observability_router, dependencies=SECURED_DEPENDENCIES)  # Comprehensive Observability Dashboard
 app.include_router(self_awareness_router, dependencies=SECURED_DEPENDENCIES)  # Self-Awareness Dashboard
 app.include_router(ai_awareness_router, dependencies=SECURED_DEPENDENCIES)  # Complete AI Awareness - THE endpoint
+
+# Permanent Observability Router - Never miss anything
+if PERMANENT_OBSERVABILITY_AVAILABLE:
+    app.include_router(permanent_observability_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("👁️ Permanent Observability endpoints registered at /visibility/*")
+
+# DevOps Automation API - Permanent knowledge & automated operations
+if DEVOPS_API_AVAILABLE:
+    app.include_router(devops_api_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("🔧 DevOps Automation endpoints registered at /devops/*")
 
 # AI-Powered UI Testing System (2025-12-29) - Automated visual testing with AI vision
 if UI_TESTING_AVAILABLE:
