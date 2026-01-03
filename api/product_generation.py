@@ -154,9 +154,10 @@ async def generate_product(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid quality tier: {request.quality_tier}")
 
-        # Create product spec with tenant isolation
+        # Create product spec with tenant isolation (using UUID for DB compatibility)
+        import uuid
         spec = ProductSpec(
-            product_id=f"prod_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{request.tenant_id}",
+            product_id=str(uuid.uuid4()),  # Use real UUID for database compatibility
             product_type=product_type,
             title=request.title,
             description=request.description,
