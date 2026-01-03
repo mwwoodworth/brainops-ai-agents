@@ -13,10 +13,15 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
 
-import openai
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from urllib.parse import urlparse
+
+# Optional OpenAI dependency
+try:
+    import openai
+except ImportError:
+    openai = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -51,7 +56,14 @@ def _get_db_config():
 DB_CONFIG = None  # Lazy initialization
 
 # AI Configuration
-openai.api_key = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_AVAILABLE = openai is not None and bool(OPENAI_API_KEY)
+if openai is not None and OPENAI_API_KEY:
+    openai.api_key = OPENAI_API_KEY
+elif openai is None:
+    logger.warning("OpenAI SDK not installed - pricing AI disabled")
+else:
+    logger.warning("OpenAI API key not found - pricing AI disabled")
 
 class PricingStrategy(Enum):
     """Pricing strategies"""
@@ -270,6 +282,10 @@ class AIPricingEngine:
     async def _analyze_pricing_factors(self, factors: PricingFactors) -> dict:
         """Analyze pricing factors using AI"""
         try:
+            if not OPENAI_AVAILABLE:
+                logger.warning("OpenAI unavailable - skipping pricing factor analysis")
+                return {}
+
             prompt = f"""Analyze these pricing factors for a roofing software quote:
 
             Customer Segment: {factors.customer_segment.value}
@@ -337,6 +353,10 @@ class AIPricingEngine:
     async def _optimize_price(self, base_price: float, factors: PricingFactors, analysis: dict) -> float:
         """Optimize price using AI and historical data"""
         try:
+            if not OPENAI_AVAILABLE:
+                logger.warning("OpenAI unavailable - using base price for optimization")
+                return base_price
+
             # Get historical win rates
             historical_performance = await self._get_historical_performance(
                 factors.customer_segment,
@@ -407,6 +427,10 @@ class AIPricingEngine:
     async def _select_pricing_strategy(self, factors: PricingFactors, analysis: dict, win_prob: float) -> PricingStrategy:
         """Select optimal pricing strategy"""
         try:
+            if not OPENAI_AVAILABLE:
+                logger.warning("OpenAI unavailable - defaulting to value-based strategy")
+                return PricingStrategy.VALUE_BASED
+
             prompt = f"""Select the best pricing strategy:
 
             Customer: {factors.customer_segment.value}

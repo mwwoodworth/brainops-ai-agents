@@ -253,7 +253,7 @@ async def run_ooda_cycle(
         }
     except Exception as e:
         logger.error(f"OODA cycle failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/ooda/metrics")
@@ -296,7 +296,7 @@ async def validate_response(
         }
     except Exception as e:
         logger.error(f"Hallucination validation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/hallucination/extract-claims")
@@ -317,7 +317,7 @@ async def extract_claims(
         }
     except Exception as e:
         logger.error(f"Claim extraction failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # Live Memory Brain Endpoints
@@ -354,7 +354,7 @@ async def store_memory(
         }
     except Exception as e:
         logger.error(f"Memory storage failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/memory/recall")
@@ -376,7 +376,7 @@ async def recall_memory(
         }
     except Exception as e:
         logger.error(f"Memory recall failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/memory/status")
@@ -395,7 +395,7 @@ async def get_memory_status() -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Memory status failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # Dependability Framework Endpoints
@@ -421,7 +421,7 @@ async def validate_operation(
         }
     except Exception as e:
         logger.error(f"Dependability validation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/dependability/status")
@@ -456,7 +456,7 @@ async def get_consciousness_status() -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Consciousness status failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/consciousness/activate")
@@ -477,7 +477,7 @@ async def activate_consciousness() -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Consciousness activation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/consciousness/introspect")
@@ -499,7 +499,7 @@ async def run_introspection(
         }
     except Exception as e:
         logger.error(f"Introspection failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # Circuit Breaker Endpoints
@@ -528,7 +528,7 @@ async def trip_circuit(
         raise HTTPException(status_code=503, detail="Circuit breaker not available")
 
     try:
-        result = await controller.trip_circuit(circuit_name)
+        await controller.trip_circuit(circuit_name)
         return {
             "success": True,
             "circuit": circuit_name,
@@ -537,7 +537,7 @@ async def trip_circuit(
         }
     except Exception as e:
         logger.error(f"Circuit trip failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/circuit-breaker/reset")
@@ -550,7 +550,7 @@ async def reset_circuit(
         raise HTTPException(status_code=503, detail="Circuit breaker not available")
 
     try:
-        result = await controller.reset_circuit(circuit_name)
+        await controller.reset_circuit(circuit_name)
         return {
             "success": True,
             "circuit": circuit_name,
@@ -559,7 +559,7 @@ async def reset_circuit(
         }
     except Exception as e:
         logger.error(f"Circuit reset failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # Combined Operations
@@ -716,7 +716,7 @@ async def get_comprehensive_diagnostics() -> dict[str, Any]:
 
     if DEPENDABILITY_AVAILABLE:
         try:
-            framework = get_dependability()
+            get_dependability()
             diagnostics["modules"]["dependability"] = {
                 "status": "available",
                 "guards": 6
@@ -835,7 +835,7 @@ async def run_bleeding_edge_smoke_test() -> dict[str, Any]:
     # Test 4: Dependability
     try:
         if DEPENDABILITY_AVAILABLE:
-            framework = get_dependability()
+            get_dependability()
             results["tests"]["dependability"] = {"success": True, "guards": 6}
             results["passed"] += 1
         else:

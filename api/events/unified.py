@@ -433,7 +433,7 @@ async def publish_event(
 
     except Exception as e:
         logger.error(f"Failed to publish event: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to publish event: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to publish event: {str(e)}") from e
 
 
 class ERPEventWebhook(BaseModel):
@@ -562,17 +562,19 @@ async def get_recent_events(
         if not include_processed:
             conditions.append("processed = FALSE")
 
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 
-        query = f"""
-            SELECT event_id, event_type, category, priority, source,
-                   tenant_id, timestamp, payload, metadata,
-                   processed, processed_at, processing_result
-            FROM unified_events
-            {where_clause}
-            ORDER BY timestamp DESC
-            LIMIT ${param_idx}
-        """
+        # Build query with safe WHERE clause (conditions use $N placeholders only)
+        # noqa: S608 - where_clause built from parameterized conditions with $1, $2, etc.
+        query = (
+            "SELECT event_id, event_type, category, priority, source, "
+            "tenant_id, timestamp, payload, metadata, "
+            "processed, processed_at, processing_result "
+            "FROM unified_events "
+            + where_clause
+            + " ORDER BY timestamp DESC "
+            + "LIMIT $" + str(param_idx)
+        )
         params.append(limit)
 
         rows = await pool.fetch(query, *params)
@@ -598,7 +600,7 @@ async def get_recent_events(
 
     except Exception as e:
         logger.error(f"Failed to get recent events: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/stats")
@@ -614,58 +616,101 @@ async def get_event_stats(
         pool = get_pool()
         since = datetime.utcnow() - timedelta(hours=hours)
 
-        tenant_filter = "AND tenant_id = $2" if tenant_id else ""
-
-        # Total counts
-        total_query = f"""
-            SELECT
-                COUNT(*) as total,
-                COUNT(*) FILTER (WHERE processed) as processed,
-                COUNT(*) FILTER (WHERE NOT processed) as pending,
-                COUNT(*) FILTER (WHERE priority = 'critical') as critical
-            FROM unified_events
-            WHERE timestamp > $1 {tenant_filter}
-        """
-
-        params = [since]
+        # Build parameterized queries based on tenant_id presence
         if tenant_id:
-            params.append(tenant_id)
+            # Total counts with tenant filter
+            total_query = """
+                SELECT
+                    COUNT(*) as total,
+                    COUNT(*) FILTER (WHERE processed) as processed,
+                    COUNT(*) FILTER (WHERE NOT processed) as pending,
+                    COUNT(*) FILTER (WHERE priority = 'critical') as critical
+                FROM unified_events
+                WHERE timestamp > $1 AND tenant_id = $2
+            """
+            params = [since, tenant_id]
+            totals = await pool.fetchrow(total_query, *params)
 
-        totals = await pool.fetchrow(total_query, *params)
+            # By type with tenant filter
+            type_query = """
+                SELECT event_type, COUNT(*) as count
+                FROM unified_events
+                WHERE timestamp > $1 AND tenant_id = $2
+                GROUP BY event_type
+                ORDER BY count DESC
+                LIMIT 20
+            """
+            type_rows = await pool.fetch(type_query, *params)
 
-        # By type
-        type_query = f"""
-            SELECT event_type, COUNT(*) as count
-            FROM unified_events
-            WHERE timestamp > $1 {tenant_filter}
-            GROUP BY event_type
-            ORDER BY count DESC
-            LIMIT 20
-        """
-        type_rows = await pool.fetch(type_query, *params)
+            # By source with tenant filter
+            source_query = """
+                SELECT source, COUNT(*) as count
+                FROM unified_events
+                WHERE timestamp > $1 AND tenant_id = $2
+                GROUP BY source
+                ORDER BY count DESC
+            """
+            source_rows = await pool.fetch(source_query, *params)
 
-        # By source
-        source_query = f"""
-            SELECT source, COUNT(*) as count
-            FROM unified_events
-            WHERE timestamp > $1 {tenant_filter}
-            GROUP BY source
-            ORDER BY count DESC
-        """
-        source_rows = await pool.fetch(source_query, *params)
+            # By hour with tenant filter
+            hourly_query = """
+                SELECT
+                    date_trunc('hour', timestamp) as hour,
+                    COUNT(*) as count
+                FROM unified_events
+                WHERE timestamp > $1 AND tenant_id = $2
+                GROUP BY date_trunc('hour', timestamp)
+                ORDER BY hour DESC
+                LIMIT 24
+            """
+            hourly_rows = await pool.fetch(hourly_query, *params)
+        else:
+            # Total counts without tenant filter
+            total_query = """
+                SELECT
+                    COUNT(*) as total,
+                    COUNT(*) FILTER (WHERE processed) as processed,
+                    COUNT(*) FILTER (WHERE NOT processed) as pending,
+                    COUNT(*) FILTER (WHERE priority = 'critical') as critical
+                FROM unified_events
+                WHERE timestamp > $1
+            """
+            params = [since]
+            totals = await pool.fetchrow(total_query, *params)
 
-        # By hour
-        hourly_query = f"""
-            SELECT
-                date_trunc('hour', timestamp) as hour,
-                COUNT(*) as count
-            FROM unified_events
-            WHERE timestamp > $1 {tenant_filter}
-            GROUP BY date_trunc('hour', timestamp)
-            ORDER BY hour DESC
-            LIMIT 24
-        """
-        hourly_rows = await pool.fetch(hourly_query, *params)
+            # By type without tenant filter
+            type_query = """
+                SELECT event_type, COUNT(*) as count
+                FROM unified_events
+                WHERE timestamp > $1
+                GROUP BY event_type
+                ORDER BY count DESC
+                LIMIT 20
+            """
+            type_rows = await pool.fetch(type_query, *params)
+
+            # By source without tenant filter
+            source_query = """
+                SELECT source, COUNT(*) as count
+                FROM unified_events
+                WHERE timestamp > $1
+                GROUP BY source
+                ORDER BY count DESC
+            """
+            source_rows = await pool.fetch(source_query, *params)
+
+            # By hour without tenant filter
+            hourly_query = """
+                SELECT
+                    date_trunc('hour', timestamp) as hour,
+                    COUNT(*) as count
+                FROM unified_events
+                WHERE timestamp > $1
+                GROUP BY date_trunc('hour', timestamp)
+                ORDER BY hour DESC
+                LIMIT 24
+            """
+            hourly_rows = await pool.fetch(hourly_query, *params)
 
         return {
             "period_hours": hours,
@@ -686,7 +731,7 @@ async def get_event_stats(
 
     except Exception as e:
         logger.error(f"Failed to get event stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/replay/{event_id}")
@@ -748,7 +793,7 @@ async def replay_event(
         raise
     except Exception as e:
         logger.error(f"Failed to replay event: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/subscriptions/channels")

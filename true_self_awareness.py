@@ -318,7 +318,7 @@ class TrueSelfAwareness:
 
             # Track test data separately
             test_gumroad = real_stats['gumroad_test'] or 0
-            test_leads = real_stats['leads_test'] or 0
+            real_stats['leads_test'] or 0
             test_won = real_stats['won_test'] or 0
             if test_gumroad > 0:
                 warnings.append(f"{test_gumroad} Gumroad sales are TEST (is_test=TRUE)")

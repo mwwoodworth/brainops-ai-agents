@@ -126,7 +126,8 @@ class AgentScheduler:
         """DEPRECATED: No longer needed - connections are auto-returned via context manager."""
         # This method is kept for backward compatibility but does nothing
         # Connections are now managed by the context manager
-        pass
+        logger.debug("return_db_connection is deprecated; connection is managed by context")
+        return None
 
     def execute_agent(self, agent_id: str, agent_name: str):
         """Execute a scheduled agent (SYNCHRONOUS for BackgroundScheduler)"""

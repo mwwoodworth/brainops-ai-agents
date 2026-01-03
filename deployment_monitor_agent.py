@@ -539,7 +539,6 @@ class DeploymentMonitorAgent:
             if not service:
                 return {"error": f"Unknown service: {service_name}"}
 
-            metrics_history = []
             start_time = datetime.utcnow()
 
             # In a real implementation, this would poll metrics over time

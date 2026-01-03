@@ -14,8 +14,17 @@ from typing import Any, Optional
 
 import numpy as np
 import psycopg2
-from openai import OpenAI
 from psycopg2.extras import RealDictCursor
+
+# Optional OpenAI dependency
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Initialize OpenAI client
 _openai_client = None
@@ -25,13 +34,15 @@ def get_openai_client():
     global _openai_client
     if _openai_client is None:
         api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            logger.warning("OpenAI API key not found - embeddings disabled")
+            return None
+        if OpenAI is None:
+            logger.warning("OpenAI SDK not installed - embeddings disabled")
+            return None
         if api_key:
             _openai_client = OpenAI(api_key=api_key)
     return _openai_client
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Database configuration - uses centralized config
 from config import config as app_config

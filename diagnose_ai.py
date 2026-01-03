@@ -5,7 +5,10 @@ Diagnose AI Issues
 
 import os
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 print("="*60)
 print("AI DIAGNOSTICS")
@@ -36,16 +39,19 @@ else:
     # Test OpenAI if available
     if openai_key:
         print("\n2. TESTING OPENAI LOCALLY:")
-        try:
-            client = OpenAI(api_key=openai_key)
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": "Say 'AI works'"}],
-                max_tokens=10
-            )
-            print(f"   ✅ OpenAI works: {response.choices[0].message.content}")
-        except Exception as e:
-            print(f"   ❌ OpenAI error: {e}")
+        if OpenAI is None:
+            print("   ❌ OpenAI SDK not installed")
+        else:
+            try:
+                client = OpenAI(api_key=openai_key)
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": "Say 'AI works'"}],
+                    max_tokens=10
+                )
+                print(f"   ✅ OpenAI works: {response.choices[0].message.content}")
+            except Exception as e:
+                print(f"   ❌ OpenAI error: {e}")
 
 print("\n" + "="*60)
 print("NEXT STEPS:")

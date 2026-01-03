@@ -1150,7 +1150,7 @@ class HallucinationPreventionController:
 
         # Check claim categories
         speculation_claims = sum(1 for c in claims if c.category == "speculation")
-        fact_claims = sum(1 for c in claims if c.category == "fact")
+        sum(1 for c in claims if c.category == "fact")
 
         # High speculation ratio is suspicious
         if claims and speculation_claims / len(claims) > 0.5:

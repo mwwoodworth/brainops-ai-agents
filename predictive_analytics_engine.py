@@ -415,7 +415,6 @@ class PredictiveAnalyticsEngine:
         prediction_type: PredictionType
     ) -> dict:
         """Ensemble prediction combining multiple models"""
-        predictions = []
 
         # Get predictions from different models
         time_series = await self.forecaster.forecast(prepared_data, prediction_type)

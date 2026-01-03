@@ -168,7 +168,7 @@ async def generate_sop(
 
     except Exception as e:
         logger.error(f"SOP generation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/generate-from-process")
@@ -199,7 +199,7 @@ async def generate_sop_from_process(
 
     except Exception as e:
         logger.error(f"Process mining SOP error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/{sop_id}")
@@ -229,7 +229,7 @@ async def get_sop(
         raise
     except Exception as e:
         logger.error(f"Get SOP error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/{sop_id}/status")
@@ -255,7 +255,7 @@ async def get_sop_status(
         raise
     except Exception as e:
         logger.error(f"Get status error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.put("/{sop_id}")
@@ -297,7 +297,7 @@ async def update_sop(
         raise
     except Exception as e:
         logger.error(f"Update SOP error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/{sop_id}/approve")
@@ -330,7 +330,7 @@ async def approve_sop(
         # Approver identity from API key (in production, from JWT)
         approved_by = "api_key_holder"  # In production: extract from JWT
 
-        approved = await generator.approve_sop(
+        await generator.approve_sop(
             sop_id=sop_id,
             approved_by=approved_by,
             approval_notes=approval_notes
@@ -347,7 +347,7 @@ async def approve_sop(
         raise
     except Exception as e:
         logger.error(f"Approve SOP error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/{sop_id}/publish")
@@ -374,7 +374,7 @@ async def publish_sop(
         if existing.get("status") != "approved":
             raise HTTPException(status_code=400, detail="SOP must be approved before publishing")
 
-        published = await generator.publish_sop(sop_id)
+        await generator.publish_sop(sop_id)
 
         return {
             "status": "published",
@@ -386,7 +386,7 @@ async def publish_sop(
         raise
     except Exception as e:
         logger.error(f"Publish SOP error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/{sop_id}/export/{format}")
@@ -446,7 +446,7 @@ async def export_sop(
         raise
     except Exception as e:
         logger.error(f"Export SOP error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/list")
@@ -483,7 +483,7 @@ async def list_sops(
 
     except Exception as e:
         logger.error(f"List SOPs error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/types")

@@ -138,7 +138,7 @@ async def create_entry(
 
     except Exception as e:
         logger.error(f"Knowledge entry creation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/entries/{entry_id}")
@@ -173,7 +173,7 @@ async def get_entry(
         raise
     except Exception as e:
         logger.error(f"Get entry error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.put("/entries/{entry_id}")
@@ -197,7 +197,7 @@ async def update_entry(
         if existing.get("tenant_id") != request.tenant_id:
             raise HTTPException(status_code=403, detail="Access denied")
 
-        entry = await kb.update_entry(
+        await kb.update_entry(
             entry_id=entry_id,
             title=request.title,
             content=request.content,
@@ -216,7 +216,7 @@ async def update_entry(
         raise
     except Exception as e:
         logger.error(f"Update entry error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.delete("/entries/{entry_id}")
@@ -252,7 +252,7 @@ async def delete_entry(
         raise
     except Exception as e:
         logger.error(f"Delete entry error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/search")
@@ -297,7 +297,7 @@ async def search_knowledge(
 
     except Exception as e:
         logger.error(f"Search error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/agent/query")
@@ -334,7 +334,7 @@ async def agent_query(
 
     except Exception as e:
         logger.error(f"Agent query error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/categories")
@@ -357,7 +357,7 @@ async def list_categories(
 
     except Exception as e:
         logger.error(f"List categories error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/statistics")
@@ -380,7 +380,7 @@ async def get_statistics(
 
     except Exception as e:
         logger.error(f"Statistics error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/types")

@@ -197,7 +197,7 @@ class AliveCore:
         if self._shutdown_event is None:
             try:
                 # Only create when we have a running loop
-                loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
                 self._shutdown_event = asyncio.Event()
             except RuntimeError:
                 # No running loop - create new one for this event

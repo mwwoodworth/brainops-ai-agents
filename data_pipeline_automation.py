@@ -213,11 +213,11 @@ class DataExtractor:
         try:
             config = source.connection_config
             conn = psycopg2.connect(
-                host=config.get('host', DB_CONFIG['host']),
-                database=config.get('database', DB_CONFIG['database']),
-                user=config.get('user', DB_CONFIG['user']),
-                password=config.get('password', DB_CONFIG['password']),
-                port=config.get('port', DB_CONFIG['port'])
+                host=config.get('host', _get_db_config()['host']),
+                database=config.get('database', _get_db_config()['database']),
+                user=config.get('user', _get_db_config()['user']),
+                password=config.get('password', _get_db_config()['password']),
+                port=config.get('port', _get_db_config()['port'])
             )
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
@@ -530,8 +530,15 @@ class DataTransformer:
                     elif norm_type == 'email':
                         new_record[field] = str(value).lower().strip()
                     elif norm_type == 'date':
-                        # Could add date format normalization
-                        pass
+                        # Normalize to ISO format when possible
+                        try:
+                            if isinstance(value, datetime):
+                                new_record[field] = value.isoformat()
+                            else:
+                                parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                                new_record[field] = parsed.isoformat()
+                        except (ValueError, TypeError):
+                            logger.debug("Unable to normalize date field %s=%s", field, value)
             result.append(new_record)
 
         return result
@@ -555,7 +562,7 @@ class DataTransformer:
                     new_record[field] = enrichment.get('value')
                 elif enrichment_type == 'computed':
                     # Simple expression evaluation
-                    expression = enrichment.get('expression', '')
+                    enrichment.get('expression', '')
                     # Could add safe expression evaluation here
 
             result.append(new_record)
@@ -637,11 +644,11 @@ class DataLoader:
         try:
             config = destination.connection_config
             conn = psycopg2.connect(
-                host=config.get('host', DB_CONFIG['host']),
-                database=config.get('database', DB_CONFIG['database']),
-                user=config.get('user', DB_CONFIG['user']),
-                password=config.get('password', DB_CONFIG['password']),
-                port=config.get('port', DB_CONFIG['port'])
+                host=config.get('host', _get_db_config()['host']),
+                database=config.get('database', _get_db_config()['database']),
+                user=config.get('user', _get_db_config()['user']),
+                password=config.get('password', _get_db_config()['password']),
+                port=config.get('port', _get_db_config()['port'])
             )
             cursor = conn.cursor()
 

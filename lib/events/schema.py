@@ -13,7 +13,7 @@ and broadcast via Supabase Realtime for live subscribers.
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -352,7 +352,8 @@ class UnifiedEvent(BaseModel):
         if isinstance(timestamp, str):
             timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
         elif isinstance(timestamp, datetime):
-            pass
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
         else:
             timestamp = datetime.utcnow()
 

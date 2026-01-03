@@ -622,7 +622,7 @@ class TimingOptimizer:
 
         # Consider entity timezone and preferences
         timezone_offset = entity_profile.get('timezone_offset', 0)
-        preferred_contact_time = entity_profile.get('preferred_contact_time', 'business_hours')
+        entity_profile.get('preferred_contact_time', 'business_hours')
 
         # Calculate optimal send time
         optimal_timing = {

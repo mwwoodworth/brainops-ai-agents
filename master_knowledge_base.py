@@ -1265,7 +1265,7 @@ def create_knowledge_router():
                 "summary": entry.summary,
             }
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     @router.get("/entries/{entry_id}")
     async def get_entry(entry_id: str, user_id: str = None, agent_id: str = None):

@@ -353,13 +353,6 @@ class SystemOrchestrator:
         }
 
         # Load core components first
-        core_components = [
-            SystemComponent.ORCHESTRATOR,
-            SystemComponent.VECTOR_MEMORY,
-            SystemComponent.STATE_MANAGER,
-            SystemComponent.DECISION_TREE,
-            SystemComponent.PERFORMANCE
-        ]
 
         # Load all available components
         all_components = list(SystemComponent)
@@ -913,7 +906,7 @@ if __name__ == "__main__":
 
         # Shutdown
         print("\n🚪 SHUTTING DOWN...")
-        shutdown_result = await ai_os.shutdown()
+        await ai_os.shutdown()
         print("✅ Shutdown complete")
 
         print("\n" + "="*60)

@@ -18,7 +18,7 @@ import os
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 
 # Configure logging
