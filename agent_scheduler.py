@@ -65,16 +65,41 @@ class AgentScheduler:
     """Manages automatic execution of AI agents"""
 
     def __init__(self, db_config: Optional[dict[str, Any]] = None):
-        # All credentials MUST come from environment variables - no hardcoded defaults
-        self.db_config = db_config or {
-            'host': os.getenv('DB_HOST'),
-            'database': os.getenv('DB_NAME', 'postgres'),
-            'user': os.getenv('DB_USER'),
-            'password': os.getenv('DB_PASSWORD'),
-            'port': int(os.getenv('DB_PORT', 5432))
-        }
-        if not all([self.db_config['host'], self.db_config['user'], self.db_config['password']]):
-            raise ValueError("DB_HOST, DB_USER, and DB_PASSWORD environment variables are required")
+        # All credentials MUST come from environment variables with DATABASE_URL fallback
+        from urllib.parse import urlparse
+
+        if db_config:
+            self.db_config = db_config
+        else:
+            host = os.getenv('DB_HOST')
+            user = os.getenv('DB_USER')
+            password = os.getenv('DB_PASSWORD')
+
+            # Fallback to DATABASE_URL if individual vars not set
+            if not all([host, user, password]):
+                database_url = os.getenv('DATABASE_URL', '')
+                if database_url:
+                    parsed = urlparse(database_url)
+                    host = parsed.hostname or ''
+                    user = parsed.username or ''
+                    password = parsed.password or ''
+                    self.db_config = {
+                        'host': host,
+                        'database': parsed.path.lstrip('/') if parsed.path else 'postgres',
+                        'user': user,
+                        'password': password,
+                        'port': parsed.port or 5432
+                    }
+                else:
+                    raise ValueError("DB_HOST/DB_USER/DB_PASSWORD or DATABASE_URL required")
+            else:
+                self.db_config = {
+                    'host': host,
+                    'database': os.getenv('DB_NAME', 'postgres'),
+                    'user': user,
+                    'password': password,
+                    'port': int(os.getenv('DB_PORT', 5432))
+                }
         # Use BackgroundScheduler instead of AsyncIOScheduler for FastAPI compatibility
         self.scheduler = BackgroundScheduler()
         self.registered_jobs = {}

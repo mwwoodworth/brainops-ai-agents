@@ -83,19 +83,28 @@ class ObservabilityPersistence:
             logger.info("ObservabilityPersistence initialized with database connection")
 
     def _get_db_config(self) -> Optional[dict[str, Any]]:
-        """Get database configuration from environment - no hardcoded fallbacks"""
+        """Get database configuration from environment with DATABASE_URL fallback"""
+        from urllib.parse import urlparse
+
         host = os.environ.get("DB_HOST")
         database = os.environ.get("DB_NAME", "postgres")
         user = os.environ.get("DB_USER")
         password = os.environ.get("DB_PASSWORD")
         port = int(os.environ.get("DB_PORT", "5432"))
 
-        # Validate required environment variables
-        required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
-        missing = [var for var in required_vars if not os.environ.get(var)]
+        # Fallback to DATABASE_URL if individual vars not set
+        if not all([host, user, password]):
+            database_url = os.environ.get('DATABASE_URL', '')
+            if database_url:
+                parsed = urlparse(database_url)
+                host = parsed.hostname or ''
+                database = parsed.path.lstrip('/') if parsed.path else 'postgres'
+                user = parsed.username or ''
+                password = parsed.password or ''
+                port = parsed.port if parsed.port else 5432
 
-        if missing:
-            logger.warning(f"Missing required environment variables for observability persistence: {', '.join(missing)}")
+        if not all([host, user, password]):
+            logger.warning("Missing DB config (no DB_HOST/DB_USER/DB_PASSWORD or DATABASE_URL)")
             return None
 
         return {
