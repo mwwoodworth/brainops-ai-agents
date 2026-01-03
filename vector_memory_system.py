@@ -13,10 +13,15 @@ from datetime import datetime
 from typing import Any, Optional
 
 import numpy as np
-import openai
 import psycopg2
 from psycopg2.extensions import AsIs, register_adapter
 from psycopg2.extras import RealDictCursor
+
+# Optional OpenAI dependency
+try:
+    import openai
+except ImportError:
+    openai = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -62,7 +67,14 @@ DB_CONFIG = {
 }
 
 # OpenAI configuration
-openai.api_key = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_AVAILABLE = openai is not None and bool(OPENAI_API_KEY)
+if openai is not None and OPENAI_API_KEY:
+    openai.api_key = OPENAI_API_KEY
+elif openai is None:
+    logger.warning("OpenAI SDK not installed - embeddings disabled")
+else:
+    logger.warning("OpenAI API key not found - embeddings disabled")
 
 @dataclass
 class Memory:
@@ -147,6 +159,9 @@ class VectorMemorySystem:
     def _get_embedding(self, text: str) -> list[float]:
         """Generate embedding for text using OpenAI"""
         try:
+            if not OPENAI_AVAILABLE:
+                logger.warning("OpenAI unavailable - returning zero embedding")
+                return [0.0] * self.embedding_dimension
             response = openai.embeddings.create(
                 input=text,
                 model=self.embedding_model
@@ -328,18 +343,21 @@ class VectorMemorySystem:
             else:
                 prompt = f"Combine these memories into a comprehensive understanding:\n{combined_content}"
 
-            # Use OpenAI to consolidate
-            response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a memory consolidation system."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=500
-            )
-
-            consolidated_content = response.choices[0].message.content
+            # Use OpenAI to consolidate (fallback to raw concatenation if unavailable)
+            if OPENAI_AVAILABLE:
+                response = openai.chat.completions.create(
+                    model="gpt-4-turbo-preview",
+                    messages=[
+                        {"role": "system", "content": "You are a memory consolidation system."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=500
+                )
+                consolidated_content = response.choices[0].message.content
+            else:
+                logger.warning("OpenAI unavailable - using raw memory concatenation")
+                consolidated_content = combined_content
 
             # Store consolidated memory
             new_memory_id = self.store_memory(

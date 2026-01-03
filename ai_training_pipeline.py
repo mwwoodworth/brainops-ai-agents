@@ -14,7 +14,12 @@ from datetime import datetime, timezone
 from enum import Enum
 
 import numpy as np
-from openai import OpenAI
+
+# Optional OpenAI dependency
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 # Import async database pool
 from database.async_connection import get_pool
@@ -31,10 +36,14 @@ def get_openai_client():
     global openai_client
     if openai_client is None:
         api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            logger.warning("OPENAI_API_KEY not set - AI features disabled")
+            return None
+        if OpenAI is None:
+            logger.warning("OpenAI SDK not installed - AI features disabled")
+            return None
         if api_key:
             openai_client = OpenAI(api_key=api_key)
-        else:
-            logger.warning("OPENAI_API_KEY not set - AI features disabled")
     return openai_client
 
 class InteractionType(Enum):

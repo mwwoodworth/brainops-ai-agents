@@ -1633,7 +1633,7 @@ class AIDecisionTree:
                 return
 
             selected_option_data = json.loads(row[0])
-            context_data = json.loads(row[1])
+            json.loads(row[1])
             expected_outcome = selected_option_data.get('expected_outcome', {})
 
             # Perform variance analysis

@@ -11,10 +11,16 @@ import time
 from datetime import datetime
 from typing import Any, Optional
 
-from anthropic import Anthropic
-
 # Import all AI providers
-from openai import OpenAI
+try:
+    from anthropic import Anthropic
+except ImportError:
+    Anthropic = None
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 try:
     import google.generativeai as genai
@@ -45,20 +51,24 @@ class UltimateAISystem:
         self.gemini_model = None
 
         # Initialize OpenAI
-        if OPENAI_API_KEY:
+        if OPENAI_API_KEY and OpenAI is not None:
             try:
                 self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
                 logger.info("✅ OpenAI initialized")
             except Exception as e:
                 logger.error(f"OpenAI init error: {e}")
+        elif OPENAI_API_KEY:
+            logger.warning("OpenAI SDK not installed")
 
         # Initialize Anthropic
-        if ANTHROPIC_API_KEY:
+        if ANTHROPIC_API_KEY and Anthropic is not None:
             try:
                 self.anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
                 logger.info("✅ Anthropic initialized")
             except Exception as e:
                 logger.error(f"Anthropic init error: {e}")
+        elif ANTHROPIC_API_KEY:
+            logger.warning("Anthropic SDK not installed")
 
         # Initialize Gemini
         if GOOGLE_API_KEY and GEMINI_AVAILABLE:
@@ -322,7 +332,7 @@ class UltimateAISystem:
         """Generate intelligent response without API calls"""
 
         # Analyze prompt for context
-        prompt_lower = prompt.lower()
+        prompt.lower()
 
         responses = {
             "research": f"Based on comprehensive analysis of '{prompt[:100]}', current industry trends indicate significant opportunities for optimization and growth. Implementation of best practices is recommended.",

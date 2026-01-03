@@ -1101,7 +1101,8 @@ class UnifiedBrain:
     async def close(self):
         """Close database connection - now handled by pool manager"""
         # The pool is managed globally, so we don't close it here
-        pass
+        logger.debug("UnifiedBrain.close called; pool managed globally")
+        return None
 
 
 # Global instance with lazy initialization (doesn't connect until first use)

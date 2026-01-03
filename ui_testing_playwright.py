@@ -207,8 +207,8 @@ class UIPlaywrightTestStore:
         try:
             get_pool()
             return
-        except RuntimeError:
-            pass
+        except RuntimeError as exc:
+            logger.info("UI testing pool not initialized yet: %s", exc)
 
         # Try individual DB vars first, fall back to DATABASE_URL
         db_host = os.getenv('DB_HOST')

@@ -28,7 +28,7 @@ class FollowUpEngine:
             # For now, we proceed but log it, or perhaps we just assume the 'check_subscription' mocks a positive for demo.
             # But let's be strict:
             # raise PermissionError("Subscription required for Follow-Up Engine")
-            pass
+            raise PermissionError("Subscription required for Follow-Up Engine")
 
         logger.info(f"Generating follow-up sequence for tenant {self.tenant_id}")
 

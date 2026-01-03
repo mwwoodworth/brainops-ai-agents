@@ -145,12 +145,12 @@ class Guard(ABC):
     @abstractmethod
     async def check(self, context: dict[str, Any]) -> GuardResult:
         """Perform the guard check"""
-        pass
+        raise NotImplementedError("Guard.check must be implemented by subclasses")
 
     @abstractmethod
     def get_recovery_action(self, violation: dict) -> Optional[str]:
         """Get the recommended recovery action for a violation"""
-        pass
+        raise NotImplementedError("Guard.get_recovery_action must be implemented by subclasses")
 
     def get_metrics(self) -> dict:
         """Get guard metrics"""

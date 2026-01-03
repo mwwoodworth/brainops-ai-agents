@@ -119,7 +119,7 @@ async def generate_dashboard(request: DashboardRequest) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Dashboard generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/generate/table")
@@ -138,7 +138,7 @@ async def generate_table(request: TableRequest) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Table generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/generate/status")
@@ -157,7 +157,7 @@ async def generate_status(request: StatusRequest) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Status generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/generate/form")
@@ -175,7 +175,7 @@ async def generate_form(request: FormRequest) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Form generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/generate/confirmation")
@@ -194,7 +194,7 @@ async def generate_confirmation(request: ConfirmationRequest) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Confirmation generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/generate/custom")
@@ -221,7 +221,7 @@ async def generate_custom(request: CustomUIRequest) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Custom UI generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # AUREA-specific endpoints
@@ -273,7 +273,7 @@ async def aurea_health_dashboard() -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"AUREA health dashboard failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/aurea/agent-grid")

@@ -86,7 +86,7 @@ except (ImportError, AttributeError):
         raise RuntimeError(
             "Database configuration is incomplete. "
             "Set DB_HOST/DB_NAME/DB_USER/DB_PASSWORD or DATABASE_URL."
-        )
+        ) from None
 
     DB_CONFIG = {
         "host": _DB_HOST,
@@ -114,7 +114,7 @@ def get_sync_connection():
             try:
                 conn.close()
             except Exception:
-                pass  # Already closed
+                logger.debug("Connection already closed while clearing pool")
     return psycopg2.connect(**DB_CONFIG, connect_timeout=10)
 
 def return_sync_connection(conn):
@@ -597,7 +597,7 @@ class AutonomousRevenueSystem:
             }
 
             # Create opportunity
-            opportunity_id = await self._create_opportunity(lead_id, pricing.get('total', 0))
+            await self._create_opportunity(lead_id, pricing.get('total', 0))
 
             # Update lead stage
             await self._update_lead_stage(lead_id, LeadStage.PROPOSAL_SENT)
@@ -658,7 +658,7 @@ class AutonomousRevenueSystem:
         """Autonomously close the deal"""
         try:
             # Generate closing documents
-            closing_docs = await self._generate_closing_documents(lead_id, terms)
+            await self._generate_closing_documents(lead_id, terms)
 
             # Update opportunity as won
             conn = psycopg2.connect(**DB_CONFIG)
@@ -734,7 +734,7 @@ class AutonomousRevenueSystem:
             # 4. Generate proposal if qualified
             if score > 0.6:
                 requirements = qualification.get('requirements', {})
-                proposal = await self.generate_proposal(lead_id, requirements)
+                await self.generate_proposal(lead_id, requirements)
 
                 # 5. Handle negotiation (if needed)
                 # This would be triggered by client response

@@ -13,9 +13,14 @@ from typing import Any
 
 import jwt
 import psycopg2
-from openai import OpenAI
 from psycopg2.extras import Json, RealDictCursor
 from urllib.parse import urlparse
+
+# Optional OpenAI dependency
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -52,7 +57,15 @@ JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key")
 JWT_ALGORITHM = "HS256"
 
 # OpenAI configuration
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+if OpenAI and OPENAI_API_KEY:
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+else:
+    openai_client = None
+    if not OPENAI_API_KEY:
+        logger.warning("OpenAI API key not found - embeddings will be skipped")
+    elif OpenAI is None:
+        logger.warning("OpenAI SDK not installed - embeddings will be skipped")
 
 class UserRole(Enum):
     """User roles in the system"""
@@ -834,8 +847,27 @@ class AIContextAwareness:
                 if context.get('profile', {}).get('department') != value:
                     return False
             elif key == 'resource_owner':
-                # Would check resource ownership
-                pass
+                context_user_id = context.get('user_id') or context.get('profile', {}).get('user_id')
+                owned_resources = context.get('owned_resources')
+                resource_owners = context.get('resource_owners')
+
+                if isinstance(owned_resources, (list, set, tuple)):
+                    if resource_id not in owned_resources:
+                        return False
+                elif isinstance(owned_resources, dict):
+                    if not owned_resources.get(resource_id):
+                        return False
+
+                if isinstance(resource_owners, dict) and resource_id:
+                    owner_id = resource_owners.get(resource_id)
+                    if isinstance(value, str) and owner_id and owner_id != value:
+                        return False
+                    if context_user_id and owner_id and owner_id != context_user_id:
+                        return False
+                    if owner_id is None and context_user_id:
+                        return False
+                elif isinstance(value, str) and context_user_id and value != context_user_id:
+                    return False
 
         return True
 
@@ -997,9 +1029,13 @@ class AIContextAwareness:
         self,
         user_id: str,
         embedding_type: str = 'behavior'
-    ):
+    ) -> bool:
         """Update user embedding based on their activity"""
         try:
+            if openai_client is None:
+                logger.warning("OpenAI client unavailable - skipping embedding update for %s", user_id)
+                return False
+
             # Get user interactions and preferences
             conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -1042,9 +1078,11 @@ class AIContextAwareness:
 
             cursor.close()
             conn.close()
+            return True
 
         except Exception as e:
             logger.error(f"Failed to update user embedding: {e}")
+            return False
 
 # Singleton instance
 _context_awareness = None

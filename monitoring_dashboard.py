@@ -456,7 +456,7 @@ class MonitoringDashboard:
             return None
 
         # Calculate cutoff time
-        now = datetime.now(timezone.utc)
+        datetime.now(timezone.utc)
         cutoff = self._get_cutoff_time(time_range)
 
         # Filter values

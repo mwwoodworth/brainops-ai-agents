@@ -13,8 +13,18 @@ from datetime import datetime
 from typing import Any, Optional
 
 import psycopg2
-from anthropic import Anthropic, AsyncAnthropic
-from openai import AsyncOpenAI, OpenAI
+# Optional AI providers
+try:
+    from anthropic import Anthropic, AsyncAnthropic
+except ImportError:
+    Anthropic = None
+    AsyncAnthropic = None
+
+try:
+    from openai import AsyncOpenAI, OpenAI
+except ImportError:
+    AsyncOpenAI = None
+    OpenAI = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -128,6 +138,10 @@ class RealAICore:
             logger.warning("OpenAI API key not found in environment - AI features may be limited")
             self.openai_client = None
             self.async_openai = None
+        elif OpenAI is None or AsyncOpenAI is None:
+            logger.warning("OpenAI SDK not installed - AI features will be limited")
+            self.openai_client = None
+            self.async_openai = None
         else:
             # Initialize REAL OpenAI clients
             self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
@@ -136,6 +150,10 @@ class RealAICore:
 
         if not ANTHROPIC_API_KEY:
             logger.warning("Anthropic API key not found in environment - Claude features may be limited")
+            self.anthropic_client = None
+            self.async_anthropic = None
+        elif Anthropic is None or AsyncAnthropic is None:
+            logger.warning("Anthropic SDK not installed - Claude features will be limited")
             self.anthropic_client = None
             self.async_anthropic = None
         else:
@@ -341,7 +359,7 @@ class RealAICore:
                 except Exception as perplexity_error:
                     logger.error(f"Perplexity fallback also failed: {perplexity_error}")
 
-            raise e
+            raise e from e
 
     async def _try_gemini(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 2000) -> str:
         """Use Gemini as fallback AI provider"""
@@ -643,7 +661,7 @@ class RealAICore:
             return response.data[0].embedding
         except Exception as e:
             logger.error(f"Embedding generation error: {e}")
-            raise e
+            raise e from e
 
     async def analyze_image(self, image_url: str, prompt: str) -> str:
         """REAL image analysis with GPT-4 Vision"""
@@ -662,7 +680,7 @@ class RealAICore:
             return response.choices[0].message.content
         except Exception as e:
             logger.error(f"Image analysis error: {e}")
-            raise e
+            raise e from e
 
     async def analyze_roofing_job(self, job_data: dict) -> dict:
         """REAL AI analysis for roofing jobs"""

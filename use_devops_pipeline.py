@@ -49,57 +49,12 @@ async def main():
 
     # Step 3: Fix frontend errors
     print("\n3. Fixing Frontend Errors...")
-    frontend_fix = {
-        'action': 'fix_errors',
-        'target': 'frontend',
-        'fixes': [
-            {
-                'type': 'error_boundary',
-                'path': '/home/matt-woodworth/myroofgenius-app/app/error.tsx',
-                'enhancement': 'comprehensive'
-            },
-            {
-                'type': 'client_validation',
-                'path': '/home/matt-woodworth/myroofgenius-app/lib',
-                'enhancement': 'uuid_validation'
-            }
-        ]
-    }
 
     # Step 4: Deploy through CI/CD
     print("\n4. Deploying through CI/CD...")
-    deploy_task = {
-        'action': 'deploy',
-        'services': {
-            'ai_agents': {
-                'platform': 'render',
-                'repo': 'https://github.com/mwwoodworth/brainops-ai-agents',
-                'branch': 'main'
-            },
-            'frontend': {
-                'platform': 'vercel',
-                'repo': 'https://github.com/mwwoodworth/myroofgenius-app',
-                'branch': 'main'
-            }
-        }
-    }
 
     # Step 5: Verify all systems
     print("\n5. Verifying All Systems...")
-    verification_task = {
-        'action': 'verify',
-        'endpoints': [
-            'https://brainops-ai-agents.onrender.com/health',
-            'https://myroofgenius.com',
-            'https://myroofgenius.com/api/health'
-        ],
-        'checks': [
-            'database_connection',
-            'ai_agents_active',
-            'error_rate',
-            'response_time'
-        ]
-    }
 
     # Generate comprehensive report
     print("\n" + "=" * 60)

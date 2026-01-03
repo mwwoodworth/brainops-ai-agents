@@ -97,19 +97,30 @@ async def agent_analytics(
 
             elif metric == "performance":
                 # Get agent performance metrics
-                perf_query = """
-                    SELECT
-                        COUNT(*) as total_executions,
-                        COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
-                        COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
-                        AVG(duration_ms) as avg_duration_ms
-                    FROM agent_executions
-                    WHERE started_at >= $1 AND started_at <= $2
-                """
                 if agent_id:
-                    perf_query += " AND agent_id::text = $3"
+                    # Query with agent_id filter
+                    perf_query = """
+                        SELECT
+                            COUNT(*) as total_executions,
+                            COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
+                            COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
+                            AVG(duration_ms) as avg_duration_ms
+                        FROM agent_executions
+                        WHERE started_at >= $1 AND started_at <= $2
+                            AND agent_id::text = $3
+                    """
                     perf_data = await pool.fetchrow(perf_query, start_date, end_date, agent_id)
                 else:
+                    # Query without agent_id filter
+                    perf_query = """
+                        SELECT
+                            COUNT(*) as total_executions,
+                            COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
+                            COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
+                            AVG(duration_ms) as avg_duration_ms
+                        FROM agent_executions
+                        WHERE started_at >= $1 AND started_at <= $2
+                    """
                     perf_data = await pool.fetchrow(perf_query, start_date, end_date)
 
                 total = perf_data["total_executions"] or 1  # Avoid division by zero
@@ -272,7 +283,7 @@ async def agent_analytics(
         raise HTTPException(
             status_code=500,
             detail=f"Analytics processing failed: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/analytics/summary")
@@ -306,7 +317,7 @@ async def get_analytics_summary():
 
     except Exception as e:
         logger.error(f"Summary endpoint error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/analytics/dashboard")
@@ -492,7 +503,7 @@ async def get_dashboard_data(
 
     except Exception as e:
         logger.error(f"Dashboard endpoint error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 async def generate_automated_insights(dashboard_data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -724,4 +735,4 @@ async def get_ai_insights(
 
     except Exception as e:
         logger.error(f"AI insights endpoint error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

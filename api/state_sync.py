@@ -78,7 +78,7 @@ async def get_all_components(
             ]
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/components/{component_name}")
@@ -105,7 +105,7 @@ async def get_component(component_name: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ============== CHANGE HISTORY ==============
@@ -127,7 +127,7 @@ async def get_change_history(limit: int = 50):
             "changes": changes[-limit:][::-1]
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/changes/by-codebase/{codebase}")
@@ -149,7 +149,7 @@ async def get_changes_by_codebase(codebase: str, limit: int = 20):
             "changes": filtered[-limit:][::-1]
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ============== FULL SCAN ==============
@@ -167,7 +167,7 @@ async def trigger_full_scan():
             "results": result
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/propagate")
@@ -185,7 +185,7 @@ async def trigger_change_propagation():
             "failed": result.get("failed", 0)
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ============== AI CONTEXT ==============
@@ -202,7 +202,7 @@ async def get_ai_context():
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/context/raw", response_class=JSONResponse)
@@ -215,7 +215,7 @@ async def get_raw_state():
         with open(_STATE_PATH) as f:
             return json.load(f)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ============== GIT STATUS ==============
@@ -247,7 +247,7 @@ async def get_git_status():
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ============== VISUALIZATION ==============

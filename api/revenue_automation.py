@@ -100,7 +100,7 @@ async def capture_lead(request: LeadCaptureRequest):
         return result
     except Exception as e:
         logger.error(f"Lead capture error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/leads")
@@ -172,7 +172,7 @@ async def get_lead(lead_id: str):
         raise
     except Exception as e:
         logger.error(f"Get lead error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/leads/{lead_id}/qualify")
@@ -184,7 +184,7 @@ async def qualify_lead(lead_id: str, request: QualifyLeadRequest):
         return result
     except Exception as e:
         logger.error(f"Qualify lead error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/leads/{lead_id}/payment-link")
@@ -201,7 +201,7 @@ async def create_payment_link(lead_id: str, request: PaymentLinkRequest):
         return result
     except Exception as e:
         logger.error(f"Payment link error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/webhooks/stripe")
@@ -213,7 +213,7 @@ async def stripe_webhook(payload: dict[str, Any]):
         return result
     except Exception as e:
         logger.error(f"Webhook error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/metrics")

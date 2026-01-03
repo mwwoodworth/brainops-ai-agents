@@ -438,7 +438,7 @@ class SelfHealingErrorRecovery:
     def _classify_error(self, error: Exception) -> ErrorCategory:
         """Classify error into category"""
         error_msg = str(error).lower()
-        error_type = type(error).__name__.lower()
+        type(error).__name__.lower()
 
         if 'database' in error_msg or 'sql' in error_msg or 'postgres' in error_msg:
             return ErrorCategory.DATABASE

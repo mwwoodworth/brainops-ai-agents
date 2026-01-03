@@ -42,7 +42,7 @@ async def _get_engine():
             _engine = PredictiveMarketIntelligence()
         except Exception as e:
             logger.error(f"Failed to initialize Market Intelligence: {e}")
-            raise HTTPException(status_code=503, detail="Market Intelligence not available")
+            raise HTTPException(status_code=503, detail="Market Intelligence not available") from e
 
     if not _initialized and hasattr(_engine, 'initialize'):
         try:
@@ -127,7 +127,7 @@ async def ingest_signal(request: MarketSignalRequest):
         return {"status": "ingested", "result": result}
     except Exception as e:
         logger.error(f"Failed to ingest signal: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/signals")
@@ -244,7 +244,7 @@ async def optimize_content(request: ContentOptimizationRequest):
         }
     except Exception as e:
         logger.error(f"Failed to optimize content: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/content/optimizations")

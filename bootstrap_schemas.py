@@ -18,7 +18,7 @@ async def bootstrap_schemas():
     # 1. Tracer Schema
     try:
         logger.info("Initializing Tracer schema...")
-        tracer = BrainOpsTracer()
+        BrainOpsTracer()
         # _ensure_schema is called in __init__
         logger.info("Tracer schema initialized.")
     except Exception as e:

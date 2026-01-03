@@ -128,7 +128,6 @@ def activate_agents():
     cur = conn.cursor()
 
     activated = 0
-    updated = 0
 
     for agent in ALL_AGENTS:
         try:

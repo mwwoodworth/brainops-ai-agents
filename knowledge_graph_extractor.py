@@ -301,7 +301,7 @@ class KnowledgeGraphExtractor:
                     agent_name = row["agent_name"] or "unknown_agent"
                     status = row["status"] or "unknown"
                     output_data = row["output_data"] or {}
-                    input_data = row["input_data"] or {}
+                    row["input_data"] or {}
                     created_at = row["created_at"]
 
                     # Create agent node

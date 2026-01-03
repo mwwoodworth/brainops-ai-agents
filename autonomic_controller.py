@@ -708,7 +708,7 @@ if __name__ == "__main__":
 
         metrics = get_metric_collector()
         event_bus = get_event_bus()
-        manager = get_autonomic_manager()
+        get_autonomic_manager()
 
         # Emit some test metrics
         print("\n📊 Emitting test metrics...")
