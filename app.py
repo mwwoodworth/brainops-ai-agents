@@ -135,6 +135,26 @@ except ImportError as e:
     DEVOPS_API_AVAILABLE = False
     logger.warning(f"⚠️ DevOps API not available: {e}")
 
+# Customer Acquisition API - Autonomous lead discovery and conversion (2026-01-03)
+try:
+    from api.customer_acquisition import router as customer_acquisition_router
+    CUSTOMER_ACQUISITION_API_AVAILABLE = True
+    logger.info("✅ Customer Acquisition API loaded - Autonomous lead gen enabled")
+except ImportError as e:
+    CUSTOMER_ACQUISITION_API_AVAILABLE = False
+    logger.warning(f"⚠️ Customer Acquisition API not available: {e}")
+
+# Email Scheduler Daemon - Background email processing
+try:
+    from email_scheduler_daemon import EmailSchedulerDaemon, start_email_scheduler, stop_email_scheduler
+    EMAIL_SCHEDULER_AVAILABLE = True
+    logger.info("✅ Email Scheduler Daemon loaded")
+except ImportError as e:
+    EMAIL_SCHEDULER_AVAILABLE = False
+    start_email_scheduler = None
+    stop_email_scheduler = None
+    logger.warning(f"⚠️ Email Scheduler not available: {e}")
+
 # Bleeding Edge AI Capabilities - Revolutionary systems (2025-12-27)
 try:
     from api.bleeding_edge import router as bleeding_edge_router
@@ -873,6 +893,14 @@ async def lifespan(app: FastAPI):
         ])
         logger.info(f"🤖 {agents_active} specialized AI agents ACTIVATED and OPERATIONAL")
 
+        # Start Email Scheduler Daemon - Background email processing
+        if EMAIL_SCHEDULER_AVAILABLE and start_email_scheduler:
+            try:
+                app.state.email_scheduler = await start_email_scheduler()
+                logger.info("📧 Email Scheduler Daemon STARTED - Automated email processing active")
+            except Exception as e:
+                logger.error(f"❌ Email Scheduler startup failed: {e}")
+
         logger.info("✅ Heavy component initialization complete - AI OS FULLY AWAKE!")
 
     asyncio.create_task(deferred_heavy_init())
@@ -922,6 +950,14 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Permanent Observability Daemon stopped")
         except Exception as e:
             logger.error(f"❌ Observability Daemon shutdown error: {e}")
+
+    # Stop Email Scheduler Daemon
+    if EMAIL_SCHEDULER_AVAILABLE and stop_email_scheduler:
+        try:
+            await stop_email_scheduler()
+            logger.info("✅ Email Scheduler Daemon stopped")
+        except Exception as e:
+            logger.error(f"❌ Email Scheduler shutdown error: {e}")
 
     # Stop scheduler
     if hasattr(app.state, 'scheduler') and app.state.scheduler:
@@ -1122,6 +1158,11 @@ if PERMANENT_OBSERVABILITY_AVAILABLE:
 if DEVOPS_API_AVAILABLE:
     app.include_router(devops_api_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("🔧 DevOps Automation endpoints registered at /devops/*")
+
+# Customer Acquisition API - Autonomous lead discovery and conversion
+if CUSTOMER_ACQUISITION_API_AVAILABLE:
+    app.include_router(customer_acquisition_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("🎯 Customer Acquisition endpoints registered at /acquire/*")
 
 # AI-Powered UI Testing System (2025-12-29) - Automated visual testing with AI vision
 if UI_TESTING_AVAILABLE:
