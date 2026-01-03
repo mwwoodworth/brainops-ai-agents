@@ -1243,15 +1243,15 @@ class AUREA:
             if pool is not None:
                 await pool.execute("""
                 UPDATE aurea_decisions
-                SET execution_status = $1,
+                SET execution_status = $1::varchar,
                     execution_result = $2::jsonb,
                     outcome = $2::jsonb,
-                    status = $1,
+                    status = $1::varchar,
                     success = CASE WHEN $1 = 'completed' THEN true ELSE false END,
                     executed_at = NOW(),
                     updated_at = NOW()
-                WHERE id::text = $3
-                """, status, safe_json, decision_id)
+                WHERE id::text = $3::text
+                """, status, safe_json, str(decision_id))
                 logger.info(f"✅ Updated decision {decision_id} status to {status} with outcome")
             else:
                 # Sync fallback - uses shared pool

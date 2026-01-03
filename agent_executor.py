@@ -1140,7 +1140,7 @@ class AgentExecutor:
 
                 # Try to parse as JSON
                 import re
-                json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                json_match = re.search(r'\{[\s\S]*?\}', response)
                 result_data = json.loads(json_match.group()) if json_match else {"response": response}
 
                 return {
@@ -2592,7 +2592,7 @@ class CustomerAgent(BaseAgent):
                     """
                     response = await ai_core.generate(prompt, model="gpt-3.5-turbo")
 
-                    json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                    json_match = re.search(r'\{[\s\S]*?\}', response)
                     if json_match:
                         recommendations = json.loads(json_match.group())
                 except Exception as e:
@@ -2625,7 +2625,7 @@ class CustomerAgent(BaseAgent):
 
             response = await ai_core.generate(prompt, model="gpt-4", temperature=0.7)
 
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            json_match = re.search(r'\{[\s\S]*?\}', response)
             message_data = json.loads(json_match.group()) if json_match else {"body": response}
 
             return {
@@ -2742,7 +2742,7 @@ class InvoicingAgent(BaseAgent):
                     """
                     response = await ai_core.generate(prompt, model="gpt-3.5-turbo")
 
-                    json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                    json_match = re.search(r'\{[\s\S]*?\}', response)
                     if json_match:
                         email_content = json.loads(json_match.group())
             except Exception as e:
@@ -3157,7 +3157,7 @@ class CustomerIntelligenceAgent(BaseAgent):
 
                     response = await ai_core.generate(prompt, model="gpt-4", temperature=0.2)
 
-                    json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                    json_match = re.search(r'\{[\s\S]*?\}', response)
                     if json_match:
                         return {
                             "status": "completed",
@@ -3272,7 +3272,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
                         """
                         response = await ai_core.generate(prompt, model="gpt-4", temperature=0.3)
 
-                        json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                        json_match = re.search(r'\{[\s\S]*?\}', response)
                         if json_match:
                             data = json.loads(json_match.group())
                             if 'refined_predictions' in data:
@@ -3312,7 +3312,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
 
             response = await ai_core.generate(prompt, model="gpt-4", temperature=0.3)
 
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            json_match = re.search(r'\{[\s\S]*?\}', response)
             if json_match:
                 return json.loads(json_match.group())
 

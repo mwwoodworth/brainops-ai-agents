@@ -589,6 +589,7 @@ class PredictiveAnalyticsEngine:
         metadata: Optional[dict] = None
     ) -> dict:
         """Update prediction with actual value for accuracy tracking"""
+        conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -606,7 +607,10 @@ class PredictiveAnalyticsEngine:
                 return {"error": "Prediction not found"}
 
             # Calculate accuracy
-            predicted = float(prediction['prediction_value'])
+            prediction_value = prediction['prediction_value']
+            if prediction_value is None:
+                return {"error": "Prediction missing value"}
+            predicted = float(prediction_value)
             accuracy = 1 - abs(predicted - actual_value) / max(actual_value, 1)
 
             # Update prediction
