@@ -144,27 +144,33 @@ class SelfHealingRecovery:
     """Self-healing error recovery system"""
 
     def __init__(self):
-        # All credentials MUST come from environment variables - no hardcoded defaults
-        required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
-        missing = [var for var in required_vars if not os.getenv(var)]
-        if missing:
-        database_url = os.getenv('DATABASE_URL', '')
-        if database_url:
-            parsed = urlparse(database_url)
-            return {
-                'host': parsed.hostname or '',
-                'database': parsed.path.lstrip('/') if parsed.path else 'postgres',
-                'user': parsed.username or '',
-                'password': parsed.password or '',
-                'port': int(str(parsed.port)) if parsed.port else 5432
-            }
-        raise RuntimeError("Missing required: DB_HOST/DB_USER/DB_PASSWORD or DATABASE_URL")
+        # Try individual DB vars first, fall back to DATABASE_URL
+        db_host = os.getenv('DB_HOST')
+        db_name = os.getenv('DB_NAME', 'postgres')
+        db_user = os.getenv('DB_USER')
+        db_password = os.getenv('DB_PASSWORD')
+        db_port = os.getenv('DB_PORT', '5432')
+
+        # Fallback to DATABASE_URL if individual vars not set (Render provides DATABASE_URL)
+        if not all([db_host, db_user, db_password]):
+            database_url = os.getenv('DATABASE_URL', '')
+            if database_url:
+                parsed = urlparse(database_url)
+                db_host = parsed.hostname or db_host
+                db_name = parsed.path.lstrip('/') if parsed.path else db_name
+                db_user = parsed.username or db_user
+                db_password = parsed.password or db_password
+                db_port = str(parsed.port) if parsed.port else db_port
+                logger.info(f"self_healing_recovery: Parsed DATABASE_URL: host={db_host}, db={db_name}")
+            else:
+                raise RuntimeError("Missing required: DB_HOST/DB_USER/DB_PASSWORD or DATABASE_URL")
+
         self.db_config = {
-            'host': os.getenv('DB_HOST'),
-            'database': os.getenv('DB_NAME', 'postgres'),
-            'user': os.getenv('DB_USER'),
-            'password': os.getenv('DB_PASSWORD'),
-            'port': int(os.getenv('DB_PORT', 5432))
+            'host': db_host,
+            'database': db_name,
+            'user': db_user,
+            'password': db_password,
+            'port': int(db_port)
         }
         self.component_states = {}
         self.error_history = deque(maxlen=1000)
