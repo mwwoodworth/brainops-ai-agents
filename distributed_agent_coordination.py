@@ -185,18 +185,33 @@ class DistributedAgentCoordinator:
         self._heartbeat_task: Optional[asyncio.Task] = None
 
     def _get_db_config(self) -> dict[str, Any]:
-        """Get database configuration lazily with validation"""
+        """Get database configuration lazily with DATABASE_URL fallback"""
+        from urllib.parse import urlparse
+
         if not self._db_config:
-            required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
-            missing = [var for var in required_vars if not os.getenv(var)]
-            if missing:
-                raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+            host = os.getenv('DB_HOST')
+            user = os.getenv('DB_USER')
+            password = os.getenv('DB_PASSWORD')
+
+            if not all([host, user, password]):
+                database_url = os.getenv('DATABASE_URL', '')
+                if database_url:
+                    parsed = urlparse(database_url)
+                    self._db_config = {
+                        'host': parsed.hostname or '',
+                        'database': parsed.path.lstrip('/') if parsed.path else 'postgres',
+                        'user': parsed.username or '',
+                        'password': parsed.password or '',
+                        'port': int(str(parsed.port)) if parsed.port else 5432
+                    }
+                    return self._db_config
+                raise RuntimeError("Missing required: DB_HOST/DB_USER/DB_PASSWORD or DATABASE_URL")
 
             self._db_config = {
-                'host': os.getenv('DB_HOST'),
+                'host': host,
                 'database': os.getenv('DB_NAME', 'postgres'),
-                'user': os.getenv('DB_USER'),
-                'password': os.getenv('DB_PASSWORD'),
+                'user': user,
+                'password': password,
                 'port': int(os.getenv('DB_PORT', '5432'))
             }
         return self._db_config

@@ -33,18 +33,30 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 
-# Database configuration - NO hardcoded credentials
-# All values MUST come from environment variables
+# Database configuration - supports both individual env vars and DATABASE_URL
+from urllib.parse import urlparse
+
 DB_HOST = os.getenv("DB_HOST")
 DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
+# Fallback to DATABASE_URL if individual vars not set
+if not all([DB_HOST, DB_NAME, DB_USER, DB_PASSWORD]):
+    _DATABASE_URL = os.getenv('DATABASE_URL', '')
+    if _DATABASE_URL:
+        _parsed = urlparse(_DATABASE_URL)
+        DB_HOST = _parsed.hostname or ''
+        DB_NAME = _parsed.path.lstrip('/') if _parsed.path else ''
+        DB_USER = _parsed.username or ''
+        DB_PASSWORD = _parsed.password or ''
+        DB_PORT = str(_parsed.port) if _parsed.port else '5432'
+
 if not all([DB_HOST, DB_NAME, DB_USER, DB_PASSWORD]):
     raise RuntimeError(
         "Database configuration is incomplete. "
-        "Ensure DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD environment variables are set."
+        "Set DB_HOST/DB_NAME/DB_USER/DB_PASSWORD or DATABASE_URL."
     )
 
 DB_CONFIG = {

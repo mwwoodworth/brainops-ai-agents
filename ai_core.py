@@ -23,18 +23,31 @@ logger = logging.getLogger(__name__)
 # REAL API KEYS - From environment variables (already configured in Render)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-# Database configuration - NO hardcoded credentials
-# All values MUST come from environment variables
+# Database configuration - supports both individual env vars and DATABASE_URL
+from urllib.parse import urlparse
+
 _DB_HOST = os.getenv('DB_HOST')
 _DB_NAME = os.getenv('DB_NAME')
 _DB_USER = os.getenv('DB_USER')
 _DB_PASSWORD = os.getenv('DB_PASSWORD')
 _DB_PORT = os.getenv('DB_PORT', '5432')
 
+# Fallback to DATABASE_URL if individual vars not set (Render provides DATABASE_URL)
+if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
+    _DATABASE_URL = os.getenv('DATABASE_URL', '')
+    if _DATABASE_URL:
+        _parsed = urlparse(_DATABASE_URL)
+        _DB_HOST = _parsed.hostname or ''
+        _DB_NAME = _parsed.path.lstrip('/') if _parsed.path else ''
+        _DB_USER = _parsed.username or ''
+        _DB_PASSWORD = _parsed.password or ''
+        _DB_PORT = str(_parsed.port) if _parsed.port else '5432'
+        logger.info(f"ai_core: Parsed DATABASE_URL: host={_DB_HOST}, db={_DB_NAME}")
+
 if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
     raise RuntimeError(
         "Database configuration is incomplete. "
-        "Ensure DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD environment variables are set."
+        "Set DB_HOST/DB_NAME/DB_USER/DB_PASSWORD or DATABASE_URL."
     )
 
 DB_CONFIG = {

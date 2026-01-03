@@ -42,18 +42,30 @@ import websockets
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration - NO hardcoded credentials
-# All values MUST come from environment variables
+# Database configuration - supports both individual env vars and DATABASE_URL
+from urllib.parse import urlparse
+
 _DB_HOST = os.environ.get("DB_HOST")
 _DB_NAME = os.environ.get("DB_NAME")
 _DB_USER = os.environ.get("DB_USER")
 _DB_PASSWORD = os.environ.get("DB_PASSWORD")
 _DB_PORT = os.environ.get("DB_PORT", "5432")
 
+# Fallback to DATABASE_URL if individual vars not set
+if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
+    _DATABASE_URL = os.environ.get('DATABASE_URL', '')
+    if _DATABASE_URL:
+        _parsed = urlparse(_DATABASE_URL)
+        _DB_HOST = _parsed.hostname or ''
+        _DB_NAME = _parsed.path.lstrip('/') if _parsed.path else ''
+        _DB_USER = _parsed.username or ''
+        _DB_PASSWORD = _parsed.password or ''
+        _DB_PORT = str(_parsed.port) if _parsed.port else '5432'
+
 if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
     raise RuntimeError(
         "Database configuration is incomplete. "
-        "Ensure DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD environment variables are set."
+        "Set DB_HOST/DB_NAME/DB_USER/DB_PASSWORD or DATABASE_URL."
     )
 
 DB_CONFIG = {
