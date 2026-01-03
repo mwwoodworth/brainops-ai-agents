@@ -345,3 +345,89 @@ async def add_reference(
     except Exception as e:
         logger.error(f"Failed to add reference: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/operational-truth", response_model=dict[str, Any])
+async def get_operational_truth():
+    """
+    Get the TRUTH about operational status.
+    Distinguishes REAL data from demo/test data.
+    Critical for understanding actual business state.
+    """
+    from database.async_connection import get_pool, using_fallback
+
+    if using_fallback():
+        return {"status": "error", "message": "Database unavailable"}
+
+    pool = get_pool()
+
+    try:
+        # Get real revenue data
+        gumroad_real = await pool.fetchval(
+            "SELECT COALESCE(SUM(price), 0) FROM gumroad_sales WHERE is_test = false"
+        ) or 0
+
+        gumroad_test = await pool.fetchval(
+            "SELECT COUNT(*) FROM gumroad_sales WHERE is_test = true"
+        ) or 0
+
+        # MRG subscriptions with Stripe (real payments)
+        mrg_real = await pool.fetchrow("""
+            SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as mrr
+            FROM mrg_subscriptions
+            WHERE stripe_subscription_id IS NOT NULL AND status = 'active'
+        """)
+
+        mrg_demo = await pool.fetchval("""
+            SELECT COUNT(*) FROM mrg_subscriptions
+            WHERE stripe_subscription_id IS NULL
+        """) or 0
+
+        # Acquisition targets
+        targets = await pool.fetchrow("""
+            SELECT COUNT(*) as total,
+                   COUNT(*) FILTER (WHERE status = 'contacted') as contacted,
+                   COUNT(*) FILTER (WHERE status = 'converted') as converted
+            FROM acquisition_targets
+        """)
+
+        # Revenue leads
+        leads = await pool.fetchrow("""
+            SELECT COUNT(*) as total,
+                   COUNT(*) FILTER (WHERE stage = 'won') as won,
+                   COALESCE(SUM(estimated_value) FILTER (WHERE stage = 'won'), 0) as won_value
+            FROM revenue_leads
+        """)
+
+        return {
+            "status": "operational",
+            "timestamp": datetime.utcnow().isoformat(),
+            "truth": {
+                "real_revenue": {
+                    "gumroad_total": float(gumroad_real),
+                    "mrg_mrr": float(mrg_real['mrr'] if mrg_real else 0),
+                    "total_real_mrr": float(mrg_real['mrr'] if mrg_real else 0),
+                    "has_paying_customers": float(mrg_real['mrr'] if mrg_real else 0) > 0
+                },
+                "demo_data": {
+                    "gumroad_test_sales": gumroad_test,
+                    "mrg_demo_subscriptions": mrg_demo,
+                    "warning": "Demo data exists - do not report as real revenue"
+                },
+                "acquisition": {
+                    "targets_total": targets['total'] if targets else 0,
+                    "targets_contacted": targets['contacted'] if targets else 0,
+                    "targets_converted": targets['converted'] if targets else 0
+                },
+                "pipeline": {
+                    "leads_total": leads['total'] if leads else 0,
+                    "leads_won": leads['won'] if leads else 0,
+                    "won_value": float(leads['won_value'] if leads else 0)
+                }
+            },
+            "action_required": float(mrg_real['mrr'] if mrg_real else 0) == 0,
+            "priority_action": "Acquire first paying customer" if float(mrg_real['mrr'] if mrg_real else 0) == 0 else "Scale revenue"
+        }
+    except Exception as e:
+        logger.error(f"Failed to get operational truth: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
