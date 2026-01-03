@@ -13,9 +13,13 @@ ENV/
 .mypy_cache/
 .ruff_cache/
 
-# Git
+# Git & CI/CD
 .git/
 .gitignore
+.github/
+.travis.yml
+.circleci/
+Jenkinsfile
 
 # Testing
 test_*.py

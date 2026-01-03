@@ -1,0 +1,110 @@
+name: Build and Deploy to Render
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      clear_cache:
+        description: 'Clear Render build cache'
+        required: false
+        default: 'false'
+
+env:
+  RENDER_SERVICE_ID: srv-d413iu75r7bs738btc10
+  DOCKER_IMAGE: mwwoodworth/brainops-ai-agents
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract version from config
+        id: version
+        run: |
+          VERSION=$(grep "self.version" config.py | grep -oP "'\K[^']+(?=')" | head -1)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:latest
+            ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.sha_short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trigger Render Deploy
+        run: |
+          CLEAR_CACHE="${{ github.event.inputs.clear_cache }}"
+          BODY='{}'
+          if [ "$CLEAR_CACHE" = "true" ]; then
+            BODY='{"clearCache": "clear"}'
+          fi
+
+          RESPONSE=$(curl -s -X POST \
+            "https://api.render.com/v1/services/${{ env.RENDER_SERVICE_ID }}/deploys" \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+
+          echo "Deploy triggered: $RESPONSE"
+          DEPLOY_ID=$(echo $RESPONSE | jq -r '.id')
+          echo "deploy_id=$DEPLOY_ID" >> $GITHUB_OUTPUT
+
+      - name: Wait for deployment
+        run: |
+          echo "Waiting for deployment to complete..."
+          for i in {1..30}; do
+            STATUS=$(curl -s \
+              "https://api.render.com/v1/services/${{ env.RENDER_SERVICE_ID }}/deploys?limit=1" \
+              -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+              | jq -r '.[0].deploy.status')
+
+            echo "Attempt $i: Status = $STATUS"
+
+            if [ "$STATUS" = "live" ]; then
+              echo "Deployment successful!"
+              exit 0
+            elif [ "$STATUS" = "build_failed" ] || [ "$STATUS" = "update_failed" ]; then
+              echo "Deployment failed!"
+              exit 1
+            fi
+
+            sleep 10
+          done
+          echo "Deployment timed out"
+          exit 1
+
+      - name: Verify deployment
+        run: |
+          sleep 5
+          HEALTH=$(curl -s "https://brainops-ai-agents.onrender.com/health" \
+            -H "X-API-Key: ${{ secrets.BRAINOPS_API_KEY }}")
+
+          echo "Health check response:"
+          echo "$HEALTH" | jq '.'
+
+          STATUS=$(echo "$HEALTH" | jq -r '.status')
+          if [ "$STATUS" != "healthy" ] && [ "$STATUS" != "degraded" ]; then
+            echo "Service unhealthy after deploy!"
+            exit 1
+          fi
+
+          echo "Deployment verified successfully!"
