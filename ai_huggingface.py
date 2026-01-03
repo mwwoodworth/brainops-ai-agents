@@ -102,8 +102,10 @@ def test_huggingface():
     """Test Hugging Face generation"""
     print("Testing Hugging Face AI...")
 
-    # Set token for testing
-    os.environ["HUGGINGFACE_API_TOKEN"] = "hf_YOUR_TOKEN_HERE"
+    # Ensure HUGGINGFACE_API_TOKEN is set in environment before running
+    if not os.environ.get("HUGGINGFACE_API_TOKEN"):
+        print("Error: Set HUGGINGFACE_API_TOKEN environment variable first")
+        return
 
     ai = HuggingFaceAI()
     result = ai.generate("What is the capital of France?", model="default")
