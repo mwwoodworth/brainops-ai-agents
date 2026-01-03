@@ -784,7 +784,96 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ Permanent Observability Daemon startup failed: {e}")
 
-        logger.info("✅ Heavy component initialization complete")
+        # === ACTIVATE ALL SPECIALIZED AGENTS - THE AI OS AWAKENS ===
+        logger.info("🚀 Activating specialized AI agents...")
+
+        # Initialize AI Training Pipeline
+        if TRAINING_AVAILABLE and AITrainingPipeline:
+            try:
+                app.state.training = AITrainingPipeline(tenant_id=tenant_id)
+                logger.info("🎓 AI Training Pipeline ACTIVATED")
+            except Exception as e:
+                logger.error(f"❌ Training Pipeline activation failed: {e}")
+
+        # Initialize Notebook LM+ Learning
+        if LEARNING_AVAILABLE and NotebookLMPlus:
+            try:
+                app.state.learning = NotebookLMPlus(tenant_id=tenant_id)
+                logger.info("📚 Notebook LM+ Learning ACTIVATED")
+            except Exception as e:
+                logger.error(f"❌ Learning System activation failed: {e}")
+
+        # Initialize System Improvement Agent
+        if SYSTEM_IMPROVEMENT_AVAILABLE and SystemImprovementAgent:
+            try:
+                app.state.system_improvement = SystemImprovementAgent(tenant_id=tenant_id)
+                logger.info("⚙️ System Improvement Agent ACTIVATED")
+            except Exception as e:
+                logger.error(f"❌ System Improvement Agent activation failed: {e}")
+
+        # Initialize DevOps Optimization Agent
+        if DEVOPS_AGENT_AVAILABLE and DevOpsOptimizationAgent:
+            try:
+                app.state.devops_agent = DevOpsOptimizationAgent(tenant_id=tenant_id)
+                logger.info("🔧 DevOps Optimization Agent ACTIVATED")
+            except Exception as e:
+                logger.error(f"❌ DevOps Agent activation failed: {e}")
+
+        # Initialize Code Quality Agent
+        if CODE_QUALITY_AVAILABLE and CodeQualityAgent:
+            try:
+                app.state.code_quality = CodeQualityAgent(tenant_id=tenant_id)
+                logger.info("✨ Code Quality Agent ACTIVATED")
+            except Exception as e:
+                logger.error(f"❌ Code Quality Agent activation failed: {e}")
+
+        # Initialize Customer Success Agent
+        if CUSTOMER_SUCCESS_AVAILABLE and CustomerSuccessAgent:
+            try:
+                app.state.customer_success = CustomerSuccessAgent(tenant_id=tenant_id)
+                logger.info("🤝 Customer Success Agent ACTIVATED")
+            except Exception as e:
+                logger.error(f"❌ Customer Success Agent activation failed: {e}")
+
+        # Initialize Competitive Intelligence Agent
+        if COMPETITIVE_INTEL_AVAILABLE and CompetitiveIntelligenceAgent:
+            try:
+                app.state.competitive_intel = CompetitiveIntelligenceAgent(tenant_id=tenant_id)
+                logger.info("🔍 Competitive Intelligence Agent ACTIVATED")
+            except Exception as e:
+                logger.error(f"❌ Competitive Intel Agent activation failed: {e}")
+
+        # Initialize Vision Alignment Agent
+        if VISION_ALIGNMENT_AVAILABLE and VisionAlignmentAgent:
+            try:
+                app.state.vision_alignment = VisionAlignmentAgent(tenant_id=tenant_id)
+                logger.info("🎯 Vision Alignment Agent ACTIVATED")
+            except Exception as e:
+                logger.error(f"❌ Vision Alignment Agent activation failed: {e}")
+
+        # Initialize AI Self-Awareness Module
+        if SELF_AWARENESS_AVAILABLE and get_self_aware_ai:
+            try:
+                app.state.self_aware_ai = get_self_aware_ai()
+                logger.info("🧠 AI Self-Awareness Module ACTIVATED - The AI OS is now self-aware!")
+            except Exception as e:
+                logger.error(f"❌ Self-Awareness Module activation failed: {e}")
+
+        # Count activated agents
+        agents_active = sum([
+            app.state.training is not None,
+            app.state.learning is not None,
+            app.state.system_improvement is not None,
+            app.state.devops_agent is not None,
+            app.state.code_quality is not None,
+            app.state.customer_success is not None,
+            app.state.competitive_intel is not None,
+            app.state.vision_alignment is not None,
+            app.state.self_aware_ai is not None
+        ])
+        logger.info(f"🤖 {agents_active} specialized AI agents ACTIVATED and OPERATIONAL")
+
+        logger.info("✅ Heavy component initialization complete - AI OS FULLY AWAKE!")
 
     asyncio.create_task(deferred_heavy_init())
     logger.info("📋 Heavy initialization scheduled (runs after server binds)")

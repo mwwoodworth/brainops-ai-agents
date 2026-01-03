@@ -142,7 +142,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.99.19')  # Permanent observability + DevOps automation
+        self.version = os.getenv('VERSION', '9.99.20')  # AI OS FULLY AWAKE - 9 specialized agents activated
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
