@@ -32,6 +32,7 @@ from typing import Any, Optional
 import httpx
 import psycopg2
 from psycopg2.extras import Json
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,17 @@ def _get_db_config():
     required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
     missing = [var for var in required_vars if not os.getenv(var)]
     if missing:
-        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+        database_url = os.getenv('DATABASE_URL', '')
+        if database_url:
+            parsed = urlparse(database_url)
+            return {
+                'host': parsed.hostname or '',
+                'database': parsed.path.lstrip('/') if parsed.path else 'postgres',
+                'user': parsed.username or '',
+                'password': parsed.password or '',
+                'port': int(str(parsed.port)) if parsed.port else 5432
+            }
+        raise RuntimeError("Missing required: DB_HOST/DB_USER/DB_PASSWORD or DATABASE_URL")
 
     return {
         "host": os.getenv("DB_HOST"),
