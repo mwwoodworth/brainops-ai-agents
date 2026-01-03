@@ -486,6 +486,11 @@ class PermanentObservabilityDaemon:
 
             # Batch insert events
             for event in events_to_persist:
+                # Convert ISO string to datetime if needed
+                timestamp = event.timestamp
+                if isinstance(timestamp, str):
+                    timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+
                 await pool.execute("""
                     INSERT INTO ai_observability_events
                     (event_id, event_type, service, severity, message, details, timestamp)
@@ -498,7 +503,7 @@ class PermanentObservabilityDaemon:
                     event.severity.value,
                     event.message,
                     json.dumps(event.details),
-                    event.timestamp
+                    timestamp
                 )
                 event.persisted = True
 
