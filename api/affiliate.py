@@ -135,27 +135,29 @@ async def register_affiliate(
             partner_type = PartnerType.AFFILIATE
 
         affiliate = await pipeline.register_affiliate(
-            name=request.name,
             email=request.email,
-            company=request.company,
-            website=request.website,
+            contact_name=request.name,
+            company_name=request.company or "",
             partner_type=partner_type,
-            marketing_channels=request.marketing_channels,
-            expected_monthly_referrals=request.expected_monthly_referrals,
-            notes=request.notes,
-            tenant_id=request.tenant_id
+            website=request.website or "",
+            metadata={
+                "marketing_channels": request.marketing_channels,
+                "expected_monthly_referrals": request.expected_monthly_referrals,
+                "notes": request.notes,
+                "tenant_id": request.tenant_id
+            }
         )
 
         return AffiliateResponse(
-            affiliate_id=affiliate["id"],
-            name=affiliate["name"],
-            email=affiliate["email"],
-            partner_type=affiliate["partner_type"],
-            tier=affiliate["tier"],
-            referral_code=affiliate["referral_code"],
-            commission_rate=affiliate["commission_rate"],
-            status=affiliate["status"],
-            created_at=affiliate["created_at"]
+            affiliate_id=affiliate.affiliate_id,
+            name=affiliate.contact_name,
+            email=affiliate.email,
+            partner_type=affiliate.partner_type.value if hasattr(affiliate.partner_type, 'value') else str(affiliate.partner_type),
+            tier=affiliate.tier.value if hasattr(affiliate.tier, 'value') else str(affiliate.tier),
+            referral_code=affiliate.affiliate_code,
+            commission_rate=float(affiliate.custom_commission_rate) if affiliate.custom_commission_rate else 0.20,  # Default 20%
+            status=affiliate.status.value if hasattr(affiliate.status, 'value') else str(affiliate.status),
+            created_at=affiliate.joined_date.isoformat() if hasattr(affiliate.joined_date, 'isoformat') else str(affiliate.joined_date)
         )
 
     except Exception as e:

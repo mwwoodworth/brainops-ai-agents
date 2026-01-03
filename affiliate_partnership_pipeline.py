@@ -2913,6 +2913,59 @@ class AffiliatePartnershipPipeline:
 
         return pending
 
+    async def get_dashboard(self, affiliate_id: str, tenant_id: str = None) -> dict:
+        """Get affiliate dashboard data."""
+        affiliate = self.affiliates.get(affiliate_id)
+        if not affiliate:
+            raise ValueError(f"Affiliate {affiliate_id} not found")
+
+        return {
+            "affiliate_id": affiliate.affiliate_id,
+            "name": affiliate.contact_name,
+            "email": affiliate.email,
+            "company": affiliate.company_name,
+            "referral_code": affiliate.affiliate_code,
+            "partner_type": affiliate.partner_type.value,
+            "tier": affiliate.tier.value,
+            "status": affiliate.status.value,
+            "commission_rate": float(affiliate.custom_commission_rate) if affiliate.custom_commission_rate else 0.20,
+            "tracking_link": affiliate.tracking_links.get("default", ""),
+            "metrics": {
+                "total_referrals": affiliate.total_referrals,
+                "total_conversions": affiliate.total_conversions,
+                "conversion_rate": round(affiliate.total_conversions / max(affiliate.total_referrals, 1) * 100, 2),
+                "total_revenue_generated": float(affiliate.total_revenue_generated),
+                "total_commissions_earned": float(affiliate.total_commissions_earned),
+                "total_commissions_paid": float(affiliate.total_commissions_paid),
+                "pending_commission": float(affiliate.pending_commission),
+            },
+            "dates": {
+                "joined": affiliate.joined_date.isoformat() if affiliate.joined_date else None,
+                "last_activity": affiliate.last_activity_date.isoformat() if affiliate.last_activity_date else None,
+                "next_payout": affiliate.next_payout_date.isoformat() if affiliate.next_payout_date else None,
+            },
+        }
+
+    async def get_stats(self, affiliate_id: str, period: str = "30d", tenant_id: str = None) -> dict:
+        """Get affiliate statistics."""
+        affiliate = self.affiliates.get(affiliate_id)
+        if not affiliate:
+            raise ValueError(f"Affiliate {affiliate_id} not found")
+
+        return {
+            "affiliate_id": affiliate.affiliate_id,
+            "referral_code": affiliate.affiliate_code,
+            "total_referrals": affiliate.total_referrals,
+            "total_conversions": affiliate.total_conversions,
+            "conversion_rate": round(affiliate.total_conversions / max(affiliate.total_referrals, 1) * 100, 2),
+            "total_revenue": float(affiliate.total_revenue_generated),
+            "total_earned": float(affiliate.total_commissions_earned),
+            "total_paid": float(affiliate.total_commissions_paid),
+            "pending": float(affiliate.pending_commission),
+            "tier": affiliate.tier.value,
+            "status": affiliate.status.value,
+        }
+
     # =========================================================================
     # UTILITIES
     # =========================================================================

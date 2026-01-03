@@ -75,67 +75,52 @@ class AUREAStateProvider:
         return self._cache
 
     async def _fetch_state(self) -> AUREAStateSnapshot:
-        """Actually fetch state from database and AUREA"""
-        import psycopg2
-        from psycopg2.extras import RealDictCursor
+        """Actually fetch state from database and AUREA using async pool"""
+        from database.async_connection import get_pool
 
-        # All credentials MUST come from environment variables - no hardcoded defaults
-        DB_CONFIG = {
-            'host': os.getenv('DB_HOST'),
-            'database': os.getenv('DB_NAME'),
-            'user': os.getenv('DB_USER'),
-            'password': os.getenv('DB_PASSWORD'),
-            'port': int(os.getenv('DB_PORT', '5432'))
-        }
-        if not all([DB_CONFIG['host'], DB_CONFIG['database'], DB_CONFIG['user'], DB_CONFIG['password']]):
-            raise RuntimeError("DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD environment variables are required")
-
-        conn = None
-        cur = None
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            pool = await get_pool()
 
             # Helper for safe count extraction
-            def safe_count(result):
+            def safe_count(result: dict | None) -> int:
                 return result.get('count', 0) if result else 0
 
-            def safe_rate(result):
+            def safe_rate(result: dict | None) -> float:
                 return (result.get('rate') or 0.0) if result else 0.0
 
             # Decisions last hour
-            cur.execute("""
+            row = await pool.fetchrow("""
                 SELECT COUNT(*) as count FROM aurea_decisions
                 WHERE created_at > NOW() - INTERVAL '1 hour'
             """)
-            decisions_last_hour = safe_count(cur.fetchone())
+            decisions_last_hour = safe_count(dict(row) if row else None)
 
             # Pending decisions
-            cur.execute("""
+            row = await pool.fetchrow("""
                 SELECT COUNT(*) as count FROM aurea_decisions
                 WHERE execution_status = 'pending'
             """)
-            decisions_pending = safe_count(cur.fetchone())
+            decisions_pending = safe_count(dict(row) if row else None)
 
             # Last 5 decisions
-            cur.execute("""
+            rows = await pool.fetch("""
                 SELECT id, decision_type, description, confidence, execution_status, created_at
                 FROM aurea_decisions
                 ORDER BY created_at DESC LIMIT 5
             """)
-            last_5_decisions = [dict(row) for row in cur.fetchall()]
+            last_5_decisions = [dict(r) for r in rows]
             for d in last_5_decisions:
                 if d.get('created_at'):
                     d['created_at'] = d['created_at'].isoformat()
 
             # Active agents
-            cur.execute("""
+            row = await pool.fetchrow("""
                 SELECT COUNT(*) as count FROM ai_agents WHERE status = 'active'
             """)
-            active_agents = safe_count(cur.fetchone())
+            active_agents = safe_count(dict(row) if row else None)
 
             # Success rate last 100
-            cur.execute("""
+            row = await pool.fetchrow("""
                 SELECT
                     COUNT(CASE WHEN execution_status = 'completed' THEN 1 END)::float /
                     NULLIF(COUNT(*), 0) as rate
@@ -144,27 +129,25 @@ class AUREAStateProvider:
                     ORDER BY created_at DESC LIMIT 100
                 ) sub
             """)
-            success_rate = safe_rate(cur.fetchone())
+            success_rate = safe_rate(dict(row) if row else None)
 
             # Memory utilization (from unified_brain)
-            cur.execute("""
+            row = await pool.fetchrow("""
                 SELECT COUNT(*) as count FROM unified_brain
             """)
-            memory_count = safe_count(cur.fetchone())
+            memory_count = safe_count(dict(row) if row else None)
             memory_util = min(1.0, memory_count / 10000)  # Assume 10k is "full"
 
             # Recent agent executions
-            cur.execute("""
+            rows = await pool.fetch("""
                 SELECT agent_name, status, created_at
                 FROM agent_activation_log
                 ORDER BY created_at DESC LIMIT 5
             """)
-            last_5_actions = [dict(row) for row in cur.fetchall()]
+            last_5_actions = [dict(r) for r in rows]
             for a in last_5_actions:
                 if a.get('created_at'):
                     a['created_at'] = a['created_at'].isoformat()
-
-            # Connection cleanup handled in finally block
 
             return AUREAStateSnapshot(
                 timestamp=datetime.now().isoformat(),
@@ -199,18 +182,6 @@ class AUREAStateProvider:
                 uptime_seconds=0,
                 success_rate_last_100=0
             )
-        finally:
-            # SECURITY: Always close database connections
-            if cur:
-                try:
-                    cur.close()
-                except Exception:
-                    pass
-            if conn:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
 
 
 # Global state provider

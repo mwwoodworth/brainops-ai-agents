@@ -107,9 +107,10 @@ async def agent_analytics(
                     WHERE started_at >= $1 AND started_at <= $2
                 """
                 if agent_id:
-                    perf_query += f" AND agent_id::text = '{agent_id}'"
-
-                perf_data = await pool.fetchrow(perf_query, start_date, end_date)
+                    perf_query += " AND agent_id::text = $3"
+                    perf_data = await pool.fetchrow(perf_query, start_date, end_date, agent_id)
+                else:
+                    perf_data = await pool.fetchrow(perf_query, start_date, end_date)
 
                 total = perf_data["total_executions"] or 1  # Avoid division by zero
                 response["analysis"] = {
