@@ -453,14 +453,14 @@ async def get_pipeline():
                 {
                     "stage": row['stage'],
                     "count": row['lead_count'],
-                    "value": float(row['total_value']),
-                    "avg_score": float(row['avg_score'])
+                    "value": float(row['total_value'] or 0),
+                    "avg_score": float(row['avg_score'] or 0)
                 }
                 for row in pipeline
             ],
             "recent_wins": [dict(row) for row in recent_wins],
-            "total_pipeline_value": sum(float(row['total_value']) for row in pipeline if row['stage'] != 'won'),
-            "total_won_revenue": sum(float(row['total_value']) for row in pipeline if row['stage'] == 'won')
+            "total_pipeline_value": sum(float(row['total_value'] or 0) for row in pipeline if row['stage'] != 'won'),
+            "total_won_revenue": sum(float(row['total_value'] or 0) for row in pipeline if row['stage'] == 'won')
         }
     except Exception as e:
         logger.error(f"Error getting pipeline: {e}")

@@ -367,12 +367,18 @@ class MetaCriticScorer:
         """Score model confidence"""
         # Check for explicit confidence
         if "confidence" in candidate:
-            return float(candidate["confidence"])
+            try:
+                return float(candidate["confidence"])
+            except (TypeError, ValueError):
+                return 0.5
 
         # Check for parsed confidence in response
         parsed = candidate.get("parsed", {})
         if "confidence" in parsed:
-            return float(parsed["confidence"])
+            try:
+                return float(parsed["confidence"])
+            except (TypeError, ValueError):
+                return 0.5
 
         return 0.5  # Neutral
 

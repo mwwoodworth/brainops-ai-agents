@@ -179,7 +179,7 @@ async def observe(self) -> Dict:
                 observations["alerts"].append({
                     "type": "overdue_invoices",
                     "count": len(overdue_invoices),
-                    "total_due": sum(float(inv["amount_due"]) for inv in overdue_invoices)
+                    "total_due": sum(float(inv["amount_due"] or 0) for inv in overdue_invoices)
                 })
 
     except Exception as e:

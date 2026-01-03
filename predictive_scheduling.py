@@ -175,8 +175,13 @@ class LoadPredictor:
             daily_counts = defaultdict(list)
 
             for pattern in patterns:
-                hourly_counts[int(pattern['hour'])].append(pattern['execution_count'])
-                daily_counts[int(pattern['day_of_week'])].append(pattern['execution_count'])
+                hour = pattern.get('hour')
+                day_of_week = pattern.get('day_of_week')
+                execution_count = pattern.get('execution_count') or 0
+                if hour is None or day_of_week is None:
+                    continue
+                hourly_counts[int(hour or 0)].append(execution_count)
+                daily_counts[int(day_of_week or 0)].append(execution_count)
 
             # Calculate averages
             for hour, counts in hourly_counts.items():
@@ -413,10 +418,11 @@ class ScheduleOptimizer:
     ) -> Optional[SchedulePrediction]:
         """Find optimal slot for a task"""
         # Get candidate windows
+        duration_minutes = int(task.estimated_duration_minutes or 0)
         windows = self.load_predictor.get_optimal_windows(
             start_time,
             end_time,
-            int(task.estimated_duration_minutes)
+            duration_minutes
         )
 
         best_slot = None
@@ -765,12 +771,27 @@ class PredictiveSchedulingSystem:
                 except ValueError:
                     logger.debug("Invalid resource type %s", key)
 
+            task_name = task_data.get('name') or f"Task_{task_id}"
+            task_type_value = task_data.get('task_type') or TaskType.AI_PROCESSING.value
+            priority_value = task_data.get('priority') or TaskPriority.MEDIUM.value
+            estimated_duration = task_data.get('estimated_duration_minutes') or 0
+
+            try:
+                task_type = TaskType(task_type_value)
+            except ValueError:
+                task_type = TaskType.AI_PROCESSING
+
+            try:
+                priority = TaskPriority(priority_value)
+            except ValueError:
+                priority = TaskPriority.MEDIUM
+
             task = SchedulableTask(
                 task_id=task_id,
-                name=task_data['name'],
-                task_type=TaskType(task_data['task_type']),
-                priority=TaskPriority(task_data['priority']),
-                estimated_duration_minutes=task_data['estimated_duration_minutes'],
+                name=task_name,
+                task_type=task_type,
+                priority=priority,
+                estimated_duration_minutes=estimated_duration,
                 resource_requirements=resource_reqs,
                 dependencies=task_data['dependencies'] or [],
                 deadline=task_data['deadline'],
@@ -928,9 +949,17 @@ class PredictiveSchedulingSystem:
                     """, (ScheduleStatus.COMPLETED.value, task['id']))
 
                     # Record metrics
+                    executed_at = task.get('executed_at')
                     actual_duration = (
-                        datetime.now(timezone.utc) - task['executed_at']
-                    ).total_seconds() / 60 if task.get('executed_at') else 0
+                        datetime.now(timezone.utc) - executed_at
+                    ).total_seconds() / 60 if executed_at else 0
+
+                    start_time = task.get('start_time')
+                    end_time = task.get('end_time')
+                    predicted_duration = (
+                        (end_time - start_time).total_seconds() / 60
+                        if start_time and end_time else 0
+                    )
 
                     cursor.execute("""
                         INSERT INTO ai_schedule_metrics
@@ -939,7 +968,7 @@ class PredictiveSchedulingSystem:
                         VALUES (%s, %s, %s, %s, %s, %s)
                     """, (
                         task['id'],
-                        (task['end_time'] - task['start_time']).total_seconds() / 60,
+                        predicted_duration,
                         actual_duration,
                         task['success_probability'],
                         True,
