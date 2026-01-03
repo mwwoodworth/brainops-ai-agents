@@ -800,7 +800,7 @@ class PredictiveSchedulingSystem:
 
             # Get schedule predictions
             start = start_after or datetime.now(timezone.utc)
-            end = end_before or start + timedelta(hours=24)
+            end_before or start + timedelta(hours=24)
 
             predictions = await self.optimizer.optimize_schedule([task], 24)
 

@@ -825,7 +825,7 @@ class AUREA:
 
         try:
             # Track observation start time
-            observe_start = datetime.now()
+            datetime.now()
 
             # Detect patterns from historical data
             patterns_detected = await self._detect_patterns()
@@ -2214,7 +2214,6 @@ class AUREA:
             try:
                 # Recalculate current value based on goal type
                 current_value = await self._measure_goal_metric(goal.target_metric)
-                old_progress = goal.progress
 
                 # Update progress
                 if goal.target_value != goal.current_value:

@@ -10,8 +10,16 @@ import time
 from typing import Any, Optional
 
 import requests
-from anthropic import Anthropic
-from openai import OpenAI
+
+try:
+    from anthropic import Anthropic
+except ImportError:
+    Anthropic = None
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +34,12 @@ class SmartAISystem:
         self.perplexity_key = os.getenv("PERPLEXITY_API_KEY")
 
         # Initialize clients
-        self.openai_client = OpenAI(api_key=self.openai_key) if self.openai_key else None
-        self.anthropic_client = Anthropic(api_key=self.anthropic_key) if self.anthropic_key else None
+        self.openai_client = OpenAI(api_key=self.openai_key) if self.openai_key and OpenAI else None
+        self.anthropic_client = Anthropic(api_key=self.anthropic_key) if self.anthropic_key and Anthropic else None
+        if self.openai_key and OpenAI is None:
+            logger.warning("OpenAI SDK not installed - OpenAI fallback disabled")
+        if self.anthropic_key and Anthropic is None:
+            logger.warning("Anthropic SDK not installed - Anthropic fallback disabled")
 
         # Track provider performance
         self.provider_stats = {

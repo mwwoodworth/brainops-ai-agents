@@ -71,7 +71,7 @@ async def register_service(request: RegisterServiceRequest) -> dict[str, Any]:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid platform: {request.platform}. Valid: {[p.value for p in DeploymentPlatform]}"
-        )
+        ) from None
 
     service = await engine.register_service(
         name=request.name,

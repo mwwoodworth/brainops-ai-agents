@@ -9,7 +9,7 @@ try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    pass  # dotenv not installed, use existing environment
+    load_dotenv = None  # dotenv not installed, use existing environment
 
 # Verify required environment variables are set
 required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]

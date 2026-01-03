@@ -168,7 +168,7 @@ async def run_full_maintenance(tenant_id: str = None):
     logger.info("=" * 80)
 
     # 1. Health check
-    healthy = await run_health_check()
+    await run_health_check()
 
     # 2. Sync if needed
     await run_sync(limit=10000)

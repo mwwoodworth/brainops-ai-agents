@@ -46,6 +46,7 @@ from api.ai_awareness import (
 )
 from api.aurea_chat import router as aurea_chat_router  # AUREA Live Conversational Interface
 from api.brain import router as brain_router
+BRAIN_AVAILABLE = True  # Brain router is always imported
 from api.cicd import router as cicd_router  # Autonomous CI/CD Management - 1-10K systems
 from api.codebase_graph import router as codebase_graph_router
 from api.customer_intelligence import router as customer_intelligence_router
@@ -626,8 +627,6 @@ async def lifespan(app: FastAPI):
         logger.warning("⚠️ No DEFAULT_TENANT_ID configured - set DEFAULT_TENANT_ID environment variable")
 
     # Keep handles defined to avoid unbound errors when optional systems are disabled
-    aurea = None
-    memory_manager = None
 
     # DEFERRED INITIALIZATION - run in background after server binds to port
     async def deferred_init():
@@ -1326,7 +1325,7 @@ if LANGGRAPH_AVAILABLE:
 
         except Exception as e:
             logger.error(f"LangGraph workflow error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
     @app.get("/langgraph/status")
     async def get_langgraph_status(authenticated: bool = Depends(verify_api_key)):
@@ -1624,25 +1623,24 @@ async def receive_telemetry_events(request: Request, authenticated: bool = Depen
 
         # Store events in database if available
         stored_count = 0
-        if DATABASE_AVAILABLE:
-            try:
-                pool = get_database_pool()
-                async with pool.acquire() as conn:
-                    for event in events:
-                        await conn.execute("""
-                            INSERT INTO ai_nerve_signals (
-                                source, event_type, payload, metadata, created_at
-                            ) VALUES ($1, $2, $3, $4, NOW())
-                            ON CONFLICT DO NOTHING
-                        """,
-                            event.get("source", "unknown"),
-                            event.get("type", "telemetry"),
-                            json.dumps(event.get("data", {})),
-                            json.dumps(event.get("metadata", {}))
-                        )
-                        stored_count += 1
-            except Exception as db_err:
-                logger.warning(f"Failed to store telemetry: {db_err}")
+        try:
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                for event in events:
+                    await conn.execute("""
+                        INSERT INTO ai_nerve_signals (
+                            source, event_type, payload, metadata, created_at
+                        ) VALUES ($1, $2, $3, $4, NOW())
+                        ON CONFLICT DO NOTHING
+                    """,
+                        event.get("source", "unknown"),
+                        event.get("type", "telemetry"),
+                        json.dumps(event.get("data", {})),
+                        json.dumps(event.get("metadata", {}))
+                    )
+                    stored_count += 1
+        except Exception as db_err:
+            logger.warning(f"Failed to store telemetry: {db_err}")
 
         return {
             "success": True,
@@ -2182,7 +2180,7 @@ async def execute_agent(
                 }
             )
 
-        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}") from e
 
 
 @app.get("/agents/{agent_id}")
@@ -2208,7 +2206,7 @@ async def get_agent(
         raise
     except Exception as e:
         logger.error(f"Failed to get agent: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve agent: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve agent: {str(e)}") from e
 
 
 @app.get("/executions")
@@ -2302,7 +2300,7 @@ async def get_executions(
 
     except Exception as e:
         logger.error(f"Failed to get executions: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve executions: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve executions: {str(e)}") from e
 
 
 @app.post("/execute")
@@ -2316,7 +2314,6 @@ async def execute_scheduled_agents(
 
     try:
         pool = get_pool()
-        scheduler = app.state.scheduler
 
         # Get current hour
         current_hour = datetime.utcnow().hour
@@ -2332,7 +2329,7 @@ async def execute_scheduled_agents(
         for agent in agents:
             try:
                 execution_id = str(uuid.uuid4())
-                started_at = datetime.utcnow()
+                datetime.utcnow()
                 agent_name = agent.get("name", "unknown")
 
                 # Log execution start (use correct columns: task_execution_id, agent_type, prompt)
@@ -2563,7 +2560,7 @@ async def capture_interaction(interaction_data: dict[str, Any] = Body(...)):
 
     except Exception as e:
         logger.error(f"Failed to capture interaction: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/training/stats")
@@ -2672,7 +2669,7 @@ async def get_all_agents_status(authenticated: bool = Depends(verify_api_key)):
                 "timestamp": datetime.utcnow().isoformat()
             }
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
     # Full health monitoring available
     try:
@@ -2701,7 +2698,7 @@ async def get_all_agents_status(authenticated: bool = Depends(verify_api_key)):
         }
     except Exception as e:
         logger.error(f"Error getting agent status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/agents/health/check", dependencies=SECURED_DEPENDENCIES)
@@ -2718,7 +2715,7 @@ async def check_agents_health():
         return result
     except Exception as e:
         logger.error(f"Health check failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/agents/{agent_id}/restart", dependencies=SECURED_DEPENDENCIES)
@@ -2747,7 +2744,7 @@ async def restart_agent(agent_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to restart agent: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/agents/health/auto-restart", dependencies=SECURED_DEPENDENCIES)
@@ -2764,7 +2761,7 @@ async def auto_restart_critical_agents():
         return result
     except Exception as e:
         logger.error(f"Auto-restart failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/scheduler/activate-all", dependencies=SECURED_DEPENDENCIES)
@@ -2837,7 +2834,7 @@ async def activate_all_agents_scheduler():
 
     except Exception as e:
         logger.error(f"Failed to activate all agents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/memory/store", dependencies=SECURED_DEPENDENCIES)
@@ -2869,7 +2866,7 @@ async def store_memory(
         }
     except Exception as e:
         logger.error(f"Failed to store memory: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/memory/search")
@@ -2899,7 +2896,7 @@ async def search_memory(
         }
     except Exception as e:
         logger.error(f"Failed to search memory: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/memory/backfill-embeddings", dependencies=SECURED_DEPENDENCIES)
@@ -2949,7 +2946,7 @@ async def backfill_embeddings(
         except ImportError:
             cur.close()
             conn.close()
-            raise HTTPException(status_code=503, detail="sentence-transformers not available for backfill")
+            raise HTTPException(status_code=503, detail="sentence-transformers not available for backfill") from None
 
         processed = 0
         for mem in memories:
@@ -2990,7 +2987,7 @@ async def backfill_embeddings(
         raise
     except Exception as e:
         logger.error(f"Embedding backfill failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/memory/force-sync", dependencies=SECURED_DEPENDENCIES)
@@ -3029,7 +3026,7 @@ async def force_sync_embedded_memory():
 
     except Exception as e:
         logger.error(f"Force sync failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/memory/stats")
@@ -3076,7 +3073,7 @@ async def get_memory_stats():
 
     except Exception as e:
         logger.error(f"Get memory stats failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ==================== AI SELF-AWARENESS ENDPOINTS ====================
@@ -3127,7 +3124,7 @@ async def ai_self_assess(
 
     except Exception as e:
         logger.error(f"Self-assessment failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Self-assessment failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Self-assessment failed: {str(e)}") from e
 
 
 @app.post("/ai/explain-reasoning")
@@ -3174,7 +3171,7 @@ async def ai_explain_reasoning(
 
     except Exception as e:
         logger.error(f"Reasoning explanation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Reasoning explanation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Reasoning explanation failed: {str(e)}") from e
 
 
 class ReasoningRequest(BaseModel):
@@ -3225,7 +3222,7 @@ async def ai_deep_reasoning(request: Request, body: ReasoningRequest):
 
     except Exception as e:
         logger.error(f"o1 reasoning failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Reasoning failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Reasoning failed: {str(e)}") from e
 
 
 @app.post("/ai/learn-from-mistake")
@@ -3277,7 +3274,7 @@ async def ai_learn_from_mistake(
 
     except Exception as e:
         logger.error(f"Learning from mistake failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Learning from mistake failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Learning from mistake failed: {str(e)}") from e
 
 
 @app.get("/ai/self-awareness/stats")
@@ -3351,7 +3348,7 @@ async def get_self_awareness_stats():
 
     except Exception as e:
         logger.error(f"Failed to get self-awareness stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve stats: {str(e)}") from e
 
 
 # ==================== END AI SELF-AWARENESS ENDPOINTS ====================
@@ -3383,7 +3380,7 @@ async def execute_ai_task(task_id: str):
         raise
     except Exception as e:
         logger.error(f"❌ Task execution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/ai/tasks/stats")
@@ -3424,7 +3421,7 @@ async def get_task_stats():
 
     except Exception as e:
         logger.error(f"❌ Failed to get task stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 class AureaCommandRequest(BaseModel):
@@ -3460,7 +3457,7 @@ async def orchestrate_complex_workflow(
 
     except Exception as e:
         logger.error(f"❌ Orchestration failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 class AIAnalyzeRequest(BaseModel):
@@ -3558,11 +3555,11 @@ async def ai_analyze(
             raise HTTPException(
                 status_code=503,
                 detail=f"AI orchestrator unavailable and task queueing failed: {str(queue_error)}"
-            )
+            ) from queue_error
 
     except Exception as e:
         logger.error(f"❌ AI analyze failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/aurea/status")
@@ -3661,7 +3658,7 @@ async def execute_aurea_nl_command(
 
     except Exception as e:
         logger.error(f"❌ Natural language command execution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ==================== END AI TASK MANAGEMENT ENDPOINTS ====================
@@ -3941,7 +3938,7 @@ async def api_v1_knowledge_graph_stats(
         }
     except Exception as e:
         logger.error(f"Knowledge graph stats error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/v1/knowledge/graph/extract")
@@ -3967,7 +3964,7 @@ async def api_v1_knowledge_graph_extract(
         }
     except Exception as e:
         logger.error(f"Knowledge graph extraction error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/v1/erp/analyze")
@@ -4375,16 +4372,10 @@ async def execute_aurea_event(
                 detail=f"Agent '{request.target_agent['name']}' not found or disabled"
             )
 
-        agent_id = str(agent_row['id'])
+        str(agent_row['id'])
         agent_name = agent_row['name']
 
         # Prepare agent execution payload
-        agent_payload = {
-            "event_id": request.event_id,
-            "topic": request.topic,
-            "source": request.source,
-            **request.payload
-        }
 
         # Execute agent (simple acknowledgment for now)
         # Can be expanded with topic-specific handlers
@@ -4445,7 +4436,7 @@ async def execute_aurea_event(
         raise HTTPException(
             status_code=500,
             detail=f"Event execution failed: {str(e)}"
-        )
+        ) from e
 
 
 # ==================== END BRAINOPS CORE v1 API ====================

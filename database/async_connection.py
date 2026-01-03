@@ -472,7 +472,7 @@ class InMemoryDatabasePool(BasePool):
         column: int = 0,
         timeout: Optional[float] = None
     ) -> Any:
-        sql = query.lower()
+        query.lower()
         # Removed fake fallback responses - return None instead of fake data
         # This ensures callers get accurate information about database state
 

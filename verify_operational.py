@@ -78,7 +78,7 @@ def test_database() -> tuple[bool, str]:
 
         # Verify data
         cursor.execute("SELECT * FROM ai_master_context WHERE id = %s", (inserted_id,))
-        data = cursor.fetchone()
+        cursor.fetchone()
 
         # Clean up
         cursor.execute("DELETE FROM ai_master_context WHERE id = %s", (inserted_id,))

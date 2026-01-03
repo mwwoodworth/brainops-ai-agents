@@ -28,7 +28,7 @@ def _get_engine():
             _engine = EnhancedSelfHealing()
         except Exception as e:
             logger.error(f"Failed to initialize Self-Healing Engine: {e}")
-            raise HTTPException(status_code=503, detail="Self-Healing Engine not available")
+            raise HTTPException(status_code=503, detail="Self-Healing Engine not available") from e
     return _engine
 
 
@@ -435,7 +435,7 @@ async def mcp_heal_service(request: MCPHealRequest):
         return result
     except Exception as e:
         logger.error(f"MCP heal error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/mcp/services")
@@ -453,7 +453,7 @@ async def mcp_list_services():
             return {"success": False, "error": result.error}
     except Exception as e:
         logger.error(f"MCP list services error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/mcp/logs/{service_name}")
@@ -477,7 +477,7 @@ async def mcp_get_service_logs(service_name: str, lines: int = 100):
         }
     except Exception as e:
         logger.error(f"MCP get logs error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/mcp/restart/{service_name}")
@@ -502,7 +502,7 @@ async def mcp_restart_service(service_name: str):
         }
     except Exception as e:
         logger.error(f"MCP restart error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/mcp/scale/{service_name}")
@@ -528,4 +528,4 @@ async def mcp_scale_service(service_name: str, instances: int = 2):
         }
     except Exception as e:
         logger.error(f"MCP scale error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

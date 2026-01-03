@@ -512,7 +512,7 @@ class CrossSystemOmniscience:
         """Create cross-references from detected changes"""
         for change in changes:
             # Create reference
-            ref_key = f"{system_id}:{change['path']}"
+            f"{system_id}:{change['path']}"
             self.cross_references[change['path']].append((system_id, change['type']))
 
     def _update_unified_state(self):

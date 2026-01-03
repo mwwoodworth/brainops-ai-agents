@@ -1265,7 +1265,7 @@ class DecisionRAG:
             embedding = await self._get_embedding(context_text)
 
             # Search in database with proper connection handling
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     # Use pgvector for similarity search
@@ -1295,7 +1295,7 @@ class DecisionRAG:
     ) -> list[dict[str, Any]]:
         """Get patterns from successful decisions of a given type"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute("""
@@ -1418,7 +1418,7 @@ class DecisionRAG:
             if not keywords:
                 return []
 
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     # Build ILIKE query
@@ -1537,9 +1537,9 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
 
     # Initialize components
     observer = get_parallel_observer(tenant_id)
-    input_validator = get_input_validator()
+    get_input_validator()
     process_validator = get_process_validator()
-    output_validator = get_output_validator()
+    get_output_validator()
     decision_rag = get_decision_rag()
     speculator = get_speculative_executor()
 

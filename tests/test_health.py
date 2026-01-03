@@ -3,6 +3,11 @@ import sys
 
 import pytest
 
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None
+
 # Add root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -27,9 +32,11 @@ def test_db_connection():
     if not os.getenv("DATABASE_URL"):
         pytest.skip("DATABASE_URL not set")
 
-    # Here we would try to connect using sqlalchemy or psycopg2
-    # import sqlalchemy
-    # engine = sqlalchemy.create_engine(os.getenv("DATABASE_URL"))
-    # connection = engine.connect()
-    # connection.close()
-    pass
+    if psycopg2 is None:
+        pytest.skip("psycopg2 not installed")
+
+    try:
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        conn.close()
+    except Exception as exc:
+        pytest.fail(f"Database connection failed: {exc}")

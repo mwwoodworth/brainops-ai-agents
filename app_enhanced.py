@@ -232,7 +232,7 @@ async def get_agents(
 
     except Exception as e:
         logger.error(f"Failed to get agents: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve agents: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve agents: {str(e)}") from e
 
 
 @app.post("/agents/{agent_id}/execute")
@@ -315,7 +315,7 @@ async def execute_agent(
                 WHERE id = $4
             """, "failed", str(e), datetime.utcnow(), execution_id)
 
-        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}") from e
 
 
 @app.get("/agents/{agent_id}")
@@ -347,7 +347,7 @@ async def get_agent(
         raise
     except Exception as e:
         logger.error(f"Failed to get agent: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve agent: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve agent: {str(e)}") from e
 
 
 @app.get("/executions")
@@ -400,7 +400,7 @@ async def get_executions(
 
     except Exception as e:
         logger.error(f"Failed to get executions: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve executions: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve executions: {str(e)}") from e
 
 
 @app.post("/execute")
@@ -414,7 +414,6 @@ async def execute_scheduled_agents(
 
     try:
         pool = get_pool()
-        scheduler = app.state.scheduler
 
         # Get current hour
         current_hour = datetime.utcnow().hour

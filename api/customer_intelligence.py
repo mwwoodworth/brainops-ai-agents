@@ -29,7 +29,7 @@ async def get_customer_intelligence(customer_id: str):
         try:
             uuid.UUID(customer_id)
         except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid customer ID format - must be a valid UUID")
+            raise HTTPException(status_code=400, detail="Invalid customer ID format - must be a valid UUID") from None
 
         # Fetch customer data
         customer = await pool.fetchrow(
@@ -169,7 +169,7 @@ async def get_customer_intelligence(customer_id: str):
 
     except Exception as e:
         logger.error(f"Error generating customer intelligence: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/analyze-customer")
 async def trigger_customer_analysis(payload: CustomerAnalysisRequest):

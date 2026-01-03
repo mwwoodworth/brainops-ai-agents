@@ -115,7 +115,7 @@ async def get_revenue_status():
         }
     except Exception as e:
         logger.error(f"Error getting revenue status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/discover-leads")
@@ -180,7 +180,7 @@ async def discover_leads(request: LeadDiscoveryRequest):
 
     except Exception as e:
         logger.error(f"Error discovering leads: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/create-lead")
@@ -214,7 +214,7 @@ async def create_lead(request: LeadCreateRequest):
         }
     except Exception as e:
         logger.error(f"Error creating lead: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/leads")
@@ -248,7 +248,7 @@ async def get_leads(
         }
     except Exception as e:
         logger.error(f"Error getting leads: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/qualify/{lead_id}")
@@ -283,7 +283,7 @@ async def qualify_lead(lead_id: str, request: LeadQualifyRequest):
         raise
     except Exception as e:
         logger.error(f"Error qualifying lead: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/generate-proposal/{lead_id}")
@@ -362,7 +362,7 @@ async def generate_proposal(lead_id: str, request: ProposalRequest):
         raise
     except Exception as e:
         logger.error(f"Error generating proposal: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/close-deal/{lead_id}")
@@ -408,7 +408,7 @@ async def close_deal(lead_id: str, won: bool = True):
         raise
     except Exception as e:
         logger.error(f"Error closing deal: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/pipeline")
@@ -464,7 +464,7 @@ async def get_pipeline():
         }
     except Exception as e:
         logger.error(f"Error getting pipeline: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 async def generate_realistic_leads(industry: str, location: str, count: int, tenant_id: Optional[str] = None) -> list[dict[str, Any]]:

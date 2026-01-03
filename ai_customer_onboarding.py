@@ -469,7 +469,8 @@ class AICustomerOnboarding:
             where_clause = " AND ".join(conditions) if conditions else "1=1"
 
             # Get overall metrics
-            cursor.execute(f"""
+            # Build query with safe WHERE clause (conditions use %s placeholders only)
+            overall_query = """
                 SELECT
                     COUNT(*) as total_journeys,
                     AVG(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) * 100 as completion_rate,
@@ -477,13 +478,14 @@ class AICustomerOnboarding:
                     AVG(progress_score) as avg_progress_score,
                     COUNT(DISTINCT segment) as segments_served
                 FROM ai_onboarding_journeys
-                WHERE {where_clause}
-            """, params)
+                WHERE """ + where_clause  # noqa: S608 - where_clause built from parameterized conditions
+            cursor.execute(overall_query, params)
 
             overall = cursor.fetchone()
 
             # Get stage performance
-            cursor.execute(f"""
+            # Build query with safe WHERE clause (conditions use %s placeholders only)
+            stage_query = """
                 SELECT
                     os.stage_type,
                     COUNT(*) as total_stages,
@@ -491,10 +493,10 @@ class AICustomerOnboarding:
                     AVG(os.time_spent_hours) as avg_time_hours
                 FROM ai_onboarding_journeys oj
                 JOIN ai_onboarding_stages os ON os.journey_id = oj.id
-                WHERE {where_clause}
+                WHERE """ + where_clause + """
                 GROUP BY os.stage_type
-                ORDER BY AVG(os.stage_order)
-            """, params)
+                ORDER BY AVG(os.stage_order)"""  # noqa: S608 - where_clause built from parameterized conditions
+            cursor.execute(stage_query, params)
 
             stage_performance = cursor.fetchall()
 

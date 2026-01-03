@@ -563,8 +563,22 @@ class FraudDetector:
 
         # Check affiliate's refund rate
         if affiliate.total_conversions > 10:  # Need enough data
-            # Would check actual refund rate here
-            pass
+            refund_rate = None
+            custom_refund_rate = affiliate.custom_data.get("refund_rate")
+            if isinstance(custom_refund_rate, (int, float)):
+                refund_rate = float(custom_refund_rate)
+            else:
+                total_refunds = affiliate.custom_data.get("total_refunds")
+                if isinstance(total_refunds, (int, float)) and affiliate.total_conversions:
+                    refund_rate = float(total_refunds) / float(affiliate.total_conversions)
+
+            if refund_rate is not None and refund_rate > self.MAX_REFUND_RATE:
+                signals.append(FraudSignal(
+                    signal_type="high_refund_rate",
+                    severity="medium",
+                    score=0.6,
+                    details=f"Refund rate {refund_rate:.2%} exceeds {self.MAX_REFUND_RATE:.0%}"
+                ))
 
         return signals
 
@@ -3084,7 +3098,7 @@ def create_affiliate_router():
                 "status": affiliate.status.value,
             }
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     @router.post("/track/click")
     async def track_click(data: ClickTracking):
@@ -3106,7 +3120,7 @@ def create_affiliate_router():
                 "fraud_signals": len(fraud_signals),
             }
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     @router.post("/track/conversion")
     async def track_conversion(data: ConversionTracking):
@@ -3139,7 +3153,7 @@ def create_affiliate_router():
         try:
             return await pipeline.get_affiliate_dashboard(affiliate_id, days)
         except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=404, detail=str(e)) from e
 
     @router.get("/analytics")
     async def get_analytics(days: int = 30):
@@ -3166,7 +3180,7 @@ def create_affiliate_router():
                 "tracking_link": content.tracking_link,
             }
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     @router.post("/payouts/process")
     async def process_payouts(affiliate_ids: list[str] = None):

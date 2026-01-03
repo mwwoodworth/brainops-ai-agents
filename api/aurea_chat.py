@@ -304,7 +304,6 @@ NOW RESPOND TO: {message}"""
 
         if stream:
             # Streaming response - try providers in order with fallback
-            response_stream = None
 
             # Try Anthropic first (best for conversation)
             if ai.async_anthropic:
@@ -662,7 +661,7 @@ async def get_work_history(hours: int = Query(24, ge=1, le=720, description="Hou
 
     except Exception as e:
         logger.error(f"Failed to get work history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/what-are-you-doing")

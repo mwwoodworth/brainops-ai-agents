@@ -434,7 +434,7 @@ class MultiAISOPGenerator:
     ) -> dict[str, Any]:
         """Claude generates initial SOP structure and content."""
 
-        sections = template.required_sections + template.optional_sections
+        template.required_sections + template.optional_sections
 
         prompt = f"""Create a comprehensive Standard Operating Procedure (SOP) with the following specifications:
 
@@ -1397,7 +1397,7 @@ def create_sop_router():
             content = manager.export_sop(sop_id, format)
             return {"content": content, "format": format}
         except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=404, detail=str(e)) from e
 
     @router.put("/{sop_id}")
     async def update_sop(sop_id: str, data: UpdateSOPRequest):
@@ -1414,7 +1414,7 @@ def create_sop_router():
                 "version": sop.version,
             }
         except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=404, detail=str(e)) from e
 
     @router.post("/{sop_id}/approve")
     async def approve_sop(sop_id: str, approved_by: str):
@@ -1428,7 +1428,7 @@ def create_sop_router():
                 "approved_by": sop.approved_by,
             }
         except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=404, detail=str(e)) from e
 
     @router.post("/{sop_id}/publish")
     async def publish_sop(sop_id: str):
@@ -1442,7 +1442,7 @@ def create_sop_router():
                 "published_at": sop.published_at.isoformat(),
             }
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     @router.get("/")
     async def list_sops(

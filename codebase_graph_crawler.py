@@ -99,7 +99,7 @@ class CodebaseCrawler:
 
             for file in files:
                 file_path = Path(root) / file
-                rel_path = str(file_path.relative_to(root_path.parent)) # Store path relative to dev root usually, or repo root?
+                str(file_path.relative_to(root_path.parent)) # Store path relative to dev root usually, or repo root?
                 # Prompt says codebases are in /home/matt-woodworth/dev/.
                 # Let's store relative to the scanned directory or just relative to repo root?
                 # Storing relative to repo root is cleaner: "src/utils.ts" in "myroofgenius-app"
@@ -257,7 +257,7 @@ class CodebaseCrawler:
                  # Iterate over nodes we just added for this file
                  # This is a bit inefficient, but works.
                  # Actually, we can just check the name in the loop above.
-                 pass
+                 logger.debug("HTTP method tagging not implemented for %s", file_path)
 
         except Exception as e:
             logger.error(f"Error parsing TS/JS file {file_path}: {e}")
@@ -319,9 +319,6 @@ class CodebaseCrawler:
 
         for source_node, target_name, target_type, edge_type, metadata in self.pending_edges:
             source_key = (source_node.repo_name, source_node.file_path, source_node.name)
-            if source_node.type == 'file': # File node key is simpler? No, consistent.
-                pass
-
             source_id = node_map.get(source_key)
             if not source_id:
                 # Fallback: maybe it's a file node looking up by (repo, path)
@@ -347,7 +344,7 @@ class CodebaseCrawler:
                     # target: src/components/Icon.tsx or src/components/Icon/index.tsx
                     try:
                         source_dir = Path(source_node.file_path).parent
-                        resolved = (source_dir / target_name).resolve() # This resolves against CWD if absolute? No, use pathlib logic.
+                        (source_dir / target_name).resolve() # This resolves against CWD if absolute? No, use pathlib logic.
                         # Wait, we are working with relative strings.
                         # Using python's os.path.normpath
                         resolved_path = os.path.normpath(os.path.join(source_dir, target_name))
@@ -368,7 +365,7 @@ class CodebaseCrawler:
                     # For now, skip external lib edges or create a "library" node?
                     # Requirement: "Extract ... imports, dependencies".
                     # Let's skip for now to avoid graph explosion with "React" node.
-                    pass
+                    logger.debug("Skipping external import edge for %s", target_name)
 
             if source_id and target_id:
                 edges_to_insert.append((source_id, target_id, edge_type, json.dumps(metadata)))

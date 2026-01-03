@@ -547,7 +547,7 @@ class E2ESystemVerification:
         degraded = sum(1 for r in self.results if r.status == VerificationStatus.DEGRADED)
 
         # Check critical tests
-        critical_tests = [t for t in self.tests if t.critical]
+        [t for t in self.tests if t.critical]
         critical_results = [r for r, t in zip(self.results, self.tests) if t.critical]
         critical_failures = [r for r in critical_results if r.status != VerificationStatus.PASSED]
 

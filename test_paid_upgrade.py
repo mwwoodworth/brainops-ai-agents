@@ -191,7 +191,7 @@ def test_ai_agents_performance():
 
         if response.status_code == 200:
             print(f"   ✅ Memory store: {store_time:.3f}s")
-            memory_id = response.json().get('memory_id')
+            response.json().get('memory_id')
         else:
             print(f"   ❌ Memory store failed: {response.status_code}")
 
@@ -615,7 +615,7 @@ def main():
     all_warnings = []
 
     # Test AI Agents Performance
-    perf = test_ai_agents_performance()
+    test_ai_agents_performance()
 
     # Test ERP Thoroughly
     erp_errors, erp_warnings = test_erp_thoroughly()

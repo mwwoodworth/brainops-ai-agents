@@ -147,12 +147,12 @@ async def generate_product(
         try:
             product_type = ProductType(request.product_type)
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid product type: {request.product_type}")
+            raise HTTPException(status_code=400, detail=f"Invalid product type: {request.product_type}") from None
 
         try:
             quality_tier = QualityTier(request.quality_tier)
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid quality tier: {request.quality_tier}")
+            raise HTTPException(status_code=400, detail=f"Invalid quality tier: {request.quality_tier}") from None
 
         # Create product spec with tenant isolation (using UUID for DB compatibility)
         import uuid
@@ -193,7 +193,7 @@ async def generate_product(
         raise
     except Exception as e:
         logger.error(f"Product generation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 async def _create_product_record(spec):
@@ -277,7 +277,7 @@ async def get_product_status(
         raise
     except Exception as e:
         logger.error(f"Status check error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/list")
@@ -312,7 +312,7 @@ async def list_products(
 
     except Exception as e:
         logger.error(f"List products error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/{product_id}/download")
@@ -357,7 +357,7 @@ async def download_product(
         raise
     except Exception as e:
         logger.error(f"Download error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 def _estimate_completion_time(product_type: ProductType, quality_tier: QualityTier) -> str:

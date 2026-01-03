@@ -28,7 +28,7 @@ def _get_loop():
             _loop = get_devops_loop()
         except Exception as e:
             logger.error(f"Failed to initialize DevOps loop: {e}")
-            raise HTTPException(status_code=503, detail="DevOps loop not available")
+            raise HTTPException(status_code=503, detail="DevOps loop not available") from e
     return _loop
 
 
@@ -66,7 +66,7 @@ async def run_devops_cycle():
         return result
     except Exception as e:
         logger.error(f"DevOps cycle failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/start")
@@ -92,7 +92,7 @@ async def start_continuous(background_tasks: BackgroundTasks, interval_seconds: 
         }
     except Exception as e:
         logger.error(f"Failed to start continuous DevOps: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/stop")
@@ -134,7 +134,7 @@ async def get_health_summary():
         }
     except Exception as e:
         logger.error(f"Health summary failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/anomalies")
@@ -150,7 +150,7 @@ async def get_current_anomalies():
         }
     except Exception as e:
         logger.error(f"Anomalies check failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/comprehensive-e2e")
@@ -162,7 +162,7 @@ async def run_comprehensive_e2e(app_name: Optional[str] = None):
         return result
     except Exception as e:
         logger.error(f"Comprehensive e2e failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/comprehensive-e2e/status")
