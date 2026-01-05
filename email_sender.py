@@ -29,7 +29,11 @@ from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
-# Environment configuration
+# Environment configuration - Resend is PRIMARY (it works!)
+RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
+RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', 'onboarding@resend.dev')
+
+# SendGrid as secondary option
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY', '')
 SENDGRID_FROM_EMAIL = os.getenv('SENDGRID_FROM_EMAIL', 'noreply@myroofgenius.com')
 SENDGRID_FROM_NAME = os.getenv('SENDGRID_FROM_NAME', 'MyRoofGenius AI')
@@ -106,6 +110,42 @@ def get_db_connection():
     """Get database connection"""
     db_config = _get_db_config()
     return psycopg2.connect(**db_config)
+
+
+def send_via_resend(recipient: str, subject: str, body: str, metadata: dict = None) -> tuple[bool, str]:
+    """Send email via Resend API - PRIMARY METHOD (proven working)"""
+    if not RESEND_API_KEY:
+        return False, "RESEND_API_KEY not configured"
+
+    try:
+        import requests
+
+        response = requests.post(
+            'https://api.resend.com/emails',
+            headers={
+                'Authorization': f'Bearer {RESEND_API_KEY}',
+                'Content-Type': 'application/json',
+            },
+            json={
+                'from': RESEND_FROM_EMAIL,
+                'to': [recipient],
+                'subject': subject,
+                'html': body,
+            }
+        )
+
+        if response.status_code in [200, 201]:
+            logger.info(f"Resend sent email to {recipient}: status {response.status_code}")
+            return True, f"Sent via Resend (status: {response.status_code})"
+        else:
+            error_msg = f"Resend returned status {response.status_code}: {response.text}"
+            logger.error(error_msg)
+            return False, error_msg
+
+    except Exception as e:
+        error_msg = f"Resend error: {str(e)}"
+        logger.error(error_msg)
+        return False, error_msg
 
 
 def send_via_sendgrid(recipient: str, subject: str, body: str, metadata: dict = None) -> tuple[bool, str]:
@@ -186,8 +226,15 @@ def send_via_smtp(recipient: str, subject: str, body: str, metadata: dict = None
 
 
 def send_email(recipient: str, subject: str, body: str, metadata: dict = None) -> tuple[bool, str]:
-    """Send email using available method (SendGrid or SMTP)"""
-    # Try SendGrid first
+    """Send email using available method (Resend > SendGrid > SMTP)"""
+    # Try Resend FIRST - proven working!
+    if RESEND_API_KEY:
+        success, message = send_via_resend(recipient, subject, body, metadata)
+        if success:
+            return True, message
+        logger.warning(f"Resend failed, trying SendGrid: {message}")
+
+    # Try SendGrid second
     if SENDGRID_API_KEY:
         success, message = send_via_sendgrid(recipient, subject, body, metadata)
         if success:
@@ -198,7 +245,7 @@ def send_email(recipient: str, subject: str, body: str, metadata: dict = None) -
     if SMTP_HOST:
         return send_via_smtp(recipient, subject, body, metadata)
 
-    return False, "No email provider configured (need SENDGRID_API_KEY or SMTP_HOST)"
+    return False, "No email provider configured (need RESEND_API_KEY, SENDGRID_API_KEY, or SMTP_HOST)"
 
 
 def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[str, Any]:
@@ -221,7 +268,7 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
         "retried": 0,
         "emails": [],
         "dry_run": dry_run,
-        "provider": "sendgrid" if SENDGRID_API_KEY else ("smtp" if SMTP_HOST else "none")
+        "provider": "resend" if RESEND_API_KEY else ("sendgrid" if SENDGRID_API_KEY else ("smtp" if SMTP_HOST else "none"))
     }
 
     # Validate DB config early
@@ -451,7 +498,7 @@ def get_queue_status() -> dict[str, Any]:
         return {
             "totals": dict(totals),
             "by_status": [dict(row) for row in status_counts],
-            "provider": "sendgrid" if SENDGRID_API_KEY else ("smtp" if SMTP_HOST else "none"),
+            "provider": "resend" if RESEND_API_KEY else ("sendgrid" if SENDGRID_API_KEY else ("smtp" if SMTP_HOST else "none")),
             "provider_configured": bool(SENDGRID_API_KEY or SMTP_HOST)
         }
 
