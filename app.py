@@ -810,7 +810,7 @@ async def lifespan(app: FastAPI):
         # Initialize AI Training Pipeline
         if TRAINING_AVAILABLE and AITrainingPipeline:
             try:
-                app.state.training = AITrainingPipeline(tenant_id=tenant_id)
+                app.state.training = AITrainingPipeline()
                 logger.info("🎓 AI Training Pipeline ACTIVATED")
             except Exception as e:
                 logger.error(f"❌ Training Pipeline activation failed: {e}")
@@ -818,7 +818,7 @@ async def lifespan(app: FastAPI):
         # Initialize Notebook LM+ Learning
         if LEARNING_AVAILABLE and NotebookLMPlus:
             try:
-                app.state.learning = NotebookLMPlus(tenant_id=tenant_id)
+                app.state.learning = NotebookLMPlus()
                 logger.info("📚 Notebook LM+ Learning ACTIVATED")
             except Exception as e:
                 logger.error(f"❌ Learning System activation failed: {e}")

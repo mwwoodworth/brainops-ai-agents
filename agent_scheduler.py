@@ -896,6 +896,8 @@ class AgentScheduler:
                             "sent": result.get('sent', 0),
                             "failed": result.get('failed', 0),
                             "skipped": result.get('skipped', 0),
+                            "retried": result.get('retried', 0),
+                            "reset_failed": result.get('reset_failed', 0),
                             "provider": result.get('provider', 'unknown'),
                             "timestamp": datetime.utcnow().isoformat()
                         },
