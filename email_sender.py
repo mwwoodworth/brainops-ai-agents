@@ -19,6 +19,8 @@ import json
 import logging
 import os
 import smtplib
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -91,6 +93,62 @@ def _get_db_config():
 # Processing configuration
 BATCH_SIZE = int(os.getenv('EMAIL_BATCH_SIZE', '10'))
 MAX_RETRIES = int(os.getenv('EMAIL_MAX_RETRIES', '3'))
+RESEND_RATE_LIMIT_PER_SECOND = float(os.getenv('RESEND_RATE_LIMIT_PER_SECOND', '2'))
+RESEND_RATE_LIMIT_MAX_RETRIES = int(os.getenv('EMAIL_RATE_LIMIT_MAX_RETRIES', '5'))
+RESEND_RATE_LIMIT_BASE_DELAY_SECONDS = int(os.getenv('EMAIL_RATE_LIMIT_BASE_DELAY_SECONDS', '30'))
+RESEND_RATE_LIMIT_MAX_DELAY_SECONDS = int(os.getenv('EMAIL_RATE_LIMIT_MAX_DELAY_SECONDS', '600'))
+
+_RESEND_MIN_INTERVAL = 1.0 / RESEND_RATE_LIMIT_PER_SECOND if RESEND_RATE_LIMIT_PER_SECOND > 0 else 0.0
+_resend_rate_lock = threading.Lock()
+_last_resend_request_at = 0.0
+
+
+def _throttle_resend() -> None:
+    global _last_resend_request_at
+    if _RESEND_MIN_INTERVAL <= 0:
+        return
+    with _resend_rate_lock:
+        now = time.monotonic()
+        elapsed = now - _last_resend_request_at
+        if elapsed < _RESEND_MIN_INTERVAL:
+            time.sleep(_RESEND_MIN_INTERVAL - elapsed)
+        _last_resend_request_at = time.monotonic()
+
+
+def _is_rate_limited_error(message: str | None) -> bool:
+    if not message:
+        return False
+    lowered = message.lower()
+    return "429" in lowered or "rate limit" in lowered or "too many requests" in lowered
+
+
+def _extract_retry_after_seconds(message: str | None) -> int | None:
+    if not message:
+        return None
+    lowered = message.lower()
+    marker = "retry_after="
+    idx = lowered.find(marker)
+    if idx == -1:
+        return None
+    start = idx + len(marker)
+    digits = []
+    while start < len(lowered) and lowered[start].isdigit():
+        digits.append(lowered[start])
+        start += 1
+    if not digits:
+        return None
+    return int("".join(digits))
+
+
+def _calculate_rate_limit_delay_seconds(retry_count: int, retry_after: int | None) -> int:
+    base_delay = RESEND_RATE_LIMIT_BASE_DELAY_SECONDS * (2 ** retry_count)
+    if retry_after:
+        base_delay = max(base_delay, retry_after)
+    if RESEND_RATE_LIMIT_MAX_DELAY_SECONDS:
+        base_delay = min(base_delay, RESEND_RATE_LIMIT_MAX_DELAY_SECONDS)
+    if base_delay < 1:
+        return 1
+    return int(base_delay)
 
 
 def _is_test_recipient(recipient: str | None, metadata: dict[str, Any] | None = None) -> bool:
@@ -120,6 +178,7 @@ def send_via_resend(recipient: str, subject: str, body: str, metadata: dict = No
     try:
         import requests
 
+        _throttle_resend()
         response = requests.post(
             'https://api.resend.com/emails',
             headers={
@@ -137,6 +196,14 @@ def send_via_resend(recipient: str, subject: str, body: str, metadata: dict = No
         if response.status_code in [200, 201]:
             logger.info(f"Resend sent email to {recipient}: status {response.status_code}")
             return True, f"Sent via Resend (status: {response.status_code})"
+        if response.status_code == 429:
+            retry_after = response.headers.get('Retry-After', '').strip()
+            if retry_after:
+                error_msg = f"Resend rate limited (429), retry_after={retry_after}: {response.text}"
+            else:
+                error_msg = f"Resend rate limited (429): {response.text}"
+            logger.warning(error_msg)
+            return False, error_msg
         else:
             error_msg = f"Resend returned status {response.status_code}: {response.text}"
             logger.error(error_msg)
@@ -227,11 +294,16 @@ def send_via_smtp(recipient: str, subject: str, body: str, metadata: dict = None
 
 def send_email(recipient: str, subject: str, body: str, metadata: dict = None) -> tuple[bool, str]:
     """Send email using available method (Resend > SendGrid > SMTP)"""
+    last_error = None
+    rate_limit_error = None
     # Try Resend FIRST - proven working!
     if RESEND_API_KEY:
         success, message = send_via_resend(recipient, subject, body, metadata)
         if success:
             return True, message
+        last_error = message
+        if _is_rate_limited_error(message):
+            rate_limit_error = message
         logger.warning(f"Resend failed, trying SendGrid: {message}")
 
     # Try SendGrid second
@@ -239,12 +311,25 @@ def send_email(recipient: str, subject: str, body: str, metadata: dict = None) -
         success, message = send_via_sendgrid(recipient, subject, body, metadata)
         if success:
             return True, message
+        last_error = message
+        if _is_rate_limited_error(message) and not rate_limit_error:
+            rate_limit_error = message
         logger.warning(f"SendGrid failed, trying SMTP: {message}")
 
     # Try SMTP as fallback
     if SMTP_HOST:
-        return send_via_smtp(recipient, subject, body, metadata)
+        success, message = send_via_smtp(recipient, subject, body, metadata)
+        if success:
+            return True, message
+        last_error = message
+        if _is_rate_limited_error(message) and not rate_limit_error:
+            rate_limit_error = message
+        logger.warning(f"SMTP failed: {message}")
 
+    if rate_limit_error:
+        return False, rate_limit_error
+    if last_error:
+        return False, last_error
     return False, "No email provider configured (need RESEND_API_KEY, SENDGRID_API_KEY, or SMTP_HOST)"
 
 
@@ -266,6 +351,7 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
         "failed": 0,
         "skipped": 0,
         "retried": 0,
+        "reset_failed": 0,
         "emails": [],
         "dry_run": dry_run,
         "provider": "resend" if RESEND_API_KEY else ("sendgrid" if SENDGRID_API_KEY else ("smtp" if SMTP_HOST else "none"))
@@ -298,6 +384,42 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
         reset_count = cursor.rowcount
         if reset_count > 0:
             logger.info(f"Reset {reset_count} stuck 'processing' emails back to 'queued'")
+            conn.commit()
+
+        # Reset failed rate-limited emails back to 'queued' for retry
+        cursor.execute("""
+            UPDATE ai_email_queue
+            SET status = 'queued',
+                scheduled_for = NOW(),
+                metadata = metadata || %s
+            WHERE status = 'failed'
+            AND (
+                COALESCE(metadata->>'final_error', '') ILIKE %s
+                OR COALESCE(metadata->>'last_error', '') ILIKE %s
+                OR COALESCE(metadata->>'error', '') ILIKE %s
+                OR COALESCE(metadata->>'final_error', '') ILIKE %s
+                OR COALESCE(metadata->>'last_error', '') ILIKE %s
+                OR COALESCE(metadata->>'error', '') ILIKE %s
+            )
+        """, (
+            json.dumps({
+                'reset_from_failed': True,
+                'reset_reason': 'rate_limit',
+                'reset_at': datetime.now(timezone.utc).isoformat(),
+                'retry_count': 0,
+                'rate_limit_retry_count': 0
+            }),
+            '%429%',
+            '%429%',
+            '%429%',
+            '%rate limit%',
+            '%rate limit%',
+            '%rate limit%'
+        ))
+        reset_failed_count = cursor.rowcount
+        if reset_failed_count > 0:
+            stats["reset_failed"] = reset_failed_count
+            logger.info(f"Reset {reset_failed_count} rate-limited failed emails back to 'queued'")
             conn.commit()
 
         # Fetch emails ready to send:
@@ -408,6 +530,50 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                 # Handle failure with retry logic
                 retry_count = metadata.get('retry_count', 0)
 
+                if _is_rate_limited_error(message):
+                    rate_limit_retry_count = metadata.get('rate_limit_retry_count', 0)
+                    if rate_limit_retry_count < RESEND_RATE_LIMIT_MAX_RETRIES:
+                        retry_after_seconds = _extract_retry_after_seconds(message)
+                        delay_seconds = _calculate_rate_limit_delay_seconds(rate_limit_retry_count, retry_after_seconds)
+                        next_retry = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+
+                        logger.warning(
+                            f"Email {email_id} rate limited, scheduling retry "
+                            f"{rate_limit_retry_count + 1}/{RESEND_RATE_LIMIT_MAX_RETRIES} in {delay_seconds}s: {message}"
+                        )
+                        if not dry_run:
+                            cursor.execute("""
+                                UPDATE ai_email_queue
+                                SET status = 'queued',
+                                    scheduled_for = %s,
+                                    metadata = metadata || %s
+                                WHERE id = %s
+                            """, (
+                                next_retry,
+                                json.dumps({
+                                    'rate_limit_retry_count': rate_limit_retry_count + 1,
+                                    'last_error': message,
+                                    'rate_limit_retry_scheduled_for': next_retry.isoformat(),
+                                    'rate_limited_at': datetime.now(timezone.utc).isoformat()
+                                }),
+                                email_id
+                            ))
+                            conn.commit()
+
+                        stats["retried"] += 1
+                        stats["emails"].append({
+                            "id": email_id,
+                            "recipient": recipient,
+                            "status": "rate_limit_retry_scheduled",
+                            "retry": rate_limit_retry_count + 1,
+                            "delay_seconds": delay_seconds,
+                            "error": message
+                        })
+                        continue
+                    logger.warning(
+                        f"Email {email_id} rate limit retries exceeded, falling back to standard retry: {message}"
+                    )
+
                 if retry_count < MAX_RETRIES:
                     # Schedule retry with exponential backoff
                     retry_delay_minutes = (2 ** retry_count) * 5  # 5, 10, 20 minutes
@@ -456,7 +622,11 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
         logger.error(f"Error processing email queue: {e}")
         stats["error"] = str(e)
 
-    logger.info(f"Email queue processing complete: {stats['sent']} sent, {stats['failed']} failed, {stats['skipped']} skipped, {stats['retried']} retried")
+    logger.info(
+        "Email queue processing complete: "
+        f"{stats['sent']} sent, {stats['failed']} failed, {stats['skipped']} skipped, "
+        f"{stats['retried']} retried, {stats['reset_failed']} reset"
+    )
     return stats
 
 
