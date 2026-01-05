@@ -1251,7 +1251,7 @@ class SelfHealingController:
             "sidecars": sidecar_status,
             "deadlock_stats": self._deadlock_detector.get_stats(),
             "cascade_graph": self._cascade_protector.get_dependency_graph(),
-            "recent_healing": self._healing_history[-10:]
+            "recent_healing": list(self._healing_history)[-10:]
         }
 
 

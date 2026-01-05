@@ -111,7 +111,7 @@ def get_db_connection():
     try:
         return psycopg2.connect(**_get_db_config())
     except Exception as e:
-        logger.debug(f"DB connection failed: {e}")
+        logger.warning(f"OODA DB connection failed: {e}")
         return None
 
 
@@ -127,7 +127,7 @@ def execute_with_connection(query: str, params: tuple = None, fetch: bool = True
                 result = cur.fetchall() if fetch else None
                 return result
     except Exception as e:
-        logger.debug(f"Query failed: {e}")
+        logger.warning(f"OODA query failed: {e}")
         return None
     finally:
         conn.close()
