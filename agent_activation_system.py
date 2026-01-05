@@ -346,28 +346,44 @@ class AgentActivationSystem:
         }
 
         # Map event types to agent types (includes AUREA orchestration events)
+        # UPDATED to match actual types in database
         event_agent_mapping = {
-            BusinessEventType.CUSTOMER_INQUIRY: ["customer_success", "support"],
-            BusinessEventType.LEAD_CREATED: ["lead_generation", "revenue"],
-            BusinessEventType.DEAL_CLOSED: ["revenue", "customer_success"],
+            BusinessEventType.CUSTOMER_INQUIRY: ["interface", "support"],
+            BusinessEventType.LEAD_CREATED: ["lead_generation", "discovery", "qualification", "LeadScoringAgent"],
+            BusinessEventType.DEAL_CLOSED: ["closing", "proposal"],
             BusinessEventType.SUPPORT_REQUEST: ["support", "customer_success"],
-            BusinessEventType.REVENUE_OPPORTUNITY: ["revenue", "pricing"],
-            BusinessEventType.SYSTEM_ALERT: ["system_improvement", "devops_optimization"],
-            BusinessEventType.SCHEDULED_TASK: ["analytics", "monitoring"],
-            BusinessEventType.PERFORMANCE_THRESHOLD: ["system_improvement", "devops_optimization"],
+            BusinessEventType.REVENUE_OPPORTUNITY: ["analytics", "optimizer", "pricing"],
+            BusinessEventType.SYSTEM_ALERT: ["monitor", "system_improvement"],
+            BusinessEventType.SCHEDULED_TASK: ["analytics", "monitor"],
+            BusinessEventType.PERFORMANCE_THRESHOLD: ["system_improvement", "monitor"],
             # AUREA orchestration events
-            BusinessEventType.NEW_CUSTOMER: ["customer_success", "lead_generation"],
-            BusinessEventType.ESTIMATE_REQUESTED: ["pricing", "revenue"],
-            BusinessEventType.INVOICE_OVERDUE: ["revenue", "customer_success"],
-            BusinessEventType.SCHEDULING_CONFLICT: ["system_improvement", "devops_optimization"],
-            BusinessEventType.SYSTEM_HEALTH_CHECK: ["system_improvement", "devops_optimization"],
-            BusinessEventType.CUSTOMER_CHURN_RISK: ["customer_success", "revenue"],
-            BusinessEventType.QUOTE_REQUESTED: ["pricing", "revenue"],
-            BusinessEventType.PAYMENT_RECEIVED: ["revenue", "customer_success"],
+            BusinessEventType.NEW_CUSTOMER: ["analytics", "discovery"],
+            BusinessEventType.ESTIMATE_REQUESTED: ["EstimationAgent", "universal", "proposal"],
+            BusinessEventType.INVOICE_OVERDUE: ["InvoiceAgent", "analytics"],
+            BusinessEventType.SCHEDULING_CONFLICT: ["SchedulingAgent", "universal", "system_improvement"],
+            BusinessEventType.SYSTEM_HEALTH_CHECK: ["monitor", "system_improvement", "MonitoringAgent"],
+            BusinessEventType.CUSTOMER_CHURN_RISK: ["analytics"],
+            BusinessEventType.QUOTE_REQUESTED: ["pricing", "revenue", "proposal"],
+            BusinessEventType.PAYMENT_RECEIVED: ["revenue"],
             BusinessEventType.JOB_SCHEDULED: ["system_improvement", "analytics"],
         }
 
+        # Map event types to SPECIFIC agent names (for agents with generic 'workflow' type)
+        event_agent_names_mapping = {
+            BusinessEventType.INVOICE_OVERDUE: ["InvoicingAgent", "RevenueOptimizer"],
+            BusinessEventType.NEW_CUSTOMER: ["CustomerAgent", "LeadGenerationAgent", "CustomerIntelligence"],
+            BusinessEventType.SCHEDULING_CONFLICT: ["DispatchAgent", "Scheduler", "IntelligentScheduler"],
+            BusinessEventType.QUOTE_REQUESTED: ["RevenueProposalAgent", "ContractGenerator"],
+            BusinessEventType.PAYMENT_RECEIVED: ["InvoicingAgent"],
+            BusinessEventType.JOB_SCHEDULED: ["DispatchAgent", "RoutingAgent"],
+            BusinessEventType.CUSTOMER_CHURN_RISK: ["CustomerIntelligence", "CustomerAgent"],
+            BusinessEventType.ESTIMATE_REQUESTED: ["Elena", "EstimationAgent", "ProposalGenerator"],
+            BusinessEventType.LEAD_CREATED: ["LeadGenerationAgent", "LeadScorer", "LeadQualificationAgent"],
+            BusinessEventType.SYSTEM_HEALTH_CHECK: ["HealthMonitor", "LearningFeedbackLoop", "SystemMonitor"],
+        }
+
         target_types = event_agent_mapping.get(event_type, [])
+        target_names = event_agent_names_mapping.get(event_type, [])
 
         try:
             with self._get_db_connection() as conn:
@@ -377,13 +393,18 @@ class AgentActivationSystem:
 
                 cur = conn.cursor(cursor_factory=RealDictCursor)
 
-                # Find active agents matching event type
+                # Find active agents matching event type OR specific names
+                # We use specific names to target agents that have generic 'workflow' types
                 cur.execute("""
                     SELECT id, name, type
                     FROM ai_agents
                     WHERE status = 'active'
-                    AND type = ANY(%s)
-                """, (target_types,))
+                    AND (
+                        type = ANY(%s)
+                        OR
+                        name = ANY(%s)
+                    )
+                """, (target_types, target_names))
 
                 agents = cur.fetchall()
 
