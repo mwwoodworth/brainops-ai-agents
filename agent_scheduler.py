@@ -18,6 +18,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from psycopg2.extras import RealDictCursor
 
 from revenue_generation_system import get_revenue_system
+from advanced_lead_scoring import get_scoring_engine
 
 # CRITICAL: Use shared connection pool to prevent MaxClientsInSessionMode
 try:
@@ -579,6 +580,64 @@ class AgentScheduler:
 
         conn.commit()
 
+        # === ADVANCED LEAD SCORING for revenue_leads table ===
+        # Score REAL leads from revenue_leads using AdvancedLeadScoringEngine
+        advanced_scores_updated = 0
+        try:
+            cur.execute("""
+                SELECT id, source, email, metadata, status, created_at
+                FROM revenue_leads
+                WHERE status = 'new'
+                AND email NOT LIKE '%%test%%'
+                AND email NOT LIKE '%%synth%%'
+                AND email NOT LIKE '%%example%%'
+                AND email NOT LIKE '%%brainops.test'
+                ORDER BY created_at DESC
+                LIMIT 25
+            """)
+            real_leads = cur.fetchall()
+
+            if real_leads:
+                scoring_engine = get_scoring_engine()
+
+                for lead in real_leads:
+                    try:
+                        # Build lead_data from metadata
+                        metadata = lead.get('metadata') or {}
+                        lead_data = {
+                            'company': metadata.get('company', {}),
+                            'intent_signals': metadata.get('intent_signals', {}),
+                            'velocity': metadata.get('velocity', {}),
+                            'financial': metadata.get('financial', {})
+                        }
+
+                        # Calculate advanced multi-factor score (async)
+                        loop = asyncio.new_event_loop()
+                        try:
+                            result = loop.run_until_complete(
+                                scoring_engine.calculate_multi_factor_score(str(lead['id']), lead_data)
+                            )
+                            advanced_scores_updated += 1
+                            actions_taken.append({
+                                'action': 'advanced_lead_scored',
+                                'lead_id': str(lead['id']),
+                                'composite_score': result.composite_score,
+                                'tier': result.tier.value,
+                                'next_best_action': result.next_best_action
+                            })
+                            logger.info(f"Advanced scored lead {lead['id']}: {result.composite_score} ({result.tier.value})")
+                        finally:
+                            loop.close()
+
+                    except Exception as e:
+                        logger.warning(f"Advanced scoring failed for lead {lead['id']}: {e}")
+
+                logger.info(f"Advanced Lead Scoring: {advanced_scores_updated}/{len(real_leads)} leads scored")
+                conn.commit()
+
+        except Exception as e:
+            logger.error(f"Advanced lead scoring section failed: {e}")
+
         return {
             "agent": agent['name'],
             "total_customers": stats['total_customers'],
@@ -586,6 +645,7 @@ class AgentScheduler:
             "new_this_month": stats['new_this_month'],
             "dormant_valuable_found": len(dormant_valuable_customers),
             "leads_scored": len([a for a in actions_taken if a['action'] == 'updated_lead_score']),
+            "advanced_leads_scored": advanced_scores_updated,
             "reengagements_scheduled": len([a for a in actions_taken if a['action'] == 'scheduled_reengagement']),
             "actions_taken": actions_taken,
             "timestamp": datetime.utcnow().isoformat()
