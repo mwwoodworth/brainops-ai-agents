@@ -2265,11 +2265,17 @@ async def execute_agent(
         # Execute agent logic using proper agent dispatch
         result = {"status": "completed", "message": "Agent executed successfully"}
         task = body.get("task", {})
+        exec_task = task
+        if isinstance(exec_task, dict):
+            exec_task = dict(exec_task)
+            exec_task["_skip_ai_agent_log"] = True
+        else:
+            exec_task = {"task": exec_task, "_skip_ai_agent_log": True}
 
         if AGENTS_AVAILABLE and AGENT_EXECUTOR:
             try:
                 # Use the actual agent executor to run the correct agent class
-                agent_result = await AGENT_EXECUTOR.execute(agent_name, task)
+                agent_result = await AGENT_EXECUTOR.execute(agent_name, exec_task)
                 result = agent_result if isinstance(agent_result, dict) else {"status": "completed", "result": agent_result}
                 result["agent_executed"] = True
             except Exception as e:
@@ -3069,7 +3075,8 @@ async def execute_agent_generic(
         # Execute via AgentExecutor if available (it's an async function, so await it directly)
         if AGENTS_AVAILABLE and AGENT_EXECUTOR:
             try:
-                result = await AGENT_EXECUTOR.execute(agent_name, {"task": task, **parameters})
+                exec_task = {"task": task, **parameters, "_skip_ai_agent_log": True}
+                result = await AGENT_EXECUTOR.execute(agent_name, exec_task)
             except Exception as exec_error:
                 logger.error(f"AgentExecutor failed: {exec_error}")
                 execution_status = "failed"
