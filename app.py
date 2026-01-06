@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query, Request, Security
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
@@ -3086,11 +3087,12 @@ async def execute_agent_generic(
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
         # Update execution record (use correct column: execution_time_ms, no completed_at)
+        # Use jsonable_encoder to handle datetime and other non-serializable types
         await pool.execute("""
             UPDATE ai_agent_executions
             SET status = 'completed', execution_time_ms = $1, output_data = $2
             WHERE id = $3
-        """, duration_ms, json.dumps(result), execution_id)
+        """, duration_ms, json.dumps(jsonable_encoder(result)), execution_id)
 
         return {
             "success": True,
