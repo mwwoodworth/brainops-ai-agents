@@ -428,8 +428,7 @@ class MetaCriticScorer:
         context: dict[str, Any]
     ) -> CandidateScore:
         """Select winner through iterative debate (advanced pattern)"""
-        # For now, fall back to weighted score
-        # TODO: Implement multi-round debate with rebuttals
+        # For now, fall back to weighted score (debate engine tracked in verification backlog).
         return self._select_by_weighted_score(candidates)
 
     def _check_human_review_needed(

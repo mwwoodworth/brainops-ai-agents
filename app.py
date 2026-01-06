@@ -3062,25 +3062,33 @@ async def execute_agent_generic(
             "type": agent_type, "task": task, "parameters": parameters
         }), started_at)
 
+        execution_status = "completed"
+        error_message = None
+        http_status = 200
+
         # Execute via AgentExecutor if available (it's an async function, so await it directly)
         if AGENTS_AVAILABLE and AGENT_EXECUTOR:
             try:
                 result = await AGENT_EXECUTOR.execute(agent_name, {"task": task, **parameters})
             except Exception as exec_error:
-                logger.warning(f"AgentExecutor failed: {exec_error}, using simulated result")
+                logger.error(f"AgentExecutor failed: {exec_error}")
+                execution_status = "failed"
+                error_message = str(exec_error)
+                http_status = 500
                 result = {
-                    "status": "completed",
-                    "message": f"Agent {agent_name} executed task: {task}",
+                    "status": "error",
+                    "message": f"Agent {agent_name} failed to execute task",
                     "agent_type": agent_type,
-                    "executor_error": str(exec_error),
-                    "simulated": True
+                    "error": error_message,
                 }
         else:
+            execution_status = "failed"
+            error_message = "Agent executor not available"
+            http_status = 503
             result = {
-                "status": "completed",
-                "message": f"Agent {agent_name} executed task: {task}",
+                "status": "error",
+                "message": "Agent executor not available",
                 "agent_type": agent_type,
-                "simulated": True
             }
 
         completed_at = datetime.utcnow()
@@ -3090,12 +3098,12 @@ async def execute_agent_generic(
         # Use jsonable_encoder to handle datetime and other non-serializable types
         await pool.execute("""
             UPDATE ai_agent_executions
-            SET status = 'completed', execution_time_ms = $1, output_data = $2
-            WHERE id = $3
-        """, duration_ms, json.dumps(jsonable_encoder(result)), execution_id)
+            SET status = $1, execution_time_ms = $2, output_data = $3, error_message = $4
+            WHERE id = $5
+        """, execution_status, duration_ms, json.dumps(jsonable_encoder(result)), error_message, execution_id)
 
-        return {
-            "success": True,
+        response_payload = {
+            "success": execution_status == "completed",
             "execution_id": execution_id,
             "agent_id": agent_id,
             "agent_name": agent_name,
@@ -3105,6 +3113,13 @@ async def execute_agent_generic(
             "timestamp": completed_at.isoformat()
         }
 
+        if execution_status != "completed":
+            raise HTTPException(status_code=http_status, detail=response_payload)
+
+        return response_payload
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Generic agent execution failed: {e}")
         await pool.execute("""
