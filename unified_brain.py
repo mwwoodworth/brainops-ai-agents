@@ -222,28 +222,71 @@ class UnifiedBrain:
             return None
 
     def _generate_embedding(self, text: str) -> Optional[list[float]]:
-        """Generate embedding vector for text using OpenAI"""
-        if not OPENAI_AVAILABLE or not openai_client:
-            return None
+        """
+        Generate embedding vector for text with intelligent fallback.
+        1. OpenAI (text-embedding-3-small) - Best quality
+        2. Gemini (text-embedding-004) - Good fallback
+        3. Local (all-MiniLM-L6-v2) - Offline backup
+        """
+        # Convert text to string if it's not
+        if not isinstance(text, str):
+            text = json.dumps(text)
 
+        # Truncate if too long (OpenAI limit is ~8k tokens, ~32k chars)
+        if len(text) > 30000:
+            text = text[:30000] + "..."
+
+        # 1. Try OpenAI first
+        if OPENAI_AVAILABLE and openai_client:
+            try:
+                response = openai_client.embeddings.create(
+                    model="text-embedding-3-small",
+                    input=text,
+                    encoding_format="float"
+                )
+                return response.data[0].embedding
+            except Exception as e:
+                logger.warning(f"⚠️ OpenAI embedding failed: {e}, trying fallback")
+
+        # 2. Try Gemini as fallback
+        gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if gemini_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=gemini_key)
+                result = genai.embed_content(
+                    model="models/text-embedding-004",
+                    content=text,
+                    task_type="retrieval_document"
+                )
+                embedding = result['embedding']
+                # Zero-pad to 1536 dimensions to match OpenAI embeddings
+                if len(embedding) < 1536:
+                    embedding = embedding + [0.0] * (1536 - len(embedding))
+                logger.info("✅ Used Gemini embedding fallback")
+                return embedding
+            except Exception as e:
+                logger.warning(f"⚠️ Gemini embedding failed: {e}, trying local fallback")
+
+        # 3. Try Local fallback (sentence-transformers)
         try:
-            # Convert text to string if it's not
-            if not isinstance(text, str):
-                text = json.dumps(text)
-
-            # Truncate if too long (OpenAI limit is ~8k tokens, ~32k chars)
-            if len(text) > 30000:
-                text = text[:30000] + "..."
-
-            response = openai_client.embeddings.create(
-                model="text-embedding-3-small",  # Cheaper and faster than ada-002
-                input=text,
-                encoding_format="float"
-            )
-            return response.data[0].embedding
+            from sentence_transformers import SentenceTransformer
+            # Cache model instance on the class or module level if possible, 
+            # but for now local import is safer for dependencies
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+            embedding = model.encode(text).tolist()
+            # Zero-pad to 1536 dimensions
+            if len(embedding) < 1536:
+                embedding = embedding + [0.0] * (1536 - len(embedding))
+            logger.info("✅ Used local embedding fallback")
+            return embedding
+        except ImportError:
+            pass  # sentence_transformers not installed
         except Exception as e:
-            logger.warning(f"⚠️ Failed to generate embedding: {e}")
-            return None
+            logger.warning(f"⚠️ Local embedding failed: {e}")
+
+        logger.error("❌ All embedding providers failed")
+        return None
 
     def _generate_summary(self, text: str, max_length: int = 200) -> str:
         """Generate automatic summary of content"""
