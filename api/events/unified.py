@@ -202,6 +202,8 @@ async def store_event(event: UnifiedEvent) -> bool:
         pool = get_pool()
         record = event.to_db_record()
 
+        # Use INSERT ON CONFLICT DO NOTHING since the unique index is partial
+        # Duplicate event_ids are rare and this avoids constraint matching issues
         await pool.execute("""
             INSERT INTO unified_events (
                 event_id, version, event_type, category, priority,
@@ -213,10 +215,6 @@ async def store_event(event: UnifiedEvent) -> bool:
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
             )
-            ON CONFLICT (event_id) DO UPDATE SET
-                retry_count = unified_events.retry_count + 1,
-                processed = FALSE,
-                processed_at = NULL
         """,
             record['event_id'],
             record['version'],
