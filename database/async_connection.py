@@ -319,16 +319,108 @@ class InMemoryDatabasePool(BasePool):
             return self._fetch_agents(sql, list(args))
 
         if "information_schema.tables" in sql:
-            return [{"table_name": "ai_persistent_memory"}]
+            return [{"table_name": "ai_persistent_memory"}, {"table_name": "unified_ai_memory"}]
 
         if "from ai_persistent_memory" in sql:
             return self._search_memories(sql, list(args))
+
+        if "from unified_ai_memory" in sql or "into unified_ai_memory" in sql or "update unified_ai_memory" in sql:
+            return self._fetch_unified_memories(sql, list(args))
 
         if "from agent_executions" in sql:
             return self._fetch_executions(sql, list(args))
 
         # Default: empty result
         return []
+
+    def _fetch_unified_memories(self, sql: str, args: list[Any]) -> list[DbRecord]:
+        """Mock handler for unified_ai_memory table"""
+        # Handle INSERT
+        if "insert into unified_ai_memory" in sql:
+            # Generate a mock ID and return it
+            import uuid
+            new_id = str(uuid.uuid4())
+            now = datetime.utcnow()
+            
+            # Store it in local memories for consistency (simplified mapping)
+            # Args order depends on the query in memory.py
+            # But we can just return success for now
+            return [{
+                "id": new_id, 
+                "content_hash": "mock_hash_" + new_id[:8], 
+                "created_at": now
+            }]
+
+        # Handle SELECT count/stats
+        if "select count(*)" in sql:
+            return [{
+                "total_memories": len(self._memories),
+                "unique_contexts": 1,
+                "avg_importance": 0.7,
+                "with_embeddings": len(self._memories),
+                "unique_systems": 1,
+                "memory_types": 1
+            }]
+
+        # Handle SEARCH/SELECT
+        importance_threshold = 0.0
+        query = None
+        
+        # Basic parsing
+        if "importance_score >=" in sql:
+            # Find the float param
+            for arg in args:
+                if isinstance(arg, float):
+                    importance_threshold = arg
+                    break
+        
+        if "ilike" in sql:
+            for arg in args:
+                if isinstance(arg, str) and "%" in arg:
+                    query = arg.strip("%")
+                    break
+
+        matches: list[DbRecord] = []
+        for memory in self._memories:
+            if memory["importance"] < importance_threshold:
+                continue
+            if query and query.lower() not in memory["content"].lower():
+                continue
+
+            matches.append({
+                "id": memory["id"],
+                "memory_type": "episodic",
+                "content": {"text": memory["content"]},
+                "importance_score": memory["importance"],
+                "category": "general",
+                "title": "Mock Memory",
+                "tags": memory.get("tags", []),
+                "source_system": "mock_db",
+                "source_agent": "mock_agent",
+                "created_at": memory["created_at"],
+                "last_accessed": memory["created_at"],
+                "access_count": 1,
+                "similarity": 0.9 if query else None,
+                "metadata": {},
+                "content_hash": "mock_hash",
+                "context_id": str(uuid.uuid4()),
+                "parent_memory_id": None,
+                "related_memories": [],
+                "has_embedding": True
+            })
+
+        limit = 10
+        if "limit" in sql:
+            try:
+                # Find the limit param (usually last int)
+                for arg in reversed(args):
+                    if isinstance(arg, int) and arg < 1000: # heuristic
+                        limit = arg
+                        break
+            except ValueError:
+                pass
+
+        return matches[:limit]
 
     def _apply_agent_filters(self, args: list[Any]) -> list[dict[str, Any]]:
         agents = list(self._agents.values())
