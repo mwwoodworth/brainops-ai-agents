@@ -626,10 +626,16 @@ async def query_memory_get(request: Request, query: Optional[str] = None, limit:
         raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
 
     try:
-        memories = memory_manager.recall(
-            query if query else {},
-            tenant_id=tenant_id,
-            limit=limit
+        # Run sync memory recall in thread pool to avoid blocking event loop
+        import asyncio
+        loop = asyncio.get_event_loop()
+        memories = await loop.run_in_executor(
+            None,
+            lambda: memory_manager.recall(
+                query if query else {},
+                tenant_id=tenant_id,
+                limit=limit
+            )
         )
 
         return {
@@ -653,11 +659,17 @@ async def query_memory(request: Request, query_request: MemoryQueryRequest):
         raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
 
     try:
-        memories = memory_manager.recall(
-            query_request.query,
-            tenant_id=tenant_id,
-            context=query_request.context,
-            limit=query_request.limit
+        # Run sync memory recall in thread pool to avoid blocking event loop
+        import asyncio
+        loop = asyncio.get_event_loop()
+        memories = await loop.run_in_executor(
+            None,
+            lambda: memory_manager.recall(
+                query_request.query,
+                tenant_id=tenant_id,
+                context=query_request.context,
+                limit=query_request.limit
+            )
         )
 
         return {
@@ -718,7 +730,10 @@ async def store_memory(request: Request, memory_data: dict[str, Any]):
             tenant_id=tenant_id
         )
 
-        memory_id = memory_manager.store(memory)
+        # Run sync memory store in thread pool to avoid blocking event loop
+        import asyncio
+        loop = asyncio.get_event_loop()
+        memory_id = await loop.run_in_executor(None, lambda: memory_manager.store(memory))
         return {"success": True, "memory_id": memory_id}
     except Exception as e:
         logger.error(f"Memory store failed: {e}")
@@ -742,11 +757,17 @@ async def recall_memory(
         raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
 
     try:
-        memories = memory_manager.recall(
-            query=query if query else {},
-            tenant_id=tenant_id,
-            context=context_id,
-            limit=limit
+        # Run sync memory recall in thread pool to avoid blocking event loop
+        import asyncio
+        loop = asyncio.get_event_loop()
+        memories = await loop.run_in_executor(
+            None,
+            lambda: memory_manager.recall(
+                query=query if query else {},
+                tenant_id=tenant_id,
+                context=context_id,
+                limit=limit
+            )
         )
         return {"memories": memories, "count": len(memories)}
     except Exception as e:
