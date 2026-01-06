@@ -190,8 +190,12 @@ async def ensure_unified_events_table():
 
 async def store_event(event: UnifiedEvent) -> bool:
     """Store event in unified_events table"""
-    if not ASYNC_POOL_AVAILABLE or using_fallback():
-        logger.warning("Async pool not available, event not stored in DB")
+    logger.info(f"store_event called: ASYNC_POOL_AVAILABLE={ASYNC_POOL_AVAILABLE}, using_fallback={using_fallback()}")
+    if not ASYNC_POOL_AVAILABLE:
+        logger.warning("ASYNC_POOL_AVAILABLE is False, event not stored in DB")
+        return False
+    if using_fallback():
+        logger.warning("Database pool is using fallback, event not stored in DB")
         return False
 
     try:
@@ -235,9 +239,11 @@ async def store_event(event: UnifiedEvent) -> bool:
             json.dumps(record['processing_result']) if record['processing_result'] else None,
             record['retry_count'],
         )
+        logger.info(f"Event {event.event_id} stored successfully")
         return True
     except Exception as e:
-        logger.error(f"Failed to store event {event.event_id}: {e}")
+        import traceback
+        logger.error(f"Failed to store event {event.event_id}: {e}\n{traceback.format_exc()}")
         return False
 
 
