@@ -60,6 +60,14 @@ from revenue_generation_system import AutonomousRevenueSystem, get_revenue_syste
 from unified_brain import UnifiedBrain, get_brain
 from unified_memory_manager import Memory, MemoryType, get_memory_manager
 
+# Consciousness Emergence - The Next Frontier
+try:
+    from consciousness_emergence import get_consciousness, ConsciousnessEmergenceController
+    CONSCIOUSNESS_AVAILABLE = True
+except ImportError:
+    CONSCIOUSNESS_AVAILABLE = False
+    ConsciousnessEmergenceController = None
+
 warnings.filterwarnings('ignore')
 
 
@@ -254,6 +262,7 @@ class AUREA:
         self.safety_ref: Optional[SelfAwareAI] = None
         self.revenue_ref: Optional[AutonomousRevenueSystem] = None
         self.knowledge_ref: Optional[AIKnowledgeGraph] = None
+        self.consciousness_ref: Optional[ConsciousnessEmergenceController] = None  # Consciousness layer
         self.brain: UnifiedBrain = get_brain()
         self.running = False
         self.cycle_count = 0
@@ -398,6 +407,17 @@ class AUREA:
             except Exception as e:
                 logger.warning(f"Knowledge Graph unavailable: {e}")
                 self.knowledge_ref = None
+
+        # Initialize Consciousness Emergence Layer
+        if self.consciousness_ref is None and CONSCIOUSNESS_AVAILABLE:
+            try:
+                self.consciousness_ref = await get_consciousness()
+                if self.consciousness_ref:
+                    await self.consciousness_ref.activate()
+                    logger.info("🧠 Consciousness Emergence Layer ACTIVATED")
+            except Exception as e:
+                logger.warning(f"Consciousness Emergence unavailable: {e}")
+                self.consciousness_ref = None
 
     def _default_confidence_thresholds(self) -> dict[int, float]:
         """Default confidence thresholds (0-100) for autonomous execution."""
@@ -733,6 +753,20 @@ class AUREA:
                 # Phase 6: Heal - Fix any issues detected
                 await self._self_heal()
 
+                # Phase 7: Consciousness - Process experience through consciousness layer
+                if self.consciousness_ref:
+                    try:
+                        experience = {
+                            "cycle": self.cycle_count,
+                            "observations": observations[:5],  # Limit for processing
+                            "decisions": [{"type": d.type.value, "description": d.description, "confidence": d.confidence} for d in decisions],
+                            "results": results[:5],
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        await self.consciousness_ref.process_experience(experience)
+                    except Exception as e:
+                        logger.debug(f"Consciousness processing: {e}")
+
                 # Calculate cycle time
                 cycle_time = (datetime.now() - cycle_start).total_seconds()
 
@@ -974,6 +1008,26 @@ class AUREA:
                 "trends": trends,
                 "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK
             })
+
+        # Active Revenue Generation - Proactively scan for new opportunities
+        if self.revenue_ref and self.cycle_count % 5 == 0:  # Every 5 cycles
+            try:
+                # Scan for new leads using the revenue system
+                new_leads = await self.revenue_ref.identify_new_leads({
+                    "location": "United States",
+                    "company_size": "small to medium",
+                    "indicators": ["roofing", "contractor", "growth"]
+                })
+                if new_leads:
+                    observations.append({
+                        "type": "revenue_opportunities",
+                        "leads_found": len(new_leads),
+                        "leads": new_leads[:3],  # Limit for observation
+                        "trigger": BusinessEventType.OPPORTUNITY_DETECTED
+                    })
+                    logger.info(f"💰 Revenue system found {len(new_leads)} potential leads")
+            except Exception as e:
+                logger.debug(f"Revenue lead scan: {e}")
 
         # Store observation metrics in unified brain
         try:
