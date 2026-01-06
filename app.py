@@ -3033,9 +3033,9 @@ async def execute_agent_generic(
     started_at = datetime.utcnow()
 
     try:
-        # Find a matching active agent by type
+        # Find a matching active agent by type (no 'description' column in agents table)
         agent = await pool.fetchrow("""
-            SELECT id, name, type, description
+            SELECT id, name, type
             FROM agents
             WHERE LOWER(type) = LOWER($1) AND status = 'active'
             ORDER BY RANDOM() LIMIT 1
@@ -3044,7 +3044,7 @@ async def execute_agent_generic(
         if not agent:
             # If no agent of that type, try by name pattern
             agent = await pool.fetchrow("""
-                SELECT id, name, type, description
+                SELECT id, name, type
                 FROM agents
                 WHERE LOWER(name) LIKE LOWER($1) AND status = 'active'
                 ORDER BY RANDOM() LIMIT 1
