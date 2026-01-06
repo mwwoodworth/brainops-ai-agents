@@ -142,7 +142,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.99.21')  # Full pipeline activation + Customer Acquisition API + Email Scheduler
+        self.version = os.getenv('VERSION', '9.99.22')  # Missing endpoints fix: agents/execute, agents/schedule, brain/decide, brain/learn, consciousness/status, self-heal/check
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
