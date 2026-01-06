@@ -315,6 +315,16 @@ class RealAICore:
                 return response.content[0].text
 
             # No client matched the requested/auto-routed model - try fallbacks
+            if self.async_anthropic:
+                system = system_prompt or "You are a helpful AI assistant."
+                response = await self.async_anthropic.messages.create(
+                    model="claude-3-haiku-20240307",
+                    system=system,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
+                return response.content[0].text
             if self.gemini_model:
                 return await self._try_gemini(prompt, system_prompt, max_tokens)
             if self.perplexity_key:
@@ -330,15 +340,8 @@ class RealAICore:
             else:
                 logger.error(f"AI generation error: {e}")
 
-            # Intelligent fallback chain: Gemini → Anthropic → Perplexity
-            if self.gemini_model:
-                try:
-                    logger.info("🔄 Trying Gemini fallback...")
-                    return await self._try_gemini(prompt, system_prompt, max_tokens)
-                except Exception as gemini_error:
-                    logger.warning(f"Gemini fallback failed: {gemini_error}")
-
-            # If original was OpenAI and failed, try Anthropic
+            # Intelligent fallback chain: Anthropic → Gemini → Perplexity
+            # If original was OpenAI and failed, try Anthropic first
             if is_openai_model and self.async_anthropic:
                 try:
                     logger.info("🔄 Trying Anthropic fallback...")
@@ -353,6 +356,13 @@ class RealAICore:
                     return response.content[0].text
                 except Exception as anthropic_error:
                     logger.warning(f"Anthropic fallback failed: {anthropic_error}")
+
+            if self.gemini_model:
+                try:
+                    logger.info("🔄 Trying Gemini fallback...")
+                    return await self._try_gemini(prompt, system_prompt, max_tokens)
+                except Exception as gemini_error:
+                    logger.warning(f"Gemini fallback failed: {gemini_error}")
 
             # Last resort: Perplexity
             if self.perplexity_key:
