@@ -142,7 +142,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.99.27')  # Fix memory route order: stats/* before /{memory_id}
+        self.version = os.getenv('VERSION', '9.99.28')  # Add debug logging for event storage
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
