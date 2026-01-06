@@ -142,7 +142,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.99.31')  # Fix: Pass datetime objects to asyncpg, not isoformat strings
+        self.version = os.getenv('VERSION', '9.99.32')  # Fix: Remove ON CONFLICT clause (partial index issue)
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
