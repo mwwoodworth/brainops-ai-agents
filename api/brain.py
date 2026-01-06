@@ -92,6 +92,44 @@ async def get_full_context():
         }
 
 
+@router.get("/status")
+async def get_brain_status():
+    """Lightweight health/status check for the unified brain."""
+    if not BRAIN_AVAILABLE or not brain:
+        logger.warning("Unified Brain not available for /brain/status")
+        return {
+            "status": "unavailable",
+            "message": "Unified Brain is initializing or not configured",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    try:
+        await brain._ensure_table()
+        from database.async_connection import get_pool
+
+        pool = get_pool()
+        stats = await pool.fetchrow("""
+            SELECT
+                COUNT(*) as total_entries,
+                MAX(last_updated) as last_update
+            FROM unified_brain
+        """)
+
+        return {
+            "status": "ok",
+            "total_entries": stats["total_entries"] if stats else 0,
+            "last_update": stats["last_update"].isoformat() if stats and stats["last_update"] else None,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Brain status check failed: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+
 @router.get("/critical")
 async def get_critical_context():
     """Get ALL critical context across all categories"""

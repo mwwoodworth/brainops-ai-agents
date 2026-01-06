@@ -89,6 +89,15 @@ def validate_version(version: str) -> bool:
         return False
     return bool(re.match(r'^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$', version))
 
+def _coerce_uuid(value: Any) -> Optional[str]:
+    """Best-effort UUID normalization for execution tracking."""
+    if not value:
+        return None
+    try:
+        return str(uuid.UUID(str(value)))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
 # Import REAL AI Core
 try:
     from ai_core import RealAICore
@@ -235,10 +244,11 @@ class AgentExecutionLogger:
             retry, completed, failed, memory_operations
     """
 
-    def __init__(self, agent_name: str, agent_id: str, task_id: str):
+    def __init__(self, agent_name: str, agent_id: str, task_id: str, execution_id: Optional[str] = None):
         self.agent_name = agent_name
         self.agent_id = agent_id
         self.task_id = task_id
+        self.execution_id = execution_id or task_id
         self.memory_operations: list[dict[str, Any]] = []
         self._phase_start_times: dict[str, datetime] = {}
         self._logger = logging.getLogger(__name__)
@@ -626,6 +636,7 @@ class AgentExecutor:
         # DevOps Agents
         self.agents['Monitor'] = MonitorAgent()
         self.agents['SystemMonitor'] = SystemMonitorAgent()
+        self.agents['DevOpsAgent'] = DevOpsAgent()
         self.agents['DeploymentAgent'] = DeploymentAgent()
         self.agents['DatabaseOptimizer'] = DatabaseOptimizerAgent()
 
@@ -844,6 +855,68 @@ class AgentExecutor:
             )
         return self.workflow_runner
 
+    async def _log_ai_agent_execution_start(
+        self,
+        execution_id: str,
+        agent_name: str,
+        task_type: str,
+        task: dict[str, Any],
+    ) -> None:
+        """Persist execution start to ai_agent_executions for tracking."""
+        try:
+            pool = get_pool()
+            await pool.execute("""
+                INSERT INTO ai_agent_executions (id, agent_name, task_type, input_data, status)
+                VALUES ($1, $2, $3, $4::jsonb, $5)
+                ON CONFLICT (id) DO NOTHING
+            """,
+                execution_id,
+                agent_name,
+                task_type,
+                json.dumps(task, default=str),
+                "running"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to log execution start to ai_agent_executions: {e}")
+
+    async def _log_ai_agent_execution_end(
+        self,
+        execution_id: str,
+        agent_name: str,
+        task_type: str,
+        task: dict[str, Any],
+        result: dict[str, Any],
+        status: str,
+        duration_ms: Optional[float],
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Persist execution completion to ai_agent_executions."""
+        try:
+            pool = get_pool()
+            await pool.execute("""
+                INSERT INTO ai_agent_executions (
+                    id, agent_name, task_type, input_data, status,
+                    output_data, execution_time_ms, error_message
+                )
+                VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8)
+                ON CONFLICT (id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    output_data = EXCLUDED.output_data,
+                    execution_time_ms = EXCLUDED.execution_time_ms,
+                    error_message = EXCLUDED.error_message
+            """,
+                execution_id,
+                agent_name,
+                task_type,
+                json.dumps(task, default=str),
+                status,
+                json.dumps(result, default=str),
+                int(duration_ms) if duration_ms is not None else None,
+                error_message
+            )
+        except Exception as e:
+            logger.warning(f"Failed to log execution completion to ai_agent_executions: {e}")
+
     async def execute(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
         """Execute task with specific agent - NOW WITH UNIFIED SYSTEM INTEGRATION"""
         await self._ensure_agents_loaded()
@@ -860,10 +933,16 @@ class AgentExecutor:
         # Generate execution identifiers for detailed logging
         task_id = str(task.get("task_id") or task.get("id") or uuid.uuid4())
         agent_id = str(task.get("agent_id") or agent_name)
+        execution_id = _coerce_uuid(
+            task.get("execution_id")
+            or task.get("task_execution_id")
+            or task.get("id")
+            or task.get("task_id")
+        ) or str(uuid.uuid4())
         execution_start = datetime.now(timezone.utc)
 
         # Initialize detailed execution logger
-        exec_logger = AgentExecutionLogger(agent_name, agent_id, task_id)
+        exec_logger = AgentExecutionLogger(agent_name, agent_id, task_id, execution_id=execution_id)
         # Support clients (e.g. /ai/analyze) that pass parameters under task["data"].
         # Flatten missing keys into the top-level task for compatibility with existing agents.
         task_data = task.get("data")
@@ -873,9 +952,16 @@ class AgentExecutor:
                     task[key] = value
         task_type = task.get('action', task.get('type', 'generic'))
         unified_ctx = None
+        skip_db_log = bool(
+            task.get("_skip_ai_agent_log")
+            or task.get("_skip_execution_log")
+            or task.get("skip_execution_log")
+        )
 
         # Log execution start
         await exec_logger.log_started(task)
+        if not skip_db_log:
+            await self._log_ai_agent_execution_start(execution_id, agent_name, task_type, task)
 
         # UNIFIED INTEGRATION: Pre-execution hooks - enrich context from ALL systems
         context_enriched = False
@@ -913,7 +999,20 @@ class AgentExecutor:
             assessment_result = await self._run_confidence_assessment(agent_name, task)
             assessment_context = assessment_result.get("assessment")
             if assessment_result.get("precheck_block"):
-                return assessment_result["precheck_block"]
+                precheck_block = assessment_result["precheck_block"]
+                if not skip_db_log:
+                    total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
+                    await self._log_ai_agent_execution_end(
+                        execution_id,
+                        agent_name,
+                        task_type,
+                        task,
+                        precheck_block,
+                        "manual_approval_required",
+                        total_duration_ms,
+                        None
+                    )
+                return precheck_block
             if assessment_context:
                 task["self_awareness"] = asdict(assessment_context)
 
@@ -976,6 +1075,21 @@ class AgentExecutor:
                         )
                     except Exception as e:
                         logger.warning(f"Workflow brain storage failed: {e}")
+
+                if not skip_db_log:
+                    result_status = result.get("status") if isinstance(result, dict) else None
+                    workflow_status = "failed" if result_status in ("failed", "error") else "completed"
+                    error_message = result.get("error") if isinstance(result, dict) else None
+                    await self._log_ai_agent_execution_end(
+                        execution_id,
+                        agent_name,
+                        task_type,
+                        task,
+                        result if isinstance(result, dict) else {"result": result},
+                        workflow_status,
+                        total_duration_ms,
+                        error_message if workflow_status == "failed" else None
+                    )
 
                 return result
 
@@ -1106,6 +1220,21 @@ class AgentExecutor:
                 except Exception as e:
                     logger.warning(f"Brain memory storage failed: {e}")
 
+            if not skip_db_log:
+                result_status = result.get("status") if isinstance(result, dict) else None
+                execution_status = "failed" if result_status in ("failed", "error") else "completed"
+                error_message = result.get("error") if isinstance(result, dict) else None
+                await self._log_ai_agent_execution_end(
+                    execution_id,
+                    agent_name,
+                    task_type,
+                    task,
+                    result if isinstance(result, dict) else {"result": result},
+                    execution_status,
+                    total_duration_ms,
+                    error_message if execution_status == "failed" else None
+                )
+
             return result
 
         except Exception as e:
@@ -1118,6 +1247,17 @@ class AgentExecutor:
                 total_duration_ms=total_duration_ms,
                 attempts=RETRY_ATTEMPTS
             )
+            if not skip_db_log:
+                await self._log_ai_agent_execution_end(
+                    execution_id,
+                    agent_name,
+                    task_type,
+                    task,
+                    {"status": "failed", "error": str(e)},
+                    "failed",
+                    total_duration_ms,
+                    str(e)
+                )
 
             # UNIFIED INTEGRATION: Error handling hooks
             if UNIFIED_INTEGRATION_AVAILABLE and unified_ctx:
@@ -1832,6 +1972,17 @@ class SystemMonitorAgent(BaseAgent):
                 "action": "no_auto_fix_available",
                 "status": "manual_intervention_needed"
             }
+
+
+class DevOpsAgent(BaseAgent):
+    """DevOps execution wrapper for optimization and remediation workflows."""
+
+    def __init__(self):
+        super().__init__("DevOpsAgent", "devops")
+        self._delegate = DevOpsOptimizationAgentAdapter()
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        return await self._delegate.execute(task)
 
 
 class DeploymentAgent(BaseAgent):
