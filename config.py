@@ -142,7 +142,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.99.33')  # Fix: Also remove ON CONFLICT from debug endpoint
+        self.version = os.getenv('VERSION', '9.99.40')  # AUREA consciousness integration + active revenue
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
