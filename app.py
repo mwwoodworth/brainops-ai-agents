@@ -1546,8 +1546,21 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
     """Health check endpoint with full system status and light caching."""
 
     async def _build_health_payload() -> dict[str, Any]:
-        pool = get_pool()
-        db_healthy = await pool.test_connection()
+        # Handle case where pool isn't initialized yet (during startup)
+        try:
+            pool = get_pool()
+            db_healthy = await pool.test_connection()
+        except RuntimeError as e:
+            if "not initialized" in str(e):
+                # Pool not ready yet - return starting status
+                return {
+                    "status": "starting",
+                    "version": VERSION,
+                    "build": BUILD_TIME,
+                    "database": "initializing",
+                    "message": "Service is starting up, database pool initializing..."
+                }
+            raise
         db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
         auth_configured = config.security.auth_configured
 
