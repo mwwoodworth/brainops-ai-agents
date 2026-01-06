@@ -863,7 +863,7 @@ async def get_events_debug():
                 'ai-agents',  # $6 source
                 None,  # $7 source_instance
                 '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457',  # $8 tenant_id
-                datetime.utcnow().isoformat(),  # $9 timestamp
+                datetime.utcnow(),  # $9 timestamp - must be datetime, not string!
                 None,  # $10 occurred_at
                 '{"debug": true}',  # $11 payload
                 '{}',  # $12 metadata
