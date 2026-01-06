@@ -248,6 +248,7 @@ class UnifiedEvent(BaseModel):
 
     def to_db_record(self) -> dict[str, Any]:
         """Convert to database-friendly dict for insertion"""
+        # Note: asyncpg requires datetime objects, not isoformat strings
         return {
             'event_id': self.event_id,
             'version': self.version,
@@ -257,8 +258,8 @@ class UnifiedEvent(BaseModel):
             'source': self.source.value,
             'source_instance': self.source_instance,
             'tenant_id': self.tenant_id,
-            'timestamp': self.timestamp.isoformat(),
-            'occurred_at': self.occurred_at.isoformat() if self.occurred_at else None,
+            'timestamp': self.timestamp,  # Keep as datetime for asyncpg
+            'occurred_at': self.occurred_at,  # Keep as datetime for asyncpg
             'payload': self.payload,
             'metadata': self.metadata,
             'correlation_id': self.correlation_id,
@@ -266,7 +267,7 @@ class UnifiedEvent(BaseModel):
             'actor_type': self.actor_type,
             'actor_id': self.actor_id,
             'processed': self.processed,
-            'processed_at': self.processed_at.isoformat() if self.processed_at else None,
+            'processed_at': self.processed_at,  # Keep as datetime for asyncpg
             'processing_result': self.processing_result,
             'retry_count': self.retry_count,
         }
