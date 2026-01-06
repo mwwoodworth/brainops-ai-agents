@@ -142,7 +142,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.99.23')  # Schema fixes for new endpoints: correct column names for ai_thought_stream, ai_agent_executions, aurea_decisions, ai_learning_insights
+        self.version = os.getenv('VERSION', '9.99.24')  # Fix agents/execute: remove 'description' column from agents query
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
