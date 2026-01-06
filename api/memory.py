@@ -687,12 +687,18 @@ async def get_stats_by_type(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/{memory_id}")
+@router.get("/id/{memory_id}")
 async def get_memory(
     memory_id: str,
     tenant_id: str = Depends(get_tenant_id)
 ) -> dict[str, Any]:
     """Get a specific memory by ID"""
+    # Validate that memory_id looks like a UUID
+    try:
+        uuid.UUID(memory_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Invalid memory ID format: {memory_id}")
+
     try:
         pool = get_pool()
 
@@ -746,12 +752,18 @@ async def get_memory(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.delete("/{memory_id}")
+@router.delete("/id/{memory_id}")
 async def delete_memory(
     memory_id: str,
     tenant_id: str = Depends(get_tenant_id)
 ) -> dict[str, Any]:
     """Delete a memory by ID (soft delete by setting expires_at)"""
+    # Validate that memory_id looks like a UUID
+    try:
+        uuid.UUID(memory_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Invalid memory ID format: {memory_id}")
+
     try:
         pool = get_pool()
 
