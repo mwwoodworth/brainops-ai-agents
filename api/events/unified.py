@@ -851,7 +851,6 @@ async def get_events_debug():
                     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                     $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
                 )
-                ON CONFLICT (event_id) DO NOTHING
             """,
                 test_event_id,  # $1 event_id
                 1,  # $2 version
