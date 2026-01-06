@@ -826,6 +826,28 @@ const channel = supabase.channel('unified-events:YOUR_TENANT_ID')
     }
 
 
+@router.get("/debug")
+async def get_events_debug():
+    """Debug endpoint to check events module state"""
+    pool = None
+    pool_type = None
+    can_test = False
+    try:
+        pool = get_pool()
+        pool_type = type(pool).__name__
+        can_test = await pool.test_connection()
+    except Exception as e:
+        pool_type = f"Error: {e}"
+
+    return {
+        "async_pool_available": ASYNC_POOL_AVAILABLE,
+        "using_fallback": using_fallback(),
+        "pool_type": pool_type,
+        "pool_test_connection": can_test,
+        "broadcaster_configured": _broadcaster.is_configured,
+    }
+
+
 # =============================================================================
 # INITIALIZATION
 # =============================================================================
