@@ -941,11 +941,13 @@ class UnifiedMemoryManager:
             with self._get_cursor() as cur:
                 stats = {'expired': 0, 'low_value': 0, 'total': 0}
 
-                # Remove expired memories
+                # Archive expired memories (soft delete for safety)
                 if not dry_run:
                     cur.execute("""
-                        DELETE FROM unified_ai_memory
+                        UPDATE unified_ai_memory
+                        SET archived = TRUE, archived_at = NOW()
                         WHERE tenant_id = %s
+                        AND archived = FALSE
                         AND expires_at IS NOT NULL
                         AND expires_at < NOW()
                     """, (tenant_id,))
@@ -955,16 +957,19 @@ class UnifiedMemoryManager:
                         SELECT COUNT(*) as count
                         FROM unified_ai_memory
                         WHERE tenant_id = %s
+                        AND archived = FALSE
                         AND expires_at IS NOT NULL
                         AND expires_at < NOW()
                     """, (tenant_id,))
                     stats['expired'] = cur.fetchone()['count']
 
-                # Remove old, low-value memories
+                # Archive old, low-value memories (soft delete for safety)
                 if not dry_run:
                     cur.execute("""
-                        DELETE FROM unified_ai_memory
+                        UPDATE unified_ai_memory
+                        SET archived = TRUE, archived_at = NOW()
                         WHERE tenant_id = %s
+                        AND archived = FALSE
                         AND importance_score < 0.3
                         AND access_count < 3
                         AND created_at < NOW() - INTERVAL '90 days'
@@ -975,6 +980,7 @@ class UnifiedMemoryManager:
                         SELECT COUNT(*) as count
                         FROM unified_ai_memory
                         WHERE tenant_id = %s
+                        AND archived = FALSE
                         AND importance_score < 0.3
                         AND access_count < 3
                         AND created_at < NOW() - INTERVAL '90 days'
