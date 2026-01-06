@@ -142,7 +142,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.99.25')  # Fix agents/execute: await AGENT_EXECUTOR.execute() properly (async)
+        self.version = os.getenv('VERSION', '9.99.26')  # Fix agents/execute: use jsonable_encoder for datetime serialization
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
