@@ -200,6 +200,16 @@ async def get_memory_status(
         )
 
 
+@router.get("/stats", response_model=MemoryStatus)
+async def get_memory_stats(
+    tenant_id: str = Depends(get_tenant_id)
+) -> MemoryStatus:
+    """
+    Get memory system statistics (Alias for /status).
+    """
+    return await get_memory_status(tenant_id)
+
+
 @router.get("/search")
 async def search_memories(
     query: str = Query(..., description="Search query"),
