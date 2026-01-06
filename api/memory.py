@@ -613,6 +613,70 @@ async def memory_health(
         }
 
 
+@router.get("/stats/by-system")
+async def get_stats_by_system(
+    tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
+    """Get memory statistics grouped by source system"""
+    try:
+        pool = get_pool()
+
+        rows = await pool.fetch("""
+            SELECT
+                source_system,
+                COUNT(*) as count,
+                AVG(importance_score) as avg_importance,
+                COUNT(*) FILTER (WHERE embedding IS NOT NULL) as with_embeddings,
+                MAX(created_at) as latest
+            FROM unified_ai_memory
+            WHERE tenant_id = $1::uuid OR tenant_id IS NULL
+            GROUP BY source_system
+            ORDER BY count DESC
+        """, tenant_id)
+
+        return {
+            "stats": [dict(r) for r in rows],
+            "table": CANONICAL_TABLE,
+            "tenant_id": tenant_id
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get stats by system: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/stats/by-type")
+async def get_stats_by_type(
+    tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
+    """Get memory statistics grouped by memory type"""
+    try:
+        pool = get_pool()
+
+        rows = await pool.fetch("""
+            SELECT
+                memory_type,
+                COUNT(*) as count,
+                AVG(importance_score) as avg_importance,
+                COUNT(*) FILTER (WHERE embedding IS NOT NULL) as with_embeddings,
+                MAX(created_at) as latest
+            FROM unified_ai_memory
+            WHERE tenant_id = $1::uuid OR tenant_id IS NULL
+            GROUP BY memory_type
+            ORDER BY count DESC
+        """, tenant_id)
+
+        return {
+            "stats": [dict(r) for r in rows],
+            "table": CANONICAL_TABLE,
+            "tenant_id": tenant_id
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get stats by type: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.get("/{memory_id}")
 async def get_memory(
     memory_id: str,
@@ -702,70 +766,6 @@ async def delete_memory(
         raise
     except Exception as e:
         logger.error(f"Failed to delete memory: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@router.get("/stats/by-system")
-async def get_stats_by_system(
-    tenant_id: str = Depends(get_tenant_id)
-) -> dict[str, Any]:
-    """Get memory statistics grouped by source system"""
-    try:
-        pool = get_pool()
-
-        rows = await pool.fetch("""
-            SELECT
-                source_system,
-                COUNT(*) as count,
-                AVG(importance_score) as avg_importance,
-                COUNT(*) FILTER (WHERE embedding IS NOT NULL) as with_embeddings,
-                MAX(created_at) as latest
-            FROM unified_ai_memory
-            WHERE tenant_id = $1::uuid OR tenant_id IS NULL
-            GROUP BY source_system
-            ORDER BY count DESC
-        """, tenant_id)
-
-        return {
-            "stats": [dict(r) for r in rows],
-            "table": CANONICAL_TABLE,
-            "tenant_id": tenant_id
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get stats by system: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@router.get("/stats/by-type")
-async def get_stats_by_type(
-    tenant_id: str = Depends(get_tenant_id)
-) -> dict[str, Any]:
-    """Get memory statistics grouped by memory type"""
-    try:
-        pool = get_pool()
-
-        rows = await pool.fetch("""
-            SELECT
-                memory_type,
-                COUNT(*) as count,
-                AVG(importance_score) as avg_importance,
-                COUNT(*) FILTER (WHERE embedding IS NOT NULL) as with_embeddings,
-                MAX(created_at) as latest
-            FROM unified_ai_memory
-            WHERE tenant_id = $1::uuid OR tenant_id IS NULL
-            GROUP BY memory_type
-            ORDER BY count DESC
-        """, tenant_id)
-
-        return {
-            "stats": [dict(r) for r in rows],
-            "table": CANONICAL_TABLE,
-            "tenant_id": tenant_id
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get stats by type: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
