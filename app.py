@@ -3053,13 +3053,13 @@ async def execute_agent_generic(
         agent_id = str(agent["id"]) if agent else "system"
         agent_name = agent["name"] if agent else f"{agent_type}_agent"
 
-        # Log execution start
+        # Log execution start (use correct column names: task_type, no agent_id or started_at)
         await pool.execute("""
-            INSERT INTO ai_agent_executions (id, agent_id, agent_name, status, started_at, input_data)
+            INSERT INTO ai_agent_executions (id, agent_name, task_type, status, input_data, created_at)
             VALUES ($1, $2, $3, 'running', $4, $5)
-        """, execution_id, agent_id, agent_name, started_at, json.dumps({
+        """, execution_id, agent_name, agent_type, json.dumps({
             "type": agent_type, "task": task, "parameters": parameters
-        }))
+        }), started_at)
 
         # Execute via AgentExecutor if available
         if AGENTS_AVAILABLE and AGENT_EXECUTOR:
@@ -3077,12 +3077,12 @@ async def execute_agent_generic(
         completed_at = datetime.utcnow()
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
-        # Update execution record
+        # Update execution record (use correct column: execution_time_ms, no completed_at)
         await pool.execute("""
             UPDATE ai_agent_executions
-            SET status = 'completed', completed_at = $1, duration_ms = $2, output_data = $3
-            WHERE id = $4
-        """, completed_at, duration_ms, json.dumps(result), execution_id)
+            SET status = 'completed', execution_time_ms = $1, output_data = $2
+            WHERE id = $3
+        """, duration_ms, json.dumps(result), execution_id)
 
         return {
             "success": True,
@@ -3181,9 +3181,9 @@ async def brain_decide(
     decision_id = str(uuid.uuid4())
 
     try:
-        # Check for similar past decisions
+        # Check for similar past decisions (use execution_result, not result)
         similar_decisions = await pool.fetch("""
-            SELECT decision_type, context, result, confidence, created_at
+            SELECT decision_type, context, execution_result as result, confidence, created_at
             FROM aurea_decisions
             WHERE decision_type = $1
             ORDER BY created_at DESC LIMIT 5
@@ -3215,11 +3215,11 @@ async def brain_decide(
             ] if similar_decisions else []
         }
 
-        # Log decision
+        # Log decision (context is JSONB, use execution_result for output, add description)
         await pool.execute("""
-            INSERT INTO aurea_decisions (id, decision_type, context, result, confidence, status, created_at)
-            VALUES ($1, $2, $3, $4, $5, 'completed', NOW())
-        """, decision_id, decision_type, context, json.dumps(decision_result), 0.85)
+            INSERT INTO aurea_decisions (id, decision_type, description, context, execution_result, confidence, status, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, 'completed', NOW())
+        """, decision_id, decision_type, f"Decision for: {context[:100]}", json.dumps({"query": context}), json.dumps(decision_result), 0.85)
 
         return decision_result
 
@@ -3243,17 +3243,17 @@ async def brain_learn(
     insight_id = str(uuid.uuid4())
 
     try:
-        # Store insight
+        # Store insight (use correct column names: insight_type for source, impact_score for importance)
         await pool.execute("""
-            INSERT INTO ai_learning_insights (id, insight, source, category, importance, created_at)
+            INSERT INTO ai_learning_insights (id, insight, insight_type, category, impact_score, created_at)
             VALUES ($1, $2, $3, $4, $5, NOW())
             ON CONFLICT DO NOTHING
         """, insight_id, insight, source, category, importance)
 
-        # Also store in thought stream for consciousness
+        # Also store in thought stream for consciousness (use correct column names)
         thought_id = str(uuid.uuid4())
         await pool.execute("""
-            INSERT INTO ai_thought_stream (id, thought_id, thought_type, content, context, created_at)
+            INSERT INTO ai_thought_stream (id, thought_id, thought_type, thought_content, metadata, timestamp)
             VALUES (gen_random_uuid(), $1, 'learning', $2, $3, NOW())
             ON CONFLICT DO NOTHING
         """, thought_id, insight, json.dumps({"source": source, "category": category}))
@@ -3286,13 +3286,13 @@ async def get_consciousness_status():
     pool = get_pool()
 
     try:
-        # Get thought stream stats
+        # Get thought stream stats (using 'timestamp' column, not 'created_at')
         thought_stats = await pool.fetchrow("""
             SELECT
                 COUNT(*) as total_thoughts,
-                COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour') as thoughts_last_hour,
-                COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as thoughts_last_day,
-                MAX(created_at) as last_thought_at
+                COUNT(*) FILTER (WHERE timestamp > NOW() - INTERVAL '1 hour') as thoughts_last_hour,
+                COUNT(*) FILTER (WHERE timestamp > NOW() - INTERVAL '24 hours') as thoughts_last_day,
+                MAX(timestamp) as last_thought_at
             FROM ai_thought_stream
         """)
 
@@ -3367,12 +3367,12 @@ async def check_self_healing():
             issues.append({"type": "database", "severity": "critical", "message": "Database connection failed"})
             health_score -= 30
 
-        # Check for stalled agents
+        # Check for stalled agents (use created_at, not started_at)
         stalled_agents = await pool.fetch("""
-            SELECT id, agent_name, status, started_at
+            SELECT id, agent_name, status, created_at
             FROM ai_agent_executions
             WHERE status = 'running'
-            AND started_at < NOW() - INTERVAL '30 minutes'
+            AND created_at < NOW() - INTERVAL '30 minutes'
             LIMIT 10
         """)
 
@@ -3382,14 +3382,14 @@ async def check_self_healing():
                     "type": "stalled_agent",
                     "severity": "high",
                     "agent_name": agent["agent_name"],
-                    "started_at": agent["started_at"].isoformat() if agent["started_at"] else None
+                    "started_at": agent["created_at"].isoformat() if agent["created_at"] else None
                 })
             health_score -= len(stalled_agents) * 5
 
-        # Check for failed executions in last hour
+        # Check for failed executions in last hour (use created_at, not started_at)
         failed_count = await pool.fetchval("""
             SELECT COUNT(*) FROM ai_agent_executions
-            WHERE status = 'failed' AND started_at > NOW() - INTERVAL '1 hour'
+            WHERE status = 'failed' AND created_at > NOW() - INTERVAL '1 hour'
         """) or 0
 
         if failed_count > 5:
