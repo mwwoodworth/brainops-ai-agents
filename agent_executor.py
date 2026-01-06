@@ -3542,22 +3542,14 @@ class RevenueOptimizerAgent(BaseAgent):
             # REAL QUERY: Profit margin analysis (if costs available)
             margin_analysis = await pool.fetch("""
                 SELECT
-                    CASE
-                        WHEN actual_costs > 0 AND actual_revenue > 0
-                        THEN ((actual_revenue - actual_costs)::float / actual_revenue * 100)
-                        ELSE NULL
-                    END as margin_pct,
+                    (ROUND(((actual_revenue - actual_costs)::float / actual_revenue * 100) / 10) * 10) as margin_tier,
                     COUNT(*) as job_count,
                     AVG(actual_revenue) as avg_revenue,
                     AVG(actual_costs) as avg_costs
                 FROM jobs
                 WHERE actual_revenue > 0 AND actual_costs > 0
-                GROUP BY CASE
-                    WHEN actual_costs > 0 AND actual_revenue > 0
-                    THEN ROUND(((actual_revenue - actual_costs)::float / actual_revenue * 100) / 10) * 10
-                    ELSE NULL
-                END
-                ORDER BY margin_pct DESC
+                GROUP BY 1
+                ORDER BY margin_tier DESC
                 LIMIT 10
             """)
 
