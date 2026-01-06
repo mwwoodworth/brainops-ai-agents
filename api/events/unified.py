@@ -832,10 +832,53 @@ async def get_events_debug():
     pool = None
     pool_type = None
     can_test = False
+    insert_test = None
     try:
         pool = get_pool()
         pool_type = type(pool).__name__
         can_test = await pool.test_connection()
+
+        # Try a test insert
+        import uuid as uuid_mod
+        test_event_id = f"evt_debug_{uuid_mod.uuid4().hex[:8]}"
+        try:
+            await pool.execute("""
+                INSERT INTO unified_events (
+                    event_id, version, event_type, category, priority,
+                    source, source_instance, tenant_id, timestamp, occurred_at,
+                    payload, metadata, correlation_id, causation_id,
+                    actor_type, actor_id, processed, processed_at,
+                    processing_result, retry_count
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                )
+                ON CONFLICT (event_id) DO NOTHING
+            """,
+                test_event_id,  # $1 event_id
+                1,  # $2 version
+                'system.debug',  # $3 event_type
+                'system',  # $4 category
+                'low',  # $5 priority
+                'ai-agents',  # $6 source
+                None,  # $7 source_instance
+                '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457',  # $8 tenant_id
+                datetime.utcnow().isoformat(),  # $9 timestamp
+                None,  # $10 occurred_at
+                '{"debug": true}',  # $11 payload
+                '{}',  # $12 metadata
+                None,  # $13 correlation_id
+                None,  # $14 causation_id
+                None,  # $15 actor_type
+                None,  # $16 actor_id
+                False,  # $17 processed
+                None,  # $18 processed_at
+                None,  # $19 processing_result
+                0,  # $20 retry_count
+            )
+            insert_test = f"SUCCESS: {test_event_id}"
+        except Exception as insert_err:
+            insert_test = f"FAILED: {type(insert_err).__name__}: {insert_err}"
     except Exception as e:
         pool_type = f"Error: {e}"
 
@@ -844,6 +887,7 @@ async def get_events_debug():
         "using_fallback": using_fallback(),
         "pool_type": pool_type,
         "pool_test_connection": can_test,
+        "insert_test": insert_test,
         "broadcaster_configured": _broadcaster.is_configured,
     }
 
