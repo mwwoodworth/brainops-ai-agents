@@ -4,6 +4,7 @@ Predictive Scheduling System - Task 18
 AI-powered predictive scheduling for optimal task execution and resource allocation
 """
 
+import json
 import logging
 import os
 import uuid
@@ -938,21 +939,64 @@ class PredictiveSchedulingSystem:
                     """, (ScheduleStatus.RUNNING.value, task['id']))
                     conn.commit()
 
-                    # Execute the task (placeholder - would call actual execution)
-                    logger.info(f"Executing scheduled task: {task['name']}")
+                    execution_start = datetime.now(timezone.utc)
+                    task_metadata = task.get("metadata") or {}
+                    if isinstance(task_metadata, str):
+                        try:
+                            task_metadata = json.loads(task_metadata)
+                        except json.JSONDecodeError:
+                            task_metadata = {}
 
-                    # Mark as completed
+                    agent_name = (
+                        task_metadata.get("agent_name")
+                        or task_metadata.get("agent")
+                        or task_metadata.get("assigned_agent")
+                        or task_metadata.get("preferred_agent")
+                    )
+
+                    if not agent_name:
+                        task_type = (task.get("task_type") or "").lower()
+                        type_map = {
+                            "report_generation": "ReportingAgent",
+                            "email_campaign": "EmailMarketingAgent",
+                            "system_maintenance": "SystemMonitor",
+                            "data_pipeline": "DatabaseOptimizer",
+                            "model_training": "TrainingAgent",
+                            "batch_job": "SystemMonitor",
+                            "real_time": "Monitor",
+                            "scheduled": "SystemMonitor",
+                            "ai_processing": "Monitor",
+                        }
+                        agent_name = type_map.get(task_type, "Monitor")
+
+                    payload = task_metadata.get("task") or task_metadata.get("payload") or task_metadata.get("data") or {}
+                    if not isinstance(payload, dict):
+                        payload = {"task": payload}
+                    payload.update({
+                        "scheduled_task_id": task.get("task_id"),
+                        "schedule_slot_id": task.get("id"),
+                        "task_type": task.get("task_type"),
+                        "task_name": task.get("name"),
+                    })
+
+                    from agent_executor import executor as agent_executor
+                    result = await agent_executor.execute(agent_name, payload)
+
+                    result_status = result.get("status") if isinstance(result, dict) else None
+                    success = result_status not in ("failed", "error")
+
                     cursor.execute("""
                         UPDATE ai_schedule_slots
                         SET status = %s, completed_at = NOW()
                         WHERE id = %s
-                    """, (ScheduleStatus.COMPLETED.value, task['id']))
+                    """, (
+                        ScheduleStatus.COMPLETED.value if success else ScheduleStatus.FAILED.value,
+                        task['id']
+                    ))
 
-                    # Record metrics
-                    executed_at = task.get('executed_at')
                     actual_duration = (
-                        datetime.now(timezone.utc) - executed_at
-                    ).total_seconds() / 60 if executed_at else 0
+                        datetime.now(timezone.utc) - execution_start
+                    ).total_seconds() / 60
 
                     start_time = task.get('start_time')
                     end_time = task.get('end_time')
@@ -960,6 +1004,9 @@ class PredictiveSchedulingSystem:
                         (end_time - start_time).total_seconds() / 60
                         if start_time and end_time else 0
                     )
+                    deviation = 0
+                    if predicted_duration > 0:
+                        deviation = ((actual_duration - predicted_duration) / predicted_duration) * 100
 
                     cursor.execute("""
                         INSERT INTO ai_schedule_metrics
@@ -971,8 +1018,8 @@ class PredictiveSchedulingSystem:
                         predicted_duration,
                         actual_duration,
                         task['success_probability'],
-                        True,
-                        0  # Would calculate deviation
+                        success,
+                        deviation
                     ))
 
                     conn.commit()
@@ -983,6 +1030,12 @@ class PredictiveSchedulingSystem:
 
                 except Exception as e:
                     logger.error(f"Failed to execute task {task['id']}: {e}")
+                    cursor.execute("""
+                        UPDATE ai_schedule_slots
+                        SET status = %s, completed_at = NOW()
+                        WHERE id = %s
+                    """, (ScheduleStatus.FAILED.value, task['id']))
+                    conn.commit()
                     cursor.execute("""
                         UPDATE ai_schedule_slots
                         SET status = %s

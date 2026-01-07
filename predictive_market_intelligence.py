@@ -16,6 +16,8 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Optional
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
 
@@ -764,9 +766,83 @@ class PredictiveMarketIntelligence:
 
     async def _fetch_news_signals(self) -> list[MarketSignal]:
         """Fetch news-based market signals"""
-        # This would integrate with a real news API
-        # For now, return mock data structure
-        return []
+        api_key = self.data_sources.get("news_api")
+        if not api_key:
+            raise RuntimeError("NEWS_API_KEY not configured")
+
+        query = os.getenv("NEWS_API_QUERY", "").strip()
+        if not query:
+            raise RuntimeError("NEWS_API_QUERY not configured")
+
+        base_url = os.getenv("NEWS_API_BASE_URL", "https://newsapi.org/v2/everything")
+        try:
+            page_size = int(os.getenv("NEWS_API_PAGE_SIZE", "20"))
+        except ValueError:
+            page_size = 20
+
+        timeout_seconds = float(os.getenv("NEWS_API_TIMEOUT", "10"))
+        params = {
+            "q": query,
+            "apiKey": api_key,
+            "pageSize": min(max(page_size, 1), 100),
+            "sortBy": "publishedAt",
+            "language": "en",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                response = await client.get(base_url, params=params)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            logger.error("News API request failed: %s", exc, exc_info=True)
+            raise RuntimeError("News API request failed") from exc
+
+        payload = response.json()
+        if payload.get("status") != "ok":
+            message = payload.get("message", "Unknown error")
+            raise RuntimeError(f"News API response error: {message}")
+
+        articles = payload.get("articles") or []
+        signals: list[MarketSignal] = []
+        now = datetime.utcnow().isoformat()
+
+        for article in articles:
+            title = article.get("title") or ""
+            description = article.get("description") or ""
+            content = article.get("content") or description
+            url = article.get("url") or ""
+            published_at = article.get("publishedAt") or now
+
+            if not title and not content:
+                continue
+
+            signal_seed = f"{title}|{url}|{published_at}"
+            signal_id = hashlib.sha256(signal_seed.encode("utf-8")).hexdigest()[:16]
+
+            signals.append(MarketSignal(
+                signal_id=signal_id,
+                signal_type=MarketSignalType.NEWS,
+                source="news_api",
+                data={
+                    "title": title,
+                    "description": description,
+                    "content": content,
+                    "url": url,
+                    "author": article.get("author"),
+                    "source_name": (article.get("source") or {}).get("name"),
+                    "published_at": published_at,
+                    "query": query,
+                },
+                strength=0.5,
+                confidence=0.6,
+                timestamp=published_at,
+                tags=[query],
+            ))
+
+        if not signals:
+            logger.warning("News API returned no articles for query=%s", query)
+
+        return signals
 
     async def generate_seo_recommendations(
         self,

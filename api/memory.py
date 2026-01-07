@@ -14,7 +14,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from database.async_connection import get_pool
+from database.async_connection import DatabaseUnavailableError, get_pool, using_fallback
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -110,6 +110,16 @@ async def get_tenant_id(
     return x_tenant_id or DEFAULT_TENANT_ID
 
 
+def _require_real_database(operation: str) -> None:
+    if using_fallback():
+        message = (
+            "Database unavailable; in-memory fallback active. "
+            "Configure DATABASE_URL and disable ALLOW_INMEMORY_FALLBACK for production."
+        )
+        logger.error("Refusing %s: %s", operation, message)
+        raise HTTPException(status_code=503, detail=message)
+
+
 # =============================================================================
 # EMBEDDING GENERATION
 # =============================================================================
@@ -117,7 +127,7 @@ async def get_tenant_id(
 async def generate_embedding(text: str) -> Optional[list[float]]:
     """
     Generate real embedding using OpenAI text-embedding-3-small.
-    Falls back gracefully if API unavailable.
+    Returns None if the provider is unavailable.
     """
     openai_key = os.getenv("OPENAI_API_KEY")
     if not openai_key:
@@ -154,6 +164,7 @@ async def get_memory_status(
     Includes tenant-specific statistics.
     """
     try:
+        _require_real_database("memory status")
         pool = get_pool()
 
         # Get comprehensive stats from unified_ai_memory
@@ -188,16 +199,14 @@ async def get_memory_status(
             message=f"Canonical table: {CANONICAL_TABLE} | {stats['unique_systems']} systems | {stats['memory_types']} types"
         )
 
+    except HTTPException:
+        raise
+    except DatabaseUnavailableError as exc:
+        logger.error("Memory status unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as e:
-        logger.error(f"Failed to get memory status: {e}")
-        return MemoryStatus(
-            status="error",
-            message=f"Unable to retrieve memory statistics: {str(e)}",
-            total_memories=0,
-            unique_contexts=0,
-            avg_importance=0.0,
-            memories_with_embeddings=0
-        )
+        logger.error("Failed to get memory status: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Unable to retrieve memory statistics") from e
 
 
 @router.get("/stats", response_model=MemoryStatus)
@@ -225,6 +234,7 @@ async def search_memories(
     All searches go to the canonical unified_ai_memory table.
     """
     try:
+        _require_real_database("memory search")
         pool = get_pool()
         results = []
 
@@ -232,76 +242,81 @@ async def search_memories(
             # Try semantic search first
             query_embedding = await generate_embedding(query)
 
-            if query_embedding:
-                # Semantic vector search
-                embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
+            if not query_embedding:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Semantic search unavailable. Configure OPENAI_API_KEY or set use_semantic=false."
+                )
 
-                sql = """
-                    SELECT
-                        id::text,
-                        memory_type,
-                        content,
-                        importance_score,
-                        category,
-                        title,
-                        tags,
-                        source_system,
-                        source_agent,
-                        created_at,
-                        last_accessed,
-                        access_count,
-                        metadata,
-                        1 - (embedding <=> $1::vector) as similarity
-                    FROM unified_ai_memory
-                    WHERE (tenant_id = $2::uuid OR tenant_id IS NULL)
-                        AND embedding IS NOT NULL
-                        AND importance_score >= $3
-                """
-                params = [embedding_str, tenant_id, importance_threshold]
-                param_idx = 4
+            # Semantic vector search
+            embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
 
-                if memory_type:
-                    sql += f" AND memory_type = ${param_idx}"
-                    params.append(memory_type)
-                    param_idx += 1
+            sql = """
+                SELECT
+                    id::text,
+                    memory_type,
+                    content,
+                    importance_score,
+                    category,
+                    title,
+                    tags,
+                    source_system,
+                    source_agent,
+                    created_at,
+                    last_accessed,
+                    access_count,
+                    metadata,
+                    1 - (embedding <=> $1::vector) as similarity
+                FROM unified_ai_memory
+                WHERE (tenant_id = $2::uuid OR tenant_id IS NULL)
+                    AND embedding IS NOT NULL
+                    AND importance_score >= $3
+            """
+            params = [embedding_str, tenant_id, importance_threshold]
+            param_idx = 4
 
-                if category:
-                    sql += f" AND category = ${param_idx}"
-                    params.append(category)
-                    param_idx += 1
+            if memory_type:
+                sql += f" AND memory_type = ${param_idx}"
+                params.append(memory_type)
+                param_idx += 1
 
-                sql += f"""
-                    ORDER BY (1 - (embedding <=> $1::vector)) * importance_score DESC
-                    LIMIT ${param_idx}
-                """
-                params.append(limit)
+            if category:
+                sql += f" AND category = ${param_idx}"
+                params.append(category)
+                param_idx += 1
 
-                rows = await pool.fetch(sql, *params)
-                results = [_row_to_memory_entry(r) for r in rows]
+            sql += f"""
+                ORDER BY (1 - (embedding <=> $1::vector)) * importance_score DESC
+                LIMIT ${param_idx}
+            """
+            params.append(limit)
 
-                # Update access counts for retrieved memories
-                if results:
-                    memory_ids = [r["id"] for r in results]
-                    await pool.execute("""
-                        UPDATE unified_ai_memory
-                        SET access_count = access_count + 1,
-                            last_accessed = NOW()
-                        WHERE id = ANY($1::uuid[])
-                    """, memory_ids)
+            rows = await pool.fetch(sql, *params)
+            results = [_row_to_memory_entry(r) for r in rows]
 
-                return {
-                    "results": results,
-                    "total": len(results),
-                    "query": query,
-                    "search_method": "semantic_vector",
-                    "table": CANONICAL_TABLE,
-                    "tenant_id": tenant_id,
-                    "filters": {
-                        "memory_type": memory_type,
-                        "category": category,
-                        "importance_threshold": importance_threshold
-                    }
+            # Update access counts for retrieved memories
+            if results:
+                memory_ids = [r["id"] for r in results]
+                await pool.execute("""
+                    UPDATE unified_ai_memory
+                    SET access_count = access_count + 1,
+                        last_accessed = NOW()
+                    WHERE id = ANY($1::uuid[])
+                """, memory_ids)
+
+            return {
+                "results": results,
+                "total": len(results),
+                "query": query,
+                "search_method": "semantic_vector",
+                "table": CANONICAL_TABLE,
+                "tenant_id": tenant_id,
+                "filters": {
+                    "memory_type": memory_type,
+                    "category": category,
+                    "importance_threshold": importance_threshold
                 }
+            }
 
         # Fallback to text search
         sql = """
@@ -362,9 +377,14 @@ async def search_memories(
             }
         }
 
+    except DatabaseUnavailableError as exc:
+        logger.error("Memory search unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Memory search failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}") from e
+        logger.error("Memory search failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Search failed") from e
 
 
 @router.post("/store")
@@ -377,6 +397,7 @@ async def store_memory(
     Generates real embeddings for semantic search.
     """
     try:
+        _require_real_database("memory store")
         pool = get_pool()
 
         # Prepare content as JSON - include category and title in content (not separate columns)
@@ -439,17 +460,11 @@ async def store_memory(
         )
 
         if not result:
-            logger.warning("Store memory returned no result (likely in-memory fallback)")
-            return {
-                "success": True,
-                "id": str(uuid.uuid4()),
-                "content_hash": "mock_hash",
-                "created_at": datetime.utcnow().isoformat(),
-                "has_embedding": False,
-                "table": CANONICAL_TABLE,
-                "tenant_id": tenant_id,
-                "note": "Stored in fallback/mock mode"
-            }
+            logger.error("Store memory returned no result from database")
+            raise HTTPException(
+                status_code=503,
+                detail="Memory store failed: database did not return a record"
+            )
 
         return {
             "success": True,
@@ -461,9 +476,14 @@ async def store_memory(
             "tenant_id": tenant_id
         }
 
+    except DatabaseUnavailableError as exc:
+        logger.error("Memory store unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to store memory: {e}")
-        raise HTTPException(status_code=500, detail=f"Store failed: {str(e)}") from e
+        logger.error("Failed to store memory: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Store failed") from e
 
 
 @router.post("/semantic-search")
@@ -494,6 +514,7 @@ async def get_memories_by_type(
 ) -> dict[str, Any]:
     """Get memories filtered by type from canonical table"""
     try:
+        _require_real_database("memory by-type")
         pool = get_pool()
 
         rows = await pool.fetch("""
@@ -527,9 +548,14 @@ async def get_memories_by_type(
             "tenant_id": tenant_id
         }
 
+    except DatabaseUnavailableError as exc:
+        logger.error("Memory by-type unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to get memories by type: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to get memories by type: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get memories by type") from e
 
 
 @router.get("/by-category/{category}")
@@ -540,6 +566,7 @@ async def get_memories_by_category(
 ) -> dict[str, Any]:
     """Get memories filtered by category from canonical table"""
     try:
+        _require_real_database("memory by-category")
         pool = get_pool()
 
         rows = await pool.fetch("""
@@ -573,9 +600,14 @@ async def get_memories_by_category(
             "tenant_id": tenant_id
         }
 
+    except DatabaseUnavailableError as exc:
+        logger.error("Memory by-category unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to get memories by category: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to get memories by category: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get memories by category") from e
 
 
 @router.get("/health")
@@ -588,6 +620,7 @@ async def memory_health(
     MUST be defined before /{memory_id} to avoid route collision.
     """
     try:
+        _require_real_database("memory health")
         pool = get_pool()
 
         stats = await pool.fetchrow("""
@@ -612,15 +645,12 @@ async def memory_health(
             "timestamp": datetime.utcnow().isoformat()
         }
 
+    except DatabaseUnavailableError as exc:
+        logger.error("Memory health unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as e:
-        logger.error(f"Memory health check failed: {e}")
-        return {
-            "status": "unhealthy",
-            "operational": False,
-            "error": str(e),
-            "table": CANONICAL_TABLE,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        logger.error("Memory health check failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=503, detail="Memory health check failed") from e
 
 
 @router.get("/stats/by-system")
@@ -629,6 +659,7 @@ async def get_stats_by_system(
 ) -> dict[str, Any]:
     """Get memory statistics grouped by source system"""
     try:
+        _require_real_database("memory stats by-system")
         pool = get_pool()
 
         rows = await pool.fetch("""
@@ -650,9 +681,14 @@ async def get_stats_by_system(
             "tenant_id": tenant_id
         }
 
+    except DatabaseUnavailableError as exc:
+        logger.error("Memory stats by-system unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to get stats by system: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to get stats by system: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get stats by system") from e
 
 
 @router.get("/stats/by-type")
@@ -661,6 +697,7 @@ async def get_stats_by_type(
 ) -> dict[str, Any]:
     """Get memory statistics grouped by memory type"""
     try:
+        _require_real_database("memory stats by-type")
         pool = get_pool()
 
         rows = await pool.fetch("""
@@ -682,9 +719,14 @@ async def get_stats_by_type(
             "tenant_id": tenant_id
         }
 
+    except DatabaseUnavailableError as exc:
+        logger.error("Memory stats by-type unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to get stats by type: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to get stats by type: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get stats by type") from e
 
 
 @router.get("/id/{memory_id}")
@@ -700,6 +742,7 @@ async def get_memory(
         raise HTTPException(status_code=404, detail=f"Invalid memory ID format: {memory_id}")
 
     try:
+        _require_real_database("memory by-id")
         pool = get_pool()
 
         row = await pool.fetchrow("""
@@ -745,11 +788,14 @@ async def get_memory(
             "tenant_id": tenant_id
         }
 
+    except DatabaseUnavailableError as exc:
+        logger.error("Memory by-id unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get memory: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to get memory: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get memory") from e
 
 
 @router.delete("/id/{memory_id}")
@@ -765,6 +811,7 @@ async def delete_memory(
         raise HTTPException(status_code=404, detail=f"Invalid memory ID format: {memory_id}")
 
     try:
+        _require_real_database("memory delete")
         pool = get_pool()
 
         result = await pool.execute("""
@@ -784,11 +831,14 @@ async def delete_memory(
             "table": CANONICAL_TABLE
         }
 
+    except DatabaseUnavailableError as exc:
+        logger.error("Memory delete unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete memory: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to delete memory: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to delete memory") from e
 
 
 # =============================================================================

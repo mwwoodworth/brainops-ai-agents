@@ -707,9 +707,10 @@ class AutonomousRevenueSystem:
             logger.error(f"Failed to close deal: {e}")
             return False
 
-    async def run_revenue_workflow(self, lead_id: str):
+    async def run_revenue_workflow(self, lead_id: str, task: Optional[dict] = None):
         """Run complete autonomous revenue workflow for a lead"""
         try:
+            task = task or {}
             workflow_id = str(uuid.uuid4())
             self.active_workflows[workflow_id] = {
                 'lead_id': lead_id,
@@ -728,8 +729,17 @@ class AutonomousRevenueSystem:
             # 2. Send personalized outreach
             await self.create_personalized_outreach(lead_id)
 
-            # 3. Wait for response (simulated)
-            await asyncio.sleep(2)
+            # 3. Wait for response or timeout
+            response_timeout = task.get("response_timeout_seconds", 3600)
+            response_poll = task.get("response_poll_seconds", 60)
+            responded = await self._await_lead_response(
+                lead_id,
+                timeout_seconds=response_timeout,
+                poll_interval=response_poll
+            )
+            if not responded:
+                await self._schedule_nurture_campaign(lead_id)
+                return
 
             # 4. Generate proposal if qualified
             if score > 0.6:
@@ -797,6 +807,43 @@ class AutonomousRevenueSystem:
         except Exception as e:
             logger.error(f"Failed to store lead: {e}")
             return None
+
+    async def _await_lead_response(
+        self,
+        lead_id: str,
+        timeout_seconds: int = 3600,
+        poll_interval: int = 60
+    ) -> bool:
+        """Wait for a lead response recorded in lead_activities."""
+        deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
+
+        while datetime.now(timezone.utc) < deadline:
+            try:
+                conn = psycopg2.connect(**DB_CONFIG)
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
+                cursor.execute("""
+                    SELECT id, activity_type, event_type, created_at
+                    FROM lead_activities
+                    WHERE lead_id = %s
+                      AND (
+                        activity_type ILIKE '%%response%%'
+                        OR activity_type ILIKE '%%reply%%'
+                        OR event_type ILIKE '%%response%%'
+                        OR event_type ILIKE '%%reply%%'
+                      )
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (lead_id,))
+                row = cursor.fetchone()
+                cursor.close()
+                conn.close()
+                if row:
+                    return True
+            except Exception as e:
+                logger.warning(f"Lead response check failed: {e}")
+            await asyncio.sleep(poll_interval)
+
+        return False
 
     async def _log_action(self, lead_id: str, action: RevenueAction, data: dict):
         """Log revenue action"""

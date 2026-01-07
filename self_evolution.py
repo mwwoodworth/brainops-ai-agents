@@ -199,8 +199,7 @@ class SelfEvolution:
         """
         Propose high-level architectural changes based on current system state.
         """
-        # This would ideally take a graph of the codebase
-        # For now, we simulate it or use a high-level prompt
+        # Use AI core reasoning with the current architecture description.
         if not self.ai_core:
             return {"error": "AI Core not available"}
 
@@ -335,21 +334,78 @@ class SelfEvolution:
         """
         if not self.ai_core:
             return {"error": "AI Core missing"}
+        conn = self._get_db_connection()
+        if not conn:
+            return {"error": "No DB connection"}
 
-        # Gather recent significant events (errors, high-latency, successful complex tasks)
-        # This is a placeholder for a complex DB query across multiple tables
-        context = "Recent system events: High latency in ImageGenerationAgent. SQL timeout in ReportingAgent."
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("""
+                SELECT event_type, COUNT(*) as count
+                FROM ai_events
+                WHERE created_at > NOW() - INTERVAL '24 hours'
+                GROUP BY event_type
+                ORDER BY count DESC
+                LIMIT 10
+            """)
+            ai_event_summary = cur.fetchall()
 
-        prompt = f"""
-        Synthesize the following system events into a coherent insight:
-        {context}
+            cur.execute("""
+                SELECT event_type, COUNT(*) as count
+                FROM os_events
+                WHERE created_at > NOW() - INTERVAL '24 hours'
+                GROUP BY event_type
+                ORDER BY count DESC
+                LIMIT 10
+            """)
+            os_event_summary = cur.fetchall()
 
-        What is the underlying pattern?
-        """
+            cur.execute("""
+                SELECT agent_name, COUNT(*) as failures
+                FROM ai_agent_executions
+                WHERE created_at > NOW() - INTERVAL '24 hours'
+                  AND status = 'failed'
+                GROUP BY agent_name
+                ORDER BY failures DESC
+                LIMIT 5
+            """)
+            failure_summary = cur.fetchall()
 
-        response_dict = await self.ai_core.reason(problem=prompt)
-        insight = response_dict.get("conclusion") or response_dict.get("reasoning")
-        return {"insight": insight, "timestamp": datetime.utcnow().isoformat()}
+            cur.execute("""
+                SELECT agent_name, AVG(execution_time_ms) as avg_latency_ms
+                FROM ai_agent_executions
+                WHERE created_at > NOW() - INTERVAL '24 hours'
+                GROUP BY agent_name
+                ORDER BY avg_latency_ms DESC NULLS LAST
+                LIMIT 5
+            """)
+            latency_summary = cur.fetchall()
+
+            cur.close()
+            conn.close()
+
+            context = {
+                "ai_events": [dict(row) for row in ai_event_summary],
+                "os_events": [dict(row) for row in os_event_summary],
+                "failures": [dict(row) for row in failure_summary],
+                "latency": [dict(row) for row in latency_summary],
+            }
+
+            prompt = (
+                "Synthesize the following system signals into a concise insight. "
+                "Identify the dominant pattern, likely root cause, and the next best action.\n\n"
+                f"{json.dumps(context, default=str)}"
+            )
+
+            response_dict = await self.ai_core.reason(problem=prompt, context=context)
+            insight = response_dict.get("conclusion") or response_dict.get("reasoning")
+            return {"insight": insight, "timestamp": datetime.utcnow().isoformat(), "signals": context}
+
+        except Exception as e:
+            logger.error("Knowledge synthesis failed: %s", e)
+            if conn:
+                conn.close()
+            return {"error": str(e)}
 
     async def implement_safe_changes(self, change_proposal: dict[str, Any]) -> bool:
         """
@@ -362,24 +418,121 @@ class SelfEvolution:
             logger.warning("Change rejected: High risk detected.")
             return False
 
-        # 2. Dry Run (Simulation)
-        # In a real implementation, this would spin up a test environment
+        # 2. Execution (SQL or MCP-driven)
+        sql_changes = change_proposal.get("sql") or change_proposal.get("sql_statements")
+        if sql_changes:
+            statements = sql_changes if isinstance(sql_changes, list) else [sql_changes]
+            conn = self._get_db_connection()
+            if not conn:
+                return False
+            try:
+                cur = conn.cursor()
+                for stmt in statements:
+                    cur.execute(stmt)
+                if change_proposal.get("dry_run"):
+                    conn.rollback()
+                    logger.info("Dry run complete - changes rolled back.")
+                else:
+                    conn.commit()
+                    logger.info("SQL changes committed.")
+                cur.close()
+                conn.close()
+                return True
+            except Exception as e:
+                logger.error(f"SQL change execution failed: {e}")
+                conn.rollback()
+                conn.close()
+                return False
 
-        # 3. Execution
-        # This would call the MCP Bridge or specific actuation code
-        logger.info("Change executed successfully (Simulated).")
-        return True
+        mcp_request = change_proposal.get("mcp")
+        if mcp_request:
+            try:
+                from mcp_integration import get_mcp_client
+                mcp = get_mcp_client()
+                server = mcp_request.get("server")
+                tool = mcp_request.get("tool")
+                params = mcp_request.get("params", {})
+                if not server or not tool:
+                    logger.error("MCP request missing server/tool.")
+                    return False
+                result = await mcp.execute_tool(server, tool, params)
+                logger.info("MCP change executed: %s", result.success)
+                return result.success
+            except Exception as e:
+                logger.error(f"MCP change execution failed: {e}")
+                return False
+
+        logger.error("No executable change proposal provided.")
+        return False
 
     async def measure_impact(self, change_id: str, metric: str) -> dict[str, float]:
         """
         Compare a metric before and after a change.
         """
-        # Placeholder logic
-        return {
-            "before": 100.0,
-            "after": 95.0,
-            "improvement": "5%"
-        }
+        conn = self._get_db_connection()
+        if not conn:
+            return {"error": "No DB connection"}
+
+        metric_key = (metric or "").lower()
+        if metric_key not in {"error_rate", "avg_latency_ms", "total_requests"}:
+            return {"error": f"Unsupported metric: {metric}"}
+
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            change_time = None
+            for table in ("ai_code_changes", "code_changes", "claude_code_changes"):
+                cur.execute(f"SELECT created_at FROM {table} WHERE id = %s LIMIT 1", (change_id,))
+                row = cur.fetchone()
+                if row and row.get("created_at"):
+                    change_time = row["created_at"]
+                    break
+
+            if not change_time:
+                cur.execute("SELECT NOW() - INTERVAL '24 hours' AS change_time")
+                change_time = cur.fetchone()["change_time"]
+
+            cur.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failures,
+                    AVG(execution_time_ms) as avg_latency
+                FROM ai_agent_executions
+                WHERE created_at BETWEEN %s - INTERVAL '24 hours' AND %s
+            """, (change_time, change_time))
+            before = cur.fetchone()
+
+            cur.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failures,
+                    AVG(execution_time_ms) as avg_latency
+                FROM ai_agent_executions
+                WHERE created_at BETWEEN %s AND %s + INTERVAL '24 hours'
+            """, (change_time, change_time))
+            after = cur.fetchone()
+
+            cur.close()
+            conn.close()
+
+            def metric_value(row):
+                if metric_key == "total_requests":
+                    return float(row.get("total") or 0)
+                if metric_key == "avg_latency_ms":
+                    return float(row.get("avg_latency") or 0)
+                failures = float(row.get("failures") or 0)
+                total = float(row.get("total") or 0) or 1.0
+                return failures / total
+
+            return {
+                "before": metric_value(before),
+                "after": metric_value(after),
+            }
+
+        except Exception as e:
+            logger.error(f"Impact measurement failed: {e}")
+            if conn:
+                conn.close()
+            return {"error": str(e)}
 
 if __name__ == "__main__":
     # Quick test if run directly

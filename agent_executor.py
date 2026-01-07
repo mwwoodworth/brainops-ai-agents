@@ -9,6 +9,7 @@ ASYNC VERSION: Uses asyncpg via database.async_connection pool
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -38,6 +39,21 @@ if ENVIRONMENT == "production":
 STRICT_AGENT_EXECUTION = os.getenv("BRAINOPS_STRICT_AGENT_EXECUTION", "").lower() in ("1", "true", "yes")
 if STRICT_STARTUP:
     STRICT_AGENT_EXECUTION = True
+
+_reasoning_guard_env = os.getenv("ENABLE_REASONING_GUARD")
+if _reasoning_guard_env is None:
+    ENABLE_REASONING_GUARD = ENVIRONMENT == "production"
+else:
+    ENABLE_REASONING_GUARD = _reasoning_guard_env.lower() in ("1", "true", "yes")
+
+REASONING_GUARD_CONFIDENCE_THRESHOLD = float(
+    os.getenv("REASONING_GUARD_CONFIDENCE_THRESHOLD", "0.7")
+)
+REASONING_GUARD_FAIL_OPEN = os.getenv("REASONING_GUARD_FAIL_OPEN", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 
 def _handle_optional_import(feature: str, exc: Exception) -> None:
@@ -529,6 +545,112 @@ class AgentExecutor:
 
         return agent_matches or type_matches or action_matches
 
+    def _redact_sensitive(self, payload: Any) -> Any:
+        """Redact obvious secrets before sending to reasoning guard or audits."""
+        if isinstance(payload, dict):
+            redacted = {}
+            for key, value in payload.items():
+                key_lower = str(key).lower()
+                if any(token in key_lower for token in ("api_key", "secret", "token", "password", "authorization")):
+                    redacted[key] = "[REDACTED]"
+                else:
+                    redacted[key] = self._redact_sensitive(value)
+            return redacted
+        if isinstance(payload, list):
+            return [self._redact_sensitive(item) for item in payload]
+        return payload
+
+    async def _run_reasoning_guard(
+        self, agent_name: str, task: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Run a reasoning + critique guard for high-stakes actions."""
+        if not ENABLE_REASONING_GUARD or not ai_core:
+            return {"block": None, "reasoning": None, "critique": None}
+
+        task_id = str(task.get("id") or task.get("task_id") or uuid.uuid4())
+        task_context = self._redact_sensitive(task)
+
+        reasoning_prompt = (
+            "You are the BrainOps Reasoning Guard.\n"
+            "Analyze the task and respond ONLY with JSON:\n"
+            "{\n"
+            '  "confidence": 0-100,\n'
+            '  "recommendation": "act" | "defer" | "ask_human",\n'
+            '  "risks": ["..."],\n'
+            '  "missing_info": ["..."],\n'
+            '  "reversible": true | false,\n'
+            '  "reasoning": "short rationale"\n'
+            "}\n"
+            f"Task: {json.dumps(task_context, default=str)[:2000]}"
+        )
+
+        reasoning_result = await ai_core.reason(
+            problem=reasoning_prompt,
+            context={"agent": agent_name, "task_id": task_id},
+            max_tokens=800,
+            model="o3-mini",
+        )
+        reasoning_json = ai_core._safe_json(reasoning_result.get("reasoning", ""))
+
+        if not reasoning_json:
+            if REASONING_GUARD_FAIL_OPEN:
+                return {"block": None, "reasoning": None, "critique": None}
+            block = {
+                "status": "manual_approval_required",
+                "agent": agent_name,
+                "reason": "Reasoning guard could not parse response",
+                "task_id": task_id,
+            }
+            await self._store_reasoning_audit(agent_name, task_context, None, None, "blocked")
+            return {"block": block, "reasoning": None, "critique": None}
+
+        critique_prompt = (
+            "You are the harsh critic for the BrainOps Reasoning Guard.\n"
+            "Review the reasoning JSON and respond ONLY with JSON:\n"
+            "{\n"
+            '  "severity": "low" | "medium" | "high",\n'
+            '  "block": true | false,\n'
+            '  "issues": ["..."]\n'
+            "}\n"
+            f"Reasoning: {json.dumps(reasoning_json, default=str)[:2000]}"
+        )
+
+        critique_text = await ai_core.generate(
+            critique_prompt,
+            intent="analysis",
+            allow_expensive=False,
+            temperature=0.0,
+            max_tokens=400,
+        )
+        critique_json = ai_core._safe_json(critique_text)
+
+        confidence_raw = reasoning_json.get("confidence", 0)
+        confidence = float(confidence_raw) / 100.0 if confidence_raw else 0.0
+        severity = (critique_json or {}).get("severity", "low")
+        block_requested = bool((critique_json or {}).get("block"))
+
+        block = None
+        if confidence < REASONING_GUARD_CONFIDENCE_THRESHOLD or severity == "high" or block_requested:
+            block = {
+                "status": "manual_approval_required",
+                "agent": agent_name,
+                "reason": "Reasoning guard flagged risk",
+                "confidence": confidence,
+                "task_id": task_id,
+                "reasoning": reasoning_json,
+                "critique": critique_json,
+            }
+
+        await self._store_reasoning_audit(
+            agent_name,
+            task_context,
+            reasoning_json,
+            critique_json,
+            "blocked" if block else "allowed",
+        )
+
+        return {"block": block, "reasoning": reasoning_json, "critique": critique_json}
+
     async def _run_confidence_assessment(
         self, agent_name: str, task: dict[str, Any]
     ) -> dict[str, Any]:
@@ -631,6 +753,45 @@ class AgentExecutor:
         except Exception as e:
             logger.warning(f"Failed to store self-awareness audit: {e}")
 
+    async def _store_reasoning_audit(
+        self,
+        agent_name: str,
+        task: dict[str, Any],
+        reasoning: Optional[dict[str, Any]],
+        critique: Optional[dict[str, Any]],
+        decision: str,
+    ) -> None:
+        """Persist reasoning guard output for auditability."""
+        try:
+            pool = get_pool()
+
+            await pool.execute("""
+                CREATE TABLE IF NOT EXISTS agent_reasoning_audits (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    agent_name TEXT NOT NULL,
+                    task JSONB,
+                    reasoning JSONB,
+                    critique JSONB,
+                    decision TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+
+            await pool.execute(
+                """
+                INSERT INTO agent_reasoning_audits (
+                    agent_name, task, reasoning, critique, decision, created_at
+                ) VALUES ($1, $2, $3, $4, $5, NOW())
+                """,
+                agent_name,
+                json.dumps(task, default=str),
+                json.dumps(reasoning or {}, default=str),
+                json.dumps(critique or {}, default=str),
+                decision,
+            )
+        except Exception as exc:
+            logger.warning("Failed to store reasoning audit: %s", exc)
+
     def _load_agent_implementations(self):
         """Load all agent implementations"""
         # DevOps Agents
@@ -654,6 +815,19 @@ class AgentExecutor:
         self.agents['ContractGenerator'] = ContractGeneratorAgent()
         self.agents['ProposalGenerator'] = ProposalGeneratorAgent()
         self.agents['ReportingAgent'] = ReportingAgent()
+
+        # Operations/Interface Agents
+        self.agents['SecurityMonitor'] = SecurityMonitorAgent()
+        self.agents['WarehouseMonitor'] = WarehouseMonitorAgent()
+        self.agents['TrainingAgent'] = TrainingAgent()
+        self.agents['VendorAgent'] = VendorAgent()
+        self.agents['WarrantyAgent'] = WarrantyAgent()
+        self.agents['PayrollAgent'] = PayrollAgent()
+        self.agents['SEOOptimizer'] = SEOOptimizerAgent()
+        self.agents['TaxCalculator'] = TaxCalculatorAgent()
+        self.agents['TranslationProcessor'] = TranslationProcessorAgent()
+        self.agents['SMSInterface'] = SMSInterfaceAgent()
+        self.agents['VoiceInterface'] = VoiceInterfaceAgent()
 
         # Meta Agent
         self.agents['SelfBuilder'] = SelfBuildingAgent()
@@ -818,6 +992,64 @@ class AgentExecutor:
 
         # Chat/Interface
         'ChatInterface': 'CustomerSuccess',
+        'SMSInterface': 'SMSInterface',
+        'VoiceInterface': 'VoiceInterface',
+        'VoiceAssistant': 'VoiceInterface',
+        'SMSAutomation': 'SMSInterface',
+        'TranslationService': 'TranslationProcessor',
+        'TranslationProcessor': 'TranslationProcessor',
+
+        # Ops aliases from deployment registries
+        'CampaignManager': 'CampaignAgent',
+        'PayrollProcessor': 'PayrollAgent',
+        'InventoryManager': 'InventoryAgent',
+        'DispatchOptimizer': 'SchedulingAgent',
+        'RouteOptimizer': 'SchedulingAgent',
+        'QualityAssurance': 'Monitor',
+        'SafetyCompliance': 'ComplianceAgent',
+        'RegulatoryCompliance': 'ComplianceAgent',
+        'BudgetForecaster': 'RevenueOptimizer',
+        'CashFlowManager': 'RevenueOptimizer',
+        'ProfitMaximizer': 'RevenueOptimizer',
+        'CostReduction': 'RevenueOptimizer',
+        'BillingAutomation': 'InvoicingAgent',
+        'CollectionAgent': 'InvoicingAgent',
+        'LeadGenerator': 'LeadDiscoveryAgentReal',
+        'SocialMediaBot': 'SocialMedia',
+        'EmailMarketing': 'EmailMarketingAgent',
+        'ContentCreator': 'SocialMedia',
+        'BrandManager': 'SocialMedia',
+        'CustomerAcquisition': 'Outreach',
+        'SalesForecaster': 'PredictiveAnalyzer',
+        'ConversionOptimizer': 'Conversion',
+        'PredictiveAnalytics': 'PredictiveAnalyzer',
+        'ReportGenerator': 'ReportingAgent',
+        'DashboardManager': 'Monitor',
+        'MetricsTracker': 'MetricsCalculator',
+        'InsightsEngine': 'PredictiveAnalyzer',
+        'TrendAnalyzer': 'PredictiveAnalyzer',
+        'DataValidator': 'ComplianceAgent',
+        'AnomalyDetector': 'Monitor',
+        'ForecastEngine': 'PredictiveAnalyzer',
+        'ChatbotAgent': 'CustomerSuccess',
+        'NotificationManager': 'NotificationAgent',
+        'ContractManager': 'ContractGenerator',
+        'PermitTracker': 'CustomerAgent',
+        'InsuranceManager': 'CustomerAgent',
+        'WarrantyTracker': 'WarrantyAgent',
+        'VendorManager': 'VendorAgent',
+        'LogisticsCoordinator': 'SchedulingAgent',
+        'WarehouseOptimizer': 'WarehouseMonitor',
+        'DeliveryTracker': 'CustomerAgent',
+        'OnboardingManager': 'OnboardingAgent',
+        'TrainingCoordinator': 'TrainingAgent',
+        'PerformanceEvaluator': 'MetricsCalculator',
+        'BenefitsAdministrator': 'CustomerAgent',
+        'SecurityAgent': 'SecurityMonitor',
+        'BackupManager': 'SystemMonitor',
+        'IntegrationHub': 'SystemMonitor',
+        'APIManager': 'Monitor',
+        'WorkflowAutomation': 'WorkflowEngine',
     }
 
     def _resolve_agent_name(self, agent_name: str) -> str:
@@ -840,7 +1072,7 @@ class AgentExecutor:
             # If alias target doesn't exist, fall back to fallback chain
             logger.warning(f"Agent alias {agent_name} -> {resolved} but {resolved} not loaded")
 
-        # Return original name (will fall back to AI simulation)
+        # Return original name; caller will enforce implementation availability.
         return agent_name
 
     def _get_workflow_runner(self):
@@ -1016,6 +1248,28 @@ class AgentExecutor:
             if assessment_context:
                 task["self_awareness"] = asdict(assessment_context)
 
+            reasoning_result = await self._run_reasoning_guard(agent_name, task)
+            if reasoning_result.get("block"):
+                precheck_block = reasoning_result["block"]
+                if not skip_db_log:
+                    total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
+                    await self._log_ai_agent_execution_end(
+                        execution_id,
+                        agent_name,
+                        task_type,
+                        task,
+                        precheck_block,
+                        "manual_approval_required",
+                        total_duration_ms,
+                        None,
+                    )
+                return precheck_block
+            if reasoning_result.get("reasoning") or reasoning_result.get("critique"):
+                task["reasoning_guard"] = {
+                    "reasoning": reasoning_result.get("reasoning"),
+                    "critique": reasoning_result.get("critique"),
+                }
+
         # Optional LangGraph workflow with review/quality loops
         if LANGGRAPH_AVAILABLE and (
             task.get("use_langgraph")
@@ -1111,6 +1365,11 @@ class AgentExecutor:
                 found_in_registry=resolved_agent_name in self.agents
             )
 
+            if resolved_agent_name not in self.agents:
+                raise RuntimeError(
+                    f"Agent '{agent_name}' is not implemented and no fallback is allowed."
+                )
+
             for attempt in range(RETRY_ATTEMPTS):
                 attempt_start = datetime.now(timezone.utc)
                 try:
@@ -1120,8 +1379,9 @@ class AgentExecutor:
                         result["_original_agent"] = original_agent_name
                         result["_resolved_agent"] = resolved_agent_name
                     else:
-                        # Fallback to generic execution
-                        result = await self._generic_execute(agent_name, task)
+                        raise RuntimeError(
+                            f"Agent '{agent_name}' is not implemented and no fallback is allowed."
+                        )
 
                     # Log successful attempt
                     attempt_duration = (datetime.now(timezone.utc) - attempt_start).total_seconds() * 1000
@@ -1269,59 +1529,10 @@ class AgentExecutor:
             raise
 
     async def _generic_execute(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
-        """Generic execution using Real AI when no specific agent exists.
-
-        IMPORTANT: This is a fallback for unimplemented agents.
-        Returns 'ai_simulated' status to make it clear this is NOT a real agent execution.
-        Callers should check the status and handle appropriately.
-        """
-        if STRICT_AGENT_EXECUTION:
-            raise RuntimeError(
-                f"Agent '{agent_name}' is not implemented. Strict execution forbids AI simulation fallback."
-            )
-        if USE_REAL_AI:
-            try:
-                prompt = f"""
-                You are the '{agent_name}'.
-                Task: {json.dumps(task, default=str)}
-
-                Execute this task to the best of your ability.
-                Return a JSON object with the results.
-                """
-                response = await ai_core.generate(prompt, model="gpt-4-turbo-preview")
-
-                # Try to parse as JSON
-                import re
-                json_match = re.search(r'\{[\s\S]*?\}', response)
-                result_data = json.loads(json_match.group()) if json_match else {"response": response}
-
-                return {
-                    "status": "ai_simulated",  # Changed from "completed" - makes simulation visible
-                    "agent": agent_name,
-                    "result": result_data,
-                    "ai_generated": True,
-                    "warning": f"Agent '{agent_name}' not implemented - response generated by AI simulation",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-            except Exception as e:
-                logger.warning(f"Generic AI execution failed: {e}")
-                # Don't mask the failure - return failed status
-                return {
-                    "status": "failed",
-                    "agent": agent_name,
-                    "error": f"Agent '{agent_name}' not implemented and AI fallback failed: {str(e)}",
-                    "task": task,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-
-        # No AI available - clearly indicate this is not a real execution
-        return {
-            "status": "not_implemented",
-            "agent": agent_name,
-            "error": f"Agent '{agent_name}' is not implemented and no AI fallback is available",
-            "task": task,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
+        """Generic execution is disabled to prevent simulated responses."""
+        raise RuntimeError(
+            f"Agent '{agent_name}' is not implemented and no fallback is allowed."
+        )
 
 
 # ============== BASE AGENT CLASS ==============
@@ -1494,7 +1705,9 @@ class LangGraphWorkflowRunner:
         if agent:
             result = await agent.execute(state["task"])
         else:
-            result = await self.executor._generic_execute(agent_name, state["task"])
+            raise RuntimeError(
+                f"Agent '{agent_name}' is not implemented and no fallback is allowed."
+            )
 
         state["result"] = result
         state["metadata"]["last_run_at"] = datetime.now(timezone.utc).isoformat()
@@ -1606,7 +1819,7 @@ class LangGraphWorkflowRunner:
     async def run(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
         """Public entrypoint for LangGraph-enhanced execution."""
         if not self.workflow:
-            return await self.executor._generic_execute(agent_name, task)
+            return await self.executor.execute(agent_name, task)
 
         initial_state: LangGraphWorkflowState = {
             "task": task,
@@ -5788,6 +6001,824 @@ class MetricsCalculatorAgent(BaseAgent):
                 return {"status": "error", "error": f"Unknown metric: {metric_name}"}
         except Exception as e:
             return {"status": "error", "error": str(e)}
+
+
+class SecurityMonitorAgent(BaseAgent):
+    """Security monitoring agent using live security_events data"""
+
+    def __init__(self):
+        super().__init__("SecurityMonitor", "security")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        action = task.get("action", task.get("type", "overview"))
+        if action == "recent":
+            return await self.get_recent_events(limit=int(task.get("limit", 20)))
+        if action == "unresolved":
+            return await self.get_unresolved_events()
+        return await self.get_overview()
+
+    async def get_overview(self) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            severity_counts = await pool.fetch("""
+                SELECT severity, COUNT(*) as count
+                FROM security_events
+                WHERE created_at > NOW() - INTERVAL '30 days'
+                GROUP BY severity
+                ORDER BY count DESC
+            """)
+            unresolved = await pool.fetchval("""
+                SELECT COUNT(*) FROM security_events
+                WHERE resolved IS NOT TRUE
+            """)
+            recent = await pool.fetch("""
+                SELECT id, event_type, severity, ip_address, request_path, created_at
+                FROM security_events
+                ORDER BY created_at DESC
+                LIMIT 20
+            """)
+            return {
+                "status": "completed",
+                "unresolved_count": unresolved or 0,
+                "severity_breakdown": [dict(row) for row in severity_counts],
+                "recent_events": [dict(row) for row in recent],
+                "data_source": "security_events"
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_recent_events(self, limit: int = 20) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            events = await pool.fetch("""
+                SELECT id, event_type, severity, ip_address, request_path, created_at
+                FROM security_events
+                ORDER BY created_at DESC
+                LIMIT $1
+            """, max(1, min(limit, 200)))
+            return {"status": "completed", "events": [dict(row) for row in events]}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_unresolved_events(self) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            events = await pool.fetch("""
+                SELECT id, event_type, severity, ip_address, request_path, created_at
+                FROM security_events
+                WHERE resolved IS NOT TRUE
+                ORDER BY created_at DESC
+                LIMIT 50
+            """)
+            return {"status": "completed", "events": [dict(row) for row in events]}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+
+class WarehouseMonitorAgent(BaseAgent):
+    """Warehouse monitoring agent using live inventory and activity logs"""
+
+    def __init__(self):
+        super().__init__("WarehouseMonitor", "operations")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        action = task.get("action", task.get("type", "overview"))
+        if action == "low_stock":
+            threshold = int(task.get("threshold", 5))
+            return await self.get_low_stock(threshold)
+        if action == "activity":
+            return await self.get_recent_activity(limit=int(task.get("limit", 50)))
+        return await self.get_overview()
+
+    async def get_overview(self) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            totals = await pool.fetchrow("""
+                SELECT
+                    COUNT(*) as item_records,
+                    COALESCE(SUM(available_quantity), 0) as available_units,
+                    COALESCE(SUM(total_value), 0) as total_value
+                FROM warehouse_inventory
+            """)
+            low_stock = await pool.fetchval("""
+                SELECT COUNT(*) FROM warehouse_inventory
+                WHERE available_quantity <= 5
+            """)
+            activity = await pool.fetch("""
+                SELECT id, activity_type, description, quantity, created_at
+                FROM warehouse_activity_log
+                ORDER BY created_at DESC
+                LIMIT 20
+            """)
+            return {
+                "status": "completed",
+                "inventory_totals": dict(totals) if totals else {},
+                "low_stock_count": low_stock or 0,
+                "recent_activity": [dict(row) for row in activity],
+                "data_source": "warehouse_inventory"
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_low_stock(self, threshold: int) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            items = await pool.fetch("""
+                SELECT id, item_id, warehouse_id, available_quantity, unit_of_measure, updated_at
+                FROM warehouse_inventory
+                WHERE available_quantity <= $1
+                ORDER BY available_quantity ASC
+                LIMIT 100
+            """, max(0, threshold))
+            return {"status": "completed", "low_stock": [dict(row) for row in items]}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_recent_activity(self, limit: int = 50) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            activity = await pool.fetch("""
+                SELECT id, activity_type, description, quantity, created_at
+                FROM warehouse_activity_log
+                ORDER BY created_at DESC
+                LIMIT $1
+            """, max(1, min(limit, 200)))
+            return {"status": "completed", "activity": [dict(row) for row in activity]}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+
+class TrainingAgent(BaseAgent):
+    """Training compliance agent using training_records and training_compliance"""
+
+    def __init__(self):
+        super().__init__("TrainingAgent", "training")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        action = task.get("action", task.get("type", "overview"))
+        if action == "expiring":
+            days = int(task.get("days", 30))
+            return await self.get_expiring_trainings(days)
+        if action == "compliance":
+            return await self.get_compliance_status()
+        return await self.get_overview()
+
+    async def get_overview(self) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            status_counts = await pool.fetch("""
+                SELECT status, COUNT(*) as count
+                FROM training_records
+                GROUP BY status
+                ORDER BY count DESC
+            """)
+            expiring = await pool.fetchval("""
+                SELECT COUNT(*) FROM training_records
+                WHERE expiry_date IS NOT NULL
+                  AND expiry_date <= NOW() + INTERVAL '30 days'
+            """)
+            compliance = await pool.fetch("""
+                SELECT status, COUNT(*) as count
+                FROM training_compliance
+                GROUP BY status
+                ORDER BY count DESC
+            """)
+            return {
+                "status": "completed",
+                "training_status": [dict(row) for row in status_counts],
+                "expiring_30d": expiring or 0,
+                "compliance_status": [dict(row) for row in compliance]
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_expiring_trainings(self, days: int) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            records = await pool.fetch("""
+                SELECT id, employee_id, training_name, expiry_date, status
+                FROM training_records
+                WHERE expiry_date IS NOT NULL
+                  AND expiry_date <= NOW() + ($1 || ' days')::interval
+                ORDER BY expiry_date ASC
+                LIMIT 100
+            """, max(1, min(days, 365)))
+            return {"status": "completed", "expiring": [dict(row) for row in records]}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_compliance_status(self) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            rows = await pool.fetch("""
+                SELECT id, name, status, updated_at
+                FROM training_compliance
+                ORDER BY updated_at DESC
+                LIMIT 50
+            """)
+            return {"status": "completed", "compliance": [dict(row) for row in rows]}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+
+class VendorAgent(BaseAgent):
+    """Vendor operations agent using vendors and vendor_bills"""
+
+    def __init__(self):
+        super().__init__("VendorAgent", "finance")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        action = task.get("action", task.get("type", "overview"))
+        if action == "open_bills":
+            return await self.get_open_bills(limit=int(task.get("limit", 50)))
+        return await self.get_overview()
+
+    async def get_overview(self) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            vendor_count = await pool.fetchval("SELECT COUNT(*) FROM vendors")
+            open_bills = await pool.fetchrow("""
+                SELECT
+                    COUNT(*) as open_bills,
+                    COALESCE(SUM(amount_due), 0) as total_due
+                FROM vendor_bills
+                WHERE COALESCE(status, '') NOT IN ('paid', 'void', 'closed')
+            """)
+            due_soon = await pool.fetch("""
+                SELECT id, vendor_id, bill_number, amount_due, due_date, status
+                FROM vendor_bills
+                WHERE due_date IS NOT NULL
+                  AND due_date <= NOW() + INTERVAL '14 days'
+                  AND COALESCE(status, '') NOT IN ('paid', 'void', 'closed')
+                ORDER BY due_date ASC
+                LIMIT 20
+            """)
+            return {
+                "status": "completed",
+                "vendor_count": vendor_count or 0,
+                "open_bills": dict(open_bills) if open_bills else {},
+                "due_soon": [dict(row) for row in due_soon]
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_open_bills(self, limit: int = 50) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            rows = await pool.fetch("""
+                SELECT id, vendor_id, bill_number, amount_due, due_date, status
+                FROM vendor_bills
+                WHERE COALESCE(status, '') NOT IN ('paid', 'void', 'closed')
+                ORDER BY due_date ASC NULLS LAST
+                LIMIT $1
+            """, max(1, min(limit, 200)))
+            return {"status": "completed", "bills": [dict(row) for row in rows]}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+
+class WarrantyAgent(BaseAgent):
+    """Warranty claims agent using warranty_claims and warranty_tracking"""
+
+    def __init__(self):
+        super().__init__("WarrantyAgent", "warranty")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        action = task.get("action", task.get("type", "overview"))
+        if action == "open_claims":
+            return await self.get_open_claims(limit=int(task.get("limit", 50)))
+        return await self.get_overview()
+
+    async def get_overview(self) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            status_counts = await pool.fetch("""
+                SELECT status, COUNT(*) as count
+                FROM warranty_claims
+                GROUP BY status
+                ORDER BY count DESC
+            """)
+            recent = await pool.fetch("""
+                SELECT id, claim_number, status, claim_date, estimated_cost, actual_cost
+                FROM warranty_claims
+                ORDER BY claim_date DESC NULLS LAST
+                LIMIT 20
+            """)
+            tracking = await pool.fetch("""
+                SELECT id, name, status, updated_at
+                FROM warranty_tracking
+                ORDER BY updated_at DESC
+                LIMIT 20
+            """)
+            return {
+                "status": "completed",
+                "claim_status": [dict(row) for row in status_counts],
+                "recent_claims": [dict(row) for row in recent],
+                "tracking": [dict(row) for row in tracking]
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_open_claims(self, limit: int = 50) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            rows = await pool.fetch("""
+                SELECT id, claim_number, status, claim_date, issue_description
+                FROM warranty_claims
+                WHERE COALESCE(status, '') NOT IN ('closed', 'resolved', 'denied')
+                ORDER BY claim_date DESC NULLS LAST
+                LIMIT $1
+            """, max(1, min(limit, 200)))
+            return {"status": "completed", "claims": [dict(row) for row in rows]}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+
+class PayrollAgent(BaseAgent):
+    """Payroll analytics agent using payroll_periods and payroll_records"""
+
+    def __init__(self):
+        super().__init__("PayrollAgent", "finance")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        action = task.get("action", task.get("type", "overview"))
+        if action == "period":
+            return await self.get_latest_period()
+        return await self.get_overview()
+
+    async def get_overview(self) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            latest = await pool.fetchrow("""
+                SELECT *
+                FROM payroll_periods
+                ORDER BY period_end DESC NULLS LAST
+                LIMIT 1
+            """)
+            totals = None
+            if latest:
+                totals = await pool.fetchrow("""
+                    SELECT
+                        COUNT(*) as record_count,
+                        COALESCE(SUM(gross_pay), 0) as gross_pay,
+                        COALESCE(SUM(total_deductions), 0) as total_deductions,
+                        COALESCE(SUM(net_pay), 0) as net_pay
+                    FROM payroll_records
+                    WHERE payroll_period_id = $1
+                """, latest["id"])
+            return {
+                "status": "completed",
+                "latest_period": dict(latest) if latest else None,
+                "latest_totals": dict(totals) if totals else None
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_latest_period(self) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            period = await pool.fetchrow("""
+                SELECT *
+                FROM payroll_periods
+                ORDER BY period_end DESC NULLS LAST
+                LIMIT 1
+            """)
+            return {"status": "completed", "period": dict(period) if period else None}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+
+class SEOOptimizerAgent(BaseAgent):
+    """SEO optimization agent using seo_tools and AI recommendations"""
+
+    def __init__(self):
+        super().__init__("SEOOptimizer", "marketing")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        action = task.get("action", task.get("type", "overview"))
+        if action == "audit":
+            return await self.get_audit()
+        if action == "recommendations":
+            return await self.get_recommendations()
+        return await self.get_overview()
+
+    async def get_overview(self) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            status_counts = await pool.fetch("""
+                SELECT status, COUNT(*) as count
+                FROM seo_tools
+                GROUP BY status
+                ORDER BY count DESC
+            """)
+            recent = await pool.fetch("""
+                SELECT id, name, status, updated_at
+                FROM seo_tools
+                ORDER BY updated_at DESC NULLS LAST
+                LIMIT 20
+            """)
+            return {
+                "status": "completed",
+                "tool_status": [dict(row) for row in status_counts],
+                "recent_tools": [dict(row) for row in recent]
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_audit(self) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            stale = await pool.fetch("""
+                SELECT id, name, status, updated_at
+                FROM seo_tools
+                WHERE updated_at IS NULL
+                   OR updated_at < NOW() - INTERVAL '30 days'
+                ORDER BY updated_at ASC NULLS FIRST
+                LIMIT 50
+            """)
+            return {"status": "completed", "stale_tools": [dict(row) for row in stale]}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_recommendations(self) -> dict[str, Any]:
+        try:
+            overview = await self.get_overview()
+            if overview.get("status") != "completed":
+                return overview
+            if not USE_REAL_AI or not ai_core:
+                return {
+                    "status": "error",
+                    "error": "AI core not configured for SEO recommendations"
+                }
+            prompt = (
+                "You are an SEO operations analyst. Review the tool status and "
+                "propose 3 concrete, actionable improvements for the SEO stack.\n\n"
+                f"{json.dumps(overview, default=str)}"
+            )
+            recommendation_text = await ai_core.generate(prompt, model="gpt-4o-mini")
+            return {
+                "status": "completed",
+                "recommendations": recommendation_text
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+
+class TaxCalculatorAgent(BaseAgent):
+    """Tax calculation agent using tax_rates"""
+
+    def __init__(self):
+        super().__init__("TaxCalculator", "finance")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        action = task.get("action", task.get("type", "calculate"))
+        if action == "list_rates":
+            return await self.list_rates(task.get("jurisdiction"))
+        return await self.calculate_tax(task)
+
+    async def list_rates(self, jurisdiction: Optional[str] = None) -> dict[str, Any]:
+        try:
+            pool = get_pool()
+            if jurisdiction:
+                rows = await pool.fetch("""
+                    SELECT tax_name, rate, tax_type, jurisdiction, effective_date, end_date
+                    FROM tax_rates
+                    WHERE is_active = true
+                      AND (jurisdiction = $1 OR tax_name = $1)
+                    ORDER BY effective_date DESC NULLS LAST
+                """, jurisdiction)
+            else:
+                rows = await pool.fetch("""
+                    SELECT tax_name, rate, tax_type, jurisdiction, effective_date, end_date
+                    FROM tax_rates
+                    WHERE is_active = true
+                    ORDER BY effective_date DESC NULLS LAST
+                    LIMIT 100
+                """)
+            return {"status": "completed", "rates": [dict(row) for row in rows]}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def calculate_tax(self, task: dict[str, Any]) -> dict[str, Any]:
+        amount = task.get("amount")
+        if amount is None:
+            return {"status": "error", "error": "amount is required"}
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError):
+            return {"status": "error", "error": "amount must be numeric"}
+
+        jurisdiction = task.get("jurisdiction") or task.get("tax_name")
+        try:
+            pool = get_pool()
+            if jurisdiction:
+                rows = await pool.fetch("""
+                    SELECT tax_name, rate, tax_type, jurisdiction
+                    FROM tax_rates
+                    WHERE is_active = true
+                      AND (jurisdiction = $1 OR tax_name = $1)
+                      AND (effective_date IS NULL OR effective_date <= NOW())
+                      AND (end_date IS NULL OR end_date >= NOW())
+                """, jurisdiction)
+            else:
+                rows = await pool.fetch("""
+                    SELECT tax_name, rate, tax_type, jurisdiction
+                    FROM tax_rates
+                    WHERE is_active = true
+                      AND (effective_date IS NULL OR effective_date <= NOW())
+                      AND (end_date IS NULL OR end_date >= NOW())
+                    LIMIT 20
+                """)
+
+            if not rows:
+                return {"status": "error", "error": "No active tax rates found"}
+
+            breakdown = []
+            total_rate = 0.0
+            for row in rows:
+                rate_val = float(row["rate"] or 0)
+                if rate_val > 1:
+                    rate_val = rate_val / 100.0
+                total_rate += rate_val
+                breakdown.append({
+                    "tax_name": row["tax_name"],
+                    "tax_type": row["tax_type"],
+                    "jurisdiction": row["jurisdiction"],
+                    "rate": rate_val,
+                    "tax_amount": round(amount * rate_val, 2)
+                })
+
+            total_tax = round(amount * total_rate, 2)
+            return {
+                "status": "completed",
+                "amount": amount,
+                "total_rate": round(total_rate, 6),
+                "total_tax": total_tax,
+                "total_with_tax": round(amount + total_tax, 2),
+                "breakdown": breakdown
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+
+class TranslationProcessorAgent(BaseAgent):
+    """Translation agent using AI providers for real translations"""
+
+    def __init__(self):
+        super().__init__("TranslationProcessor", "language")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        text = task.get("text") or task.get("content")
+        target = task.get("target_language") or task.get("target")
+        source = task.get("source_language") or "auto"
+        model = task.get("model") or "gpt-4o-mini"
+
+        if not text or not target:
+            return {"status": "error", "error": "text and target_language are required"}
+
+        prompt = (
+            f"Translate the following text from {source} to {target}. "
+            "Return only the translated text.\n\n"
+            f"{text}"
+        )
+
+        try:
+            if USE_REAL_AI and ai_core:
+                translation = await ai_core.generate(prompt, model=model)
+                return {"status": "completed", "translation": translation.strip()}
+
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                return {"status": "error", "error": "AI core and OPENAI_API_KEY are not configured"}
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": "You are a translation engine."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.1
+                    }
+                )
+            if response.status_code != 200:
+                return {"status": "error", "error": f"Translation failed: {response.text}"}
+            payload = response.json()
+            translation = payload["choices"][0]["message"]["content"]
+            return {"status": "completed", "translation": translation.strip()}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+
+class SMSInterfaceAgent(BaseAgent):
+    """SMS interface agent using Twilio for real delivery"""
+
+    def __init__(self):
+        super().__init__("SMSInterface", "communication")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        action = task.get("action", task.get("type", "send"))
+        if action != "send":
+            return {"status": "error", "error": f"Unsupported action: {action}"}
+        return await self.send_sms(task)
+
+    async def send_sms(self, task: dict[str, Any]) -> dict[str, Any]:
+        to_number = task.get("to") or task.get("phone")
+        message = task.get("message") or task.get("body")
+        media_urls = task.get("media_urls") or task.get("media_url")
+
+        if not to_number or not message:
+            return {"status": "error", "error": "to and message are required"}
+
+        sid = os.getenv("TWILIO_ACCOUNT_SID")
+        token = os.getenv("TWILIO_AUTH_TOKEN")
+        from_number = os.getenv("TWILIO_FROM_NUMBER")
+        if not all([sid, token, from_number]):
+            return {"status": "error", "error": "Twilio credentials are not configured"}
+
+        try:
+            from twilio.rest import Client
+        except Exception as e:
+            return {"status": "error", "error": f"Twilio client not available: {e}"}
+
+        try:
+            client = Client(sid, token)
+            send_kwargs = {
+                "body": message,
+                "from_": from_number,
+                "to": to_number
+            }
+            if media_urls:
+                send_kwargs["media_url"] = media_urls if isinstance(media_urls, list) else [media_urls]
+
+            msg = await asyncio.to_thread(client.messages.create, **send_kwargs)
+            await self._log_communication(
+                comm_type="sms",
+                direction="outbound",
+                subject="SMS",
+                content=message,
+                metadata={"to": to_number, "sid": msg.sid}
+            )
+            return {
+                "status": "completed",
+                "message_sid": msg.sid,
+                "to": to_number
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _log_communication(
+        self,
+        comm_type: str,
+        direction: str,
+        subject: str,
+        content: str,
+        metadata: dict[str, Any]
+    ) -> None:
+        try:
+            pool = get_pool()
+            await pool.execute("""
+                INSERT INTO communication_logs
+                (type, direction, subject, content, attachments, created_by)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+            """, comm_type, direction, subject, content, json.dumps(metadata), self.name)
+        except Exception as e:
+            self.logger.warning("Failed to log SMS communication: %s", e)
+
+
+class VoiceInterfaceAgent(BaseAgent):
+    """Voice interface agent using ElevenLabs and OpenAI Whisper"""
+
+    def __init__(self):
+        super().__init__("VoiceInterface", "communication")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        action = task.get("action", task.get("type", "synthesize"))
+        if action == "transcribe":
+            return await self.transcribe(task)
+        if action == "synthesize":
+            return await self.synthesize(task)
+        return {"status": "error", "error": f"Unsupported action: {action}"}
+
+    async def synthesize(self, task: dict[str, Any]) -> dict[str, Any]:
+        text = task.get("text")
+        voice_id = task.get("voice_id", "rachel")
+        model = task.get("model", "eleven_multilingual_v2")
+
+        if not text or not isinstance(text, str):
+            return {"status": "error", "error": "text is required"}
+        if len(text) > 5000:
+            return {"status": "error", "error": "text exceeds 5000 character limit"}
+
+        api_key = os.getenv("ELEVENLABS_API_KEY")
+        if not api_key:
+            return {"status": "error", "error": "ELEVENLABS_API_KEY not configured"}
+
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(
+                    f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+                    headers={
+                        "Accept": "audio/mpeg",
+                        "Content-Type": "application/json",
+                        "xi-api-key": api_key
+                    },
+                    json={
+                        "text": text,
+                        "model_id": model,
+                        "voice_settings": {
+                            "stability": task.get("stability", 0.5),
+                            "similarity_boost": task.get("similarity_boost", 0.8)
+                        }
+                    }
+                )
+            if response.status_code != 200:
+                return {"status": "error", "error": response.text}
+
+            audio_bytes = response.content
+            audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+            await self._log_communication(
+                comm_type="voice",
+                direction="outbound",
+                subject="TTS",
+                content=text,
+                metadata={"voice_id": voice_id, "bytes": len(audio_bytes)}
+            )
+            return {
+                "status": "completed",
+                "audio_base64": audio_b64,
+                "content_type": response.headers.get("content-type", "audio/mpeg")
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def transcribe(self, task: dict[str, Any]) -> dict[str, Any]:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return {"status": "error", "error": "OPENAI_API_KEY not configured"}
+
+        audio_url = task.get("audio_url")
+        audio_b64 = task.get("audio_base64")
+        if not audio_url and not audio_b64:
+            return {"status": "error", "error": "audio_url or audio_base64 is required"}
+
+        try:
+            if audio_url:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    response = await client.get(audio_url)
+                if response.status_code != 200:
+                    return {"status": "error", "error": "Failed to download audio"}
+                audio_bytes = response.content
+                content_type = response.headers.get("content-type", "audio/mpeg")
+            else:
+                audio_bytes = base64.b64decode(audio_b64)
+                content_type = task.get("content_type", "audio/mpeg")
+
+            files = {
+                "file": ("audio", audio_bytes, content_type),
+                "model": (None, "whisper-1")
+            }
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(
+                    "https://api.openai.com/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    files=files
+                )
+            if response.status_code != 200:
+                return {"status": "error", "error": response.text}
+            payload = response.json()
+            transcript = payload.get("text", "")
+            await self._log_communication(
+                comm_type="voice",
+                direction="inbound",
+                subject="Transcription",
+                content=transcript,
+                metadata={"bytes": len(audio_bytes)}
+            )
+            return {"status": "completed", "transcript": transcript}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _log_communication(
+        self,
+        comm_type: str,
+        direction: str,
+        subject: str,
+        content: str,
+        metadata: dict[str, Any]
+    ) -> None:
+        try:
+            pool = get_pool()
+            await pool.execute("""
+                INSERT INTO communication_logs
+                (type, direction, subject, content, attachments, created_by)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+            """, comm_type, direction, subject, content, json.dumps(metadata), self.name)
+        except Exception as e:
+            self.logger.warning("Failed to log voice communication: %s", e)
 
 
 # ============== PHASE 2 ADAPTERS ==============

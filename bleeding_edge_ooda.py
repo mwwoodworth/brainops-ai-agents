@@ -51,6 +51,12 @@ MAX_RETRIES = 3
 RETRY_BACKOFF_BASE = 1.0  # Base seconds for exponential backoff
 
 logger = logging.getLogger(__name__)
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production").strip().lower()
+ALLOW_OODA_SPECULATION_MOCK = os.getenv("ALLOW_OODA_SPECULATION_MOCK", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 
 async def retry_with_backoff(
@@ -1746,7 +1752,8 @@ class BleedingEdgeOODAController:
     async def speculate_actions(
         self,
         likely_actions: list[dict[str, Any]],
-        context: dict[str, Any]
+        context: dict[str, Any],
+        executor: Optional[Callable[[str, dict], Awaitable[Any]]] = None,
     ) -> dict[str, Any]:
         """Pre-execute likely actions speculatively."""
         # Convert actions to PredictedAction format
@@ -1759,12 +1766,25 @@ class BleedingEdgeOODAController:
             )
             for action in likely_actions
         ]
+        executor_fn = executor or context.get("speculative_executor")
+        if executor_fn is None:
+            if ENVIRONMENT != "production" and ALLOW_OODA_SPECULATION_MOCK:
+                logger.warning(
+                    "OODA speculative execution using mock executor (ALLOW_OODA_SPECULATION_MOCK enabled)."
+                )
 
-        async def mock_executor(action_type: str, params: dict) -> Any:
-            return {"status": "speculated", "action_type": action_type, "params": params}
+                async def mock_executor(action_type: str, params: dict) -> Any:
+                    return {"status": "speculated", "action_type": action_type, "params": params}
+
+                executor_fn = mock_executor
+            else:
+                raise RuntimeError(
+                    "Speculative execution requires a real executor. "
+                    "Set ALLOW_OODA_SPECULATION_MOCK=true in non-production for dev-only mocks."
+                )
 
         # Call speculate with correct signature
-        return await self.speculative_executor.speculate(predictions, mock_executor)
+        return await self.speculative_executor.speculate(predictions, executor_fn)
 
     def get_metrics(self) -> dict[str, Any]:
         """Get all controller metrics."""

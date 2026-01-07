@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 import networkx as nx
 import psycopg2
+from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 from urllib.parse import urlparse
 
@@ -502,6 +503,9 @@ class KnowledgeGraphBuilder:
         self.graph = nx.DiGraph()
         self.node_index = {}
         self.edge_index = defaultdict(list)
+        self.tenant_id = os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID")
+        if not self.tenant_id:
+            logger.warning("KnowledgeGraphBuilder missing tenant_id; writes may be unscoped.")
 
     async def build_graph(
         self,
@@ -653,43 +657,144 @@ class KnowledgeGraphBuilder:
             conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'ai_knowledge_nodes'
+            """)
+            node_columns = {row[0] for row in cursor.fetchall()}
+
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'ai_knowledge_edges'
+            """)
+            edge_columns = {row[0] for row in cursor.fetchall()}
+
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = 'brain_entities'
+                )
+            """)
+            brain_entities_exists = bool(cursor.fetchone()[0])
+
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = 'brain_relationships'
+                )
+            """)
+            brain_relationships_exists = bool(cursor.fetchone()[0])
+
+            entity_ids: dict[str, str] = {}
+
             # Store nodes
             for node_id, data in self.graph.nodes(data=True):
-                cursor.execute("""
-                    INSERT INTO ai_knowledge_nodes (
-                        id, node_type, name, properties,
-                        created_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, NOW(), NOW())
-                    ON CONFLICT (id) DO UPDATE SET
-                        properties = EXCLUDED.properties,
-                        updated_at = NOW()
-                """, (
+                node_fields = ["id", "node_type", "name", "properties"]
+                node_params = [
                     node_id,
-                    data['type'],
-                    data['name'],
-                    json.dumps({k: v for k, v in data.items() if k not in ['type', 'name']})
-                ))
+                    data["type"],
+                    data["name"],
+                    json.dumps({k: v for k, v in data.items() if k not in ["type", "name"]}),
+                ]
+                if "tenant_id" in node_columns and self.tenant_id:
+                    node_fields.insert(0, "tenant_id")
+                    node_params.insert(0, self.tenant_id)
+
+                cursor.execute(
+                    sql.SQL("""
+                        INSERT INTO ai_knowledge_nodes ({fields})
+                        VALUES ({values})
+                        ON CONFLICT (id) DO UPDATE SET
+                            properties = EXCLUDED.properties,
+                            updated_at = NOW()
+                    """).format(
+                        fields=sql.SQL(", ").join(sql.Identifier(f) for f in node_fields),
+                        values=sql.SQL(", ").join([sql.Placeholder()] * len(node_fields)),
+                    ),
+                    node_params,
+                )
+
+                if brain_entities_exists and self.tenant_id:
+                    cursor.execute(
+                        """
+                        INSERT INTO brain_entities (tenant_id, entity_type, name, metadata, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, NOW(), NOW())
+                        ON CONFLICT (tenant_id, entity_type, name) DO UPDATE SET
+                            metadata = EXCLUDED.metadata,
+                            updated_at = NOW()
+                        RETURNING id
+                        """,
+                        (
+                            self.tenant_id,
+                            data["type"],
+                            data["name"],
+                            json.dumps(
+                                {
+                                    "node_id": node_id,
+                                    "properties": {
+                                        k: v for k, v in data.items() if k not in ["type", "name"]
+                                    },
+                                }
+                            ),
+                        ),
+                    )
+                    entity_ids[node_id] = str(cursor.fetchone()[0])
 
             # Store edges
             for source, target, edge_data in self.graph.edges(data=True):
                 edge_id = hashlib.md5(f"{source}_{target}".encode()).hexdigest()
 
-                cursor.execute("""
-                    INSERT INTO ai_knowledge_edges (
-                        id, source_id, target_id, edge_type,
-                        weight, properties, created_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                    ON CONFLICT (id) DO UPDATE SET
-                        weight = EXCLUDED.weight,
-                        properties = EXCLUDED.properties
-                """, (
+                edge_fields = ["id", "source_id", "target_id", "edge_type", "weight", "properties"]
+                edge_params = [
                     edge_id,
                     source,
                     target,
-                    edge_data.get('type', 'related'),
-                    edge_data.get('weight', 1.0),
-                    json.dumps({k: v for k, v in edge_data.items() if k not in ['type', 'weight']})
-                ))
+                    edge_data.get("type", "related"),
+                    edge_data.get("weight", 1.0),
+                    json.dumps({k: v for k, v in edge_data.items() if k not in ["type", "weight"]}),
+                ]
+                if "tenant_id" in edge_columns and self.tenant_id:
+                    edge_fields.insert(0, "tenant_id")
+                    edge_params.insert(0, self.tenant_id)
+
+                cursor.execute(
+                    sql.SQL("""
+                        INSERT INTO ai_knowledge_edges ({fields})
+                        VALUES ({values})
+                        ON CONFLICT (id) DO UPDATE SET
+                            weight = EXCLUDED.weight,
+                            properties = EXCLUDED.properties
+                    """).format(
+                        fields=sql.SQL(", ").join(sql.Identifier(f) for f in edge_fields),
+                        values=sql.SQL(", ").join([sql.Placeholder()] * len(edge_fields)),
+                    ),
+                    edge_params,
+                )
+
+                if brain_relationships_exists and self.tenant_id and source in entity_ids and target in entity_ids:
+                    cursor.execute(
+                        """
+                        INSERT INTO brain_relationships (
+                            tenant_id, entity_a, entity_b, relationship_type, strength, context, created_at, last_reinforced
+                        ) VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        ON CONFLICT (tenant_id, entity_a, entity_b, relationship_type) DO UPDATE SET
+                            strength = EXCLUDED.strength,
+                            context = EXCLUDED.context,
+                            last_reinforced = NOW()
+                        """,
+                        (
+                            self.tenant_id,
+                            entity_ids[source],
+                            entity_ids[target],
+                            edge_data.get("type", "related"),
+                            edge_data.get("weight", 1.0),
+                            json.dumps(
+                                {k: v for k, v in edge_data.items() if k not in ["type", "weight"]}
+                            ),
+                        ),
+                    )
 
             conn.commit()
             cursor.close()
@@ -706,6 +811,7 @@ class KnowledgeQueryEngine:
         self.graph = None
         self.embedding_cache = {}
         self.openai_client = None
+        self.tenant_id = os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID")
 
         # Initialize OpenAI for semantic queries
         try:
@@ -726,9 +832,19 @@ class KnowledgeQueryEngine:
 
             # Load nodes
             cursor.execute("""
-                SELECT id, node_type, name, properties
-                FROM ai_knowledge_nodes
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'ai_knowledge_nodes'
             """)
+            node_columns = {row["column_name"] for row in cursor.fetchall()}
+
+            node_query = "SELECT id, node_type, name, properties FROM ai_knowledge_nodes"
+            node_params: list[Any] = []
+            if "tenant_id" in node_columns and self.tenant_id:
+                node_query += " WHERE tenant_id = %s"
+                node_params.append(self.tenant_id)
+
+            cursor.execute(node_query, node_params)
 
             nodes = cursor.fetchall()
             for node in nodes:
@@ -747,9 +863,19 @@ class KnowledgeQueryEngine:
 
             # Load edges
             cursor.execute("""
-                SELECT source_id, target_id, edge_type, weight, properties
-                FROM ai_knowledge_edges
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'ai_knowledge_edges'
             """)
+            edge_columns = {row["column_name"] for row in cursor.fetchall()}
+
+            edge_query = "SELECT source_id, target_id, edge_type, weight, properties FROM ai_knowledge_edges"
+            edge_params: list[Any] = []
+            if "tenant_id" in edge_columns and self.tenant_id:
+                edge_query += " WHERE tenant_id = %s"
+                edge_params.append(self.tenant_id)
+
+            cursor.execute(edge_query, edge_params)
 
             edges = cursor.fetchall()
             for edge in edges:

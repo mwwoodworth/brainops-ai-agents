@@ -20,16 +20,20 @@ import os
 import re
 import shlex
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import psycopg2
+import sqlparse
 from fastapi import Depends, FastAPI, HTTPException, Request, Security, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from psycopg2.extras import RealDictCursor
+from sqlparse import tokens as T
+from sqlparse.sql import Identifier, IdentifierList, Parenthesis, TokenList
 
 from config import config
 
@@ -86,6 +90,51 @@ ALLOWED_WRITE_PATHS = {
 
 # SQL: Only SELECT queries are allowed (read-only)
 # This is an ALLOWLIST approach - much more secure than blocklist
+SQL_ALLOWED_SCHEMAS = {"public"}
+SQL_DISALLOWED_KEYWORDS = {
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "UPSERT",
+    "MERGE",
+    "DROP",
+    "ALTER",
+    "CREATE",
+    "TRUNCATE",
+    "GRANT",
+    "REVOKE",
+    "COPY",
+    "EXEC",
+    "EXECUTE",
+    "CALL",
+    "DO",
+    "WITH",
+    "UNION",
+    "INTERSECT",
+    "EXCEPT",
+    "INTO",
+    "RETURNING",
+    "COMMIT",
+    "ROLLBACK",
+    "BEGIN",
+    "SET",
+    "SHOW",
+    "LOCK",
+    "VACUUM",
+    "ANALYZE",
+}
+SQL_DISALLOWED_FUNCTIONS = {
+    "pg_read_file",
+    "pg_read_binary_file",
+    "pg_ls_dir",
+    "pg_stat_file",
+    "pg_sleep",
+    "current_setting",
+    "set_config",
+    "lo_import",
+    "lo_export",
+}
+SQL_MAX_PARAMS = 50
 
 
 def sanitize_input(value: str, max_length: int = 10000) -> str:
@@ -207,56 +256,131 @@ def is_safe_write_path(path: str) -> tuple:
     return is_safe_path(path, ALLOWED_WRITE_PATHS)
 
 
-def is_safe_sql_query(query: str) -> tuple:
+def _count_placeholders(query: str) -> int:
+    return len(re.findall(r'(?<!%)%s', query))
+
+
+def _extract_table_identifiers(token_list: TokenList) -> list[Identifier]:
+    tables: list[Identifier] = []
+    from_seen = False
+    for token in token_list.tokens:
+        if token.is_group:
+            tables.extend(_extract_table_identifiers(token))
+        if from_seen:
+            if isinstance(token, Parenthesis):
+                raise ValueError("Subqueries are not allowed in MCP SQL")
+            if isinstance(token, IdentifierList):
+                tables.extend(list(token.get_identifiers()))
+            elif isinstance(token, Identifier):
+                tables.append(token)
+            from_seen = False
+        if token.ttype is T.Keyword and token.normalized in {
+            "FROM",
+            "JOIN",
+            "INNER JOIN",
+            "LEFT JOIN",
+            "RIGHT JOIN",
+            "FULL JOIN",
+            "CROSS JOIN",
+        }:
+            from_seen = True
+    return tables
+
+
+def _contains_subquery(token_list: TokenList) -> bool:
+    for token in token_list.tokens:
+        if isinstance(token, Parenthesis):
+            if any(
+                inner.ttype is T.DML and inner.normalized == "SELECT"
+                for inner in token.flatten()
+            ):
+                return True
+        if token.is_group and _contains_subquery(token):
+            return True
+    return False
+
+
+def is_safe_sql_query(query: str, params: list[Any]) -> tuple:
     """
-    Check if SQL query is safe (read-only SELECT only).
+    Check if SQL query is safe (read-only SELECT only) with strict parsing.
     Returns (is_safe: bool, reason: str)
 
     Security measures:
-    1. ALLOWLIST approach - only SELECT queries permitted
-    2. Block all write/DDL operations
-    3. Prevent SQL injection patterns
+    1. Parse with sqlparse and allow only a single SELECT statement
+    2. Disallow comments, literals, and dangerous keywords/functions
+    3. Require parameterized queries using %s placeholders
+    4. Restrict schemas and block system tables
     """
     if not query or not isinstance(query, str):
         return False, "Empty or invalid query"
 
     query = sanitize_input(query, max_length=5000)
     query_stripped = query.strip()
-    query_upper = query_stripped.upper()
 
     if not query_stripped:
         return False, "Empty query after sanitization"
 
-    # ALLOWLIST: Only SELECT queries are permitted
-    if not query_upper.startswith('SELECT'):
+    if re.search(r'\$\d+', query_stripped):
+        return False, "Use %s placeholders only (positional $1 not allowed)"
+
+    placeholder_count = _count_placeholders(query_stripped)
+    if placeholder_count > SQL_MAX_PARAMS:
+        return False, "Too many query parameters"
+    if placeholder_count != len(params):
+        return False, "Parameter count mismatch"
+
+    statements = sqlparse.parse(query_stripped)
+    if len(statements) != 1:
+        return False, "Only a single SQL statement is allowed"
+
+    statement = statements[0]
+    if statement.get_type() != "SELECT":
         return False, "Only SELECT queries are allowed (read-only mode)"
 
-    # Block dangerous SQL patterns even in SELECT queries
-    dangerous_sql_patterns = [
-        r'\bINTO\s+OUTFILE\b',      # SELECT INTO OUTFILE
-        r'\bINTO\s+DUMPFILE\b',     # SELECT INTO DUMPFILE
-        r'\bLOAD_FILE\b',           # LOAD_FILE() function
-        r';\s*\w',                   # Multiple statements (SQL injection)
-        r'--\s*$',                   # SQL comment at end (potential injection)
-        r'/\*.*\*/',                 # Block comments (potential injection)
-        r'\bUNION\b.*\bSELECT\b',   # UNION SELECT (SQL injection pattern)
-        r'\bEXEC\b',                 # EXEC command
-        r'\bEXECUTE\b',             # EXECUTE command
-        r'\bxp_\w+',                 # SQL Server extended procedures
-        r'\bDROP\b',                 # DROP (should never appear in SELECT)
-        r'\bALTER\b',               # ALTER
-        r'\bCREATE\b',              # CREATE
-        r'\bTRUNCATE\b',            # TRUNCATE
-        r'\bDELETE\b',              # DELETE
-        r'\bUPDATE\b',              # UPDATE
-        r'\bINSERT\b',              # INSERT
-        r'\bGRANT\b',               # GRANT
-        r'\bREVOKE\b',              # REVOKE
-    ]
+    if _contains_subquery(statement):
+        return False, "Subqueries are not allowed in MCP SQL"
 
-    for pattern in dangerous_sql_patterns:
-        if re.search(pattern, query_upper, re.IGNORECASE):
-            return False, f"Dangerous SQL pattern detected: {pattern}"
+    tokens = list(statement.flatten())
+    for idx, token in enumerate(tokens):
+        if token.ttype in T.Comment:
+            return False, "SQL comments are not allowed"
+        if token.ttype in (T.Literal.String.Single, T.Literal.String.Symbol):
+            return False, "String literals are not allowed; use parameters"
+        if token.ttype in T.Number:
+            return False, "Numeric literals are not allowed; use parameters"
+        if token.ttype is T.Keyword and token.normalized in SQL_DISALLOWED_KEYWORDS:
+            return False, f"Disallowed SQL keyword: {token.normalized}"
+        if token.ttype in (T.Name, T.Name.Builtin):
+            candidate = token.value.lower()
+            if candidate in SQL_DISALLOWED_FUNCTIONS:
+                next_token = None
+                for lookahead in tokens[idx + 1 :]:
+                    if lookahead.ttype in T.Whitespace:
+                        continue
+                    next_token = lookahead
+                    break
+                if next_token and next_token.value == "(":
+                    return False, f"Disallowed SQL function: {token.value}"
+
+    try:
+        table_identifiers = _extract_table_identifiers(statement)
+    except ValueError as exc:
+        return False, str(exc)
+
+    for identifier in table_identifiers:
+        table_name = identifier.get_real_name()
+        schema_name = identifier.get_parent_name()
+        if not table_name:
+            return False, "Unable to resolve table name"
+        table_lower = table_name.lower()
+        if table_lower.startswith("pg_") or table_lower.startswith("sql_"):
+            return False, "System tables are not allowed"
+        if schema_name:
+            schema_lower = schema_name.lower()
+            if schema_lower == "information_schema":
+                return False, "information_schema access is not allowed"
+            if schema_lower not in SQL_ALLOWED_SCHEMAS:
+                return False, f"Schema not allowed: {schema_name}"
 
     return True, "Query is safe (SELECT only)"
 
@@ -312,14 +436,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Database configuration
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST'),
-    'database': 'postgres',
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'),
-    'port': 5432
-}
+# Database configuration (MCP must use read-only credentials in production)
+DISALLOWED_DB_USERS = {"postgres", "supabase_admin", "service_role"}
+
+
+def _build_db_config(prefix: str, default_db: str) -> dict[str, Any] | None:
+    host = os.getenv(f"{prefix}_HOST")
+    user = os.getenv(f"{prefix}_USER")
+    password = os.getenv(f"{prefix}_PASSWORD")
+    if not host or not user or not password:
+        return None
+    port_raw = os.getenv(f"{prefix}_PORT", os.getenv("DB_PORT", "5432"))
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 5432
+    return {
+        "host": host,
+        "database": os.getenv(f"{prefix}_NAME", default_db),
+        "user": user,
+        "password": password,
+        "port": port,
+    }
+
+
+def _extract_username_from_dsn(dsn: str) -> str | None:
+    try:
+        parsed = urlparse(dsn)
+        return parsed.username
+    except Exception:
+        return None
+
+
+def get_mcp_db_connection_target() -> tuple[dict[str, Any] | str | None, str]:
+    default_db = os.getenv("DB_NAME", "postgres")
+    mcp_dsn = os.getenv("MCP_DATABASE_URL")
+    if mcp_dsn:
+        return mcp_dsn, "mcp_database_url"
+
+    mcp_config = _build_db_config("MCP_DB", default_db)
+    if mcp_config:
+        return mcp_config, "mcp_db_config"
+
+    if ENVIRONMENT in ("production", "staging"):
+        return None, "mcp_config_missing"
+
+    fallback = _build_db_config("DB", default_db)
+    if fallback:
+        return fallback, "fallback_db_config"
+
+    return None, "mcp_config_missing"
 
 # Service endpoints
 SERVICES = {
@@ -383,8 +549,19 @@ class MCPServer:
 
         # Check database
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn_target, conn_source = get_mcp_db_connection_target()
+            if not conn_target:
+                raise RuntimeError(f"MCP database credentials missing ({conn_source})")
+
+            if isinstance(conn_target, str):
+                conn = psycopg2.connect(conn_target)
+            else:
+                conn = psycopg2.connect(**conn_target)
+            conn.set_session(readonly=True, autocommit=True)
             cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            cursor.execute("SET statement_timeout = '10s'")
+            cursor.execute("SET search_path TO public")
 
             # Get database metrics
             cursor.execute("""
@@ -547,26 +724,77 @@ class MCPServer:
             elif tool == 'database_query':
                 # Execute database query - WITH SECURITY CONTROLS (READ-ONLY)
                 query = params.get('query', '')
+                raw_params = params.get('params', [])
+
+                if raw_params is None:
+                    raw_params = []
+                if not isinstance(raw_params, list):
+                    result['error'] = "params must be an array"
+                    result['status'] = 'failed'
+                    return result
+
+                normalized_params: list[Any] = []
+                for value in raw_params:
+                    if isinstance(value, str):
+                        normalized_params.append(sanitize_input(value, max_length=1000))
+                    elif isinstance(value, (int, float, bool, type(None), datetime, date)):
+                        normalized_params.append(value)
+                    else:
+                        result['error'] = f"Unsupported parameter type: {type(value).__name__}"
+                        result['status'] = 'failed'
+                        return result
 
                 # SECURITY: Sanitize input
                 query = sanitize_input(query, max_length=5000)
 
                 # SECURITY: Validate query with comprehensive checks
-                is_safe, reason = is_safe_sql_query(query)
+                is_safe, reason = is_safe_sql_query(query, normalized_params)
                 if not is_safe:
                     result['error'] = f"Query blocked: {reason}"
                     result['status'] = 'blocked'
                     logger.warning(f"SECURITY: Blocked SQL query - {reason}: {query[:100]}")
                     return result
 
-                logger.info(f"Executing allowed SQL query (SELECT only): {query[:100]}")
-                conn = psycopg2.connect(**DB_CONFIG)
+                conn_target, conn_source = get_mcp_db_connection_target()
+                if not conn_target:
+                    result['error'] = "MCP database credentials not configured (read-only required)"
+                    result['status'] = 'blocked'
+                    logger.error("SECURITY: MCP database credentials missing (%s)", conn_source)
+                    return result
+
+                db_user = None
+                if isinstance(conn_target, str):
+                    db_user = _extract_username_from_dsn(conn_target)
+                else:
+                    db_user = conn_target.get("user")
+
+                if (
+                    db_user
+                    and db_user.lower() in DISALLOWED_DB_USERS
+                    and ENVIRONMENT in ("production", "staging")
+                ):
+                    result['error'] = "Read-only database user required for MCP queries"
+                    result['status'] = 'blocked'
+                    logger.error("SECURITY: Blocked MCP query using privileged DB user: %s", db_user)
+                    return result
+
+                if conn_source == "fallback_db_config":
+                    logger.warning("SECURITY: MCP using fallback DB credentials (non-production only)")
+
+                logger.info("Executing allowed SQL query (SELECT only)")
+                if isinstance(conn_target, str):
+                    conn = psycopg2.connect(conn_target)
+                else:
+                    conn = psycopg2.connect(**conn_target)
+                conn.set_session(readonly=True, autocommit=True)
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-                # SECURITY: Set statement timeout to prevent long-running queries
+                # SECURITY: Set session safeguards
                 cursor.execute("SET statement_timeout = '30s'")
+                cursor.execute("SET idle_in_transaction_session_timeout = '10s'")
+                cursor.execute("SET search_path TO public")
 
-                cursor.execute(query)
+                cursor.execute(query, normalized_params)
 
                 # Only SELECT is allowed, so always fetch results
                 rows = cursor.fetchall()
@@ -857,7 +1085,8 @@ async def get_mcp_tools():
                 "name": "database_query",
                 "description": "Execute database query",
                 "parameters": {
-                    "query": "string"
+                    "query": "string",
+                    "params": "array"
                 }
             },
             {

@@ -5,6 +5,7 @@ Type-safe, lint-clean, fully tested
 import asyncio
 import json
 import logging
+import os
 import ssl
 from dataclasses import dataclass
 from datetime import datetime
@@ -16,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 # Type alias for database records
 DbRecord = dict[str, Any]
+
+
+class DatabaseUnavailableError(RuntimeError):
+    """Raised when the database pool cannot be initialized or accessed."""
 
 
 @dataclass
@@ -334,10 +339,10 @@ class InMemoryDatabasePool(BasePool):
         return []
 
     def _fetch_unified_memories(self, sql: str, args: list[Any]) -> list[DbRecord]:
-        """Mock handler for unified_ai_memory table"""
+        """Fallback handler for unified_ai_memory table"""
         # Handle INSERT
         if "insert into unified_ai_memory" in sql:
-            # Generate a mock ID and return it
+            # Generate an in-memory ID and return it
             import uuid
             new_id = str(uuid.uuid4())
             now = datetime.utcnow()
@@ -347,7 +352,7 @@ class InMemoryDatabasePool(BasePool):
             # But we can just return success for now
             return [{
                 "id": new_id, 
-                "content_hash": "mock_hash_" + new_id[:8], 
+                "content_hash": "inmemory_hash_" + new_id[:8], 
                 "created_at": now
             }]
 
@@ -393,16 +398,16 @@ class InMemoryDatabasePool(BasePool):
                 "content": {"text": memory["content"]},
                 "importance_score": memory["importance"],
                 "category": "general",
-                "title": "Mock Memory",
+                "title": "In-memory Record",
                 "tags": memory.get("tags", []),
-                "source_system": "mock_db",
-                "source_agent": "mock_agent",
+                "source_system": "inmemory_fallback",
+                "source_agent": "inmemory_fallback",
                 "created_at": memory["created_at"],
                 "last_accessed": memory["created_at"],
                 "access_count": 1,
                 "similarity": 0.9 if query else None,
                 "metadata": {},
-                "content_hash": "mock_hash",
+                "content_hash": "inmemory_hash",
                 "context_id": str(uuid.uuid4()),
                 "parent_memory_id": None,
                 "related_memories": [],
@@ -674,16 +679,31 @@ async def init_pool(config: PoolConfig) -> BasePool:
             last_error = exc
             logger.error("❌ Failed to initialize database pool on port %s: %s", port, exc)
 
-    # In production, hard fail instead of using in-memory fallback
-    # This prevents silent data loss and amnesia
-    import os
-    if os.getenv('ENVIRONMENT', 'development') == 'production':
-        logger.critical("❌ FATAL: Database connection failed in PRODUCTION. Refusing to use in-memory fallback.")
+    env = os.getenv("ENVIRONMENT", "production").strip().lower()
+    is_production = env in {"production", "prod"}
+    allow_fallback = os.getenv("ALLOW_INMEMORY_FALLBACK", "").strip().lower() in {"1", "true", "yes"}
+    if allow_fallback and is_production:
+        logger.critical(
+            "❌ FATAL: ALLOW_INMEMORY_FALLBACK is set but ENVIRONMENT=%s. Refusing to use in-memory fallback in production.",
+            env,
+        )
+        allow_fallback = False
+
+    if not allow_fallback:
+        logger.critical(
+            "❌ FATAL: Database connection failed. Refusing to use in-memory fallback without ALLOW_INMEMORY_FALLBACK."
+        )
         if last_error:
             logger.critical("Database error: %s", last_error)
-        raise RuntimeError(f"Database connection required in production. Error: {last_error}")
+        raise DatabaseUnavailableError(
+            f"Database connection required. Error: {last_error}. "
+            "Set ALLOW_INMEMORY_FALLBACK=true for explicit dev-only fallback (ENVIRONMENT != production)."
+        )
 
-    logger.warning("Falling back to in-memory store so critical APIs remain available.")
+    logger.warning(
+        "Falling back to in-memory store (ALLOW_INMEMORY_FALLBACK enabled, ENVIRONMENT=%s).",
+        env,
+    )
     fallback = InMemoryDatabasePool()
     await fallback.initialize()
     _pool = fallback
@@ -696,7 +716,7 @@ async def init_pool(config: PoolConfig) -> BasePool:
 def get_pool() -> BasePool:
     """Get global database pool"""
     if _pool is None:
-        raise RuntimeError("Database pool not initialized. Call init_pool() first.")
+        raise DatabaseUnavailableError("Database pool not initialized. Call init_pool() first.")
     return _pool
 
 
