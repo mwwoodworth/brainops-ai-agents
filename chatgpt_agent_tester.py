@@ -399,7 +399,9 @@ class ChatGPTAgentTester:
             FlowStep("Navigate to pricing", "navigate", value="https://myroofgenius.com/pricing"),
             FlowStep("Wait for load", "wait", value="2000"),
             FlowStep("Screenshot pricing", "screenshot"),
-            FlowStep("Assert pricing content", "assert_text", expected="price"),
+            # NOTE: MyRoofGenius pages do not consistently include the literal substring "price" in rendered HTML.
+            # Use a stable keyword present in the page content instead.
+            FlowStep("Assert pricing content", "assert_text", expected="pricing"),
         ]
         return await self.run_flow("MRG Pricing Page", steps)
 
@@ -423,6 +425,37 @@ class ChatGPTAgentTester:
         ]
         return await self.run_flow("ERP Login Page", steps)
 
+    async def test_command_center_dashboard(self) -> FlowResult:
+        """Test BrainOps Command Center dashboard (public redirect target)"""
+        steps = [
+            FlowStep("Navigate to dashboard", "navigate", value="https://brainops-command-center.vercel.app/dashboard"),
+            FlowStep("Wait for load", "wait", value="2000"),
+            FlowStep("Screenshot dashboard", "screenshot"),
+            FlowStep("Assert branding", "assert_text", expected="Command Center"),
+            FlowStep("Check navigation", "assert_element", selector="nav"),
+        ]
+        return await self.run_flow("Command Center Dashboard", steps)
+
+    async def test_command_center_aurea(self) -> FlowResult:
+        """Test Command Center AUREA chat page"""
+        steps = [
+            FlowStep("Navigate to AUREA", "navigate", value="https://brainops-command-center.vercel.app/aurea"),
+            FlowStep("Wait for load", "wait", value="2000"),
+            FlowStep("Screenshot AUREA", "screenshot"),
+            FlowStep("Assert AUREA loaded", "assert_text", expected="AUREA"),
+        ]
+        return await self.run_flow("Command Center AUREA", steps)
+
+    async def test_brainstack_studio_homepage(self) -> FlowResult:
+        """Test Brainstack Studio marketing site"""
+        steps = [
+            FlowStep("Navigate to Brainstack Studio", "navigate", value="https://brainstack-studio.vercel.app"),
+            FlowStep("Wait for load", "wait", value="2000"),
+            FlowStep("Screenshot Brainstack Studio", "screenshot"),
+            FlowStep("Assert BrainOps branding", "assert_text", expected="BrainOps"),
+        ]
+        return await self.run_flow("Brainstack Studio Homepage", steps)
+
     async def run_full_test_suite(self) -> dict[str, Any]:
         """Run all test flows"""
         logger.info("Starting full ChatGPT-Agent test suite...")
@@ -439,6 +472,11 @@ class ChatGPTAgentTester:
         # ERP Tests
         results.append(await self.test_erp_homepage())
         results.append(await self.test_erp_login_page())
+
+        # Command Center + Brainstack Studio (public surfaces)
+        results.append(await self.test_command_center_dashboard())
+        results.append(await self.test_command_center_aurea())
+        results.append(await self.test_brainstack_studio_homepage())
 
         duration = time.time() - start_time
 

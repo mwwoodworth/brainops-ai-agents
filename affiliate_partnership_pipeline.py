@@ -1633,7 +1633,7 @@ class AffiliatePartnershipPipeline:
             referral.touchpoints.append({
                 "type": "fraud_flag",
                 "score": fraud_score,
-                "signals": [s.__dict__ for s in fraud_signals],
+                "signals": [s.__dict__ for s in fraud_signals if s is not None],
             })
 
         # Store

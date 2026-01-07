@@ -33,7 +33,11 @@ MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrend
 _api_keys_str = os.getenv("API_KEYS", "")
 _api_keys_list = [k.strip() for k in _api_keys_str.split(",") if k.strip()] if _api_keys_str else []
 API_KEY = _api_keys_list[0] if _api_keys_list else os.getenv("BRAINOPS_API_KEY", "")
-logger.info(f"E2E verification using API key: {API_KEY[:10]}... (from API_KEYS: {bool(_api_keys_list)})")
+logger.info(
+    "E2E verification API key configured: %s (source=%s)",
+    bool(API_KEY),
+    "API_KEYS" if _api_keys_list else "BRAINOPS_API_KEY",
+)
 
 
 class VerificationStatus(Enum):
@@ -365,6 +369,15 @@ class E2ESystemVerification:
                 timeout_seconds=15.0
             ),
             EndpointTest(
+                name="ERP - API Health",
+                url=f"{ERP_URL}/api/health",
+                expected_status=200,
+                expected_fields=["status", "services"],
+                category=SystemCategory.FRONTEND,
+                critical=True,
+                timeout_seconds=15.0,
+            ),
+            EndpointTest(
                 name="MyRoofGenius - Homepage",
                 url=MRG_URL,
                 expected_status=200,
@@ -372,6 +385,33 @@ class E2ESystemVerification:
                 category=SystemCategory.FRONTEND,
                 critical=True,
                 timeout_seconds=15.0
+            ),
+            EndpointTest(
+                name="MyRoofGenius - API Health",
+                url=f"{MRG_URL}/api/health",
+                expected_status=200,
+                expected_fields=["status", "services"],
+                category=SystemCategory.FRONTEND,
+                critical=True,
+                timeout_seconds=20.0,
+            ),
+            EndpointTest(
+                name="Command Center - Unified Health",
+                url="https://brainops-command-center.vercel.app/api/unified-health",
+                expected_status=200,
+                expected_fields=["overall", "services"],
+                category=SystemCategory.FRONTEND,
+                critical=True,
+                timeout_seconds=20.0,
+            ),
+            EndpointTest(
+                name="Brainstack Studio - Homepage",
+                url="https://brainstack-studio.vercel.app/",
+                expected_status=200,
+                expected_fields=[],
+                category=SystemCategory.FRONTEND,
+                critical=False,
+                timeout_seconds=15.0,
             ),
         ])
 
@@ -402,6 +442,56 @@ class E2ESystemVerification:
                 critical=True
             ),
         ])
+
+        # ============================================
+        # BLEEDING EDGE - UI AGENT TESTS (REAL BROWSER)
+        # ============================================
+        self.tests.extend([
+            EndpointTest(
+                name="ChatGPT Agent UI - Quick",
+                url=f"{BRAINOPS_API_URL}/always-know/chatgpt-agent-test",
+                method="POST",
+                headers=headers,
+                expected_status=200,
+                expected_fields=["mrg_healthy", "erp_healthy"],
+                validation_func="validate_chatgpt_agent_quick",
+                category=SystemCategory.BLEEDING_EDGE,
+                critical=True,
+                timeout_seconds=180.0,
+            ),
+        ])
+
+    def _run_validation(self, test: EndpointTest, response_body: Any) -> list[str]:
+        if not test.validation_func:
+            return []
+
+        validator = getattr(self, test.validation_func, None)
+        if not callable(validator):
+            return [f"Unknown validation_func: {test.validation_func}"]
+
+        try:
+            errors = validator(test, response_body)
+            if not errors:
+                return []
+            if isinstance(errors, list):
+                return [str(e) for e in errors]
+            return [str(errors)]
+        except Exception as exc:
+            return [f"Validation '{test.validation_func}' raised: {exc}"]
+
+    @staticmethod
+    def validate_chatgpt_agent_quick(_test: EndpointTest, response_body: Any) -> list[str]:
+        """Validate the ChatGPT-Agent quick UI test result payload."""
+        if not isinstance(response_body, dict):
+            return ["Response body is not a JSON object"]
+
+        errors: list[str] = []
+        if response_body.get("mrg_healthy") is not True:
+            errors.append("MyRoofGenius UI quick test failed")
+        if response_body.get("erp_healthy") is not True:
+            errors.append("Weathercraft ERP UI quick test failed")
+
+        return errors
 
     async def _run_single_test(self, test: EndpointTest, session: aiohttp.ClientSession) -> TestResult:
         """Execute a single endpoint test"""
@@ -484,6 +574,22 @@ class E2ESystemVerification:
                         status_code=response.status,
                         response_body=response_body,
                         error_message=f"Slow response: {response_time_ms:.0f}ms"
+                    )
+
+                validation_errors = []
+                if response_body is not None and test.validation_func:
+                    validation_errors = self._run_validation(test, response_body)
+
+                if validation_errors:
+                    return TestResult(
+                        test_name=test.name,
+                        endpoint=test.url,
+                        status=VerificationStatus.FAILED,
+                        response_time_ms=response_time_ms,
+                        status_code=response.status,
+                        response_body=response_body if isinstance(response_body, dict) else None,
+                        validation_errors=validation_errors,
+                        error_message="; ".join(validation_errors),
                     )
 
                 # All checks passed

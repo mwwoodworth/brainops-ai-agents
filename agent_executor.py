@@ -29,6 +29,7 @@ from ai_self_awareness import get_self_aware_ai
 # CRITICAL: Use async connection pool - NO psycopg2
 from database.async_connection import get_pool
 from unified_brain import UnifiedBrain
+from optimization.prompt_compiler import RevenuePromptCompiler
 
 logger = logging.getLogger(__name__)
 
@@ -4431,6 +4432,50 @@ class SelfBuildingAgent(BaseAgent):
                     recommendations.append(f"AI Insights: {ai_recs}")
                 except Exception as e:
                     self.logger.warning(f"AI optimization analysis failed: {e}")
+
+            if os.getenv("ENABLE_DSPY_OPTIMIZATION", "false").lower() == "true":
+                try:
+                    lead_rows = await pool.fetch("""
+                        SELECT contact_name, contact_email, lead_source, estimated_value, stage, metadata
+                        FROM revenue_leads
+                        WHERE contact_email IS NOT NULL
+                        ORDER BY updated_at DESC NULLS LAST
+                        LIMIT 25
+                    """)
+
+                    training_samples = []
+                    for lead in lead_rows:
+                        name = lead.get("contact_name") or "there"
+                        leads_context = json.dumps(
+                            {
+                                "contact_name": name,
+                                "contact_email": lead.get("contact_email"),
+                                "lead_source": lead.get("lead_source"),
+                                "stage": lead.get("stage"),
+                                "metadata": lead.get("metadata"),
+                            },
+                            default=str,
+                        )
+                        revenue_metrics = json.dumps(
+                            {"estimated_value": lead.get("estimated_value"), "stage": lead.get("stage")},
+                            default=str,
+                        )
+                        training_samples.append(
+                            {
+                                "leads": leads_context,
+                                "revenue_metrics": revenue_metrics,
+                                "email": f"Hi {name}, following up on your roofing needs. We can help with a tailored estimate.",
+                                "revenue_generated": lead.get("estimated_value") or 0,
+                            }
+                        )
+
+                    compiler = RevenuePromptCompiler()
+                    compiled = compiler.compile(training_samples)
+                    recommendations.append(
+                        "DSPy optimization ready" if compiled else "DSPy optimization unavailable"
+                    )
+                except Exception as e:
+                    self.logger.warning(f"DSPy optimization failed: {e}")
 
             return {
                 "status": "completed",

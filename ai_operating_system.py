@@ -193,7 +193,7 @@ class ComponentLoader:
         """Dynamically load a component"""
         try:
             module_name = component.value
-            module_path = Path(f"/home/matt-woodworth/brainops-ai-agents/{module_name}.py")
+            module_path = Path(__file__).resolve().parent / f"{module_name}.py"
 
             # Allow fallback to current directory
             if not module_path.exists():
@@ -205,7 +205,19 @@ class ComponentLoader:
 
             # Load module dynamically
             spec = importlib.util.spec_from_file_location(module_name, module_path)
+            if spec is None or spec.loader is None:
+                logger.error(f"Failed to load module spec for {module_name} at {module_path}")
+                return False
             module = importlib.util.module_from_spec(spec)
+            previous_module = sys.modules.get(module_name)
+            sys.modules[module_name] = module
+            try:
+                spec.loader.exec_module(module)
+            except Exception:
+                sys.modules.pop(module_name, None)
+                if previous_module is not None:
+                    sys.modules[module_name] = previous_module
+                raise
 
             # Store component
             self.components[component] = module
