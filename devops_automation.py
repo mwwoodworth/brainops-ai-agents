@@ -83,7 +83,7 @@ class DevOpsAutomation:
         self.render_api_key = os.getenv("RENDER_API_KEY", "")
         self.vercel_token = os.getenv("VERCEL_TOKEN", "")
         self.docker_hub_user = os.getenv("DOCKER_HUB_USER", "mwwoodworth")
-        self.brainops_api_key = os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+        self.brainops_api_key = os.getenv("BRAINOPS_API_KEY")
 
         # Service registry with Render service IDs
         self.services = {

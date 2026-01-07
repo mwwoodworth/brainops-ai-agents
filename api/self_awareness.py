@@ -62,6 +62,7 @@ async def get_self_awareness_dashboard() -> dict[str, Any]:
     now = datetime.utcnow()
     conn = await _get_db_connection()
     query_errors: list[str] = []
+    tenant_id = os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID")
 
     dashboard = {
         "timestamp": now.isoformat(),
@@ -77,7 +78,11 @@ async def get_self_awareness_dashboard() -> dict[str, Any]:
             "cognitive_load": 0,
             "active_thoughts": 0,
             "decision_confidence": 0,
-            "learning_mode": "active"
+            "learning_mode": "active",
+            "self_state": None,
+            "self_state_recorded_at": None,
+            "health_score": None,
+            "mood": None,
         },
         "memory_state": {
             "total_memories": 0,
@@ -122,29 +127,34 @@ async def get_self_awareness_dashboard() -> dict[str, Any]:
 
     if conn:
         try:
-            async def safe_fetchrow(sql: str):
+            async def safe_fetchrow(sql: str, *params):
                 try:
-                    return await conn.fetchrow(sql)
+                    return await conn.fetchrow(sql, *params)
                 except Exception as e:
                     query_errors.append(str(e))
                     return None
 
-            async def safe_fetch(sql: str):
+            async def safe_fetch(sql: str, *params):
                 try:
-                    return await conn.fetch(sql)
+                    return await conn.fetch(sql, *params)
                 except Exception as e:
                     query_errors.append(str(e))
                     return []
 
             # Get memory stats
-            memory_stats = await safe_fetchrow("""
+            memory_stats_sql = """
                 SELECT
                     COUNT(*) as total,
                     COUNT(CASE WHEN embedding IS NOT NULL THEN 1 END) as with_embeddings,
                     COUNT(CASE WHEN created_at > NOW() - INTERVAL '1 hour' THEN 1 END) as recent,
                     MAX(created_at) as last_write
                 FROM unified_ai_memory
-            """)
+            """
+            memory_params: list[Any] = []
+            if tenant_id:
+                memory_stats_sql += " WHERE tenant_id = $1"
+                memory_params = [tenant_id]
+            memory_stats = await safe_fetchrow(memory_stats_sql, *memory_params)
             if memory_stats:
                 dashboard["memory_state"]["total_memories"] = memory_stats["total"]
                 dashboard["memory_state"]["memories_with_embeddings"] = memory_stats["with_embeddings"]
@@ -152,7 +162,7 @@ async def get_self_awareness_dashboard() -> dict[str, Any]:
                 dashboard["memory_state"]["last_memory_write"] = memory_stats["last_write"].isoformat() if memory_stats["last_write"] else None
 
             # Get knowledge graph stats
-            kg_stats = await safe_fetchrow("SELECT COUNT(*) as nodes FROM ai_knowledge_graph")
+            kg_stats = await safe_fetchrow("SELECT COUNT(*) as nodes FROM ai_knowledge_nodes")
             if kg_stats:
                 dashboard["memory_state"]["knowledge_graph_nodes"] = kg_stats["nodes"]
 
@@ -194,6 +204,30 @@ async def get_self_awareness_dashboard() -> dict[str, Any]:
             """)
             if thoughts_stats:
                 dashboard["aurea_state"]["thoughts_processed"] = thoughts_stats["total"] or 0
+
+            # Fetch latest self-state snapshot
+            self_state_sql = """
+                SELECT content, metadata, created_at
+                FROM unified_ai_memory
+                WHERE memory_type = 'meta'
+                  AND tags @> ARRAY['self_state']::text[]
+            """
+            self_state_params: list[Any] = []
+            if tenant_id:
+                self_state_sql += " AND tenant_id = $1"
+                self_state_params = [tenant_id]
+            self_state_sql += " ORDER BY created_at DESC LIMIT 1"
+            self_state_row = await safe_fetchrow(self_state_sql, *self_state_params)
+            if self_state_row:
+                content = self_state_row.get("content") or {}
+                dashboard["consciousness_state"]["self_state"] = content
+                dashboard["consciousness_state"]["self_state_recorded_at"] = (
+                    self_state_row["created_at"].isoformat()
+                    if self_state_row.get("created_at")
+                    else None
+                )
+                dashboard["consciousness_state"]["health_score"] = content.get("health_score")
+                dashboard["consciousness_state"]["mood"] = content.get("mood")
 
             # Get recent decisions
             recent_decisions = await safe_fetch("""

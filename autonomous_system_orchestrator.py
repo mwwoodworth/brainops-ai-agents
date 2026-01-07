@@ -134,6 +134,7 @@ class Task:
     created_at: datetime = field(default_factory=lambda: datetime.utcnow())
     retries: int = 0
     max_retries: int = 3
+    result_future: Optional[asyncio.Future] = None
 
     def __lt__(self, other):
         """For priority queue ordering"""
@@ -143,13 +144,14 @@ class Task:
 class MessageQueue:
     """Priority-based message queue for async task processing"""
 
-    def __init__(self, max_workers: int = 10):
+    def __init__(self, max_workers: int = 10, task_handler: Optional[Callable[[Task], Any]] = None):
         self._queue: PriorityQueue = PriorityQueue()
         self._workers: list[asyncio.Task] = []
         self._max_workers = max_workers
         self._running = False
         self._task_history: deque = deque(maxlen=1000)
         self._active_tasks: dict[str, Task] = {}
+        self._task_handler = task_handler
 
     async def enqueue(self, task: Task):
         """Add task to queue"""
@@ -165,8 +167,24 @@ class MessageQueue:
 
                 logger.info(f"Worker {worker_id} processing task {task.task_id}")
 
-                # Task will be processed by orchestrator
-                # This is just the queue mechanism
+                result = None
+                if self._task_handler:
+                    try:
+                        if asyncio.iscoroutinefunction(self._task_handler):
+                            result = await self._task_handler(task)
+                        else:
+                            result = self._task_handler(task)
+                    except Exception as handler_exc:
+                        logger.error("Task handler failed for %s: %s", task.task_id, handler_exc)
+                        if task.result_future and not task.result_future.done():
+                            task.result_future.set_exception(handler_exc)
+                        result = {"status": "failed", "error": str(handler_exc)}
+                else:
+                    logger.warning("No task handler configured for queue execution")
+                    result = {"status": "failed", "error": "Task handler not configured"}
+
+                if task.result_future and not task.result_future.done():
+                    task.result_future.set_result(result)
 
                 self._task_history.append(task)
                 del self._active_tasks[task.task_id]
@@ -624,7 +642,7 @@ class AutonomousSystemOrchestrator:
         self.event_bus = EventBus()
 
         # NEW: Message queue for async operations
-        self.message_queue = MessageQueue(max_workers=20)
+        self.message_queue = MessageQueue(max_workers=20, task_handler=self._execute_task_handler)
 
         # NEW: Circuit breakers for each system
         self.circuit_breakers: dict[str, CircuitBreaker] = {}
@@ -1548,6 +1566,18 @@ class AutonomousSystemOrchestrator:
             "results": results
         }
 
+    async def _execute_task_handler(self, task: Task) -> dict[str, Any]:
+        """Execute a queued task through the real agent executor."""
+        from agent_executor import executor as agent_executor
+        payload = dict(task.data or {})
+        payload.update({
+            "task_id": task.task_id,
+            "task_type": task.task_type,
+            "agent_name": task.agent_name,
+            "priority": task.priority,
+        })
+        return await agent_executor.execute(task.agent_name, payload)
+
     async def execute_task_with_priority(
         self,
         task_type: str,
@@ -1572,12 +1602,14 @@ class AutonomousSystemOrchestrator:
             priority = self.priority_routes.get(task_type, 5)
 
         # Create task
+        result_future = asyncio.get_running_loop().create_future()
         task = Task(
             task_id=self._generate_id("task"),
             task_type=task_type,
             agent_name=agent_name,
             data=data,
-            priority=priority
+            priority=priority,
+            result_future=result_future
         )
 
         # Select instance using load balancer
@@ -1610,25 +1642,29 @@ class AutonomousSystemOrchestrator:
             priority=priority
         ))
 
-        # Execute task (simulated for now)
-        result = {
-            "task_id": task.task_id,
-            "task_type": task_type,
-            "agent_name": agent_name,
-            "instance_id": instance.instance_id,
-            "priority": priority,
-            "status": "completed",
-            "executed_at": datetime.utcnow().isoformat()
-        }
+        # Wait for actual task execution
+        try:
+            timeout = data.get("timeout_seconds", 300) if isinstance(data, dict) else 300
+            result = await asyncio.wait_for(result_future, timeout=timeout)
+        except asyncio.TimeoutError:
+            result = {
+                "status": "failed",
+                "error": "Task execution timed out",
+                "task_id": task.task_id,
+                "agent_name": agent_name,
+            }
 
         # Update load
         self.load_balancer.update_load(instance.instance_id, -1)
 
         # Publish completion event
+        completion_event = EventType.AGENT_COMPLETED
+        if isinstance(result, dict) and result.get("status") in ("failed", "error"):
+            completion_event = EventType.AGENT_FAILED
         await self.event_bus.publish(SystemEvent(
-            event_type=EventType.AGENT_COMPLETED,
+            event_type=completion_event,
             source=agent_name,
-            data=result,
+            data=result if isinstance(result, dict) else {"result": result},
             priority=priority
         ))
 

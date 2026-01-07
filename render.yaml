@@ -24,6 +24,8 @@ services:
         sync: false  # REQUIRED - Set in Render dashboard
       - key: DATABASE_URL
         sync: false
+      - key: MCP_DATABASE_URL
+        sync: false
       - key: DB_PORT
         value: "6543"  # Transaction mode - higher connection limits than Session mode (5432)
       # SECURITY: API keys must be set in Render dashboard, NOT in this file
@@ -49,6 +51,28 @@ services:
         value: "INFO"
       - key: ENVIRONMENT
         value: "production"
+      - key: ALIVE_SELF_STATE_INTERVAL_SEC
+        value: "30"
+      - key: ENABLE_REASONING_GUARD
+        value: "true"
+      - key: REASONING_GUARD_CONFIDENCE_THRESHOLD
+        value: "0.7"
+      - key: REASONING_GUARD_FAIL_OPEN
+        value: "false"
+      - key: ENABLE_REVENUE_DRIVE
+        value: "true"
+      - key: REVENUE_DRIVE_DRY_RUN
+        value: "false"
+      - key: REVENUE_DRIVE_STALE_DAYS
+        value: "7"
+      - key: REVENUE_DRIVE_OVERDUE_DAYS
+        value: "14"
+      - key: REVENUE_DRIVE_UPSELL_DAYS
+        value: "30"
+      - key: REVENUE_DRIVE_MAX_ITEMS
+        value: "25"
+      - key: REVENUE_DRIVE_COOLDOWN_HOURS
+        value: "24"
       # AI API Keys (set in Render dashboard for security)
       - key: OPENAI_API_KEY
         sync: false

@@ -27,6 +27,8 @@ import psutil
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
+from unified_memory_manager import Memory, MemoryType, UnifiedMemoryManager
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -191,6 +193,13 @@ class AliveCore:
             'emergency': [],
             'awakening': []
         }
+        self._tenant_id = os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID")
+        if not self._tenant_id:
+            logger.warning("No DEFAULT_TENANT_ID/TENANT_ID set; self-state memory writes disabled.")
+        self._memory_manager: Optional[UnifiedMemoryManager] = None
+        self._last_self_state_at: Optional[datetime] = None
+        self._last_self_state: Optional[dict[str, Any]] = None
+        self._self_state_interval = int(os.getenv("ALIVE_SELF_STATE_INTERVAL_SEC", "30"))
 
     def _get_shutdown_event(self) -> asyncio.Event:
         """Lazily create shutdown event when in async context"""
@@ -206,6 +215,18 @@ class AliveCore:
 
         # Schema is pre-created in database - skip blocking init
         # self._ensure_schema() - tables already exist
+
+    def _get_memory_manager(self) -> Optional[UnifiedMemoryManager]:
+        """Lazy init unified memory manager for self-state persistence."""
+        if not self._tenant_id:
+            return None
+        if self._memory_manager is None:
+            try:
+                self._memory_manager = UnifiedMemoryManager(tenant_id=self._tenant_id)
+            except Exception as exc:
+                logger.warning("Failed to initialize UnifiedMemoryManager: %s", exc)
+                self._memory_manager = None
+        return self._memory_manager
 
     # Use shared sync pool instead of creating our own
     _use_shared_pool = True
@@ -229,6 +250,127 @@ class AliveCore:
                     if conn and not conn.closed:
                         conn.close()
             return fallback_conn()
+
+    def _get_active_agents_count(self) -> int:
+        """Fetch active agent count from database."""
+        try:
+            with self._get_connection() as conn:
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute("SELECT COUNT(*) FROM ai_agents WHERE status = 'active'")
+                    count = cur.fetchone()[0]
+                    cur.close()
+                    return int(count or 0)
+        except Exception as exc:
+            logger.warning("Failed to fetch active agent count: %s", exc)
+        return 0
+
+    def _get_pending_tasks_count(self) -> int:
+        """Fetch pending autonomous task count."""
+        try:
+            with self._get_connection() as conn:
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute("SELECT COUNT(*) FROM ai_autonomous_tasks WHERE status = 'pending'")
+                    count = cur.fetchone()[0]
+                    cur.close()
+                    return int(count or 0)
+        except Exception as exc:
+            logger.warning("Failed to fetch pending tasks count: %s", exc)
+        return 0
+
+    def _get_last_error(self) -> Optional[dict[str, Any]]:
+        """Fetch the most recent error from ai_error_logs."""
+        try:
+            with self._get_connection() as conn:
+                if conn:
+                    cur = conn.cursor(cursor_factory=RealDictCursor)
+                    cur.execute("""
+                        SELECT error_type, error_message, severity, component, timestamp
+                        FROM ai_error_logs
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    """)
+                    row = cur.fetchone()
+                    cur.close()
+                    return dict(row) if row else None
+        except Exception as exc:
+            logger.warning("Failed to fetch last error: %s", exc)
+        return None
+
+    def _calculate_health_score(self, vitals: VitalSigns, pending_tasks: int) -> float:
+        """Compute a 0-100 health score from vitals and backlog."""
+        cpu_score = max(0.0, 100.0 - float(vitals.cpu_percent))
+        mem_score = max(0.0, 100.0 - float(vitals.memory_percent))
+        error_rate = float(vitals.error_rate or 0.0)
+        error_score = max(0.0, 100.0 - min(100.0, error_rate * 200.0))
+        response_time = float(vitals.response_time_avg or 0.0)
+        response_score = max(0.0, 100.0 - min(100.0, response_time * 25.0))
+        base_score = (cpu_score + mem_score + error_score + response_score) / 4.0
+        backlog_penalty = min(20.0, pending_tasks / 5.0)
+        return max(0.0, min(100.0, base_score - backlog_penalty))
+
+    def _infer_mood(self, health_score: float, last_error: Optional[dict[str, Any]]) -> str:
+        """Infer system mood from health and recent errors."""
+        severity = (last_error or {}).get("severity") if last_error else None
+        if severity in {"critical", "high"}:
+            return "recovering"
+        if health_score >= 80:
+            return "healthy"
+        if health_score >= 50:
+            return "stressed"
+        return "recovering"
+
+    async def _maybe_store_self_state(self, vitals: VitalSigns) -> None:
+        """Persist a periodic self-state snapshot into unified memory."""
+        if not self._tenant_id:
+            return
+
+        now = datetime.utcnow()
+        if self._last_self_state_at:
+            elapsed = (now - self._last_self_state_at).total_seconds()
+            if elapsed < self._self_state_interval:
+                return
+
+        pending_tasks = self._get_pending_tasks_count()
+        active_agents = self._get_active_agents_count()
+        last_error = self._get_last_error()
+        health_score = round(self._calculate_health_score(vitals, pending_tasks), 2)
+
+        state = {
+            "timestamp": now.isoformat(),
+            "memory_used_mb": round(psutil.virtual_memory().used / (1024 * 1024), 2),
+            "active_agents": active_agents,
+            "pending_tasks": pending_tasks,
+            "last_error": last_error,
+            "health_score": health_score,
+            "mood": self._infer_mood(health_score, last_error),
+            "vital_signs": vitals.to_dict(),
+        }
+
+        memory_manager = self._get_memory_manager()
+        if not memory_manager:
+            logger.warning("UnifiedMemoryManager unavailable; self_state not stored.")
+            return
+
+        memory = Memory(
+            memory_type=MemoryType.META,
+            content=state,
+            source_system="alive_core",
+            source_agent="heartbeat",
+            created_by="alive_core",
+            importance_score=0.6,
+            tags=["self_state", "heartbeat"],
+            metadata={"health_score": state["health_score"], "mood": state["mood"]},
+            tenant_id=self._tenant_id,
+        )
+
+        try:
+            await asyncio.to_thread(memory_manager.store, memory)
+            self._last_self_state_at = now
+            self._last_self_state = state
+        except Exception as exc:
+            logger.warning("Failed to store self_state memory: %s", exc)
 
     def _ensure_schema(self):
         """Create required database tables"""
@@ -541,6 +683,7 @@ class AliveCore:
 
                 # Collect vital signs
                 vitals = await self.collect_vital_signs()
+                await self._maybe_store_self_state(vitals)
 
                 # Generate periodic thoughts based on state
                 if self.heartbeat_count % 12 == 0:  # Every minute
@@ -769,7 +912,8 @@ class AliveCore:
             'heartbeat_count': self.heartbeat_count,
             'thought_count': self.thought_counter,
             'vital_signs': self.vital_signs.to_dict() if self.vital_signs else None,
-            'recent_thoughts': len(self.thought_stream)
+            'recent_thoughts': len(self.thought_stream),
+            'self_state': self._last_self_state,
         }
 
 

@@ -7,6 +7,7 @@ Real-time monitoring of Render and Vercel deployments with log access
 
 import asyncio
 import os
+import time
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -283,20 +284,23 @@ class DeploymentMonitorAgent:
     async def check_service_health(self, url: str) -> dict[str, Any]:
         """Check if a service is healthy"""
         try:
+            start = time.monotonic()
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{url}/health", timeout=5) as response:
+                    latency_ms = (time.monotonic() - start) * 1000
                     if response.status == 200:
                         data = await response.json()
                         return {
                             "status": "healthy",
-                            "response_time_ms": response.headers.get("X-Response-Time", "N/A"),
+                            "response_time_ms": latency_ms,
                             "version": data.get("version", "unknown"),
                             "details": data
                         }
                     else:
                         return {
                             "status": "unhealthy",
-                            "http_status": response.status
+                            "http_status": response.status,
+                            "response_time_ms": latency_ms
                         }
         except asyncio.TimeoutError:
             return {"status": "timeout"}
@@ -540,24 +544,51 @@ class DeploymentMonitorAgent:
                 return {"error": f"Unknown service: {service_name}"}
 
             start_time = datetime.utcnow()
+            start_monotonic = time.monotonic()
 
-            # In a real implementation, this would poll metrics over time
-            # For now, we'll simulate with a single check
-            health_check = await self.check_service_health(service["url"])
+            samples = max(1, min(int(duration_minutes * 2), 20))
+            interval_seconds = max(5, (duration_minutes * 60) / samples) if duration_minutes else 5
+            sample_results = []
+
+            for i in range(samples):
+                health_check = await self.check_service_health(service["url"])
+                ok = health_check.get("status") == "healthy"
+                latency = health_check.get("response_time_ms")
+                sample_results.append({"ok": ok, "latency": latency})
+                if i < samples - 1:
+                    await asyncio.sleep(interval_seconds)
+
+            def compute_metrics(sample_set: list[dict[str, Any]]):
+                total = len(sample_set)
+                errors = len([s for s in sample_set if not s["ok"]])
+                latencies = [s["latency"] for s in sample_set if s["ok"] and isinstance(s.get("latency"), (int, float))]
+                avg_latency = (sum(latencies) / len(latencies)) if latencies else None
+                error_rate = errors / total if total else 0
+                return avg_latency, error_rate, total
+
+            mid = max(1, len(sample_results) // 2)
+            baseline_samples = sample_results[:mid]
+            current_samples = sample_results[mid:] or sample_results
+
+            baseline_latency, baseline_error_rate, baseline_total = compute_metrics(baseline_samples)
+            current_latency, current_error_rate, current_total = compute_metrics(current_samples)
+
+            elapsed_minutes = max(1e-6, (time.monotonic() - start_monotonic) / 60.0)
+            requests_per_minute = current_total / elapsed_minutes
 
             metrics = {
                 "service": service_name,
                 "monitoring_started": start_time.isoformat(),
                 "duration_minutes": duration_minutes,
-                "health_status": health_check.get("status"),
-                "error_rate": 0,  # Would come from APM/logging
-                "avg_response_time_ms": 0,  # Would come from metrics
-                "requests_per_minute": 0,  # Would come from metrics
-                "cpu_usage_percent": 0,  # Would come from platform API
-                "memory_usage_percent": 0,  # Would come from platform API
-                "baseline_error_rate": 0.5,
-                "baseline_response_time_ms": 200,
-                "baseline_requests_per_minute": 100
+                "health_status": "healthy" if current_error_rate == 0 else "degraded",
+                "error_rate": current_error_rate,
+                "avg_response_time_ms": current_latency,
+                "requests_per_minute": requests_per_minute,
+                "cpu_usage_percent": None,
+                "memory_usage_percent": None,
+                "baseline_error_rate": baseline_error_rate,
+                "baseline_response_time_ms": baseline_latency,
+                "baseline_requests_per_minute": baseline_total / elapsed_minutes if elapsed_minutes else None
             }
 
             # Check if rollback is needed
