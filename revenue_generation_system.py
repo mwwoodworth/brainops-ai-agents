@@ -37,19 +37,71 @@ def _is_test_email(email: str | None) -> bool:
         return True
     return any(domain in lowered for domain in TEST_EMAIL_DOMAINS)
 
-# Use unified AI core instead of direct clients
+AI_CORE_AVAILABLE = False
+ai_generate = None
+ai_analyze = None
+openai = None
+anthropic_client = None
+
+# Prefer unified AI core; fall back to direct SDKs.
 try:
-    from ai_core import RealAICore, ai_analyze, ai_generate
-    _ai_core = RealAICore()
+    from ai_core import ai_analyze, ai_generate
+
     AI_CORE_AVAILABLE = True
     logger.info("Revenue System using unified AI Core")
-except ImportError:
-    AI_CORE_AVAILABLE = False
-    import anthropic
-    import openai
-    openai.api_key = os.getenv("OPENAI_API_KEY")
-    anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    logger.warning("AI Core not available - using direct clients")
+except Exception as exc:
+    logger.warning("AI Core not available (%s) - using direct clients", exc)
+    try:
+        import anthropic
+        import openai
+    except Exception as import_exc:
+        logger.error("OpenAI/Anthropic SDK unavailable: %s", import_exc)
+    else:
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+        anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+
+async def _generate_text(
+    prompt: str,
+    *,
+    model: str,
+    system_prompt: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int = 2000,
+) -> str:
+    if AI_CORE_AVAILABLE and ai_generate:
+        return await ai_generate(
+            prompt,
+            model=model,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+    if model.startswith("claude") and anthropic_client is not None:
+        response = anthropic_client.messages.create(
+            model=model,
+            system=system_prompt or "You are a helpful AI assistant.",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        return response.content[0].text
+
+    if openai is not None:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        response = openai.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content
+
+    raise RuntimeError("No AI provider available")
 
 # Database configuration - use config module for consistency
 # NO hardcoded credentials - all values MUST come from environment variables
@@ -201,19 +253,12 @@ class AutonomousRevenueSystem:
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
 
-        # Add location column if it doesn't exist (migration for existing tables)
-        cursor.execute("""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_name = 'revenue_leads' AND column_name = 'location'
-                ) THEN
-                    ALTER TABLE revenue_leads ADD COLUMN location VARCHAR(255);
-                END IF;
-            END $$;
-        """)
-        conn.commit()
+        # Ensure gen_random_uuid() is available for DEFAULTs (Supabase typically provides pgcrypto).
+        try:
+            cursor.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        except Exception as exc:
+            conn.rollback()
+            logger.debug("Skipping pgcrypto extension ensure: %s", exc)
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS revenue_leads (
@@ -353,11 +398,25 @@ class AutonomousRevenueSystem:
             CREATE INDEX IF NOT EXISTS idx_unified_brain_logs_created ON unified_brain_logs(created_at DESC);
         """)
 
+        # Post-create migrations / safety indexes
+        cursor.execute("ALTER TABLE IF EXISTS revenue_leads ADD COLUMN IF NOT EXISTS location VARCHAR(255);")
+        cursor.execute(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'revenue_metrics'
+              AND column_name = 'metric_date'
+            """
+        )
+        if cursor.fetchone():
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_revenue_metrics_metric_date ON revenue_metrics(metric_date);")
+
         conn.commit()
         cursor.close()
         conn.close()
 
-    async def identify_new_leads(self, criteria: dict[str, Any]) -> list[Lead]:
+    async def identify_new_leads(self, criteria: dict[str, Any]) -> list[str]:
         """Autonomously identify new leads based on criteria"""
         try:
             # Use AI to generate lead search parameters
@@ -366,16 +425,15 @@ class AutonomousRevenueSystem:
             Include: location, company size, indicators of need, budget range.
             Return as JSON."""
 
-            response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a lead generation expert."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7
+            search_params = json.loads(
+                await _generate_text(
+                    prompt,
+                    model="gpt-4-turbo-preview",
+                    system_prompt="You are a lead generation expert.",
+                    temperature=0.7,
+                    max_tokens=800,
+                )
             )
-
-            search_params = json.loads(response.choices[0].message.content)
 
             # Simulate lead discovery (would integrate with real data sources)
             new_leads = await self._discover_leads(search_params)
@@ -438,16 +496,18 @@ class AutonomousRevenueSystem:
             - buying_signals: array of detected signals
             - competitor_risk: 0-1 probability they're with competitor"""
 
-            response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are an advanced AI lead qualification expert with deep sales intelligence capabilities. Provide detailed, data-driven analysis."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.5
+            qualification = json.loads(
+                await _generate_text(
+                    prompt,
+                    model="gpt-4-turbo-preview",
+                    system_prompt=(
+                        "You are an advanced AI lead qualification expert with deep sales intelligence "
+                        "capabilities. Provide detailed, data-driven analysis."
+                    ),
+                    temperature=0.5,
+                    max_tokens=1500,
+                )
             )
-
-            qualification = json.loads(response.choices[0].message.content)
             score = qualification.get('score', 0) / 100.0
 
             # Update lead with qualification
@@ -502,6 +562,10 @@ class AutonomousRevenueSystem:
             lead = await self._get_lead(lead_id)
             if not lead:
                 return {}
+            recipient = lead.get("email")
+            if not recipient:
+                logger.warning("Lead %s has no email; outreach not scheduled", lead_id)
+                return {}
 
             # Generate personalized email
             prompt = f"""Create a personalized cold email for:
@@ -514,16 +578,13 @@ class AutonomousRevenueSystem:
             Make it personal, compelling, and focused on their potential ROI.
             Include subject line and body."""
 
-            response = anthropic_client.messages.create(
+            email_content = await _generate_text(
+                prompt,
                 model="claude-3-opus-20240229",
-                messages=[{
-                    "role": "user",
-                    "content": prompt
-                }],
-                max_tokens=500
+                system_prompt="You are an expert B2B email copywriter.",
+                max_tokens=500,
+                temperature=0.7,
             )
-
-            email_content = response.content[0].text
 
             # Parse and structure email
             lines = email_content.split('\n')
@@ -531,6 +592,7 @@ class AutonomousRevenueSystem:
             body = '\n'.join(lines[2:]).strip()
 
             outreach = {
+                'to': recipient,
                 'subject': subject,
                 'body': body,
                 'lead_id': lead_id,
@@ -573,17 +635,13 @@ class AutonomousRevenueSystem:
 
             Make it professional and compelling."""
 
-            response = openai.chat.completions.create(
+            proposal_content = await _generate_text(
+                prompt,
                 model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a proposal writing expert."},
-                    {"role": "user", "content": prompt}
-                ],
+                system_prompt="You are a proposal writing expert.",
                 temperature=0.7,
-                max_tokens=1500
+                max_tokens=1500,
             )
-
-            proposal_content = response.choices[0].message.content
 
             # Calculate pricing
             pricing = await self._calculate_dynamic_pricing(requirements)
@@ -626,16 +684,15 @@ class AutonomousRevenueSystem:
 
             Return as JSON."""
 
-            response = anthropic_client.messages.create(
-                model="claude-3-opus-20240229",
-                messages=[{
-                    "role": "user",
-                    "content": prompt
-                }],
-                max_tokens=500
+            analysis = json.loads(
+                await _generate_text(
+                    prompt,
+                    model="claude-3-opus-20240229",
+                    system_prompt="You are a sales negotiation expert.",
+                    max_tokens=500,
+                    temperature=0.4,
+                )
             )
-
-            analysis = json.loads(response.content[0].text)
 
             # Generate negotiation response
             negotiation_response = await self._generate_negotiation_response(
@@ -681,17 +738,34 @@ class AutonomousRevenueSystem:
                 WHERE id = %s
             """, (lead_id,))
 
-            # Update metrics
-            cursor.execute("""
-                INSERT INTO revenue_metrics (metric_date, deals_closed, revenue_generated)
-                VALUES (CURRENT_DATE, 1, %s)
-                ON CONFLICT (metric_date)
-                DO UPDATE SET
-                    deals_closed = revenue_metrics.deals_closed + 1,
-                    revenue_generated = revenue_metrics.revenue_generated + EXCLUDED.revenue_generated
-            """, (terms.get('final_value', 0),))
-
+            # Commit core state changes first; metrics updates are best-effort and schema varies.
+            final_value = terms.get('final_value', 0)
             conn.commit()
+
+            try:
+                cursor.execute(
+                    """
+                    UPDATE sales_metrics
+                    SET contracts_signed = COALESCE(contracts_signed, 0) + 1,
+                        opportunities_won = COALESCE(opportunities_won, 0) + 1,
+                        total_revenue = COALESCE(total_revenue, 0) + %s
+                    WHERE metric_date = CURRENT_DATE
+                      AND metric_type = 'daily'
+                    """,
+                    (final_value,),
+                )
+                if cursor.rowcount == 0:
+                    cursor.execute(
+                        """
+                        INSERT INTO sales_metrics (metric_date, metric_type, contracts_signed, opportunities_won, total_revenue)
+                        VALUES (CURRENT_DATE, 'daily', 1, 1, %s)
+                        """,
+                        (final_value,),
+                    )
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                logger.warning("Sales metrics update skipped: %s", exc)
             cursor.close()
             conn.close()
 
@@ -941,17 +1015,20 @@ Return ONLY valid JSON array, no other text."""
                 except json.JSONDecodeError:
                     logger.warning("Could not parse lead discovery response as JSON")
 
-                # Fallback: use OpenAI to extract structured data
-                extraction_response = openai.chat.completions.create(
-                    model="gpt-4-turbo-preview",
-                    messages=[
-                        {"role": "system", "content": "Extract lead data from search results. Return only valid JSON array."},
-                        {"role": "user", "content": f"Extract leads from: {result['answer']}\n\nReturn JSON array with company_name, contact_name, email, phone, website, location, source, buying_signals, estimated_value, confidence_score for each lead."}
-                    ],
-                    temperature=0.3
+                # Fallback: use AI to extract structured data
+                extracted = json.loads(
+                    await _generate_text(
+                        (
+                            f"Extract leads from: {result['answer']}\n\n"
+                            "Return JSON array with company_name, contact_name, email, phone, website, "
+                            "location, source, buying_signals, estimated_value, confidence_score for each lead."
+                        ),
+                        model="gpt-4-turbo-preview",
+                        system_prompt="Extract lead data from search results. Return only valid JSON array.",
+                        temperature=0.3,
+                        max_tokens=1500,
+                    )
                 )
-
-                extracted = json.loads(extraction_response.choices[0].message.content)
                 if isinstance(extracted, list):
                     logger.info(f"Extracted {len(extracted)} leads from discovery")
                     return extracted
@@ -959,11 +1036,6 @@ Return ONLY valid JSON array, no other text."""
             # Perplexity unavailable - check database for opportunities
             logger.warning("Perplexity unavailable, checking database for opportunities")
             try:
-                import psycopg2
-                from psycopg2.extras import RealDictCursor
-
-                # Use the validated DB config - no hardcoded defaults
-                from revenue_generation_system import DB_CONFIG
                 conn = psycopg2.connect(**DB_CONFIG)
                 cur = conn.cursor(cursor_factory=RealDictCursor)
 
@@ -1051,16 +1123,15 @@ Return ONLY valid JSON array, no other text."""
             - reasoning: short explanation
             """
 
-            response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a pricing expert."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3
+            pricing = json.loads(
+                await _generate_text(
+                    prompt,
+                    model="gpt-4-turbo-preview",
+                    system_prompt="You are a pricing expert.",
+                    temperature=0.3,
+                    max_tokens=800,
+                )
             )
-
-            pricing = json.loads(response.choices[0].message.content)
             return pricing
         except Exception as e:
             logger.error(f"AI pricing calculation failed: {e}")
@@ -1078,6 +1149,21 @@ Return ONLY valid JSON array, no other text."""
         """Schedule email for sending"""
         try:
             recipient = email_data.get('to')
+            if not recipient:
+                logger.warning("Email missing recipient; not queued")
+                return
+            scheduled_for = (
+                email_data.get("scheduled_for")
+                or email_data.get("scheduled_send")
+                or datetime.now(timezone.utc)
+            )
+            if isinstance(scheduled_for, str):
+                try:
+                    scheduled_for = datetime.fromisoformat(scheduled_for)
+                    if scheduled_for.tzinfo is None:
+                        scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    scheduled_for = datetime.now(timezone.utc)
             metadata = email_data.get('metadata') or {}
             if isinstance(metadata, str):
                 try:
@@ -1099,7 +1185,7 @@ Return ONLY valid JSON array, no other text."""
                 recipient,
                 email_data.get('subject'),
                 email_data.get('body'),
-                datetime.now(timezone.utc),
+                scheduled_for,
                 'queued',
                 json.dumps(metadata)
             ))
@@ -1200,16 +1286,15 @@ Return ONLY valid JSON array, no other text."""
             - signature_block: text for signature area
             """
 
-            response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a legal document assistant."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3
+            docs = json.loads(
+                await _generate_text(
+                    prompt,
+                    model="gpt-4-turbo-preview",
+                    system_prompt="You are a legal document assistant.",
+                    temperature=0.3,
+                    max_tokens=1200,
+                )
             )
-
-            docs = json.loads(response.choices[0].message.content)
             docs['generated_at'] = datetime.now(timezone.utc).isoformat()
             return docs
 
@@ -1336,17 +1421,18 @@ Return ONLY valid JSON array, no other text."""
 
             Make highly personalized, benefit-focused, and conversion-optimized."""
 
-            response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are an expert email marketing copywriter specializing in B2B sales sequences with proven conversion rates."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=2500
+            sequence = json.loads(
+                await _generate_text(
+                    prompt,
+                    model="gpt-4-turbo-preview",
+                    system_prompt=(
+                        "You are an expert email marketing copywriter specializing in B2B sales sequences "
+                        "with proven conversion rates."
+                    ),
+                    temperature=0.7,
+                    max_tokens=2500,
+                )
             )
-
-            sequence = json.loads(response.choices[0].message.content)
 
             # Store sequence in database
             conn = psycopg2.connect(**DB_CONFIG)
@@ -1401,16 +1487,18 @@ Return ONLY valid JSON array, no other text."""
 
             Return JSON with detailed competitive analysis."""
 
-            response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a competitive intelligence analyst with deep knowledge of the roofing software market."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.5
+            analysis = json.loads(
+                await _generate_text(
+                    prompt,
+                    model="gpt-4-turbo-preview",
+                    system_prompt=(
+                        "You are a competitive intelligence analyst with deep knowledge of the roofing "
+                        "software market."
+                    ),
+                    temperature=0.5,
+                    max_tokens=1500,
+                )
             )
-
-            analysis = json.loads(response.choices[0].message.content)
 
             # Store analysis
             conn = psycopg2.connect(**DB_CONFIG)
@@ -1485,16 +1573,18 @@ Return ONLY valid JSON array, no other text."""
             - timeline: expected churn window
             """
 
-            response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a customer success AI specializing in churn prediction and retention strategies."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3
+            prediction = json.loads(
+                await _generate_text(
+                    prompt,
+                    model="gpt-4-turbo-preview",
+                    system_prompt=(
+                        "You are a customer success AI specializing in churn prediction and retention "
+                        "strategies."
+                    ),
+                    temperature=0.3,
+                    max_tokens=1500,
+                )
             )
-
-            prediction = json.loads(response.choices[0].message.content)
 
             # Store prediction
             conn = psycopg2.connect(**DB_CONFIG)
@@ -1562,16 +1652,18 @@ Return ONLY valid JSON array, no other text."""
 
             Prioritize by revenue potential and fit."""
 
-            response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are an expert at identifying upsell and cross-sell opportunities with high conversion rates."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.6
+            recommendations = json.loads(
+                await _generate_text(
+                    prompt,
+                    model="gpt-4-turbo-preview",
+                    system_prompt=(
+                        "You are an expert at identifying upsell and cross-sell opportunities with high "
+                        "conversion rates."
+                    ),
+                    temperature=0.6,
+                    max_tokens=2000,
+                )
             )
-
-            recommendations = json.loads(response.choices[0].message.content)
 
             # Store recommendations
             conn = psycopg2.connect(**DB_CONFIG)
@@ -1660,16 +1752,15 @@ Return ONLY valid JSON array, no other text."""
 
             Include best-case, likely-case, and worst-case scenarios."""
 
-            response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a revenue forecasting expert with deep statistical modeling capabilities."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.4
+            forecast = json.loads(
+                await _generate_text(
+                    prompt,
+                    model="gpt-4-turbo-preview",
+                    system_prompt="You are a revenue forecasting expert with deep statistical modeling capabilities.",
+                    temperature=0.4,
+                    max_tokens=2500,
+                )
             )
-
-            forecast = json.loads(response.choices[0].message.content)
 
             # Store forecast
             conn = psycopg2.connect(**DB_CONFIG)

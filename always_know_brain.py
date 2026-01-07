@@ -59,6 +59,8 @@ class SystemComponent(Enum):
     MEMORY = "memory"
     FRONTEND_MRG = "frontend_mrg"
     FRONTEND_ERP = "frontend_erp"
+    FRONTEND_COMMAND_CENTER = "frontend_command_center"
+    FRONTEND_BRAINSTACK_STUDIO = "frontend_brainstack_studio"
 
 
 @dataclass
@@ -102,6 +104,10 @@ class SystemState:
     mrg_response_time_ms: float = 0.0
     erp_healthy: bool = False
     erp_response_time_ms: float = 0.0
+    command_center_healthy: bool = False
+    command_center_response_time_ms: float = 0.0
+    brainstack_studio_healthy: bool = False
+    brainstack_studio_response_time_ms: float = 0.0
 
     # Business metrics
     customers_total: int = 0
@@ -346,6 +352,35 @@ class AlwaysKnowBrain:
             logger.warning(f"ERP check failed: {e}")
             state.erp_healthy = False
 
+        # BrainOps Command Center - check unified health endpoint (public)
+        try:
+            start = time.time()
+            async with self._session.get("https://brainops-command-center.vercel.app/api/unified-health") as resp:
+                state.command_center_response_time_ms = (time.time() - start) * 1000
+                if resp.status == 200:
+                    try:
+                        data = await resp.json()
+                        overall = (data.get("overall") or {}).get("status")
+                        # Treat "degraded" as still reachable; "critical" is considered unhealthy.
+                        state.command_center_healthy = overall != "critical"
+                    except Exception:
+                        state.command_center_healthy = True
+                else:
+                    state.command_center_healthy = False
+        except Exception as e:
+            logger.warning(f"Command Center check failed: {e}")
+            state.command_center_healthy = False
+
+        # Brainstack Studio (marketing) - simple availability check
+        try:
+            start = time.time()
+            async with self._session.get("https://brainstack-studio.vercel.app/") as resp:
+                state.brainstack_studio_response_time_ms = (time.time() - start) * 1000
+                state.brainstack_studio_healthy = resp.status == 200
+        except Exception as e:
+            logger.warning(f"Brainstack Studio check failed: {e}")
+            state.brainstack_studio_healthy = False
+
     async def _check_errors(self, state: SystemState):
         """Check error counts"""
         try:
@@ -374,6 +409,8 @@ class AlwaysKnowBrain:
             SystemComponent.DATABASE.value: state.database_connected,
             SystemComponent.FRONTEND_MRG.value: state.mrg_healthy,
             SystemComponent.FRONTEND_ERP.value: state.erp_healthy,
+            SystemComponent.FRONTEND_COMMAND_CENTER.value: state.command_center_healthy,
+            SystemComponent.FRONTEND_BRAINSTACK_STUDIO.value: state.brainstack_studio_healthy,
             SystemComponent.AUREA.value: state.aurea_operational,
         }
 
@@ -457,6 +494,22 @@ class AlwaysKnowBrain:
                 SystemComponent.FRONTEND_ERP,
                 "Weathercraft ERP Down",
                 "Weathercraft ERP is not responding."
+            )
+
+        if not state.command_center_healthy:
+            await self._create_alert(
+                AlertSeverity.ERROR,
+                SystemComponent.FRONTEND_COMMAND_CENTER,
+                "Command Center Down",
+                "BrainOps Command Center is not responding (or reporting critical status)."
+            )
+
+        if not state.brainstack_studio_healthy:
+            await self._create_alert(
+                AlertSeverity.WARNING,
+                SystemComponent.FRONTEND_BRAINSTACK_STUDIO,
+                "Brainstack Studio Down",
+                "Brainstack Studio marketing site is not responding."
             )
 
         # Warning: AUREA not operational
@@ -632,23 +685,51 @@ class AlwaysKnowBrain:
         logger.info("Starting scheduled UI tests...")
 
         try:
-            from ai_ui_testing import AIUITestingEngine
+            from ai_ui_testing import (
+                AIUITestingEngine,
+                MRG_ROUTES,
+                ERP_ROUTES,
+                COMMAND_CENTER_ROUTES,
+                BRAINSTACK_STUDIO_ROUTES,
+            )
 
             engine = AIUITestingEngine()
             await engine.initialize()
 
+            mode = (os.getenv("ALWAYS_KNOW_UI_TEST_MODE") or "smoke").strip().lower()
+            if mode == "full":
+                mrg_routes = MRG_ROUTES
+                erp_routes = ERP_ROUTES
+            else:
+                mrg_routes = ["/", "/login", "/tools", "/pricing", "/aurea"]
+                erp_routes = ["/", "/login"]
+
             # Test MyRoofGenius
             mrg_results = await engine.test_application(
                 base_url="https://myroofgenius.com",
-                routes=["/", "/login", "/tools", "/pricing"],
+                routes=mrg_routes,
                 app_name="MyRoofGenius"
             )
 
             # Test ERP
             erp_results = await engine.test_application(
                 base_url="https://weathercraft-erp.vercel.app",
-                routes=["/", "/login"],
+                routes=erp_routes,
                 app_name="Weathercraft ERP"
+            )
+
+            # Test Command Center
+            command_center_results = await engine.test_application(
+                base_url="https://brainops-command-center.vercel.app",
+                routes=COMMAND_CENTER_ROUTES,
+                app_name="BrainOps Command Center",
+            )
+
+            # Test Brainstack Studio
+            brainstack_results = await engine.test_application(
+                base_url="https://brainstack-studio.vercel.app",
+                routes=BRAINSTACK_STUDIO_ROUTES,
+                app_name="Brainstack Studio",
             )
 
             await engine.close()
@@ -670,15 +751,49 @@ class AlwaysKnowBrain:
                     f"{erp_results['failed']} UI tests failed out of {erp_results['total_tests']}"
                 )
 
-            # Persist test results
-            await self._persist_ui_test_results(mrg_results, erp_results)
+            if command_center_results.get("failed", 0) > 0:
+                await self._create_alert(
+                    AlertSeverity.ERROR,
+                    SystemComponent.FRONTEND_COMMAND_CENTER,
+                    "Command Center UI Test Failures",
+                    f"{command_center_results['failed']} UI tests failed out of {command_center_results['total_tests']}",
+                )
 
-            logger.info(f"UI tests complete. MRG: {mrg_results.get('passed', 0)}/{mrg_results.get('total_tests', 0)} passed. ERP: {erp_results.get('passed', 0)}/{erp_results.get('total_tests', 0)} passed.")
+            if brainstack_results.get("failed", 0) > 0:
+                await self._create_alert(
+                    AlertSeverity.WARNING,
+                    SystemComponent.FRONTEND_BRAINSTACK_STUDIO,
+                    "Brainstack Studio UI Test Failures",
+                    f"{brainstack_results['failed']} UI tests failed out of {brainstack_results['total_tests']}",
+                )
+
+            # Persist test results
+            await self._persist_ui_test_results(
+                [
+                    ("MyRoofGenius", mrg_results),
+                    ("Weathercraft ERP", erp_results),
+                    ("BrainOps Command Center", command_center_results),
+                    ("Brainstack Studio", brainstack_results),
+                ]
+            )
+
+            logger.info(
+                "UI tests complete. "
+                "MRG: %s/%s passed. ERP: %s/%s passed. Command Center: %s/%s passed. Brainstack: %s/%s passed.",
+                mrg_results.get("passed", 0),
+                mrg_results.get("total_tests", 0),
+                erp_results.get("passed", 0),
+                erp_results.get("total_tests", 0),
+                command_center_results.get("passed", 0),
+                command_center_results.get("total_tests", 0),
+                brainstack_results.get("passed", 0),
+                brainstack_results.get("total_tests", 0),
+            )
 
         except Exception as e:
             logger.error(f"UI tests failed: {e}\n{traceback.format_exc()}")
 
-    async def _persist_ui_test_results(self, mrg_results: dict, erp_results: dict):
+    async def _persist_ui_test_results(self, app_results: list[tuple[str, dict]]):
         """Persist UI test results to database"""
         try:
             if not self._db_pool:
@@ -704,7 +819,7 @@ class AlwaysKnowBrain:
                     )
                 """)
 
-                for app_name, results in [("MyRoofGenius", mrg_results), ("Weathercraft ERP", erp_results)]:
+                for app_name, results in app_results:
                     cur.execute("""
                         INSERT INTO ui_test_history
                         (application, total_tests, passed, failed, warnings, duration_seconds, results_json)
@@ -740,9 +855,11 @@ class AlwaysKnowBrain:
             s.mcp_bridge_healthy,
             s.database_connected,
             s.mrg_healthy,
-            s.erp_healthy
+            s.erp_healthy,
+            s.command_center_healthy,
+            s.brainstack_studio_healthy,
         ])
-        services_total = 6
+        services_total = 8
         health_pct = (services_up / services_total) * 100
 
         return f"""
@@ -757,6 +874,8 @@ SERVICES:
   Database: {'✅' if s.database_connected else '❌'}
   MyRoofGenius: {'✅' if s.mrg_healthy else '❌'} ({s.mrg_response_time_ms:.0f}ms)
   Weathercraft ERP: {'✅' if s.erp_healthy else '❌'} ({s.erp_response_time_ms:.0f}ms)
+  Command Center: {'✅' if s.command_center_healthy else '❌'} ({s.command_center_response_time_ms:.0f}ms)
+  Brainstack Studio: {'✅' if s.brainstack_studio_healthy else '❌'} ({s.brainstack_studio_response_time_ms:.0f}ms)
 
 AUREA:
   Status: {'Operational' if s.aurea_operational else 'Not Operational'}

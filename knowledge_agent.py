@@ -30,6 +30,12 @@ except ImportError as exc:
 
 logger = logging.getLogger(__name__)
 
+try:
+    from memory.codebase_graph import CodebaseGraph
+except Exception as exc:
+    CodebaseGraph = None
+    logger.warning("Codebase graph unavailable: %s", exc)
+
 class KnowledgeAgent:
     """Permanent knowledge and context manager for Claude Code sessions with AUREA integration"""
 
@@ -39,6 +45,8 @@ class KnowledgeAgent:
         self.agent_type = "knowledge"
         self.openai_client = None
         self.gemini_model = None
+        self._codebase_graph = CodebaseGraph() if CodebaseGraph else None
+        self._graph_loaded = False
 
         # AUREA Integration for decision recording and learning
         try:
@@ -57,6 +65,22 @@ class KnowledgeAgent:
             genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
             self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
             logger.info("✅ Gemini 2.0 Flash model initialized for Q&A")
+
+    def _ensure_codebase_graph(self) -> None:
+        if not self._codebase_graph or self._graph_loaded:
+            return
+        try:
+            self._codebase_graph.build()
+            self._graph_loaded = True
+        except Exception as exc:
+            logger.warning("Failed to build codebase graph: %s", exc)
+
+    def get_table_dependents(self, table: str) -> list[str]:
+        """Return systems that depend on a given table."""
+        if not self._codebase_graph:
+            return []
+        self._ensure_codebase_graph()
+        return self._codebase_graph.get_dependents(table)
 
     def get_db_connection(self):
         """Get database connection"""
@@ -89,6 +113,13 @@ class KnowledgeAgent:
             raise Exception("Database unavailable")
 
         try:
+            if entry.get("type") == "schema_change":
+                metadata = entry.get("metadata", {}) or {}
+                table = metadata.get("table")
+                if table:
+                    metadata["dependents"] = self.get_table_dependents(table)
+                    entry["metadata"] = metadata
+
             # Generate embedding
             text = f"{entry.get('title', '')}\n\n{entry.get('content', '')}"
             embedding = await self.generate_embedding(text)
@@ -241,6 +272,14 @@ class KnowledgeAgent:
             cursor.close()
             conn.close()
 
+            graph_summary = None
+            if self._codebase_graph:
+                self._ensure_codebase_graph()
+                graph_summary = {
+                    'nodes': self._codebase_graph.graph.number_of_nodes(),
+                    'edges': self._codebase_graph.graph.number_of_edges(),
+                }
+
             return {
                 'timestamp': datetime.utcnow().isoformat(),
                 'total_entries': len(all_entries),
@@ -260,7 +299,8 @@ class KnowledgeAgent:
                     'operational_status': 'ONLINE',
                     'ai_tier': 'gemini' if self.gemini_model else 'openai',
                     'cost_per_month': '$0'
-                }
+                },
+                'graph_summary': graph_summary
             }
         except Exception as e:
             if conn:

@@ -875,6 +875,15 @@ ERP_ROUTES = [
     "/reports"
 ]
 
+COMMAND_CENTER_ROUTES = [
+    "/dashboard",
+    "/aurea",
+]
+
+BRAINSTACK_STUDIO_ROUTES = [
+    "/",
+]
+
 
 async def test_myroofgenius():
     """Test MyRoofGenius application"""
