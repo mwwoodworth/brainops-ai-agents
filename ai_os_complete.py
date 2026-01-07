@@ -364,20 +364,23 @@ class SchedulingAgent(IntelligentAgent):
             try:
                 cursor.execute("SELECT id, name FROM users LIMIT %s", (size,))
                 users = cursor.fetchall()
-                if users:
-                    return [{"id": str(u[0]), "name": u[1], "role": "technician"} for u in users]
+                if not users:
+                    raise RuntimeError("No crew available in users table")
+                return [{"id": str(u[0]), "name": u[1], "role": "technician"} for u in users]
             except Exception as exc:
                 # Table might not exist or schema differs
                 conn.rollback()
-                logger.debug("Crew lookup failed; returning placeholder crew: %s", exc, exc_info=True)
-
-            return [{"id": "pending", "name": "To Be Assigned", "role": "technician"}]
+                logger.error("Crew lookup failed: %s", exc, exc_info=True)
+                raise RuntimeError("Crew lookup failed; verify users table and data") from exc
         finally:
             self.return_connection(conn)
 
     async def _check_weather(self, date: str) -> dict:
         """Check weather suitability"""
-        return {"status": "skipped", "reason": "Weather API not configured"}
+        api_key = os.getenv("WEATHER_API_KEY")
+        if not api_key:
+            raise RuntimeError("Weather API not configured (WEATHER_API_KEY missing)")
+        raise RuntimeError("Weather API integration not implemented")
 
     async def _store_schedule(self, schedule: dict):
         """Store schedule in database"""

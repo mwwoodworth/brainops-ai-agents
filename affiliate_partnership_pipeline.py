@@ -1134,6 +1134,16 @@ class AffiliatePartnershipPipeline:
 
     def __init__(self, db_url: str = None):
         self.db_url = db_url or os.getenv("DATABASE_URL")
+        env = os.getenv("ENVIRONMENT", "production").strip().lower()
+        allow_inmemory = os.getenv("ALLOW_AFFILIATE_INMEMORY", "").strip().lower() in {"1", "true", "yes"}
+
+        if env in {"production", "prod"} and allow_inmemory:
+            raise RuntimeError("ALLOW_AFFILIATE_INMEMORY is not permitted in production environments")
+
+        if not self.db_url and not allow_inmemory:
+            raise RuntimeError(
+                "Affiliate pipeline requires DATABASE_URL or ALLOW_AFFILIATE_INMEMORY=true for explicit dev-only mode"
+            )
 
         # In-memory storage (would be database in production)
         self.affiliates: dict[str, Affiliate] = {}
@@ -1156,7 +1166,11 @@ class AffiliatePartnershipPipeline:
         # Database connection pool (lazy initialization)
         self._db_pool = None
 
-        logger.info("AffiliatePartnershipPipeline initialized")
+        logger.info(
+            "AffiliatePartnershipPipeline initialized (env=%s, storage=%s)",
+            env,
+            "database" if self.db_url else "inmemory",
+        )
 
     # =========================================================================
     # DATABASE OPERATIONS
@@ -1486,7 +1500,7 @@ class AffiliatePartnershipPipeline:
         affiliate.status = AffiliateStatus.ACTIVE
         logger.info(f"Approved affiliate: {affiliate_id}")
 
-        # Send welcome email (mock)
+        # Send welcome email
         await self._send_welcome_email(affiliate)
 
         return affiliate
@@ -2157,7 +2171,7 @@ class AffiliatePartnershipPipeline:
                 commission.status = PayoutStatus.PROCESSING
                 commission.payout_id = payout.payout_id
 
-            # Process payment (mock)
+            # Process payment
             payout.status = PayoutStatus.PROCESSING
             payment_result = await self._process_payment(payout, affiliate)
 
@@ -2235,15 +2249,17 @@ class AffiliatePartnershipPipeline:
                 return {"success": False, "error": str(e)}
 
         elif method == "paypal":
+            logger.error("PayPal payouts are not implemented for affiliate %s", affiliate.affiliate_id)
             return {
-                "success": True,
-                "reference": f"PP-{secrets.token_hex(8).upper()}",
+                "success": False,
+                "error": "PayPal payouts not implemented. Configure Stripe Connect or add PayPal integration.",
                 "processor": "paypal",
             }
         elif method == "wire":
+            logger.error("Wire payouts are not implemented for affiliate %s", affiliate.affiliate_id)
             return {
-                "success": True,
-                "reference": f"WIRE-{datetime.utcnow().strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}",
+                "success": False,
+                "error": "Wire payouts not implemented. Configure Stripe Connect or add manual payout workflow.",
                 "processor": "wire",
             }
         else:

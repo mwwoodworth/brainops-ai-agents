@@ -20,6 +20,22 @@ from psycopg2.extras import RealDictCursor
 from revenue_generation_system import get_revenue_system
 from advanced_lead_scoring import get_scoring_engine
 
+# Revenue Drive (autonomous goals)
+try:
+    from drives.revenue_drive import RevenueDrive
+    REVENUE_DRIVE_AVAILABLE = True
+except Exception as exc:
+    RevenueDrive = None
+    REVENUE_DRIVE_AVAILABLE = False
+    logging.warning("RevenueDrive unavailable: %s", exc)
+
+# Enable revenue drive by default in production, off in dev unless toggled
+_revenue_drive_env = os.getenv("ENABLE_REVENUE_DRIVE")
+if _revenue_drive_env is None:
+    ENABLE_REVENUE_DRIVE = os.getenv("ENVIRONMENT", "production").lower() == "production"
+else:
+    ENABLE_REVENUE_DRIVE = _revenue_drive_env.lower() in ("1", "true", "yes")
+
 # CRITICAL: Use shared connection pool to prevent MaxClientsInSessionMode
 try:
     from database.sync_pool import get_sync_pool
@@ -1057,6 +1073,40 @@ class AgentScheduler:
         except Exception as e:
             logger.error(f"❌ Error loading schedules: {e}", exc_info=True)
 
+    def _run_revenue_drive(self):
+        """Execute the autonomous revenue drive scan."""
+        if not REVENUE_DRIVE_AVAILABLE or not ENABLE_REVENUE_DRIVE:
+            return
+        try:
+            drive = RevenueDrive()
+            result = drive.run()
+            logger.info("RevenueDrive completed: %s", result)
+        except Exception as exc:
+            logger.error("RevenueDrive failed: %s", exc, exc_info=True)
+
+    def _register_internal_jobs(self):
+        """Register internal recurring jobs (e.g., revenue drive)."""
+        if not (REVENUE_DRIVE_AVAILABLE and ENABLE_REVENUE_DRIVE):
+            return
+        try:
+            job_id = "revenue_drive"
+            self.scheduler.add_job(
+                func=self._run_revenue_drive,
+                trigger=IntervalTrigger(hours=4),
+                id=job_id,
+                name="Revenue Drive",
+                replace_existing=True,
+            )
+            self.registered_jobs[job_id] = {
+                "agent_id": "revenue_drive",
+                "agent_name": "RevenueDrive",
+                "frequency_minutes": 240,
+                "added_at": datetime.utcnow().isoformat(),
+            }
+            logger.info("✅ Scheduled RevenueDrive every 4 hours")
+        except Exception as exc:
+            logger.error("Failed to schedule RevenueDrive: %s", exc, exc_info=True)
+
     def add_schedule(self, agent_id: str, agent_name: str, frequency_minutes: int, schedule_id: str = None):
         """Add an agent to the scheduler"""
         try:
@@ -1099,6 +1149,8 @@ class AgentScheduler:
         try:
             # Load schedules from database
             self.load_schedules_from_db()
+            # Internal jobs (revenue drive, etc.)
+            self._register_internal_jobs()
 
             # Start scheduler
             self.scheduler.start()
