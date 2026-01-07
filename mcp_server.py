@@ -553,6 +553,22 @@ class MCPServer:
             if not conn_target:
                 raise RuntimeError(f"MCP database credentials missing ({conn_source})")
 
+            db_user = None
+            if isinstance(conn_target, str):
+                db_user = _extract_username_from_dsn(conn_target)
+            else:
+                db_user = conn_target.get("user")
+
+            if (
+                db_user
+                and db_user.lower() in DISALLOWED_DB_USERS
+                and ENVIRONMENT in ("production", "staging")
+            ):
+                raise RuntimeError("MCP database user must be read-only for system status checks")
+
+            if conn_source == "fallback_db_config":
+                logger.warning("SECURITY: MCP using fallback DB credentials (non-production only)")
+
             if isinstance(conn_target, str):
                 conn = psycopg2.connect(conn_target)
             else:

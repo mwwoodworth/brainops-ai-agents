@@ -88,7 +88,9 @@ async def get_quick_health() -> dict[str, Any]:
         "database": state.database_connected,
         "aurea": state.aurea_operational,
         "mrg_frontend": state.mrg_healthy,
-        "erp_frontend": state.erp_healthy
+        "erp_frontend": state.erp_healthy,
+        "command_center_frontend": getattr(state, "command_center_healthy", False),
+        "brainstack_studio_frontend": getattr(state, "brainstack_studio_healthy", False),
     }
 
     healthy_count = sum(services.values())
@@ -156,6 +158,8 @@ async def get_prometheus_metrics() -> str:
         f'brainops_service_healthy{{service="aurea"}} {1 if state.aurea_operational else 0}',
         f'brainops_service_healthy{{service="mrg_frontend"}} {1 if state.mrg_healthy else 0}',
         f'brainops_service_healthy{{service="erp_frontend"}} {1 if state.erp_healthy else 0}',
+        f'brainops_service_healthy{{service="command_center_frontend"}} {1 if getattr(state, "command_center_healthy", False) else 0}',
+        f'brainops_service_healthy{{service="brainstack_studio_frontend"}} {1 if getattr(state, "brainstack_studio_healthy", False) else 0}',
         "",
         "# HELP brainops_errors_total Total errors in time window",
         "# TYPE brainops_errors_total counter",

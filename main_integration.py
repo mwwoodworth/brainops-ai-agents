@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from agent_activation_system import BusinessEventType, get_activation_system
 from ai_board_governance import Proposal, ProposalType, get_ai_board
 from aurea_orchestrator import AutonomyLevel, get_aurea
+from alive_protocols import start_alive_protocols
 
 # Import all our components
 from unified_memory_manager import DB_CONFIG, Memory, MemoryType, get_memory_manager
@@ -362,6 +363,9 @@ async def startup_event():
     if os.getenv("AUTO_START_AUREA", "false").lower() == "true":
         # Note: Background task needs a specific tenant context, defaulting to system
         asyncio.create_task(run_aurea_background("system-background"))
+
+    # Start Alive Protocol daemons (Self-Health + Revenue Drive)
+    start_alive_protocols("system-startup")
 
 
 @app.get("/")
