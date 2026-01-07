@@ -7,6 +7,7 @@ asyncpg==0.29.0
 # Database
 psycopg2-binary==2.9.9
 sqlalchemy==2.0.23
+sqlparse==0.5.5
 
 # AI/ML (Required for activated systems)
 openai>=1.58.1,<2.0.0  # Compatible with langchain-openai 0.3.x

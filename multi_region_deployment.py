@@ -237,20 +237,24 @@ class EdgeNode:
         if function_name not in self.functions:
             raise ValueError(f"Function {function_name} not found")
 
-        # Simulate function execution
         self.functions[function_name]['invocations'] += 1
         self.current_load += 1
-
-        # Return simulated result
-        result = {
-            'function': function_name,
-            'node': self.node_id,
-            'region': self.region.value,
-            'result': f"Processed at edge: {params}"
-        }
-
-        self.current_load -= 1
-        return result
+        try:
+            code = self.functions[function_name].get('code', '')
+            exec_globals: dict[str, Any] = {}
+            exec(code, exec_globals)
+            handler = exec_globals.get('handler')
+            if not callable(handler):
+                raise ValueError("Edge function must define a callable handler(params)")
+            result = handler(params)
+            return {
+                'function': function_name,
+                'node': self.node_id,
+                'region': self.region.value,
+                'result': result
+            }
+        finally:
+            self.current_load -= 1
 
     def cache_content(self, key: str, content: Any, ttl: int = 3600) -> bool:
         """Cache content at edge"""

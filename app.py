@@ -63,12 +63,14 @@ from api.observability import (
 )
 from api.revenue import router as revenue_router
 from api.revenue_automation import router as revenue_automation_router
+from api.relationships import router as relationships_router
 from api.self_awareness import router as self_awareness_router  # Self-Awareness Dashboard
 from api.self_healing import router as self_healing_router
 from api.state_sync import router as state_sync_router
 from api.sync import router as sync_router  # Memory migration & consolidation
 from api.system_orchestrator import router as system_orchestrator_router
 from database.async_connection import (
+    DatabaseUnavailableError,
     PoolConfig,
     close_pool,
     get_pool,
@@ -1120,6 +1122,7 @@ app.include_router(sync_router, dependencies=SECURED_DEPENDENCIES)  # Memory syn
 app.include_router(brain_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(memory_coordination_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(customer_intelligence_router, dependencies=SECURED_DEPENDENCIES)
+app.include_router(relationships_router, dependencies=SECURED_DEPENDENCIES)
 
 # External webhook endpoints must NOT require an internal API key; they validate their own webhook secrets/signatures.
 app.include_router(gumroad_router)
@@ -1652,6 +1655,125 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
     return {**payload, "cached": from_cache}
 
 
+def _require_diagnostics_key(request: Request) -> None:
+    api_key = (
+        request.headers.get("X-API-Key")
+        or request.headers.get("x-api-key")
+        or request.headers.get("Authorization")
+        or ""
+    )
+    if api_key.startswith("ApiKey "):
+        api_key = api_key.split(" ", 1)[1]
+    if api_key.startswith("Bearer "):
+        api_key = api_key.split(" ", 1)[1]
+
+    if not api_key or api_key not in config.security.valid_api_keys:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
+@app.get("/ready")
+async def readiness_check():
+    """Dependency-aware readiness check."""
+    try:
+        pool = get_pool()
+        db_healthy = await pool.test_connection()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Database not ready: {exc}")
+
+    if not db_healthy:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+    if config.security.auth_required and not config.security.auth_configured:
+        raise HTTPException(status_code=503, detail="Auth not configured")
+
+    return {
+        "status": "ready",
+        "database": "connected",
+        "auth_configured": config.security.auth_configured,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/capabilities")
+async def capabilities(request: Request):
+    """Authenticated capability registry."""
+    _require_diagnostics_key(request)
+    routes = []
+    for route in app.routes:
+        methods = sorted(getattr(route, "methods", []) or [])
+        routes.append({"path": route.path, "methods": methods})
+
+    return {
+        "service": config.service_name,
+        "version": VERSION,
+        "environment": config.environment,
+        "active_systems": _collect_active_systems(),
+        "routes": routes,
+        "ai_enabled": AI_AVAILABLE,
+        "scheduler_enabled": SCHEDULER_AVAILABLE,
+    }
+
+
+@app.get("/diagnostics")
+async def diagnostics(request: Request):
+    """Authenticated deep diagnostics."""
+    _require_diagnostics_key(request)
+
+    missing_env = [
+        key
+        for key in (
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "SUPABASE_URL",
+            "SUPABASE_SERVICE_KEY",
+        )
+        if not os.getenv(key)
+    ]
+
+    db_status = {"ready": False}
+    last_error = None
+    try:
+        pool = get_pool()
+        db_ready = await pool.test_connection()
+        db_status["ready"] = bool(db_ready)
+    except Exception as exc:
+        db_status["error"] = str(exc)
+
+    try:
+        pool = get_pool()
+        last_error_row = await pool.fetchrow("""
+            SELECT error_type, error_message, severity, component, timestamp
+            FROM ai_error_logs
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """)
+        if last_error_row:
+            last_error = dict(last_error_row)
+    except Exception as exc:
+        last_error = {"error": str(exc)}
+
+    alive_core_status = None
+    try:
+        if hasattr(app.state, "nerve_center") and app.state.nerve_center:
+            alive_core = getattr(app.state.nerve_center, "alive_core", None)
+            if alive_core:
+                alive_core_status = alive_core.get_status()
+    except Exception as exc:
+        alive_core_status = {"error": str(exc)}
+
+    return {
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat(),
+        "missing_env": missing_env,
+        "fallback_mode": using_fallback(),
+        "database": db_status,
+        "active_systems": _collect_active_systems(),
+        "last_error": last_error,
+        "alive_core": alive_core_status,
+    }
+
+
 @app.get("/alive")
 async def alive_status():
     """Get the consciousness status of the AI OS - is it truly alive?"""
@@ -2175,8 +2297,8 @@ async def get_agents(
         cache_key = f"agents:{category or 'all'}:{enabled}"
 
         async def _load_agents() -> AgentList:
-            pool = get_pool()
             try:
+                pool = get_pool()
                 # Build query with execution statistics
                 # Join with ai_agent_executions to get total_executions and last_active
                 query = """
@@ -2218,10 +2340,12 @@ async def get_agents(
                     page=1,
                     page_size=len(agents)
                 )
+            except DatabaseUnavailableError as exc:
+                logger.error("Database unavailable while loading agents", exc_info=True)
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
             except Exception as e:
                 logger.error(f"Failed to get agents from database: {e}", exc_info=True)
-                # Return empty list on error to ensure valid JSON
-                return AgentList(agents=[], total=0, page=1, page_size=0)
+                raise HTTPException(status_code=500, detail="Failed to load agents") from e
 
         agents_response, _ = await RESPONSE_CACHE.get_or_set(
             cache_key,
@@ -2229,10 +2353,11 @@ async def get_agents(
             _load_agents
         )
         return agents_response
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get agents (outer): {e}", exc_info=True)
-        # Final fallback - return empty list to ensure valid JSON response
-        return AgentList(agents=[], total=0, page=1, page_size=0)
+        raise HTTPException(status_code=500, detail="Failed to retrieve agents") from e
 
 
 @app.post("/agents/{agent_id}/execute")
@@ -2414,9 +2539,8 @@ async def get_executions(
     authenticated: bool = Depends(verify_api_key)
 ):
     """Get agent executions"""
-    pool = get_pool()
-
     try:
+        pool = get_pool()
         query = """
             SELECT e.*, a.name as agent_name
             FROM agent_executions e
@@ -2439,25 +2563,11 @@ async def get_executions(
         try:
             rows = await pool.fetch(query, *params)
         except Exception as primary_error:
-            logger.error("Execution query failed (%s). Returning fallback data.", primary_error)
-            fallback_items = [
-                {
-                    "execution_id": entry.get("execution_id"),
-                    "agent_id": entry.get("agent_id"),
-                    "agent_name": entry.get("agent_name"),
-                    "status": entry.get("status"),
-                    "started_at": entry.get("started_at").isoformat() if entry.get("started_at") else None,
-                    "completed_at": entry.get("completed_at").isoformat() if entry.get("completed_at") else None,
-                    "duration_ms": entry.get("duration_ms"),
-                    "error": entry.get("error"),
-                }
-                for entry in list(LOCAL_EXECUTIONS)
-            ]
-            return {
-                "executions": fallback_items,
-                "total": len(fallback_items),
-                "message": "Execution history limited to in-memory cache",
-            }
+            logger.error("Execution query failed: %s", primary_error, exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail="Execution history unavailable; database query failed.",
+            ) from primary_error
 
         executions = []
         for row in rows:
@@ -2495,9 +2605,14 @@ async def get_executions(
 
         return {"executions": executions, "total": len(executions)}
 
+    except HTTPException:
+        raise
+    except DatabaseUnavailableError as exc:
+        logger.error("Database unavailable while loading executions", exc_info=True)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as e:
-        logger.error(f"Failed to get executions: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve executions: {str(e)}") from e
+        logger.error(f"Failed to get executions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve executions") from e
 
 
 @app.post("/execute")
@@ -5290,6 +5405,19 @@ async def get_unified_system_status():
 
 
 # ==================== END UNIFIED OBSERVABILITY ====================
+
+
+@app.exception_handler(DatabaseUnavailableError)
+async def database_unavailable_handler(request: Request, exc: DatabaseUnavailableError):
+    """Surface database connectivity issues with a 503 response."""
+    logger.error("Database unavailable: %s", exc, exc_info=True)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": str(exc),
+            "type": "DatabaseUnavailable",
+        },
+    )
 
 
 @app.exception_handler(Exception)

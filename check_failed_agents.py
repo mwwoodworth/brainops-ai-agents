@@ -7,7 +7,9 @@ import psycopg2
 DB_HOST = os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com")
 DB_NAME = os.getenv("DB_NAME", "postgres")
 DB_USER = os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "Brain0ps2O2S")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+if not DB_PASSWORD:
+    raise RuntimeError("DB_PASSWORD environment variable is required")
 DB_PORT = 5432
 
 def check_failed_agents():

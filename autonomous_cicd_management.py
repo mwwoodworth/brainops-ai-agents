@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -767,15 +768,18 @@ class AutonomousCICDManagement:
             return {"status": "unknown", "reason": "No deployment URL"}
 
         try:
+            start = time.monotonic()
             url = f"{service.deployment_url.rstrip('/')}{service.health_endpoint}"
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 status = "healthy" if resp.status == 200 else "unhealthy"
+                latency_ms = (time.monotonic() - start) * 1000
                 service.health_status = status
                 service.last_health_check = datetime.utcnow().isoformat()
                 return {
                     "status": status,
                     "http_status": resp.status,
                     "checked_at": service.last_health_check,
+                    "latency_ms": latency_ms,
                 }
         except Exception as e:
             service.health_status = "error"
@@ -789,6 +793,20 @@ class AutonomousCICDManagement:
     ) -> dict[str, Any]:
         """Detect performance regressions by comparing current vs baseline metrics"""
         try:
+            relevant_metrics = {"avg_response_time_ms", "error_rate", "requests_per_second", "memory_mb"}
+            if not any(
+                key in current_metrics and key in baseline_metrics for key in relevant_metrics
+            ):
+                return {
+                    "service_id": service_id,
+                    "status": "insufficient_data",
+                    "action": "Collect baseline metrics",
+                    "regressions": [],
+                    "improvements": [],
+                    "regression_count": 0,
+                    "evaluated_at": datetime.utcnow().isoformat()
+                }
+
             regressions = []
             improvements = []
 
@@ -891,6 +909,110 @@ class AutonomousCICDManagement:
                 "status": "unknown"
             }
 
+    async def _fetch_deployment_metrics(
+        self,
+        service: Service,
+        deployment_id: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Load current/baseline metrics from deployment events."""
+        current_metrics: dict[str, Any] = {}
+        baseline_metrics: dict[str, Any] = {}
+        conn = await _get_db_connection(os.getenv("DATABASE_URL"))
+        if not conn:
+            return current_metrics, baseline_metrics
+
+        try:
+            rows = await conn.fetch("""
+                SELECT metrics, started_at
+                FROM ai_deployment_events
+                WHERE service_name = $1 AND metrics IS NOT NULL
+                ORDER BY started_at DESC
+                LIMIT 2
+            """, service.name)
+            if rows:
+                current_metrics = rows[0]["metrics"] or {}
+                if len(rows) > 1:
+                    baseline_metrics = rows[1]["metrics"] or {}
+
+            if not current_metrics:
+                row = await conn.fetchrow("""
+                    SELECT health_checks
+                    FROM deployment_log
+                    WHERE deployment_id = $1
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, deployment_id)
+                if row and row.get("health_checks"):
+                    current_metrics = dict(row["health_checks"])
+        except Exception as e:
+            logger.warning("Failed to fetch deployment metrics: %s", e)
+        finally:
+            try:
+                await conn.close()
+            except Exception:
+                pass
+
+        return current_metrics, baseline_metrics
+
+    async def _analyze_deployment_logs(self, deployment_id: str) -> dict[str, Any]:
+        """Summarize deployment logs and error rates from DB."""
+        summary = {
+            "error_count": 0,
+            "warning_count": 0,
+            "patterns_detected": [],
+            "event_error_rate": 0.0,
+            "event_count": 0
+        }
+        conn = await _get_db_connection(os.getenv("DATABASE_URL"))
+        if not conn:
+            return summary
+
+        try:
+            row = await conn.fetchrow("""
+                SELECT
+                    COUNT(*) FILTER (WHERE error_details IS NOT NULL) as error_count,
+                    COUNT(*) FILTER (WHERE status IN ('warning', 'degraded')) as warning_count
+                FROM deployment_log
+                WHERE deployment_id = $1
+            """, deployment_id)
+            if row:
+                summary["error_count"] = row.get("error_count") or 0
+                summary["warning_count"] = row.get("warning_count") or 0
+
+            event_row = await conn.fetchrow("""
+                SELECT
+                    COUNT(*) as total,
+                    COUNT(*) FILTER (WHERE status IN ('failed', 'error')) as errors
+                FROM deployment_events
+                WHERE deployment_id = $1
+            """, deployment_id)
+            if event_row:
+                total = event_row.get("total") or 0
+                errors = event_row.get("errors") or 0
+                summary["event_count"] = total
+                summary["event_error_rate"] = (errors / total) if total else 0.0
+
+            patterns = await conn.fetch("""
+                SELECT event_type, COUNT(*) as count
+                FROM deployment_events
+                WHERE deployment_id = $1
+                GROUP BY event_type
+                ORDER BY count DESC
+                LIMIT 5
+            """, deployment_id)
+            summary["patterns_detected"] = [
+                f"{row['event_type']}: {row['count']}" for row in patterns
+            ]
+        except Exception as e:
+            logger.warning("Deployment log analysis failed: %s", e)
+        finally:
+            try:
+                await conn.close()
+            except Exception:
+                pass
+
+        return summary
+
     async def advanced_deployment_monitoring(
         self,
         service_id: str,
@@ -912,29 +1034,23 @@ class AutonomousCICDManagement:
             }
 
             # Health check
-            health_result = await self._check_service_health(
-                aiohttp.ClientSession(),
-                service
-            )
+            async with aiohttp.ClientSession() as session:
+                health_result = await self._check_service_health(
+                    session,
+                    service
+                )
             monitoring_results["checks"].append({
                 "type": "health_check",
                 "status": health_result.get("status"),
                 "timestamp": datetime.utcnow().isoformat()
             })
 
-            # Performance baseline comparison (simulated)
-            current_metrics = {
-                "avg_response_time_ms": 250,
-                "error_rate": 0.3,
-                "requests_per_second": 150,
-                "memory_mb": 512
-            }
-            baseline_metrics = {
-                "avg_response_time_ms": 200,
-                "error_rate": 0.2,
-                "requests_per_second": 180,
-                "memory_mb": 450
-            }
+            current_metrics, baseline_metrics = await self._fetch_deployment_metrics(
+                service,
+                deployment_id
+            )
+            if health_result.get("latency_ms") is not None:
+                current_metrics.setdefault("avg_response_time_ms", health_result["latency_ms"])
 
             regression_result = await self.detect_performance_regression(
                 service_id,
@@ -943,14 +1059,10 @@ class AutonomousCICDManagement:
             )
             monitoring_results["regression_analysis"] = regression_result
 
-            # Log analysis (simulated)
-            log_analysis = {
-                "error_count": 5,
-                "warning_count": 12,
-                "critical_issues": [],
-                "patterns_detected": ["Increased database query time"]
-            }
+            log_analysis = await self._analyze_deployment_logs(deployment_id)
             monitoring_results["log_analysis"] = log_analysis
+            if "error_rate" not in current_metrics:
+                current_metrics["error_rate"] = log_analysis.get("event_error_rate", 0.0)
 
             # Overall assessment
             if regression_result.get("status") == "critical_regression":

@@ -100,7 +100,7 @@ class PermanentObservabilityDaemon:
     ):
         self.poll_interval = poll_interval
         self.brain_api_url = brain_api_url
-        self.api_key = api_key or os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+        self.api_key = api_key or os.getenv("BRAINOPS_API_KEY")
         self.running = False
         self._task: Optional[asyncio.Task] = None
 

@@ -6,6 +6,7 @@ Build multi-touch automated follow-up campaigns
 
 import asyncio
 import json
+import math
 import logging
 import os
 import uuid
@@ -755,6 +756,30 @@ class LeadNurturingSystem:
                 sample_size
             ))
 
+            # Assign active enrollments to A/B variants
+            cursor.execute("""
+                SELECT id
+                FROM ai_lead_enrollments
+                WHERE sequence_id = %s
+                  AND status = 'active'
+                ORDER BY enrollment_date ASC
+                LIMIT %s
+            """, (sequence_id, sample_size))
+            enrollments = cursor.fetchall()
+            half = max(1, len(enrollments) // 2) if enrollments else 0
+            for idx, row in enumerate(enrollments):
+                variant = "A" if idx < half else "B"
+                cursor.execute("""
+                    UPDATE ai_lead_enrollments
+                    SET metadata = jsonb_set(
+                        COALESCE(metadata, '{}'::jsonb),
+                        ARRAY['ab_tests', %s],
+                        to_jsonb(%s::text),
+                        true
+                    )
+                    WHERE id = %s
+                """, (test_id, variant, row[0]))
+
             conn.commit()
             cursor.close()
             conn.close()
@@ -775,7 +800,120 @@ class LeadNurturingSystem:
         try:
             conn = _get_db_connection()
             cursor = conn.cursor()
-            placeholder = Json({"status": "not_implemented"})
+
+            cursor.execute("""
+                SELECT sequence_id, test_metric, started_at
+                FROM ai_nurture_ab_tests
+                WHERE id = %s
+            """, (test_id,))
+            test_row = cursor.fetchone()
+            if not test_row:
+                logger.error("A/B test %s not found", test_id)
+                return
+
+            sequence_id, test_metric, started_at = test_row
+
+            def compute_variant(variant: str) -> dict:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM ai_lead_enrollments
+                    WHERE sequence_id = %s
+                      AND metadata -> 'ab_tests' ->> %s = %s
+                """, (sequence_id, test_id, variant))
+                assigned = cursor.fetchone()[0] or 0
+
+                cursor.execute("""
+                    SELECT
+                        COUNT(*) as total_sent,
+                        COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'opened', 'clicked', 'responded')) as sent_count
+                    FROM ai_touchpoint_executions te
+                    JOIN ai_lead_enrollments le ON te.enrollment_id = le.id
+                    WHERE le.sequence_id = %s
+                      AND le.metadata -> 'ab_tests' ->> %s = %s
+                      AND te.executed_at >= %s
+                """, (sequence_id, test_id, variant, started_at))
+                exec_row = cursor.fetchone() or (0, 0)
+                total_sent = exec_row[0] or 0
+                sent_count = exec_row[1] or 0
+
+                cursor.execute("""
+                    SELECT
+                        COUNT(*) FILTER (WHERE engagement_type IN ('open', 'opened')) as opens,
+                        COUNT(*) FILTER (WHERE engagement_type IN ('click', 'clicked')) as clicks,
+                        COUNT(*) FILTER (WHERE engagement_type IN ('response', 'responded', 'reply')) as responses
+                    FROM ai_nurture_engagement e
+                    JOIN ai_touchpoint_executions te ON e.execution_id = te.id
+                    JOIN ai_lead_enrollments le ON te.enrollment_id = le.id
+                    WHERE le.sequence_id = %s
+                      AND le.metadata -> 'ab_tests' ->> %s = %s
+                      AND e.engagement_timestamp >= %s
+                """, (sequence_id, test_id, variant, started_at))
+                engagement_row = cursor.fetchone() or (0, 0, 0)
+                opens = engagement_row[0] or 0
+                clicks = engagement_row[1] or 0
+                responses = engagement_row[2] or 0
+
+                cursor.execute("""
+                    SELECT COUNT(*) FROM ai_lead_enrollments
+                    WHERE sequence_id = %s
+                      AND metadata -> 'ab_tests' ->> %s = %s
+                      AND completion_date IS NOT NULL
+                      AND completion_date >= %s
+                """, (sequence_id, test_id, variant, started_at))
+                conversions = cursor.fetchone()[0] or 0
+
+                base = sent_count or 1
+                return {
+                    "assigned": assigned,
+                    "total_sent": total_sent,
+                    "sent_count": sent_count,
+                    "opens": opens,
+                    "clicks": clicks,
+                    "responses": responses,
+                    "conversions": conversions,
+                    "open_rate": opens / base,
+                    "click_rate": clicks / base,
+                    "response_rate": responses / base,
+                    "conversion_rate": conversions / (assigned or 1)
+                }
+
+            variant_a = compute_variant("A")
+            variant_b = compute_variant("B")
+
+            metric_key = (test_metric or "response_rate").lower()
+            metric_map = {
+                "open_rate": "open_rate",
+                "click_rate": "click_rate",
+                "response_rate": "response_rate",
+                "conversion_rate": "conversion_rate",
+            }
+            metric_key = metric_map.get(metric_key, "response_rate")
+
+            metric_a = variant_a.get(metric_key, 0)
+            metric_b = variant_b.get(metric_key, 0)
+
+            def z_confidence(success_a: int, total_a: int, success_b: int, total_b: int) -> float:
+                if total_a <= 0 or total_b <= 0:
+                    return 0.0
+                p1 = success_a / total_a
+                p2 = success_b / total_b
+                p = (success_a + success_b) / (total_a + total_b)
+                denom = math.sqrt(p * (1 - p) * (1 / total_a + 1 / total_b))
+                if denom == 0:
+                    return 0.0
+                z = abs(p1 - p2) / denom
+                p_value = 2 * (1 - 0.5 * (1 + math.erf(z / math.sqrt(2))))
+                return max(0.0, min(1.0, 1 - p_value))
+
+            success_a = round(variant_a.get(metric_key, 0) * (variant_a.get("sent_count") or 0))
+            success_b = round(variant_b.get(metric_key, 0) * (variant_b.get("sent_count") or 0))
+            confidence = z_confidence(success_a, variant_a.get("sent_count") or 0,
+                                      success_b, variant_b.get("sent_count") or 0)
+
+            winner = None
+            if metric_a > metric_b:
+                winner = "A"
+            elif metric_b > metric_a:
+                winner = "B"
 
             cursor.execute(
                 """
@@ -783,14 +921,14 @@ class LeadNurturingSystem:
                 SET variant_a_results = %s,
                     variant_b_results = %s,
                     completed_at = NOW(),
-                    winner = NULL,
-                    confidence_level = NULL
+                    winner = %s,
+                    confidence_level = %s
                 WHERE id = %s
                 """,
-                (placeholder, placeholder, test_id),
+                (Json(variant_a), Json(variant_b), winner, confidence, test_id),
             )
             conn.commit()
-            logger.info("Marked A/B test %s as completed (placeholder results)", test_id)
+            logger.info("Completed A/B test %s with winner=%s (confidence %.2f)", test_id, winner, confidence)
         except Exception as e:
             logger.error("Failed to execute A/B test %s: %s", test_id, e)
         finally:

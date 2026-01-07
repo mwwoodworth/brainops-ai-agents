@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 # API Key Security - use centralized config
 from config import config
-from database.async_connection import get_pool
+from database.async_connection import DatabaseUnavailableError, get_pool
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 VALID_API_KEYS = config.security.valid_api_keys
@@ -121,14 +121,13 @@ async def get_revenue_status():
 @router.post("/discover-leads")
 async def discover_leads(request: LeadDiscoveryRequest):
     """
-    Use AI to discover and generate new leads.
-    This creates REAL leads from AI-powered research.
+    Discover and generate new leads from configured lead sources and ERP data.
+    This endpoint never fabricates leads; it only stores verified results.
     """
     pool = get_pool()
 
     try:
-        # Generate realistic roofing contractor leads using AI patterns
-        # In production, this would use Perplexity/web scraping
+        # Generate leads using configured sources. Tenant_id is required for ERP data access.
         # SECURITY: Pass tenant_id for proper tenant isolation
         leads_data = await generate_realistic_leads(request.industry, request.location, request.limit, request.tenant_id)
 
@@ -175,9 +174,14 @@ async def discover_leads(request: LeadDiscoveryRequest):
             "success": True,
             "leads_created": len(created_leads),
             "leads": created_leads,
-            "message": f"Generated {len(created_leads)} new leads from AI discovery"
+            "message": f"Generated {len(created_leads)} new leads from discovery pipeline"
         }
 
+    except DatabaseUnavailableError as exc:
+        logger.error("Database unavailable during lead discovery", exc_info=True)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error discovering leads: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -536,7 +540,7 @@ async def generate_realistic_leads(industry: str, location: str, count: int, ten
                 }
             })
 
-        # Strategy 2: Check configured lead sources
+        # Strategy 2: Check configured lead sources (only real integrations, no placeholders)
         sources = await pool.fetch("""
             SELECT id, name, source_type, config, leads_found
             FROM ai_lead_sources
@@ -550,27 +554,12 @@ async def generate_realistic_leads(industry: str, location: str, count: int, ten
             # Log available sources
             logger.info(f"Lead source available: {source_name} (type: {source_type})")
 
-            # For storm tracker, we could integrate with weather APIs
-            if source_type == "api" and "weather" in str(source.get("config", {})):
-                leads.append({
-                    "id": str(uuid.uuid4()),
-                    "company_name": f"Storm Alert - {location}",
-                    "contact_name": "Property Owner",
-                    "email": None,
-                    "phone": None,
-                    "location": location,
-                    "source": "storm_tracker",
-                    "source_detail": f"Storm damage potential in {location}",
-                    "value_estimate": 15000.0,
-                    "score": 60,
-                    "industry": industry,
-                    "discovered_at": datetime.now().isoformat(),
-                    "metadata": {
-                        "source_id": str(source["id"]),
-                        "requires_outreach": True,
-                        "alert_type": "storm_damage_opportunity"
-                    }
-                })
+            if source_type == "api":
+                logger.warning(
+                    "Lead source %s requires external integration; skipping until configured.",
+                    source_name,
+                )
+                continue
 
         # Update lead source stats
         if leads:
@@ -585,7 +574,9 @@ async def generate_realistic_leads(industry: str, location: str, count: int, ten
         logger.info(f"Lead discovery completed: found {len(leads)} leads for {industry} in {location}")
         return leads[:count]
 
+    except DatabaseUnavailableError as exc:
+        logger.error("Database unavailable during lead discovery", exc_info=True)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as e:
-        logger.error(f"Lead discovery error: {e}")
-        # Return empty list rather than 501 - discovery is operational but found nothing
-        return []
+        logger.error(f"Lead discovery error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Lead discovery failed") from e
