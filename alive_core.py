@@ -78,7 +78,15 @@ def _build_db_config():
         'port': int(port)
     }
 
-DB_CONFIG = _build_db_config()
+_DB_CONFIG: dict[str, Any] | None = None
+
+
+def get_db_config() -> dict[str, Any]:
+    """Lazily resolve DB config so imports don't explode in test/dev contexts."""
+    global _DB_CONFIG
+    if _DB_CONFIG is None:
+        _DB_CONFIG = _build_db_config()
+    return _DB_CONFIG
 
 
 class ConsciousnessState(Enum):
@@ -243,7 +251,7 @@ class AliveCore:
             from contextlib import contextmanager
             @contextmanager
             def fallback_conn():
-                conn = psycopg2.connect(**DB_CONFIG)
+                conn = psycopg2.connect(**get_db_config())
                 try:
                     yield conn
                 finally:
