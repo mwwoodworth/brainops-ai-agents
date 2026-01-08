@@ -1,6 +1,7 @@
 import os
 import json
 import psycopg2
+from psycopg2 import sql
 
 # Use env vars from context
 DB_HOST = os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com")
@@ -37,7 +38,7 @@ def check_tables():
         results = {}
         for table in TABLES_TO_CHECK:
             try:
-                cur.execute(f"SELECT COUNT(*) FROM {table}")
+                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table)))
                 count = cur.fetchone()[0]
                 results[table] = count
             except Exception as e:
