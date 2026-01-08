@@ -206,6 +206,7 @@ class ChatGPTAgentTester:
         steps_failed = 0
         screenshots = []
         error_message = None
+        wants_screenshots = self.enable_ai_analysis or any(s.action == "screenshot" for s in steps)
 
         try:
             page = await self._new_context()
@@ -242,9 +243,10 @@ class ChatGPTAgentTester:
                         steps_passed += 1
 
                     elif step.action == "screenshot":
-                        screenshot = await self._take_screenshot(step.name)
-                        if screenshot:
-                            screenshots.append(screenshot)
+                        if wants_screenshots:
+                            screenshot = await self._take_screenshot(step.name)
+                            if screenshot:
+                                screenshots.append(screenshot)
                         steps_passed += 1
 
                     elif step.action == "assert_url":
@@ -276,15 +278,17 @@ class ChatGPTAgentTester:
                     error_message = f"Step '{step.name}' failed: {str(e)}"
                     logger.error(error_message)
                     # Take error screenshot
-                    screenshot = await self._take_screenshot(f"error_{step.name}")
-                    if screenshot:
-                        screenshots.append(screenshot)
+                    if wants_screenshots:
+                        screenshot = await self._take_screenshot(f"error_{step.name}")
+                        if screenshot:
+                            screenshots.append(screenshot)
                     break
 
-            # Final screenshot
-            final_screenshot = await self._take_screenshot("final")
-            if final_screenshot:
-                screenshots.append(final_screenshot)
+            # Final screenshot (only when explicitly requested or needed for AI analysis)
+            if wants_screenshots:
+                final_screenshot = await self._take_screenshot("final")
+                if final_screenshot:
+                    screenshots.append(final_screenshot)
 
             # Performance metrics
             performance = await self._get_performance_metrics()
@@ -375,6 +379,14 @@ class ChatGPTAgentTester:
         ]
         return await self.run_flow("MRG Homepage", steps)
 
+    async def test_mrg_homepage_quick(self) -> FlowResult:
+        """Fast-path MyRoofGenius homepage check (used by quick health)."""
+        steps = [
+            FlowStep("Navigate to homepage", "navigate", value="https://myroofgenius.com"),
+            FlowStep("Assert body", "assert_element", selector="body"),
+        ]
+        return await self.run_flow("MRG Homepage (Quick)", steps)
+
     async def test_mrg_login_page(self) -> FlowResult:
         """Test MyRoofGenius login page"""
         steps = [
@@ -433,6 +445,14 @@ class ChatGPTAgentTester:
             FlowStep("Assert loaded", "assert_element", selector="body"),
         ]
         return await self.run_flow("ERP Homepage", steps)
+
+    async def test_erp_homepage_quick(self) -> FlowResult:
+        """Fast-path ERP homepage check (used by quick health)."""
+        steps = [
+            FlowStep("Navigate to homepage", "navigate", value="https://weathercraft-erp.vercel.app"),
+            FlowStep("Assert body", "assert_element", selector="body"),
+        ]
+        return await self.run_flow("ERP Homepage (Quick)", steps)
 
     async def test_erp_login_page(self) -> FlowResult:
         """Test Weathercraft ERP login page"""
@@ -549,8 +569,8 @@ async def run_quick_health_test() -> dict[str, Any]:
     try:
         await tester.initialize()
 
-        mrg_result = await tester.test_mrg_homepage()
-        erp_result = await tester.test_erp_homepage()
+        mrg_result = await tester.test_mrg_homepage_quick()
+        erp_result = await tester.test_erp_homepage_quick()
 
         return {
             "mrg_healthy": mrg_result.status == TestFlowStatus.PASSED,
