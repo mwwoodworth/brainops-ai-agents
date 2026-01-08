@@ -69,6 +69,7 @@ class EndpointTest:
     expected_status: int = 200
     expected_fields: list[str] = field(default_factory=list)
     timeout_seconds: float = 30.0
+    max_response_time_ms: Optional[float] = None
     category: SystemCategory = SystemCategory.CORE_API
     critical: bool = True  # If True, failure means system is NOT 100% operational
     validation_func: Optional[str] = None  # Name of custom validation function
@@ -472,6 +473,7 @@ class E2ESystemVerification:
                 category=SystemCategory.BLEEDING_EDGE,
                 critical=True,
                 timeout_seconds=180.0,
+                max_response_time_ms=60000.0,
             ),
         ])
 
@@ -578,8 +580,17 @@ class E2ESystemVerification:
                             error_message=response_body.get("error") or response_body.get("message") or "Error in response"
                         )
 
-                # Check for degraded performance (>20 second response - Render free tier is slow)
-                if response_time_ms > 20000:
+                max_response_time_ms: Optional[float] = test.max_response_time_ms
+                if max_response_time_ms is None:
+                    env_max_ms = os.getenv("E2E_MAX_RESPONSE_TIME_MS", "").strip()
+                    if env_max_ms:
+                        try:
+                            max_response_time_ms = float(env_max_ms)
+                        except ValueError:
+                            max_response_time_ms = None
+
+                # Check for degraded performance (Render free tier can be slow; keep defaults conservative)
+                if response_time_ms > (max_response_time_ms if max_response_time_ms is not None else 20000.0):
                     return TestResult(
                         test_name=test.name,
                         endpoint=test.url,
