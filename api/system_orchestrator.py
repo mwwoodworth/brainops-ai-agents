@@ -11,6 +11,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from database.async_connection import get_pool
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/orchestrator", tags=["System Orchestrator"])
@@ -71,24 +73,20 @@ class BulkCommandRequest(BaseModel):
 async def get_orchestrator_status():
     """Get Orchestrator system status"""
     try:
-        engine = await _get_engine()
-        managed_count = len(engine.managed_systems) if hasattr(engine, 'managed_systems') else 0
+        managed_count = 0
+        if _engine is not None and hasattr(_engine, "managed_systems"):
+            try:
+                managed_count = len(getattr(_engine, "managed_systems") or {})
+            except Exception:
+                managed_count = 0
 
-        # Fallback: check DB if in-memory is empty
+        # Fallback: check DB if in-memory is empty (use shared pool; avoid creating ad-hoc connections)
         if managed_count == 0:
-            import os
-            db_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")  # SECURITY: No hardcoded credentials
-            if db_url:
-                try:
-                    import asyncpg
-                    conn = await asyncpg.connect(db_url)
-                    try:
-                        result = await conn.fetchval("SELECT COUNT(*) FROM managed_systems")
-                        managed_count = result or 0
-                    finally:
-                        await conn.close()
-                except Exception as exc:
-                    logger.warning("DB fallback failed in status check: %s", exc, exc_info=True)
+            try:
+                pool = get_pool()
+                managed_count = int(await pool.fetchval("SELECT COUNT(*) FROM managed_systems") or 0)
+            except Exception as exc:
+                logger.warning("DB fallback failed in status check: %s", exc, exc_info=True)
 
         return {
             "system": "autonomous_system_orchestrator",
@@ -156,69 +154,121 @@ async def register_system(request: RegisterSystemRequest):
 async def list_systems(
     provider: Optional[str] = None,
     system_type: Optional[str] = None,
-    status: Optional[str] = None
+    status: Optional[str] = None,
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
 ):
     """List all managed systems"""
     try:
-        engine = await _get_engine()
+        systems: list[dict[str, Any]] = []
 
-        systems = []
-        if hasattr(engine, 'managed_systems'):
-            for sys_id, system in engine.managed_systems.items():
+        # Prefer in-memory state when already loaded, but do not force engine initialization here.
+        if _engine is not None and hasattr(_engine, "managed_systems") and isinstance(getattr(_engine, "managed_systems"), dict):
+            total_available = 0
+            returned = 0
+            for sys_id, system in getattr(_engine, "managed_systems").items():
                 # Apply filters
-                if provider and hasattr(system, 'provider'):
-                    sys_provider = system.provider.value if hasattr(system.provider, 'value') else str(system.provider)
+                if provider and hasattr(system, "provider"):
+                    sys_provider = system.provider.value if hasattr(system.provider, "value") else str(system.provider)
                     if sys_provider.lower() != provider.lower():
                         continue
-                if system_type and hasattr(system, 'system_type'):
-                    sys_type = system.system_type.value if hasattr(system.system_type, 'value') else str(system.system_type)
+                if system_type and hasattr(system, "system_type"):
+                    sys_type = system.system_type.value if hasattr(system.system_type, "value") else str(system.system_type)
                     if sys_type.lower() != system_type.lower():
                         continue
+                if status and hasattr(system, "status"):
+                    sys_status = system.status.value if hasattr(system.status, "value") else str(system.status)
+                    if sys_status.lower() != status.lower():
+                        continue
+
+                total_available += 1
+                if total_available <= offset:
+                    continue
+                if returned >= limit:
+                    continue
 
                 systems.append({
                     "system_id": sys_id,
-                    "name": system.name if hasattr(system, 'name') else sys_id,
-                    "system_type": system.system_type.value if hasattr(system, 'system_type') and hasattr(system.system_type, 'value') else str(system.system_type) if hasattr(system, 'system_type') else "unknown",
-                    "provider": system.provider.value if hasattr(system, 'provider') and hasattr(system.provider, 'value') else str(system.provider) if hasattr(system, 'provider') else "unknown",
-                    "endpoint": system.endpoint if hasattr(system, 'endpoint') else None,
-                    "status": system.status.value if hasattr(system, 'status') and hasattr(system.status, 'value') else str(system.status) if hasattr(system, 'status') else "unknown",
-                    "health_score": system.health_score if hasattr(system, 'health_score') else 100
+                    "name": system.name if hasattr(system, "name") else sys_id,
+                    "system_type": (
+                        system.system_type.value
+                        if hasattr(system, "system_type") and hasattr(system.system_type, "value")
+                        else str(system.system_type)
+                        if hasattr(system, "system_type")
+                        else "unknown"
+                    ),
+                    "provider": (
+                        system.provider.value
+                        if hasattr(system, "provider") and hasattr(system.provider, "value")
+                        else str(system.provider)
+                        if hasattr(system, "provider")
+                        else "unknown"
+                    ),
+                    "endpoint": system.endpoint if hasattr(system, "endpoint") else None,
+                    "status": (
+                        system.status.value
+                        if hasattr(system, "status") and hasattr(system.status, "value")
+                        else str(system.status)
+                        if hasattr(system, "status")
+                        else "unknown"
+                    ),
+                    "health_score": system.health_score if hasattr(system, "health_score") else 100,
                 })
+                returned += 1
 
-        # Fallback: query DB directly if in-memory is empty
-        if not systems:
-            import os
-            db_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")  # SECURITY: No hardcoded credentials
-            if db_url:
-                try:
-                    import asyncpg
-                    conn = await asyncpg.connect(db_url)
-                    try:
-                        rows = await conn.fetch("SELECT system_id, name, type, url, provider, status, health_score FROM managed_systems")
-                        for row in rows:
-                            # Apply filters
-                            if provider and row['provider'] and row['provider'].lower() != provider.lower():
-                                continue
-                            if system_type and row['type'] and row['type'].lower() != system_type.lower():
-                                continue
-                            systems.append({
-                                "system_id": row['system_id'],
-                                "name": row['name'],
-                                "system_type": row['type'],
-                                "provider": row['provider'],
-                                "endpoint": row['url'],
-                                "status": row['status'] or 'unknown',
-                                "health_score": row['health_score'] or 100
-                            })
-                    finally:
-                        await conn.close()
-                except Exception as db_err:
-                    logger.warning(f"DB fallback failed: {db_err}")
+            return {
+                "systems": systems,
+                "total": len(systems),
+                "total_available": total_available,
+                "limit": limit,
+                "offset": offset,
+                "source": "memory",
+            }
 
-        return {"systems": systems, "total": len(systems)}
+        # Fallback: query DB via the shared async pool (fast + avoids creating new connections)
+        pool = get_pool()
+        params: list[Any] = []
+        where: list[str] = []
+        param_idx = 1
+        if provider:
+            where.append(f"LOWER(provider) = LOWER(${param_idx})")
+            params.append(provider)
+            param_idx += 1
+        if system_type:
+            where.append(f"LOWER(\"type\") = LOWER(${param_idx})")
+            params.append(system_type)
+            param_idx += 1
+        if status:
+            where.append(f"LOWER(status) = LOWER(${param_idx})")
+            params.append(status)
+            param_idx += 1
+
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        query = (
+            'SELECT system_id, name, "type" AS system_type, url, provider, status, health_score '
+            "FROM managed_systems "
+            f"{where_sql} "
+            "ORDER BY system_id "
+            f"LIMIT ${param_idx} OFFSET ${param_idx + 1}"
+        )
+        params.extend([limit, offset])
+
+        rows = await pool.fetch(query, *params)
+        for row in rows:
+            systems.append({
+                "system_id": row.get("system_id"),
+                "name": row.get("name"),
+                "system_type": row.get("system_type"),
+                "provider": row.get("provider"),
+                "endpoint": row.get("url"),
+                "status": row.get("status") or "unknown",
+                "health_score": row.get("health_score") or 100,
+            })
+
+        return {"systems": systems, "total": len(systems), "limit": limit, "offset": offset, "source": "db"}
     except Exception as e:
         logger.error(f"Failed to list systems: {e}")
-        return {"systems": [], "total": 0, "error": str(e)}
+        return {"systems": [], "total": 0, "limit": limit, "offset": offset, "error": str(e)}
 
 
 @router.get("/systems/{system_id}")
