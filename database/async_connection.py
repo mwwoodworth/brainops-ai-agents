@@ -89,6 +89,38 @@ class AsyncDatabasePool(BasePool):
         else:
             self._ssl_context = None
 
+    @staticmethod
+    def _json_text_encoder(value: Any) -> str:
+        """
+        Encode Python values for Postgres json/jsonb parameters.
+
+        asyncpg's default jsonb encoder expects a string; many call sites pass dicts.
+        We keep decode behavior as text (string) to avoid breaking existing codepaths
+        that assume jsonb results are strings.
+        """
+        if value is None:
+            return "null"
+        if isinstance(value, str):
+            return value
+        return json.dumps(value, default=str)
+
+    async def _init_connection(self, conn: asyncpg.Connection) -> None:
+        """Per-connection initialization for asyncpg pool connections."""
+        await conn.set_type_codec(
+            "json",
+            encoder=self._json_text_encoder,
+            decoder=lambda s: s,
+            schema="pg_catalog",
+            format="text",
+        )
+        await conn.set_type_codec(
+            "jsonb",
+            encoder=self._json_text_encoder,
+            decoder=lambda s: s,
+            schema="pg_catalog",
+            format="text",
+        )
+
     async def initialize(self) -> None:
         """Initialize connection pool with timeout protection"""
         if self._pool is not None:
@@ -111,6 +143,7 @@ class AsyncDatabasePool(BasePool):
                     max_inactive_connection_lifetime=self.config.max_inactive_connection_lifetime,
                     ssl=self._ssl_context,
                     statement_cache_size=0,  # Disable statement cache to avoid session mode issues
+                    init=self._init_connection,
                 ),
                 timeout=self.config.connect_timeout + 5  # Extra buffer for pool setup
             )
