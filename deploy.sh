@@ -1,10 +1,20 @@
 #!/bin/bash
 # BrainOps AI Agents - Full Automated Deployment
 # Builds, pushes to Docker Hub, triggers Render deploy via API
-set -e
+set -euo pipefail
 
-# Get version from app.py
-VERSION=$(grep "^VERSION" app.py | cut -d'"' -f2)
+# Get version from centralized config (never parse arbitrary source lines into a shell var)
+VERSION="$(
+  python3 -c "from config import config; print(getattr(config, 'version', 'unknown'))" 2>/dev/null \
+    | tr -d '[:space:]'
+)"
+if [ -z "$VERSION" ] || [ "$VERSION" = "unknown" ]; then
+    echo "ERROR: Unable to determine VERSION from config.py"
+    exit 1
+fi
+# Normalize VERSION for Docker tags (strip leading v/V)
+VERSION="${VERSION#v}"
+VERSION="${VERSION#V}"
 SERVICE_ID="srv-d413iu75r7bs738btc10"
 
 echo "=========================================="
@@ -12,10 +22,16 @@ echo "Deploying BrainOps AI Agents v$VERSION"
 echo "=========================================="
 
 # Check for RENDER_API_KEY
-if [ -z "$RENDER_API_KEY" ]; then
+if [ -z "${RENDER_API_KEY:-}" ]; then
     echo "ERROR: RENDER_API_KEY not set"
     echo "Get it from: brainops_credentials table or ~/.bashrc"
     exit 1
+fi
+
+# Check required CLIs
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ERROR: jq is required (used to parse Render + health responses)"
+  exit 1
 fi
 
 # Step 1: Build Docker image with both tags
@@ -32,7 +48,16 @@ docker push mwwoodworth/brainops-ai-agents:v$VERSION
 # Step 3: Push to Git
 echo ""
 echo "Step 3: Pushing to Git..."
-git push || echo "Git push failed or nothing to push"
+if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+  AHEAD_COUNT="$(git rev-list --count @{u}..HEAD 2>/dev/null || echo "0")"
+  if [ "${AHEAD_COUNT:-0}" -gt 0 ]; then
+    git push || echo "Git push failed"
+  else
+    echo "No new commits to push"
+  fi
+else
+  echo "No upstream configured; skipping git push"
+fi
 
 # Step 4: Trigger Render deploy via API
 echo ""
@@ -41,8 +66,13 @@ DEPLOY_RESPONSE=$(curl -s -X POST "https://api.render.com/v1/services/$SERVICE_I
     -H "Authorization: Bearer $RENDER_API_KEY" \
     -H "Content-Type: application/json")
 
-DEPLOY_ID=$(echo "$DEPLOY_RESPONSE" | jq -r '.deploy.id // "unknown"')
-DEPLOY_STATUS=$(echo "$DEPLOY_RESPONSE" | jq -r '.deploy.status // "unknown"')
+DEPLOY_ID=$(echo "$DEPLOY_RESPONSE" | jq -r '.id // empty')
+DEPLOY_STATUS=$(echo "$DEPLOY_RESPONSE" | jq -r '.status // empty')
+if [ -z "${DEPLOY_ID:-}" ] || [ -z "${DEPLOY_STATUS:-}" ]; then
+  echo "ERROR: Render deploy trigger returned unexpected response:"
+  echo "$DEPLOY_RESPONSE" | jq . || echo "$DEPLOY_RESPONSE"
+  exit 1
+fi
 
 echo "Deploy ID: $DEPLOY_ID"
 echo "Status: $DEPLOY_STATUS"
@@ -50,21 +80,42 @@ echo "Status: $DEPLOY_STATUS"
 # Step 5: Wait and verify
 echo ""
 echo "Step 5: Waiting for deploy..."
-sleep 30
+for i in {1..30}; do
+  sleep 10
+  STATUS_RESPONSE=$(curl -s "https://api.render.com/v1/services/$SERVICE_ID/deploys/$DEPLOY_ID" \
+    -H "Authorization: Bearer $RENDER_API_KEY" \
+    -H "Content-Type: application/json" || true)
+
+  LIVE_STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status // "unknown"' 2>/dev/null || echo "unknown")
+  if [ "$LIVE_STATUS" = "live" ]; then
+    break
+  fi
+  if [ "$LIVE_STATUS" = "failed" ] || [ "$LIVE_STATUS" = "canceled" ]; then
+    echo "ERROR: Render deploy status: $LIVE_STATUS"
+    echo "$STATUS_RESPONSE" | jq . || echo "$STATUS_RESPONSE"
+    exit 1
+  fi
+  echo "  Render status: $LIVE_STATUS"
+done
 
 HEALTH=$(curl -s https://brainops-ai-agents.onrender.com/health)
-DEPLOYED_VERSION=$(echo "$HEALTH" | jq -r '.version')
+DEPLOYED_VERSION=$(echo "$HEALTH" | jq -r '.version // ""' | tr -d '[:space:]')
+# Normalize deployed version to compare apples-to-apples
+DEPLOYED_VERSION="${DEPLOYED_VERSION#v}"
+DEPLOYED_VERSION="${DEPLOYED_VERSION#V}"
 DB_STATUS=$(echo "$HEALTH" | jq -r '.database')
+HEALTH_STATUS=$(echo "$HEALTH" | jq -r '.status // "unknown"')
 
 echo ""
 echo "=========================================="
 if [ "$DEPLOYED_VERSION" = "$VERSION" ]; then
     echo "✅ SUCCESS: v$VERSION deployed"
-    echo "   Database: $DB_STATUS"
+    echo "   Health:    $HEALTH_STATUS"
+    echo "   Database:  $DB_STATUS"
 else
-    echo "⏳ Deploy in progress..."
-    echo "   Expected: $VERSION"
-    echo "   Current:  $DEPLOYED_VERSION"
+    echo "⚠️  Version mismatch after deploy"
+    echo "   Expected: v$VERSION"
+    echo "   Current:  v$DEPLOYED_VERSION"
     echo ""
     echo "Check status: curl -s https://brainops-ai-agents.onrender.com/health | jq '.version'"
 fi
