@@ -105,7 +105,16 @@ for i in {1..30}; do
   echo "  Render status: $LIVE_STATUS"
 done
 
-HEALTH=$(curl -s https://brainops-ai-agents.onrender.com/health)
+HEALTH=""
+# Render may report `live` before the app instance has fully recycled; wait briefly for /health to reflect the new build.
+for j in {1..12}; do
+  HEALTH="$(curl -s https://brainops-ai-agents.onrender.com/health 2>/dev/null || true)"
+  DEPLOYED_BUILD_CANDIDATE="$(echo "$HEALTH" | jq -r '.build // empty' 2>/dev/null | tr -d '[:space:]' || true)"
+  if [ -n "${DEPLOYED_BUILD_CANDIDATE:-}" ] && [ "${PRE_DEPLOYED_BUILD:-}" != "${DEPLOYED_BUILD_CANDIDATE:-}" ]; then
+    break
+  fi
+  sleep 5
+done
 DEPLOYED_VERSION=$(echo "$HEALTH" | jq -r '.version // ""' | tr -d '[:space:]')
 # Normalize deployed version to compare apples-to-apples
 DEPLOYED_VERSION="${DEPLOYED_VERSION#v}"
