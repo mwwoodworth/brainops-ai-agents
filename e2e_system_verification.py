@@ -271,6 +271,20 @@ class E2ESystemVerification:
         ])
 
         # ============================================
+        # BLEEDING EDGE - ROOFING LABOR ML
+        # ============================================
+        self.tests.extend([
+            EndpointTest(
+                name="Roofing Labor ML - Status",
+                url=f"{BRAINOPS_API_URL}/roofing/labor-ml/status",
+                headers=headers,
+                expected_fields=["system", "status", "samples"],
+                category=SystemCategory.BLEEDING_EDGE,
+                critical=True,
+            ),
+        ])
+
+        # ============================================
         # BLEEDING EDGE - SYSTEM ORCHESTRATOR
         # ============================================
         self.tests.extend([
