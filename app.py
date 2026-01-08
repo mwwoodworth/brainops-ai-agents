@@ -53,6 +53,8 @@ from api.codebase_graph import router as codebase_graph_router
 from api.customer_intelligence import router as customer_intelligence_router
 from api.digital_twin import router as digital_twin_router
 from api.e2e_verification import router as e2e_verification_router
+from api.logistics import router as logistics_router
+from api.infrastructure import router as infrastructure_router
 from api.gumroad_webhook import router as gumroad_router
 from api.market_intelligence import router as market_intelligence_router
 from api.mcp import router as mcp_router  # MCP Bridge Integration - 345 tools
@@ -1146,6 +1148,8 @@ app.include_router(market_intelligence_router, dependencies=SECURED_DEPENDENCIES
 app.include_router(system_orchestrator_router, dependencies=SECURED_DEPENDENCIES)  # Autonomous system orchestration (1-10K systems)
 app.include_router(self_healing_router, dependencies=SECURED_DEPENDENCIES)  # Enhanced self-healing AI infrastructure
 app.include_router(e2e_verification_router, dependencies=SECURED_DEPENDENCIES)  # E2E System Verification
+app.include_router(logistics_router, dependencies=SECURED_DEPENDENCIES)  # Neuro-Symbolic Logistics
+app.include_router(infrastructure_router, dependencies=SECURED_DEPENDENCIES)  # Self-Provisioning Infra
 app.include_router(revenue_automation_router, dependencies=SECURED_DEPENDENCIES)  # Revenue Automation Engine
 app.include_router(mcp_router, dependencies=SECURED_DEPENDENCIES)  # MCP Bridge - 345 tools (Render, Vercel, Supabase, GitHub, Stripe, Docker)
 app.include_router(cicd_router, dependencies=SECURED_DEPENDENCIES)  # Autonomous CI/CD - manage 1-10K deployments
