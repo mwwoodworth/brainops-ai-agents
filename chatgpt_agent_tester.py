@@ -81,12 +81,31 @@ class ChatGPTAgentTester:
     Goes beyond health checks to test real functionality.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        enable_ai_analysis: Optional[bool] = None,
+        goto_wait_until: Optional[str] = None,
+    ):
         self._browser = None
         self._context = None
         self._page = None
         self._playwright = None
         self.results: list[FlowResult] = []
+
+        if enable_ai_analysis is None:
+            enable_ai_analysis = os.getenv("CHATGPT_AGENT_TESTER_ENABLE_AI_ANALYSIS", "false").lower() == "true"
+        self.enable_ai_analysis = bool(enable_ai_analysis)
+
+        wait_until = (goto_wait_until or os.getenv("CHATGPT_AGENT_TESTER_GOTO_WAIT_UNTIL", "domcontentloaded")).lower()
+        if wait_until not in {"load", "domcontentloaded", "networkidle"}:
+            wait_until = "domcontentloaded"
+        self.goto_wait_until = wait_until
+
+        try:
+            self.ai_timeout_seconds = float(os.getenv("CHATGPT_AGENT_TESTER_AI_TIMEOUT_SECONDS", "25"))
+        except ValueError:
+            self.ai_timeout_seconds = 25.0
 
     async def initialize(self):
         """Initialize Playwright browser"""
@@ -143,7 +162,7 @@ class ChatGPTAgentTester:
 
         try:
             import openai
-            client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
+            client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=self.ai_timeout_seconds)
 
             response = await client.chat.completions.create(
                 model="gpt-4o",
@@ -196,7 +215,7 @@ class ChatGPTAgentTester:
                     logger.info(f"[{flow_name}] Executing: {step.name}")
 
                     if step.action == "navigate":
-                        await page.goto(step.value, wait_until="networkidle", timeout=step.timeout_ms)
+                        await page.goto(step.value, wait_until=self.goto_wait_until, timeout=step.timeout_ms)
                         steps_passed += 1
 
                     elif step.action == "click":
@@ -295,7 +314,7 @@ class ChatGPTAgentTester:
 
         # AI analysis of final screenshot
         ai_analysis = None
-        if screenshots:
+        if self.enable_ai_analysis and screenshots:
             ai_analysis = await self._analyze_with_ai(
                 screenshots[-1],
                 f"Test flow: {flow_name}, Status: {status.value}"
@@ -526,7 +545,7 @@ async def run_chatgpt_agent_tests() -> dict[str, Any]:
 
 async def run_quick_health_test() -> dict[str, Any]:
     """Run quick health test (homepage only)"""
-    tester = ChatGPTAgentTester()
+    tester = ChatGPTAgentTester(enable_ai_analysis=False)
     try:
         await tester.initialize()
 
