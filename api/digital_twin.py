@@ -8,7 +8,7 @@ Fully operational with proper error handling and fallbacks.
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -119,53 +119,87 @@ async def create_twin(request: CreateTwinRequest):
 
 
 @router.get("/twins")
-async def list_twins():
+async def list_twins(
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
     """List all digital twins"""
     try:
-        engine = await _get_engine()
+        twins_list: list[dict[str, Any]] = []
 
-        twins_list = []
-        if hasattr(engine, 'twins'):
-            for twin_id, twin in engine.twins.items():
+        # Prefer in-memory state when already loaded, but do not force engine initialization here
+        # (initialization can be expensive and should not block list calls).
+        if _engine is not None and hasattr(_engine, "twins") and isinstance(getattr(_engine, "twins"), dict):
+            all_items = list(getattr(_engine, "twins").items())
+            total_available = len(all_items)
+            page_items = all_items[offset : offset + limit]
+            for twin_id, twin in page_items:
                 twins_list.append({
                     "twin_id": twin_id,
-                    "source_system": twin.source_system if hasattr(twin, 'source_system') else twin_id,
-                    "system_type": twin.system_type.value if hasattr(twin, 'system_type') and hasattr(twin.system_type, 'value') else str(twin.system_type) if hasattr(twin, 'system_type') else "unknown",
-                    "maturity_level": twin.maturity_level.value if hasattr(twin, 'maturity_level') and hasattr(twin.maturity_level, 'value') else str(twin.maturity_level) if hasattr(twin, 'maturity_level') else "status",
-                    "health_score": twin.health_score if hasattr(twin, 'health_score') else 100,
-                    "last_sync": twin.last_sync if hasattr(twin, 'last_sync') else None,
-                    "drift_detected": twin.drift_detected if hasattr(twin, 'drift_detected') else False
+                    "source_system": twin.source_system if hasattr(twin, "source_system") else twin_id,
+                    "system_type": (
+                        twin.system_type.value
+                        if hasattr(twin, "system_type") and hasattr(twin.system_type, "value")
+                        else str(twin.system_type)
+                        if hasattr(twin, "system_type")
+                        else "unknown"
+                    ),
+                    "maturity_level": (
+                        twin.maturity_level.value
+                        if hasattr(twin, "maturity_level") and hasattr(twin.maturity_level, "value")
+                        else str(twin.maturity_level)
+                        if hasattr(twin, "maturity_level")
+                        else "status"
+                    ),
+                    "health_score": twin.health_score if hasattr(twin, "health_score") else 100,
+                    "last_sync": twin.last_sync if hasattr(twin, "last_sync") else None,
+                    "drift_detected": twin.drift_detected if hasattr(twin, "drift_detected") else False,
                 })
 
-        # Fallback: query DB directly if in-memory is empty
-        if not twins_list:
-            import os
-            db_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")  # SECURITY: No hardcoded credentials
-            if db_url:
-                try:
-                    import asyncpg
-                    conn = await asyncpg.connect(db_url)
-                    try:
-                        rows = await conn.fetch("SELECT twin_id, source_system, system_type, maturity_level, health_score, last_sync, drift_detected FROM digital_twins")
-                        for row in rows:
-                            twins_list.append({
-                                "twin_id": row['twin_id'],
-                                "source_system": row['source_system'],
-                                "system_type": row['system_type'],
-                                "maturity_level": row['maturity_level'],
-                                "health_score": row['health_score'] or 100,
-                                "last_sync": row['last_sync'].isoformat() if row['last_sync'] else None,
-                                "drift_detected": row['drift_detected'] or False
-                            })
-                    finally:
-                        await conn.close()
-                except Exception as db_err:
-                    logger.warning(f"DB fallback failed: {db_err}")
+            return {
+                "twins": twins_list,
+                "total": len(twins_list),
+                "total_available": total_available,
+                "limit": limit,
+                "offset": offset,
+                "source": "memory",
+            }
 
-        return {"twins": twins_list, "total": len(twins_list)}
+        # Fallback: query DB via the shared async pool (fast + avoids creating new connections)
+        from database.async_connection import get_pool
+
+        pool = get_pool()
+        rows = await pool.fetch(
+            """
+            SELECT twin_id, source_system, system_type, maturity_level, health_score, last_sync, drift_detected
+            FROM digital_twins
+            ORDER BY last_sync DESC NULLS LAST
+            LIMIT $1 OFFSET $2
+            """,
+            limit,
+            offset,
+        )
+        for row in rows:
+            twins_list.append({
+                "twin_id": row["twin_id"],
+                "source_system": row["source_system"],
+                "system_type": row["system_type"],
+                "maturity_level": row["maturity_level"],
+                "health_score": row.get("health_score") or 100,
+                "last_sync": row["last_sync"].isoformat() if row.get("last_sync") else None,
+                "drift_detected": row.get("drift_detected") or False,
+            })
+
+        return {
+            "twins": twins_list,
+            "total": len(twins_list),
+            "limit": limit,
+            "offset": offset,
+            "source": "db",
+        }
     except Exception as e:
         logger.error(f"Failed to list twins: {e}")
-        return {"twins": [], "total": 0, "error": str(e)}
+        return {"twins": [], "total": 0, "limit": limit, "offset": offset, "error": str(e)}
 
 
 @router.get("/twins/{twin_id}")
