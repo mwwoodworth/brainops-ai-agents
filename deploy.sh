@@ -21,6 +21,13 @@ echo "=========================================="
 echo "Deploying BrainOps AI Agents v$VERSION"
 echo "=========================================="
 
+# Capture currently deployed build/version for a robust post-deploy verification.
+PRE_HEALTH="$(curl -s https://brainops-ai-agents.onrender.com/health 2>/dev/null || true)"
+PRE_DEPLOYED_BUILD="$(echo "$PRE_HEALTH" | jq -r '.build // empty' 2>/dev/null | tr -d '[:space:]' || true)"
+PRE_DEPLOYED_VERSION_RAW="$(echo "$PRE_HEALTH" | jq -r '.version // empty' 2>/dev/null | tr -d '[:space:]' || true)"
+PRE_DEPLOYED_VERSION="${PRE_DEPLOYED_VERSION_RAW#v}"
+PRE_DEPLOYED_VERSION="${PRE_DEPLOYED_VERSION#V}"
+
 # Check for RENDER_API_KEY
 if [ -z "${RENDER_API_KEY:-}" ]; then
     echo "ERROR: RENDER_API_KEY not set"
@@ -103,20 +110,40 @@ DEPLOYED_VERSION=$(echo "$HEALTH" | jq -r '.version // ""' | tr -d '[:space:]')
 # Normalize deployed version to compare apples-to-apples
 DEPLOYED_VERSION="${DEPLOYED_VERSION#v}"
 DEPLOYED_VERSION="${DEPLOYED_VERSION#V}"
+DEPLOYED_BUILD="$(echo "$HEALTH" | jq -r '.build // ""' | tr -d '[:space:]')"
 DB_STATUS=$(echo "$HEALTH" | jq -r '.database')
 HEALTH_STATUS=$(echo "$HEALTH" | jq -r '.status // "unknown"')
 
 echo ""
 echo "=========================================="
-if [ "$DEPLOYED_VERSION" = "$VERSION" ]; then
-    echo "✅ SUCCESS: v$VERSION deployed"
-    echo "   Health:    $HEALTH_STATUS"
-    echo "   Database:  $DB_STATUS"
+BUILD_CHANGED="false"
+if [ -n "${PRE_DEPLOYED_BUILD:-}" ] && [ -n "${DEPLOYED_BUILD:-}" ] && [ "$DEPLOYED_BUILD" != "$PRE_DEPLOYED_BUILD" ]; then
+  BUILD_CHANGED="true"
+fi
+
+if [ "$BUILD_CHANGED" = "true" ]; then
+  echo "✅ SUCCESS: Deploy is live (build changed)"
+  echo "   Build:     $DEPLOYED_BUILD"
+  echo "   Health:    $HEALTH_STATUS"
+  echo "   Database:  $DB_STATUS"
+  if [ "$DEPLOYED_VERSION" = "$VERSION" ]; then
+    echo "   Version:   v$DEPLOYED_VERSION"
+  else
+    echo "   Version:   v$DEPLOYED_VERSION (local tag: v$VERSION)"
+  fi
 else
-    echo "⚠️  Version mismatch after deploy"
-    echo "   Expected: v$VERSION"
-    echo "   Current:  v$DEPLOYED_VERSION"
-    echo ""
-    echo "Check status: curl -s https://brainops-ai-agents.onrender.com/health | jq '.version'"
+  if [ "$DEPLOYED_VERSION" = "$VERSION" ]; then
+      echo "✅ SUCCESS: v$VERSION deployed"
+      echo "   Health:    $HEALTH_STATUS"
+      echo "   Database:  $DB_STATUS"
+  else
+      echo "⚠️  Could not confirm deploy via version/build"
+      echo "   Pre-build: ${PRE_DEPLOYED_BUILD:-unknown}"
+      echo "   Post-build:${DEPLOYED_BUILD:-unknown}"
+      echo "   Expected:  v$VERSION"
+      echo "   Current:   v$DEPLOYED_VERSION"
+      echo ""
+      echo "Check status: curl -s https://brainops-ai-agents.onrender.com/health | jq '{version,build,status,database}'"
+  fi
 fi
 echo "=========================================="
