@@ -1335,10 +1335,21 @@ def _self_healing_status() -> dict[str, Any]:
     healer = getattr(app.state, "healer", None)
     if not (SELF_HEALING_AVAILABLE and healer):
         return {"available": False}
+
+    # Keep this helper lightweight: do not call `get_health_report()` here because it can
+    # execute multiple DB queries and return a large payload. Dedicated self-healing
+    # endpoints cover the full report when needed.
     try:
-        if hasattr(healer, "get_health_report"):
-            return {"available": True, "report": healer.get_health_report()}
-        return {"available": True}
+        circuit_breakers = getattr(healer, "circuit_breakers", None) or {}
+        breaker_total = len(circuit_breakers) if isinstance(circuit_breakers, dict) else 0
+        rules = getattr(healer, "healing_rules", None) or []
+        active_rules = len(rules) if hasattr(rules, "__len__") else None
+        return {
+            "available": True,
+            "report_available": hasattr(healer, "get_health_report"),
+            "circuit_breakers_total": breaker_total,
+            "active_healing_rules": active_rules,
+        }
     except Exception as exc:
         logger.error("Failed to read self-healing status: %s", exc)
         return {"available": True, "error": str(exc)}
@@ -2292,19 +2303,55 @@ async def providers_status(authenticated: bool = Depends(verify_api_key)):
 async def get_agents(
     category: Optional[str] = None,
     enabled: Optional[bool] = True,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    include_capabilities: bool = Query(True),
+    include_configuration: bool = Query(False),
     authenticated: bool = Depends(verify_api_key)
 ) -> AgentList:
     """Get list of available agents"""
     try:
-        cache_key = f"agents:{category or 'all'}:{enabled}"
+        cache_key = (
+            f"agents:{category or 'all'}:{enabled}:"
+            f"{limit}:{offset}:{int(include_capabilities)}:{int(include_configuration)}"
+        )
 
         async def _load_agents() -> AgentList:
             try:
                 pool = get_pool()
+
+                params: list[Any] = []
+                where_sql = "WHERE 1=1"
+
+                if enabled is not None:
+                    where_sql += f" AND a.enabled = ${len(params) + 1}"
+                    params.append(enabled)
+
+                if category:
+                    where_sql += f" AND a.category = ${len(params) + 1}"
+                    params.append(category)
+
+                # Keep list responses small by default; full agent details are available via `/agents/{agent_id}`.
+                select_cols = [
+                    "a.id",
+                    "a.name",
+                    "a.category",
+                    "a.enabled",
+                    "a.status",
+                    "a.type",
+                    "a.created_at",
+                    "a.updated_at",
+                    ("a.capabilities" if include_capabilities else "'[]'::jsonb AS capabilities"),
+                    ("a.configuration" if include_configuration else "'{}'::jsonb AS configuration"),
+                ]
+                select_sql = ", ".join(select_cols)
+
+                total = await pool.fetchval(f"SELECT COUNT(*) FROM agents a {where_sql}", *params) or 0
+
                 # Build query with execution statistics
                 # Join with ai_agent_executions to get total_executions and last_active
-                query = """
-                    SELECT a.*,
+                query = f"""
+                    SELECT {select_sql},
                            COALESCE(e.exec_count, 0) as total_executions,
                            e.last_exec as last_active
                     FROM agents a
@@ -2315,21 +2362,12 @@ async def get_agents(
                         FROM ai_agent_executions
                         GROUP BY agent_name
                     ) e ON a.name = e.agent_name
-                    WHERE 1=1
+                    {where_sql}
+                    ORDER BY a.category, a.name
+                    LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
                 """
-                params = []
 
-                if enabled is not None:
-                    query += f" AND a.enabled = ${len(params) + 1}"
-                    params.append(enabled)
-
-                if category:
-                    query += f" AND a.category = ${len(params) + 1}"
-                    params.append(category)
-
-                query += " ORDER BY a.category, a.name"
-
-                rows = await pool.fetch(query, *params)
+                rows = await pool.fetch(query, *params, limit, offset)
 
                 agents = [
                     _row_to_agent(row if isinstance(row, dict) else dict(row))
@@ -2338,9 +2376,9 @@ async def get_agents(
 
                 return AgentList(
                     agents=agents,
-                    total=len(agents),
-                    page=1,
-                    page_size=len(agents)
+                    total=int(total),
+                    page=(offset // limit) + 1,
+                    page_size=limit,
                 )
             except DatabaseUnavailableError as exc:
                 logger.error("Database unavailable while loading agents", exc_info=True)
