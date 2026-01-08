@@ -564,28 +564,96 @@ async def run_chatgpt_agent_tests() -> dict[str, Any]:
 
 
 async def run_quick_health_test() -> dict[str, Any]:
-    """Run quick health test (homepage only)"""
-    tester = ChatGPTAgentTester(enable_ai_analysis=False)
-    try:
-        await tester.initialize()
+    """
+    Run quick health test (homepage only).
 
-        mrg_result = await tester.test_mrg_homepage_quick()
-        erp_result = await tester.test_erp_homepage_quick()
+    Default behavior is a fast HTTP probe (no Playwright dependency) to keep `/e2e/verify` stable.
+    Set `CHATGPT_AGENT_TESTER_QUICK_MODE=playwright` to force real browser-based checks.
+    """
 
-        return {
-            "mrg_healthy": mrg_result.status == TestFlowStatus.PASSED,
-            "erp_healthy": erp_result.status == TestFlowStatus.PASSED,
-            "mrg_details": {
-                "status": mrg_result.status.value,
-                "duration": mrg_result.duration_seconds
-            },
-            "erp_details": {
-                "status": erp_result.status.value,
-                "duration": erp_result.duration_seconds
+    mode = os.getenv("CHATGPT_AGENT_TESTER_QUICK_MODE", "http").strip().lower()
+    if mode in {"playwright", "browser", "ui"}:
+        tester = ChatGPTAgentTester(enable_ai_analysis=False)
+        try:
+            await tester.initialize()
+
+            mrg_result = await tester.test_mrg_homepage_quick()
+            erp_result = await tester.test_erp_homepage_quick()
+
+            return {
+                "mode": "playwright",
+                "mrg_healthy": mrg_result.status == TestFlowStatus.PASSED,
+                "erp_healthy": erp_result.status == TestFlowStatus.PASSED,
+                "mrg_details": {
+                    "status": mrg_result.status.value,
+                    "duration": mrg_result.duration_seconds,
+                },
+                "erp_details": {
+                    "status": erp_result.status.value,
+                    "duration": erp_result.duration_seconds,
+                },
             }
-        }
-    finally:
-        await tester.close()
+        finally:
+            await tester.close()
+
+    # Fast-path: HTTP probe
+    import aiohttp
+
+    async def _probe(session: aiohttp.ClientSession, url: str) -> tuple[bool, float, Optional[str]]:
+        start = time.perf_counter()
+
+        def _finish(ok: bool, err: Optional[str] = None) -> tuple[bool, float, Optional[str]]:
+            return ok, (time.perf_counter() - start), err
+
+        try:
+            async with session.get(url, allow_redirects=True) as resp:
+                content_type = resp.headers.get("content-type", "")
+                body_bytes = await resp.content.read(200_000)
+                body = body_bytes.decode("utf-8", errors="ignore").lower()
+
+                if resp.status < 200 or resp.status >= 400:
+                    return _finish(False, f"HTTP {resp.status}")
+
+                if "text/html" not in content_type.lower():
+                    return _finish(False, f"Unexpected content-type: {content_type}")
+
+                if "<body" not in body:
+                    return _finish(False, "Missing <body> in HTML")
+
+                return _finish(True, None)
+        except asyncio.TimeoutError:
+            return _finish(False, "Timeout")
+        except Exception as exc:
+            return _finish(False, str(exc))
+
+    timeout_seconds = float(os.getenv("CHATGPT_AGENT_TESTER_HTTP_TIMEOUT_SECONDS", "12"))
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+    headers = {
+        "User-Agent": "BrainOpsChatGPTAgentTester/1.0 (+https://brainops.ai)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+
+    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+        (mrg_ok, mrg_duration, mrg_error), (erp_ok, erp_duration, erp_error) = await asyncio.gather(
+            _probe(session, "https://myroofgenius.com"),
+            _probe(session, "https://weathercraft-erp.vercel.app"),
+        )
+
+    return {
+        "mode": "http",
+        "mrg_healthy": mrg_ok,
+        "erp_healthy": erp_ok,
+        "mrg_details": {
+            "status": "passed" if mrg_ok else "failed",
+            "duration": mrg_duration,
+            "error": mrg_error,
+        },
+        "erp_details": {
+            "status": "passed" if erp_ok else "failed",
+            "duration": erp_duration,
+            "error": erp_error,
+        },
+    }
 
 
 # =============================================================================
