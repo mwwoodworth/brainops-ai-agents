@@ -210,7 +210,9 @@ async def train_model(
     y_pred = model.predict(X_test)
     r2 = float(r2_score(y_test, y_pred))
     mae = float(mean_absolute_error(y_test, y_pred))
-    rmse = float(mean_squared_error(y_test, y_pred, squared=False))
+    # scikit-learn >= 1.8 removed `squared=`; compute RMSE manually for compatibility.
+    mse = float(mean_squared_error(y_test, y_pred))
+    rmse = float(mse**0.5)
 
     # Feature importance (top 25)
     feature_names = list(vec.get_feature_names_out())
@@ -315,4 +317,3 @@ async def predict(payload: LaborPredictIn) -> dict[str, Any]:
             "crew_days": crew_days,
         },
     }
-
