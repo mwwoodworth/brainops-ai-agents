@@ -634,10 +634,41 @@ class E2ESystemVerification:
 
         logger.info(f"Starting E2E verification (ID: {report_id}) - {len(self.tests)} tests")
 
-        # Run all tests concurrently
+        # Run tests with bounded concurrency to avoid self-DOS'ing the service under test.
+        # Additionally, run heavyweight browser-based UI tests serially after the main batch.
+        max_concurrency = max(1, int(os.getenv("E2E_MAX_CONCURRENCY", "10")))
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        def _should_run_serial(test: EndpointTest) -> bool:
+            return "/always-know/chatgpt-agent-test" in test.url or test.name.startswith("ChatGPT Agent UI")
+
+        serial_indices: list[int] = []
+        parallel_indices: list[int] = []
+        for idx, test in enumerate(self.tests):
+            (serial_indices if _should_run_serial(test) else parallel_indices).append(idx)
+
+        logger.info(
+            "E2E execution plan: %s parallel (max_concurrency=%s), %s serial",
+            len(parallel_indices),
+            max_concurrency,
+            len(serial_indices),
+        )
+
         async with aiohttp.ClientSession() as session:
-            tasks = [self._run_single_test(test, session) for test in self.tests]
-            self.results = await asyncio.gather(*tasks)
+            results_by_index: dict[int, TestResult] = {}
+
+            async def _run_index(i: int) -> tuple[int, TestResult]:
+                async with semaphore:
+                    return i, await self._run_single_test(self.tests[i], session)
+
+            if parallel_indices:
+                pairs = await asyncio.gather(*[_run_index(i) for i in parallel_indices])
+                results_by_index.update(dict(pairs))
+
+            for i in serial_indices:
+                results_by_index[i] = await self._run_single_test(self.tests[i], session)
+
+            self.results = [results_by_index[i] for i in range(len(self.tests))]
 
         completed_at = datetime.utcnow()
         duration = (completed_at - started_at).total_seconds()
@@ -759,9 +790,30 @@ class E2ESystemVerification:
         """Quick health check of critical endpoints only"""
         critical_tests = [t for t in self.tests if t.critical]
 
+        # Same safeguards as full verification: limit concurrency + run UI browser tests serially.
+        max_concurrency = max(1, int(os.getenv("E2E_MAX_CONCURRENCY", "10")))
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        def _should_run_serial(test: EndpointTest) -> bool:
+            return "/always-know/chatgpt-agent-test" in test.url or test.name.startswith("ChatGPT Agent UI")
+
         async with aiohttp.ClientSession() as session:
-            tasks = [self._run_single_test(test, session) for test in critical_tests]
-            results = await asyncio.gather(*tasks)
+            results_by_index: dict[int, TestResult] = {}
+            parallel_indices = [i for i, t in enumerate(critical_tests) if not _should_run_serial(t)]
+            serial_indices = [i for i, t in enumerate(critical_tests) if _should_run_serial(t)]
+
+            async def _run_index(i: int) -> tuple[int, TestResult]:
+                async with semaphore:
+                    return i, await self._run_single_test(critical_tests[i], session)
+
+            if parallel_indices:
+                pairs = await asyncio.gather(*[_run_index(i) for i in parallel_indices])
+                results_by_index.update(dict(pairs))
+
+            for i in serial_indices:
+                results_by_index[i] = await self._run_single_test(critical_tests[i], session)
+
+            results = [results_by_index[i] for i in range(len(critical_tests))]
 
         passed = sum(1 for r in results if r.status == VerificationStatus.PASSED)
         failed = [r for r in results if r.status != VerificationStatus.PASSED]
