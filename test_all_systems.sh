@@ -19,13 +19,12 @@ echo ""
 
 echo "3️⃣  Checking System Count..."
 SYSTEM_COUNT=$(echo "$HEALTH" | jq -r '.system_count')
-echo "Active Systems: $SYSTEM_COUNT/7"
-if [ "$SYSTEM_COUNT" = "7" ]; then
-    echo "✅ ALL SYSTEMS ACTIVE!"
-elif [ "$SYSTEM_COUNT" = "6" ]; then
-    echo "⚠️  6/7 active (scheduler pending)"
+EXPECTED_SYSTEM_COUNT="${EXPECTED_SYSTEM_COUNT:-16}"
+echo "Active Systems: $SYSTEM_COUNT/$EXPECTED_SYSTEM_COUNT"
+if [ "$SYSTEM_COUNT" -ge "$EXPECTED_SYSTEM_COUNT" ]; then
+    echo "✅ ALL SYSTEMS ACTIVE OR MORE"
 else
-    echo "❌ Only $SYSTEM_COUNT/7 active"
+    echo "⚠️  $SYSTEM_COUNT/$EXPECTED_SYSTEM_COUNT systems active"
 fi
 echo ""
 
@@ -58,13 +57,20 @@ fi
 echo ""
 
 echo "7️⃣  Final Score..."
-if [ "$SYSTEM_COUNT" = "7" ] && [ "$FALSE_COUNT" = "0" ] && [ "$DB_STATUS" = "connected" ]; then
-    echo "🎉 PERFECT SCORE: 100% (7/7 systems active)"
-    exit 0
-elif [ "$SYSTEM_COUNT" = "6" ]; then
-    echo "⚠️  GOOD SCORE: 85.7% (6/7 systems active)"
+if [ "$SYSTEM_COUNT" -ge "$EXPECTED_SYSTEM_COUNT" ] && [ "$FALSE_COUNT" = "0" ] && [ "$DB_STATUS" = "connected" ]; then
+    echo "🎉 PERFECT SCORE: 100% ($SYSTEM_COUNT systems active)"
     exit 0
 else
-    echo "❌ NEEDS WORK: $(echo "scale=1; $SYSTEM_COUNT * 100 / 7" | bc)% ($SYSTEM_COUNT/7 systems active)"
+    if [ "$DB_STATUS" != "connected" ]; then
+        echo "❌ Database not connected: $DB_STATUS"
+    fi
+    if [ "$FALSE_COUNT" -ne "0" ]; then
+        echo "⚠️  $FALSE_COUNT capabilities reported FALSE"
+    fi
+    if [ "$SYSTEM_COUNT" -lt "$EXPECTED_SYSTEM_COUNT" ]; then
+        echo "⚠️  $SYSTEM_COUNT/$EXPECTED_SYSTEM_COUNT systems active"
+    fi
+    SYSTEM_SCORE=$(echo "scale=1; 100 * $SYSTEM_COUNT / $EXPECTED_SYSTEM_COUNT" | bc)
+    echo "⚠️  SCORE: $SYSTEM_SCORE%"
     exit 1
 fi
