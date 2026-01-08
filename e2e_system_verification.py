@@ -661,7 +661,9 @@ class E2ESystemVerification:
 
         # Run tests with bounded concurrency to avoid self-DOS'ing the service under test.
         # Additionally, run heavyweight browser-based UI tests serially after the main batch.
-        max_concurrency = max(1, int(os.getenv("E2E_MAX_CONCURRENCY", "10")))
+        # Default to 4 to align with the production DB pool max_size (Supabase session mode).
+        # Higher values can self-DOS the service under test during `/e2e/verify`.
+        max_concurrency = max(1, int(os.getenv("E2E_MAX_CONCURRENCY", "4")))
         semaphore = asyncio.Semaphore(max_concurrency)
 
         def _should_run_serial(test: EndpointTest) -> bool:
