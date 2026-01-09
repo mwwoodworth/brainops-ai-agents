@@ -112,12 +112,12 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Configure CORS
+# Configure CORS - uses secure defaults from config (no wildcard fallback)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.security.allowed_origins or ["*"],
+    allow_origins=config.security.allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
