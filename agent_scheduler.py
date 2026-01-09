@@ -20,6 +20,14 @@ from psycopg2.extras import RealDictCursor
 from revenue_generation_system import get_revenue_system
 from advanced_lead_scoring import get_scoring_engine
 
+# Bleeding Edge OODA (Consciousness)
+try:
+    from api.bleeding_edge import get_ooda_controller
+    OODA_AVAILABLE = True
+except ImportError:
+    OODA_AVAILABLE = False
+    logging.warning("BleedingEdgeOODA unavailable")
+
 # Revenue Drive (autonomous goals)
 try:
     from drives.revenue_drive import RevenueDrive
@@ -1084,8 +1092,48 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("RevenueDrive failed: %s", exc, exc_info=True)
 
+    def _run_ooda_loop(self):
+        """Execute the Bleeding Edge OODA loop."""
+        if not OODA_AVAILABLE:
+            return
+        try:
+            controller = get_ooda_controller("scheduler")
+            if controller:
+                # We need to run the async method in a sync context
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(controller.run_enhanced_cycle())
+                    logger.info("OODA Loop completed: %s", result.get("cycle_id"))
+                finally:
+                    loop.close()
+        except Exception as exc:
+            logger.error("OODA Loop failed: %s", exc, exc_info=True)
+
     def _register_internal_jobs(self):
         """Register internal recurring jobs (e.g., revenue drive)."""
+        # Register OODA Loop (Consciousness)
+        if OODA_AVAILABLE:
+            try:
+                job_id = "ooda_loop"
+                self.scheduler.add_job(
+                    func=self._run_ooda_loop,
+                    trigger=IntervalTrigger(minutes=5),
+                    id=job_id,
+                    name="OODA Consciousness Loop",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "ooda_loop",
+                    "agent_name": "OODA Loop",
+                    "frequency_minutes": 5,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("✅ Scheduled OODA Loop every 5 minutes")
+            except Exception as exc:
+                logger.error("Failed to schedule OODA Loop: %s", exc, exc_info=True)
+
         if not (REVENUE_DRIVE_AVAILABLE and ENABLE_REVENUE_DRIVE):
             return
         try:
