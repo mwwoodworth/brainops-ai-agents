@@ -118,11 +118,18 @@ class SecurityConfig:
 
         cors_origins_str = os.getenv('ALLOWED_ORIGINS', '')
         if cors_origins_str:
-            self.allowed_origins = cors_origins_str.split(',')
+            self.allowed_origins = [o.strip() for o in cors_origins_str.split(',') if o.strip()]
         elif self.dev_mode:
-            self.allowed_origins = ["http://localhost:3000", "http://localhost:3001", "*"]
+            self.allowed_origins = ["http://localhost:3000", "http://localhost:3001"]
         else:
-            self.allowed_origins = []
+            # Secure production defaults - only known frontends
+            self.allowed_origins = [
+                "https://weathercraft-erp.vercel.app",
+                "https://myroofgenius.com",
+                "https://www.myroofgenius.com",
+                "https://brainops-command-center.vercel.app",
+                "https://brainops-mcp-bridge.onrender.com",
+            ]
 
 
 class TenantConfig:
