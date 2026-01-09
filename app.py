@@ -30,6 +30,54 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Simple In-Memory Rate Limiter (Token Bucket Algorithm)
+# ---------------------------------------------------------------------------
+class RateLimiter:
+    """IP-based rate limiter using token bucket algorithm."""
+
+    def __init__(self, requests_per_minute: int = 60, burst_size: int = 10):
+        self.rate = requests_per_minute / 60.0  # tokens per second
+        self.burst_size = burst_size
+        self._buckets: dict[str, tuple[float, float]] = {}  # ip -> (tokens, last_update)
+        self._lock = asyncio.Lock()
+
+    async def is_allowed(self, identifier: str) -> bool:
+        """Check if request is allowed and consume a token."""
+        async with self._lock:
+            now = time.time()
+            tokens, last_update = self._buckets.get(identifier, (self.burst_size, now))
+
+            # Replenish tokens based on time elapsed
+            elapsed = now - last_update
+            tokens = min(self.burst_size, tokens + elapsed * self.rate)
+
+            if tokens >= 1:
+                self._buckets[identifier] = (tokens - 1, now)
+                return True
+            else:
+                self._buckets[identifier] = (tokens, now)
+                return False
+
+    async def cleanup(self) -> None:
+        """Remove stale entries to prevent memory growth."""
+        async with self._lock:
+            now = time.time()
+            stale_threshold = 300  # 5 minutes
+            stale_keys = [
+                k for k, (_, last) in self._buckets.items()
+                if now - last > stale_threshold
+            ]
+            for k in stale_keys:
+                del self._buckets[k]
+
+
+# Global rate limiters
+_rate_limiter = RateLimiter(requests_per_minute=120, burst_size=20)  # General endpoints
+_auth_rate_limiter = RateLimiter(requests_per_minute=10, burst_size=5)  # Auth/sensitive endpoints
+
+
 # Import agent executor for actual agent dispatch
 try:
     from agent_executor import AgentExecutor
@@ -907,6 +955,17 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ Email Scheduler startup failed: {e}")
 
+        # Start rate limiter cleanup task (every 5 minutes)
+        async def rate_limiter_cleanup_loop():
+            while True:
+                await asyncio.sleep(300)  # 5 minutes
+                await _rate_limiter.cleanup()
+                await _auth_rate_limiter.cleanup()
+                logger.debug("🧹 Rate limiter buckets cleaned up")
+
+        asyncio.create_task(rate_limiter_cleanup_loop())
+        logger.info("✅ Rate limiter cleanup task started")
+
         logger.info("✅ Heavy component initialization complete - AI OS FULLY AWAKE!")
 
     asyncio.create_task(deferred_heavy_init())
@@ -1031,6 +1090,37 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+# Rate limiting middleware
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Apply rate limiting based on client IP."""
+    # Skip rate limiting for health checks
+    if request.url.path in ("/health", "/", "/docs", "/openapi.json"):
+        return await call_next(request)
+
+    # Get client IP (handle proxies)
+    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if not client_ip:
+        client_ip = request.client.host if request.client else "unknown"
+
+    # Use stricter rate limit for auth-related paths
+    if any(p in request.url.path for p in ["/auth", "/login", "/api-key"]):
+        limiter = _auth_rate_limiter
+    else:
+        limiter = _rate_limiter
+
+    if not await limiter.is_allowed(client_ip):
+        logger.warning(f"Rate limit exceeded for {client_ip} on {request.url.path}")
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Too many requests. Please slow down."},
+            headers={"Retry-After": "60"}
+        )
+
+    return await call_next(request)
+
 
 # Request/latency observability middleware
 @app.middleware("http")
