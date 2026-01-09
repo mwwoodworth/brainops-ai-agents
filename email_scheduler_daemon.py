@@ -2,7 +2,7 @@
 Email Scheduler Daemon
 ======================
 Background daemon that processes scheduled emails from ai_email_queue
-and sends them via SendGrid at the appropriate times.
+and sends them via Resend (primary) or SendGrid (fallback) at the appropriate times.
 
 Handles:
 - Nurture campaign emails (drip sequences)
@@ -18,16 +18,38 @@ import asyncio
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# SendGrid configuration
+# Email provider configuration (Resend is primary in prod)
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
+
+# SendGrid fallback configuration (optional)
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY', '')
 SENDGRID_FROM_EMAIL = os.getenv('SENDGRID_FROM_EMAIL', 'noreply@brainops.ai')
 SENDGRID_FROM_NAME = os.getenv('SENDGRID_FROM_NAME', 'BrainOps AI')
+
+RESEND_RATE_LIMIT_PER_SECOND = float(os.getenv("RESEND_RATE_LIMIT_PER_SECOND", "2"))
+_RESEND_MIN_INTERVAL = 1.0 / RESEND_RATE_LIMIT_PER_SECOND if RESEND_RATE_LIMIT_PER_SECOND > 0 else 0.0
+_resend_rate_lock = asyncio.Lock()
+_last_resend_request_at = 0.0
+
+async def _throttle_resend() -> None:
+    """Best-effort throttle to avoid hammering Resend rate limits."""
+    global _last_resend_request_at
+    if _RESEND_MIN_INTERVAL <= 0:
+        return
+    async with _resend_rate_lock:
+        now = time.monotonic()
+        elapsed = now - _last_resend_request_at
+        if elapsed < _RESEND_MIN_INTERVAL:
+            await asyncio.sleep(_RESEND_MIN_INTERVAL - elapsed)
+        _last_resend_request_at = time.monotonic()
 
 
 TEST_EMAIL_SUFFIXES = (".test", ".example", ".invalid")
@@ -75,7 +97,7 @@ class EmailSchedulerDaemon:
     and dispatches them via SendGrid.
     """
 
-    def __init__(self, poll_interval: int = 60, batch_size: int = 50, max_retries: int = 3):
+    def __init__(self, poll_interval: int = 30, batch_size: int = 50, max_retries: int = 3):
         self.poll_interval = poll_interval
         self.batch_size = batch_size
         self.max_retries = max_retries
@@ -186,7 +208,7 @@ class EmailSchedulerDaemon:
             return []
 
     async def _send_email(self, email: EmailJob):
-        """Send a single email via SendGrid"""
+        """Send a single email via Resend (primary) or SendGrid (fallback)."""
         try:
             skip_reason = _get_skip_reason(email)
             if skip_reason:
@@ -202,11 +224,113 @@ class EmailSchedulerDaemon:
                 )
                 return
 
-            if not SENDGRID_API_KEY:
-                logger.warning(f"SendGrid not configured - skipping email {email.id}")
-                await self._update_email_status(email.id, 'skipped', {'reason': 'no_api_key'})
+            provider: str | None = None
+            provider_meta: dict[str, Any] = {}
+            success = False
+            message = ""
+
+            if RESEND_API_KEY:
+                provider = "resend"
+                success, message, provider_meta = await self._send_via_resend(email)
+            elif SENDGRID_API_KEY:
+                provider = "sendgrid"
+                success, message, provider_meta = await self._send_via_sendgrid(email)
+            else:
+                logger.critical("No email provider configured (need RESEND_API_KEY or SENDGRID_API_KEY)")
+                await self._update_email_status(
+                    email.id,
+                    "failed",
+                    {
+                        **email.metadata,
+                        "final_error": "No email provider configured (need RESEND_API_KEY or SENDGRID_API_KEY)",
+                        "failed_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+                self._stats["emails_failed"] += 1
                 return
 
+            if success:
+                # Success
+                await self._update_email_status(email.id, 'sent', {
+                    **email.metadata,
+                    "provider": provider,
+                    **provider_meta,
+                    'sent_at': datetime.now(timezone.utc).isoformat(),
+                    "send_message": message,
+                })
+                self._stats["emails_sent"] += 1
+                logger.info(f"✅ Email {email.id} sent to {email.recipient}")
+
+                # Optional: Record delivery for tracking (table may not exist)
+                try:
+                    await self._record_delivery(email)
+                except Exception as delivery_err:
+                    logger.debug(f"Delivery tracking skipped for {email.id}: {delivery_err}")
+            else:
+                # Failed
+                await self._handle_send_failure(
+                    email,
+                    f"{provider or 'provider'} failure: {message}".strip()
+                )
+
+        except Exception as e:
+            await self._handle_send_failure(email, str(e))
+
+    async def _send_via_resend(self, email: EmailJob) -> tuple[bool, str, dict[str, Any]]:
+        if not RESEND_API_KEY:
+            return False, "RESEND_API_KEY not configured", {}
+
+        try:
+            import httpx
+
+            await _throttle_resend()
+            payload: dict[str, Any] = {
+                "from": RESEND_FROM_EMAIL,
+                "to": [email.recipient],
+                "subject": email.subject,
+            }
+
+            if "<" in email.body and ">" in email.body:
+                payload["html"] = email.body
+            else:
+                payload["text"] = email.body
+
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                response = await client.post(
+                    "https://api.resend.com/emails",
+                    headers={
+                        "Authorization": f"Bearer {RESEND_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+
+            if response.status_code in (200, 201):
+                resend_id: str | None = None
+                try:
+                    data = response.json()
+                    if isinstance(data, dict):
+                        resend_id = data.get("id")
+                except Exception:
+                    resend_id = None
+                return True, f"Resend {response.status_code}", {
+                    "resend_status": response.status_code,
+                    **({"resend_id": resend_id} if resend_id else {}),
+                }
+
+            retry_after = response.headers.get("Retry-After")
+            retry_note = f" retry_after={retry_after}" if retry_after else ""
+            return False, f"Resend {response.status_code}{retry_note}: {response.text}", {
+                "resend_status": response.status_code,
+                **({"retry_after": retry_after} if retry_after else {}),
+            }
+        except Exception as exc:
+            return False, f"Resend error: {exc}", {}
+
+    async def _send_via_sendgrid(self, email: EmailJob) -> tuple[bool, str, dict[str, Any]]:
+        if not SENDGRID_API_KEY:
+            return False, "SENDGRID_API_KEY not configured", {}
+        try:
             # Import SendGrid
             from sendgrid import SendGridAPIClient
             from sendgrid.helpers.mail import Content, CustomArg, Email, Mail, To
@@ -229,30 +353,14 @@ class EmailSchedulerDaemon:
             if email.metadata.get('lead_id'):
                 message.add_custom_arg(CustomArg('lead_id', email.metadata.get('lead_id', '')))
 
-            # Send via SendGrid (run in executor to avoid blocking async loop)
             sg = SendGridAPIClient(SENDGRID_API_KEY)
             response = sg.send(message)
 
             if response.status_code in [200, 201, 202]:
-                # Success
-                await self._update_email_status(email.id, 'sent', {
-                    'sendgrid_response': response.status_code,
-                    'sent_at': datetime.now(timezone.utc).isoformat()
-                })
-                self._stats["emails_sent"] += 1
-                logger.info(f"✅ Email {email.id} sent to {email.recipient}")
-
-                # Optional: Record delivery for tracking (table may not exist)
-                try:
-                    await self._record_delivery(email)
-                except Exception as delivery_err:
-                    logger.debug(f"Delivery tracking skipped for {email.id}: {delivery_err}")
-            else:
-                # Failed
-                await self._handle_send_failure(email, f"SendGrid returned {response.status_code}")
-
-        except Exception as e:
-            await self._handle_send_failure(email, str(e))
+                return True, f"SendGrid {response.status_code}", {"sendgrid_status": response.status_code}
+            return False, f"SendGrid returned {response.status_code}", {"sendgrid_status": response.status_code}
+        except Exception as exc:
+            return False, f"SendGrid error: {exc}", {}
 
     async def _handle_send_failure(self, email: EmailJob, error: str):
         """Handle email send failure with retry logic"""

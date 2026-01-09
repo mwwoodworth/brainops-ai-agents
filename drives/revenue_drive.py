@@ -88,6 +88,7 @@ class RevenueDrive:
             if dry_run_env is not None
             else environment != "production"
         )
+        logger.info(f"RevenueDrive initialized (Dry Run: {self.dry_run}) - Environment: {environment}")
         self.stale_days = int(os.getenv("REVENUE_DRIVE_STALE_DAYS", "7"))
         self.overdue_days = int(os.getenv("REVENUE_DRIVE_OVERDUE_DAYS", "14"))
         self.upsell_days = int(os.getenv("REVENUE_DRIVE_UPSELL_DAYS", "30"))
