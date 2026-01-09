@@ -23,6 +23,8 @@ CONVERTKIT_API_SECRET = os.getenv("CONVERTKIT_API_SECRET", "")
 CONVERTKIT_FORM_ID = os.getenv("CONVERTKIT_FORM_ID", "")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
 GUMROAD_WEBHOOK_SECRET = os.getenv("GUMROAD_WEBHOOK_SECRET", "")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production").strip().lower()
 
@@ -108,36 +110,103 @@ class GumroadSale(BaseModel):
     currency: Optional[str] = "USD"
     download_url: Optional[str] = ""
 
+def _as_convertkit_tag_name(value: str) -> str:
+    return value.strip().replace("_", " ").replace("-", " ").strip()
+
+async def _resolve_convertkit_tag_id(client: httpx.AsyncClient, tag_ref: str) -> Optional[str]:
+    """
+    ConvertKit tag references can be either:
+    - A numeric tag id (preferred)
+    - A human-readable tag name (we'll look up / create)
+    """
+    tag_ref = (tag_ref or "").strip()
+    if not tag_ref:
+        return None
+    if tag_ref.isdigit():
+        return tag_ref
+
+    if not CONVERTKIT_API_KEY:
+        logger.warning("ConvertKit tagging requested but CONVERTKIT_API_KEY is missing")
+        return None
+
+    # Lookup by name
+    try:
+        response = await client.get(
+            "https://api.convertkit.com/v3/tags",
+            params={"api_key": CONVERTKIT_API_KEY},
+        )
+        if response.status_code == 200:
+            data = response.json()
+            tags = data.get("tags", []) if isinstance(data, dict) else []
+            desired = _as_convertkit_tag_name(tag_ref).lower()
+            for tag in tags:
+                if not isinstance(tag, dict):
+                    continue
+                if str(tag.get("name", "")).strip().lower() == desired:
+                    tag_id = tag.get("id")
+                    if tag_id is not None:
+                        return str(tag_id)
+        else:
+            logger.warning("ConvertKit tag lookup failed: HTTP %s", response.status_code)
+    except Exception as exc:
+        logger.warning("ConvertKit tag lookup error: %s", exc)
+
+    # Create tag if API secret is available
+    if not CONVERTKIT_API_SECRET:
+        logger.warning("ConvertKit tag '%s' missing and CONVERTKIT_API_SECRET not set (cannot create)", tag_ref)
+        return None
+
+    try:
+        create_resp = await client.post(
+            "https://api.convertkit.com/v3/tags",
+            data={"api_secret": CONVERTKIT_API_SECRET, "tag[name]": _as_convertkit_tag_name(tag_ref)},
+        )
+        if create_resp.status_code in (200, 201):
+            payload = create_resp.json()
+            tag = payload.get("tag") if isinstance(payload, dict) else None
+            if isinstance(tag, dict) and tag.get("id") is not None:
+                return str(tag.get("id"))
+        logger.warning("ConvertKit tag create failed: HTTP %s %s", create_resp.status_code, create_resp.text)
+    except Exception as exc:
+        logger.warning("ConvertKit tag create error: %s", exc)
+
+    return None
+
 async def add_to_convertkit(email: str, first_name: str, last_name: str, product_code: str):
     """Add subscriber to ConvertKit with product tagging"""
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=20.0) as client:
             # Subscribe to form
-            subscriber_data = {
-                "api_key": CONVERTKIT_API_KEY,
-                "email": email,
-                "first_name": first_name,
-                "fields": {
-                    "last_name": last_name,
-                    "gumroad_customer": "true",
-                    "last_purchase": datetime.utcnow().isoformat(),
-                    "purchased_products": product_code
-                }
-            }
+            if not (CONVERTKIT_API_KEY and CONVERTKIT_FORM_ID):
+                logger.warning("ConvertKit not configured; skipping ConvertKit sync for %s", email)
+                return False
 
             response = await client.post(
                 f"https://api.convertkit.com/v3/forms/{CONVERTKIT_FORM_ID}/subscribe",
-                json=subscriber_data
+                data={
+                    "api_key": CONVERTKIT_API_KEY,
+                    "email": email,
+                    "first_name": first_name,
+                    "fields[last_name]": last_name,
+                    "fields[gumroad_customer]": "true",
+                    "fields[last_purchase]": datetime.utcnow().isoformat(),
+                    "fields[purchased_products]": product_code,
+                },
             )
 
             if response.status_code == 200:
                 # Add product tag
                 product = PRODUCT_MAPPING.get(product_code)
                 if product and "convertkit_tag" in product:
-                    await client.post(
-                        f"https://api.convertkit.com/v3/tags/{product['convertkit_tag']}/subscribe",
-                        json={"api_key": CONVERTKIT_API_KEY, "email": email}
-                    )
+                    tag_ref = str(product.get("convertkit_tag") or "").strip()
+                    tag_id = await _resolve_convertkit_tag_id(client, tag_ref)
+                    if tag_id:
+                        await client.post(
+                            f"https://api.convertkit.com/v3/tags/{tag_id}/subscribe",
+                            data={"api_key": CONVERTKIT_API_KEY, "email": email},
+                        )
+                    else:
+                        logger.warning("ConvertKit tag not available for product_code=%s tag_ref=%s", product_code, tag_ref)
                 logger.info(f"Added {email} to ConvertKit with tag {product_code}")
                 return True
             else:
@@ -182,28 +251,53 @@ async def record_sale_to_database(sale_data: dict[str, Any]):
         return False
 
 async def send_purchase_email(email: str, name: str, product_name: str, download_url: str):
-    """Send purchase confirmation via SendGrid"""
-    if not SENDGRID_API_KEY:
-        logger.warning("SendGrid not configured")
-        return False
+    """Send purchase confirmation via Resend (primary) or SendGrid (fallback)."""
+
+    html_body = f"""
+      <h2>Hi {name or 'there'},</h2>
+      <p>Thank you for purchasing <strong>{product_name}</strong>!</p>
+      <p><a href="{download_url}" style="background: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Download Your Product</a></p>
+      <p>If you have any questions, reply to this email.</p>
+      <p>Best,<br>BrainOps Team</p>
+    """
 
     try:
-        async with httpx.AsyncClient() as client:
+        if RESEND_API_KEY:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                response = await client.post(
+                    "https://api.resend.com/emails",
+                    headers={
+                        "Authorization": f"Bearer {RESEND_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "from": RESEND_FROM_EMAIL,
+                        "to": [email],
+                        "subject": f"Your {product_name} is ready!",
+                        "html": html_body,
+                    },
+                )
+
+            if response.status_code in (200, 201):
+                logger.info("Sent purchase email via Resend to %s", email)
+                return True
+            logger.error("Resend error: HTTP %s %s", response.status_code, response.text)
+            return False
+
+        if not SENDGRID_API_KEY:
+            logger.warning("No email provider configured for purchase email (need RESEND_API_KEY or SENDGRID_API_KEY)")
+            return False
+
+        async with httpx.AsyncClient(timeout=20.0) as client:
             email_data = {
                 "personalizations": [{
                     "to": [{"email": email}],
                     "subject": f"Your {product_name} is ready!"
                 }],
-                "from": {"email": "support@brainops.io"},
+                "from": {"email": SENDGRID_FROM_EMAIL or "support@myroofgenius.com"},
                 "content": [{
                     "type": "text/html",
-                    "value": f"""
-                    <h2>Hi {name},</h2>
-                    <p>Thank you for purchasing <strong>{product_name}</strong>!</p>
-                    <p><a href="{download_url}" style="background: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Download Your Product</a></p>
-                    <p>If you have any questions, reply to this email.</p>
-                    <p>Best,<br>BrainOps Team</p>
-                    """
+                    "value": html_body,
                 }]
             }
 
@@ -216,12 +310,11 @@ async def send_purchase_email(email: str, name: str, product_name: str, download
                 json=email_data
             )
 
-            if response.status_code in [200, 202]:
-                logger.info(f"Sent purchase email to {email}")
-                return True
-            else:
-                logger.error(f"SendGrid error: {response.text}")
-                return False
+        if response.status_code in [200, 202]:
+            logger.info("Sent purchase email via SendGrid to %s", email)
+            return True
+        logger.error("SendGrid error: %s", response.text)
+        return False
 
     except Exception as e:
         logger.error(f"Email sending error: {e}")

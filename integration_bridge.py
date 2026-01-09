@@ -108,7 +108,7 @@ class IntegrationBridge:
 
                 # Trigger CustomerAgent to analyze
                 await client.post(
-                    f"{self.agents_url}/agents/9e8ad51f-2f0b-4ee4-9e48-4971c93e8cdf/execute",
+                    f"{self.agents_url}/agents/6a0e9027-b859-4260-b5d2-56c250726a52/execute",
                     json={"action": "analyze_customers", "data": customers}
                 )
 
