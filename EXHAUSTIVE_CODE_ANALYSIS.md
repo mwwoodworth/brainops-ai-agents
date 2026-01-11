@@ -166,75 +166,75 @@ Scope: scanned repo files excluding .venv/venv, __pycache__, .git, node_modules.
 - .env:18 [DB password literal] DATABASE_URL=postgresql://postgres.yomagoqdmxszqtdwuhab:<DB_PASSWORD>@aws-0-us-east-2.pooler.supabase.com:5432/postgres
 - .env.local:9 [DB password literal] DB_PASSWORD=<DB_PASSWORD>
 - .env.local:11 [DB password literal] DATABASE_URL=postgresql://postgres.yomagoqdmxszqtdwuhab:<DB_PASSWORD>@aws-0-us-east-2.pooler.supabase.com:5432/postgres
-- .env.local:18 [API key literal] API_KEYS=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025
-- .env.local:18 [API key/hash literal] API_KEYS=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025
-- .env.local:19 [API key literal] AGENTS_API_KEY=brainops_prod_key_2025
+- .env.local:18 [API key literal] API_KEYS=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,<YOUR_BRAINOPS_API_KEY>
+- .env.local:18 [API key/hash literal] API_KEYS=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,<YOUR_BRAINOPS_API_KEY>
+- .env.local:19 [API key literal] AGENTS_API_KEY=<YOUR_BRAINOPS_API_KEY>
 - .env.local:20 [API key/hash literal] BRAINOPS_API_KEY=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c
 - .env.production:8 [DB password literal] DB_PASSWORD=<DB_PASSWORD>
-- .env.production:12 [API key literal] API_KEYS=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025
-- .env.production:12 [API key/hash literal] API_KEYS=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025
-- .env.production:13 [API key literal] AGENTS_API_KEY=brainops_prod_key_2025
+- .env.production:12 [API key literal] API_KEYS=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,<YOUR_BRAINOPS_API_KEY>
+- .env.production:12 [API key/hash literal] API_KEYS=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,<YOUR_BRAINOPS_API_KEY>
+- .env.production:13 [API key literal] AGENTS_API_KEY=<YOUR_BRAINOPS_API_KEY>
 - .env.production:14 [API key/hash literal] BRAINOPS_API_KEY=11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c
-- AGENT_ACTIVATION_REPORT.md:304 [API key literal] -H "X-API-Key: brainops_prod_key_2025"
-- AGENT_ACTIVATION_REPORT.md:310 [API key literal] -H "X-API-Key: brainops_prod_key_2025"
-- AGENT_ACTIVATION_REPORT.md:316 [API key literal] -H "X-API-Key: brainops_prod_key_2025"
-- AGENT_ACTIVATION_REPORT.md:322 [API key literal] -H "X-API-Key: brainops_prod_key_2025"
+- AGENT_ACTIVATION_REPORT.md:304 [API key literal] -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>"
+- AGENT_ACTIVATION_REPORT.md:310 [API key literal] -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>"
+- AGENT_ACTIVATION_REPORT.md:316 [API key literal] -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>"
+- AGENT_ACTIVATION_REPORT.md:322 [API key literal] -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>"
 - AGENT_ACTIVATION_REPORT.md:327 [DB password literal] PGPASSWORD=<DB_PASSWORD> psql -h aws-0-us-east-2.pooler.supabase.com \
-- AUREA_INTEGRATION_PATCH.md:140 [API key literal] -H "X-API-Key: brainops_prod_key_2025" \
+- AUREA_INTEGRATION_PATCH.md:140 [API key literal] -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" \
 - BRAIN_ENHANCEMENTS.md:354 [DB password literal] DB_PASSWORD=<DB_PASSWORD>
 - BRAIN_ENHANCEMENT_SUMMARY.txt:156 [DB password literal] DB_PASSWORD=<DB_PASSWORD>
-- DEPLOYMENT_STATUS.md:32 [API key literal] curl -X POST https://brainops-ai-agents.onrender.com/memory/force-sync -H "X-API-Key: brainops_prod_key_2025"
-- EMBEDDED_MEMORY_SYNC_FIX.md:186 [API key literal] -H "X-API-Key: brainops_prod_key_2025"
+- DEPLOYMENT_STATUS.md:32 [API key literal] curl -X POST https://brainops-ai-agents.onrender.com/memory/force-sync -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>"
+- EMBEDDED_MEMORY_SYNC_FIX.md:186 [API key literal] -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>"
 - EMBEDDED_MEMORY_SYNC_FIX.md:213 [DB password literal] Password: <DB_PASSWORD>
 - MCP_ENHANCEMENTS_V2.md:550 [MCP key literal] MCP_API_KEY=brainops_mcp_2025
 - SELF_HEALING_QUICK_REFERENCE.md:124 [DB password literal] export DB_PASSWORD="${DB_PASSWORD}"
 - SELF_HEALING_UPGRADE_DOCS.md:360 [DB password literal] export DB_PASSWORD="${DB_PASSWORD}"
 - UPGRADE_SUMMARY.md:208 [DB password literal] export DB_PASSWORD="${DB_PASSWORD}"
-- always_know_brain.py:221 [API key literal] headers={"X-API-Key": os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")}
-- always_know_brain.py:298 [API key literal] headers={"X-API-Key": os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")}
-- api/affiliate.py:18 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
-- api/affiliate.py:18 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
-- api/affiliate.py:19 [API key literal] ADMIN_API_KEYS = {"brainops_prod_key_2025"}  # Only admin keys can process payouts
-- api/knowledge.py:17 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
-- api/knowledge.py:17 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
-- api/product_generation.py:17 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
-- api/product_generation.py:17 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
-- api/sop.py:19 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
-- api/sop.py:19 [API key literal] VALID_API_KEYS = {"brainops_prod_key_2025", "brainops_dev_key_2025"}
-- api/sop.py:20 [API key literal] APPROVER_API_KEYS = {"brainops_prod_key_2025"}  # Only approvers can approve SOPs
+- always_know_brain.py:221 [API key literal] headers={"X-API-Key": os.getenv("BRAINOPS_API_KEY", "<YOUR_BRAINOPS_API_KEY>")}
+- always_know_brain.py:298 [API key literal] headers={"X-API-Key": os.getenv("BRAINOPS_API_KEY", "<YOUR_BRAINOPS_API_KEY>")}
+- api/affiliate.py:18 [API key literal] VALID_API_KEYS = {"<YOUR_BRAINOPS_API_KEY>", "brainops_dev_key_2025"}
+- api/affiliate.py:18 [API key literal] VALID_API_KEYS = {"<YOUR_BRAINOPS_API_KEY>", "brainops_dev_key_2025"}
+- api/affiliate.py:19 [API key literal] ADMIN_API_KEYS = {"<YOUR_BRAINOPS_API_KEY>"}  # Only admin keys can process payouts
+- api/knowledge.py:17 [API key literal] VALID_API_KEYS = {"<YOUR_BRAINOPS_API_KEY>", "brainops_dev_key_2025"}
+- api/knowledge.py:17 [API key literal] VALID_API_KEYS = {"<YOUR_BRAINOPS_API_KEY>", "brainops_dev_key_2025"}
+- api/product_generation.py:17 [API key literal] VALID_API_KEYS = {"<YOUR_BRAINOPS_API_KEY>", "brainops_dev_key_2025"}
+- api/product_generation.py:17 [API key literal] VALID_API_KEYS = {"<YOUR_BRAINOPS_API_KEY>", "brainops_dev_key_2025"}
+- api/sop.py:19 [API key literal] VALID_API_KEYS = {"<YOUR_BRAINOPS_API_KEY>", "brainops_dev_key_2025"}
+- api/sop.py:19 [API key literal] VALID_API_KEYS = {"<YOUR_BRAINOPS_API_KEY>", "brainops_dev_key_2025"}
+- api/sop.py:20 [API key literal] APPROVER_API_KEYS = {"<YOUR_BRAINOPS_API_KEY>"}  # Only approvers can approve SOPs
 - api/ui_testing.py:31 [DB password literal] "password": "<DB_PASSWORD>",
 - aurea_orchestrator.py:98 [MCP key literal] MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "brainops_mcp_2025"
-- autonomous_cicd_management.py:184 [API key literal] self.mcp_api_key = os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+- autonomous_cicd_management.py:184 [API key literal] self.mcp_api_key = os.getenv("BRAINOPS_API_KEY", "<YOUR_BRAINOPS_API_KEY>")
 - bleeding_edge_ooda.py:729 [MCP key literal] headers={"X-API-Key": os.getenv("MCP_API_KEY", "brainops_mcp_2025")}
 - config.py:92 [test API key literal] default_local_test_key = "brainops-local-test-key"
 - database/sync_pool.py:22 [DB password literal] "password": "<DB_PASSWORD>",
 - docs/BRAINOPS_DEVOPS_SOP.md:63 [API key literal] | AI Agents | brainops-ai-agents.onrender.com | /health | v9.1.1 | `curl -s <url>/health -H "X-API-Key: ${BRAINOPS_API_KEY}"` |
 - docs/BRAINOPS_DEVOPS_SOP.md:74 [API key literal] | AI Agents | BRAINOPS_API_KEY | `${BRAINOPS_API_KEY}` |
 - docs/BRAINOPS_DEVOPS_SOP.md:83 [DB password literal] PGPASSWORD=${DB_PASSWORD} psql \
-- docs/BRAINOPS_DEVOPS_SOP.md:105 [API key literal] -H "X-API-Key: brainops_prod_key_2025" | jq
-- docs/BRAINOPS_DEVOPS_SOP.md:197 [API key literal] -H "X-API-Key: brainops_prod_key_2025" | jq '.aurea'
+- docs/BRAINOPS_DEVOPS_SOP.md:105 [API key literal] -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq
+- docs/BRAINOPS_DEVOPS_SOP.md:197 [API key literal] -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq '.aurea'
 - docs/BRAINOPS_DEVOPS_SOP.md:211 [DB password literal] PGPASSWORD=${DB_PASSWORD} psql -h aws-0-us-east-2.pooler.supabase.com ...
-- docs/BRAINOPS_DEVOPS_SOP.md:226 [API key literal] -H "X-API-Key: brainops_prod_key_2025" | jq
-- docs/BRAINOPS_DEVOPS_SOP.md:244 [API key literal] -H "X-API-Key: brainops_prod_key_2025" | jq '.aurea'
-- docs/BRAINOPS_DEVOPS_SOP.md:269 [API key literal] -H "X-API-Key: brainops_prod_key_2025" | jq '.next_jobs[0:5]'
-- docs/BRAINOPS_DEVOPS_SOP.md:359 [API key literal] curl -s "https://brainops-ai-agents.onrender.com/health" -H "X-API-Key: brainops_prod_key_2025" | jq '.status'
-- docs/BRAINOPS_DEVOPS_SOP.md:362 [API key literal] curl -s "https://brainops-ai-agents.onrender.com/systems/usage" -H "X-API-Key: brainops_prod_key_2025" | jq '.aurea.running'
-- docs/BRAINOPS_DEVOPS_SOP.md:365 [API key literal] curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" -H "X-API-Key: brainops_prod_key_2025" | jq '.apscheduler_jobs_count'
-- e2e_system_verification.py:34 [API key literal] API_KEY = _api_keys_list[0] if _api_keys_list else os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+- docs/BRAINOPS_DEVOPS_SOP.md:226 [API key literal] -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq
+- docs/BRAINOPS_DEVOPS_SOP.md:244 [API key literal] -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq '.aurea'
+- docs/BRAINOPS_DEVOPS_SOP.md:269 [API key literal] -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq '.next_jobs[0:5]'
+- docs/BRAINOPS_DEVOPS_SOP.md:359 [API key literal] curl -s "https://brainops-ai-agents.onrender.com/health" -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq '.status'
+- docs/BRAINOPS_DEVOPS_SOP.md:362 [API key literal] curl -s "https://brainops-ai-agents.onrender.com/systems/usage" -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq '.aurea.running'
+- docs/BRAINOPS_DEVOPS_SOP.md:365 [API key literal] curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq '.apscheduler_jobs_count'
+- e2e_system_verification.py:34 [API key literal] API_KEY = _api_keys_list[0] if _api_keys_list else os.getenv("BRAINOPS_API_KEY", "<YOUR_BRAINOPS_API_KEY>")
 - mcp_integration.py:39 [MCP key literal] MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("MCP_BRIDGE_API_KEY") or "brainops_mcp_2025"
 - render.yaml:21 [DB password literal] value: <DB_PASSWORD>
-- render.yaml:27 [API key literal] value: "11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025"
-- render.yaml:27 [API key/hash literal] value: "11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,brainops_prod_key_2025"
-- render.yaml:29 [API key literal] value: brainops_prod_key_2025
+- render.yaml:27 [API key literal] value: "11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,<YOUR_BRAINOPS_API_KEY>"
+- render.yaml:27 [API key/hash literal] value: "11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,<YOUR_BRAINOPS_API_KEY>"
+- render.yaml:29 [API key literal] value: <YOUR_BRAINOPS_API_KEY>
 - render.yaml:31 [API key/hash literal] value: 11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c
-- scripts/verify_ai_os.sh:66 [API key literal] AI_HEALTH=$(curl -s "https://brainops-ai-agents.onrender.com/health" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null)
-- scripts/verify_ai_os.sh:73 [API key literal] AUREA=$(curl -s "https://brainops-ai-agents.onrender.com/systems/usage" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null | jq '.aurea.running' 2>/dev/null)
-- scripts/verify_ai_os.sh:77 [API key literal] SCHEDULER=$(curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null)
-- scripts/verify_ai_os.sh:138 [API key literal] BRAIN=$(curl -s "https://brainops-ai-agents.onrender.com/brain/critical" -H "X-API-Key: brainops_prod_key_2025" 2>/dev/null | jq 'length' 2>/dev/null)
+- scripts/verify_ai_os.sh:66 [API key literal] AI_HEALTH=$(curl -s "https://brainops-ai-agents.onrender.com/health" -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" 2>/dev/null)
+- scripts/verify_ai_os.sh:73 [API key literal] AUREA=$(curl -s "https://brainops-ai-agents.onrender.com/systems/usage" -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" 2>/dev/null | jq '.aurea.running' 2>/dev/null)
+- scripts/verify_ai_os.sh:77 [API key literal] SCHEDULER=$(curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" 2>/dev/null)
+- scripts/verify_ai_os.sh:138 [API key literal] BRAIN=$(curl -s "https://brainops-ai-agents.onrender.com/brain/critical" -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" 2>/dev/null | jq 'length' 2>/dev/null)
 - self_healing_recovery.py:42 [DB password literal] "password": os.getenv("DB_PASSWORD", "<DB_PASSWORD>"),
 - setup_consciousness_db.py:5 [DB password literal] DB_URL = "postgresql://postgres.yomagoqdmxszqtdwuhab:<DB_PASSWORD>@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
 - test_consciousness_loop.py:10 [DB password literal] os.environ["DB_PASSWORD"] = "<DB_PASSWORD>"
-- test_memory_sync_production.sh:5 [API key literal] API_KEY="brainops_prod_key_2025"
+- test_memory_sync_production.sh:5 [API key literal] API_KEY="<YOUR_BRAINOPS_API_KEY>"
 - verify_production.py:11 [DB password literal] os.environ["DB_PASSWORD"] = "<DB_PASSWORD>"
 - verify_production.py:13 [DB password literal] os.environ["DATABASE_URL"] = "postgresql://postgres.yomagoqdmxszqtdwuhab:<DB_PASSWORD>@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
 - verify_system.py:18 [DB password literal] 'password': os.getenv('DB_PASSWORD', '<DB_PASSWORD>'), # Using the one from context

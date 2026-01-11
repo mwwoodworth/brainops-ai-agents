@@ -43,3 +43,19 @@ CREATE INDEX IF NOT EXISTS idx_ml_roofing_labor_samples_tenant
 CREATE INDEX IF NOT EXISTS idx_ml_roofing_labor_samples_is_synthetic
   ON public.ml_roofing_labor_samples (is_synthetic, created_at DESC);
 
+-- RLS: Tenant isolation for PostgREST / client access
+ALTER TABLE public.ml_roofing_labor_samples ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ml_roofing_labor_samples FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS ml_roofing_labor_samples_tenant_policy ON public.ml_roofing_labor_samples;
+CREATE POLICY ml_roofing_labor_samples_tenant_policy
+  ON public.ml_roofing_labor_samples
+  FOR ALL
+  USING (
+    length(current_setting('request.jwt.claim.tenant_id', true)) > 0
+    AND tenant_id::text = current_setting('request.jwt.claim.tenant_id', true)
+  )
+  WITH CHECK (
+    length(current_setting('request.jwt.claim.tenant_id', true)) > 0
+    AND tenant_id::text = current_setting('request.jwt.claim.tenant_id', true)
+  );
