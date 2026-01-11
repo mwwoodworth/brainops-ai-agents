@@ -565,8 +565,26 @@ class AgentExecutor:
         self, agent_name: str, task: dict[str, Any]
     ) -> dict[str, Any]:
         """Run a reasoning + critique guard for high-stakes actions."""
-        if not ENABLE_REASONING_GUARD or not ai_core:
+        # If reasoning guard is disabled, pass through
+        if not ENABLE_REASONING_GUARD:
             return {"block": None, "reasoning": None, "critique": None}
+
+        # SECURITY: If ai_core is unavailable but guard is enabled, fail closed by default
+        # This prevents bypass of safety checks when AI service is disrupted
+        if not ai_core:
+            if REASONING_GUARD_FAIL_OPEN:
+                logger.warning("Reasoning guard: ai_core unavailable, failing OPEN (configured)")
+                return {"block": None, "reasoning": None, "critique": None}
+            else:
+                logger.warning("Reasoning guard: ai_core unavailable, failing CLOSED (secure default)")
+                task_id = str(task.get("id") or task.get("task_id") or uuid.uuid4())
+                block = {
+                    "status": "manual_approval_required",
+                    "agent": agent_name,
+                    "reason": "Reasoning guard unavailable (ai_core not loaded) - fail closed for security",
+                    "task_id": task_id,
+                }
+                return {"block": block, "reasoning": None, "critique": None}
 
         task_id = str(task.get("id") or task.get("task_id") or uuid.uuid4())
         task_context = self._redact_sensitive(task)

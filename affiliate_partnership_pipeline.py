@@ -2213,7 +2213,8 @@ class AffiliatePartnershipPipeline:
         affiliate: Affiliate
     ) -> dict[str, Any]:
         """Process actual payment using Stripe Connect."""
-        stripe_api_key = os.getenv("STRIPE_API_KEY") or os.getenv("STRIPE_SECRET_KEY")
+        # STANDARDIZED: Use STRIPE_SECRET_KEY consistently across all components
+        stripe_api_key = os.getenv("STRIPE_SECRET_KEY") or os.getenv("STRIPE_API_KEY")
 
         method = payout.payment_method
 
