@@ -333,7 +333,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
                     stage, score, value_estimate, source, metadata, created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
             """,
-                lead.get('company_name', 'Unknown'),
+                lead.get('company_name') or lead.get('contact_name') or 'Valued Customer',
                 lead.get('contact_name', ''),
                 email,
                 lead.get('phone', ''),

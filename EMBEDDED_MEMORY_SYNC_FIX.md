@@ -183,7 +183,7 @@ Expected output:
 ### 2. Force Sync (if still empty)
 ```bash
 curl -X POST https://brainops-ai-agents.onrender.com/memory/force-sync \
-  -H "X-API-Key: brainops_prod_key_2025"
+  -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>"
 ```
 
 Expected output:

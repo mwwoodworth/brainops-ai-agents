@@ -137,7 +137,7 @@ async def execute_aurea_event(
 # Test with curl
 curl -X POST https://brainops-ai-agents.onrender.com/api/v1/aurea/execute-event \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: brainops_prod_key_2025" \
+  -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" \
   -d '{
     "event_id": "test-123",
     "topic": "task.created",
