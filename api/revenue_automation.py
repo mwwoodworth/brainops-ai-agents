@@ -2,15 +2,39 @@
 Revenue Automation API Router
 ==============================
 REAL revenue generation endpoints. No placeholders.
+Enhanced with proper validation and error handling.
 """
 
 import logging
+import re
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
+from fastapi.security import APIKeyHeader
+from pydantic import BaseModel, Field, validator
 
 logger = logging.getLogger(__name__)
+
+# API Key Security
+try:
+    from config import config
+    VALID_API_KEYS = config.security.valid_api_keys
+except (ImportError, AttributeError):
+    import os
+    VALID_API_KEYS = {os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")}
+
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
+    """Verify API key for authentication"""
+    if not api_key or api_key not in VALID_API_KEYS:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return api_key
+
+
+# Email validation regex
+EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
 router = APIRouter(prefix="/revenue", tags=["Revenue Automation"])
 
@@ -32,23 +56,80 @@ async def _get_engine():
 
 
 class LeadCaptureRequest(BaseModel):
-    email: str
-    name: str
-    industry: str
-    source: str
-    phone: Optional[str] = None
-    company: Optional[str] = None
-    custom_fields: Optional[dict[str, Any]] = None
+    """Request model for capturing leads with validation"""
+    email: str = Field(..., min_length=5, max_length=255, description="Valid email address")
+    name: str = Field(..., min_length=1, max_length=200, description="Lead name")
+    industry: str = Field(..., min_length=2, max_length=50, description="Industry type")
+    source: str = Field(..., min_length=2, max_length=50, description="Lead source")
+    phone: Optional[str] = Field(None, max_length=30, description="Phone number")
+    company: Optional[str] = Field(None, max_length=200, description="Company name")
+    custom_fields: Optional[dict[str, Any]] = Field(default_factory=dict)
+
+    @validator('email')
+    def validate_email(cls, v):
+        if not EMAIL_REGEX.match(v):
+            raise ValueError('Invalid email format')
+        return v.lower().strip()
+
+    @validator('name')
+    def validate_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Name cannot be empty')
+        return v.strip()
+
+    @validator('industry')
+    def validate_industry(cls, v):
+        valid_industries = {
+            'roofing', 'solar', 'hvac', 'plumbing', 'electrical',
+            'landscaping', 'construction', 'home_services', 'saas',
+            'ecommerce', 'consulting', 'real_estate', 'insurance',
+            'automotive', 'healthcare', 'generic'
+        }
+        v_lower = v.lower().strip()
+        if v_lower not in valid_industries:
+            # Allow but log unknown industries
+            logger.warning(f"Unknown industry: {v_lower}, using 'generic'")
+            return 'generic'
+        return v_lower
+
+    @validator('source')
+    def validate_source(cls, v):
+        valid_sources = {
+            'website', 'referral', 'google_ads', 'facebook', 'instagram',
+            'linkedin', 'cold_outreach', 'partnership', 'organic_search',
+            'direct', 'api', 'manual'
+        }
+        v_lower = v.lower().strip()
+        if v_lower not in valid_sources:
+            return 'direct'  # Default to direct
+        return v_lower
 
 
 class QualifyLeadRequest(BaseModel):
-    qualification_data: dict[str, Any]
+    """Request model for lead qualification"""
+    qualification_data: dict[str, Any] = Field(..., description="Qualification criteria")
+
+    @validator('qualification_data')
+    def validate_qualification_data(cls, v):
+        if not v:
+            raise ValueError('Qualification data cannot be empty')
+        return v
 
 
 class PaymentLinkRequest(BaseModel):
-    amount: float
-    product_service: str
-    description: Optional[str] = None
+    """Request model for creating payment links with validation"""
+    amount: float = Field(..., gt=0, le=1000000, description="Payment amount in USD")
+    product_service: str = Field(..., min_length=2, max_length=200, description="Product or service name")
+    description: Optional[str] = Field(None, max_length=1000, description="Payment description")
+
+    @validator('amount')
+    def validate_amount(cls, v):
+        if v <= 0:
+            raise ValueError('Amount must be greater than 0')
+        if v > 1000000:
+            raise ValueError('Amount exceeds maximum limit')
+        # Round to 2 decimal places
+        return round(v, 2)
 
 
 @router.get("/status")
@@ -84,8 +165,8 @@ async def get_revenue_status():
 
 
 @router.post("/leads/capture")
-async def capture_lead(request: LeadCaptureRequest):
-    """Capture a new lead and start automation"""
+async def capture_lead(request: LeadCaptureRequest, api_key: str = Depends(verify_api_key)):
+    """Capture a new lead and start automation. Requires API key authentication."""
     try:
         engine = await _get_engine()
         result = await engine.capture_lead(
@@ -176,8 +257,8 @@ async def get_lead(lead_id: str):
 
 
 @router.post("/leads/{lead_id}/qualify")
-async def qualify_lead(lead_id: str, request: QualifyLeadRequest):
-    """Qualify a lead with additional data"""
+async def qualify_lead(lead_id: str, request: QualifyLeadRequest, api_key: str = Depends(verify_api_key)):
+    """Qualify a lead with additional data. Requires API key authentication."""
     try:
         engine = await _get_engine()
         result = await engine.qualify_lead(lead_id, request.qualification_data)
@@ -188,8 +269,8 @@ async def qualify_lead(lead_id: str, request: QualifyLeadRequest):
 
 
 @router.post("/leads/{lead_id}/payment-link")
-async def create_payment_link(lead_id: str, request: PaymentLinkRequest):
-    """Create a payment link for a lead"""
+async def create_payment_link(lead_id: str, request: PaymentLinkRequest, api_key: str = Depends(verify_api_key)):
+    """Create a payment link for a lead. Requires API key authentication."""
     try:
         engine = await _get_engine()
         result = await engine.create_payment_link(

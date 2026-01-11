@@ -105,10 +105,10 @@ curl -X POST "https://api.render.com/v1/services/srv-d413iu75r7bs738btc10/deploy
 curl -s https://brainops-ai-agents.onrender.com/health | jq '{version, database, build}'
 
 # Brain endpoint
-curl -s https://brainops-ai-agents.onrender.com/brain/critical -H "X-API-Key: brainops_prod_key_2025" | jq 'length'
+curl -s https://brainops-ai-agents.onrender.com/brain/critical -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq 'length'
 
 # Agents status
-curl -s https://brainops-ai-agents.onrender.com/agents -H "X-API-Key: brainops_prod_key_2025" | jq '.agents | length'
+curl -s https://brainops-ai-agents.onrender.com/agents -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq '.agents | length'
 ```
 
 ---
