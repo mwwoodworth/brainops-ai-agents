@@ -149,7 +149,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.99.41')  # Self-state + revenue drive + relationships
+        self.version = os.getenv('VERSION', '9.99.42')  # Security fixes: RCE, reasoning guard, Stripe standardization
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
