@@ -97,6 +97,9 @@ class ChatGPTAgentTester:
             enable_ai_analysis = os.getenv("CHATGPT_AGENT_TESTER_ENABLE_AI_ANALYSIS", "false").lower() == "true"
         self.enable_ai_analysis = bool(enable_ai_analysis)
 
+        capture_screenshots_raw = os.getenv("CHATGPT_AGENT_TESTER_CAPTURE_SCREENSHOTS", "false").strip().lower()
+        self.capture_screenshots = capture_screenshots_raw in {"1", "true", "yes", "on"}
+
         wait_until = (goto_wait_until or os.getenv("CHATGPT_AGENT_TESTER_GOTO_WAIT_UNTIL", "domcontentloaded")).lower()
         if wait_until not in {"load", "domcontentloaded", "networkidle"}:
             wait_until = "domcontentloaded"
@@ -138,8 +141,8 @@ class ChatGPTAgentTester:
     async def _new_context(self):
         """Create a new browser context"""
         self._context = await self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            device_scale_factor=2,
+            viewport={"width": 1440, "height": 900},
+            device_scale_factor=1,
             locale='en-US',
             timezone_id='America/New_York'
         )
@@ -206,7 +209,7 @@ class ChatGPTAgentTester:
         steps_failed = 0
         screenshots = []
         error_message = None
-        wants_screenshots = self.enable_ai_analysis or any(s.action == "screenshot" for s in steps)
+        wants_screenshots = self.enable_ai_analysis or self.capture_screenshots
 
         try:
             page = await self._new_context()
