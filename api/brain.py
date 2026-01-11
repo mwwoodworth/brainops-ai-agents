@@ -3,6 +3,7 @@ Unified Brain API Endpoints
 Single source of truth for ALL BrainOps memory
 """
 import logging
+import re
 from datetime import datetime
 from typing import Any, Optional
 
@@ -42,6 +43,45 @@ except ImportError as e:
     logger.warning(f"⚠️ Unified Brain not available: {e}")
 
 
+_SECRET_REPLACEMENTS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"brainops_[A-Za-z0-9_]*key_[A-Za-z0-9_]*", re.IGNORECASE), "<REDACTED_BRAINOPS_API_KEY>"),
+    (re.compile(r"\brnd_[A-Za-z0-9]{10,}\b"), "rnd_<REDACTED>"),
+    (re.compile(r"\bsk_live_[A-Za-z0-9]{10,}\b"), "sk_live_<REDACTED>"),
+    (re.compile(r"\bsk_test_[A-Za-z0-9]{10,}\b"), "sk_test_<REDACTED>"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"), "<REDACTED_JWT>"),
+    # Redact DB URL passwords (keep scheme/user/host/path)
+    (re.compile(r"(postgres(?:ql)?://[^:/\\s]+:)([^@\\s]+)(@)", re.IGNORECASE), r"\\1<REDACTED>\\3"),
+]
+
+
+def _redact_string(text: str) -> str:
+    redacted = text
+    for rx, replacement in _SECRET_REPLACEMENTS:
+        redacted = rx.sub(replacement, redacted)
+    return redacted
+
+
+def redact_secrets(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return _redact_string(value)
+    if isinstance(value, list):
+        return [redact_secrets(v) for v in value]
+    if isinstance(value, dict):
+        return {k: redact_secrets(v) for k, v in value.items()}
+    return value
+
+
+def _sanitize_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(entry)
+    if "value" in sanitized:
+        sanitized["value"] = redact_secrets(sanitized["value"])
+    if "metadata" in sanitized and sanitized["metadata"] is not None:
+        sanitized["metadata"] = redact_secrets(sanitized["metadata"])
+    return sanitized
+
+
 class BrainEntry(BaseModel):
     """Brain entry model with enhanced features"""
     key: str = Field(..., description="Unique key for this context")
@@ -76,7 +116,7 @@ async def get_full_context():
         }
 
     try:
-        context = await brain.get_full_context()
+        context = redact_secrets(await brain.get_full_context())
         return {
             "status": "ok",
             "context": context,
@@ -143,7 +183,7 @@ async def get_critical_context():
         }
 
     try:
-        critical_items = await brain.get_all_critical()
+        critical_items = [_sanitize_entry(item) for item in await brain.get_all_critical()]
         return {
             "status": "ok",
             "critical_items": critical_items,
@@ -170,7 +210,7 @@ async def get_by_category(
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        return await brain.get_by_category(category, limit)
+        return [_sanitize_entry(item) for item in await brain.get_by_category(category, limit)]
     except Exception as e:
         logger.error(f"Failed to get category: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -189,7 +229,7 @@ async def get_context(
         result = await brain.get(key, include_related=include_related)
         if not result:
             raise HTTPException(status_code=404, detail=f"Key not found: {key}")
-        return result
+        return _sanitize_entry(result)
     except HTTPException:
         raise
     except Exception as e:
@@ -204,13 +244,18 @@ async def store_context(entry: BrainEntry):
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
+        safe_value = redact_secrets(entry.value)
+        safe_metadata = redact_secrets(entry.metadata or {})
+        if safe_value != entry.value or safe_metadata != (entry.metadata or {}):
+            safe_metadata = {**(safe_metadata or {}), "secrets_redacted": True}
+
         entry_id = await brain.store(
             key=entry.key,
-            value=entry.value,
+            value=safe_value,
             category=entry.category,
             priority=entry.priority,
             source=entry.source,
-            metadata=entry.metadata,
+            metadata=safe_metadata,
             ttl_hours=entry.ttl_hours
         )
         return {"id": entry_id, "key": entry.key, "status": "stored"}
@@ -226,7 +271,10 @@ async def search_context(query: BrainQuery):
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        return await brain.search(query.query, query.limit, use_semantic=query.use_semantic)
+        return [
+            _sanitize_entry(item)
+            for item in await brain.search(query.query, query.limit, use_semantic=query.use_semantic)
+        ]
     except Exception as e:
         logger.error(f"Failed to search: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -319,8 +367,7 @@ async def find_similar(
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        results = await brain.find_similar(key, limit)
-        return results
+        return [_sanitize_entry(item) for item in await brain.find_similar(key, limit)]
     except Exception as e:
         logger.error(f"Failed to find similar entries: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -336,8 +383,7 @@ async def get_related(
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        results = await brain.get_related_entries(key, max_depth)
-        return results
+        return [_sanitize_entry(item) for item in await brain.get_related_entries(key, max_depth)]
     except Exception as e:
         logger.error(f"Failed to get related entries: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

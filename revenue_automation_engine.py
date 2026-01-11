@@ -14,6 +14,7 @@ This is NOT theoretical - this generates REAL revenue through:
 Designed for scale: Handle 100s to 100,000s of leads across industries.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -22,9 +23,76 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Optional
+from functools import wraps
+from typing import Any, Callable, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
+
+# Type variable for generic retry decorator
+T = TypeVar('T')
+
+
+def retry_async(
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 30.0,
+    exponential_backoff: bool = True,
+    retryable_exceptions: tuple = (Exception,),
+    on_retry: Optional[Callable[[Exception, int], None]] = None
+):
+    """
+    Decorator for retrying async functions with exponential backoff.
+
+    Args:
+        max_retries: Maximum number of retry attempts
+        base_delay: Initial delay between retries in seconds
+        max_delay: Maximum delay between retries
+        exponential_backoff: Whether to use exponential backoff
+        retryable_exceptions: Tuple of exception types to retry on
+        on_retry: Optional callback function called on each retry
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        async def wrapper(*args, **kwargs) -> T:
+            last_exception = None
+            for attempt in range(max_retries + 1):
+                try:
+                    return await func(*args, **kwargs)
+                except retryable_exceptions as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        # Calculate delay with exponential backoff
+                        if exponential_backoff:
+                            delay = min(base_delay * (2 ** attempt), max_delay)
+                        else:
+                            delay = base_delay
+
+                        # Log retry attempt
+                        logger.warning(
+                            f"Retry {attempt + 1}/{max_retries} for {func.__name__}: {str(e)[:100]}. "
+                            f"Waiting {delay:.2f}s..."
+                        )
+
+                        # Call optional retry callback
+                        if on_retry:
+                            on_retry(e, attempt + 1)
+
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.error(
+                            f"All {max_retries} retries exhausted for {func.__name__}: {str(e)}"
+                        )
+            raise last_exception
+        return wrapper
+    return decorator
+
+
+class RetryableAPIError(Exception):
+    """Exception for API errors that should trigger a retry"""
+    def __init__(self, message: str, status_code: int = None, retryable: bool = True):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = retryable
 
 # Configuration - Use config module for consistent database access
 try:
@@ -146,6 +214,27 @@ class Lead:
     custom_fields: dict[str, Any] = field(default_factory=dict)
     automation_history: list[dict[str, Any]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+
+    @property
+    def first_name(self) -> str:
+        """Extract first name from full name"""
+        if not self.name:
+            return "Friend"
+        parts = self.name.strip().split()
+        return parts[0] if parts else "Friend"
+
+    @property
+    def last_name(self) -> str:
+        """Extract last name from full name"""
+        if not self.name:
+            return ""
+        parts = self.name.strip().split()
+        return " ".join(parts[1:]) if len(parts) > 1 else ""
+
+    @property
+    def display_name(self) -> str:
+        """Get display-friendly name"""
+        return self.name if self.name else self.email.split("@")[0] if self.email else "Valued Lead"
 
 
 @dataclass
@@ -381,10 +470,39 @@ class RevenueAutomationEngine:
                     );
                 """)
 
-                # Create indexes
+                # Create indexes for revenue optimization
+                # Lead indexes for fast filtering and pipeline queries
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_status ON revenue_leads(status);")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_industry ON revenue_leads(industry);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_email ON revenue_leads(email);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_score ON revenue_leads(score DESC);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_created ON revenue_leads(created_at DESC);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_updated ON revenue_leads(updated_at DESC);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_source ON revenue_leads(source);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_estimated_value ON revenue_leads(estimated_value DESC);")
+                # Composite index for pipeline queries (status + value)
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_status_value ON revenue_leads(status, estimated_value DESC);")
+                # Index for lead qualification queries
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_score_status ON revenue_leads(score DESC, status);")
+
+                # Transaction indexes for revenue analytics
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_status ON revenue_transactions(status);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_created ON revenue_transactions(created_at DESC);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_completed ON revenue_transactions(completed_at DESC);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_lead ON revenue_transactions(lead_id);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_amount ON revenue_transactions(amount DESC);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_industry ON revenue_transactions(industry);")
+                # Composite index for revenue reporting
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_status_created ON revenue_transactions(status, created_at DESC);")
+
+                # Automation sequence indexes
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_sequences_trigger ON automation_sequences(trigger);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_sequences_industry ON automation_sequences(industry);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_sequences_active ON automation_sequences(active);")
+
+                # Revenue metrics indexes for time-series queries
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_period ON revenue_metrics(period_start DESC, period_end DESC);")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_period_type ON revenue_metrics(period);")
 
                 logger.info("Revenue tables created/verified")
             finally:
@@ -1185,6 +1303,8 @@ class RevenueAutomationEngine:
         SECURITY: This function now fails fast instead of returning fake/placeholder URLs.
         If Stripe is not configured or fails, returns None and logs critical error.
         Callers must handle None return appropriately.
+
+        Includes retry logic for transient Stripe API errors.
         """
         # SECURITY FIX: Fail fast if Stripe not configured - no fake URLs
         if not STRIPE_SECRET_KEY:
@@ -1195,6 +1315,45 @@ class RevenueAutomationEngine:
             import stripe
             stripe.api_key = STRIPE_SECRET_KEY
 
+            # Use retry logic for Stripe API calls
+            payment_link = await self._create_stripe_payment_link_with_retry(
+                product_service=product_service,
+                description=description,
+                amount=amount,
+                transaction_id=transaction_id,
+                lead=lead
+            )
+
+            logger.info(f"Stripe payment link created: {payment_link.url}")
+            return payment_link.url
+
+        except ImportError as e:
+            logger.critical("Stripe library not installed - cannot process payments")
+            raise ImportError("Payment processing unavailable: stripe library not installed") from e
+        except Exception as e:
+            logger.error(f"Stripe payment link creation failed: {e}")
+            # Re-raise exception instead of returning fake URL
+            raise RuntimeError(f"Payment link creation failed: {e}") from e
+
+    @retry_async(
+        max_retries=3,
+        base_delay=1.0,
+        max_delay=10.0,
+        exponential_backoff=True,
+        retryable_exceptions=(RetryableAPIError, ConnectionError, TimeoutError)
+    )
+    async def _create_stripe_payment_link_with_retry(
+        self,
+        product_service: str,
+        description: Optional[str],
+        amount: Decimal,
+        transaction_id: str,
+        lead: Lead
+    ):
+        """Create Stripe payment link with retry logic for transient errors"""
+        import stripe
+
+        try:
             # Create a Stripe Payment Link
             payment_link = stripe.PaymentLink.create(
                 line_items=[{
@@ -1220,17 +1379,25 @@ class RevenueAutomationEngine:
                     }
                 }
             )
+            return payment_link
 
-            logger.info(f"✅ Stripe payment link created: {payment_link.url}")
-            return payment_link.url
-
-        except ImportError as e:
-            logger.critical("Stripe library not installed - cannot process payments")
-            raise ImportError("Payment processing unavailable: stripe library not installed") from e
-        except Exception as e:
-            logger.error(f"Stripe payment link creation failed: {e}")
-            # Re-raise exception instead of returning fake URL
-            raise RuntimeError(f"Payment link creation failed: {e}") from e
+        except stripe.error.RateLimitError as e:
+            # Retry on rate limit errors
+            raise RetryableAPIError(f"Stripe rate limit: {e}", status_code=429) from e
+        except stripe.error.APIConnectionError as e:
+            # Retry on connection errors
+            raise RetryableAPIError(f"Stripe connection error: {e}") from e
+        except stripe.error.APIError as e:
+            # Retry on generic API errors (5xx)
+            if hasattr(e, 'http_status') and e.http_status >= 500:
+                raise RetryableAPIError(f"Stripe API error: {e}", status_code=e.http_status) from e
+            raise  # Don't retry client errors
+        except stripe.error.CardError as e:
+            # Don't retry card errors - these are not transient
+            raise
+        except stripe.error.InvalidRequestError as e:
+            # Don't retry invalid request errors - these are client errors
+            raise
 
     async def process_payment_webhook(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Process payment webhook from Stripe"""

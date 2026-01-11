@@ -29,7 +29,7 @@ curl https://brainops-ai-agents.onrender.com/health
 curl https://brainops-ai-agents.onrender.com/memory/stats
 
 # Force sync (if needed)
-curl -X POST https://brainops-ai-agents.onrender.com/memory/force-sync -H "X-API-Key: brainops_prod_key_2025"
+curl -X POST https://brainops-ai-agents.onrender.com/memory/force-sync -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>"
 ```
 
 ## Status: Deploying...
