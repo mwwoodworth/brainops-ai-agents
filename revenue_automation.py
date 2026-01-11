@@ -64,7 +64,8 @@ DB_CONFIG = {
 }
 
 # API Keys from environment
-stripe.api_key = os.getenv("STRIPE_API_KEY")
+# STANDARDIZED: Use STRIPE_SECRET_KEY consistently across all components
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY") or os.getenv("STRIPE_API_KEY")
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 # Payment links (already created in Stripe)
 PAYMENT_LINKS = {

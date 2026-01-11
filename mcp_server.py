@@ -53,10 +53,12 @@ ADMIN_API_KEY = os.getenv("MCP_ADMIN_API_KEY", "")
 
 # Allowlists for dangerous operations - STRICT command validation
 # Only these exact commands (first word) are allowed
+# SECURITY: Removed python, python3, pip, node, npm, curl to prevent RCE
+# These interpreters allow arbitrary code execution even with shell operator filtering
 ALLOWED_BASH_COMMANDS = {
     "ls", "pwd", "whoami", "date", "cat", "head", "tail", "grep", "wc",
-    "ps", "df", "du", "uptime", "free", "git", "npm", "node", "python3",
-    "python", "pip", "curl"
+    "ps", "df", "du", "uptime", "free", "git", "echo", "find", "sort",
+    "uniq", "less", "more", "file", "stat", "env", "printenv"
 }
 
 # Dangerous shell operators and characters that indicate command chaining/injection

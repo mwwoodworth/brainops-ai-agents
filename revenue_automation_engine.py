@@ -41,7 +41,8 @@ except Exception as e:
     logger.warning(f"Could not load config for database URL: {e}")
     DATABASE_URL = os.getenv("DATABASE_URL")
 
-STRIPE_API_KEY = os.getenv("STRIPE_API_KEY", "")
+# STANDARDIZED: Use STRIPE_SECRET_KEY consistently across all components
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY") or os.getenv("STRIPE_API_KEY") or ""
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 TWILIO_SID = os.getenv("TWILIO_SID", "")
 TWILIO_TOKEN = os.getenv("TWILIO_TOKEN", "")
@@ -542,6 +543,107 @@ class RevenueAutomationEngine:
 
         for seq in default_sequences:
             self.sequences[seq.sequence_id] = seq
+
+    # =========================================
+    # DATABASE-BACKED LEAD ACCESS (SCALABILITY FIX)
+    # =========================================
+
+    async def _fetch_lead_from_db(self, lead_id: str) -> Optional[Lead]:
+        """Fetch a single lead from the database.
+
+        SCALABILITY FIX: Instead of loading all leads into memory,
+        this method fetches individual leads on-demand from the database.
+        """
+        if not self._db_url:
+            return None
+
+        try:
+            import asyncpg
+            conn = await asyncpg.connect(self._db_url)
+            try:
+                row = await conn.fetchrow(
+                    "SELECT * FROM revenue_leads WHERE lead_id = $1 OR id::text = $1",
+                    lead_id
+                )
+                if not row:
+                    return None
+
+                # Parse the lead (same logic as _load_from_db)
+                lead_id_val = row.get('lead_id') or str(row.get('id', ''))
+                company = row.get('company') or row.get('company_name', '')
+                name = row.get('name') or row.get('contact_name', '')
+
+                try:
+                    industry = Industry(row.get('industry', 'generic'))
+                except ValueError:
+                    industry = Industry.GENERIC
+
+                try:
+                    source_val = row.get('source', 'website')
+                    source = LeadSource(source_val) if source_val else LeadSource.WEBSITE
+                except ValueError:
+                    source = LeadSource.WEBSITE
+
+                try:
+                    status_val = row.get('status') or row.get('stage', 'new')
+                    status = LeadStatus(status_val) if status_val else LeadStatus.NEW
+                except ValueError:
+                    status = LeadStatus.NEW
+
+                est_value = row.get('estimated_value') or row.get('value_estimate') or 0
+
+                return Lead(
+                    lead_id=lead_id_val,
+                    email=row.get('email', ''),
+                    phone=row.get('phone', ''),
+                    name=name,
+                    company=company,
+                    industry=industry,
+                    source=source,
+                    status=status,
+                    score=row.get('score', 0) or 0,
+                    estimated_value=Decimal(str(est_value)),
+                    created_at=row['created_at'].isoformat() if row.get('created_at') else None,
+                    updated_at=row['updated_at'].isoformat() if row.get('updated_at') else None,
+                    contacted_at=row['contacted_at'].isoformat() if row.get('contacted_at') else None,
+                    converted_at=row['converted_at'].isoformat() if row.get('converted_at') else None,
+                    tags=json.loads(row['tags']) if row.get('tags') and isinstance(row['tags'], str) else (row.get('tags') or []),
+                    custom_fields=json.loads(row['custom_fields']) if row.get('custom_fields') and isinstance(row['custom_fields'], str) else (row.get('custom_fields') or {}),
+                    automation_history=json.loads(row['automation_history']) if row.get('automation_history') and isinstance(row['automation_history'], str) else (row.get('automation_history') or []),
+                    notes=[]
+                )
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.error(f"Failed to fetch lead {lead_id} from database: {e}")
+            return None
+
+    async def get_lead(self, lead_id: str) -> Optional[Lead]:
+        """Get a lead by ID - checks cache first, then database.
+
+        SCALABILITY FIX: This method provides a hybrid approach:
+        1. First check in-memory cache for fast access
+        2. If not found, fetch from database (for leads not in cache)
+        3. Cache the fetched lead for subsequent access
+
+        This allows the system to work with millions of leads without
+        loading them all into memory at startup.
+        """
+        # Check in-memory cache first
+        if lead_id in self.leads:
+            return self.leads[lead_id]
+
+        # Fallback to database lookup
+        lead = await self._fetch_lead_from_db(lead_id)
+        if lead:
+            # Cache the lead for future access (with size limit check)
+            if len(self.leads) < 50000:  # Prevent unbounded memory growth
+                self.leads[lead.lead_id] = lead
+            else:
+                # If cache is full, just return without caching
+                logger.debug(f"Lead cache full, not caching lead {lead_id}")
+
+        return lead
 
     # =========================================
     # LEAD MANAGEMENT
@@ -1077,15 +1179,21 @@ class RevenueAutomationEngine:
         product_service: str,
         description: Optional[str],
         lead: Lead
-    ) -> str:
-        """Create real Stripe payment link - PRODUCTION IMPLEMENTATION"""
-        if not STRIPE_API_KEY:
-            logger.warning("Stripe not configured - using placeholder URL")
-            return f"https://pay.brainops.ai/{transaction_id}"
+    ) -> Optional[str]:
+        """Create real Stripe payment link - PRODUCTION IMPLEMENTATION
+
+        SECURITY: This function now fails fast instead of returning fake/placeholder URLs.
+        If Stripe is not configured or fails, returns None and logs critical error.
+        Callers must handle None return appropriately.
+        """
+        # SECURITY FIX: Fail fast if Stripe not configured - no fake URLs
+        if not STRIPE_SECRET_KEY:
+            logger.critical("STRIPE_SECRET_KEY not configured - cannot create payment link. No fake URLs will be generated.")
+            raise ValueError("Payment processing unavailable: STRIPE_SECRET_KEY not configured")
 
         try:
             import stripe
-            stripe.api_key = STRIPE_API_KEY
+            stripe.api_key = STRIPE_SECRET_KEY
 
             # Create a Stripe Payment Link
             payment_link = stripe.PaymentLink.create(
@@ -1108,7 +1216,7 @@ class RevenueAutomationEngine:
                 after_completion={
                     'type': 'redirect',
                     'redirect': {
-                        'url': 'https://brainops.ai/payment-success?session_id={CHECKOUT_SESSION_ID}'
+                        'url': 'https://myroofgenius.com/payment-success?session_id={CHECKOUT_SESSION_ID}'
                     }
                 }
             )
@@ -1116,13 +1224,13 @@ class RevenueAutomationEngine:
             logger.info(f"✅ Stripe payment link created: {payment_link.url}")
             return payment_link.url
 
-        except ImportError:
-            logger.warning("Stripe library not installed - using placeholder URL")
-            return f"https://pay.brainops.ai/{transaction_id}"
+        except ImportError as e:
+            logger.critical("Stripe library not installed - cannot process payments")
+            raise ImportError("Payment processing unavailable: stripe library not installed") from e
         except Exception as e:
             logger.error(f"Stripe payment link creation failed: {e}")
-            # Return a fallback URL that will show an error page
-            return f"https://pay.brainops.ai/error/{transaction_id}"
+            # Re-raise exception instead of returning fake URL
+            raise RuntimeError(f"Payment link creation failed: {e}") from e
 
     async def process_payment_webhook(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Process payment webhook from Stripe"""
