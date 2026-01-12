@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
@@ -128,6 +128,24 @@ class E2ESystemVerification:
         self.results: list[TestResult] = []
         self.last_report: Optional[SystemVerificationReport] = None
         self._initialize_tests()
+
+    @staticmethod
+    def _apply_api_key_override(tests: list[EndpointTest], api_key_override: Optional[str]) -> list[EndpointTest]:
+        """Return a per-run test list with X-API-Key overridden when provided.
+
+        This avoids coupling outbound cross-system checks (e.g., Command Center unified health)
+        to a particular env var ordering (API_KEYS vs BRAINOPS_API_KEY) and prevents global
+        mutation of the singleton test registry.
+        """
+        if not api_key_override:
+            return tests
+
+        updated: list[EndpointTest] = []
+        for test in tests:
+            merged_headers = dict(test.headers or {})
+            merged_headers["X-API-Key"] = api_key_override
+            updated.append(replace(test, headers=merged_headers))
+        return updated
 
     def _initialize_tests(self):
         """Initialize all endpoint tests"""
@@ -652,12 +670,14 @@ class E2ESystemVerification:
                 error_message=f"Unexpected error: {str(e)}"
             )
 
-    async def run_full_verification(self) -> SystemVerificationReport:
+    async def run_full_verification(self, api_key_override: Optional[str] = None) -> SystemVerificationReport:
         """Run complete E2E verification of all systems"""
         started_at = datetime.utcnow()
         report_id = hashlib.md5(started_at.isoformat().encode()).hexdigest()[:12]
 
-        logger.info(f"Starting E2E verification (ID: {report_id}) - {len(self.tests)} tests")
+        tests = self._apply_api_key_override(self.tests, api_key_override)
+
+        logger.info(f"Starting E2E verification (ID: {report_id}) - {len(tests)} tests")
 
         # Run tests with bounded concurrency to avoid self-DOS'ing the service under test.
         # Additionally, run heavyweight browser-based UI tests serially after the main batch.
@@ -671,7 +691,7 @@ class E2ESystemVerification:
 
         serial_indices: list[int] = []
         parallel_indices: list[int] = []
-        for idx, test in enumerate(self.tests):
+        for idx, test in enumerate(tests):
             (serial_indices if _should_run_serial(test) else parallel_indices).append(idx)
 
         logger.info(
@@ -686,16 +706,16 @@ class E2ESystemVerification:
 
             async def _run_index(i: int) -> tuple[int, TestResult]:
                 async with semaphore:
-                    return i, await self._run_single_test(self.tests[i], session)
+                    return i, await self._run_single_test(tests[i], session)
 
             if parallel_indices:
                 pairs = await asyncio.gather(*[_run_index(i) for i in parallel_indices])
                 results_by_index.update(dict(pairs))
 
             for i in serial_indices:
-                results_by_index[i] = await self._run_single_test(self.tests[i], session)
+                results_by_index[i] = await self._run_single_test(tests[i], session)
 
-            self.results = [results_by_index[i] for i in range(len(self.tests))]
+            self.results = [results_by_index[i] for i in range(len(tests))]
 
         completed_at = datetime.utcnow()
         duration = (completed_at - started_at).total_seconds()
@@ -711,8 +731,8 @@ class E2ESystemVerification:
         degraded = sum(1 for r in self.results if r.status == VerificationStatus.DEGRADED)
 
         # Check critical tests
-        [t for t in self.tests if t.critical]
-        critical_results = [r for r, t in zip(self.results, self.tests) if t.critical]
+        [t for t in tests if t.critical]
+        critical_results = [r for r, t in zip(self.results, tests) if t.critical]
         critical_failures = [r for r in critical_results if r.status != VerificationStatus.PASSED]
 
         # Determine overall status
@@ -730,7 +750,7 @@ class E2ESystemVerification:
         # Group results by category
         results_by_category = {}
         for category in SystemCategory:
-            cat_tests = [(r, t) for r, t in zip(self.results, self.tests) if t.category == category]
+            cat_tests = [(r, t) for r, t in zip(self.results, tests) if t.category == category]
             if cat_tests:
                 cat_passed = sum(1 for r, t in cat_tests if r.status == VerificationStatus.PASSED)
                 cat_failed = sum(1 for r, t in cat_tests if r.status != VerificationStatus.PASSED)
@@ -813,9 +833,12 @@ class E2ESystemVerification:
 
         return recommendations
 
-    async def run_quick_health_check(self) -> dict[str, Any]:
+    async def run_quick_health_check(self, api_key_override: Optional[str] = None) -> dict[str, Any]:
         """Quick health check of critical endpoints only"""
-        critical_tests = [t for t in self.tests if t.critical]
+        critical_tests = self._apply_api_key_override(
+            [t for t in self.tests if t.critical],
+            api_key_override,
+        )
 
         # Same safeguards as full verification: limit concurrency + run UI browser tests serially.
         max_concurrency = max(1, int(os.getenv("E2E_MAX_CONCURRENCY", "10")))
@@ -881,9 +904,9 @@ e2e_verification = E2ESystemVerification()
 # API FUNCTIONS
 # ============================================
 
-async def run_full_e2e_verification() -> dict[str, Any]:
+async def run_full_e2e_verification(api_key_override: Optional[str] = None) -> dict[str, Any]:
     """Run complete E2E verification and return report"""
-    report = await e2e_verification.run_full_verification()
+    report = await e2e_verification.run_full_verification(api_key_override=api_key_override)
 
     # Convert to dict, handling dataclass conversion
     failed_tests_dicts = []
@@ -914,9 +937,9 @@ async def run_full_e2e_verification() -> dict[str, Any]:
     }
 
 
-async def run_quick_health_check() -> dict[str, Any]:
+async def run_quick_health_check(api_key_override: Optional[str] = None) -> dict[str, Any]:
     """Run quick health check of critical systems"""
-    return await e2e_verification.run_quick_health_check()
+    return await e2e_verification.run_quick_health_check(api_key_override=api_key_override)
 
 
 async def get_last_verification_report() -> Optional[dict[str, Any]]:
