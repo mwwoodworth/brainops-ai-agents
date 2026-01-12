@@ -8,7 +8,7 @@ Ensures 100% operational status across ALL BrainOps systems.
 import asyncio
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,7 @@ _last_background_result = None
 
 @router.get("/verify")
 async def run_verification(
+    request: Request,
     quick: bool = Query(False, description="Run quick health check only (critical endpoints)")
 ):
     """
@@ -34,15 +35,27 @@ async def run_verification(
     try:
         from e2e_system_verification import run_full_e2e_verification, run_quick_health_check
 
+        api_key_override = (
+            request.headers.get("X-API-Key")
+            or request.headers.get("x-api-key")
+            or request.headers.get("X-Api-Key")
+        )
+        if not api_key_override:
+            authorization = request.headers.get("Authorization") or request.headers.get("authorization") or ""
+            if authorization.startswith("ApiKey "):
+                api_key_override = authorization[len("ApiKey ") :].strip()
+            elif authorization.startswith("Bearer "):
+                api_key_override = authorization[len("Bearer ") :].strip()
+
         if quick:
-            result = await run_quick_health_check()
+            result = await run_quick_health_check(api_key_override=api_key_override)
             return {
                 "verification_type": "quick",
                 "is_100_percent_operational": result["is_healthy"],
                 **result
             }
         else:
-            result = await run_full_e2e_verification()
+            result = await run_full_e2e_verification(api_key_override=api_key_override)
             return {
                 "verification_type": "full",
                 **result
