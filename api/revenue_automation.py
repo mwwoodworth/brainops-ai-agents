@@ -21,7 +21,8 @@ try:
     VALID_API_KEYS = config.security.valid_api_keys
 except (ImportError, AttributeError):
     import os
-    VALID_API_KEYS = {os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")}
+    fallback_key = os.getenv("BRAINOPS_API_KEY") or os.getenv("AGENTS_API_KEY") or os.getenv("API_KEY")
+    VALID_API_KEYS = {fallback_key} if fallback_key else set()
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
