@@ -21,13 +21,34 @@ from psycopg2.extras import RealDictCursor
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Test data safeguards
+# Test data safeguards - ENHANCED to block personal email providers
 TEST_EMAIL_SUFFIXES = (".test", ".example", ".invalid")
-TEST_EMAIL_TOKENS = ("@example.", "@test.", "@demo.", "@invalid.")
+TEST_EMAIL_TOKENS = ("@example.", "@test.", "@demo.", "@invalid.", "@weathercraft.")
 TEST_EMAIL_DOMAINS = ("test.com", "example.com", "localhost", "demo@roofing.com")
+
+# Personal email providers - blocked by default to prevent accidental spam
+# Only business domains should be contacted in automated outreach
+BLOCKED_PERSONAL_PROVIDERS = (
+    "@gmail.com", "@yahoo.com", "@outlook.com", "@hotmail.com",
+    "@aol.com", "@icloud.com", "@protonmail.com", "@mail.com",
+    "@live.com", "@msn.com", "@ymail.com", "@rocketmail.com"
+)
+
+# Environment flag to explicitly allow personal emails (must be set intentionally)
+import os
+ALLOW_PERSONAL_EMAIL_OUTREACH = os.getenv("ALLOW_PERSONAL_EMAIL_OUTREACH", "false").lower() == "true"
 
 
 def _is_test_email(email: str | None) -> bool:
+    """Check if an email should be treated as test/blocked.
+
+    Returns True (blocked) for:
+    - Empty/null emails
+    - Test domain suffixes (.test, .example, .invalid)
+    - Test domain tokens (@example., @test., @demo.)
+    - Known test domains
+    - Personal email providers (unless ALLOW_PERSONAL_EMAIL_OUTREACH=true)
+    """
     if not email:
         return True
     lowered = email.lower().strip()
@@ -35,7 +56,13 @@ def _is_test_email(email: str | None) -> bool:
         return True
     if any(token in lowered for token in TEST_EMAIL_TOKENS):
         return True
-    return any(domain in lowered for domain in TEST_EMAIL_DOMAINS)
+    if any(domain in lowered for domain in TEST_EMAIL_DOMAINS):
+        return True
+    # Block personal email providers unless explicitly allowed
+    if not ALLOW_PERSONAL_EMAIL_OUTREACH:
+        if any(provider in lowered for provider in BLOCKED_PERSONAL_PROVIDERS):
+            return True
+    return False
 
 AI_CORE_AVAILABLE = False
 ai_generate = None
@@ -1079,6 +1106,7 @@ Return ONLY valid JSON array, no other text."""
                     FROM customers c
                     WHERE c.email IS NOT NULL
                       AND c.created_at < NOW() - INTERVAL '30 days'
+                      AND COALESCE(c.is_demo, TRUE) = FALSE  -- CRITICAL: Exclude seeded/demo data
                       AND NOT EXISTS (
                           SELECT 1 FROM jobs j
                           WHERE j.customer_id = c.id
