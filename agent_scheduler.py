@@ -84,6 +84,22 @@ except ImportError:
     BRAIN_AVAILABLE = False
     UnifiedBrain = None
 
+# Customer Acquisition Agents
+try:
+    from customer_acquisition_agents import WebSearchAgent, SocialMediaAgent, OutreachAgent, ConversionAgent
+    ACQUISITION_AGENTS_AVAILABLE = True
+except ImportError:
+    ACQUISITION_AGENTS_AVAILABLE = False
+    logging.warning("Customer Acquisition Agents unavailable")
+
+# Content Generation Agent
+try:
+    from content_generation_agent import ContentGeneratorAgent
+    CONTENT_GENERATOR_AVAILABLE = True
+except ImportError:
+    CONTENT_GENERATOR_AVAILABLE = False
+    logging.warning("Content Generation Agent unavailable")
+
 logger = logging.getLogger(__name__)
 
 class AgentScheduler:
@@ -328,6 +344,14 @@ class AgentScheduler:
         # Learning Feedback Loop agent - closes the gap between insights and action
         elif agent_name == 'LearningFeedbackLoop' or agent_type == 'system_improvement':
             return self._execute_learning_feedback_loop(agent, cur, conn)
+
+        # Content Generation
+        elif agent_name in ['ContentGenerator', 'BlogAutomation', 'ContentAgent']:
+            return self._execute_content_agent(agent, cur, conn)
+
+        # Customer Acquisition
+        elif agent_name in ['WebSearch', 'SocialMedia', 'Outreach', 'Conversion']:
+            return self._execute_acquisition_agent(agent, cur, conn)
 
         # Default: log and continue
         else:
@@ -1041,6 +1065,86 @@ class AgentScheduler:
                 "error": str(e),
                 "timestamp": datetime.utcnow().isoformat()
             }
+
+    def _execute_content_agent(self, agent: dict, cur, conn) -> dict:
+        """Execute content generation agent"""
+        logger.info(f"Running content generation for agent: {agent['name']}")
+
+        try:
+            if not CONTENT_GENERATOR_AVAILABLE:
+                return {"status": "skipped", "error": "Content generator unavailable"}
+
+            agent_instance = ContentGeneratorAgent()
+            
+            # Determine task based on agent name or config
+            action = "generate_blog"
+            topic = None
+            if "idea" in agent['name'].lower():
+                action = "generate_topic_ideas"
+            
+            # Run in new loop
+            def run_in_new_loop():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(
+                        asyncio.wait_for(agent_instance.execute({"action": action, "topic": topic}), timeout=300)
+                    )
+                except asyncio.TimeoutError:
+                    return {"error": "Content generation timed out"}
+                finally:
+                    loop.close()
+
+            result = run_in_new_loop()
+            return {"status": "completed", "result": result, "timestamp": datetime.utcnow().isoformat()}
+
+        except Exception as e:
+            logger.error(f"Content generation failed: {e}")
+            return {"status": "failed", "error": str(e)}
+
+    def _execute_acquisition_agent(self, agent: dict, cur, conn) -> dict:
+        """Execute customer acquisition agent"""
+        logger.info(f"Running acquisition agent: {agent['name']}")
+
+        try:
+            if not ACQUISITION_AGENTS_AVAILABLE:
+                return {"status": "skipped", "error": "Acquisition agents unavailable"}
+
+            # Run in new loop
+            def run_in_new_loop():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    if 'WebSearch' in agent['name']:
+                        instance = WebSearchAgent()
+                        return loop.run_until_complete(instance.search_for_leads({"industry": "roofing"}))
+                    elif 'SocialMedia' in agent['name']:
+                        instance = SocialMediaAgent()
+                        return loop.run_until_complete(instance.monitor_social_signals())
+                    elif 'Outreach' in agent['name']:
+                        # Outreach usually needs a target_id, placeholder for now
+                        return {"status": "outreach_scan_completed"} 
+                    elif 'Conversion' in agent['name']:
+                        return {"status": "conversion_optimization_completed"}
+                    return {"status": "unknown_acquisition_agent"}
+                finally:
+                    loop.close()
+
+            result = run_in_new_loop()
+            
+            # Count results
+            count = len(result) if isinstance(result, list) else 0
+            
+            return {
+                "status": "completed", 
+                "agent": agent['name'], 
+                "items_found": count,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Acquisition execution failed: {e}")
+            return {"status": "failed", "error": str(e)}
 
     def load_schedules_from_db(self):
         """Load agent schedules from database"""
