@@ -547,7 +547,7 @@ for tool in metrics['tools'][:5]:
 MCP_BRIDGE_URL=https://brainops-mcp-bridge.onrender.com
 
 # MCP API Key
-MCP_API_KEY=brainops_mcp_2025
+MCP_API_KEY=<YOUR_MCP_API_KEY>
 
 # Cache Configuration (optional)
 MCP_CACHE_ENABLED=true

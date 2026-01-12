@@ -35,7 +35,9 @@ logger = logging.getLogger(__name__)
 
 # MCP Bridge configuration
 MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
-MCP_API_KEY = os.getenv("BRAINOPS_API_KEY") or os.getenv("MCP_API_KEY", "brainops_mcp_2025")
+MCP_API_KEY = (os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "").strip()
+if not MCP_API_KEY:
+    logger.warning("MCP_API_KEY not configured - MCP UI testing will be disabled")
 
 # AI Vision APIs
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")

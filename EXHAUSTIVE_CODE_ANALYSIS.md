@@ -186,7 +186,7 @@ Scope: scanned repo files excluding .venv/venv, __pycache__, .git, node_modules.
 - DEPLOYMENT_STATUS.md:32 [API key literal] curl -X POST https://brainops-ai-agents.onrender.com/memory/force-sync -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>"
 - EMBEDDED_MEMORY_SYNC_FIX.md:186 [API key literal] -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>"
 - EMBEDDED_MEMORY_SYNC_FIX.md:213 [DB password literal] Password: <DB_PASSWORD>
-- MCP_ENHANCEMENTS_V2.md:550 [MCP key literal] MCP_API_KEY=brainops_mcp_2025
+- MCP_ENHANCEMENTS_V2.md:550 [MCP key placeholder] MCP_API_KEY=<YOUR_MCP_API_KEY>
 - SELF_HEALING_QUICK_REFERENCE.md:124 [DB password literal] export DB_PASSWORD="${DB_PASSWORD}"
 - SELF_HEALING_UPGRADE_DOCS.md:360 [DB password literal] export DB_PASSWORD="${DB_PASSWORD}"
 - UPGRADE_SUMMARY.md:208 [DB password literal] export DB_PASSWORD="${DB_PASSWORD}"
@@ -203,9 +203,9 @@ Scope: scanned repo files excluding .venv/venv, __pycache__, .git, node_modules.
 - api/sop.py:19 [API key literal] VALID_API_KEYS = {"<YOUR_BRAINOPS_API_KEY>", "brainops_dev_key_2025"}
 - api/sop.py:20 [API key literal] APPROVER_API_KEYS = {"<YOUR_BRAINOPS_API_KEY>"}  # Only approvers can approve SOPs
 - api/ui_testing.py:31 [DB password literal] "password": "<DB_PASSWORD>",
-- aurea_orchestrator.py:98 [MCP key literal] MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "brainops_mcp_2025"
+- aurea_orchestrator.py:98 [MCP key] MCP_API_KEY = (os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "").strip()
 - autonomous_cicd_management.py:184 [API key literal] self.mcp_api_key = os.getenv("BRAINOPS_API_KEY", "<YOUR_BRAINOPS_API_KEY>")
-- bleeding_edge_ooda.py:729 [MCP key literal] headers={"X-API-Key": os.getenv("MCP_API_KEY", "brainops_mcp_2025")}
+- bleeding_edge_ooda.py:729 [MCP key] Uses MCP_API_KEY/BRAINOPS_API_KEY from environment (no default)
 - config.py:92 [test API key literal] default_local_test_key = "brainops-local-test-key"
 - database/sync_pool.py:22 [DB password literal] "password": "<DB_PASSWORD>",
 - docs/BRAINOPS_DEVOPS_SOP.md:63 [API key literal] | AI Agents | brainops-ai-agents.onrender.com | /health | v9.1.1 | `curl -s <url>/health -H "X-API-Key: ${BRAINOPS_API_KEY}"` |
@@ -221,7 +221,7 @@ Scope: scanned repo files excluding .venv/venv, __pycache__, .git, node_modules.
 - docs/BRAINOPS_DEVOPS_SOP.md:362 [API key literal] curl -s "https://brainops-ai-agents.onrender.com/systems/usage" -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq '.aurea.running'
 - docs/BRAINOPS_DEVOPS_SOP.md:365 [API key literal] curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq '.apscheduler_jobs_count'
 - e2e_system_verification.py:34 [API key literal] API_KEY = _api_keys_list[0] if _api_keys_list else os.getenv("BRAINOPS_API_KEY", "<YOUR_BRAINOPS_API_KEY>")
-- mcp_integration.py:39 [MCP key literal] MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("MCP_BRIDGE_API_KEY") or "brainops_mcp_2025"
+- mcp_integration.py:39 [MCP key] MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("MCP_BRIDGE_API_KEY")
 - render.yaml:21 [DB password literal] value: <DB_PASSWORD>
 - render.yaml:27 [API key literal] value: "11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,<YOUR_BRAINOPS_API_KEY>"
 - render.yaml:27 [API key/hash literal] value: "11f6251fe56a1f8f1875fc9d1c6eb98014377dfd8384c1cae0c59c013bfb1d7c,<YOUR_BRAINOPS_API_KEY>"
@@ -263,4 +263,3 @@ See SQL_COLUMN_MISMATCHES.txt for full list (generated vs database_schema.json).
 ## Endpoints that don't actually do anything
 - api/revenue.py: discover_leads endpoint relies on generate_realistic_leads(), which always raises 501 (TODO for real integration).
 - erp_event_bridge.py: /events/webhook NEW_JOB branch contains a pass (revenue system action stub), so no revenue-side processing happens for that event.
-

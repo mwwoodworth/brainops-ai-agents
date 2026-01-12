@@ -747,10 +747,12 @@ class ParallelObserver:
     async def _observe_agent_status(self) -> dict[str, Any]:
         """Observe AI agent execution status"""
         try:
+            api_key = (os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "").strip()
+            headers = {"X-API-Key": api_key} if api_key else None
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
                 async with session.get(
                     "https://brainops-ai-agents.onrender.com/scheduler/status",
-                    headers={"X-API-Key": os.getenv("MCP_API_KEY", "brainops_mcp_2025")}
+                    headers=headers
                 ) as response:
                     if response.status == 200:
                         data = await response.json()

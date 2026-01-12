@@ -105,7 +105,7 @@ def json_safe_serialize(obj: Any) -> Any:
 
 # MCP Bridge Configuration
 MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
-MCP_API_KEY = os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "brainops_mcp_2025"
+MCP_API_KEY = (os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "").strip()
 
 # Configure logging
 logging.basicConfig(
