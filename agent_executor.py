@@ -146,6 +146,14 @@ except Exception as exc:
     ACQUISITION_AGENTS_AVAILABLE = False
     _handle_optional_import("Customer acquisition agents", exc)
 
+# Content Generation Agent
+try:
+    from content_generation_agent import ContentGeneratorAgent
+    CONTENT_AGENT_AVAILABLE = True
+except Exception as exc:
+    CONTENT_AGENT_AVAILABLE = False
+    _handle_optional_import("Content generation agent", exc)
+
 # Knowledge Agent - Permanent memory and context management
 try:
     from knowledge_agent import KnowledgeAgent
@@ -867,6 +875,14 @@ class AgentExecutor:
             self.agents['Conversion'] = AcqConversionAgent()
             logger.info("Customer acquisition agents registered: WebSearch, SocialMedia, Outreach, Conversion")
 
+        # Content Generation Agent
+        if CONTENT_AGENT_AVAILABLE:
+            try:
+                self.agents['ContentGenerator'] = ContentGeneratorAgent()
+                logger.info("Content generation agent registered: ContentGenerator")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Content generation agent: {e}")
+
         # Knowledge Agent - Permanent memory and context management
         if KNOWLEDGE_AGENT_AVAILABLE:
             try:
@@ -1035,6 +1051,9 @@ class AgentExecutor:
         'CollectionAgent': 'InvoicingAgent',
         'LeadGenerator': 'LeadDiscoveryAgentReal',
         'SocialMediaBot': 'SocialMedia',
+        'ContentAgent': 'ContentGenerator',
+        'BlogAgent': 'ContentGenerator',
+        'BlogAutomation': 'ContentGenerator',
         'EmailMarketing': 'EmailMarketingAgent',
         'ContentCreator': 'SocialMedia',
         'BrandManager': 'SocialMedia',
