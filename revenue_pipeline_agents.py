@@ -139,6 +139,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
                 WHERE c.email IS NOT NULL
                   AND c.email != ''
                   AND c.status != 'inactive'
+                  AND COALESCE(c.is_demo, TRUE) = FALSE  -- CRITICAL: Exclude seeded/demo data
                 GROUP BY c.id, c.company_name, c.first_name, c.last_name, c.email, c.phone, c.city, c.state
                 HAVING MAX(j.created_at) < NOW() - INTERVAL '12 months'
                    OR MAX(j.created_at) IS NULL
@@ -192,6 +193,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
                     WHERE c.email IS NOT NULL
                       AND c.email != ''
                       AND j.status = 'completed'
+                      AND COALESCE(c.is_demo, TRUE) = FALSE  -- CRITICAL: Exclude seeded/demo data
                     GROUP BY c.id, c.company_name, c.first_name, c.last_name, c.email, c.phone, c.city, c.state
                 ),
                 avg_values AS (
@@ -257,6 +259,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
                   AND c.email != ''
                   AND j.status = 'completed'
                   AND j.created_at > NOW() - INTERVAL '6 months'
+                  AND COALESCE(c.is_demo, TRUE) = FALSE  -- CRITICAL: Exclude seeded/demo data
                 GROUP BY c.id, c.company_name, c.first_name, c.last_name, c.email, c.phone, c.city, c.state
                 HAVING COUNT(j.id) >= 2
                 ORDER BY COUNT(j.id) DESC, MAX(j.created_at) DESC
