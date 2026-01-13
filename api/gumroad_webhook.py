@@ -35,8 +35,46 @@ router = APIRouter(
     tags=["gumroad", "income", "sales"]
 )
 
-# Product mapping
+# Product mapping - keyed by Gumroad permalink (uppercase) or product code
 PRODUCT_MAPPING = {
+    # === LIVE GUMROAD PRODUCTS (Published) ===
+    'HJHMSM': {
+        'name': 'MCP Server Starter Kit',
+        'price': 97,
+        'type': 'code_kit',
+        'convertkit_tag': 'mcp-kit-buyer'
+    },
+    'VJXCEW': {
+        'name': 'SaaS Automation Scripts',
+        'price': 67,
+        'type': 'code_kit',
+        'convertkit_tag': 'saas-scripts-buyer'
+    },
+    'XGFKP': {
+        'name': 'AI Prompt Engineering Pack',
+        'price': 47,
+        'type': 'prompt_pack',
+        'convertkit_tag': 'ai-prompts-buyer'
+    },
+    'GSAAVB': {
+        'name': 'AI Orchestration Framework',
+        'price': 147,
+        'type': 'code_kit',
+        'convertkit_tag': 'ai-orchestration-buyer'
+    },
+    'UPSYKR': {
+        'name': 'Command Center UI Kit',
+        'price': 149,
+        'type': 'code_kit',
+        'convertkit_tag': 'ui-kit-buyer'
+    },
+    'CAWVO': {
+        'name': 'Business Automation Toolkit',
+        'price': 49,
+        'type': 'prompt_pack',
+        'convertkit_tag': 'business-toolkit-buyer'
+    },
+    # === LEGACY/FUTURE PRODUCTS ===
     'GR-ROOFINT': {
         'name': 'Commercial Roofing Intelligence Bundle',
         'price': 97,
