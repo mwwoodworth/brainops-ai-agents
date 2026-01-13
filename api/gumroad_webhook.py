@@ -429,21 +429,59 @@ async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundT
         logger.exception("Webhook processing error")
         raise HTTPException(status_code=500, detail="Internal error") from None
 
+async def enroll_in_nurture_sequence(
+    email: str,
+    first_name: str,
+    product_name: str,
+    product_type: str,
+    product_code: str,
+    download_url: str
+) -> bool:
+    """Enroll buyer in post-purchase nurture sequence"""
+    try:
+        from gumroad_sequences import enroll_buyer_in_sequence
+
+        email_ids = await enroll_buyer_in_sequence(
+            email=email,
+            first_name=first_name,
+            product_name=product_name,
+            product_type=product_type,
+            product_code=product_code,
+            download_url=download_url
+        )
+
+        if email_ids:
+            logger.info(f"Enrolled {email} in nurture sequence: {len(email_ids)} emails scheduled")
+            return True
+        return False
+
+    except Exception as e:
+        logger.error(f"Failed to enroll in nurture sequence: {e}")
+        return False
+
+
 async def process_sale(sale_data: dict[str, Any], product_code: str, first_name: str, last_name: str):
     """Process sale through all systems"""
+    product_info = PRODUCT_MAPPING.get(product_code, {})
+    product_name = product_info.get('name', sale_data.get('product_name', 'Product'))
+    product_type = product_info.get('type', 'code_kit')
+    download_url = sale_data.get('download_url', 'https://gumroad.com/library')
+
     results = await asyncio.gather(
         add_to_convertkit(sale_data['email'], first_name, last_name, product_code),
         record_sale_to_database({**sale_data, 'product_code': product_code}),
-        send_purchase_email(
-            sale_data['email'],
-            first_name,
-            PRODUCT_MAPPING.get(product_code, {}).get('name', sale_data.get('product_name', 'Product')),
-            sale_data.get('download_url', 'https://gumroad.com/library')
+        enroll_in_nurture_sequence(
+            email=sale_data['email'],
+            first_name=first_name,
+            product_name=product_name,
+            product_type=product_type,
+            product_code=product_code,
+            download_url=download_url
         ),
         return_exceptions=True
     )
 
-    logger.info(f"Sale processing results - ConvertKit: {results[0]}, Database: {results[1]}, Email: {results[2]}")
+    logger.info(f"Sale processing results - ConvertKit: {results[0]}, Database: {results[1]}, NurtureSequence: {results[2]}")
 
 @router.get("/analytics")
 async def get_sales_analytics():
