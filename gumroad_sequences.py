@@ -120,7 +120,7 @@ PRODUCT_SEQUENCES = {
     <ol>
         <li>Browse the categories to find prompts for your use case</li>
         <li>Copy/paste into ChatGPT, Claude, or your favorite AI</li>
-        <li>Customize the variables in {brackets} for your context</li>
+        <li>Customize the variables in [brackets] for your context</li>
     </ol>
 
     <p>These prompts are tested and refined - they'll save you hours of trial and error!</p>

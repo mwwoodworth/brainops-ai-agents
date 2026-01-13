@@ -149,7 +149,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.99.44')  # Added: Gumroad post-purchase nurture email sequences (Day 0,1,3,7)
+        self.version = os.getenv('VERSION', '9.99.45')  # Fix: Escaped template variable in prompt_pack email sequence
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
