@@ -149,7 +149,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.99.43')  # Enhanced: retry logic, Lead name properties, DB indexes, secret redaction
+        self.version = os.getenv('VERSION', '9.99.44')  # Added: Gumroad post-purchase nurture email sequences (Day 0,1,3,7)
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
