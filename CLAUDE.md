@@ -212,54 +212,91 @@ git push origin main  # Triggers Render deployment
 
 ## Session Summary
 
-### Latest Session: 2025-12-29 (Consciousness Persistence & Security Fixes)
+### Latest Session: 2026-01-13 (Gumroad Email Sequences & Revenue Automation)
 - **Work Done:**
-  - Fixed consciousness emergence thought persistence to database
-  - Added _collect_new_thoughts() to gather unpersisted thoughts
-  - Added UNIQUE constraint on ai_thought_stream.thought_id
-  - CRITICAL SECURITY: Fixed MyRoofGenius payment endpoint - now requires auth
-  - Verified email scheduler daemon and queue are operational
-  - Verified Stripe integration complete and working
+  - Created `gumroad_sequences.py` - 4-email nurture sequences for Gumroad purchases
+  - Updated `api/gumroad_webhook.py` - Auto-enrollment in sequences on purchase
+  - Configured Resend email provider in Render production
+  - Verified end-to-end email pipeline: Queue → Daemon → Resend → Inbox
+  - Fixed template variable bug (`{brackets}` → `[brackets]`)
 
 - **Production Status:**
-  - Version: v9.31.0 ✅ DEPLOYED
-  - Database: Connected ✅ (1,577 thoughts persisted)
-  - Agent Executions: 2,725 total logged ✅
-  - Revenue Pipeline: Operational ($44,450 tracked, 29 leads)
-  - All 16 systems active and reporting
+  - Version: v9.99.45 ✅ DEPLOYED
+  - Database: Connected ✅
+  - Email Daemon: Running ✅ (poll_count active, 30s interval)
+  - Resend API: Configured ✅ (verified domain: myroofgenius.com)
+  - Gumroad Webhook: Active ✅ (/gumroad/webhook with signature verification)
 
 - **Commits This Session:**
-  - `80679de` - fix: Consciousness thought persistence and self-awareness
-  - `8d6dff0` - security: Add authentication to payment endpoint (MRG)
+  - `92d7777` - feat: Add Gumroad post-purchase nurture email sequences (Day 0,1,3,7)
+  - `0c789ff` - fix: Escape template variable in prompt_pack email sequence
 
-### Verified Live Production Data:
-- ERP Customers: 10,639+ (7,738 active)
-- Jobs: 18,319+
-- Revenue Tracked: $9.37M (ERP) / $44,450 (AI OS)
-- Agent Executions: 2,725 total
-- Thoughts Persisted: 1,577
-- Tenants: 148
+### Gumroad Email Sequences (NEW)
+**File:** `gumroad_sequences.py`
+- 3 product types with 4-email drip campaigns each:
+  - `code_kit`: Code Kit Onboarding (Day 0, 1, 3, 7)
+  - `prompt_pack`: Prompt Pack Onboarding (Day 0, 1, 3, 7)
+  - `bundle`: Bundle VIP Onboarding (Day 0, 1, 3, 7)
+- Personalization: {first_name}, {product_name}, {download_url}
+- Auto-enrollment via `enroll_buyer_in_sequence()`
 
-### Security Fixes Applied (MRG):
-- app/api/payment/route.ts: Added authentication (portal token OR session auth)
-- Verifies customer belongs to authenticated user's tenant
-- Tracks auth_source in payment metadata for audit
+### Email Infrastructure
+| Component | Status | Details |
+|-----------|--------|---------|
+| `ai_email_queue` table | ✅ Active | Stores all scheduled emails |
+| `email_scheduler_daemon.py` | ✅ Running | Polls every 30s, sends via Resend |
+| Resend API | ✅ Configured | Domain: myroofgenius.com |
+| Test Email Detection | ✅ Working | Skips @example.com, @test.com, etc. |
 
-### Code Fixes (AI Agents):
-1. **consciousness_emergence.py** - Thought persistence to ai_thought_stream table
-2. **consciousness_emergence.py** - _collect_new_thoughts() for gathering from stream
-3. **consciousness_emergence.py** - _persisted_thought_ids tracking
-4. **app.py** - Version bump to 9.31.0
+### Gumroad Products Live
+| Code | Product | Price | Type |
+|------|---------|-------|------|
+| HJHMSM | MCP Server Starter Kit | $97 | code_kit |
+| VJXCEW | SaaS Automation Scripts | $67 | code_kit |
+| XGFKP | AI Prompt Engineering Pack | $47 | prompt_pack |
+| GSAAVB | AI Orchestration Framework | $147 | code_kit |
+| UPSYKR | Command Center UI Kit | $149 | code_kit |
+| CAWVO | Business Automation Toolkit | $49 | prompt_pack |
 
-### System Capabilities (16 Active):
+### Purchase → Email Flow
+```
+Gumroad Purchase
+    ↓
+POST /gumroad/webhook (signature verified)
+    ↓
+process_sale() [background task]
+    ↓
+enroll_in_nurture_sequence()
+    ↓
+gumroad_sequences.enroll_buyer_in_sequence()
+    ↓
+4 emails → ai_email_queue (status='queued')
+    ↓
+EmailSchedulerDaemon polls every 30s
+    ↓
+Due emails → Resend API → Customer inbox
+```
+
+### Render Environment Variables (Email)
+- `RESEND_API_KEY`: ✅ Configured
+- `RESEND_FROM_EMAIL`: `Matt @ BrainStack <matt@myroofgenius.com>`
+- `GUMROAD_WEBHOOK_SECRET`: ✅ Configured
+
+### Previous Session: 2025-12-29 (Consciousness Persistence & Security Fixes)
+- Fixed consciousness emergence thought persistence
+- CRITICAL SECURITY: Fixed MyRoofGenius payment endpoint auth
+- Verified Stripe integration complete
+
+### System Capabilities (17 Active):
 - AUREA Orchestrator, Self-Healing Recovery, Memory Manager
 - Embedded Memory (RAG), Training Pipeline, Learning System
 - Agent Scheduler, AI Core, System Improvement Agent
 - DevOps Optimization, Code Quality, Customer Success
 - Competitive Intelligence, Vision Alignment, Self-Healing Reconciler
 - Bleeding Edge AI (OODA, Consciousness, Circuit Breaker)
+- **NEW: Gumroad Email Sequences (4-email nurture automation)**
 
 ### Next Priority:
-- Continue enhancing consciousness self-reporting capabilities
-- Add more security fixes to remaining MRG endpoints
-- Implement continuous health monitoring dashboard
+- Monitor first real Gumroad purchases for sequence delivery
+- Add more product types to sequences (automation type)
+- Implement sequence analytics and tracking
