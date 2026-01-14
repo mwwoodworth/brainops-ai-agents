@@ -104,6 +104,7 @@ from api.e2e_verification import router as e2e_verification_router
 from api.logistics import router as logistics_router
 from api.infrastructure import router as infrastructure_router
 from api.gumroad_webhook import router as gumroad_router
+from api.stripe_webhook import router as stripe_webhook_router  # Stripe webhooks (no API key - uses Stripe signature)
 from api.market_intelligence import router as market_intelligence_router
 from api.mcp import router as mcp_router  # MCP Bridge Integration - 345 tools
 from api.memory import router as memory_router
@@ -1220,6 +1221,7 @@ app.include_router(relationships_router, dependencies=SECURED_DEPENDENCIES)
 
 # External webhook endpoints must NOT require an internal API key; they validate their own webhook secrets/signatures.
 app.include_router(gumroad_router)
+app.include_router(stripe_webhook_router)  # Stripe webhooks - uses Stripe-Signature verification
 app.include_router(erp_event_router)
 
 # Unified Events System - Central event bus for all systems
