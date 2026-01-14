@@ -15,8 +15,12 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 logger = logging.getLogger(__name__)
 
-# Configuration
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+# Configuration - check both possible env var names
+STRIPE_WEBHOOK_SECRET = (
+    os.getenv("STRIPE_WEBHOOK_SECRET_AIAGENTS") or
+    os.getenv("STRIPE_WEBHOOK_SECRET") or
+    ""
+)
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production").strip().lower()
 
 router = APIRouter(
@@ -304,8 +308,17 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
 @router.get("/health")
 async def stripe_health():
     """Check Stripe webhook configuration status."""
+    # Determine which env var is being used
+    secret_source = None
+    if os.getenv("STRIPE_WEBHOOK_SECRET_AIAGENTS"):
+        secret_source = "STRIPE_WEBHOOK_SECRET_AIAGENTS"
+    elif os.getenv("STRIPE_WEBHOOK_SECRET"):
+        secret_source = "STRIPE_WEBHOOK_SECRET"
+
     return {
         "status": "healthy",
         "webhook_secret_REDACTED": bool(STRIPE_WEBHOOK_SECRET),
+        "secret_source": secret_source,
+        "secret_prefix": STRIPE_WEBHOOK_SECRET[:10] + "..." if STRIPE_WEBHOOK_SECRET else None,
         "environment": ENVIRONMENT
     }
