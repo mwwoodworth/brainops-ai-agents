@@ -196,8 +196,8 @@ class RevenuePipelineFactory:
                 metadata JSONB DEFAULT '{}'
             );
 
-            -- Daily revenue summary
-            CREATE TABLE IF NOT EXISTS revenue_daily_summary (
+            -- Daily revenue summary by pipeline stream
+            CREATE TABLE IF NOT EXISTS revenue_pipeline_daily (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 date DATE NOT NULL,
                 stream_type VARCHAR(50) NOT NULL,
@@ -220,7 +220,7 @@ class RevenuePipelineFactory:
             -- Indexes
             CREATE INDEX IF NOT EXISTS idx_pipeline_runs_stream ON revenue_pipeline_runs(stream_type, started_at);
             CREATE INDEX IF NOT EXISTS idx_revenue_source_stream ON revenue_by_source(stream_type, recorded_at);
-            CREATE INDEX IF NOT EXISTS idx_revenue_daily_date ON revenue_daily_summary(date, stream_type);
+            CREATE INDEX IF NOT EXISTS idx_revenue_daily_date ON revenue_pipeline_daily(date, stream_type);
         """)
 
         logger.info("Revenue tracking tables ensured")
