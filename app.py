@@ -115,6 +115,7 @@ from api.observability import (
 from api.revenue import router as revenue_router
 from api.revenue_automation import router as revenue_automation_router
 from api.income_streams import router as income_streams_router  # Automated Income Streams
+from api.revenue_complete import router as revenue_complete_router  # Complete Revenue API
 from api.relationships import router as relationships_router
 from api.roofing_labor_ml import router as roofing_labor_ml_router
 from api.self_awareness import router as self_awareness_router  # Self-Awareness Dashboard
@@ -1233,6 +1234,7 @@ if UNIFIED_EVENTS_AVAILABLE and unified_events_router:
 app.include_router(codebase_graph_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(state_sync_router, dependencies=SECURED_DEPENDENCIES)  # Real-time state synchronization
 app.include_router(revenue_router, dependencies=SECURED_DEPENDENCIES)  # Revenue generation system
+app.include_router(revenue_complete_router, dependencies=SECURED_DEPENDENCIES)  # Complete Revenue API with billing
 app.include_router(roofing_labor_ml_router, dependencies=SECURED_DEPENDENCIES)  # Roofing labor ML (RandomForest)
 
 # Bleeding-edge AI systems (2025)

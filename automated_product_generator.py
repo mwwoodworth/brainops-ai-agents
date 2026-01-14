@@ -1159,15 +1159,110 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+    async def publish_to_gumroad(self, product_id: str) -> dict:
+        """
+        Auto-publish a generated product to Gumroad.
+        Requires GUMROAD_ACCESS_TOKEN environment variable.
+        """
+        import httpx
+
+        GUMROAD_ACCESS_TOKEN = os.getenv("GUMROAD_ACCESS_TOKEN", "")
+        if not GUMROAD_ACCESS_TOKEN:
+            return {"success": False, "error": "GUMROAD_ACCESS_TOKEN not configured"}
+
+        pool = await self._get_pool()
+        if not pool:
+            return {"success": False, "error": "Database unavailable"}
+
+        # Get product from database
+        product = await pool.fetchrow(
+            "SELECT * FROM digital_products WHERE id = $1",
+            product_id
+        )
+        if not product:
+            return {"success": False, "error": f"Product {product_id} not found"}
+
+        metadata = product.get("metadata", {})
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata)
+
+        # Create Gumroad product
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.post(
+                    "https://api.gumroad.com/v2/products",
+                    headers={"Authorization": f"Bearer {GUMROAD_ACCESS_TOKEN}"},
+                    data={
+                        "name": product["name"],
+                        "price": product["price_cents"],
+                        "description": metadata.get("description", f"AI-generated {product['product_type']}"),
+                        "url": self._slugify(product["name"]),
+                    }
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    gumroad_id = result.get("product", {}).get("id")
+                    gumroad_url = result.get("product", {}).get("short_url")
+
+                    # Update database with Gumroad info
+                    await pool.execute("""
+                        UPDATE digital_products
+                        SET status = 'published',
+                            metadata = metadata || $1::jsonb
+                        WHERE id = $2
+                    """,
+                        json.dumps({
+                            "gumroad_id": gumroad_id,
+                            "gumroad_url": gumroad_url,
+                            "published_at": datetime.now(timezone.utc).isoformat()
+                        }),
+                        product_id
+                    )
+
+                    return {
+                        "success": True,
+                        "product_id": product_id,
+                        "gumroad_id": gumroad_id,
+                        "gumroad_url": gumroad_url,
+                        "status": "published"
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": response.text,
+                        "status_code": response.status_code
+                    }
+
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+    async def generate_and_publish(self, spec: dict) -> dict:
+        """Generate a product and immediately publish to Gumroad."""
+        # Generate the product
+        gen_result = await self.generate_product(spec)
+        if not gen_result.get("success"):
+            return gen_result
+
+        # Publish to Gumroad
+        pub_result = await self.publish_to_gumroad(gen_result["product_id"])
+
+        return {
+            "success": pub_result.get("success", False),
+            "generation": gen_result,
+            "publication": pub_result
+        }
+
 
 # Agent metadata
 AGENT_METADATA = {
     "id": "AutomatedProductGenerator",
     "name": "Automated Product Generator",
-    "description": "AI-powered digital product creation factory",
-    "version": "1.0.0",
+    "description": "AI-powered digital product creation factory with Gumroad auto-publish",
+    "version": "1.1.0",
     "tasks": [
         {"name": "generate_from_trend", "schedule": "0 10 * * 1", "description": "Weekly trend-based product generation"},
+        {"name": "generate_and_publish", "schedule": "0 12 * * 3", "description": "Generate and publish to Gumroad"},
     ],
     "category": "revenue"
 }
