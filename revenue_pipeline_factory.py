@@ -420,14 +420,14 @@ class RevenuePipelineFactory:
                     SELECT
                         COUNT(*) as total_subscriptions,
                         SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active,
-                        SUM(CASE WHEN status = 'active' THEN amount_cents ELSE 0 END) as mrr_cents
+                        SUM(CASE WHEN status = 'active' THEN amount ELSE 0 END) as mrr
                     FROM mrg_subscriptions
                 """)
                 return {
                     "total_subscriptions": result["total_subscriptions"] or 0,
                     "active_subscriptions": result["active"] or 0,
-                    "mrr": float(result["mrr_cents"] or 0) / 100,
-                    "revenue_generated": float(result["mrr_cents"] or 0) / 100
+                    "mrr": float(result["mrr"] or 0),
+                    "revenue_generated": float(result["mrr"] or 0)
                 }
             return {"status": "no_database"}
 
