@@ -1355,6 +1355,24 @@ try:
 except ImportError as e:
     logger.warning(f"Analytics endpoint not available: {e}")
 
+# Revenue Pipeline Factory (2026-01-14) - Master revenue orchestrator
+try:
+    from revenue_pipeline_factory import create_factory_router
+    revenue_factory_router = create_factory_router()
+    app.include_router(revenue_factory_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("✅ Revenue Pipeline Factory loaded at /revenue/factory - 6 automated revenue streams")
+except ImportError as e:
+    logger.warning(f"Revenue Pipeline Factory not available: {e}")
+
+# API Monetization Engine (2026-01-14) - Usage-based billing
+try:
+    from api_monetization_engine import create_monetization_router
+    api_monetization_router = create_monetization_router()
+    app.include_router(api_monetization_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("✅ API Monetization Engine loaded at /api/billing - usage-based pricing")
+except ImportError as e:
+    logger.warning(f"API Monetization Engine not available: {e}")
+
 
 def _collect_active_systems() -> list[str]:
     """Return a list of systems that are initialized and active."""
