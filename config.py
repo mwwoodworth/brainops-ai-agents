@@ -149,7 +149,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', '9.99.45')  # Fix: Escaped template variable in prompt_pack email sequence
+        self.version = os.getenv('VERSION', 'v3.1.156')  # Fix: ortools optional import for deployment
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))

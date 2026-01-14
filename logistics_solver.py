@@ -1,8 +1,15 @@
-
-from ortools.sat.python import cp_model
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Optional import - ortools may not be available in all environments
+try:
+    from ortools.sat.python import cp_model
+    ORTOOLS_AVAILABLE = True
+except ImportError:
+    cp_model = None
+    ORTOOLS_AVAILABLE = False
+    logger.warning("ortools not available - LogisticsSolver will be disabled")
 
 class LogisticsSolver:
     """
@@ -13,15 +20,19 @@ class LogisticsSolver:
     def solve_schedule(self, jobs, crews, time_slots):
         """
         Solve a scheduling problem.
-        
+
         Args:
             jobs: List of dicts {id, duration, priority, skills_required, deadline}
             crews: List of dicts {id, skills, availability_start, availability_end}
             time_slots: List of time slots (e.g., hours or days)
-            
+
         Returns:
             Optimal schedule or None
         """
+        if not ORTOOLS_AVAILABLE:
+            logger.error("ortools not available - cannot solve schedule")
+            return None
+
         model = cp_model.CpModel()
         
         # Variables
