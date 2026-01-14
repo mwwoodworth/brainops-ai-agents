@@ -149,7 +149,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.1.158')  # Fix: Add email-validator dependency
+        self.version = os.getenv('VERSION', 'v3.1.159')  # Fix: Add email-validator dependency
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
