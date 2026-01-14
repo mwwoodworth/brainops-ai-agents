@@ -255,9 +255,13 @@ class RevenuePipelineFactory:
         }
 
         for stream, pipeline in self.pipelines.items():
+            # Handle status as either enum or string for robustness
+            status_val = pipeline.get("status", PipelineStatus.ACTIVE)
+            status_str = status_val.value if isinstance(status_val, PipelineStatus) else str(status_val)
+
             status["pipelines"][stream.value] = {
                 "name": pipeline["config"]["name"],
-                "status": pipeline.get("status", PipelineStatus.ACTIVE).value,
+                "status": status_str,
                 "revenue_model": pipeline["config"]["revenue_model"],
                 "projected_mrr": pipeline["config"]["projected_mrr"],
                 "last_run": pipeline.get("last_run"),
@@ -569,14 +573,19 @@ class RevenuePipelineFactory:
         }
 
         for stream, pipeline in self.pipelines.items():
+            # Handle status as either enum or string for robustness
+            status_val = pipeline.get("status", PipelineStatus.ACTIVE)
+            status_str = status_val.value if isinstance(status_val, PipelineStatus) else str(status_val)
+
             pipeline_health = {
-                "status": pipeline.get("status", PipelineStatus.ACTIVE).value,
+                "status": status_str,
                 "last_run": pipeline.get("last_run"),
                 "error_count": len(pipeline.get("errors", []))
             }
 
             # Check for issues
-            if pipeline.get("status") == PipelineStatus.ERROR:
+            is_error = status_val == PipelineStatus.ERROR or status_str == "error"
+            if is_error:
                 health["issues"].append(f"{stream.value}: Pipeline in error state")
                 health["status"] = "degraded"
 
