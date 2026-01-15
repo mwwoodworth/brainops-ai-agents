@@ -467,6 +467,18 @@ async def process_sale(sale_data: dict[str, Any], product_code: str, first_name:
     product_type = product_info.get('type', 'code_kit')
     download_url = sale_data.get('download_url', 'https://gumroad.com/library')
 
+    # Import upsell engine
+    try:
+        from upsell_engine import process_purchase_for_upsell
+        upsell_task = process_purchase_for_upsell(
+            email=sale_data['email'],
+            first_name=first_name,
+            product_code=product_code,
+            product_name=product_name
+        )
+    except ImportError:
+        upsell_task = asyncio.sleep(0)  # No-op if not available
+
     results = await asyncio.gather(
         add_to_convertkit(sale_data['email'], first_name, last_name, product_code),
         record_sale_to_database({**sale_data, 'product_code': product_code}),
@@ -478,10 +490,11 @@ async def process_sale(sale_data: dict[str, Any], product_code: str, first_name:
             product_code=product_code,
             download_url=download_url
         ),
+        upsell_task,
         return_exceptions=True
     )
 
-    logger.info(f"Sale processing results - ConvertKit: {results[0]}, Database: {results[1]}, NurtureSequence: {results[2]}")
+    logger.info(f"Sale processing results - ConvertKit: {results[0]}, Database: {results[1]}, NurtureSequence: {results[2]}, Upsell: {results[3]}")
 
 @router.get("/analytics")
 async def get_sales_analytics():

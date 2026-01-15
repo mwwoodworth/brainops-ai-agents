@@ -651,5 +651,71 @@ async def revenue_health():
     return health
 
 
+# ==================== OUTREACH CAMPAIGNS ====================
+
+@router.get("/campaigns")
+async def list_outreach_campaigns():
+    """List all available outreach campaigns."""
+    try:
+        from outreach_campaigns import list_campaigns
+        return await list_campaigns()
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Outreach campaigns not available")
+
+
+@router.post("/campaigns/run/{campaign_id}")
+async def run_outreach_campaign(campaign_id: str, limit: int = 50):
+    """Run an outreach campaign for new leads."""
+    try:
+        from outreach_campaigns import run_campaign_for_new_leads
+        result = await run_campaign_for_new_leads(campaign_id, limit)
+        return result
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Outreach campaigns not available")
+
+
+@router.get("/campaigns/stats")
+async def get_campaign_stats(campaign_id: str = None):
+    """Get statistics for outreach campaigns."""
+    try:
+        from outreach_campaigns import get_campaign_stats
+        return await get_campaign_stats(campaign_id)
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Outreach campaigns not available")
+
+
+# ==================== UPSELL ENGINE ====================
+
+@router.post("/upsells/process-missed")
+async def process_missed_upsells(days_back: int = 7, limit: int = 50):
+    """Process purchases that missed upsell emails."""
+    try:
+        from upsell_engine import process_missed_upsells
+        result = await process_missed_upsells(days_back, limit)
+        return result
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Upsell engine not available")
+
+
+@router.get("/upsells/recommendations/{email}")
+async def get_upsell_recommendations(email: str):
+    """Get upsell recommendations for a customer."""
+    try:
+        from upsell_engine import get_customer_purchase_history, get_recommended_upsells
+        history = await get_customer_purchase_history(email)
+        if not history:
+            return {"email": email, "recommendations": [], "message": "No purchase history"}
+
+        last_product = history[0]['product_code']
+        recommendations = await get_recommended_upsells(email, last_product)
+        return {
+            "email": email,
+            "purchase_history": history,
+            "recommendations": recommendations
+        }
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Upsell engine not available")
+
+
 # Export router
 __all__ = ["router"]
