@@ -121,7 +121,7 @@ class RevenuePipelineFactory:
         self.metrics = {}
         self._pool = None
 
-    async def _get_pool(self):
+    def _get_pool(self):
         """Lazy-load database pool."""
         if self._pool is None:
             try:
@@ -164,7 +164,7 @@ class RevenuePipelineFactory:
 
     async def _ensure_tables(self):
         """Ensure revenue tracking tables exist."""
-        pool = await self._get_pool()
+        pool = self._get_pool()
         if not pool:
             return
 
@@ -293,7 +293,7 @@ class RevenuePipelineFactory:
         started_at = datetime.now(timezone.utc)
 
         # Record run start
-        pool = await self._get_pool()
+        pool = self._get_pool()
         if pool:
             await pool.execute("""
                 INSERT INTO revenue_pipeline_runs (id, pipeline_name, stream_type, status)
@@ -396,7 +396,7 @@ class RevenuePipelineFactory:
 
         elif stream == RevenueStream.AGENT_SERVICES:
             # Track agent usage for billing
-            pool = await self._get_pool()
+            pool = self._get_pool()
             if pool:
                 # Count recent agent executions
                 result = await pool.fetchrow("""
@@ -414,7 +414,7 @@ class RevenuePipelineFactory:
 
         elif stream == RevenueStream.SUBSCRIPTIONS:
             # Check subscription status
-            pool = await self._get_pool()
+            pool = self._get_pool()
             if pool:
                 result = await pool.fetchrow("""
                     SELECT
@@ -460,7 +460,7 @@ class RevenuePipelineFactory:
 
     async def generate_revenue_report(self, days: int = 30) -> dict:
         """Generate comprehensive revenue report."""
-        pool = await self._get_pool()
+        pool = self._get_pool()
         if not pool:
             return {"success": False, "error": "Database unavailable"}
 
@@ -601,7 +601,7 @@ class RevenuePipelineFactory:
             health["pipelines"][stream.value] = pipeline_health
 
         # Check dependencies
-        pool = await self._get_pool()
+        pool = self._get_pool()
         health["database_connected"] = pool is not None
 
         if not pool:
@@ -612,7 +612,7 @@ class RevenuePipelineFactory:
 
     async def optimize_pipelines(self) -> dict:
         """Analyze and optimize pipeline configurations."""
-        pool = await self._get_pool()
+        pool = self._get_pool()
         if not pool:
             return {"success": False, "error": "Database unavailable"}
 

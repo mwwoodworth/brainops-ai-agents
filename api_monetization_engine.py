@@ -69,7 +69,7 @@ class APIMonetizationEngine:
         self.version = "1.0.0"
         self._pool = None
 
-    async def _get_pool(self):
+    def _get_pool(self):
         """Lazy-load database pool."""
         if self._pool is None:
             try:
@@ -82,7 +82,7 @@ class APIMonetizationEngine:
 
     async def ensure_tables(self):
         """Ensure monetization tables exist."""
-        pool = await self._get_pool()
+        pool = self._get_pool()
 
         await pool.execute("""
             -- API Keys table
@@ -101,7 +101,7 @@ class APIMonetizationEngine:
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             );
 
-            -- API Usage tracking
+            -- API Usage tracking (uses 'timestamp' column name for compatibility)
             CREATE TABLE IF NOT EXISTS api_usage (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 api_key_id UUID REFERENCES api_keys(id),
@@ -112,7 +112,7 @@ class APIMonetizationEngine:
                 tokens_used INT DEFAULT 0,
                 cost_cents INT DEFAULT 0,
                 metadata JSONB DEFAULT '{}',
-                created_at TIMESTAMPTZ DEFAULT NOW()
+                timestamp TIMESTAMPTZ DEFAULT NOW()
             );
 
             -- Monthly usage summary
@@ -146,9 +146,9 @@ class APIMonetizationEngine:
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
 
-            -- Indexes for performance
+            -- Indexes for performance (note: column is 'timestamp' not 'created_at')
             CREATE INDEX IF NOT EXISTS idx_api_usage_key_date
-                ON api_usage(api_key_id, created_at);
+                ON api_usage(api_key_id, timestamp);
             CREATE INDEX IF NOT EXISTS idx_api_usage_monthly_key
                 ON api_usage_monthly(api_key_id, year_month);
         """)
@@ -171,7 +171,7 @@ class APIMonetizationEngine:
         key_hash = hashlib.sha256(key_raw.encode()).hexdigest()
         key_prefix = key_raw[:15]
 
-        pool = await self._get_pool()
+        pool = self._get_pool()
 
         key_id = str(uuid.uuid4())
         await pool.execute("""
@@ -196,7 +196,7 @@ class APIMonetizationEngine:
         import hashlib
 
         key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-        pool = await self._get_pool()
+        pool = self._get_pool()
 
         result = await pool.fetchrow("""
             SELECT id, user_id, tier, rate_limit_per_minute, is_active, expires_at, metadata
@@ -255,7 +255,7 @@ class APIMonetizationEngine:
         tokens_used: int = 0
     ) -> dict:
         """Track API usage and calculate cost."""
-        pool = await self._get_pool()
+        pool = self._get_pool()
 
         # Get API key tier
         key_data = await pool.fetchrow(
@@ -324,7 +324,7 @@ class APIMonetizationEngine:
 
     async def get_usage_report(self, api_key_id: str, days: int = 30) -> dict:
         """Generate usage report for an API key."""
-        pool = await self._get_pool()
+        pool = self._get_pool()
 
         since = datetime.now(timezone.utc) - timedelta(days=days)
 
@@ -336,7 +336,7 @@ class APIMonetizationEngine:
                 AVG(response_time_ms) as avg_response_time,
                 SUM(tokens_used) as total_tokens
             FROM api_usage
-            WHERE api_key_id = $1 AND created_at >= $2
+            WHERE api_key_id = $1 AND timestamp >= $2
         """, api_key_id, since)
 
         # Get usage by endpoint
@@ -346,7 +346,7 @@ class APIMonetizationEngine:
                 COUNT(*) as calls,
                 SUM(cost_cents) as cost_cents
             FROM api_usage
-            WHERE api_key_id = $1 AND created_at >= $2
+            WHERE api_key_id = $1 AND timestamp >= $2
             GROUP BY endpoint
             ORDER BY calls DESC
             LIMIT 10
@@ -355,12 +355,12 @@ class APIMonetizationEngine:
         # Get daily breakdown
         daily = await pool.fetch("""
             SELECT
-                DATE(created_at) as date,
+                DATE(timestamp) as date,
                 COUNT(*) as calls,
                 SUM(cost_cents) as cost_cents
             FROM api_usage
-            WHERE api_key_id = $1 AND created_at >= $2
-            GROUP BY DATE(created_at)
+            WHERE api_key_id = $1 AND timestamp >= $2
+            GROUP BY DATE(timestamp)
             ORDER BY date
         """, api_key_id, since)
 
@@ -387,7 +387,7 @@ class APIMonetizationEngine:
         if not year_month:
             year_month = datetime.now(timezone.utc).strftime("%Y-%m")
 
-        pool = await self._get_pool()
+        pool = self._get_pool()
 
         # Get monthly summary
         summary = await pool.fetchrow("""

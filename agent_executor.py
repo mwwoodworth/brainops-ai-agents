@@ -91,6 +91,20 @@ except Exception as exc:
     UNIFIED_INTEGRATION_AVAILABLE = False
     _handle_optional_import("Unified system integration", exc)
 
+# Agent Memory SDK - RBA/WBA Enforcement (Total Completion Protocol)
+try:
+    from agent_memory_sdk import AgentMemoryClient, EnforcementViolationError, EnforcementBlockedError
+    from memory_enforcement import MemoryObjectType, EvidenceLevel
+    AGENT_MEMORY_SDK_AVAILABLE = True
+except Exception as exc:
+    AGENT_MEMORY_SDK_AVAILABLE = False
+    AgentMemoryClient = None
+    EnforcementViolationError = Exception
+    EnforcementBlockedError = Exception
+    MemoryObjectType = None
+    EvidenceLevel = None
+    _handle_optional_import("Agent Memory SDK (RBA/WBA)", exc)
+
 T = TypeVar("T")
 
 _REPO_ROOT = Path(__file__).resolve().parent
@@ -1408,6 +1422,40 @@ class AgentExecutor:
                     f"Agent '{agent_name}' is not implemented and no fallback is allowed."
                 )
 
+            # RBA/WBA ENFORCEMENT (Total Completion Protocol)
+            # Retrieve memory context before agent acts
+            memory_context = None
+            memory_client = None
+            if AGENT_MEMORY_SDK_AVAILABLE and not task.get("_skip_memory_enforcement"):
+                try:
+                    memory_client = AgentMemoryClient(
+                        agent_id=resolved_agent_name,
+                        enforce_rba=True,
+                        enforce_wba=True,
+                        allow_bypass=True  # Don't block execution, just log violations
+                    )
+                    await memory_client.__aenter__()
+
+                    # RBA: Retrieve relevant context before acting
+                    task_description = str(
+                        task.get("description")
+                        or task.get("action")
+                        or task.get("prompt")
+                        or f"{resolved_agent_name} task"
+                    )
+                    memory_context = await memory_client.retrieve_context(
+                        query=task_description,
+                        include_verified_only=False
+                    )
+                    task["_memory_context"] = memory_context[:5] if memory_context else []
+                    task["_memory_correlation_id"] = memory_client.correlation_id
+                    logger.info(
+                        f"[RBA] Agent {resolved_agent_name} retrieved {len(memory_context)} memories | "
+                        f"correlation_id={memory_client.correlation_id}"
+                    )
+                except Exception as e:
+                    logger.warning(f"[RBA] Memory context retrieval failed (non-blocking): {e}")
+
             for attempt in range(RETRY_ATTEMPTS):
                 attempt_start = datetime.now(timezone.utc)
                 try:
@@ -1459,6 +1507,48 @@ class AgentExecutor:
 
             # Log successful completion
             await exec_logger.log_completed(result, total_duration_ms)
+
+            # WBA ENFORCEMENT (Total Completion Protocol)
+            # Write execution decision back to memory
+            if AGENT_MEMORY_SDK_AVAILABLE and memory_client and not task.get("_skip_memory_enforcement"):
+                try:
+                    # WBA: Write decision to memory
+                    execution_success = result.get("status") not in ("failed", "error")
+                    decision_title = f"Agent {resolved_agent_name} execution: {task_type}"
+
+                    memory_id = await memory_client.write_decision(
+                        title=decision_title,
+                        content={
+                            "agent": resolved_agent_name,
+                            "task_type": task_type,
+                            "task_description": task_description,
+                            "result_summary": str(result.get("result", result))[:500],
+                            "status": "success" if execution_success else "failed",
+                            "duration_ms": total_duration_ms,
+                            "memory_context_count": len(memory_context) if memory_context else 0
+                        },
+                        object_type=MemoryObjectType.DECISION,
+                        proof_type="execution_log",
+                        proof_content={
+                            "execution_id": execution_id,
+                            "correlation_id": memory_client.correlation_id,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        },
+                        tags=[f"agent:{resolved_agent_name}", f"task:{task_type}"],
+                        evidence_level=EvidenceLevel.E1_RECORDED
+                    )
+
+                    result["_memory_decision_id"] = memory_id
+                    logger.info(
+                        f"[WBA] Agent {resolved_agent_name} wrote decision | "
+                        f"memory_id={memory_id} | correlation_id={memory_client.correlation_id}"
+                    )
+
+                    # Close the memory client
+                    await memory_client.__aexit__(None, None, None)
+
+                except Exception as e:
+                    logger.warning(f"[WBA] Memory decision write failed (non-blocking): {e}")
 
             # UNIFIED INTEGRATION: Post-execution hooks for success
             if UNIFIED_INTEGRATION_AVAILABLE and unified_ctx:

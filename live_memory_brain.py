@@ -438,7 +438,7 @@ class CrossSystemOmniscience:
             # Fetch from database
             try:
                 from database.async_connection import get_pool
-                pool = await get_pool()
+                pool = get_pool()
                 if pool:
                     # Get table counts and health
                     tables_query = """
