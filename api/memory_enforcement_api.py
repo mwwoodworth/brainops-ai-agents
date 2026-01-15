@@ -18,6 +18,7 @@ from memory_enforcement import (
     EvidenceLevel,
     MemoryContract,
     MemoryObjectType,
+    VerificationProof,
     VerificationState,
     get_enforcement_engine,
 )
@@ -85,20 +86,27 @@ async def verify_memory(request: VerifyMemoryRequest) -> dict[str, Any]:
 
         evidence = EvidenceLevel[request.evidence_level]
 
-        memory_id = await engine.verify_memory(
-            memory_id=request.memory_id,
+        # Construct VerificationProof object
+        proof = VerificationProof(
+            artifact_type="api_verification",
+            artifact_content={"refs": request.artifact_refs},
             evidence_level=evidence,
-            artifact_refs=request.artifact_refs,
-            verified_by=request.verified_by,
-            expiration_days=request.expiration_days
+            created_by=request.verified_by,
+            metadata={"expiration_days": request.expiration_days}
+        )
+
+        result = await engine.verify_memory(
+            memory_id=request.memory_id,
+            proof=proof,
+            verified_by=request.verified_by
         )
 
         return {
-            "success": True,
-            "memory_id": str(memory_id),
-            "verification_state": "VERIFIED",
+            "success": result.success,
+            "memory_id": request.memory_id,
+            "verification_state": "VERIFIED" if result.success else "FAILED",
             "evidence_level": request.evidence_level,
-            "message": "Memory verified successfully"
+            "message": "Memory verified successfully" if result.success else result.block_reason
         }
 
     except Exception as e:
