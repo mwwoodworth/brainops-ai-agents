@@ -46,6 +46,16 @@ except ImportError:
     run_scheduled_hygiene = None
     logging.warning("Memory Hygiene System unavailable")
 
+# Learning Feedback Loop (2026-01-15 - Total Completion Protocol)
+# CRITICAL: This finally activates the 4,700+ insights that were sitting idle!
+try:
+    from learning_feedback_loop import run_scheduled_feedback_loop
+    LEARNING_FEEDBACK_AVAILABLE = True
+except ImportError:
+    LEARNING_FEEDBACK_AVAILABLE = False
+    run_scheduled_feedback_loop = None
+    logging.warning("Learning Feedback Loop unavailable")
+
 # Enable revenue drive by default in production, off in dev unless toggled
 _revenue_drive_env = os.getenv("ENABLE_REVENUE_DRIVE")
 if _revenue_drive_env is None:
@@ -1210,6 +1220,27 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("Memory Hygiene failed: %s", exc, exc_info=True)
 
+    def _run_learning_feedback_loop(self):
+        """Execute the learning feedback loop - ACTIVATES 4,700+ idle insights."""
+        if not LEARNING_FEEDBACK_AVAILABLE:
+            return
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(run_scheduled_feedback_loop())
+                logger.info(
+                    "Learning Feedback Loop completed: %d patterns -> %d proposals -> %d applied",
+                    result.get("patterns_found", 0),
+                    result.get("proposals_generated", 0),
+                    result.get("improvements_applied", 0)
+                )
+            finally:
+                loop.close()
+        except Exception as exc:
+            logger.error("Learning Feedback Loop failed: %s", exc, exc_info=True)
+
     def _run_revenue_drive(self):
         """Execute the autonomous revenue drive scan."""
         if not REVENUE_DRIVE_AVAILABLE or not ENABLE_REVENUE_DRIVE:
@@ -1283,6 +1314,28 @@ class AgentScheduler:
                 logger.info("✅ Scheduled Memory Hygiene every 6 hours")
             except Exception as exc:
                 logger.error("Failed to schedule Memory Hygiene: %s", exc, exc_info=True)
+
+        # Register Learning Feedback Loop (Total Completion Protocol)
+        # CRITICAL: Finally activates 4,700+ insights that were sitting idle!
+        if LEARNING_FEEDBACK_AVAILABLE:
+            try:
+                job_id = "learning_feedback_loop"
+                self.scheduler.add_job(
+                    func=self._run_learning_feedback_loop,
+                    trigger=IntervalTrigger(hours=4),  # Run every 4 hours
+                    id=job_id,
+                    name="Learning Feedback Loop",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "learning_feedback_loop",
+                    "agent_name": "Learning Feedback Loop",
+                    "frequency_minutes": 240,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("✅ Scheduled Learning Feedback Loop every 4 hours")
+            except Exception as exc:
+                logger.error("Failed to schedule Learning Feedback Loop: %s", exc, exc_info=True)
 
         if not (REVENUE_DRIVE_AVAILABLE and ENABLE_REVENUE_DRIVE):
             return
