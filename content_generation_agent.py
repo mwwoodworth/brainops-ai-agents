@@ -22,9 +22,27 @@ from ai_core import ai_core
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration (reused from customer_acquisition_agents.py pattern)
+# Database configuration - supports DATABASE_URL or individual vars
 def _get_db_config():
     """Get database configuration from environment variables."""
+    # First try DATABASE_URL (preferred for Render/Supabase)
+    database_url = os.getenv('DATABASE_URL')
+    if database_url:
+        # Parse DATABASE_URL: postgresql://user:pass@host:port/dbname
+        match = re.match(
+            r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)',
+            database_url
+        )
+        if match:
+            return {
+                'host': match.group(3),
+                'database': match.group(5),
+                'user': match.group(1),
+                'password': match.group(2),
+                'port': int(match.group(4))
+            }
+
+    # Fallback to individual environment variables
     db_host = os.getenv("DB_HOST")
     db_name = os.getenv("DB_NAME")
     db_user = os.getenv("DB_USER")
@@ -44,7 +62,7 @@ def _get_db_config():
     if missing:
         raise RuntimeError(
             f"Required environment variables not set: {', '.join(missing)}. "
-            "Set these variables before using content agent."
+            "Set DATABASE_URL or these variables before using content agent."
         )
 
     return {
