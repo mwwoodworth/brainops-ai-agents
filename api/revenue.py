@@ -641,6 +641,15 @@ async def enrich_leads(request: EnrichLeadsRequest):
                     email = email_match.group(0)
                     phone = phone_match.group(0).strip() if phone_match else None
 
+                    # Check if email already exists for another lead
+                    existing = await pool.fetchval("""
+                        SELECT id FROM revenue_leads WHERE email = $1
+                    """, email)
+
+                    if existing:
+                        logger.warning(f"Email {email} already exists for another lead, skipping")
+                        continue
+
                     # Update the lead
                     await pool.execute("""
                         UPDATE revenue_leads
