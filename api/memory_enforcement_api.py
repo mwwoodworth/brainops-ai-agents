@@ -186,10 +186,7 @@ async def get_truth_backlog(
         engine = get_enforcement_engine()
         await engine.initialize()
 
-        backlog = await engine.get_truth_backlog(
-            limit=limit,
-            object_type=MemoryObjectType[object_type] if object_type else None
-        )
+        backlog = await engine.get_truth_backlog(limit=limit)
 
         # Get aggregate stats
         stats = await engine.pool.fetchrow("""
