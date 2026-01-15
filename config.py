@@ -130,6 +130,8 @@ class SecurityConfig:
                 "https://brainops-command-center.vercel.app",
                 "https://brainops-mcp-bridge.onrender.com",
             ]
+        
+        self.supabase_jwt_secret = os.getenv('SUPABASE_JWT_SECRET', '')
 
 
 class TenantConfig:
@@ -149,7 +151,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.2.0')  # Fix: Add email-validator dependency
+        self.version = os.getenv('VERSION', 'v3.5.12')  # Fixed api_usage column name (timestamp not created_at)
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))

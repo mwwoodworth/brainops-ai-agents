@@ -121,7 +121,7 @@ class NerveCenter:
         # Schema is pre-created in database - skip blocking init
         # self._ensure_schema() - moved to lazy init via activate()
 
-    async def _get_pool(self):
+    def _get_pool(self):
         """Get shared async pool - DO NOT reinitialize to prevent MaxClientsInSessionMode"""
         try:
             return get_pool()
@@ -135,7 +135,7 @@ class NerveCenter:
     async def _ensure_schema(self):
         """Create nerve center tables"""
         try:
-            pool = await self._get_pool()
+            pool = self._get_pool()
             if using_fallback():
                 return
 
@@ -202,7 +202,7 @@ class NerveCenter:
 
         # Log signal
         try:
-            pool = await self._get_pool()
+            pool = self._get_pool()
             if not using_fallback():
                 # FIX: Use positional args, not tuple for asyncpg
                 await pool.execute("""
@@ -306,7 +306,7 @@ class NerveCenter:
 
         # Log emergency
         try:
-            pool = await self._get_pool()
+            pool = self._get_pool()
             if using_fallback():
                 return
             # FIX: Use positional args, not tuple for asyncpg
@@ -427,7 +427,7 @@ class NerveCenter:
             if self.alive_core and self.alive_core.state == ConsciousnessState.EMERGENCY:
                 health = "emergency"
 
-            pool = await self._get_pool()
+            pool = self._get_pool()
             if using_fallback():
                 return
             # FIX: Use positional args, not tuple for asyncpg

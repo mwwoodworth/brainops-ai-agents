@@ -86,7 +86,7 @@ class AutomatedProductGenerator:
         self.output_dir.mkdir(exist_ok=True)
         self._pool = None
 
-    async def _get_pool(self):
+    def _get_pool(self):
         """Lazy-load database pool."""
         if self._pool is None:
             try:
@@ -1096,7 +1096,7 @@ For support, contact: support@brainops.ai
 
     async def _record_product(self, product_id: str, name: str, product_type: str, zip_path: str, price: int, metadata: dict):
         """Record generated product in database."""
-        pool = await self._get_pool()
+        pool = self._get_pool()
         if not pool:
             return
 
@@ -1170,7 +1170,7 @@ SOFTWARE.
         if not GUMROAD_ACCESS_TOKEN:
             return {"success": False, "error": "GUMROAD_ACCESS_TOKEN not configured"}
 
-        pool = await self._get_pool()
+        pool = self._get_pool()
         if not pool:
             return {"success": False, "error": "Database unavailable"}
 

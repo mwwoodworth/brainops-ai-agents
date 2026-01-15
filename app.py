@@ -18,7 +18,7 @@ from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Quer
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.security import APIKeyHeader
+from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 
 # Import our production-ready components
 from config import config
@@ -116,6 +116,12 @@ from api.revenue import router as revenue_router
 from api.revenue_automation import router as revenue_automation_router
 from api.income_streams import router as income_streams_router  # Automated Income Streams
 from api.revenue_complete import router as revenue_complete_router  # Complete Revenue API
+from api.revenue_control_tower import router as revenue_control_tower_router  # Revenue Control Tower - THE ground truth
+from api.pipeline import router as pipeline_router  # Pipeline State Machine - ledger-backed state transitions
+from api.proposals import router as proposals_router  # Proposal Engine - draft/approve/send workflow
+from api.outreach import router as outreach_router  # Outreach Engine - lead enrichment and sequences
+from api.payments import router as payments_router  # Payment Capture - invoices and revenue collection
+from api.revenue_operator import router as revenue_operator_router  # AI Revenue Operator - automated actions
 from api.relationships import router as relationships_router
 from api.roofing_labor_ml import router as roofing_labor_ml_router
 from api.self_awareness import router as self_awareness_router  # Self-Awareness Dashboard
@@ -969,6 +975,16 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(rate_limiter_cleanup_loop())
         logger.info("✅ Rate limiter cleanup task started")
 
+        # Initialize Slack alerting integration (Total Completion Protocol)
+        try:
+            from slack_notifications import setup_slack_alerting
+            if setup_slack_alerting():
+                logger.info("📢 Slack alerting integration ACTIVATED")
+            else:
+                logger.info("📢 Slack alerting not configured (set SLACK_WEBHOOK_URL to enable)")
+        except Exception as e:
+            logger.warning(f"⚠️ Slack alerting setup failed: {e}")
+
         logger.info("✅ Heavy component initialization complete - AI OS FULLY AWAKE!")
 
     asyncio.create_task(deferred_heavy_init())
@@ -1151,6 +1167,7 @@ async def record_request_metrics(request: Request, call_next):
 
 # API Key authentication
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+jwt_bearer = HTTPBearer(auto_error=False)
 
 # Rate limit 403 error logging to avoid log flooding
 from collections import defaultdict
@@ -1162,11 +1179,29 @@ _API_KEY_ERROR_LOG_INTERVAL = 60  # Only log same path/error once per minute
 async def verify_api_key(
     request: Request,
     api_key: str = Security(api_key_header),
+    jwt_token: Optional[HTTPAuthorizationCredentials] = Security(jwt_bearer)
 ) -> bool:
-    """Verify API key if authentication is required"""
+    """
+    Verify authentication using either API Key or JWT.
+    Prioritizes JWT if present for user context.
+    """
     if not config.security.auth_required:
         return True
 
+    # 1. Try JWT first (User Context)
+    if jwt_token:
+        try:
+            payload = await verify_jwt(request, jwt_token)
+            if payload:
+                # JWT is valid, user context is set in request.state
+                return True
+        except HTTPException:
+            # If JWT is invalid, we don't fall back to API Key if it was provided but bad
+            # But if verify_jwt returned None (not configured?), we might fall back.
+            # verify_jwt raises 401 on invalid token.
+            raise
+
+    # 2. Try API Key (Service Context)
     if not config.security.auth_configured:
         raise HTTPException(status_code=503, detail="Authentication misconfigured")
 
@@ -1176,7 +1211,9 @@ async def verify_api_key(
         if auth_header:
             scheme, _, token = auth_header.partition(" ")
             scheme_lower = scheme.lower()
-            if scheme_lower in ("bearer", "apikey", "api-key"):
+            # If it was Bearer, it should have been caught by jwt_bearer, 
+            # unless it's a malformed header or something.
+            if scheme_lower in ("apikey", "api-key"):
                 provided = token.strip()
 
     if not provided and config.security.test_api_key:
@@ -1194,8 +1231,8 @@ async def verify_api_key(
         now = time.time()
         if now - _api_key_error_log_times[error_key] > _API_KEY_ERROR_LOG_INTERVAL:
             _api_key_error_log_times[error_key] = now
-            logger.warning(f"API key missing for {path} (rate-limited)")
-        raise HTTPException(status_code=403, detail="API key required")
+            logger.warning(f"Auth missing for {path} (rate-limited)")
+        raise HTTPException(status_code=403, detail="Authentication required (API Key or Bearer Token)")
 
     if provided not in config.security.valid_api_keys:
         # Rate-limit logging of invalid API key errors
@@ -1235,6 +1272,12 @@ app.include_router(codebase_graph_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(state_sync_router, dependencies=SECURED_DEPENDENCIES)  # Real-time state synchronization
 app.include_router(revenue_router, dependencies=SECURED_DEPENDENCIES)  # Revenue generation system
 app.include_router(revenue_complete_router, dependencies=SECURED_DEPENDENCIES)  # Complete Revenue API with billing
+app.include_router(revenue_control_tower_router, dependencies=SECURED_DEPENDENCIES)  # Revenue Control Tower - GROUND TRUTH (REAL vs TEST)
+app.include_router(pipeline_router, dependencies=SECURED_DEPENDENCIES)  # Pipeline State Machine - ledger-backed state transitions
+app.include_router(proposals_router, dependencies=SECURED_DEPENDENCIES)  # Proposal Engine - draft/approve/send workflow
+app.include_router(outreach_router, dependencies=SECURED_DEPENDENCIES)  # Outreach Engine - lead enrichment and sequences
+app.include_router(payments_router, dependencies=SECURED_DEPENDENCIES)  # Payment Capture - invoices and revenue collection
+app.include_router(revenue_operator_router, dependencies=SECURED_DEPENDENCIES)  # AI Revenue Operator - automated actions
 app.include_router(roofing_labor_ml_router, dependencies=SECURED_DEPENDENCIES)  # Roofing labor ML (RandomForest)
 
 # Bleeding-edge AI systems (2025)

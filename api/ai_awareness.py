@@ -241,10 +241,30 @@ async def get_complete_awareness() -> dict[str, Any]:
     # ============================================
     # 5. REVENUE PIPELINE - Is money flowing?
     # ============================================
+    # CRITICAL: Distinguish REAL vs TEST data for accurate DevOps context
     revenue_health = {"status": "unknown"}
     try:
-        # FIX: Query revenue_leads table (not ai_revenue_leads) with correct column names
-        revenue_stats = await _safe_query(pool, """
+        # Test email patterns for filtering
+        test_filter = """
+            email NOT ILIKE '%test%' AND email NOT ILIKE '%example%'
+            AND email NOT ILIKE '%demo%' AND email NOT ILIKE '%sample%'
+            AND email NOT ILIKE '%fake%' AND email NOT ILIKE '%placeholder%'
+            AND email NOT ILIKE '@test.%' AND email NOT ILIKE '@example.%'
+            AND email NOT ILIKE '%localhost%'
+        """
+
+        # REAL-ONLY revenue stats (ground truth)
+        real_revenue_stats = await _safe_query(pool, f"""
+            SELECT
+                COUNT(*) as real_leads,
+                COUNT(CASE WHEN stage = 'won' THEN 1 END) as real_won,
+                COALESCE(SUM(CASE WHEN stage = 'won' THEN value_estimate ELSE 0 END), 0) as real_revenue
+            FROM revenue_leads
+            WHERE {test_filter}
+        """)
+
+        # ALL data stats (for comparison)
+        all_revenue_stats = await _safe_query(pool, """
             SELECT
                 COUNT(*) as total_leads,
                 COUNT(CASE WHEN stage = 'won' THEN 1 END) as won,
@@ -252,13 +272,41 @@ async def get_complete_awareness() -> dict[str, Any]:
             FROM revenue_leads
         """)
 
-        rev = revenue_stats[0] if revenue_stats else {}
+        real = real_revenue_stats[0] if real_revenue_stats else {}
+        all_rev = all_revenue_stats[0] if all_revenue_stats else {}
+
+        real_leads = real.get('real_leads', 0)
+        total_leads = all_rev.get('total_leads', 0)
+        test_leads = total_leads - real_leads
+
         revenue_health = {
-            "status": "active" if rev.get('total_leads', 0) > 0 else "empty",
-            "total_leads": rev.get('total_leads', 0),
-            "won_deals": rev.get('won', 0),
-            "revenue_tracked": float(rev.get('won_value', 0))
+            "status": "active" if total_leads > 0 else "empty",
+            # GROUND TRUTH - REAL ONLY
+            "real_leads": real_leads,
+            "real_won": real.get('real_won', 0),
+            "real_revenue": float(real.get('real_revenue', 0)),
+            # Test/Demo data (for awareness only)
+            "test_leads": test_leads,
+            "total_leads": total_leads,
+            # Classification breakdown
+            "data_breakdown": {
+                "real": real_leads,
+                "test_demo": test_leads,
+                "real_percentage": round(real_leads / total_leads * 100, 1) if total_leads > 0 else 0
+            },
+            # Warning if all revenue is test data
+            "warning": "ALL REVENUE IS TEST DATA - $0 REAL" if real.get('real_revenue', 0) == 0 and total_leads > 0 else None
         }
+
+        # Add alert if $0 real revenue
+        if real.get('real_revenue', 0) == 0 and real_leads > 0:
+            alerts.append({
+                "severity": "critical",
+                "system": "revenue",
+                "message": f"$0 real revenue from {real_leads} real leads - conversion needed!",
+                "timestamp": now.isoformat()
+            })
+            recommendations.insert(0, f"CRITICAL: Convert {real_leads} real leads to revenue")
 
     except Exception as e:
         logger.warning(f"Revenue check failed: {e}")
@@ -290,7 +338,132 @@ async def get_complete_awareness() -> dict[str, Any]:
         logger.warning(f"Activity check failed: {e}")
 
     # ============================================
-    # 7. DETERMINE OVERALL HEALTH
+    # 7. MEMORY ENFORCEMENT (Total Completion Protocol)
+    # ============================================
+    enforcement_health = {"status": "unknown"}
+    try:
+        # Memory verification stats
+        verification_stats = await _safe_query(pool, """
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE verification_state = 'VERIFIED') as verified,
+                COUNT(*) FILTER (WHERE verification_state = 'UNVERIFIED') as unverified,
+                COUNT(*) FILTER (WHERE verification_state = 'DEGRADED') as degraded,
+                AVG(confidence_score) as avg_confidence
+            FROM unified_ai_memory
+            WHERE expires_at IS NULL OR expires_at > NOW()
+        """)
+
+        # RBA/WBA audit stats (last 24 hours)
+        audit_stats = await _safe_query(pool, """
+            SELECT
+                COUNT(*) as total_ops,
+                COUNT(*) FILTER (WHERE rba_enforced = true) as rba_enforced,
+                COUNT(*) FILTER (WHERE wba_enforced = true) as wba_enforced,
+                COUNT(*) FILTER (WHERE operation_result = 'blocked') as blocked
+            FROM memory_operation_audit
+            WHERE created_at > NOW() - INTERVAL '24 hours'
+        """)
+
+        # Truth backlog
+        backlog_stats = await _safe_query(pool, """
+            SELECT COUNT(*) as backlog_count FROM memory_truth_backlog
+        """)
+
+        # Conflict count
+        conflict_stats = await _safe_query(pool, """
+            SELECT COUNT(*) as open_conflicts FROM memory_conflicts
+            WHERE resolution_status = 'open'
+        """)
+
+        ver = verification_stats[0] if verification_stats else {}
+        aud = audit_stats[0] if audit_stats else {}
+        backlog = backlog_stats[0] if backlog_stats else {}
+        conflicts = conflict_stats[0] if conflict_stats else {}
+
+        total_memories = ver.get('total', 0) or 0
+        verified_count = ver.get('verified', 0) or 0
+        verification_rate = (verified_count / max(total_memories, 1)) * 100
+
+        rba_rate = ((aud.get('rba_enforced', 0) or 0) / max(aud.get('total_ops', 0) or 1, 1)) * 100
+        wba_rate = ((aud.get('wba_enforced', 0) or 0) / max(aud.get('total_ops', 0) or 1, 1)) * 100
+
+        enforcement_health = {
+            "status": "active" if rba_rate > 0 or wba_rate > 0 else "inactive",
+            "total_memories": total_memories,
+            "verified": verified_count,
+            "unverified": ver.get('unverified', 0) or 0,
+            "degraded": ver.get('degraded', 0) or 0,
+            "verification_rate": round(verification_rate, 1),
+            "avg_confidence": round(float(ver.get('avg_confidence', 0) or 0), 3),
+            "rba_enforcement_rate_24h": round(rba_rate, 1),
+            "wba_enforcement_rate_24h": round(wba_rate, 1),
+            "truth_backlog": backlog.get('backlog_count', 0) or 0,
+            "open_conflicts": conflicts.get('open_conflicts', 0) or 0
+        }
+
+        if (conflicts.get('open_conflicts', 0) or 0) > 100:
+            alerts.append({
+                "severity": "warning",
+                "system": "memory_enforcement",
+                "message": f"{conflicts.get('open_conflicts', 0)} open memory conflicts need resolution",
+                "timestamp": now.isoformat()
+            })
+
+    except Exception as e:
+        logger.warning(f"Enforcement check failed: {e}")
+
+    # ============================================
+    # 8. LEARNING FEEDBACK LOOP (Total Completion Protocol)
+    # ============================================
+    learning_health = {"status": "unknown"}
+    try:
+        # Insight stats
+        insight_stats = await _safe_query(pool, """
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE applied = false) as unapplied,
+                COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as recent
+            FROM ai_learning_insights
+        """)
+
+        # Proposal stats
+        proposal_stats = await _safe_query(pool, """
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE status = 'proposed') as pending,
+                COUNT(*) FILTER (WHERE status = 'approved') as approved,
+                COUNT(*) FILTER (WHERE status = 'completed') as completed
+            FROM ai_improvement_proposals
+        """)
+
+        ins = insight_stats[0] if insight_stats else {}
+        prop = proposal_stats[0] if proposal_stats else {}
+
+        learning_health = {
+            "status": "active" if (ins.get('recent', 0) or 0) > 0 else "idle",
+            "total_insights": ins.get('total', 0) or 0,
+            "unapplied_insights": ins.get('unapplied', 0) or 0,
+            "insights_24hr": ins.get('recent', 0) or 0,
+            "pending_proposals": prop.get('pending', 0) or 0,
+            "approved_proposals": prop.get('approved', 0) or 0,
+            "completed_proposals": prop.get('completed', 0) or 0
+        }
+
+        if (ins.get('unapplied', 0) or 0) > 1000:
+            alerts.append({
+                "severity": "info",
+                "system": "learning",
+                "message": f"{ins.get('unapplied', 0)} insights haven't been applied - run feedback loop",
+                "timestamp": now.isoformat()
+            })
+            recommendations.append("Run /learning/feedback/run to process unapplied insights")
+
+    except Exception as e:
+        logger.warning(f"Learning check failed: {e}")
+
+    # ============================================
+    # 9. DETERMINE OVERALL HEALTH
     # ============================================
     critical_alerts = len([a for a in alerts if a['severity'] == 'critical'])
     warning_alerts = len([a for a in alerts if a['severity'] == 'warning'])
@@ -322,7 +495,9 @@ async def get_complete_awareness() -> dict[str, Any]:
             "agents": agent_health,
             "aurea_orchestrator": aurea_health,
             "memory": memory_health,
-            "revenue": revenue_health
+            "revenue": revenue_health,
+            "memory_enforcement": enforcement_health,
+            "learning_feedback": learning_health
         },
         "recent_activity": recent_activity,
         "schema_issues": schema_issues,
@@ -332,7 +507,10 @@ async def get_complete_awareness() -> dict[str, Any]:
             "trigger_health_check": "/execute/HealthMonitor",
             "search_brain": "POST /brain/search",
             "store_memory": "POST /memory/store",
-            "aurea_status": "/aurea/status"
+            "aurea_status": "/aurea/status",
+            "enforcement_stats": "/enforcement/stats",
+            "hygiene_health": "/hygiene/health",
+            "run_feedback_loop": "POST /learning/feedback/run"
         }
     }
 

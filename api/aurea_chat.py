@@ -79,7 +79,7 @@ class AUREAStateProvider:
         from database.async_connection import get_pool
 
         try:
-            pool = await get_pool()
+            pool = get_pool()
 
             # Helper for safe count extraction
             def safe_count(result: dict | None) -> int:

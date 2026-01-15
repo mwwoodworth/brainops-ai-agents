@@ -77,7 +77,7 @@ class SystemAwareness:
             'mcp-bridge': 'https://brainops-mcp-bridge.onrender.com'
         }
 
-    async def _get_pool(self):
+    def _get_pool(self):
         """Get shared async pool - DO NOT reinitialize to prevent MaxClientsInSessionMode"""
         try:
             return get_pool()
@@ -102,7 +102,7 @@ class SystemAwareness:
         """Scan real business data for insights"""
         insights = []
         try:
-            pool = await self._get_pool()
+            pool = self._get_pool()
             if using_fallback():
                 insights.append(Insight(
                     category=AwarenessCategory.BUSINESS,
@@ -300,7 +300,7 @@ class SystemAwareness:
         insights = []
 
         try:
-            pool = await self._get_pool()
+            pool = self._get_pool()
             if using_fallback():
                 return insights
 
@@ -341,7 +341,7 @@ class SystemAwareness:
         insights = []
 
         try:
-            pool = await self._get_pool()
+            pool = self._get_pool()
             if using_fallback():
                 return insights
 
@@ -431,7 +431,7 @@ class SystemAwareness:
             if not insights:
                 return
 
-            pool = await self._get_pool()
+            pool = self._get_pool()
             if using_fallback():
                 logger.warning("Skipping insight persistence (database fallback active).")
                 return

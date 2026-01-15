@@ -435,7 +435,8 @@ async def revenue_dashboard(days: int = 30):
     if not pool:
         raise HTTPException(503, "Database unavailable")
 
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    # Use timezone-naive datetime for compatibility with various table schemas
+    since = datetime.utcnow() - timedelta(days=days)
 
     # Gumroad sales (excluding test)
     gumroad = await pool.fetchrow("""
@@ -481,23 +482,23 @@ async def revenue_dashboard(days: int = 30):
         WHERE created_at >= $1
     """, since)
 
-    # Agent executions
+    # Agent executions (cast to timestamp for tz compatibility)
     agents = await pool.fetchrow("""
         SELECT
             COUNT(*) as total_executions,
             COUNT(DISTINCT agent_type) as unique_agents
         FROM agent_executions
-        WHERE created_at >= $1
+        WHERE created_at >= $1::timestamp
     """, since)
 
-    # API usage
+    # API usage (note: api_usage uses timestamp, not created_at, and has no cost_cents)
     api = await pool.fetchrow("""
         SELECT
             COUNT(*) as total_calls,
             COUNT(DISTINCT api_key_id) as unique_keys,
-            COALESCE(SUM(cost_cents), 0) as total_revenue_cents
+            0 as total_revenue_cents
         FROM api_usage
-        WHERE created_at >= $1
+        WHERE timestamp >= $1
     """, since)
 
     # Calculate totals
