@@ -580,3 +580,90 @@ async def generate_realistic_leads(industry: str, location: str, count: int, ten
     except Exception as e:
         logger.error(f"Lead discovery error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Lead discovery failed") from e
+
+
+class EnrichLeadsRequest(BaseModel):
+    """Request to enrich leads with contact information"""
+    lead_ids: Optional[list[str]] = None
+    max_leads: int = 10
+
+
+@router.post("/enrich-leads")
+async def enrich_leads(request: EnrichLeadsRequest):
+    """
+    Enrich leads with real contact information using AI web search.
+    Finds emails, phone numbers, and contact names from company websites.
+    """
+    pool = get_pool()
+
+    try:
+        # Import Perplexity for web search
+        from ai_advanced_providers import AdvancedAIProviders
+        ai = AdvancedAIProviders()
+
+        # Get leads that need enrichment
+        if request.lead_ids:
+            leads = await pool.fetch("""
+                SELECT id, company_name, website
+                FROM revenue_leads
+                WHERE id = ANY($1::uuid[])
+                AND email IS NULL
+                AND website IS NOT NULL
+            """, [uuid.UUID(lid) for lid in request.lead_ids])
+        else:
+            leads = await pool.fetch("""
+                SELECT id, company_name, website
+                FROM revenue_leads
+                WHERE email IS NULL
+                AND website IS NOT NULL
+                LIMIT $1
+            """, request.max_leads)
+
+        enriched = []
+        for lead in leads:
+            website = lead['website']
+            company = lead['company_name']
+
+            # Use Perplexity to find contact info
+            query = f"Find the contact email address and phone number for {company}. Their website is {website}. Return ONLY the email address and phone number, nothing else."
+
+            result = ai.search_with_perplexity(query)
+
+            if result and result.get('answer'):
+                answer = result['answer']
+
+                # Extract email from response (simple regex)
+                import re
+                email_match = re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', answer)
+                phone_match = re.search(r'[\d\-\(\)\s\.]{10,}', answer)
+
+                if email_match:
+                    email = email_match.group(0)
+                    phone = phone_match.group(0).strip() if phone_match else None
+
+                    # Update the lead
+                    await pool.execute("""
+                        UPDATE revenue_leads
+                        SET email = $1, phone = $2, updated_at = NOW()
+                        WHERE id = $3
+                    """, email, phone, lead['id'])
+
+                    enriched.append({
+                        "lead_id": str(lead['id']),
+                        "company_name": company,
+                        "email": email,
+                        "phone": phone
+                    })
+
+                    logger.info(f"Enriched lead {company}: {email}")
+
+        return {
+            "success": True,
+            "enriched_count": len(enriched),
+            "leads": enriched,
+            "message": f"Enriched {len(enriched)} of {len(leads)} leads"
+        }
+
+    except Exception as e:
+        logger.error(f"Lead enrichment error: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
