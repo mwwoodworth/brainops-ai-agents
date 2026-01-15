@@ -3760,6 +3760,109 @@ async def get_consciousness_status():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+# ============================================================================
+# WORKFLOW ENGINE STATUS ENDPOINTS
+# ============================================================================
+
+@app.post("/workflow-engine/status")
+@app.get("/workflow-engine/status")
+async def get_workflow_engine_status():
+    """
+    Get workflow engine status.
+    Returns health status and statistics for the workflow execution system.
+    """
+    try:
+        from ai_workflow_templates import get_workflow_engine
+        engine = get_workflow_engine()
+
+        if not engine._initialized:
+            await engine.initialize()
+
+        health = await engine.get_health_status()
+        stats = await engine.get_stats()
+
+        return {
+            "status": "healthy",
+            "engine": "WorkflowEngine",
+            "initialized": health.get("initialized", False),
+            "stats": stats,
+            "templates_available": stats.get("templates_count", 0),
+            "running_workflows": stats.get("running_executions", 0),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except ImportError:
+        return {
+            "status": "unavailable",
+            "message": "Workflow engine module not available",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.warning(f"Workflow engine status check: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+
+@app.post("/workflow-automation/status")
+@app.get("/workflow-automation/status")
+async def get_workflow_automation_status():
+    """
+    Get workflow automation status.
+    Returns status of automated workflow pipelines and scheduled executions.
+    """
+    pool = get_pool()
+
+    try:
+        # Get workflow automation stats from database
+        # Schema: is_active (bool), not status
+        automation_stats = await pool.fetchrow("""
+            SELECT
+                COUNT(*) as total_workflows,
+                COUNT(*) FILTER (WHERE is_active = true) as active_workflows,
+                MAX(updated_at) as last_activity
+            FROM workflow_automation
+        """)
+
+        # Get recent run stats
+        # Schema: run_status (not status)
+        run_stats = await pool.fetchrow("""
+            SELECT
+                COUNT(*) as total_runs,
+                COUNT(*) FILTER (WHERE run_status = 'completed') as completed_runs,
+                COUNT(*) FILTER (WHERE run_status = 'failed') as failed_runs,
+                COUNT(*) FILTER (WHERE run_status = 'running') as running_workflows,
+                COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as runs_last_24h
+            FROM workflow_automation_runs
+        """)
+
+        return {
+            "status": "healthy",
+            "automation": {
+                "total_workflows": automation_stats["total_workflows"] if automation_stats else 0,
+                "active_workflows": automation_stats["active_workflows"] if automation_stats else 0,
+                "last_activity": automation_stats["last_activity"].isoformat() if automation_stats and automation_stats["last_activity"] else None
+            },
+            "runs": {
+                "total": run_stats["total_runs"] if run_stats else 0,
+                "completed": run_stats["completed_runs"] if run_stats else 0,
+                "failed": run_stats["failed_runs"] if run_stats else 0,
+                "running": run_stats["running_workflows"] if run_stats else 0,
+                "last_24h": run_stats["runs_last_24h"] if run_stats else 0
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.warning(f"Workflow automation status check: {e}")
+        return {
+            "status": "degraded",
+            "error": str(e),
+            "message": "Workflow automation tables may not exist",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+
 @app.get("/self-heal/check", dependencies=SECURED_DEPENDENCIES)
 async def check_self_healing():
     """

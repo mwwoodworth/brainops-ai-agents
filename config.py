@@ -151,7 +151,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.5.12')  # Fixed api_usage column name (timestamp not created_at)
+        self.version = os.getenv('VERSION', 'v3.5.14')  # Fixed workflow-automation query (is_active, run_status columns)
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
