@@ -99,14 +99,28 @@ PRODUCT_UPSELLS = {
     }
 }
 
-# Product prices for discount calculations
-PRODUCT_PRICES = {
-    "HJHMSM": 97, "VJXCEW": 67, "XGFKP": 47, "GSAAVB": 147,
-    "UPSYKR": 149, "CAWVO": 49, "GR-ROOFINT": 97, "GR-PMACC": 127,
-    "GR-LAUNCH": 147, "GR-ONBOARD": 297, "GR-CONTENT": 347,
-    "GR-ROOFVAL": 497, "GR-ERP-START": 197, "GR-AI-ORCH": 147,
-    "GR-UI-KIT": 97, "GR-ULTIMATE": 997
+# Product prices and names for upselling
+PRODUCT_INFO = {
+    "HJHMSM": {"name": "MCP Server Starter Kit", "price": 97},
+    "VJXCEW": {"name": "SaaS Automation Scripts", "price": 67},
+    "XGFKP": {"name": "AI Prompt Engineering Pack", "price": 47},
+    "GSAAVB": {"name": "AI Orchestration Framework", "price": 147},
+    "UPSYKR": {"name": "Command Center UI Kit", "price": 149},
+    "CAWVO": {"name": "Business Automation Toolkit", "price": 49},
+    "GR-ROOFINT": {"name": "Commercial Roofing Intelligence Bundle", "price": 97},
+    "GR-PMACC": {"name": "AI Project Management Accelerator", "price": 127},
+    "GR-LAUNCH": {"name": "Digital Product Launch Optimizer", "price": 147},
+    "GR-ONBOARD": {"name": "Intelligent Client Onboarding System", "price": 297},
+    "GR-CONTENT": {"name": "AI Content Production Pipeline", "price": 347},
+    "GR-ROOFVAL": {"name": "Commercial Roofing Estimation Validator", "price": 497},
+    "GR-ERP-START": {"name": "SaaS ERP Starter Kit", "price": 197},
+    "GR-AI-ORCH": {"name": "BrainOps AI Orchestrator Framework", "price": 147},
+    "GR-UI-KIT": {"name": "Modern Command Center UI Kit", "price": 97},
+    "GR-ULTIMATE": {"name": "Ultimate All-Access Bundle", "price": 997}
 }
+
+# Legacy mapping for backwards compatibility
+PRODUCT_PRICES = {k: v["price"] for k, v in PRODUCT_INFO.items()}
 
 
 def _get_db_config():
@@ -241,6 +255,7 @@ async def schedule_upsell_email(
         subject = upsell_config.get('upsell_subject', f"A special offer for you, {first_name}")
 
         rec = recommendations[0]
+        rec_product_name = PRODUCT_INFO.get(rec['product_code'], {}).get('name', rec['product_code'])
         discount_text = f"As a valued customer, you get {rec['discount_percent']}% off!" if rec['discount_percent'] > 0 else ""
 
         body = f"""
@@ -253,7 +268,7 @@ async def schedule_upsell_email(
 
     <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
         <h3 style="margin-top: 0;">Special Offer for You</h3>
-        <p><strong>{rec['product_code']}</strong></p>
+        <p><strong>{rec_product_name}</strong></p>
         <p style="font-size: 24px; color: #2563eb;">
             <span style="text-decoration: line-through; color: #999;">${rec['original_price']}</span>
             <strong>${rec['discounted_price']}</strong>
@@ -354,17 +369,17 @@ async def process_missed_upsells(days_back: int = 7, limit: int = 50) -> dict:
         purchases = await pool.fetch("""
             SELECT DISTINCT ON (gs.email)
                 gs.email, gs.product_code, gs.product_name, gs.sale_timestamp,
-                COALESCE(gs.full_name, 'there') as first_name
+                COALESCE(gs.customer_name, 'there') as first_name
             FROM gumroad_sales gs
             LEFT JOIN ai_email_queue eq ON eq.recipient = gs.email
                 AND eq.metadata->>'source' = 'upsell_engine'
-            WHERE gs.sale_timestamp > NOW() - INTERVAL '%s days'
+            WHERE gs.sale_timestamp > NOW() - make_interval(days => $1)
                 AND eq.id IS NULL
-                AND gs.email NOT LIKE '%%test%%'
-                AND gs.email NOT LIKE '%%example%%'
+                AND gs.email NOT LIKE '%test%'
+                AND gs.email NOT LIKE '%example%'
             ORDER BY gs.email, gs.sale_timestamp DESC
-            LIMIT $1
-        """ % days_back, limit)
+            LIMIT $2
+        """, days_back, limit)
 
         scheduled = 0
         for purchase in purchases:
