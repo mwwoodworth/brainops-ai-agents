@@ -37,6 +37,15 @@ except Exception as exc:
     REVENUE_DRIVE_AVAILABLE = False
     logging.warning("RevenueDrive unavailable: %s", exc)
 
+# Memory Hygiene System (2026-01-15 - Total Completion Protocol)
+try:
+    from memory_hygiene import run_scheduled_hygiene
+    MEMORY_HYGIENE_AVAILABLE = True
+except ImportError:
+    MEMORY_HYGIENE_AVAILABLE = False
+    run_scheduled_hygiene = None
+    logging.warning("Memory Hygiene System unavailable")
+
 # Enable revenue drive by default in production, off in dev unless toggled
 _revenue_drive_env = os.getenv("ENABLE_REVENUE_DRIVE")
 if _revenue_drive_env is None:
@@ -1185,6 +1194,22 @@ class AgentScheduler:
         except Exception as e:
             logger.error(f"❌ Error loading schedules: {e}", exc_info=True)
 
+    def _run_memory_hygiene(self):
+        """Execute the memory hygiene system."""
+        if not MEMORY_HYGIENE_AVAILABLE:
+            return
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(run_scheduled_hygiene())
+                logger.info("Memory Hygiene completed: %s operations", result.get("operations", {}))
+            finally:
+                loop.close()
+        except Exception as exc:
+            logger.error("Memory Hygiene failed: %s", exc, exc_info=True)
+
     def _run_revenue_drive(self):
         """Execute the autonomous revenue drive scan."""
         if not REVENUE_DRIVE_AVAILABLE or not ENABLE_REVENUE_DRIVE:
@@ -1237,6 +1262,27 @@ class AgentScheduler:
                 logger.info("✅ Scheduled OODA Loop every 5 minutes")
             except Exception as exc:
                 logger.error("Failed to schedule OODA Loop: %s", exc, exc_info=True)
+
+        # Register Memory Hygiene Job (Total Completion Protocol)
+        if MEMORY_HYGIENE_AVAILABLE:
+            try:
+                job_id = "memory_hygiene"
+                self.scheduler.add_job(
+                    func=self._run_memory_hygiene,
+                    trigger=IntervalTrigger(hours=6),
+                    id=job_id,
+                    name="Memory Hygiene",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "memory_hygiene",
+                    "agent_name": "Memory Hygiene",
+                    "frequency_minutes": 360,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("✅ Scheduled Memory Hygiene every 6 hours")
+            except Exception as exc:
+                logger.error("Failed to schedule Memory Hygiene: %s", exc, exc_info=True)
 
         if not (REVENUE_DRIVE_AVAILABLE and ENABLE_REVENUE_DRIVE):
             return
