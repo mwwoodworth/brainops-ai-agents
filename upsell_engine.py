@@ -5,15 +5,15 @@ Automatically suggests related products after purchase,
 tracks customer history, and sends personalized upsell emails.
 """
 
-import asyncio
 import json
 import logging
-import os
-import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Base upsell timing: 3 days after purchase (in minutes).
+BASE_UPSELL_DELAY_MINUTES = 60 * 24 * 3
 
 # Product relationships for upselling
 PRODUCT_UPSELLS = {
@@ -123,23 +123,27 @@ PRODUCT_INFO = {
 PRODUCT_PRICES = {k: v["price"] for k, v in PRODUCT_INFO.items()}
 
 
-def _get_db_config():
-    """Get database configuration from environment variables."""
-    database_url = os.getenv('DATABASE_URL')
-    if database_url:
-        match = re.match(
-            r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)',
-            database_url
-        )
-        if match:
-            return {
-                'host': match.group(3),
-                'database': match.group(5),
-                'user': match.group(1),
-                'password': match.group(2),
-                'port': int(match.group(4))
-            }
-    return None
+def _normalize_product_code(product_code: str) -> str:
+    return (product_code or "").strip().upper()
+
+
+def _product_name(product_code: str) -> str:
+    code = _normalize_product_code(product_code)
+    name = str(PRODUCT_INFO.get(code, {}).get("name") or "").strip()
+    return name or code or "Product"
+
+
+def _product_price(product_code: str) -> int:
+    code = _normalize_product_code(product_code)
+    try:
+        return int(PRODUCT_INFO.get(code, {}).get("price") or 0)
+    except Exception:
+        return 0
+
+
+def _gumroad_product_url(product_code: str) -> str:
+    code = (product_code or "").strip()
+    return f"https://brainstack.gumroad.com/l/{code}" if code else "https://gumroad.com/library"
 
 
 async def get_customer_purchase_history(email: str) -> list[dict]:
@@ -152,7 +156,7 @@ async def get_customer_purchase_history(email: str) -> list[dict]:
             SELECT product_code, product_name, price, sale_timestamp
             FROM gumroad_sales
             WHERE email = $1
-            ORDER BY sale_timestamp DESC
+            ORDER BY sale_timestamp DESC NULLS LAST, created_at DESC
         """, email)
 
         return [dict(row) for row in rows]
@@ -166,28 +170,44 @@ async def get_recommended_upsells(email: str, last_product_code: str) -> list[di
     try:
         # Get what they've already bought
         history = await get_customer_purchase_history(email)
-        purchased_codes = {p['product_code'] for p in history}
+        purchased_codes = {
+            _normalize_product_code(p.get("product_code", ""))
+            for p in history
+            if p.get("product_code")
+        }
+        trigger_code = _normalize_product_code(last_product_code)
+        if trigger_code:
+            purchased_codes.add(trigger_code)
 
         # Get upsell config for last product
-        upsell_config = PRODUCT_UPSELLS.get(last_product_code, {})
-        related_products = upsell_config.get('related', [])
+        upsell_config = PRODUCT_UPSELLS.get(trigger_code, {})
+        related_products = list(upsell_config.get("related", []) or [])
+
+        # Fallback: if there is no explicit mapping, default to the Ultimate bundle (if not owned).
+        if not related_products and "GR-ULTIMATE" not in purchased_codes:
+            related_products = ["GR-ULTIMATE"]
 
         # Filter out already purchased
         recommendations = []
+        prior_purchase_count = max(len(purchased_codes) - 1, 0)
         for product_code in related_products:
-            if product_code not in purchased_codes:
-                price = PRODUCT_PRICES.get(product_code, 0)
-                # Calculate loyalty discount based on purchase count
-                discount_pct = min(len(purchased_codes) * 5, 20)  # 5% per purchase, max 20%
-                discounted_price = int(price * (100 - discount_pct) / 100)
+            code = _normalize_product_code(product_code)
+            if not code or code in purchased_codes:
+                continue
 
-                recommendations.append({
-                    'product_code': product_code,
-                    'original_price': price,
-                    'discount_percent': discount_pct,
-                    'discounted_price': discounted_price,
-                    'reason': f"Recommended based on your {last_product_code} purchase"
-                })
+            price = _product_price(code)
+            discount_pct = min(prior_purchase_count * 5, 20)  # 5% per prior purchase, max 20%
+            discounted_price = int(price * (100 - discount_pct) / 100) if price else 0
+
+            recommendations.append({
+                "product_code": code,
+                "product_name": _product_name(code),
+                "product_url": _gumroad_product_url(code),
+                "original_price": price,
+                "discount_percent": discount_pct,
+                "discounted_price": discounted_price,
+                "reason": f"Pairs well with {_product_name(trigger_code)}",
+            })
 
         return recommendations[:2]  # Max 2 recommendations
     except Exception as e:
@@ -196,36 +216,85 @@ async def get_recommended_upsells(email: str, last_product_code: str) -> list[di
 
 
 async def calculate_optimal_upsell_timing(email: str) -> int:
-    """Calculate optimal delay for upsell email based on engagement."""
+    """
+    Calculate optimal delay (minutes) for the upsell email based on engagement.
+
+    Constraints:
+    - Never schedule sooner than 3 days after purchase (BASE_UPSELL_DELAY_MINUTES).
+
+    Engagement signals (best-effort, based on what we have in DB today):
+    - Repeat purchases (gumroad_sales) => earlier on day 3
+    - High recent email volume (ai_email_queue) => later on day 3
+    """
     try:
         from database.async_connection import get_pool
         pool = get_pool()
 
-        # Check email engagement
-        engagement = await pool.fetchrow("""
+        purchase_stats = await pool.fetchrow("""
             SELECT
-                COUNT(*) FILTER (WHERE status = 'sent') as emails_received,
-                COUNT(*) FILTER (WHERE metadata->>'clicked' = 'true') as emails_clicked
+                COUNT(*)::int AS purchase_count,
+                MAX(sale_timestamp) AS last_purchase_at,
+                COALESCE(SUM(price), 0) AS lifetime_value
+            FROM gumroad_sales
+            WHERE email = $1
+        """, email)
+
+        email_stats = await pool.fetchrow("""
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'sent' AND sent_at > NOW() - INTERVAL '60 days')::int AS emails_sent_60d,
+                MAX(sent_at) AS last_email_sent_at
             FROM ai_email_queue
             WHERE recipient = $1
         """, email)
 
-        if engagement:
-            received = engagement['emails_received'] or 0
-            clicked = engagement['emails_clicked'] or 0
+        purchase_count = int(purchase_stats.get("purchase_count") or 0) if purchase_stats else 0
+        emails_sent_60d = int(email_stats.get("emails_sent_60d") or 0) if email_stats else 0
 
-            if received > 0 and clicked / received > 0.3:
-                # High engagement - send sooner (2 days)
-                return 2880  # minutes
-            elif received > 5:
-                # Low engagement - wait longer (5 days)
-                return 7200
+        # Repeat buyers tend to convert better: send closer to the 3-day mark.
+        if purchase_count >= 3:
+            return BASE_UPSELL_DELAY_MINUTES + 60  # +1h
+        if purchase_count == 2:
+            return BASE_UPSELL_DELAY_MINUTES + 240  # +4h
 
-        # Default: 3 days
-        return 4320
+        # Avoid piling on if the customer is already receiving lots of emails.
+        if emails_sent_60d >= 8:
+            return BASE_UPSELL_DELAY_MINUTES + 720  # +12h
+
+        return BASE_UPSELL_DELAY_MINUTES + 480  # +8h default
     except Exception as e:
         logger.error(f"Error calculating timing: {e}")
-        return 4320  # Default 3 days
+        return BASE_UPSELL_DELAY_MINUTES + 480
+
+
+async def _avoid_email_collision(recipient: str, scheduled_for: datetime) -> datetime:
+    """
+    Best-effort collision avoidance to prevent sending multiple emails at the same time.
+
+    If there is an existing queued/scheduled email within +/- 45 minutes, push by 2 hours.
+    """
+    try:
+        from database.async_connection import get_pool
+        pool = get_pool()
+
+        candidate = scheduled_for
+        for _ in range(3):
+            window_start = candidate - timedelta(minutes=45)
+            window_end = candidate + timedelta(minutes=45)
+            collision_count = await pool.fetchval("""
+                SELECT COUNT(*)::int
+                FROM ai_email_queue
+                WHERE recipient = $1
+                  AND status IN ('queued', 'scheduled', 'processing')
+                  AND scheduled_for IS NOT NULL
+                  AND scheduled_for BETWEEN $2 AND $3
+            """, recipient, window_start, window_end)
+            if not collision_count:
+                return candidate
+            candidate = candidate + timedelta(hours=2)
+
+        return candidate
+    except Exception:
+        return scheduled_for
 
 
 async def schedule_upsell_email(
@@ -236,14 +305,16 @@ async def schedule_upsell_email(
 ) -> Optional[str]:
     """Schedule a personalized upsell email."""
     try:
+        trigger_code = _normalize_product_code(last_product_code)
+
         # Get upsell config
-        upsell_config = PRODUCT_UPSELLS.get(last_product_code)
+        upsell_config = PRODUCT_UPSELLS.get(trigger_code)
         if not upsell_config or not upsell_config.get('related'):
             logger.info(f"No upsells configured for {last_product_code}")
             return None
 
         # Get recommendations
-        recommendations = await get_recommended_upsells(email, last_product_code)
+        recommendations = await get_recommended_upsells(email, trigger_code)
         if not recommendations:
             logger.info(f"No upsell recommendations for {email} (may already own related)")
             return None
@@ -254,9 +325,47 @@ async def schedule_upsell_email(
         # Build email content
         subject = upsell_config.get('upsell_subject', f"A special offer for you, {first_name}")
 
-        rec = recommendations[0]
-        rec_product_name = PRODUCT_INFO.get(rec['product_code'], {}).get('name', rec['product_code'])
-        discount_text = f"As a valued customer, you get {rec['discount_percent']}% off!" if rec['discount_percent'] > 0 else ""
+        blocks: list[str] = []
+        recommended_codes: list[str] = []
+        max_discount_percent = 0
+
+        for rec in recommendations:
+            code = str(rec.get("product_code") or "").strip()
+            recommended_codes.append(code)
+
+            product_name = str(rec.get("product_name") or _product_name(code))
+            product_url = str(rec.get("product_url") or _gumroad_product_url(code))
+            reason = str(rec.get("reason") or "").strip()
+
+            original_price = int(rec.get("original_price") or 0)
+            discounted_price = int(rec.get("discounted_price") or 0)
+            discount_percent = int(rec.get("discount_percent") or 0)
+            max_discount_percent = max(max_discount_percent, discount_percent)
+
+            price_html = ""
+            if original_price and discounted_price and discounted_price < original_price:
+                price_html = (
+                    f"<span style=\"text-decoration: line-through; color: #999;\">${original_price}</span> "
+                    f"<strong>${discounted_price}</strong>"
+                )
+            elif original_price:
+                price_html = f"<strong>${original_price}</strong>"
+
+            discount_text = f"{discount_percent}% off for existing customers" if discount_percent else ""
+
+            blocks.append(f"""
+    <div style="background: #f5f5f5; padding: 18px; border-radius: 8px; margin: 14px 0;">
+        <h3 style="margin: 0 0 8px 0;">{product_name}</h3>
+        {f'<p style=\"margin: 0 0 10px 0; color: #555;\">{reason}</p>' if reason else ''}
+        {f'<p style=\"margin: 0 0 12px 0; font-size: 20px; color: #2563eb;\">{price_html}</p>' if price_html else ''}
+        {f'<p style=\"margin: 0 0 12px 0; color: #16a34a;\">{discount_text}</p>' if discount_text else ''}
+        <a href="{product_url}"
+           style="background: #2563eb; color: white; padding: 12px 18px;
+                  text-decoration: none; border-radius: 6px; display: inline-block;">
+            View {product_name}
+        </a>
+    </div>
+""")
 
         body = f"""
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -266,20 +375,8 @@ async def schedule_upsell_email(
 
     <p>{upsell_config.get('upsell_message', '')}</p>
 
-    <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-        <h3 style="margin-top: 0;">Special Offer for You</h3>
-        <p><strong>{rec_product_name}</strong></p>
-        <p style="font-size: 24px; color: #2563eb;">
-            <span style="text-decoration: line-through; color: #999;">${rec['original_price']}</span>
-            <strong>${rec['discounted_price']}</strong>
-        </p>
-        {f'<p style="color: #16a34a;">{discount_text}</p>' if discount_text else ''}
-        <a href="https://brainstack.gumroad.com/l/{rec['product_code']}"
-           style="background: #2563eb; color: white; padding: 12px 24px;
-                  text-decoration: none; border-radius: 5px; display: inline-block;">
-            Get It Now
-        </a>
-    </div>
+    <h3 style="margin-top: 22px;">Recommended next steps</h3>
+    {''.join(blocks)}
 
     <p>This offer is just for existing customers like you. Thanks for being part of the BrainStack community!</p>
 
@@ -289,6 +386,10 @@ async def schedule_upsell_email(
 
         # Schedule the email
         from email_scheduler_daemon import schedule_nurture_email
+        desired_send_at = datetime.now(timezone.utc) + timedelta(minutes=delay_minutes)
+        desired_send_at = await _avoid_email_collision(email, desired_send_at)
+        delay_minutes = max(0, int((desired_send_at - datetime.now(timezone.utc)).total_seconds() / 60))
+
         email_id = await schedule_nurture_email(
             recipient=email,
             subject=subject,
@@ -296,13 +397,20 @@ async def schedule_upsell_email(
             delay_minutes=delay_minutes,
             metadata={
                 "source": "upsell_engine",
-                "trigger_product": last_product_code,
-                "recommended_product": rec['product_code'],
-                "discount_percent": rec['discount_percent']
+                "trigger_product": trigger_code,
+                "trigger_product_name": last_product_name,
+                "recommended_products": [c for c in recommended_codes if c],
+                "recommended_product": next((c for c in recommended_codes if c), ""),
+                "discount_percent": max_discount_percent,
             }
         )
 
-        logger.info(f"Scheduled upsell email for {email}: {rec['product_code']} in {delay_minutes} minutes")
+        logger.info(
+            "Scheduled upsell email for %s: %s in %s minutes",
+            email,
+            ",".join([c for c in recommended_codes if c]),
+            delay_minutes,
+        )
         return email_id
 
     except Exception as e:
@@ -330,8 +438,29 @@ async def process_purchase_for_upsell(
     }
 
     try:
+        trigger_code = _normalize_product_code(product_code)
+
+        # Best-effort duplicate protection: avoid scheduling multiple upsells for the same trigger product.
+        try:
+            from database.async_connection import get_pool
+            pool = get_pool()
+            existing = await pool.fetchval("""
+                SELECT COUNT(*)::int
+                FROM ai_email_queue
+                WHERE recipient = $1
+                  AND metadata->>'source' = 'upsell_engine'
+                  AND metadata->>'trigger_product' = $2
+                  AND created_at > NOW() - INTERVAL '14 days'
+            """, email, trigger_code)
+            if existing and int(existing) > 0:
+                result["skipped_reason"] = "duplicate_recent_upsell"
+                return result
+        except Exception:
+            # If the DB check fails, proceed (queue-level locks still reduce duplicate sends in practice).
+            pass
+
         # Get recommendations
-        recommendations = await get_recommended_upsells(email, product_code)
+        recommendations = await get_recommended_upsells(email, trigger_code)
         result["recommendations"] = recommendations
 
         if recommendations:
@@ -339,7 +468,7 @@ async def process_purchase_for_upsell(
             email_id = await schedule_upsell_email(
                 email=email,
                 first_name=first_name or "there",
-                last_product_code=product_code,
+                last_product_code=trigger_code,
                 last_product_name=product_name
             )
 
@@ -373,6 +502,7 @@ async def process_missed_upsells(days_back: int = 7, limit: int = 50) -> dict:
             FROM gumroad_sales gs
             LEFT JOIN ai_email_queue eq ON eq.recipient = gs.email
                 AND eq.metadata->>'source' = 'upsell_engine'
+                AND eq.metadata->>'trigger_product' = gs.product_code
             WHERE gs.sale_timestamp > NOW() - make_interval(days => $1)
                 AND eq.id IS NULL
                 AND gs.email NOT LIKE '%test%'

@@ -447,7 +447,8 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
         cursor.execute("""
             SELECT id, recipient, subject, body, scheduled_for, status, metadata, created_at
             FROM ai_email_queue
-            WHERE (status = 'queued' OR (status = 'scheduled' AND (scheduled_for IS NULL OR scheduled_for <= NOW())))
+            WHERE status IN ('queued', 'scheduled')
+              AND (scheduled_for IS NULL OR scheduled_for <= NOW())
             ORDER BY
                 CASE WHEN metadata->>'priority' = 'high' THEN 0 ELSE 1 END,
                 scheduled_for ASC NULLS FIRST,

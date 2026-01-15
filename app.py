@@ -1375,6 +1375,26 @@ try:
 except ImportError as e:
     logger.warning(f"API Monetization Engine not available: {e}")
 
+# Memory Enforcement API (2026-01-15) - RBA/WBA enforcement, verification, audit
+try:
+    from api.memory_enforcement_api import router as memory_enforcement_router
+    app.include_router(memory_enforcement_router, dependencies=SECURED_DEPENDENCIES)
+    MEMORY_ENFORCEMENT_AVAILABLE = True
+    logger.info("✅ Memory Enforcement API loaded at /enforcement - RBA/WBA, verification, audit")
+except ImportError as e:
+    MEMORY_ENFORCEMENT_AVAILABLE = False
+    logger.warning(f"Memory Enforcement API not available: {e}")
+
+# Memory Hygiene API (2026-01-15) - Automated memory maintenance
+try:
+    from api.memory_hygiene_api import router as memory_hygiene_router
+    app.include_router(memory_hygiene_router, dependencies=SECURED_DEPENDENCIES)
+    MEMORY_HYGIENE_AVAILABLE = True
+    logger.info("✅ Memory Hygiene API loaded at /hygiene - deduplication, conflicts, decay")
+except ImportError as e:
+    MEMORY_HYGIENE_AVAILABLE = False
+    logger.warning(f"Memory Hygiene API not available: {e}")
+
 
 def _collect_active_systems() -> list[str]:
     """Return a list of systems that are initialized and active."""
@@ -1412,6 +1432,11 @@ def _collect_active_systems() -> list[str]:
     # Bleeding Edge AI Systems (2025-12-27)
     if BLEEDING_EDGE_AVAILABLE:
         active.append("Bleeding Edge AI (OODA, Hallucination, Memory, Dependability, Consciousness, Circuit Breaker)")
+    # Memory Enforcement & Hygiene (2026-01-15) - Total Completion Protocol
+    if MEMORY_ENFORCEMENT_AVAILABLE:
+        active.append("Memory Enforcement (RBA/WBA, Verification, Audit)")
+    if MEMORY_HYGIENE_AVAILABLE:
+        active.append("Memory Hygiene (Deduplication, Conflicts, Decay)")
     return active
 
 
