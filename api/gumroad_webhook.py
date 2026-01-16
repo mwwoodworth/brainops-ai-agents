@@ -37,42 +37,48 @@ router = APIRouter(
 
 # Product mapping - keyed by Gumroad permalink (uppercase) or product code
 PRODUCT_MAPPING = {
-    # === LIVE GUMROAD PRODUCTS (Published) ===
+    # === LIVE GUMROAD PRODUCTS (Published) - Prices synced 2026-01-15 ===
     'HJHMSM': {
         'name': 'MCP Server Starter Kit',
-        'price': 97,
+        'price': 49,  # Live price on Gumroad
         'type': 'code_kit',
-        'convertkit_tag': 'mcp-kit-buyer'
+        'convertkit_tag': 'mcp-kit-buyer',
+        'gumroad_url': 'https://woodworthia.gumroad.com/l/hjhmsm'
     },
     'VJXCEW': {
         'name': 'SaaS Automation Scripts',
-        'price': 67,
+        'price': 37,  # Live price on Gumroad
         'type': 'code_kit',
-        'convertkit_tag': 'saas-scripts-buyer'
+        'convertkit_tag': 'saas-scripts-buyer',
+        'gumroad_url': 'https://woodworthia.gumroad.com/l/vjxcew'
     },
     'XGFKP': {
         'name': 'AI Prompt Engineering Pack',
-        'price': 47,
+        'price': 29,  # Live price on Gumroad
         'type': 'prompt_pack',
-        'convertkit_tag': 'ai-prompts-buyer'
+        'convertkit_tag': 'ai-prompts-buyer',
+        'gumroad_url': 'https://woodworthia.gumroad.com/l/xgfkp'
     },
     'GSAAVB': {
         'name': 'AI Orchestration Framework',
-        'price': 147,
+        'price': 97,  # Live price on Gumroad
         'type': 'code_kit',
-        'convertkit_tag': 'ai-orchestration-buyer'
+        'convertkit_tag': 'ai-orchestration-buyer',
+        'gumroad_url': 'https://woodworthia.gumroad.com/l/gsaavb'
     },
     'UPSYKR': {
         'name': 'Command Center UI Kit',
-        'price': 149,
+        'price': 149,  # Live price on Gumroad
         'type': 'code_kit',
-        'convertkit_tag': 'ui-kit-buyer'
+        'convertkit_tag': 'ui-kit-buyer',
+        'gumroad_url': 'https://woodworthia.gumroad.com/l/upsykr'
     },
     'CAWVO': {
         'name': 'Business Automation Toolkit',
-        'price': 49,
+        'price': 29,  # Live price on Gumroad
         'type': 'prompt_pack',
-        'convertkit_tag': 'business-toolkit-buyer'
+        'convertkit_tag': 'business-toolkit-buyer',
+        'gumroad_url': 'https://woodworthia.gumroad.com/l/cawvo'
     },
     # === LEGACY/FUTURE PRODUCTS ===
     'GR-ROOFINT': {
