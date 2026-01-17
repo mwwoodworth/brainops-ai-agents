@@ -7,6 +7,7 @@ tracks customer history, and sends personalized upsell emails.
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -14,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 # Base upsell timing: 3 days after purchase (in minutes).
 BASE_UPSELL_DELAY_MINUTES = 60 * 24 * 3
+
+# Gumroad host for product links (public URLs, not secrets).
+GUMROAD_SELLER_HOST = os.getenv("GUMROAD_SELLER_HOST", "woodworthia.gumroad.com").strip() or "woodworthia.gumroad.com"
 
 # Product relationships for upselling
 PRODUCT_UPSELLS = {
@@ -101,12 +105,13 @@ PRODUCT_UPSELLS = {
 
 # Product prices and names for upselling
 PRODUCT_INFO = {
-    "HJHMSM": {"name": "MCP Server Starter Kit", "price": 97},
-    "VJXCEW": {"name": "SaaS Automation Scripts", "price": 67},
-    "XGFKP": {"name": "AI Prompt Engineering Pack", "price": 47},
-    "GSAAVB": {"name": "AI Orchestration Framework", "price": 147},
+    # Live Gumroad products (verified via Gumroad API 2026-01-17)
+    "HJHMSM": {"name": "MCP Server Starter Kit", "price": 49},
+    "VJXCEW": {"name": "SaaS Automation Scripts", "price": 37},
+    "XGFKP": {"name": "AI Prompt Engineering Pack", "price": 29},
+    "GSAAVB": {"name": "AI Orchestration Framework", "price": 97},
     "UPSYKR": {"name": "Command Center UI Kit", "price": 149},
-    "CAWVO": {"name": "Business Automation Toolkit", "price": 49},
+    "CAWVO": {"name": "Business Automation Toolkit", "price": 29},
     "GR-ROOFINT": {"name": "Commercial Roofing Intelligence Bundle", "price": 97},
     "GR-PMACC": {"name": "AI Project Management Accelerator", "price": 127},
     "GR-LAUNCH": {"name": "Digital Product Launch Optimizer", "price": 147},
@@ -143,7 +148,9 @@ def _product_price(product_code: str) -> int:
 
 def _gumroad_product_url(product_code: str) -> str:
     code = (product_code or "").strip()
-    return f"https://brainstack.gumroad.com/l/{code}" if code else "https://gumroad.com/library"
+    if not code:
+        return "https://gumroad.com/library"
+    return f"https://{GUMROAD_SELLER_HOST}/l/{code.lower()}"
 
 
 async def get_customer_purchase_history(email: str) -> list[dict]:

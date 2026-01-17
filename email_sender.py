@@ -54,6 +54,58 @@ TEST_EMAIL_SUFFIXES = (".test", ".example", ".invalid")
 TEST_EMAIL_TOKENS = ("@example.", "@test.", "@demo.", "@invalid.")
 TEST_EMAIL_DOMAINS = ("test.com", "example.com", "localhost", "demo@roofing.com")
 
+OUTBOUND_EMAIL_MODE = os.getenv("OUTBOUND_EMAIL_MODE", "disabled").strip().lower()
+
+
+def _parse_csv_env(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    return {item.strip().lower() for item in value.split(",") if item.strip()}
+
+
+_OUTBOUND_EMAIL_ALLOWLIST_RECIPIENTS = _parse_csv_env(os.getenv("OUTBOUND_EMAIL_ALLOWLIST", ""))
+_OUTBOUND_EMAIL_ALLOWLIST_DOMAINS = _parse_csv_env(os.getenv("OUTBOUND_EMAIL_ALLOWLIST_DOMAINS", ""))
+
+
+def _is_allowlisted_recipient(recipient: str | None) -> bool:
+    if not recipient:
+        return False
+    lowered = recipient.strip().lower()
+    if lowered in _OUTBOUND_EMAIL_ALLOWLIST_RECIPIENTS:
+        return True
+    if "@" not in lowered:
+        return False
+    domain = lowered.split("@", 1)[1]
+    if domain in _OUTBOUND_EMAIL_ALLOWLIST_DOMAINS:
+        return True
+    return any(domain.endswith(f".{allowed}") for allowed in _OUTBOUND_EMAIL_ALLOWLIST_DOMAINS)
+
+
+def _outbound_block_reason(recipient: str, metadata: dict[str, Any] | None) -> str | None:
+    """
+    Centralized outbound safety rail.
+
+    Modes:
+      - disabled (default): nothing sends; queue entries are marked skipped.
+      - allowlist: only allowlisted recipients/domains send.
+      - live: sends (still skips test recipients by heuristic).
+    """
+    mode = OUTBOUND_EMAIL_MODE
+    if mode == "live":
+        return None
+
+    if _is_allowlisted_recipient(recipient):
+        return None
+
+    if mode == "allowlist":
+        return "not_allowlisted"
+
+    # disabled (or unknown): fail closed
+    if metadata and (metadata.get("allow_outbound") is True):
+        # Explicit per-email override (still subject to allowlist above). Keep for future use.
+        return "outbound_disabled"
+    return "outbound_disabled"
+
 
 # Database configuration - supports DATABASE_URL or individual vars
 def _get_db_config():
@@ -499,6 +551,34 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                 stats["emails"].append({"id": email_id, "recipient": recipient, "status": "failed", "reason": "invalid_recipient"})
                 continue
 
+            block_reason = _outbound_block_reason(recipient, metadata)
+            if block_reason:
+                logger.warning("Outbound email blocked (%s) for %s", block_reason, recipient)
+                if not dry_run:
+                    cursor.execute(
+                        """
+                        UPDATE ai_email_queue
+                        SET status = 'skipped',
+                            metadata = metadata || %s
+                        WHERE id = %s
+                        """,
+                        (
+                            json.dumps(
+                                {
+                                    "skip_reason": block_reason,
+                                    "skipped_at": datetime.now(timezone.utc).isoformat(),
+                                }
+                            ),
+                            email_id,
+                        ),
+                    )
+                    conn.commit()
+                stats["skipped"] += 1
+                stats["emails"].append(
+                    {"id": email_id, "recipient": recipient, "status": "skipped", "reason": block_reason}
+                )
+                continue
+
             if _is_test_recipient(recipient, metadata):
                 logger.info(f"Skipping test email {email_id}: {recipient}")
                 if not dry_run:
@@ -689,7 +769,7 @@ def get_queue_status() -> dict[str, Any]:
             "totals": dict(totals),
             "by_status": [dict(row) for row in status_counts],
             "provider": "resend" if RESEND_API_KEY else ("sendgrid" if SENDGRID_API_KEY else ("smtp" if SMTP_HOST else "none")),
-            "provider_configured": bool(SENDGRID_API_KEY or SMTP_HOST)
+            "provider_configured": bool(RESEND_API_KEY or SENDGRID_API_KEY or SMTP_HOST)
         }
 
     except Exception as e:
