@@ -227,9 +227,16 @@ class PaymentCapture:
         now = datetime.now(timezone.utc)
 
         # Queue email
+        email_metadata = {
+            "source": "payment_capture",
+            "invoice_id": invoice_id,
+            "proposal_id": str(invoice["proposal_id"]),
+            "lead_id": str(invoice["lead_id"]),
+            "payment_link": invoice["payment_link"],
+        }
         await pool.execute("""
-            INSERT INTO ai_email_queue (id, recipient_email, subject, body, status, send_after, created_at)
-            VALUES ($1, $2, $3, $4, 'queued', $5, $5)
+            INSERT INTO ai_email_queue (id, recipient, subject, body, status, scheduled_for, created_at, metadata)
+            VALUES ($1, $2, $3, $4, 'queued', $5, $5, $6::jsonb)
         """,
             uuid.uuid4(),
             invoice["client_email"],
@@ -246,7 +253,8 @@ If you have any questions, just reply to this email.
 
 Best,
 BrainOps Team""",
-            now
+            now,
+            json.dumps(email_metadata),
         )
 
         # Update invoice status

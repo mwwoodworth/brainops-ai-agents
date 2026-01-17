@@ -460,7 +460,7 @@ class OutreachEngine:
             # Check for duplicate sends
             existing = await pool.fetchrow("""
                 SELECT id FROM ai_email_queue
-                WHERE recipient_email = $1
+                WHERE recipient = $1
                 AND subject = $2
                 AND status = 'sent'
             """, lead["email"], action_data.get("subject"))
@@ -470,15 +470,23 @@ class OutreachEngine:
 
             # Queue email
             now = datetime.now(timezone.utc)
+            email_metadata = {
+                "source": "outreach_engine",
+                "draft_id": draft_id,
+                "lead_id": str(draft["lead_id"]),
+                "approved_by": approved_by,
+                "sequence_step": action_data.get("sequence_step"),
+            }
             await pool.execute("""
-                INSERT INTO ai_email_queue (id, recipient_email, subject, body, status, send_after, created_at)
-                VALUES ($1, $2, $3, $4, 'queued', $5, $5)
+                INSERT INTO ai_email_queue (id, recipient, subject, body, status, scheduled_for, created_at, metadata)
+                VALUES ($1, $2, $3, $4, 'queued', $5, $5, $6::jsonb)
             """,
                 uuid.uuid4(),
                 lead["email"],
                 action_data.get("subject"),
                 action_data.get("body"),
-                now
+                now,
+                json.dumps(email_metadata),
             )
 
             # Update draft status
