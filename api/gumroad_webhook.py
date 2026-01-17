@@ -9,13 +9,16 @@ import hmac
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Security
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
+
+from config import config
 
 # Configuration
 CONVERTKIT_API_KEY = os.getenv("CONVERTKIT_API_KEY", "")
@@ -34,6 +37,83 @@ router = APIRouter(
     prefix="/gumroad",
     tags=["gumroad", "income", "sales"]
 )
+
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def _require_internal_api_key(api_key: str = Security(_api_key_header)) -> bool:
+    """
+    Protect non-webhook Gumroad endpoints.
+
+    `/gumroad/webhook` must remain publicly reachable for Gumroad, and is protected
+    via HMAC signature verification. Everything else is internal-only.
+    """
+    if not config.security.auth_required:
+        return True
+
+    provided = (api_key or "").strip()
+    if not provided or provided not in config.security.valid_api_keys:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return True
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
+
+def _parse_gumroad_timestamp(value: Any) -> datetime:
+    """
+    Gumroad commonly sends ISO timestamps with a trailing 'Z' (UTC).
+    Python's datetime.fromisoformat() does not accept 'Z', so normalize it.
+    """
+    if value is None:
+        return datetime.now(timezone.utc)
+    text = str(value).strip()
+    if not text:
+        return datetime.now(timezone.utc)
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        # Last-resort: accept unix seconds (string/number)
+        try:
+            parsed = datetime.fromtimestamp(float(text), tz=timezone.utc)
+        except Exception:
+            return datetime.now(timezone.utc)
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+def _parse_price(value: Any) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, (int, float)):
+        return Decimal(str(value))
+    text = str(value).strip().replace("$", "").replace(",", "")
+    if not text:
+        return Decimal("0")
+    try:
+        return Decimal(text)
+    except Exception:
+        return Decimal("0")
+
+def _is_test_sale(sale_data: dict[str, Any]) -> bool:
+    # Gumroad includes a `test` field for test purchases.
+    if _coerce_bool(sale_data.get("test")):
+        return True
+    sale_id = str(sale_data.get("sale_id") or "").strip().upper()
+    if sale_id.startswith("TEST-"):
+        return True
+    email = str(sale_data.get("email") or "").strip().lower()
+    if any(token in email for token in ("test", "example", "demo", "sample", "fake", "placeholder", "localhost")):
+        return True
+    return False
 
 # Product mapping - keyed by Gumroad permalink (uppercase) or product code
 PRODUCT_MAPPING = {
@@ -267,13 +347,27 @@ async def record_sale_to_database(sale_data: dict[str, Any]):
         from database.async_connection import get_pool
 
         pool = get_pool()
+        is_test = _is_test_sale(sale_data)
+        sale_timestamp = _parse_gumroad_timestamp(sale_data.get("sale_timestamp"))
         await pool.execute("""
             INSERT INTO gumroad_sales (
                 sale_id, email, customer_name, product_code,
                 product_name, price, currency, sale_timestamp,
-                convertkit_synced, metadata
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                convertkit_synced, stripe_synced, sendgrid_sent, is_test, metadata
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             ON CONFLICT (sale_id) DO UPDATE SET
+                email = EXCLUDED.email,
+                customer_name = EXCLUDED.customer_name,
+                product_code = EXCLUDED.product_code,
+                product_name = EXCLUDED.product_name,
+                price = EXCLUDED.price,
+                currency = EXCLUDED.currency,
+                sale_timestamp = EXCLUDED.sale_timestamp,
+                metadata = EXCLUDED.metadata,
+                is_test = EXCLUDED.is_test,
+                convertkit_synced = gumroad_sales.convertkit_synced OR EXCLUDED.convertkit_synced,
+                stripe_synced = gumroad_sales.stripe_synced OR EXCLUDED.stripe_synced,
+                sendgrid_sent = gumroad_sales.sendgrid_sent OR EXCLUDED.sendgrid_sent,
                 updated_at = NOW()
         """,
             sale_data.get('sale_id'),
@@ -281,11 +375,14 @@ async def record_sale_to_database(sale_data: dict[str, Any]):
             sale_data.get('full_name'),
             sale_data.get('product_code'),
             sale_data.get('product_name'),
-            Decimal(sale_data.get('price', '0').replace('$', '').replace(',', '')),
+            _parse_price(sale_data.get("price")),
             sale_data.get('currency', 'USD'),
-            datetime.fromisoformat(sale_data.get('sale_timestamp', datetime.utcnow().isoformat())),
-            True,
-            json.dumps(sale_data)
+            sale_timestamp,
+            False,  # convertkit_synced (set true only after confirmed)
+            False,  # stripe_synced
+            False,  # sendgrid_sent
+            is_test,
+            sale_data
         )
         logger.info(f"Recorded sale {sale_data.get('sale_id')} to database")
         return True
@@ -293,6 +390,46 @@ async def record_sale_to_database(sale_data: dict[str, Any]):
     except Exception as e:
         logger.error(f"Database recording error: {e}")
         return False
+
+async def _update_sale_flags(
+    sale_id: str,
+    *,
+    convertkit_synced: Optional[bool] = None,
+    stripe_synced: Optional[bool] = None,
+    sendgrid_sent: Optional[bool] = None,
+) -> None:
+    if not sale_id:
+        return
+
+    updates: list[str] = []
+    params: list[Any] = [sale_id]
+
+    def _add_flag(column: str, value: Optional[bool]) -> None:
+        if value is None:
+            return
+        if value is True:
+            params.append(True)
+            updates.append(f"{column} = {column} OR ${len(params)}")
+        else:
+            # Never downgrade flags (keep audit semantics monotonic)
+            return
+
+    _add_flag("convertkit_synced", convertkit_synced)
+    _add_flag("stripe_synced", stripe_synced)
+    _add_flag("sendgrid_sent", sendgrid_sent)
+
+    if not updates:
+        return
+
+    from database.async_connection import get_pool
+
+    pool = get_pool()
+    query = f"""
+        UPDATE gumroad_sales
+        SET {", ".join(updates)}, updated_at = NOW()
+        WHERE sale_id = $1
+    """
+    await pool.execute(query, *params)
 
 async def send_purchase_email(email: str, name: str, product_name: str, download_url: str):
     """Send purchase confirmation via Resend (primary) or SendGrid (fallback)."""
@@ -394,9 +531,18 @@ async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundT
         elif signature_required:
             raise HTTPException(status_code=503, detail="Webhook not configured")
 
-        # Parse webhook data
-        data = await request.json()
-        sale = GumroadSale(**data)
+        # Parse webhook data (Gumroad commonly posts form-encoded payloads).
+        content_type = (request.headers.get("content-type") or "").lower()
+        if "application/json" in content_type:
+            raw_data = await request.json()
+        else:
+            form = await request.form()
+            raw_data = dict(form)
+
+        if not isinstance(raw_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid payload")
+
+        sale = GumroadSale(**raw_data)
 
         # Extract product code
         product_code = sale.product_permalink.upper() if sale.product_permalink else ""
@@ -418,16 +564,32 @@ async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundT
         )
         logger.info(f"Processing Gumroad sale: {sale.sale_id} for {redacted_email} - Product: {product_code}")
 
-        # Process sale asynchronously
-        background_tasks.add_task(
-            process_sale,
-            sale.dict(),
-            product_code,
-            first_name,
-            last_name
-        )
+        # Persist the full raw payload in metadata (includes fields like `test`)
+        sale_dict = {**raw_data, **sale.dict(), "product_code": product_code}
 
-        return {"success": True, "sale_id": sale.sale_id, "message": "Sale processing initiated"}
+        # Always record to DB synchronously (fail closed) so Gumroad retries on failure.
+        recorded = await record_sale_to_database(sale_dict)
+        if not recorded:
+            raise HTTPException(status_code=500, detail="Failed to record sale")
+
+        # Automations (ConvertKit, nurture sequences, upsells) are explicitly gated.
+        automations_enabled = os.getenv("GUMROAD_AUTOMATIONS_ENABLED", "").strip().lower() in {"1", "true", "yes"}
+        if automations_enabled and not _is_test_sale(sale_dict):
+            background_tasks.add_task(
+                process_sale,
+                sale_dict,
+                product_code,
+                first_name,
+                last_name
+            )
+
+        return {
+            "success": True,
+            "sale_id": sale.sale_id,
+            "recorded": True,
+            "automations_enabled": automations_enabled,
+            "message": "Sale recorded"
+        }
 
     except HTTPException:
         raise
@@ -468,6 +630,11 @@ async def enroll_in_nurture_sequence(
 
 async def process_sale(sale_data: dict[str, Any], product_code: str, first_name: str, last_name: str):
     """Process sale through all systems"""
+    # Safety: do not run post-purchase automations for test purchases.
+    if _is_test_sale(sale_data):
+        logger.info("Skipping Gumroad automations for test sale_id=%s", sale_data.get("sale_id"))
+        return
+
     product_info = PRODUCT_MAPPING.get(product_code, {})
     product_name = product_info.get('name', sale_data.get('product_name', 'Product'))
     product_type = product_info.get('type', 'code_kit')
@@ -487,7 +654,6 @@ async def process_sale(sale_data: dict[str, Any], product_code: str, first_name:
 
     results = await asyncio.gather(
         add_to_convertkit(sale_data['email'], first_name, last_name, product_code),
-        record_sale_to_database({**sale_data, 'product_code': product_code}),
         enroll_in_nurture_sequence(
             email=sale_data['email'],
             first_name=first_name,
@@ -500,9 +666,21 @@ async def process_sale(sale_data: dict[str, Any], product_code: str, first_name:
         return_exceptions=True
     )
 
-    logger.info(f"Sale processing results - ConvertKit: {results[0]}, Database: {results[1]}, NurtureSequence: {results[2]}, Upsell: {results[3]}")
+    convertkit_ok = results[0] is True
+    # Nurture + upsell currently do not map cleanly to a gumroad_sales boolean flag.
+    try:
+        await _update_sale_flags(sale_data.get("sale_id", ""), convertkit_synced=convertkit_ok)
+    except Exception as exc:
+        logger.warning("Failed updating gumroad_sale flags for sale_id=%s: %s", sale_data.get("sale_id"), exc)
 
-@router.get("/analytics")
+    logger.info(
+        "Sale processing results - ConvertKit: %s, NurtureSequence: %s, Upsell: %s",
+        results[0],
+        results[1],
+        results[2],
+    )
+
+@router.get("/analytics", dependencies=[Depends(_require_internal_api_key)])
 async def get_sales_analytics():
     """Get sales analytics from database"""
     try:
@@ -552,9 +730,12 @@ async def get_sales_analytics():
         logger.error(f"Analytics error: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
-@router.post("/test")
+@router.post("/test", dependencies=[Depends(_require_internal_api_key)])
 async def test_webhook(background_tasks: BackgroundTasks):
     """Test endpoint for webhook"""
+    if ENVIRONMENT == "production":
+        raise HTTPException(status_code=404, detail="Not found")
+
     test_sale = {
         "email": "test@example.com",
         "full_name": "Test User",
@@ -581,7 +762,7 @@ async def test_webhook(background_tasks: BackgroundTasks):
         "test_data": test_sale
     }
 
-@router.get("/products")
+@router.get("/products", dependencies=[Depends(_require_internal_api_key)])
 async def get_products():
     """Get list of configured products"""
     return {

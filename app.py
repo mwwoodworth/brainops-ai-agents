@@ -1119,6 +1119,11 @@ async def rate_limit_middleware(request: Request, call_next):
     if request.url.path in ("/health", "/", "/docs", "/openapi.json"):
         return await call_next(request)
 
+    # Skip rate limiting for authenticated internal webhooks.
+    # These endpoints have their own HMAC/signature verification + API key auth and may burst (e.g. ERP event drain).
+    if request.url.path == "/events/webhook/erp":
+        return await call_next(request)
+
     # Get client IP (handle proxies)
     client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
     if not client_ip:
@@ -2759,6 +2764,73 @@ async def execute_agent(
         raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}") from e
 
 
+@app.get("/agents/status")
+async def get_all_agents_status(authenticated: bool = Depends(verify_api_key)):
+    """
+    Get comprehensive status of all agents including health metrics,
+    execution statistics, and current state
+    """
+    if not HEALTH_MONITOR_AVAILABLE:
+        # Fallback to basic agent list
+        pool = get_pool()
+        try:
+            result = await pool.fetch("""
+                SELECT
+                    a.id,
+                    a.name,
+                    a.type,
+                    a.status,
+                    a.last_active,
+                    a.total_executions,
+                    s.enabled as scheduled,
+                    s.frequency_minutes,
+                    s.last_execution,
+                    s.next_execution
+                FROM ai_agents a
+                LEFT JOIN agent_schedules s ON s.agent_id = a.id
+                ORDER BY a.name
+            """)
+
+            agents = [dict(row) for row in result]
+            return {
+                "total_agents": len(agents),
+                "agents": agents,
+                "health_monitoring": False,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    # Full health monitoring available
+    try:
+        health_monitor = get_health_monitor()
+
+        # Run health check for all agents
+        health_summary = health_monitor.check_all_agents_health()
+
+        # Get detailed health summary
+        detailed_summary = health_monitor.get_agent_health_summary()
+
+        return {
+            "total_agents": health_summary.get("total_agents", 0),
+            "health_summary": {
+                "healthy": health_summary.get("healthy", 0),
+                "degraded": health_summary.get("degraded", 0),
+                "critical": health_summary.get("critical", 0),
+                "unknown": health_summary.get("unknown", 0)
+            },
+            "agents": health_summary.get("agents", []),
+            "critical_agents": detailed_summary.get("critical_agents", []),
+            "active_alerts": detailed_summary.get("active_alerts", []),
+            "recent_restarts": detailed_summary.get("recent_restarts", []),
+            "health_monitoring": True,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting agent status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/agents/{agent_id}")
 async def get_agent(
     agent_id: str,
@@ -3198,73 +3270,6 @@ async def get_scheduler_status():
                 "timestamp": datetime.utcnow().isoformat()
             }
         )
-
-
-@app.get("/agents/status")
-async def get_all_agents_status(authenticated: bool = Depends(verify_api_key)):
-    """
-    Get comprehensive status of all 61 agents including health metrics,
-    execution statistics, and current state
-    """
-    if not HEALTH_MONITOR_AVAILABLE:
-        # Fallback to basic agent list
-        pool = get_pool()
-        try:
-            result = await pool.fetch("""
-                SELECT
-                    a.id,
-                    a.name,
-                    a.type,
-                    a.status,
-                    a.last_active,
-                    a.total_executions,
-                    s.enabled as scheduled,
-                    s.frequency_minutes,
-                    s.last_execution,
-                    s.next_execution
-                FROM ai_agents a
-                LEFT JOIN agent_schedules s ON s.agent_id = a.id
-                ORDER BY a.name
-            """)
-
-            agents = [dict(row) for row in result]
-            return {
-                "total_agents": len(agents),
-                "agents": agents,
-                "health_monitoring": False,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
-
-    # Full health monitoring available
-    try:
-        health_monitor = get_health_monitor()
-
-        # Run health check for all agents
-        health_summary = health_monitor.check_all_agents_health()
-
-        # Get detailed health summary
-        detailed_summary = health_monitor.get_agent_health_summary()
-
-        return {
-            "total_agents": health_summary.get("total_agents", 0),
-            "health_summary": {
-                "healthy": health_summary.get("healthy", 0),
-                "degraded": health_summary.get("degraded", 0),
-                "critical": health_summary.get("critical", 0),
-                "unknown": health_summary.get("unknown", 0)
-            },
-            "agents": health_summary.get("agents", []),
-            "critical_agents": detailed_summary.get("critical_agents", []),
-            "active_alerts": detailed_summary.get("active_alerts", []),
-            "recent_restarts": detailed_summary.get("recent_restarts", []),
-            "health_monitoring": True,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Error getting agent status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/agents/health/check", dependencies=SECURED_DEPENDENCIES)
@@ -4653,10 +4658,57 @@ async def ai_analyze(
         try:
             pool = get_pool()
             task_id = str(uuid.uuid4())
-            await pool.execute("""
-                INSERT INTO ai_autonomous_tasks (id, title, payload, priority, status, created_at)
-                VALUES ($1, $2, $3, $4, 'pending', NOW())
-            """, task_id, f"{agent_name}.{action}", json.dumps({"agent": agent_name, "action": action, "data": data}), 50)
+            tenant_id = (
+                request.headers.get(config.tenant.header_name)
+                or context.get("tenant_id")
+                or config.tenant.default_tenant_id
+            )
+            tenant_uuid: str | None = None
+            if tenant_id:
+                try:
+                    tenant_uuid = str(uuid.UUID(str(tenant_id)))
+                except (ValueError, TypeError, AttributeError):
+                    tenant_uuid = None
+
+            agent_row = await pool.fetchrow(
+                "SELECT id FROM ai_agents WHERE id::text = $1 OR name = $1 LIMIT 1",
+                agent_name,
+            )
+            agent_uuid = str(agent_row["id"]) if agent_row else None
+
+            await pool.execute(
+                """
+                INSERT INTO ai_autonomous_tasks (
+                    id,
+                    title,
+                    task_type,
+                    priority,
+                    status,
+                    trigger_type,
+                    trigger_condition,
+                    agent_id,
+                    tenant_id,
+                    created_at
+                )
+                VALUES ($1, $2, $3, $4, 'pending', $5, $6::jsonb, $7, $8, NOW())
+                """,
+                task_id,
+                f"{agent_name}.{action}",
+                "ai_analyze",
+                "medium",
+                "ai_analyze",
+                json.dumps(
+                    {
+                        "agent": agent_name,
+                        "action": action,
+                        "data": data,
+                        "context": context,
+                    },
+                    default=str,
+                ),
+                agent_uuid,
+                tenant_uuid,
+            )
 
             return {
                 "success": True,

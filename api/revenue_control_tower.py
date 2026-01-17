@@ -119,15 +119,26 @@ async def get_ground_truth(
     """
 
     # Email Queue Status
+    # NOTE: `ai_email_queue` does not have `send_after` (older drafts did).
+    # Use timestamps that actually exist so "ground truth" doesn't silently degrade.
     email_query = """
         SELECT
-            COUNT(*) as total,
             COUNT(*) FILTER (WHERE status = 'queued') as queued,
-            COUNT(*) FILTER (WHERE status = 'sent') as sent,
-            COUNT(*) FILTER (WHERE status = 'failed') as failed,
-            MAX(created_at) as last_queued
+            COUNT(*) FILTER (
+                WHERE status = 'sent'
+                  AND COALESCE(sent_at, created_at) > NOW() - INTERVAL '7 days'
+            ) as sent_7d,
+            COUNT(*) FILTER (
+                WHERE status = 'failed'
+                  AND COALESCE(last_attempt, created_at) > NOW() - INTERVAL '7 days'
+            ) as failed_7d,
+            COUNT(*) FILTER (
+                WHERE status = 'skipped'
+                  AND created_at > NOW() - INTERVAL '7 days'
+            ) as skipped_7d,
+            MAX(created_at) as last_created,
+            MAX(sent_at) as last_sent_at
         FROM ai_email_queue
-        WHERE send_after > NOW() - INTERVAL '7 days'
     """
 
     try:
@@ -192,9 +203,10 @@ async def get_ground_truth(
             # Email Automation
             "email_automation": {
                 "queued": email.get('queued', 0) or 0,
-                "sent_7d": email.get('sent', 0) or 0,
-                "failed_7d": email.get('failed', 0) or 0,
-                "healthy": (email.get('failed', 0) or 0) < 5
+                "sent_7d": email.get('sent_7d', 0) or 0,
+                "failed_7d": email.get('failed_7d', 0) or 0,
+                "skipped_7d": email.get('skipped_7d', 0) or 0,
+                "healthy": (email.get('failed_7d', 0) or 0) < 5
             },
 
             # CRITICAL DIAGNOSIS
@@ -210,14 +222,17 @@ def _generate_diagnosis(leads: dict, gumroad: dict, total_revenue: float) -> dic
     """Generate actionable diagnosis based on current state"""
     issues = []
     recommendations = []
+    total_leads = leads.get('total', 0) or 0
 
     # Check for $0 revenue
     if total_revenue == 0:
         issues.append("CRITICAL: $0 real revenue")
-        recommendations.append("Focus on converting the 23 real leads in pipeline")
+        if total_leads:
+            recommendations.append(f"Focus on converting the {total_leads} real leads in pipeline")
+        else:
+            recommendations.append("Acquire qualified leads and convert the first deals")
 
     # Check conversion
-    total_leads = leads.get('total', 0) or 0
     won = leads.get('won', 0) or 0
     if total_leads > 10 and won == 0:
         issues.append(f"CRITICAL: 0% conversion rate ({total_leads} leads, 0 won)")

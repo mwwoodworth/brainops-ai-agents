@@ -122,10 +122,19 @@ class TaskQueueConsumer:
             async with pool.acquire() as conn:
                 # Lock and fetch pending tasks
                 rows = await conn.fetch("""
-                    SELECT id, task_type, priority, status, trigger_type,
-                           trigger_condition, agent_id, created_at
-                    FROM ai_autonomous_tasks
-                    WHERE status = 'pending'
+                    SELECT
+                        t.id,
+                        t.task_type,
+                        t.priority,
+                        t.status,
+                        t.trigger_type,
+                        t.trigger_condition,
+                        t.agent_id,
+                        a.name AS agent_name,
+                        t.created_at
+                    FROM ai_autonomous_tasks t
+                    LEFT JOIN ai_agents a ON a.id = t.agent_id
+                    WHERE t.status = 'pending'
                     ORDER BY
                         CASE priority
                             WHEN 'critical' THEN 1
@@ -159,21 +168,33 @@ class TaskQueueConsumer:
         """Process a single task"""
         task_id = task['id']
         agent_id = task.get('agent_id')
+        agent_name = task.get('agent_name')
         task_type = task.get('task_type', 'unknown')
 
         logger.info(f"⚙️ Processing task {task_id}: {task_type}")
 
         try:
+            trigger_condition = task.get("trigger_condition")
+            if isinstance(trigger_condition, str):
+                try:
+                    trigger_condition = json.loads(trigger_condition)
+                except json.JSONDecodeError:
+                    trigger_condition = {"raw": trigger_condition}
+            if not isinstance(trigger_condition, dict):
+                trigger_condition = {"raw": str(trigger_condition)}
+
             # Execute the task via AgentExecutor
-            if self._executor and agent_id:
+            if self._executor and agent_name:
                 result = await self._executor.execute(
-                    agent_id=str(agent_id),
+                    agent_name=str(agent_name),
                     task={
                         "task_id": str(task_id),
+                        "agent_id": str(agent_id) if agent_id else None,
+                        "action": task_type,
                         "task_type": task_type,
-                        "trigger_type": task.get('trigger_type'),
-                        "trigger_condition": task.get('trigger_condition')
-                    }
+                        "trigger_type": task.get("trigger_type"),
+                        "trigger_condition": trigger_condition,
+                    },
                 )
 
                 # Mark as completed
@@ -183,7 +204,15 @@ class TaskQueueConsumer:
 
             else:
                 # No executor or agent - skip
-                await self._update_task_status(task_id, 'skipped', {"reason": "no_executor"})
+                await self._update_task_status(
+                    task_id,
+                    'skipped',
+                    {
+                        "reason": "missing_agent_name_or_executor",
+                        "agent_id": str(agent_id) if agent_id else None,
+                        "agent_name": agent_name,
+                    },
+                )
                 self._stats["tasks_skipped"] += 1
                 logger.warning(f"⏭️ Task {task_id} skipped - no executor")
 
@@ -211,7 +240,7 @@ class TaskQueueConsumer:
                         completed_at = CASE WHEN $1 IN ('completed', 'failed', 'skipped') THEN NOW() ELSE completed_at END,
                         result = $2
                     WHERE id = $3
-                """, status, json.dumps(result) if result else None, task_id)
+                """, status, json.dumps(result, default=str) if result else None, task_id)
 
         except Exception as e:
             logger.error(f"Failed to update task status: {e}")

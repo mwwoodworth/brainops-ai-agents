@@ -5,7 +5,7 @@ set -euo pipefail
 
 # Get version from centralized config (never parse arbitrary source lines into a shell var)
 VERSION="$(
-  python3 -c "from config import config; print(getattr(config, 'version', 'unknown'))" 2>/dev/null \
+  env -u VERSION python3 -c "from config import config; print(getattr(config, 'version', 'unknown'))" 2>/dev/null \
     | tr -d '[:space:]'
 )"
 if [ -z "$VERSION" ] || [ "$VERSION" = "unknown" ]; then

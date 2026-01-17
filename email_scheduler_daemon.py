@@ -56,6 +56,32 @@ TEST_EMAIL_SUFFIXES = (".test", ".example", ".invalid")
 TEST_EMAIL_TOKENS = ("@example.", "@test.", "@demo.", "@invalid.")
 TEST_EMAIL_DOMAINS = ("test.com", "example.com", "localhost", "demo@roofing.com")
 
+OUTBOUND_EMAIL_MODE = os.getenv("OUTBOUND_EMAIL_MODE", "disabled").strip().lower()
+
+
+def _parse_csv_env(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    return {item.strip().lower() for item in value.split(",") if item.strip()}
+
+
+_OUTBOUND_EMAIL_ALLOWLIST_RECIPIENTS = _parse_csv_env(os.getenv("OUTBOUND_EMAIL_ALLOWLIST", ""))
+_OUTBOUND_EMAIL_ALLOWLIST_DOMAINS = _parse_csv_env(os.getenv("OUTBOUND_EMAIL_ALLOWLIST_DOMAINS", ""))
+
+
+def _is_allowlisted_recipient(recipient: str | None) -> bool:
+    if not recipient:
+        return False
+    lowered = recipient.strip().lower()
+    if lowered in _OUTBOUND_EMAIL_ALLOWLIST_RECIPIENTS:
+        return True
+    if "@" not in lowered:
+        return False
+    domain = lowered.split("@", 1)[1]
+    if domain in _OUTBOUND_EMAIL_ALLOWLIST_DOMAINS:
+        return True
+    return any(domain.endswith(f".{allowed}") for allowed in _OUTBOUND_EMAIL_ALLOWLIST_DOMAINS)
+
 
 def _is_test_recipient(recipient: str | None) -> bool:
     if not recipient:
@@ -69,6 +95,10 @@ def _is_test_recipient(recipient: str | None) -> bool:
 
 
 def _get_skip_reason(email: "EmailJob") -> str | None:
+    # Global outbound safety rail (fail closed by default).
+    if OUTBOUND_EMAIL_MODE != "live" and not _is_allowlisted_recipient(email.recipient):
+        return "not_allowlisted" if OUTBOUND_EMAIL_MODE == "allowlist" else "outbound_disabled"
+
     if email.metadata.get("is_test") is True or email.metadata.get("test") is True:
         return "is_test_metadata"
     if _is_test_recipient(email.recipient):
