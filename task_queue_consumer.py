@@ -197,6 +197,9 @@ class TaskQueueConsumer:
                                 "task_type": task_type,
                                 "trigger_type": task.get("trigger_type"),
                                 "trigger_condition": trigger_condition,
+                                # Production performance: ERP/unified_event handlers should not
+                                # trigger codebase graph scans by default.
+                                "use_graph_context": False,
                             },
                         ),
                         timeout=timeout_seconds,
