@@ -19,6 +19,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
 from config import config
+from utils.outbound import email_block_reason
 
 # Configuration
 CONVERTKIT_API_KEY = os.getenv("CONVERTKIT_API_KEY", "")
@@ -433,6 +434,11 @@ async def _update_sale_flags(
 
 async def send_purchase_email(email: str, name: str, product_name: str, download_url: str):
     """Send purchase confirmation via Resend (primary) or SendGrid (fallback)."""
+
+    block_reason = email_block_reason(email, {"source": "gumroad_webhook", "product": product_name})
+    if block_reason:
+        logger.warning("Purchase email blocked (%s) for %s", block_reason, email)
+        return False
 
     html_body = f"""
       <h2>Hi {name or 'there'},</h2>
