@@ -37,6 +37,7 @@ STRICT_STARTUP = os.getenv("BRAINOPS_STRICT_STARTUP", "").lower() in ("1", "true
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
 if ENVIRONMENT == "production":
     STRICT_STARTUP = True
+IS_PRODUCTION = ENVIRONMENT in ("production", "prod")
 STRICT_AGENT_EXECUTION = os.getenv("BRAINOPS_STRICT_AGENT_EXECUTION", "").lower() in ("1", "true", "yes")
 if STRICT_STARTUP:
     STRICT_AGENT_EXECUTION = True
@@ -474,7 +475,9 @@ class AgentExecutor:
         Enrich task with relevant codebase context from the graph.
         Phase 2 Enhancement: Agents now receive intelligent codebase context.
         """
-        if not task.get("use_graph_context", True):
+        # Production safety/perf: default to NOT scanning the codebase graph unless explicitly requested.
+        default_use_graph_context = not IS_PRODUCTION
+        if not task.get("use_graph_context", default_use_graph_context):
             return task
 
         provider = await self._get_graph_context_provider()

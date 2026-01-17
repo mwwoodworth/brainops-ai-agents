@@ -278,7 +278,7 @@ class AITaskQueueConsumer:
             raise RuntimeError("AgentExecutor not available")
         result = await self._executor.execute(
             "QualityAgent",
-            {"task_id": task_id, "action": "quality_check", "payload": payload},
+            {"task_id": task_id, "action": "quality_check", "payload": payload, "use_graph_context": False},
         )
         return {"status": "completed", "result": result}
 
