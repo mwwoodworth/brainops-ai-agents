@@ -1,17 +1,14 @@
 """
 Authentication Module for BrainOps AI Agents
 ============================================
-Centralizes API key verification to avoid duplication across routers.
+Authentication primitives live in this package.
 
-Usage:
-    from auth import verify_api_key, API_KEY_HEADER
-
-    router = APIRouter(
-        prefix="/my-endpoint",
-        dependencies=[Depends(verify_api_key)]
-    )
+Notes:
+- API key verification is currently implemented in `app.py` (FastAPI dependency),
+  because it needs access to the active runtime config and request context.
+- JWT verification is implemented in `auth/jwt.py`.
 """
 
-from auth.api_key import API_KEY_HEADER, verify_api_key, get_optional_api_key
+from .jwt import verify_jwt
 
-__all__ = ["verify_api_key", "API_KEY_HEADER", "get_optional_api_key"]
+__all__ = ["verify_jwt"]

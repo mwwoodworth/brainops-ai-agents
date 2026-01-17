@@ -22,6 +22,7 @@ from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredenti
 
 # Import our production-ready components
 from config import config
+from auth.jwt import verify_jwt
 
 # Configure logging
 logging.basicConfig(
