@@ -57,7 +57,7 @@ class TaskQueueConsumer:
     agent_activation_system but never consumed.
     """
 
-    def __init__(self, poll_interval: int = 30, batch_size: int = 10):
+    def __init__(self, poll_interval: int = 30, batch_size: int = 1):
         self.poll_interval = poll_interval
         self.batch_size = batch_size
         self._running = False
@@ -183,19 +183,38 @@ class TaskQueueConsumer:
             if not isinstance(trigger_condition, dict):
                 trigger_condition = {"raw": str(trigger_condition)}
 
-            # Execute the task via AgentExecutor
+            # Execute the task via AgentExecutor (bounded by timeout for queue health)
             if self._executor and agent_name:
-                result = await self._executor.execute(
-                    agent_name=str(agent_name),
-                    task={
-                        "task_id": str(task_id),
-                        "agent_id": str(agent_id) if agent_id else None,
-                        "action": task_type,
-                        "task_type": task_type,
-                        "trigger_type": task.get("trigger_type"),
-                        "trigger_condition": trigger_condition,
-                    },
-                )
+                timeout_seconds = float(os.getenv("TASK_QUEUE_EXECUTION_TIMEOUT_SECONDS", "60"))
+                try:
+                    result = await asyncio.wait_for(
+                        self._executor.execute(
+                            agent_name=str(agent_name),
+                            task={
+                                "task_id": str(task_id),
+                                "agent_id": str(agent_id) if agent_id else None,
+                                "action": task_type,
+                                "task_type": task_type,
+                                "trigger_type": task.get("trigger_type"),
+                                "trigger_condition": trigger_condition,
+                            },
+                        ),
+                        timeout=timeout_seconds,
+                    )
+                except asyncio.TimeoutError:
+                    await self._update_task_status(
+                        task_id,
+                        "failed",
+                        {
+                            "error": "timeout",
+                            "timeout_seconds": timeout_seconds,
+                            "agent_name": agent_name,
+                            "task_type": task_type,
+                        },
+                    )
+                    self._stats["tasks_failed"] += 1
+                    logger.error("❌ Task %s timed out after %ss", task_id, timeout_seconds)
+                    return
 
                 # Mark as completed
                 await self._update_task_status(task_id, 'completed', result)
@@ -264,7 +283,9 @@ def get_task_queue_consumer() -> TaskQueueConsumer:
     """Get or create the TaskQueueConsumer singleton"""
     global _consumer
     if _consumer is None:
-        _consumer = TaskQueueConsumer()
+        poll_interval = int(os.getenv("TASK_QUEUE_POLL_INTERVAL", "30"))
+        batch_size = int(os.getenv("TASK_QUEUE_BATCH_SIZE", "1"))
+        _consumer = TaskQueueConsumer(poll_interval=poll_interval, batch_size=batch_size)
     return _consumer
 
 
