@@ -99,7 +99,11 @@ def _get_skip_reason(email: "EmailJob") -> str | None:
     if OUTBOUND_EMAIL_MODE != "live" and not _is_allowlisted_recipient(email.recipient):
         return "not_allowlisted" if OUTBOUND_EMAIL_MODE == "allowlist" else "outbound_disabled"
 
-    if email.metadata.get("is_test") is True or email.metadata.get("test") is True:
+    if (
+        email.metadata.get("is_test") is True
+        or email.metadata.get("is_demo") is True
+        or email.metadata.get("test") is True
+    ):
         return "is_test_metadata"
     if _is_test_recipient(email.recipient):
         return "test_recipient"
