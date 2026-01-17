@@ -99,6 +99,7 @@ class TaskQueueConsumer:
         """Main consumption loop"""
         while self._running:
             try:
+                await self._reconcile_stale_processing_tasks()
                 tasks = await self._fetch_pending_tasks()
 
                 if tasks:
@@ -113,6 +114,96 @@ class TaskQueueConsumer:
 
             await asyncio.sleep(self.poll_interval)
 
+    async def _reconcile_stale_processing_tasks(self) -> None:
+        """Requeue tasks stuck in processing for too long (self-healing)."""
+        stale_after_seconds = int(os.getenv("TASK_QUEUE_STALE_AFTER_SECONDS", "600"))
+        max_retries = int(os.getenv("TASK_QUEUE_MAX_RETRIES", "3"))
+
+        if stale_after_seconds <= 0:
+            return
+
+        try:
+            from database.async_connection import get_pool
+
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    stale_rows = await conn.fetch(
+                        """
+                        SELECT id, retry_count
+                        FROM ai_autonomous_tasks
+                        WHERE status = 'processing'
+                          AND started_at IS NOT NULL
+                          AND started_at < NOW() - ($1 * INTERVAL '1 second')
+                        LIMIT 100
+                        FOR UPDATE SKIP LOCKED
+                        """,
+                        stale_after_seconds,
+                    )
+
+                    if not stale_rows:
+                        return
+
+                    requeue_ids: list[str] = []
+                    fail_ids: list[str] = []
+
+                    for row in stale_rows:
+                        task_id = str(row["id"])
+                        retry_count = int(row.get("retry_count") or 0)
+                        if retry_count >= max_retries:
+                            fail_ids.append(task_id)
+                        else:
+                            requeue_ids.append(task_id)
+
+                    requeued = "UPDATE 0"
+                    failed = "UPDATE 0"
+
+                    if requeue_ids:
+                        requeued = await conn.execute(
+                            """
+                            UPDATE ai_autonomous_tasks
+                            SET status = 'pending',
+                                started_at = NULL,
+                                retry_count = COALESCE(retry_count, 0) + 1,
+                                error_log = COALESCE(error_log, '') || 'stale_processing_requeued\n'
+                            WHERE id = ANY($1::uuid[])
+                            """,
+                            requeue_ids,
+                        )
+
+                    if fail_ids:
+                        failed = await conn.execute(
+                            """
+                            UPDATE ai_autonomous_tasks
+                            SET status = 'failed',
+                                completed_at = NOW(),
+                                error_log = COALESCE(error_log, '') || 'stale_processing_max_retries\n'
+                            WHERE id = ANY($1::uuid[])
+                            """,
+                            fail_ids,
+                        )
+
+            try:
+                requeued_n = int(str(requeued).split()[-1]) if requeued else 0
+            except Exception:
+                requeued_n = 0
+            try:
+                failed_n = int(str(failed).split()[-1]) if failed else 0
+            except Exception:
+                failed_n = 0
+
+            if requeued_n or failed_n:
+                logger.warning(
+                    "🧹 Reconciled stale ai_autonomous_tasks processing tasks | requeued=%s failed=%s stale_after_seconds=%s max_retries=%s",
+                    requeued_n,
+                    failed_n,
+                    stale_after_seconds,
+                    max_retries,
+                )
+
+        except Exception as e:
+            logger.error("Failed to reconcile stale tasks: %s", e)
+
     async def _fetch_pending_tasks(self) -> list[dict[str, Any]]:
         """Fetch pending tasks from database with row locking"""
         try:
@@ -120,45 +211,52 @@ class TaskQueueConsumer:
             pool = get_pool()
 
             async with pool.acquire() as conn:
-                # Lock and fetch pending tasks
-                rows = await conn.fetch("""
-                    SELECT
-                        t.id,
-                        t.task_type,
-                        t.priority,
-                        t.status,
-                        t.trigger_type,
-                        t.trigger_condition,
-                        t.agent_id,
-                        a.name AS agent_name,
-                        t.created_at
-                    FROM ai_autonomous_tasks t
-                    LEFT JOIN ai_agents a ON a.id = t.agent_id
-                    WHERE t.status = 'pending'
-                    ORDER BY
-                        CASE priority
-                            WHEN 'critical' THEN 1
-                            WHEN 'high' THEN 2
-                            WHEN 'medium' THEN 3
-                            WHEN 'low' THEN 4
-                            ELSE 5
-                        END,
-                        created_at ASC
-                    LIMIT $1
-                    FOR UPDATE OF t SKIP LOCKED
-                """, self.batch_size)
+                async with conn.transaction():
+                    # Lock and fetch pending tasks
+                    rows = await conn.fetch(
+                        """
+                        SELECT
+                            t.id,
+                            t.task_type,
+                            t.priority,
+                            t.status,
+                            t.trigger_type,
+                            t.trigger_condition,
+                            t.agent_id,
+                            a.name AS agent_name,
+                            t.created_at
+                        FROM ai_autonomous_tasks t
+                        LEFT JOIN ai_agents a ON a.id = t.agent_id
+                        WHERE t.status = 'pending'
+                        ORDER BY
+                            CASE priority
+                                WHEN 'critical' THEN 1
+                                WHEN 'high' THEN 2
+                                WHEN 'medium' THEN 3
+                                WHEN 'low' THEN 4
+                                ELSE 5
+                            END,
+                            created_at ASC
+                        LIMIT $1
+                        FOR UPDATE OF t SKIP LOCKED
+                        """,
+                        self.batch_size,
+                    )
 
-                # Mark as processing
-                if rows:
-                    task_ids = [row['id'] for row in rows]
-                    await conn.execute("""
-                        UPDATE ai_autonomous_tasks
-                        SET status = 'processing',
-                            started_at = NOW()
-                        WHERE id = ANY($1)
-                    """, task_ids)
+                    # Mark as processing
+                    if rows:
+                        task_ids = [str(row["id"]) for row in rows]
+                        await conn.execute(
+                            """
+                            UPDATE ai_autonomous_tasks
+                            SET status = 'processing',
+                                started_at = NOW()
+                            WHERE id = ANY($1::uuid[])
+                            """,
+                            task_ids,
+                        )
 
-                return [dict(row) for row in rows]
+                    return [dict(row) for row in rows]
 
         except Exception as e:
             logger.error(f"Failed to fetch tasks: {e}")
@@ -258,10 +356,17 @@ class TaskQueueConsumer:
             async with pool.acquire() as conn:
                 await conn.execute("""
                     UPDATE ai_autonomous_tasks
-                    SET status = $1,
-                        completed_at = CASE WHEN $1 IN ('completed', 'failed', 'skipped') THEN NOW() ELSE completed_at END,
-                        result = $2
-                    WHERE id = $3
+                    SET status = $1::text,
+                        completed_at = CASE
+                            WHEN $1::text IN ('completed', 'failed', 'skipped') THEN NOW()
+                            ELSE completed_at
+                        END,
+                        result = $2::jsonb,
+                        error_log = CASE
+                            WHEN $1::text = 'failed' THEN COALESCE(($2::jsonb ->> 'error'), error_log)
+                            ELSE error_log
+                        END
+                    WHERE id = $3::uuid
                 """, status, json.dumps(result, default=str) if result else None, task_id)
 
         except Exception as e:
