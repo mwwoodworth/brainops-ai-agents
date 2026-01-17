@@ -85,11 +85,21 @@ async def get_ground_truth(
 
     now = datetime.now(timezone.utc)
 
-    # Build WHERE clause for real-only filter
+    # Build WHERE clause for real-only filter (fail-closed).
+    #
+    # IMPORTANT:
+    # - Prefer explicit DB flags (is_test/is_demo) over email heuristics.
+    # - Keep email heuristics as a backstop to avoid counting obvious test addresses.
     test_filter = ""
     if not include_test:
-        patterns = " AND ".join([f"email NOT ILIKE '{p}'" for p in TEST_EMAIL_PATTERNS])
-        test_filter = f"AND ({patterns})"
+        email_patterns = " AND ".join(
+            [f"COALESCE(email, '') NOT ILIKE '{p}'" for p in TEST_EMAIL_PATTERNS]
+        )
+        test_filter = (
+            "AND COALESCE(is_test, FALSE) = FALSE "
+            "AND COALESCE(is_demo, FALSE) = FALSE "
+            f"AND ({email_patterns})"
+        )
 
     # Revenue Leads Analysis
     leads_query = f"""
@@ -115,7 +125,7 @@ async def get_ground_truth(
             COALESCE(SUM(price), 0) as total_revenue,
             COUNT(DISTINCT product_name) as unique_products
         FROM gumroad_sales
-        WHERE 1=1 {test_filter.replace('email', 'email')}
+        WHERE 1=1 {"AND COALESCE(is_test, FALSE) = FALSE" if not include_test else ""}
     """
 
     # Email Queue Status
