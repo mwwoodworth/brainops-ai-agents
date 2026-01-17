@@ -596,7 +596,11 @@ class NurtureExecutorAgentReal(BaseAgent):
         try:
             pool = get_pool()
             emails_queued = 0
-            lead_is_test = bool(lead_data.get('is_test'))
+            lead_is_demo = bool(lead_data.get('is_demo'))
+            lead_is_test = bool(lead_data.get('is_test')) or lead_is_demo
+            if lead_is_test:
+                self.logger.info("Skipping nurture queue for demo/test lead %s (sequence %s)", lead_id, sequence_id)
+                return 0
             lead_metadata = lead_data.get('metadata') or {}
             if isinstance(lead_metadata, str):
                 try:
@@ -633,7 +637,8 @@ class NurtureExecutorAgentReal(BaseAgent):
                         "lead_id": lead_id,
                         "touchpoint_day": days_delay,
                         "lead_type": lead_type,
-                        "is_test": lead_is_test
+                        "is_test": lead_is_test,
+                        "is_demo": lead_is_demo,
                     })
                 )
 

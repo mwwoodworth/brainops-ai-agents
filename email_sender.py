@@ -223,7 +223,11 @@ def _calculate_rate_limit_delay_seconds(retry_count: int, retry_after: int | Non
 
 
 def _is_test_recipient(recipient: str | None, metadata: dict[str, Any] | None = None) -> bool:
-    if metadata and (metadata.get("is_test") is True or metadata.get("test") is True):
+    if metadata and (
+        metadata.get("is_test") is True
+        or metadata.get("is_demo") is True
+        or metadata.get("test") is True
+    ):
         return True
     if not recipient:
         return True
