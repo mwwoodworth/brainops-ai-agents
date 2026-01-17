@@ -964,6 +964,24 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ Email Scheduler startup failed: {e}")
 
+        # Start Task Queue Consumer - processes ai_autonomous_tasks backlog and ERP unified_event handlers
+        try:
+            from task_queue_consumer import start_task_queue_consumer
+
+            app.state.task_queue_consumer = await start_task_queue_consumer()
+            logger.info("📋 Task Queue Consumer STARTED - ai_autonomous_tasks processing active")
+        except Exception as e:
+            logger.error(f"❌ Task Queue Consumer startup failed: {e}")
+
+        # Start AI Task Queue Consumer - processes public.ai_task_queue (quality checks, lead nurturing, etc.)
+        try:
+            from ai_task_queue_consumer import start_ai_task_queue_consumer
+
+            app.state.ai_task_queue_consumer = await start_ai_task_queue_consumer()
+            logger.info("🧠 AI Task Queue Consumer STARTED - ai_task_queue processing active")
+        except Exception as e:
+            logger.error(f"❌ AI Task Queue Consumer startup failed: {e}")
+
         # Start rate limiter cleanup task (every 5 minutes)
         async def rate_limiter_cleanup_loop():
             while True:

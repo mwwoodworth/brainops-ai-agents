@@ -103,7 +103,7 @@ class AITaskQueueConsumer:
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     """
-                    SELECT id, tenant_id, task_type, payload, priority, status, created_at
+                    SELECT id, tenant_id, task_type, payload, input_data, priority, status, created_at
                     FROM ai_task_queue
                     WHERE status = 'pending'
                     ORDER BY priority DESC, created_at ASC
@@ -140,6 +140,20 @@ class AITaskQueueConsumer:
                 payload = {}
         if not isinstance(payload, dict):
             payload = {}
+
+        input_data = task.get("input_data") or {}
+        if isinstance(input_data, str):
+            try:
+                input_data = json.loads(input_data)
+            except json.JSONDecodeError:
+                input_data = {}
+        if not isinstance(input_data, dict):
+            input_data = {}
+
+        # Normalize: payload is the "active" envelope; input_data is often used by DB triggers.
+        # Prefer explicit payload keys over trigger-provided input_data keys.
+        payload = {**input_data, **payload}
+
         tenant_raw = task.get("tenant_id") or DEFAULT_TENANT_ID
         tenant_id = str(tenant_raw) if tenant_raw else DEFAULT_TENANT_ID
 
@@ -300,6 +314,7 @@ class AITaskQueueConsumer:
 
 
 _ai_task_queue_consumer: Optional[AITaskQueueConsumer] = None
+_ai_task_queue_consumer_task: Optional[asyncio.Task] = None
 
 
 def get_ai_task_queue_consumer() -> AITaskQueueConsumer:
@@ -315,10 +330,25 @@ def get_ai_task_queue_consumer() -> AITaskQueueConsumer:
 
 
 async def start_ai_task_queue_consumer():
+    global _ai_task_queue_consumer_task
     consumer = get_ai_task_queue_consumer()
-    await consumer.start()
+
+    if _ai_task_queue_consumer_task is None or _ai_task_queue_consumer_task.done():
+        _ai_task_queue_consumer_task = asyncio.create_task(consumer.start())
+        logger.info("📋 AI task queue consumer started as background task")
+
+    return consumer
 
 
 async def stop_ai_task_queue_consumer():
+    global _ai_task_queue_consumer_task
     consumer = get_ai_task_queue_consumer()
     await consumer.stop()
+
+    if _ai_task_queue_consumer_task:
+        _ai_task_queue_consumer_task.cancel()
+        try:
+            await _ai_task_queue_consumer_task
+        except asyncio.CancelledError:
+            logger.debug("AI task queue consumer task cancelled")
+        _ai_task_queue_consumer_task = None
