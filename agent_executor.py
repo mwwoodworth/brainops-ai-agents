@@ -31,6 +31,7 @@ from database.async_connection import get_pool
 from unified_brain import UnifiedBrain
 from optimization.prompt_compiler import RevenuePromptCompiler
 from utils.outbound import sms_block_reason
+from lead_qualification_agent import LeadQualificationAgent as LeadQualificationAgentLogic
 
 logger = logging.getLogger(__name__)
 
@@ -961,6 +962,7 @@ class AgentExecutor:
         # REAL Stub Agent Implementations - Replace AI simulation with actual database queries
         # These are critical agents that were previously falling back to _generic_execute()
         try:
+            self.agents['LeadQualificationAgent'] = LeadQualificationTaskAgent()
             self.agents['LeadScorer'] = LeadScorerAgent()
             self.agents['CampaignAgent'] = CampaignAgent()
             self.agents['EmailMarketingAgent'] = EmailMarketingAgent()
@@ -997,7 +999,6 @@ class AgentExecutor:
         # Lead agents -> REAL revenue pipeline agents
         'LeadGenerationAgent': 'LeadDiscoveryAgentReal',
         'LeadDiscoveryAgent': 'LeadDiscoveryAgentReal',  # REAL: Queries customers/jobs tables
-        'LeadQualificationAgent': 'Conversion',
         # NOTE: LeadScorer now has REAL implementation - registered directly
         'DealClosingAgent': 'Conversion',
         'NurtureExecutorAgent': 'NurtureExecutorAgentReal',  # REAL: Creates sequences, queues emails
@@ -4619,6 +4620,42 @@ class SelfBuildingAgent(BaseAgent):
 
 # ============== REAL STUB AGENT IMPLEMENTATIONS ==============
 # These replace the AI-simulated fallback with actual database queries
+
+class LeadQualificationTaskAgent(BaseAgent):
+    """REAL ERP lead qualification agent - updates public.leads with AI/heuristic scoring."""
+
+    def __init__(self):
+        super().__init__("LeadQualificationAgent", "qualification")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        trigger = task.get("trigger_condition")
+        if isinstance(trigger, str):
+            try:
+                trigger = json.loads(trigger)
+            except json.JSONDecodeError:
+                trigger = {"raw": trigger}
+        if not isinstance(trigger, dict):
+            trigger = {}
+
+        tenant_id = (
+            str(trigger.get("tenant_id") or "")
+            or str(task.get("tenant_id") or "")
+            or str(task.get("tenantId") or "")
+        ).strip()
+        payload = trigger.get("payload") if isinstance(trigger.get("payload"), dict) else {}
+
+        lead_id = (
+            str(payload.get("leadId") or payload.get("id") or task.get("lead_id") or task.get("leadId") or "")
+        ).strip()
+
+        if not tenant_id:
+            return {"status": "skipped", "reason": "missing_tenant_id"}
+        if not lead_id:
+            return {"status": "skipped", "reason": "missing_lead_id"}
+
+        qualifier = LeadQualificationAgentLogic(tenant_id)
+        result = await qualifier.qualify_lead(lead_id, payload)
+        return {"status": "completed", "result": result}
 
 class LeadScorerAgent(BaseAgent):
     """REAL lead scoring agent - queries revenue_leads and advanced_lead_metrics tables"""
