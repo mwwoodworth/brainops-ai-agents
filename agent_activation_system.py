@@ -7,6 +7,7 @@ Implements real database operations for agent state management.
 import json
 import logging
 import os
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal
@@ -17,6 +18,10 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
+
+# NOTE: This system runs in build-out mode for many tenants. We must be safe-by-default:
+# - Respect dry_run_outreach flags from AUREA.
+# - Prevent task floods via simple DB-level dedupe windows (no migrations).
 
 # Try to use sync pool, fall back to direct connections
 try:
@@ -87,6 +92,44 @@ class BusinessEventType(Enum):
     QUOTE_REQUESTED = "quote_requested"
     PAYMENT_RECEIVED = "payment_received"
     JOB_SCHEDULED = "job_scheduled"
+
+
+def _coerce_uuid(value: Any) -> str | None:
+    if not value:
+        return None
+    try:
+        return str(uuid.UUID(str(value)))
+    except Exception:
+        return None
+
+
+def _activation_dedupe_window_seconds(event_type: "BusinessEventType") -> int:
+    """
+    Best-effort idempotency/cooldown window for agent activation.
+
+    We do NOT rely on DB constraints/migrations here. This is a safety rail to prevent
+    runaway task floods (seen in production with AUREA loops).
+    """
+    env_override = os.getenv(f"AGENT_ACTIVATION_DEDUPE_SECONDS_{event_type.value.upper()}")
+    if env_override:
+        try:
+            return max(0, int(env_override))
+        except Exception:
+            pass
+
+    try:
+        default_window = max(0, int(os.getenv("AGENT_ACTIVATION_DEDUPE_SECONDS", "900")))
+    except Exception:
+        default_window = 900
+
+    per_event: dict[BusinessEventType, int] = {
+        BusinessEventType.INVOICE_OVERDUE: 86400,        # daily
+        BusinessEventType.CUSTOMER_CHURN_RISK: 86400,    # daily
+        BusinessEventType.QUOTE_REQUESTED: 3600,         # hourly
+        BusinessEventType.NEW_CUSTOMER: 3600,            # hourly
+        BusinessEventType.SYSTEM_HEALTH_CHECK: 300,      # 5 minutes
+    }
+    return per_event.get(event_type, default_window)
 
 
 # Singleton instances per tenant
@@ -345,6 +388,9 @@ class AgentActivationSystem:
             "triggered_agents": []
         }
 
+        tenant_id_value = _coerce_uuid(self.tenant_id)
+        dedupe_window_seconds = _activation_dedupe_window_seconds(event_type)
+
         # Map event types to agent types (includes AUREA orchestration events)
         # UPDATED to match actual types in database
         event_agent_mapping = {
@@ -409,18 +455,67 @@ class AgentActivationSystem:
                 agents = cur.fetchall()
 
                 for agent in agents:
+                    # Flood protection: if a similar task already exists recently for this agent/event, skip.
+                    try:
+                        task_type = f"{event_type.value}_handler"
+                        if dedupe_window_seconds > 0:
+                            if tenant_id_value:
+                                cur.execute(
+                                    """
+                                    SELECT id
+                                    FROM ai_autonomous_tasks
+                                    WHERE agent_id = %s
+                                      AND tenant_id = %s
+                                      AND task_type = %s
+                                      AND status IN ('pending', 'processing', 'in_progress')
+                                      AND created_at > NOW() - (%s * INTERVAL '1 second')
+                                    ORDER BY created_at DESC
+                                    LIMIT 1
+                                    """,
+                                    (agent["id"], tenant_id_value, task_type, dedupe_window_seconds),
+                                )
+                            else:
+                                cur.execute(
+                                    """
+                                    SELECT id
+                                    FROM ai_autonomous_tasks
+                                    WHERE agent_id = %s
+                                      AND tenant_id IS NULL
+                                      AND task_type = %s
+                                      AND status IN ('pending', 'processing', 'in_progress')
+                                      AND created_at > NOW() - (%s * INTERVAL '1 second')
+                                    ORDER BY created_at DESC
+                                    LIMIT 1
+                                    """,
+                                    (agent["id"], task_type, dedupe_window_seconds),
+                                )
+
+                            existing = cur.fetchone()
+                            if existing:
+                                logger.info(
+                                    "Skipping duplicate activation for %s (%s): existing_task=%s within %ss",
+                                    agent.get("name"),
+                                    event_type.value,
+                                    existing.get("id"),
+                                    dedupe_window_seconds,
+                                )
+                                continue
+                    except Exception as dedupe_exc:
+                        logger.warning("Activation dedupe check failed (continuing): %s", dedupe_exc)
+
                     # Queue task for each matching agent
                     cur.execute("""
                         INSERT INTO ai_autonomous_tasks
-                        (task_type, priority, status, trigger_type, trigger_condition, agent_id, created_at)
-                        VALUES (%s, %s, 'pending', %s, %s, %s, NOW())
+                        (task_type, priority, status, trigger_type, trigger_condition, agent_id, tenant_id, created_at)
+                        VALUES (%s, %s, 'pending', %s, %s, %s, %s, NOW())
                         RETURNING id
                     """, (
-                        f"{event_type.value}_handler",
+                        task_type,
                         'high' if event_type in [BusinessEventType.SYSTEM_ALERT, BusinessEventType.SUPPORT_REQUEST] else 'medium',
                         event_type.value,
                         json.dumps(json_safe_serialize(event_data)),
-                        agent['id']
+                        agent['id'],
+                        tenant_id_value,
                     ))
                     task = cur.fetchone()
 
@@ -505,7 +600,8 @@ class AgentActivationSystem:
         """
         # Check for verification/dry_run mode
         verification_mode = event_data.get("verification_mode", False)
-        dry_run = event_data.get("dry_run", False)
+        dry_run_outreach = event_data.get("dry_run_outreach", False)
+        dry_run = event_data.get("dry_run", False) or dry_run_outreach
         aurea_initiated = event_data.get("aurea_initiated", False)
 
         result = {
@@ -513,6 +609,7 @@ class AgentActivationSystem:
             "timestamp": datetime.utcnow().isoformat(),
             "verification_mode": verification_mode,
             "dry_run": dry_run,
+            "dry_run_outreach": dry_run_outreach,
             "aurea_initiated": aurea_initiated,
             "actions_taken": [],
             "success": True

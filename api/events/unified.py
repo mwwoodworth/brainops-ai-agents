@@ -202,20 +202,21 @@ async def store_event(event: UnifiedEvent) -> bool:
         pool = get_pool()
         record = event.to_db_record()
 
-        # Use INSERT ON CONFLICT DO NOTHING since the unique index is partial
-        # Duplicate event_ids are rare and this avoids constraint matching issues
-        await pool.execute("""
-            INSERT INTO unified_events (
-                event_id, version, event_type, category, priority,
-                source, source_instance, tenant_id, timestamp, occurred_at,
-                payload, metadata, correlation_id, causation_id,
-                actor_type, actor_id, processed, processed_at,
-                processing_result, retry_count
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
-            )
-        """,
+        row = await pool.fetchrow("""
+	            INSERT INTO unified_events (
+	                event_id, version, event_type, category, priority,
+	                source, source_instance, tenant_id, timestamp, occurred_at,
+	                payload, metadata, correlation_id, causation_id,
+	                actor_type, actor_id, processed, processed_at,
+	                processing_result, retry_count
+	            ) VALUES (
+	                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+	                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+	            )
+	            -- Supabase table uses a partial unique index: UNIQUE(event_id) WHERE event_id IS NOT NULL
+	            ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING
+	            RETURNING event_id
+	        """,
             record['event_id'],
             record['version'],
             record['event_type'],
@@ -237,7 +238,10 @@ async def store_event(event: UnifiedEvent) -> bool:
             json.dumps(record['processing_result']) if record['processing_result'] else None,
             record['retry_count'],
         )
-        logger.info(f"Event {event.event_id} stored successfully")
+        if row:
+            logger.info(f"Event {event.event_id} stored successfully")
+        else:
+            logger.info(f"Event {event.event_id} already stored (idempotent duplicate)")
         return True
     except Exception as e:
         import traceback
@@ -261,7 +265,7 @@ async def mark_event_processed(
                 processed_at = NOW(),
                 processing_result = $2
             WHERE event_id = $1
-        """, event_id, json.dumps(result) if result else None)
+        """, event_id, json.dumps(result, default=str) if result else None)
         return True
     except Exception as e:
         logger.error(f"Failed to mark event processed: {e}")
@@ -272,85 +276,245 @@ async def mark_event_processed(
 # AGENT ROUTING
 # =============================================================================
 
-async def route_event_to_agents(event: UnifiedEvent, background_tasks: BackgroundTasks) -> list[str]:
-    """Route event to appropriate agents for processing"""
-    agents = get_agents_for_event(event.event_type)
+def _snake_to_pascal(value: str) -> str:
+    parts = [p for p in (value or "").strip().split("_") if p]
+    return "".join(part[:1].upper() + part[1:] for part in parts)
 
-    if not agents:
+
+_ROUTING_AGENT_OVERRIDES: dict[str, str] = {
+    "scoring_agent": "LeadScorer",
+    "followup_agent": "WorkflowAutomation",
+    "review_agent": "QualityAgent",
+    "billing_agent": "InvoicingAgent",
+    "collection_agent": "InvoicingAgent",
+    "pricing_agent": "EstimationAgent",
+    "resource_agent": "SchedulingAgent",
+    "job_creation_agent": "WorkflowAutomation",
+}
+
+
+def _event_priority_to_task_priority(priority: EventPriority) -> str:
+    if priority == EventPriority.CRITICAL:
+        return "critical"
+    if priority == EventPriority.HIGH:
+        return "high"
+    if priority == EventPriority.LOW:
+        return "low"
+    if priority == EventPriority.BATCH:
+        return "low"
+    return "medium"
+
+
+async def _resolve_ai_agent_for_routing_key(agent_key: str) -> Optional[dict[str, Any]]:
+    """
+    Resolve an EVENT_AGENT_ROUTING key (e.g. `notification_agent`) to an active
+    `ai_agents` record (id + name). Returns None if no match.
+    """
+    if not ASYNC_POOL_AVAILABLE or using_fallback():
+        return None
+
+    pool = get_pool()
+
+    candidates: list[str] = []
+    override = _ROUTING_AGENT_OVERRIDES.get(agent_key)
+    if override:
+        candidates.append(override)
+
+    candidates.append(agent_key)
+    candidates.append(_snake_to_pascal(agent_key))
+
+    # If we got something like "NotificationAgent" already, keep; else try adding Agent suffix.
+    pascal = _snake_to_pascal(agent_key)
+    if pascal and not pascal.endswith("Agent"):
+        candidates.append(f"{pascal}Agent")
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        row = await pool.fetchrow(
+            """
+            SELECT id, name
+            FROM ai_agents
+            WHERE name = $1
+              AND status = 'active'
+            LIMIT 1
+            """,
+            candidate,
+        )
+        if row:
+            return dict(row)
+    return None
+
+
+async def _enqueue_autonomous_task_for_agent(agent: dict[str, Any], event: UnifiedEvent) -> Optional[str]:
+    """Create an ai_autonomous_tasks row for the resolved agent/event pair (idempotent)."""
+    if not ASYNC_POOL_AVAILABLE or using_fallback():
+        return None
+
+    import uuid as uuid_mod
+
+    pool = get_pool()
+    agent_id = agent.get("id")
+    agent_name = agent.get("name")
+    if not agent_id or not agent_name:
+        return None
+
+    # Idempotency: do not enqueue duplicate tasks for the same event+agent.
+    exists = await pool.fetchval(
+        """
+        SELECT 1
+        FROM ai_autonomous_tasks
+        WHERE agent_id = $1
+          AND trigger_type = 'unified_event'
+          AND trigger_condition->>'event_id' = $2
+          AND created_at > NOW() - INTERVAL '90 days'
+        LIMIT 1
+        """,
+        agent_id,
+        event.event_id,
+    )
+    if exists:
+        return None
+
+    task_id = uuid_mod.uuid4()
+    task_type = f"{event.event_type.replace('.', '_')}_handler"
+    priority = _event_priority_to_task_priority(event.priority)
+    tenant_uuid: str | None = None
+    if getattr(event, "tenant_id", None):
+        try:
+            tenant_uuid = str(uuid_mod.UUID(str(event.tenant_id)))
+        except (ValueError, TypeError, AttributeError):
+            tenant_uuid = None
+
+    trigger_condition = {
+        "event_id": event.event_id,
+        "event_type": event.event_type,
+        "source": event.source.value,
+        "tenant_id": event.tenant_id,
+        "payload": event.payload,
+        "metadata": event.metadata or {},
+        "routed_agent": agent_name,
+        "received_at": event.timestamp.isoformat() if getattr(event, "timestamp", None) else None,
+    }
+
+    await pool.execute(
+        """
+        INSERT INTO ai_autonomous_tasks (
+            id,
+            title,
+            task_type,
+            priority,
+            status,
+            trigger_type,
+            trigger_condition,
+            agent_id,
+            tenant_id,
+            created_at
+        )
+        VALUES ($1, $2, $3, $4, 'pending', 'unified_event', $5::jsonb, $6, $7, NOW())
+        """,
+        task_id,
+        f"{agent_name}: {event.event_type}",
+        task_type,
+        priority,
+        json.dumps(trigger_condition, default=str),
+        agent_id,
+        tenant_uuid,
+    )
+
+    return str(task_id)
+
+
+async def route_event_to_agents(event: UnifiedEvent, background_tasks: BackgroundTasks) -> list[str]:
+    """Route event to appropriate agents for processing by enqueuing tasks."""
+    agent_keys = get_agents_for_event(event.event_type)
+    if not agent_keys:
         logger.debug(f"No agents registered for event type: {event.event_type}")
         return []
 
-    routed = []
-    for agent_id in agents:
+    resolved_agents: list[dict[str, Any]] = []
+    for agent_key in agent_keys:
         try:
-            # Add agent execution to background tasks
-            background_tasks.add_task(
-                execute_agent_for_event,
-                agent_id,
-                event
-            )
-            routed.append(agent_id)
-            logger.info(f"Routed event {event.event_id} to agent {agent_id}")
-        except Exception as e:
-            logger.error(f"Failed to route to agent {agent_id}: {e}")
+            agent = await _resolve_ai_agent_for_routing_key(agent_key)
+            if agent:
+                resolved_agents.append(agent)
+            else:
+                logger.warning("No matching ai_agents record for routing key: %s", agent_key)
+        except Exception as exc:
+            logger.error("Failed resolving routing key %s: %s", agent_key, exc)
 
-    return routed
+    # Fallback to a generic workflow agent so events are never silently dropped.
+    if not resolved_agents:
+        fallback = await _resolve_ai_agent_for_routing_key("WorkflowAutomation")
+        if fallback:
+            resolved_agents.append(fallback)
+        else:
+            logger.error("No agents resolved for event %s and no WorkflowAutomation fallback available", event.event_id)
+            return []
+
+    routed_to: list[str] = []
+    tasks_created: list[str] = []
+    tasks_skipped: int = 0
+    for agent in resolved_agents:
+        routed_to.append(agent.get("name") or "unknown")
+        try:
+            task_id = await _enqueue_autonomous_task_for_agent(agent, event)
+            if task_id:
+                tasks_created.append(task_id)
+            else:
+                tasks_skipped += 1
+        except Exception as exc:
+            logger.error("Failed enqueuing autonomous task for agent %s: %s", agent.get("name"), exc)
+
+    # "processed" here means: routed + enqueued (or skipped due to idempotency).
+    await mark_event_processed(
+        event.event_id,
+        {
+            "routed_to": routed_to,
+            "tasks_created": tasks_created,
+            "tasks_skipped": tasks_skipped,
+        },
+    )
+
+    return routed_to
 
 
 async def execute_agent_for_event(agent_id: str, event: UnifiedEvent):
-    """Execute an agent with the given event"""
-    try:
-        # Import agent execution machinery
-        # This integrates with existing agent infrastructure
-        logger.info(f"Executing agent {agent_id} for event {event.event_id}")
-
-        # Try to use the intelligent task orchestrator
-        try:
-            from intelligent_task_orchestrator import get_task_orchestrator
-            orchestrator = get_task_orchestrator()
-
-            await orchestrator.submit_task(
-                title=f"Process {event.event_type} event",
-                task_type=agent_id.replace('_agent', ''),
-                payload={
-                    'event_id': event.event_id,
-                    'event_type': event.event_type,
-                    'tenant_id': event.tenant_id,
-                    'payload': event.payload,
-                },
-                priority=80 if event.priority == EventPriority.CRITICAL else
-                        70 if event.priority == EventPriority.HIGH else
-                        50 if event.priority == EventPriority.NORMAL else 30,
-            )
-            logger.info(f"Submitted task to orchestrator for {agent_id}")
-        except Exception as e:
-            logger.warning(f"Task orchestrator not available: {e}")
-
-            # Fallback: Direct agent execution for known agents
-            await execute_agent_directly(agent_id, event)
-
-    except Exception as e:
-        logger.error(f"Agent execution failed for {agent_id}: {e}")
+    """
+    Backward-compatible helper kept for older call sites: routes via the same
+    enqueue mechanism used by the unified router.
+    """
+    agent = await _resolve_ai_agent_for_routing_key(agent_id)
+    if not agent:
+        logger.warning("execute_agent_for_event: no agent resolved for %s", agent_id)
+        return
+    await _enqueue_autonomous_task_for_agent(agent, event)
 
 
 async def execute_agent_directly(agent_id: str, event: UnifiedEvent):
-    """Direct agent execution fallback"""
+    """Direct agent execution fallback (only used when explicitly enabled)."""
+    direct_enabled = os.getenv("BRAINOPS_UNIFIED_EVENTS_DIRECT_EXECUTION", "").lower() in ("1", "true", "yes")
+    if not direct_enabled:
+        logger.info("Direct unified-event execution disabled; skipping %s for %s", agent_id, event.event_id)
+        return
+
     try:
-        # Map agent IDs to actual implementations
-        agent_map = {
-            'customer_success_agent': 'customer_success_agent.CustomerSuccessAgent',
-            'revenue_agent': 'revenue_generation_system.RevenueGenerationSystem',
-            'followup_agent': 'intelligent_followup_system.IntelligentFollowupSystem',
-            'scheduling_agent': 'scheduling_agent.SchedulingAgent',
-        }
+        from agent_executor import executor as agent_executor_singleton
 
-        if agent_id in agent_map:
-            module_path, class_name = agent_map[agent_id].rsplit('.', 1)
-            # Dynamic import would go here
-            logger.info(f"Would execute {agent_map[agent_id]} for {event.event_type}")
-        else:
-            logger.debug(f"No direct implementation for agent: {agent_id}")
+        agent = await _resolve_ai_agent_for_routing_key(agent_id)
+        agent_name = (agent or {}).get("name") or agent_id
 
+        await agent_executor_singleton.execute(
+            agent_name=str(agent_name),
+            task={
+                "action": "unified_event",
+                "event_id": event.event_id,
+                "event_type": event.event_type,
+                "tenant_id": event.tenant_id,
+                "payload": event.payload,
+                "metadata": event.metadata or {},
+            },
+        )
     except Exception as e:
         logger.error(f"Direct agent execution failed: {e}")
 
@@ -420,6 +584,8 @@ async def publish_event(
 
         # Store in database
         stored = await store_event(event)
+        if not stored:
+            raise HTTPException(status_code=503, detail="Database unavailable; event not persisted")
 
         # Broadcast via Supabase Realtime
         broadcast = await _broadcaster.broadcast(event)
@@ -462,8 +628,13 @@ async def verify_erp_signature(request: Request) -> bool:
     secret = os.getenv("ERP_WEBHOOK_SECRET", "")
 
     if not secret:
+        environment = os.getenv("ENVIRONMENT", "production").lower()
+        allow_unverified = os.getenv("ALLOW_UNVERIFIED_ERP_WEBHOOKS", "").lower() in ("1", "true", "yes")
+        if environment == "production" and not allow_unverified:
+            logger.critical("ERP_WEBHOOK_SECRET not configured in production - rejecting webhook")
+            return False
         logger.warning("ERP_WEBHOOK_SECRET not configured - webhook verification disabled")
-        return True  # Allow in dev mode if no secret configured
+        return True
 
     if not signature:
         logger.error("Missing ERP webhook signature header")
@@ -502,6 +673,8 @@ async def handle_erp_webhook(
 
         # Store
         stored = await store_event(event)
+        if not stored:
+            raise HTTPException(status_code=503, detail="Database unavailable; event not persisted")
 
         # Broadcast
         broadcast = await _broadcaster.broadcast(event)
@@ -520,12 +693,9 @@ async def handle_erp_webhook(
 
     except Exception as e:
         logger.error(f"ERP webhook error: {e}")
-        # Return 200 to prevent ERP from retrying indefinitely
-        return {
-            "status": "error",
-            "error": str(e),
-            "event_id": webhook.eventId,
-        }
+        if isinstance(e, HTTPException):
+            raise
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/recent")
