@@ -429,15 +429,22 @@ class ProposalEngine:
             """, ProposalStatus.SENT.value, now, public_link, uuid.UUID(proposal_id))
 
             # Queue email
+            email_metadata = {
+                "source": "proposal_engine",
+                "proposal_id": proposal_id,
+                "lead_id": str(proposal["lead_id"]),
+                "public_link": public_link,
+            }
             await pool.execute("""
-                INSERT INTO ai_email_queue (id, recipient_email, subject, body, status, send_after, created_at)
-                VALUES ($1, $2, $3, $4, 'queued', $5, $5)
+                INSERT INTO ai_email_queue (id, recipient, subject, body, status, scheduled_for, created_at, metadata)
+                VALUES ($1, $2, $3, $4, 'queued', $5, $5, $6::jsonb)
             """,
                 uuid.uuid4(),
                 proposal["client_email"],
                 f"Proposal from BrainOps: {proposal['offer_name']}",
                 f"Hi {proposal['client_name']},\n\nPlease review your proposal here: {public_link}\n\nBest,\nBrainOps Team",
-                now
+                now,
+                json.dumps(email_metadata),
             )
 
             # Update lead state via state machine
