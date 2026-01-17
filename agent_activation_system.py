@@ -390,6 +390,15 @@ class AgentActivationSystem:
 
         tenant_id_value = _coerce_uuid(self.tenant_id)
         dedupe_window_seconds = _activation_dedupe_window_seconds(event_type)
+        if not tenant_id_value:
+            logger.warning(
+                "Activation skipped: invalid tenant_id for AgentActivationSystem tenant=%s event=%s",
+                self.tenant_id,
+                event_type.value,
+            )
+            result["success"] = False
+            result["error"] = "tenant_id_invalid"
+            return result
 
         # Map event types to agent types (includes AUREA orchestration events)
         # UPDATED to match actual types in database
