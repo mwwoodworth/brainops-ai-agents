@@ -13,7 +13,7 @@ import re
 import uuid
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Optional
@@ -279,9 +279,37 @@ class AUREA:
         self._last_orientation_bundle: dict[str, Any] = {}
         self._decision_success_rate_history: list[float] = []
         self._performance_trends: dict[str, list[float]] = {}
+        self._last_recommended_action_at: dict[str, datetime] = {}
         self._init_database()
 
         logger.info(f"🧠 AUREA initialized for tenant {tenant_id} at autonomy level: {autonomy_level.name}")
+
+    def _recommended_action_cooldown_seconds(self, action: str, default_seconds: int) -> int:
+        env_key = f"AUREA_ACTION_COOLDOWN_SECONDS_{action.upper()}"
+        override = os.getenv(env_key) or os.getenv("AUREA_ACTION_COOLDOWN_SECONDS")
+        if override:
+            try:
+                return max(0, int(override))
+            except Exception:
+                return default_seconds
+        return default_seconds
+
+    def _should_emit_recommended_action(self, action: str, default_cooldown_seconds: int) -> bool:
+        """
+        Simple in-process cooldown to prevent decision spam.
+
+        This is a safety rail (not a substitute for durable idempotency), but it prevents
+        runaway loops from flooding aurea_decisions and downstream task queues.
+        """
+        cooldown = self._recommended_action_cooldown_seconds(action, default_cooldown_seconds)
+        if cooldown <= 0:
+            return True
+        now = datetime.now(timezone.utc)
+        last = self._last_recommended_action_at.get(action)
+        if last and (now - last).total_seconds() < cooldown:
+            return False
+        self._last_recommended_action_at[action] = now
+        return True
 
     @property
     def db_pool(self) -> Optional[Any]:
@@ -1124,6 +1152,8 @@ class AUREA:
         # Financial decisions
         for priority in context.get("priorities", []):
             if priority["type"] == "financial" and priority["urgency"] == "high":
+                if not self._should_emit_recommended_action("activate_collection_agents", 86400):
+                    continue
                 decision = Decision(
                     id=f"dec-{self.cycle_count}-{len(decisions)}",
                     type=DecisionType.FINANCIAL,
@@ -1141,6 +1171,8 @@ class AUREA:
         # Operational decisions
         for priority in context.get("priorities", []):
             if priority["type"] == "operational":
+                if not self._should_emit_recommended_action("activate_scheduling_optimization", 900):
+                    continue
                 decision = Decision(
                     id=f"dec-{self.cycle_count}-{len(decisions)}",
                     type=DecisionType.OPERATIONAL,
@@ -1158,6 +1190,8 @@ class AUREA:
         # Technical/Frontend decisions
         for priority in context.get("priorities", []):
             if priority["type"] == "technical" and priority.get("urgency") == "critical":
+                if not self._should_emit_recommended_action("trigger_frontend_investigation", 600):
+                    continue
                 decision = Decision(
                     id=f"dec-{self.cycle_count}-{len(decisions)}",
                     type=DecisionType.TECHNICAL,
@@ -1175,6 +1209,8 @@ class AUREA:
         # Customer retention decisions
         for risk in context.get("risks", []):
             if risk["type"] == "customer":
+                if not self._should_emit_recommended_action("activate_retention_campaign", 86400):
+                    continue
                 decision = Decision(
                     id=f"dec-{self.cycle_count}-{len(decisions)}",
                     type=DecisionType.CUSTOMER,
@@ -1192,6 +1228,8 @@ class AUREA:
         # Opportunity decisions
         for opportunity in context.get("opportunities", []):
             if opportunity["type"] == "revenue" and opportunity["potential_value"] > 10000:
+                if not self._should_emit_recommended_action("activate_sales_acceleration", 86400):
+                    continue
                 decision = Decision(
                     id=f"dec-{self.cycle_count}-{len(decisions)}",
                     type=DecisionType.STRATEGIC,
