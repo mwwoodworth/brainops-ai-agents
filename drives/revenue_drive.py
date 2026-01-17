@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Optional
@@ -23,6 +24,16 @@ from psycopg2.extras import RealDictCursor
 from agent_activation_system import BusinessEventType, get_activation_system
 
 logger = logging.getLogger(__name__)
+
+
+def _is_uuid(value: str | None) -> bool:
+    if not value:
+        return False
+    try:
+        uuid.UUID(str(value))
+        return True
+    except Exception:
+        return False
 
 
 def _build_db_config() -> dict[str, Any]:
@@ -82,11 +93,13 @@ class RevenueDrive:
     ) -> None:
         self.tenant_id = tenant_id or os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID")
         environment = os.getenv("ENVIRONMENT", "production").lower()
+        outbound_mode = os.getenv("OUTBOUND_EMAIL_MODE", "disabled").strip().lower()
+        outbound_is_live = outbound_mode == "live"
         dry_run_env = os.getenv("REVENUE_DRIVE_DRY_RUN")
         self.dry_run = (
             dry_run_env.lower() in ("1", "true", "yes")
             if dry_run_env is not None
-            else environment != "production"
+            else (environment != "production" or not outbound_is_live)
         )
         logger.info(f"RevenueDrive initialized (Dry Run: {self.dry_run}) - Environment: {environment}")
         self.stale_days = int(os.getenv("REVENUE_DRIVE_STALE_DAYS", "7"))
@@ -112,6 +125,9 @@ class RevenueDrive:
         if not self.activation_system:
             logger.warning("RevenueDrive missing tenant_id; skipping run.")
             return {"status": "skipped", "reason": "tenant_id_missing"}
+        if not self.dry_run and not _is_uuid(self.tenant_id):
+            logger.warning("RevenueDrive tenant_id invalid for live execution; skipping run.")
+            return {"status": "skipped", "reason": "tenant_id_invalid"}
 
         stale_leads = self._fetch_stale_leads()
         overdue_invoices = self._fetch_overdue_invoices()

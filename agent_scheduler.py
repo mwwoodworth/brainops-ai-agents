@@ -19,6 +19,7 @@ from psycopg2.extras import RealDictCursor
 
 from revenue_generation_system import get_revenue_system
 from advanced_lead_scoring import get_scoring_engine
+from utils.outbound import email_block_reason
 
 # Bleeding Edge OODA (Consciousness)
 try:
@@ -56,12 +57,9 @@ except ImportError:
     run_scheduled_feedback_loop = None
     logging.warning("Learning Feedback Loop unavailable")
 
-# Enable revenue drive by default in production, off in dev unless toggled
+# Safe-by-default: autonomous revenue drive is OFF unless explicitly enabled.
 _revenue_drive_env = os.getenv("ENABLE_REVENUE_DRIVE")
-if _revenue_drive_env is None:
-    ENABLE_REVENUE_DRIVE = os.getenv("ENVIRONMENT", "production").lower() == "production"
-else:
-    ENABLE_REVENUE_DRIVE = _revenue_drive_env.lower() in ("1", "true", "yes")
+ENABLE_REVENUE_DRIVE = bool(_revenue_drive_env and _revenue_drive_env.lower() in ("1", "true", "yes"))
 
 # CRITICAL: Use shared connection pool to prevent MaxClientsInSessionMode
 try:
@@ -410,6 +408,15 @@ class AgentScheduler:
         # Create follow-up tasks for stale estimates
         for est in stale_estimates:
             try:
+                block_reason = email_block_reason(est.get("email"))
+                if block_reason:
+                    actions_taken.append({
+                        'action': 'followup_blocked',
+                        'customer_id': str(est.get('customer_id')),
+                        'estimate_id': str(est.get('id')),
+                        'reason': block_reason,
+                    })
+                    continue
                 cur.execute("""
                     INSERT INTO ai_scheduled_outreach
                     (target_id, channel, message_template, personalization, scheduled_for, status, metadata)
@@ -610,32 +617,41 @@ class AgentScheduler:
 
                 # Schedule re-engagement for high-score leads
                 if score >= 50:
-                    cur.execute("""
-                        INSERT INTO ai_scheduled_outreach
-                        (target_id, channel, message_template, personalization, scheduled_for, status, metadata)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        str(customer['id']),
-                        'email',
-                        'reengagement',
-                        json.dumps({
-                            'customer_name': customer['name'],
-                            'lead_score': score
-                        }),
-                        datetime.utcnow() + timedelta(hours=48),
-                        'scheduled',
-                        json.dumps({
+                    block_reason = email_block_reason(customer.get("email"))
+                    if block_reason:
+                        actions_taken.append({
+                            'action': 'reengagement_blocked',
+                            'customer_id': str(customer.get('id')),
                             'lead_score': score,
-                            'total_spent': total_spent,
-                            'reason': 'High-value dormant customer - re-engagement opportunity',
-                            'priority': 'high' if score >= 70 else 'medium'
+                            'reason': block_reason,
                         })
-                    ))
-                    actions_taken.append({
-                        'action': 'scheduled_reengagement',
-                        'customer_id': str(customer['id']),
-                        'lead_score': score
-                    })
+                    else:
+                        cur.execute("""
+                            INSERT INTO ai_scheduled_outreach
+                            (target_id, channel, message_template, personalization, scheduled_for, status, metadata)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            str(customer['id']),
+                            'email',
+                            'reengagement',
+                            json.dumps({
+                                'customer_name': customer['name'],
+                                'lead_score': score
+                            }),
+                            datetime.utcnow() + timedelta(hours=48),
+                            'scheduled',
+                            json.dumps({
+                                'lead_score': score,
+                                'total_spent': total_spent,
+                                'reason': 'High-value dormant customer - re-engagement opportunity',
+                                'priority': 'high' if score >= 70 else 'medium'
+                            })
+                        ))
+                        actions_taken.append({
+                            'action': 'scheduled_reengagement',
+                            'customer_id': str(customer['id']),
+                            'lead_score': score
+                        })
 
                 actions_taken.append({
                     'action': 'updated_lead_score',
@@ -1245,6 +1261,9 @@ class AgentScheduler:
         """Execute the autonomous revenue drive scan."""
         if not REVENUE_DRIVE_AVAILABLE or not ENABLE_REVENUE_DRIVE:
             return
+        if os.getenv("OUTBOUND_EMAIL_MODE", "disabled").strip().lower() != "live":
+            logger.info("RevenueDrive skipped: OUTBOUND_EMAIL_MODE is not live")
+            return
         try:
             drive = RevenueDrive()
             result = drive.run()
@@ -1338,6 +1357,9 @@ class AgentScheduler:
                 logger.error("Failed to schedule Learning Feedback Loop: %s", exc, exc_info=True)
 
         if not (REVENUE_DRIVE_AVAILABLE and ENABLE_REVENUE_DRIVE):
+            return
+        if os.getenv("OUTBOUND_EMAIL_MODE", "disabled").strip().lower() != "live":
+            logger.info("RevenueDrive not scheduled: OUTBOUND_EMAIL_MODE is not live")
             return
         try:
             job_id = "revenue_drive"
