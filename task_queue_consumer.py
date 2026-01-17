@@ -145,7 +145,7 @@ class TaskQueueConsumer:
                         END,
                         created_at ASC
                     LIMIT $1
-                    FOR UPDATE SKIP LOCKED
+                    FOR UPDATE OF t SKIP LOCKED
                 """, self.batch_size)
 
                 # Mark as processing
