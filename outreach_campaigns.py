@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -234,9 +235,31 @@ async def enroll_lead_in_campaign(
 
     try:
         from email_scheduler_daemon import schedule_nurture_email
+        from database.async_connection import get_pool
 
         email_ids = []
         custom_vars = custom_vars or {}
+
+        # Fail-closed: never enroll demo/test leads into outbound campaigns.
+        try:
+            pool = get_pool()
+            lead_uuid = uuid.UUID(str(lead_id))
+            lead_row = await pool.fetchrow(
+                "SELECT is_test, is_demo FROM revenue_leads WHERE id = $1",
+                lead_uuid,
+            )
+            if lead_row and (lead_row.get("is_test") is True or lead_row.get("is_demo") is True):
+                logger.warning("Skipping campaign enrollment for demo/test lead %s (%s)", lead_id, campaign_id)
+                return {
+                    "success": False,
+                    "skipped": True,
+                    "reason": "lead_marked_demo_or_test",
+                    "lead_id": lead_id,
+                    "campaign_id": campaign_id,
+                }
+        except Exception as e:
+            # If we cannot resolve lead flags, continue but mark metadata as test-safe by default.
+            logger.warning("Could not verify lead flags for %s: %s", lead_id, e)
 
         for email_template in campaign["emails"]:
             # Personalize content
@@ -305,6 +328,8 @@ async def run_campaign_for_new_leads(
             SELECT rl.id, rl.email, rl.company_name, rl.contact_name
             FROM revenue_leads rl
             WHERE rl.email IS NOT NULL
+                AND COALESCE(rl.is_test, false) = false
+                AND COALESCE(rl.is_demo, false) = false
                 AND rl.email NOT LIKE '%%test%%'
                 AND rl.email NOT LIKE '%%example%%'
                 AND NOT EXISTS (
