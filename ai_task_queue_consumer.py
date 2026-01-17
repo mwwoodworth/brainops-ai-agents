@@ -87,6 +87,7 @@ class AITaskQueueConsumer:
     async def _consume_loop(self):
         while self._running:
             try:
+                await self._reconcile_stale_processing_tasks()
                 tasks = await self._fetch_pending_tasks()
                 if tasks:
                     logger.info("📥 Fetched %s ai_task_queue tasks", len(tasks))
@@ -96,6 +97,79 @@ class AITaskQueueConsumer:
             except Exception as exc:
                 logger.error("Error in ai_task_queue consume loop: %s", exc)
             await asyncio.sleep(self.poll_interval)
+
+    async def _reconcile_stale_processing_tasks(self) -> None:
+        """Fail or requeue tasks stuck in processing for too long (self-healing)."""
+        stale_after_seconds = int(os.getenv("AI_TASK_QUEUE_STALE_AFTER_SECONDS", "600"))
+        if stale_after_seconds <= 0:
+            return
+
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            stale_rows = await conn.fetch(
+                """
+                SELECT id, task_type
+                FROM ai_task_queue
+                WHERE status = 'processing'
+                  AND started_at IS NOT NULL
+                  AND started_at < NOW() - ($1 * INTERVAL '1 second')
+                LIMIT 100
+                """,
+                stale_after_seconds,
+            )
+
+            if not stale_rows:
+                return
+
+            quality_ids = [row["id"] for row in stale_rows if (row["task_type"] or "").lower() == "quality_check"]
+            other_ids = [row["id"] for row in stale_rows if row["id"] not in quality_ids]
+
+            requeued = 0
+            failed = 0
+
+            if quality_ids:
+                requeued = await conn.execute(
+                    """
+                    UPDATE ai_task_queue
+                    SET status = 'pending',
+                        started_at = NULL,
+                        updated_at = NOW(),
+                        error_message = 'stale_processing_requeued'
+                    WHERE id = ANY($1)
+                    """,
+                    quality_ids,
+                )
+
+            if other_ids:
+                failed = await conn.execute(
+                    """
+                    UPDATE ai_task_queue
+                    SET status = 'failed',
+                        completed_at = NOW(),
+                        updated_at = NOW(),
+                        error_message = 'stale_processing_timeout'
+                    WHERE id = ANY($1)
+                    """,
+                    other_ids,
+                )
+
+        # asyncpg returns "UPDATE <n>" strings
+        try:
+            requeued_n = int(str(requeued).split()[-1]) if requeued else 0
+        except Exception:
+            requeued_n = 0
+        try:
+            failed_n = int(str(failed).split()[-1]) if failed else 0
+        except Exception:
+            failed_n = 0
+
+        if requeued_n or failed_n:
+            logger.warning(
+                "🧹 Reconciled stale ai_task_queue processing tasks | requeued=%s failed=%s stale_after_seconds=%s",
+                requeued_n,
+                failed_n,
+                stale_after_seconds,
+            )
 
     async def _fetch_pending_tasks(self) -> list[dict[str, Any]]:
         try:
@@ -160,10 +234,18 @@ class AITaskQueueConsumer:
         started_at = time.time()
 
         try:
+            timeout_seconds = float(os.getenv("AI_TASK_QUEUE_EXECUTION_TIMEOUT_SECONDS", "60"))
+
             if task_type == "lead_nurturing":
-                result = await self._handle_lead_nurturing(task_id, tenant_id, payload)
+                result = await asyncio.wait_for(
+                    self._handle_lead_nurturing(task_id, tenant_id, payload),
+                    timeout=timeout_seconds,
+                )
             elif task_type == "quality_check":
-                result = await self._handle_quality_check(task_id, payload)
+                result = await asyncio.wait_for(
+                    self._handle_quality_check(task_id, payload),
+                    timeout=timeout_seconds,
+                )
             else:
                 result = {"status": "skipped", "reason": "unsupported_task_type", "task_type": task_type}
                 self._stats["tasks_skipped"] += 1
@@ -184,6 +266,17 @@ class AITaskQueueConsumer:
                 logger.info("✅ ai_task_queue task %s completed", task_id)
 
             await self._update_task_status(task_id, status, result, duration_ms)
+        except asyncio.TimeoutError:
+            duration_ms = int((time.time() - started_at) * 1000)
+            result = {
+                "status": "failed",
+                "error": "timeout",
+                "timeout_seconds": float(os.getenv("AI_TASK_QUEUE_EXECUTION_TIMEOUT_SECONDS", "60")),
+                "task_type": task_type,
+            }
+            await self._update_task_status(task_id, "failed", result, duration_ms)
+            self._stats["tasks_failed"] += 1
+            logger.error("⏱️ ai_task_queue task %s timed out after %ss", task_id, result["timeout_seconds"])
         except Exception as exc:
             duration_ms = int((time.time() - started_at) * 1000)
             await self._update_task_status(task_id, "failed", {"error": str(exc)}, duration_ms)

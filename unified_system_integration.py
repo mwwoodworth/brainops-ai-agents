@@ -21,11 +21,60 @@ Purpose: MAKE ALL SYSTEMS POWERFUL AND USED!
 import asyncio
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
+IS_PRODUCTION = ENVIRONMENT in ("production", "prod")
+
+DEFAULT_FEATURE_TIMEOUT_SECONDS = float(os.getenv("UNIFIED_SYSTEM_FEATURE_TIMEOUT_SECONDS", "5"))
+DEFAULT_GRAPH_CONTEXT_TIMEOUT_SECONDS = float(
+    os.getenv("UNIFIED_SYSTEM_GRAPH_CONTEXT_TIMEOUT_SECONDS", str(DEFAULT_FEATURE_TIMEOUT_SECONDS))
+)
+DEFAULT_DECISION_TREE_TIMEOUT_SECONDS = float(
+    os.getenv("UNIFIED_SYSTEM_DECISION_TREE_TIMEOUT_SECONDS", str(DEFAULT_FEATURE_TIMEOUT_SECONDS))
+)
+DEFAULT_PRICING_TIMEOUT_SECONDS = float(
+    os.getenv("UNIFIED_SYSTEM_PRICING_TIMEOUT_SECONDS", str(DEFAULT_FEATURE_TIMEOUT_SECONDS))
+)
+DEFAULT_LEARNING_TIMEOUT_SECONDS = float(
+    os.getenv("UNIFIED_SYSTEM_LEARNING_TIMEOUT_SECONDS", str(DEFAULT_FEATURE_TIMEOUT_SECONDS))
+)
+DEFAULT_REVENUE_TIMEOUT_SECONDS = float(
+    os.getenv("UNIFIED_SYSTEM_REVENUE_TIMEOUT_SECONDS", str(DEFAULT_FEATURE_TIMEOUT_SECONDS))
+)
+DEFAULT_CONSCIOUSNESS_TIMEOUT_SECONDS = float(
+    os.getenv("UNIFIED_SYSTEM_CONSCIOUSNESS_TIMEOUT_SECONDS", str(DEFAULT_FEATURE_TIMEOUT_SECONDS))
+)
+DEFAULT_LIVE_BRAIN_TIMEOUT_SECONDS = float(
+    os.getenv("UNIFIED_SYSTEM_LIVE_BRAIN_TIMEOUT_SECONDS", str(DEFAULT_FEATURE_TIMEOUT_SECONDS))
+)
+
+
+async def _await_with_timeout(
+    awaitable: Any,
+    *,
+    timeout_seconds: float,
+    label: str,
+) -> Any:
+    try:
+        return await asyncio.wait_for(awaitable, timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        logger.warning("%s timed out after %ss", label, timeout_seconds)
+        return None
+
+
+def _should_use_graph_context(task_data: dict[str, Any]) -> bool:
+    """
+    Graph context can be expensive; default OFF in production unless explicitly requested.
+    """
+    default_use_graph_context = not IS_PRODUCTION
+    return bool(task_data.get("use_graph_context", default_use_graph_context))
+
 
 # Import enhanced orchestration features
 try:
@@ -337,16 +386,22 @@ class UnifiedSystemIntegration:
 
         # Publish agent started event
         if self.event_bus:
-            await self.event_bus.publish(SystemEvent(
-                event_type=EventType.AGENT_STARTED,
-                source=agent_name,
-                data={
-                    "execution_id": ctx.execution_id,
-                    "task_type": task_type,
-                    "priority": priority
-                },
-                priority=priority
-            ))
+            await _await_with_timeout(
+                self.event_bus.publish(
+                    SystemEvent(
+                        event_type=EventType.AGENT_STARTED,
+                        source=agent_name,
+                        data={
+                            "execution_id": ctx.execution_id,
+                            "task_type": task_type,
+                            "priority": priority,
+                        },
+                        priority=priority,
+                    )
+                ),
+                timeout_seconds=DEFAULT_FEATURE_TIMEOUT_SECONDS,
+                label="UnifiedSystemIntegration event_bus.publish(AGENT_STARTED)",
+            )
 
         # 1. Update state sync - track that this agent is executing
         state_sync = get_state_sync()
@@ -364,21 +419,32 @@ class UnifiedSystemIntegration:
                     circuit.record_failure()
 
         # 2. Get graph context - understand codebase relationships
-        graph_ctx = get_graph_context()
-        if graph_ctx:
-            try:
-                ctx.graph_context = await graph_ctx.get_context_for_agent(agent_name, task_data)
-                self.systems_used.add("graph_context")
-            except Exception as e:
-                self.logger.warning(f"Graph context failed: {e}")
+        if _should_use_graph_context(task_data):
+            graph_ctx = get_graph_context()
+            if graph_ctx:
+                try:
+                    ctx.graph_context = await _await_with_timeout(
+                        graph_ctx.get_context_for_agent(agent_name, task_data),
+                        timeout_seconds=DEFAULT_GRAPH_CONTEXT_TIMEOUT_SECONDS,
+                        label="UnifiedSystemIntegration graph_context.get_context_for_agent",
+                    )
+                    if ctx.graph_context:
+                        self.systems_used.add("graph_context")
+                except Exception as e:
+                    self.logger.warning(f"Graph context failed: {e}")
 
         # 3. Get pricing recommendations if relevant
         if task_type in ['proposal', 'quote', 'pricing', 'estimate', 'invoice']:
             pricing = get_pricing_engine()
             if pricing:
                 try:
-                    ctx.pricing_recommendations = await pricing.get_recommendations_async(task_data)
-                    self.systems_used.add("pricing_engine")
+                    ctx.pricing_recommendations = await _await_with_timeout(
+                        pricing.get_recommendations_async(task_data),
+                        timeout_seconds=DEFAULT_PRICING_TIMEOUT_SECONDS,
+                        label="UnifiedSystemIntegration pricing.get_recommendations_async",
+                    )
+                    if ctx.pricing_recommendations:
+                        self.systems_used.add("pricing_engine")
                 except Exception as e:
                     self.logger.warning(f"Pricing engine failed: {e}")
 
@@ -386,7 +452,11 @@ class UnifiedSystemIntegration:
         decision_tree = get_decision_tree()
         if decision_tree:
             try:
-                guidance = await decision_tree.get_execution_guidance(agent_name, task_type, task_data)
+                guidance = await _await_with_timeout(
+                    decision_tree.get_execution_guidance(agent_name, task_type, task_data),
+                    timeout_seconds=DEFAULT_DECISION_TREE_TIMEOUT_SECONDS,
+                    label="UnifiedSystemIntegration decision_tree.get_execution_guidance",
+                )
                 if guidance:
                     ctx.confidence_score = guidance.get('confidence', 1.0)
                     self.systems_used.add("decision_tree")
@@ -403,9 +473,14 @@ class UnifiedSystemIntegration:
         learning = get_notebook_learning()
         if learning:
             try:
-                patterns = await learning.get_patterns_for_task(ctx.agent_name, ctx.task_type)
+                patterns = await _await_with_timeout(
+                    learning.get_patterns_for_task(ctx.agent_name, ctx.task_type),
+                    timeout_seconds=DEFAULT_LEARNING_TIMEOUT_SECONDS,
+                    label="UnifiedSystemIntegration learning.get_patterns_for_task",
+                )
                 ctx.historical_patterns = patterns
-                self.systems_used.add("notebook_learning")
+                if patterns:
+                    self.systems_used.add("notebook_learning")
             except Exception as e:
                 self.logger.warning(f"Learning system failed: {e}")
 
@@ -434,12 +509,16 @@ class UnifiedSystemIntegration:
         learning = get_notebook_learning()
         if learning:
             try:
-                await learning.record_execution(
-                    agent=ctx.agent_name,
-                    task_type=ctx.task_type,
-                    input_data=ctx.task_data,
-                    output_data=result,
-                    success=success
+                await _await_with_timeout(
+                    learning.record_execution(
+                        agent=ctx.agent_name,
+                        task_type=ctx.task_type,
+                        input_data=ctx.task_data,
+                        output_data=result,
+                        success=success,
+                    ),
+                    timeout_seconds=DEFAULT_LEARNING_TIMEOUT_SECONDS,
+                    label="UnifiedSystemIntegration learning.record_execution",
                 )
             except Exception as e:
                 self.logger.warning(f"Learning record failed: {e}")
@@ -448,11 +527,15 @@ class UnifiedSystemIntegration:
         decision_tree = get_decision_tree()
         if decision_tree:
             try:
-                await decision_tree.record_outcome(
-                    agent_name=ctx.agent_name,
-                    task_type=ctx.task_type,
-                    success=success,
-                    confidence_used=ctx.confidence_score
+                await _await_with_timeout(
+                    decision_tree.record_outcome(
+                        agent_name=ctx.agent_name,
+                        task_type=ctx.task_type,
+                        success=success,
+                        confidence_used=ctx.confidence_score,
+                    ),
+                    timeout_seconds=DEFAULT_DECISION_TREE_TIMEOUT_SECONDS,
+                    label="UnifiedSystemIntegration decision_tree.record_outcome",
                 )
             except Exception as e:
                 self.logger.warning(f"Decision tree update failed: {e}")
@@ -462,7 +545,11 @@ class UnifiedSystemIntegration:
             revenue = get_revenue_system()
             if revenue:
                 try:
-                    await revenue.track_revenue_event(ctx.task_type, result)
+                    await _await_with_timeout(
+                        revenue.track_revenue_event(ctx.task_type, result),
+                        timeout_seconds=DEFAULT_REVENUE_TIMEOUT_SECONDS,
+                        label="UnifiedSystemIntegration revenue.track_revenue_event",
+                    )
                 except Exception as e:
                     self.logger.warning(f"Revenue tracking failed: {e}")
 
@@ -494,17 +581,27 @@ class UnifiedSystemIntegration:
 
         # 6. Record consciousness thought about execution
         try:
-            consciousness = await get_consciousness_controller()
+            consciousness = await _await_with_timeout(
+                get_consciousness_controller(),
+                timeout_seconds=DEFAULT_CONSCIOUSNESS_TIMEOUT_SECONDS,
+                label="UnifiedSystemIntegration get_consciousness_controller",
+            )
             if consciousness:
-                await consciousness.record_thought({
-                    "type": "execution_reflection",
-                    "agent": ctx.agent_name,
-                    "task": ctx.task_type,
-                    "success": success,
-                    "confidence": ctx.confidence_score,
-                    "insight": f"Completed {ctx.task_type} with {success and 'success' or 'failure'}",
-                    "timestamp": ctx.timestamp.isoformat()
-                })
+                await _await_with_timeout(
+                    consciousness.record_thought(
+                        {
+                            "type": "execution_reflection",
+                            "agent": ctx.agent_name,
+                            "task": ctx.task_type,
+                            "success": success,
+                            "confidence": ctx.confidence_score,
+                            "insight": f"Completed {ctx.task_type} with {success and 'success' or 'failure'}",
+                            "timestamp": ctx.timestamp.isoformat(),
+                        }
+                    ),
+                    timeout_seconds=DEFAULT_CONSCIOUSNESS_TIMEOUT_SECONDS,
+                    label="UnifiedSystemIntegration consciousness.record_thought",
+                )
                 ctx.consciousness_state = {"thought_recorded": True}
                 self.systems_used.add("consciousness")
         except Exception as e:
@@ -512,19 +609,27 @@ class UnifiedSystemIntegration:
 
         # 7. Store in live brain memory
         try:
-            brain = await get_live_brain()
+            brain = await _await_with_timeout(
+                get_live_brain(),
+                timeout_seconds=DEFAULT_LIVE_BRAIN_TIMEOUT_SECONDS,
+                label="UnifiedSystemIntegration get_live_brain",
+            )
             if brain:
                 from live_memory_brain import MemoryType
-                memory_id = await brain.store(
-                    content={
-                        "agent": ctx.agent_name,
-                        "task": ctx.task_type,
-                        "result_summary": str(result)[:500],
-                        "success": success
-                    },
-                    memory_type=MemoryType.EPISODIC,
-                    importance=0.7 if success else 0.9,
-                    context={"execution_id": ctx.execution_id}
+                memory_id = await _await_with_timeout(
+                    brain.store(
+                        content={
+                            "agent": ctx.agent_name,
+                            "task": ctx.task_type,
+                            "result_summary": str(result)[:500],
+                            "success": success,
+                        },
+                        memory_type=MemoryType.EPISODIC,
+                        importance=0.7 if success else 0.9,
+                        context={"execution_id": ctx.execution_id},
+                    ),
+                    timeout_seconds=DEFAULT_LIVE_BRAIN_TIMEOUT_SECONDS,
+                    label="UnifiedSystemIntegration live_brain.store",
                 )
                 ctx.brain_memory_id = memory_id
                 self.systems_used.add("live_brain")
@@ -544,11 +649,15 @@ class UnifiedSystemIntegration:
         learning = get_notebook_learning()
         if learning:
             try:
-                await learning.record_error(
-                    agent=ctx.agent_name,
-                    task_type=ctx.task_type,
-                    error=str(error),
-                    context=ctx.to_dict()
+                await _await_with_timeout(
+                    learning.record_error(
+                        agent=ctx.agent_name,
+                        task_type=ctx.task_type,
+                        error=str(error),
+                        context=ctx.to_dict(),
+                    ),
+                    timeout_seconds=DEFAULT_LEARNING_TIMEOUT_SECONDS,
+                    label="UnifiedSystemIntegration learning.record_error",
                 )
             except Exception as e:
                 self.logger.warning(f"Error recording failed: {e}")
@@ -557,7 +666,11 @@ class UnifiedSystemIntegration:
         decision_tree = get_decision_tree()
         if decision_tree:
             try:
-                recovery = await decision_tree.get_recovery_actions(ctx.agent_name, str(error))
+                recovery = await _await_with_timeout(
+                    decision_tree.get_recovery_actions(ctx.agent_name, str(error)),
+                    timeout_seconds=DEFAULT_DECISION_TREE_TIMEOUT_SECONDS,
+                    label="UnifiedSystemIntegration decision_tree.get_recovery_actions",
+                )
                 if recovery:
                     recovery_actions = recovery
             except Exception as e:
