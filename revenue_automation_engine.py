@@ -26,6 +26,8 @@ from enum import Enum
 from functools import wraps
 from typing import Any, Callable, Optional, TypeVar
 
+from utils.outbound import email_block_reason, sms_block_reason
+
 logger = logging.getLogger(__name__)
 
 # Type variable for generic retry decorator
@@ -992,6 +994,25 @@ class RevenueAutomationEngine:
 
     async def _send_automated_email(self, lead: Lead, template: str):
         """Send automated email via SendGrid - REAL IMPLEMENTATION"""
+        if not lead.email:
+            logger.warning("No email address for lead %s", lead.lead_id)
+            lead.automation_history.append({
+                "action": "email_skipped",
+                "reason": "missing_email",
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            return
+
+        block_reason = email_block_reason(lead.email, {"lead_id": lead.lead_id, "template": template})
+        if block_reason:
+            logger.warning("Outbound email blocked (%s) for %s", block_reason, lead.email)
+            lead.automation_history.append({
+                "action": "email_skipped",
+                "reason": block_reason,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            return
+
         if not SENDGRID_API_KEY:
             logger.warning("SendGrid not configured - email not sent")
             lead.automation_history.append({
@@ -1096,12 +1117,27 @@ class RevenueAutomationEngine:
 
     async def _send_automated_sms(self, lead: Lead, template: str):
         """Send automated SMS via Twilio - REAL IMPLEMENTATION"""
-        if not TWILIO_SID or not TWILIO_TOKEN:
-            logger.warning("Twilio not configured - SMS not sent")
-            return
-
         if not lead.phone:
             logger.warning(f"No phone number for lead {lead.lead_id}")
+            lead.automation_history.append({
+                "action": "sms_skipped",
+                "reason": "missing_phone",
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            return
+
+        block_reason = sms_block_reason(lead.phone, {"lead_id": lead.lead_id, "template": template})
+        if block_reason:
+            logger.warning("Outbound SMS blocked (%s) for %s", block_reason, lead.phone)
+            lead.automation_history.append({
+                "action": "sms_skipped",
+                "reason": block_reason,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            return
+
+        if not TWILIO_SID or not TWILIO_TOKEN:
+            logger.warning("Twilio not configured - SMS not sent")
             return
 
         try:

@@ -30,6 +30,7 @@ from ai_self_awareness import get_self_aware_ai
 from database.async_connection import get_pool
 from unified_brain import UnifiedBrain
 from optimization.prompt_compiler import RevenuePromptCompiler
+from utils.outbound import sms_block_reason
 
 logger = logging.getLogger(__name__)
 
@@ -6807,6 +6808,19 @@ class SMSInterfaceAgent(BaseAgent):
 
         if not to_number or not message:
             return {"status": "error", "error": "to and message are required"}
+
+        metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else None
+        block_reason = sms_block_reason(to_number, metadata)
+        if block_reason:
+            self.logger.warning("Outbound SMS blocked (%s) for %s", block_reason, to_number)
+            await self._log_communication(
+                comm_type="sms",
+                direction="outbound",
+                subject="SMS",
+                content=message,
+                metadata={"to": to_number, "blocked": True, "reason": block_reason},
+            )
+            return {"status": "skipped", "reason": block_reason, "to": to_number}
 
         sid = os.getenv("TWILIO_ACCOUNT_SID")
         token = os.getenv("TWILIO_AUTH_TOKEN")

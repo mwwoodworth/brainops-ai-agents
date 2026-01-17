@@ -17,6 +17,8 @@ from typing import Optional
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
+from utils.outbound import sms_block_reason
+
 # Optional OpenAI dependency
 try:
     from openai import OpenAI
@@ -1159,10 +1161,37 @@ class DeliveryManager:
             return {'success': False, 'error': str(e)}
 
     async def _deliver_sms(self, lead_id: str, content: dict) -> dict:
-        """Deliver SMS via Twilio if configured, otherwise log and skip"""
+        """Deliver SMS via Twilio if configured (fail-closed by default)."""
         twilio_sid = os.getenv('TWILIO_ACCOUNT_SID')
         twilio_token = os.getenv('TWILIO_AUTH_TOKEN')
         twilio_from = os.getenv('TWILIO_FROM_NUMBER')
+
+        to_number = (
+            content.get("to")
+            or content.get("phone")
+            or content.get("to_number")
+            or content.get("recipient")
+        )
+        message = content.get("message") or content.get("body") or content.get("content") or ""
+
+        block_reason = sms_block_reason(to_number, {"lead_id": str(lead_id), "source": "lead_nurturing_system"})
+        if block_reason:
+            logger.info("SMS blocked (%s) for %s", block_reason, to_number or "<missing>")
+            return {
+                'success': False,
+                'channel': 'sms',
+                'status': 'skipped',
+                'reason': block_reason
+            }
+
+        if not to_number or not message:
+            logger.warning("Cannot deliver SMS: missing to/message for lead %s", lead_id)
+            return {
+                'success': False,
+                'channel': 'sms',
+                'status': 'skipped',
+                'reason': 'missing_to_or_message'
+            }
 
         if not all([twilio_sid, twilio_token, twilio_from]):
             logger.info(f"SMS delivery skipped for {lead_id} - Twilio not configured")
@@ -1173,15 +1202,39 @@ class DeliveryManager:
                 'reason': 'Twilio credentials not configured'
             }
 
-        # Would integrate with Twilio here
-        # For now, log that SMS would be sent
-        logger.info(f"SMS would be sent to lead {lead_id}: {content.get('message', '')[:50]}...")
-        return {
-            'success': False,
-            'channel': 'sms',
-            'status': 'not_implemented',
-            'reason': 'Twilio integration pending - credentials present but integration not complete'
-        }
+        try:
+            from twilio.rest import Client
+        except Exception as e:
+            logger.warning("Twilio client not available - SMS not sent: %s", e)
+            return {
+                'success': False,
+                'channel': 'sms',
+                'status': 'skipped',
+                'reason': 'twilio_client_unavailable'
+            }
+
+        try:
+            client = Client(twilio_sid, twilio_token)
+            msg = client.messages.create(
+                body=message,
+                from_=twilio_from,
+                to=to_number,
+            )
+            return {
+                'success': True,
+                'channel': 'sms',
+                'status': 'sent',
+                'message_sid': getattr(msg, "sid", None),
+                'to': to_number
+            }
+        except Exception as e:
+            logger.error("Twilio SMS failed for lead %s: %s", lead_id, e)
+            return {
+                'success': False,
+                'channel': 'sms',
+                'status': 'failed',
+                'reason': str(e)
+            }
 
 # Singleton instance
 _nurturing_system = None
