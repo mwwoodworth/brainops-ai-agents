@@ -173,12 +173,12 @@ class NotificationService:
         self.owner_email = os.getenv("OWNER_EMAIL", "matt@weathercraft.com")
         self.owner_phone = os.getenv("OWNER_PHONE")
 
-        # Notification preferences
+        # Notification preferences - use string values for JSON serialization
         self.severity_channels = {
-            "critical": [NotificationChannel.SLACK, NotificationChannel.SMS, NotificationChannel.DATABASE],
-            "high": [NotificationChannel.SLACK, NotificationChannel.DATABASE],
-            "medium": [NotificationChannel.DATABASE],
-            "low": [NotificationChannel.DATABASE],
+            "critical": [NotificationChannel.SLACK.value, NotificationChannel.SMS.value, NotificationChannel.DATABASE.value],
+            "high": [NotificationChannel.SLACK.value, NotificationChannel.DATABASE.value],
+            "medium": [NotificationChannel.DATABASE.value],
+            "low": [NotificationChannel.DATABASE.value],
         }
 
     async def notify(self, notification: TaskNotification):
@@ -426,9 +426,13 @@ class IntelligentTaskOrchestrator:
             cur = conn.cursor(cursor_factory=RealDictCursor)
 
             # Get pending tasks ordered by AI-adjusted priority
+            # CAST t.priority to FLOAT to match ap.adjusted_priority type
             cur.execute("""
             SELECT t.*,
-                   COALESCE(ap.adjusted_priority, t.priority) as effective_priority
+                   COALESCE(ap.adjusted_priority,
+                            CASE WHEN t.priority ~ '^[0-9.]+$'
+                                 THEN t.priority::FLOAT
+                                 ELSE 0.5 END) as effective_priority
             FROM ai_autonomous_tasks t
             LEFT JOIN ai_priority_adjustments ap ON t.id::text = ap.task_id
             WHERE t.status = 'pending'
