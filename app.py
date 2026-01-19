@@ -983,6 +983,16 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ AI Task Queue Consumer startup failed: {e}")
 
+        # Start Intelligent Task Orchestrator - AI-driven task prioritization and execution
+        try:
+            from intelligent_task_orchestrator import start_task_orchestrator, get_task_orchestrator
+
+            await start_task_orchestrator()
+            app.state.task_orchestrator = get_task_orchestrator()
+            logger.info("🎯 Intelligent Task Orchestrator STARTED - AI-driven task prioritization active")
+        except Exception as e:
+            logger.error(f"❌ Intelligent Task Orchestrator startup failed: {e}")
+
         # Start rate limiter cleanup task (every 5 minutes)
         async def rate_limiter_cleanup_loop():
             while True:

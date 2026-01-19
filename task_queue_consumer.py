@@ -96,18 +96,42 @@ class TaskQueueConsumer:
         logger.info("🛑 TaskQueueConsumer stopped")
 
     async def _consume_loop(self):
-        """Main consumption loop"""
+        """Main consumption loop with advisory lock to prevent race conditions"""
+        # Advisory lock key for ai_autonomous_tasks queue (unique identifier)
+        ADVISORY_LOCK_KEY = 8675309001  # Unique key for this consumer
+
         while self._running:
             try:
-                await self._reconcile_stale_processing_tasks()
-                tasks = await self._fetch_pending_tasks()
+                from database.async_connection import get_pool
+                pool = get_pool()
 
-                if tasks:
-                    logger.info(f"📥 Fetched {len(tasks)} pending tasks")
-                    for task in tasks:
-                        await self._process_task(task)
+                # Try to acquire advisory lock (non-blocking)
+                async with pool.acquire() as conn:
+                    lock_acquired = await conn.fetchval(
+                        "SELECT pg_try_advisory_lock($1)",
+                        ADVISORY_LOCK_KEY
+                    )
 
-                self._stats["last_poll"] = datetime.now(timezone.utc).isoformat()
+                if not lock_acquired:
+                    # Another instance is processing, wait and retry
+                    logger.debug("TaskQueueConsumer: Another instance holds the lock, waiting...")
+                    await asyncio.sleep(5)  # Short wait before retry
+                    continue
+
+                try:
+                    await self._reconcile_stale_processing_tasks()
+                    tasks = await self._fetch_pending_tasks()
+
+                    if tasks:
+                        logger.info(f"📥 Fetched {len(tasks)} pending tasks")
+                        for task in tasks:
+                            await self._process_task(task)
+
+                    self._stats["last_poll"] = datetime.now(timezone.utc).isoformat()
+                finally:
+                    # Release advisory lock
+                    async with pool.acquire() as conn:
+                        await conn.execute("SELECT pg_advisory_unlock($1)", ADVISORY_LOCK_KEY)
 
             except Exception as e:
                 logger.error(f"Error in consume loop: {e}")
