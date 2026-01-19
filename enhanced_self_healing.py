@@ -1075,6 +1075,8 @@ class EnhancedSelfHealing:
                 except (ValueError, TypeError):
                     safe_max_age = 300
 
+                # SECURITY FIX: Use parameterized query instead of string formatting
+                # safe_max_age is already validated as int between 0-86400
                 mcp_result = await self._execute_mcp_tool(
                     platform="supabase",
                     tool="execute_sql",
@@ -1083,9 +1085,10 @@ class EnhancedSelfHealing:
                             SELECT pg_terminate_backend(pid)
                             FROM pg_stat_activity
                             WHERE state = 'idle'
-                            AND query_start < NOW() - INTERVAL '%s seconds'
+                            AND query_start < NOW() - ($1 * INTERVAL '1 second')
                             AND pid <> pg_backend_pid()
-                        """ % safe_max_age,
+                        """,
+                        "params": [safe_max_age],
                         "reason": f"Self-healing connection flush for {component}"
                     }
                 )
