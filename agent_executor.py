@@ -1429,15 +1429,18 @@ class AgentExecutor:
 
             # RBA/WBA ENFORCEMENT (Total Completion Protocol)
             # Retrieve memory context before agent acts
+            # PRODUCTION: Enforce memory protocol by default for AGI-level operation
             memory_context = None
             memory_client = None
+            # Environment variable to control enforcement (default: enforce)
+            memory_enforcement_bypass = os.getenv("MEMORY_ENFORCEMENT_BYPASS", "false").lower() in ("true", "1", "yes")
             if AGENT_MEMORY_SDK_AVAILABLE and not task.get("_skip_memory_enforcement"):
                 try:
                     memory_client = AgentMemoryClient(
                         agent_id=resolved_agent_name,
                         enforce_rba=True,
                         enforce_wba=True,
-                        allow_bypass=True  # Don't block execution, just log violations
+                        allow_bypass=memory_enforcement_bypass  # Default: enforce, can bypass via env var
                     )
                     await memory_client.__aenter__()
 

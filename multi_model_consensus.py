@@ -257,13 +257,60 @@ class ModelProvider:
         temperature: float
     ) -> ModelResponse:
         """Query Google Gemini"""
-        # Placeholder - would integrate with Google AI Studio
-        return ModelResponse(
-            model=ModelType.GOOGLE_GEMINI,
-            response="Gemini integration pending",
-            confidence=0.0,
-            metadata={"available": False}
-        )
+        try:
+            import google.generativeai as genai
+
+            api_key = os.getenv("GOOGLE_API_KEY")
+            if not api_key:
+                return ModelResponse(
+                    model=ModelType.GOOGLE_GEMINI,
+                    response="Google API key not configured",
+                    confidence=0.0,
+                    metadata={"available": False}
+                )
+
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-pro')
+
+            # Combine system prompt and user prompt
+            full_prompt = prompt
+            if system_prompt:
+                full_prompt = f"{system_prompt}\n\n{prompt}"
+
+            # Run in thread pool for async compatibility
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: model.generate_content(
+                    full_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        max_output_tokens=max_tokens,
+                        temperature=temperature
+                    )
+                )
+            )
+
+            return ModelResponse(
+                model=ModelType.GOOGLE_GEMINI,
+                response=response.text,
+                confidence=0.82,  # Gemini doesn't provide confidence scores
+                metadata={"available": True}
+            )
+
+        except ImportError:
+            return ModelResponse(
+                model=ModelType.GOOGLE_GEMINI,
+                response="Google GenAI SDK not installed",
+                confidence=0.0,
+                metadata={"available": False, "error": "ImportError"}
+            )
+        except Exception as e:
+            logger.error(f"Gemini query failed: {e}")
+            return ModelResponse(
+                model=ModelType.GOOGLE_GEMINI,
+                response=f"Gemini query failed: {str(e)}",
+                confidence=0.0,
+                metadata={"available": False, "error": str(e)}
+            )
 
     def get_model_weight(self, model: ModelType) -> float:
         """Get weight for a model"""
