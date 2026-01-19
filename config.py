@@ -151,7 +151,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.5.18')  # P0: Fail-closed outbound safety (disable RevenueDrive by default + block scheduling outbound outreach)
+        self.version = os.getenv('VERSION', 'v3.5.19')  # P0: Fail-closed outbound safety (disable RevenueDrive by default + block scheduling outbound outreach)
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
