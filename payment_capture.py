@@ -426,8 +426,13 @@ BrainOps Team""",
 async def ensure_invoices_table():
     """Ensure the ai_invoices table exists."""
     try:
-        from database.async_connection import get_pool
-        pool = get_pool()
+        from database.async_connection import get_pool, DatabaseUnavailableError
+        try:
+            pool = get_pool()
+        except DatabaseUnavailableError:
+            # Pool not initialized yet - will be called again later
+            logger.debug("Database pool not ready yet for ai_invoices table - will retry later")
+            return False
         if not pool:
             return False
 
