@@ -383,7 +383,13 @@ class APIMonetizationEngine:
         }
 
     async def generate_invoice(self, api_key_id: str, year_month: str = None) -> dict:
-        """Generate invoice for API usage."""
+        """
+        Generate invoice record for API usage.
+        
+        NOTE: This creates a billing record in the local database. 
+        It does NOT trigger a charge on Stripe automatically.
+        The `stripe_invoice_id` field will be null until processed by a separate billing worker.
+        """
         if not year_month:
             year_month = datetime.now(timezone.utc).strftime("%Y-%m")
 

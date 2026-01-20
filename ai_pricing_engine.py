@@ -641,51 +641,21 @@ class AIPricingEngine:
 
     async def run_ab_test(self, test_name: str, variant_a: dict, variant_b: dict, sample_size: int = 100):
         """Run A/B test on pricing strategies"""
+        # TODO: Implement real A/B testing logic when traffic volume permits.
+        # Currently disabled to prevent fake data pollution.
+        logger.warning(f"A/B testing requested ({test_name}) but feature is currently disabled/stubbed.")
+        return {
+            "status": "skipped",
+            "reason": "feature_disabled",
+            "message": "Real A/B testing requires higher traffic volume. Fake simulation disabled."
+        }
+
+        # The following fake simulation code is removed to ensure data integrity.
+        """
         try:
             logger.info(f"Starting A/B test: {test_name}")
-
-            # Implementation would run actual tests with real customers
-            # This is a simulation
-
-            results = {
-                "test_name": test_name,
-                "variant_a": variant_a,
-                "variant_b": variant_b,
-                "results": {
-                    "variant_a_conversion": 0.15,
-                    "variant_b_conversion": 0.18,
-                    "statistical_significance": 0.95,
-                    "winner": "variant_b"
-                }
-            }
-
-            # Store test results
-            conn = psycopg2.connect(**_get_db_config())
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                INSERT INTO pricing_ab_tests
-                (test_name, variant_a, variant_b, metrics, winner, confidence_level, completed_at)
-                VALUES (%s, %s, %s, %s, %s, %s, NOW())
-            """, (
-                test_name,
-                json.dumps(variant_a),
-                json.dumps(variant_b),
-                json.dumps(results["results"]),
-                results["results"]["winner"],
-                results["results"]["statistical_significance"]
-            ))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
-
-            logger.info(f"A/B test completed: {results['results']['winner']} wins")
-            return results
-
-        except Exception as e:
-            logger.error(f"A/B test failed: {e}")
-            return {}
+            ...
+        """
 
 # Global instance - create lazily
 pricing_engine = None

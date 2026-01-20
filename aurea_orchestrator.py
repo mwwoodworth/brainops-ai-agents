@@ -1867,23 +1867,23 @@ class AUREA:
     def _infer_mcp_server(self, tool: str) -> str:
         """Infer which MCP server to use based on tool name"""
         tool_lower = tool.lower()
-        if any(k in tool_lower for k in ["render", "service", "deploy", "restart"]):
+        if tool_lower.startswith("render_") or any(k in tool_lower for k in ["render", "service", "deploy", "restart"]):
             return "render"
-        elif any(k in tool_lower for k in ["vercel", "preview", "domain", "deployment"]):
+        elif tool_lower.startswith("vercel_") or any(k in tool_lower for k in ["vercel", "preview", "domain", "deployment"]):
             return "vercel"
-        elif any(k in tool_lower for k in ["supabase", "sql", "database", "query", "insert"]):
+        elif tool_lower.startswith("supabase_") or any(k in tool_lower for k in ["supabase", "sql", "database", "query", "insert"]):
             return "supabase"
-        elif any(k in tool_lower for k in ["github", "repo", "branch", "pr", "issue", "workflow"]):
+        elif tool_lower.startswith("github_") or any(k in tool_lower for k in ["github", "repo", "branch", "pr", "issue", "workflow"]):
             return "github"
-        elif any(k in tool_lower for k in ["docker", "container", "image", "kubernetes"]):
+        elif tool_lower.startswith("docker_") or any(k in tool_lower for k in ["docker", "container", "image", "kubernetes"]):
             return "docker"
-        elif any(k in tool_lower for k in ["stripe", "payment", "invoice", "subscription", "customer"]):
+        elif tool_lower.startswith("stripe_") or any(k in tool_lower for k in ["stripe", "payment", "invoice", "subscription", "customer"]):
             return "stripe"
-        elif any(k in tool_lower for k in ["playwright", "browser", "screenshot"]):
+        elif tool_lower.startswith("playwright_") or any(k in tool_lower for k in ["playwright", "browser", "screenshot"]):
             return "playwright"
-        elif any(k in tool_lower for k in ["openai", "gpt", "embedding"]):
+        elif tool_lower.startswith("openai_") or any(k in tool_lower for k in ["openai", "gpt", "embedding"]):
             return "openai"
-        elif any(k in tool_lower for k in ["anthropic", "claude"]):
+        elif tool_lower.startswith("anthropic_") or any(k in tool_lower for k in ["anthropic", "claude"]):
             return "anthropic"
         else:
             return "render"  # Default to Render for infrastructure
