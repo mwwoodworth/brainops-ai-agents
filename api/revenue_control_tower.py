@@ -394,13 +394,27 @@ async def get_automation_controls() -> dict[str, Any]:
     except Exception:
         control_settings = {}
 
+    # Calculate actual emails sent today from the queue
+    sent_today = 0
+    try:
+        result = await pool.fetchval("""
+            SELECT COUNT(*)
+            FROM ai_email_queue
+            WHERE status = 'sent'
+            AND sent_at::date = CURRENT_DATE
+        """)
+        sent_today = result or 0
+    except Exception as e:
+        logger.warning(f"Could not calculate sent_today: {e}")
+        sent_today = 0
+
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "controls": {
             "email_outreach": {
                 "enabled": control_settings.get("control_email_outreach", {}).get("value", "enabled") == "enabled",
                 "daily_limit": 50,
-                "sent_today": 0  # TODO: Calculate from email queue
+                "sent_today": sent_today  # Calculated from email queue
             },
             "lead_enrichment": {
                 "enabled": control_settings.get("control_lead_enrichment", {}).get("value", "enabled") == "enabled",
