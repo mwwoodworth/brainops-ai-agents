@@ -1354,7 +1354,7 @@ class AutonomousSystemOrchestrator:
         }
 
     async def _deploy_to_vercel(self, system: ManagedSystem, deployment: Deployment):
-        """Trigger Vercel deployment"""
+        """Trigger Vercel deployment and poll for completion status"""
         token = self.ci_cd_providers.get("vercel")
         if not token:
             logger.warning("Vercel token not configured")
@@ -1362,10 +1362,70 @@ class AutonomousSystemOrchestrator:
 
         project_id = system.metadata.get("vercel_project_id")
         if not project_id:
+            logger.warning(f"No vercel_project_id in metadata for {system.name}")
             return
 
-        # Vercel auto-deploys on git push, so we just track it
-        await asyncio.sleep(60)  # Simulate Vercel build time
+        team_id = system.metadata.get("vercel_team_id")
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {"Authorization": f"Bearer {token}"}
+
+                # Get latest deployment for this project
+                deployments_url = f"https://api.vercel.com/v6/deployments?projectId={project_id}&limit=1"
+                if team_id:
+                    deployments_url += f"&teamId={team_id}"
+
+                async with session.get(deployments_url, headers=headers) as response:
+                    if response.status != 200:
+                        logger.error(f"Failed to fetch Vercel deployments: {response.status}")
+                        return
+
+                    data = await response.json()
+                    deployments = data.get("deployments", [])
+
+                    if not deployments:
+                        logger.info(f"No Vercel deployments found for project {project_id}")
+                        return
+
+                    latest = deployments[0]
+                    deploy_id = latest.get("uid")
+                    state = latest.get("state", "UNKNOWN")
+
+                    logger.info(f"Vercel deployment {deploy_id} for {system.name}: {state}")
+
+                    # Poll for completion if still building (max 10 minutes)
+                    max_polls = 60
+                    poll_interval = 10
+
+                    for _ in range(max_polls):
+                        if state in ["READY", "ERROR", "CANCELED"]:
+                            break
+
+                        await asyncio.sleep(poll_interval)
+
+                        status_url = f"https://api.vercel.com/v13/deployments/{deploy_id}"
+                        if team_id:
+                            status_url += f"?teamId={team_id}"
+
+                        async with session.get(status_url, headers=headers) as status_resp:
+                            if status_resp.status == 200:
+                                status_data = await status_resp.json()
+                                state = status_data.get("readyState", status_data.get("state", "UNKNOWN"))
+                                logger.info(f"Vercel deployment {deploy_id} status: {state}")
+
+                    # Update deployment record with final status
+                    deployment.status = DeploymentStatus.SUCCESS if state == "READY" else DeploymentStatus.FAILED
+                    deployment.completed_at = datetime.utcnow().isoformat()
+
+                    if state == "READY":
+                        logger.info(f"Vercel deployment completed successfully for {system.name}")
+                    else:
+                        logger.error(f"Vercel deployment failed for {system.name}: {state}")
+
+        except Exception as e:
+            logger.error(f"Vercel deployment error for {system.name}: {e}")
+            deployment.status = DeploymentStatus.FAILED
 
     async def _deploy_to_render(self, system: ManagedSystem, deployment: Deployment):
         """Trigger Render deployment"""
