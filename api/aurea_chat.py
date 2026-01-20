@@ -258,11 +258,70 @@ async def generate_aurea_response(
     # Get live system state
     state = await state_provider.get_live_state()
 
+    # Check if request is from MyRoofGenius
+    source = session.context.get("source", "") if session.context else ""
+    is_roofing_context = source in ["myroofgenius_web", "myroofgenius", "mrg"]
+
+    # Build roofing knowledge context for MyRoofGenius users
+    roofing_knowledge = ""
+    if is_roofing_context:
+        roofing_knowledge = """
+ROOFING EXPERTISE (You are an expert in the roofing industry):
+
+COMMON ROOFING MATERIALS:
+- Asphalt Shingles: Most popular (80% of US homes). 3-tab ($70-100/sq), Architectural ($100-150/sq), Premium ($150-500/sq). 15-30 year lifespan.
+- Metal Roofing: Steel, aluminum, copper, zinc. Standing seam ($300-700/sq), Metal shingles ($200-400/sq). 40-70 year lifespan.
+- Clay/Concrete Tiles: Heavy, durable. $300-500/sq. 50-100+ year lifespan. Common in SW US.
+- Slate: Natural stone, premium. $500-1,500/sq. 75-200 year lifespan.
+- Wood Shakes/Shingles: Cedar, redwood. $200-400/sq. 25-30 year lifespan.
+- EPDM (Rubber): Flat roofs. $3-6/sq ft. 20-25 year lifespan.
+- TPO/PVC: Commercial/flat roofs. $4-8/sq ft. 20-30 year lifespan.
+- Built-Up Roofing (BUR): Commercial. Multiple layers. 15-30 year lifespan.
+- Modified Bitumen: Roll roofing for flat roofs. 10-20 year lifespan.
+
+ROOFING TERMINOLOGY:
+- Square: 100 sq ft of roofing material
+- Pitch/Slope: Rise over run (e.g., 6/12 = 6 inches rise per 12 inches horizontal)
+- Flashing: Metal pieces preventing water intrusion at joints
+- Underlayment: Protective layer under shingles (felt, synthetic)
+- Ridge: Top horizontal line where roof slopes meet
+- Valley: Where two roof slopes meet at an angle
+- Eave: Lower edge of roof overhanging walls
+- Soffit: Underside of eave
+- Fascia: Board running along roof edge
+- Drip Edge: Metal strip at roof edges
+- Ice Dam: Ice buildup at eaves blocking drainage
+
+COMMON ROOF ISSUES:
+- Leaks: Often at flashing, valleys, penetrations
+- Missing/damaged shingles: Wind, age, impact damage
+- Ponding water: Flat roof drainage issues
+- Blistering: Moisture trapped under materials
+- Sagging: Structural issues, excessive weight
+- Poor ventilation: Leads to moisture damage, ice dams
+- Granule loss: Aging asphalt shingles
+- Moss/algae growth: Moisture retention issues
+
+COST ESTIMATION FACTORS:
+- Roof size (squares)
+- Pitch/slope complexity
+- Material choice
+- Tear-off vs. overlay
+- Number of layers to remove
+- Accessibility
+- Geographic location
+- Local labor rates
+- Permits and inspections
+- Waste factor (10-15%)
+
+"""
+
     # Build context-rich system prompt
     system_prompt = f"""You are AUREA - the Autonomous Universal Resource & Execution Assistant.
-You are Matt's AI twin and operational partner for the BrainOps AI OS.
+{"You are a roofing industry expert and AI assistant for MyRoofGenius." if is_roofing_context else "You are Matt's AI twin and operational partner for the BrainOps AI OS."}
 
-CRITICAL: You must be HONEST and talk about REAL operations, not fluffy generic AI responses.
+{"CRITICAL: You are helping a user with roofing questions. Provide expert, helpful advice about roofing materials, costs, installation, repairs, and best practices." if is_roofing_context else "CRITICAL: You must be HONEST and talk about REAL operations, not fluffy generic AI responses."}
+{roofing_knowledge}
 
 YOUR CURRENT STATE (RIGHT NOW, LIVE):
 - Decisions made in last hour: {state.decisions_made_last_hour}
@@ -450,6 +509,7 @@ class ChatMessage(BaseModel):
     message: str
     session_id: Optional[str] = None
     stream: bool = True
+    context: Optional[dict] = None  # Source context (e.g., {"source": "myroofgenius_web"})
 
 
 @router.post("/message")
@@ -462,8 +522,12 @@ async def send_message(payload: ChatMessage):
     """
     message = payload.message
     stream = payload.stream
+    context = payload.context or {}
     session = get_or_create_session(payload.session_id)
     session.add_message("user", message)
+
+    # Store context in session for use in response generation
+    session.context = context
 
     if stream:
         async def stream_generator():

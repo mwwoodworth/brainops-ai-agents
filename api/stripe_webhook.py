@@ -91,6 +91,8 @@ async def process_stripe_event(event: dict, background_tasks: BackgroundTasks) -
     event_type = event.get("type", "unknown")
     event_id = event.get("id", "unknown")
     data = event.get("data", {}).get("object", {})
+    if isinstance(data, dict) and "livemode" not in data and "livemode" in event:
+        data["livemode"] = event["livemode"]
 
     logger.info(f"Processing Stripe event: {event_type} ({event_id})")
 

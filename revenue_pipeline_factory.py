@@ -495,6 +495,7 @@ class RevenuePipelineFactory:
             FROM stripe_events
             WHERE created_at >= $1
               AND event_type IN ('charge.succeeded', 'checkout.session.completed')
+              AND COALESCE((metadata->>'livemode')::boolean, false) = true
         """, since)
 
         # Get lead pipeline
@@ -505,6 +506,8 @@ class RevenuePipelineFactory:
                 SUM(CASE WHEN stage = 'won' THEN value_estimate ELSE 0 END) as won_value
             FROM revenue_leads
             WHERE created_at >= $1
+              AND COALESCE(is_test, FALSE) = FALSE
+              AND COALESCE(is_demo, FALSE) = FALSE
         """, since)
 
         # Pipeline run stats
