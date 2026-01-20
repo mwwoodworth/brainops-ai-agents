@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel
+from pydantic import BaseModel, root_validator
 
 # API Key Security - use centralized config
 from config import config
@@ -45,14 +45,41 @@ class LeadDiscoveryRequest(BaseModel):
 
 class LeadCreateRequest(BaseModel):
     """Request to create a lead"""
-    company_name: str
-    contact_name: str
+    name: str
     email: str
     phone: Optional[str] = None
+    company: Optional[str] = None
+    company_name: Optional[str] = None
+    contact_name: Optional[str] = None
     website: Optional[str] = None
-    source: str = "manual"
+    source: str = "website"
+    status: str = "new"
+    score: float = 0.0
+    assigned_to: Optional[str] = None
+    description: Optional[str] = None
+    tags: Optional[list[str]] = None
+    custom_fields: Optional[dict[str, Any]] = None
+    roof_type: Optional[str] = None
+    square_footage: Optional[float] = None
+    urgency: str = "medium"
+    insurance_claim: bool = False
+    budget_range: Optional[str] = None
+    preferred_contact_method: str = "email"
+    notes: Optional[str] = None
+    tenant_id: Optional[str] = None
     value_estimate: float = 5000.0
 
+    @root_validator(pre=True)
+    def normalize_legacy_fields(cls, values: dict[str, Any]) -> dict[str, Any]:
+        if "name" not in values and values.get("contact_name"):
+            values["name"] = values["contact_name"]
+        if "company" not in values and values.get("company_name"):
+            values["company"] = values["company_name"]
+        if "contact_name" not in values and values.get("name"):
+            values["contact_name"] = values["name"]
+        if "company_name" not in values and values.get("company"):
+            values["company_name"] = values["company"]
+        return values
 
 class LeadQualifyRequest(BaseModel):
     """Request to qualify a lead"""
@@ -195,20 +222,38 @@ async def create_lead(request: LeadCreateRequest):
     try:
         lead_id = str(uuid.uuid4())
 
+        metadata = {
+            "assigned_to": request.assigned_to,
+            "description": request.description,
+            "tags": request.tags,
+            "custom_fields": request.custom_fields,
+            "roof_type": request.roof_type,
+            "square_footage": request.square_footage,
+            "urgency": request.urgency,
+            "insurance_claim": request.insurance_claim,
+            "budget_range": request.budget_range,
+            "preferred_contact_method": request.preferred_contact_method,
+            "notes": request.notes,
+            "tenant_id": request.tenant_id,
+        }
+
         await pool.execute("""
             INSERT INTO revenue_leads (
                 id, company_name, contact_name, email, phone, website,
-                stage, score, value_estimate, source, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, 'new', 0.5, $7, $8, NOW())
+                stage, score, value_estimate, source, metadata, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
         """,
             uuid.UUID(lead_id),
-            request.company_name,
-            request.contact_name,
+            request.company_name or request.company or "Unknown",
+            request.contact_name or request.name,
             request.email,
             request.phone,
             request.website,
+            request.status or "new",
+            request.score,
             request.value_estimate,
-            request.source
+            request.source,
+            json.dumps({k: v for k, v in metadata.items() if v is not None})
         )
 
         return {

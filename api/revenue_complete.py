@@ -27,6 +27,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, EmailStr
+from api.models.invoice import Invoice
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,25 @@ PRICING_TIERS = {
         "stripe_price_id": "price_enterprise_monthly"
     }
 }
+
+
+@router.post("/invoices/validate")
+async def validate_invoice_payload(invoice: Invoice) -> dict[str, Any]:
+    """
+    Validate ERP invoice payloads against the canonical Invoice schema.
+    Returns normalized invoice data for downstream processing.
+    """
+    balance_due = invoice.balance_due
+    if balance_due is None and invoice.total_amount is not None and invoice.amount_paid is not None:
+        balance_due = max(invoice.total_amount - invoice.amount_paid, 0)
+
+    payload = invoice.dict()
+    payload["balance_due"] = balance_due
+
+    return {
+        "success": True,
+        "invoice": payload,
+    }
 
 AGENT_PRICING = {
     # High-value agents
@@ -400,6 +420,8 @@ async def get_revenue_streams():
                 SELECT COUNT(*) as total,
                        SUM(CASE WHEN stage = 'won' THEN value_estimate ELSE 0 END) as won_value
                 FROM revenue_leads
+                WHERE COALESCE(is_test, FALSE) = FALSE
+                  AND COALESCE(is_demo, FALSE) = FALSE
             """)
             streams["lead_nurturing"]["total_leads"] = leads["total"] or 0
             streams["lead_nurturing"]["won_value"] = float(leads["won_value"] or 0)
@@ -457,6 +479,7 @@ async def revenue_dashboard(days: int = 30):
         FROM stripe_events
         WHERE created_at >= $1
           AND event_type IN ('charge.succeeded', 'checkout.session.completed')
+          AND COALESCE((metadata->>'livemode')::boolean, false) = true
     """, since)
 
     # Lead pipeline
@@ -470,6 +493,8 @@ async def revenue_dashboard(days: int = 30):
             SUM(CASE WHEN stage = 'won' THEN value_estimate ELSE 0 END) as won_value
         FROM revenue_leads
         WHERE created_at >= $1
+          AND COALESCE(is_test, FALSE) = FALSE
+          AND COALESCE(is_demo, FALSE) = FALSE
     """, since)
 
     # Email campaign performance

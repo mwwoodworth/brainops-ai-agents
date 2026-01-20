@@ -1391,6 +1391,8 @@ class RevenueAutomationEngine:
 
         try:
             # Create a Stripe Payment Link
+            success_url = os.getenv("STRIPE_SUCCESS_URL", "https://myroofgenius.com/payment-success?session_id={CHECKOUT_SESSION_ID}")
+            
             payment_link = stripe.PaymentLink.create(
                 line_items=[{
                     'price_data': {
@@ -1411,7 +1413,7 @@ class RevenueAutomationEngine:
                 after_completion={
                     'type': 'redirect',
                     'redirect': {
-                        'url': 'https://myroofgenius.com/payment-success?session_id={CHECKOUT_SESSION_ID}'
+                        'url': success_url
                     }
                 }
             )

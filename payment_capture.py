@@ -293,7 +293,10 @@ BrainOps Team""",
             return False, "Database not available"
 
         invoice = await pool.fetchrow("""
-            SELECT * FROM ai_invoices WHERE id = $1
+            SELECT i.*, rl.email AS client_email
+            FROM ai_invoices i
+            LEFT JOIN revenue_leads rl ON i.lead_id = rl.id
+            WHERE i.id = $1
         """, uuid.UUID(invoice_id))
 
         if not invoice:
@@ -329,16 +332,46 @@ BrainOps Team""",
         )
 
         # Record real revenue
+        revenue_date = now.date().isoformat()
+        stripe_payment_id = payment_reference if payment_method.startswith("stripe") else None
+        description = f"Invoice {invoice_id} paid via {payment_method}"
+
+        customer_email = invoice["client_email"]
+        currency = invoice["currency"] or "USD"
+
         await pool.execute("""
             INSERT INTO real_revenue_tracking (
-                id, source, amount, currency, lead_id, invoice_id, status, created_at
-            ) VALUES ($1, 'proposal', $2, 'USD', $3, $4, 'captured', $5)
+                id,
+                tenant_id,
+                revenue_date,
+                source,
+                amount,
+                description,
+                customer_email,
+                is_verified,
+                stripe_payment_id,
+                created_at,
+                currency,
+                is_recurring,
+                metadata
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9, $10, false, $11)
         """,
             uuid.uuid4(),
+            invoice["tenant_id"],
+            revenue_date,
+            "proposal",
             float(invoice["amount"]),
-            invoice["lead_id"],
-            uuid.UUID(invoice_id),
-            now
+            description,
+            customer_email,
+            stripe_payment_id,
+            now,
+            currency,
+            json.dumps({
+                "invoice_id": invoice_id,
+                "lead_id": str(invoice["lead_id"]),
+                "payment_method": payment_method,
+                "payment_reference": payment_reference
+            })
         )
 
         logger.info(f"REAL REVENUE: Invoice {invoice_id[:8]}... marked PAID - ${float(invoice['amount']):.2f}")

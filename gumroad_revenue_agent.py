@@ -330,7 +330,7 @@ class GumroadRevenueAgent:
 
     async def publish_products_from_config(
         self,
-        config_path: str = "/home/matt-woodworth/dev/brainops-gumroad/gumroad-products-import.json"
+        config_path: str = None
     ) -> dict:
         """
         Publish products from JSON config to Gumroad.
@@ -339,12 +339,24 @@ class GumroadRevenueAgent:
         import json
         from pathlib import Path
 
-        config_file = Path(config_path)
-        if not config_file.exists():
-            return {"success": False, "error": f"Config not found: {config_path}"}
+        # Determine config path: argument -> env var -> default relative path
+        if not config_path:
+            config_path = os.getenv("GUMROAD_PRODUCT_CONFIG", "gumroad-products-import.json")
 
-        with open(config_file) as f:
-            config = json.load(f)
+        config_file = Path(config_path)
+        if not config_file.is_absolute():
+             # relative to current working directory
+             config_file = Path(os.getcwd()) / config_path
+
+        if not config_file.exists():
+            logger.warning(f"Product config not found at: {config_file}")
+            return {"success": False, "error": f"Config not found: {config_file}"}
+
+        try:
+            with open(config_file) as f:
+                config = json.load(f)
+        except json.JSONDecodeError as e:
+            return {"success": False, "error": f"Invalid JSON in config: {e}"}
 
         products = config.get("products", [])
         results = []
