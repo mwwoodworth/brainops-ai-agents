@@ -56,6 +56,17 @@ except ImportError:
     GumroadRevenueAgent = None
     logging.warning("GumroadRevenueAgent unavailable")
 
+# Revenue Pipeline Factory (2026-01-21 - Deep Integration Protocol)
+# Runs all revenue pipelines: API monetization, product sales, lead nurturing, content marketing
+try:
+    from revenue_pipeline_factory import RevenuePipelineFactory, get_factory
+    REVENUE_FACTORY_AVAILABLE = True
+except ImportError:
+    REVENUE_FACTORY_AVAILABLE = False
+    RevenuePipelineFactory = None
+    get_factory = None
+    logging.warning("RevenuePipelineFactory unavailable")
+
 # Learning Feedback Loop (2026-01-15 - Total Completion Protocol)
 # CRITICAL: This finally activates the 4,700+ insights that were sitting idle!
 try:
@@ -1322,6 +1333,29 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("OODA Loop failed: %s", exc, exc_info=True)
 
+    def _run_revenue_pipeline_factory(self):
+        """Execute all revenue pipelines: lead nurturing, content marketing, etc."""
+        if not REVENUE_FACTORY_AVAILABLE:
+            logger.info("RevenuePipelineFactory skipped: not available")
+            return
+        try:
+            factory = get_factory()
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Initialize if needed
+                if not factory.pipelines:
+                    loop.run_until_complete(factory.initialize())
+                # Run all pipelines
+                result = loop.run_until_complete(factory.run_all_pipelines())
+                logger.info("💰 RevenuePipelineFactory completed: %d pipelines, %d leads generated",
+                           result.get("pipelines_run", 0), result.get("total_leads", 0))
+            finally:
+                loop.close()
+        except Exception as exc:
+            logger.error("RevenuePipelineFactory failed: %s", exc, exc_info=True)
+
     def _register_internal_jobs(self):
         """Register internal recurring jobs (e.g., revenue drive)."""
         # Register OODA Loop (Consciousness)
@@ -1409,6 +1443,28 @@ class AgentScheduler:
                 logger.info("✅ Scheduled GumroadRevenueAgent every 6 hours")
             except Exception as exc:
                 logger.error("Failed to schedule GumroadRevenueAgent: %s", exc, exc_info=True)
+
+        # Register Revenue Pipeline Factory (2026-01-21 - Deep Integration Protocol)
+        # Runs all revenue pipelines: lead nurturing, content marketing, product sales, etc.
+        if REVENUE_FACTORY_AVAILABLE:
+            try:
+                job_id = "revenue_pipeline_factory"
+                self.scheduler.add_job(
+                    func=self._run_revenue_pipeline_factory,
+                    trigger=IntervalTrigger(hours=6),  # Run every 6 hours to generate leads and content
+                    id=job_id,
+                    name="Revenue Pipeline Factory",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "revenue_pipeline_factory",
+                    "agent_name": "RevenuePipelineFactory",
+                    "frequency_minutes": 360,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("✅ Scheduled RevenuePipelineFactory every 6 hours")
+            except Exception as exc:
+                logger.error("Failed to schedule RevenuePipelineFactory: %s", exc, exc_info=True)
 
         if not (REVENUE_DRIVE_AVAILABLE and ENABLE_REVENUE_DRIVE):
             return
