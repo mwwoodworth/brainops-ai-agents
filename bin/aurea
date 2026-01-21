@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+"""
+AUREA CLI - Your Personal AI Ops Assistant
+==========================================
+Interactive command center for the BrainOps AI OS.
+Talk to AUREA, execute commands, and monitor the system live.
+
+Features:
+- Real-time streaming chat
+- Natural Language Command execution ("Restart the backend")
+- Live system status dashboard
+- Rich markdown formatting
+- Persistent session history
+"""
+
+import asyncio
+import json
+import os
+import sys
+import argparse
+from datetime import datetime
+import signal
+
+# Try to import rich for beautiful output
+try:
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+    from rich.live import Live
+    from rich.prompt import Prompt
+    from rich.layout import Layout
+    from rich.table import Table
+    from rich.style import Style
+    from rich.text import Text
+    from rich import box
+    import websockets
+    import aiohttp
+except ImportError:
+    print("❌ Missing dependencies. Please run: pip install rich websockets aiohttp")
+    sys.exit(1)
+
+# Configuration
+API_URL = os.getenv("BRAINOPS_AGENTS_URL", "https://brainops-ai-agents.onrender.com")
+# API_URL = "http://localhost:8000" # Local fallback
+WS_URL = API_URL.replace("https://", "wss://").replace("http://", "ws://")
+
+# Manual Env Loading
+def load_env_file(filepath):
+    if os.path.exists(filepath):
+        with open(filepath, 'r') as f:
+            for line in f:
+                if '=' in line and not line.startswith('#'):
+                    key, value = line.strip().split('=', 1)
+                    # Handle quotes
+                    value = value.strip('"').strip("'")
+                    if key not in os.environ:
+                        os.environ[key] = value
+
+# Try loading secure env
+load_env_file(os.path.join(os.path.dirname(__file__), '../../_secure/BrainOps.env'))
+load_env_file(os.path.join(os.path.dirname(__file__), '../../BrainOps.env'))
+
+API_KEY = os.getenv("BRAINOPS_API_KEY") or os.getenv("AGENTS_API_KEY")
+
+console = Console() if 'rich' in sys.modules else None
+
+def print_formatted(text, style=None):
+    if console:
+        console.print(text, style=style)
+    else:
+        # Strip simple tags for raw output or just print
+        print(text)
+
+class AureaCLI:
+    def __init__(self):
+        self.session_id = None
+        self.running = True
+        
+        if not API_KEY:
+            print("❌ Error: BRAINOPS_API_KEY not found in environment or env files.")
+            sys.exit(1)
+
+        self.headers = {
+            "X-API-Key": API_KEY,
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        # Debug auth
+        masked = f"{API_KEY[:3]}...{API_KEY[-3:]}" if API_KEY and len(API_KEY) > 6 else "***"
+        # console.print(f"[dim]Using API Key: {masked} (Length: {len(API_KEY)})[/dim]")
+
+    async def get_system_status(self):
+        """Fetch and display system health."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{API_URL}/aurea/chat/status", headers=self.headers, timeout=5) as resp:
+                    if resp.status != 200:
+                        return None
+                    return await resp.json()
+        except Exception:
+            return None
+
+    def print_header(self, status=None):
+        """Print the AUREA header with status."""
+        title = Text(" AUREA ", style="bold white on blue")
+        subtitle = Text(" Autonomous Universal Resource & Execution Assistant ", style="bold blue")
+        
+        header_grid = Table.grid(expand=True)
+        header_grid.add_column(justify="center")
+        header_grid.add_row(title)
+        header_grid.add_row(subtitle)
+
+        if status:
+            stats = Table.grid(padding=(0, 2))
+            stats.add_column(style="green")
+            stats.add_column(style="white")
+            
+            s_rate = status.get('success_rate', 0)
+            active = status.get('active_agents', 0)
+            pending = status.get('decisions_pending', 0)
+            
+            stats.add_row(
+                "System Status:", 
+                Text("OPERATIONAL", style="bold green") if status.get('status') == 'operational' else Text("DEGRADED", style="bold red")
+            )
+            stats.add_row("Success Rate:", f"{s_rate:.1f}%")
+            stats.add_row("Active Agents:", str(active))
+            stats.add_row("Pending Decisions:", str(pending))
+            
+            header_grid.add_row(Panel(stats, border_style="blue", box=box.ROUNDED))
+        
+        console.print(Panel(header_grid, border_style="blue", box=box.DOUBLE))
+
+    async def execute_command(self, command_text: str):
+        """Execute a single natural language command."""
+        console.print(f"[bold cyan]⚡ Executing command:[/bold cyan] {command_text}")
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{API_URL}/aurea/chat/command",
+                    headers=self.headers,
+                    json={
+                        "command": command_text,
+                        "session_id": self.session_id or "cli-single-shot",
+                        "auto_confirm": True # CLI users imply confirmation
+                    },
+                    timeout=60
+                ) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        console.print(f"[bold red]❌ Error ({resp.status}):[/bold red] {text}")
+                        return
+
+                    data = await resp.json()
+                    
+                    # Check for NLU interpretation
+                    if data.get("result", {}).get("intent_data"):
+                        intent = data["result"]["intent_data"]
+                        console.print(f"[dim]Intent: {intent.get('intent')} | Confidence: {intent.get('confidence')}[/dim]")
+
+                    # Display Result
+                    result = data.get("result")
+                    
+                    # Handle direct success message
+                    if result.get("status") == "success":
+                        console.print(Panel(
+                            Markdown(str(result.get("message", "Command executed successfully."))),
+                            title="✅ Success",
+                            border_style="green"
+                        ))
+                        # If there's detailed result data, show it
+                        if result.get("result"):
+                             console.print(result["result"])
+                             
+                    elif result.get("status") == "failed":
+                        console.print(Panel(
+                            f"[bold]Error:[/bold] {result.get('error')}\n[dim]{result.get('message')}[/dim]",
+                            title="❌ Failed",
+                            border_style="red"
+                        ))
+                    else:
+                        # Fallback for complex objects
+                        console.print(data)
+
+        except Exception as e:
+            console.print(f"[bold red]❌ Connection Error:[/bold red] {e}")
+
+    async def chat_loop(self):
+        """Interactive chat loop with WebSocket."""
+        # Generate session ID
+        import uuid
+        self.session_id = f"cli-{str(uuid.uuid4())[:8]}"
+        
+        # Initial status fetch
+        status = await self.get_system_status()
+        self.print_header(status)
+        
+        console.print(f"[dim]Connected to {API_URL} | Session: {self.session_id}[/dim]")
+        console.print("[bold yellow]Type 'exit' to quit, '/cmd <text>' to force a command execution.[/bold yellow]\n")
+
+        try:
+            async with websockets.connect(f"{WS_URL}/aurea/chat/ws/{self.session_id}") as websocket:
+                while self.running:
+                    try:
+                        # Get user input
+                        user_input = await asyncio.get_event_loop().run_in_executor(None, Prompt.ask, "\n[bold green]You[/bold green]")
+                        
+                        if user_input.lower() in ['exit', 'quit']:
+                            self.running = False
+                            break
+                            
+                        if not user_input.strip():
+                            continue
+
+                        # Handle explicit commands
+                        if user_input.startswith("/cmd "):
+                            command = user_input[5:]
+                            await self.execute_command(command)
+                            continue
+
+                        # Send to WebSocket
+                        await websocket.send(json.dumps({"message": user_input}))
+
+                        # Stream response
+                        console.print("\n[bold blue]AUREA[/bold blue]")
+                        response_text = ""
+                        
+                        # Use a Live display for streaming updates
+                        with Live(Markdown(""), refresh_per_second=10, auto_refresh=True) as live:
+                            while True:
+                                try:
+                                    message = await websocket.recv()
+                                    data = json.loads(message)
+                                    
+                                    if data.get("type") == "chunk":
+                                        chunk = data.get("content", "")
+                                        response_text += chunk
+                                        live.update(Markdown(response_text))
+                                        
+                                    elif data.get("type") == "complete":
+                                        break
+                                        
+                                    elif data.get("error"):
+                                        console.print(f"[bold red]Error:[/bold red] {data['error']}")
+                                        break
+                                except websockets.exceptions.ConnectionClosed:
+                                    console.print("[bold red]Connection closed.[/bold red]")
+                                    return
+
+                    except KeyboardInterrupt:
+                        self.running = False
+                        break
+        except Exception as e:
+            console.print(f"[bold red]Connection failed:[/bold red] {e}")
+            # Fallback to single-shot execution if WS fails?
+            # For now, just exit
+            
+    async def run(self):
+        parser = argparse.ArgumentParser(description="AUREA CLI")
+        parser.add_argument("command", nargs="*", help="Direct command to execute (e.g. 'restart backend')")
+        args = parser.parse_args()
+
+        if args.command:
+            # Single shot command
+            command_text = " ".join(args.command)
+            await self.execute_command(command_text)
+        else:
+            # Interactive mode
+            await self.chat_loop()
+
+if __name__ == "__main__":
+    try:
+        cli = AureaCLI()
+        asyncio.run(cli.run())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Goodbye![/yellow]")
+        sys.exit(0)
