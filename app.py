@@ -300,9 +300,10 @@ except ImportError as e:
 # Voice Router (Added for AUREA)
 try:
     from api.voice import router as voice_router
-    app.include_router(voice_router, dependencies=SECURED_DEPENDENCIES)
-    logger.info("✅ Voice Router loaded")
+    VOICE_ROUTER_AVAILABLE = True
+    logger.info("Voice Router loaded")
 except ImportError as e:
+    VOICE_ROUTER_AVAILABLE = False
     logger.warning(f"Voice Router not available: {e}")
 
 # Always-Know Observability Brain - Deep continuous monitoring (2025-12-29)
@@ -1357,6 +1358,11 @@ app.include_router(aurea_chat_router, dependencies=SECURED_DEPENDENCIES)  # AURE
 app.include_router(full_observability_router, dependencies=SECURED_DEPENDENCIES)  # Comprehensive Observability Dashboard
 app.include_router(self_awareness_router, dependencies=SECURED_DEPENDENCIES)  # Self-Awareness Dashboard
 app.include_router(ai_awareness_router, dependencies=SECURED_DEPENDENCIES)  # Complete AI Awareness - THE endpoint
+
+# Voice Router - AUREA voice & communications
+if VOICE_ROUTER_AVAILABLE:
+    app.include_router(voice_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("🎤 Voice Router endpoints registered at /api/v1/voice/*")
 
 # Permanent Observability Router - Never miss anything
 if PERMANENT_OBSERVABILITY_AVAILABLE:
