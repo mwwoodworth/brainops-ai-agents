@@ -76,6 +76,7 @@ class PowerCapability(Enum):
     MONITORING = "monitoring"
     FILE_OPS = "file_ops"
     AUTOMATION = "automation"
+    VOICE = "voice"
 
 
 @dataclass
@@ -890,6 +891,148 @@ class AUREAPowerLayer:
         return results
 
     # =========================================================================
+    # VOICE & COMMUNICATIONS
+    # =========================================================================
+
+    async def speak(self, text: str) -> PowerResult:
+        """Generate speech from text using ElevenLabs."""
+        start = datetime.utcnow()
+        api_key = os.getenv("ELEVENLABS_API_KEY")
+        if not api_key:
+            return PowerResult(success=False, capability=PowerCapability.VOICE, operation="speak", result=None, duration_ms=0, error="ElevenLabs API key missing")
+
+        try:
+            voice_id = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+            url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+            headers = {"xi-api-key": api_key, "Content-Type": "application/json"}
+            data = {"text": text, "model_id": "eleven_monolingual_v1"}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=data, headers=headers) as resp:
+                    if resp.status != 200:
+                        raise Exception(f"ElevenLabs error: {await resp.text()}")
+                    audio_data = await resp.read()
+            
+            # Save to temp file
+            filename = f"aurea_speech_{int(datetime.utcnow().timestamp())}.mp3"
+            path = f"/tmp/{filename}"
+            with open(path, "wb") as f:
+                f.write(audio_data)
+                
+            duration = (datetime.utcnow() - start).total_seconds() * 1000
+            return PowerResult(
+                success=True, 
+                capability=PowerCapability.VOICE, 
+                operation="speak", 
+                result={"file": path, "message": "Audio generated"}, 
+                duration_ms=duration
+            )
+        except Exception as e:
+            duration = (datetime.utcnow() - start).total_seconds() * 1000
+            return PowerResult(success=False, capability=PowerCapability.VOICE, operation="speak", result=None, duration_ms=duration, error=str(e))
+
+    async def call_phone(self, number: str, message: str) -> PowerResult:
+        """Make an outbound phone call."""
+        start = datetime.utcnow()
+        sid = os.getenv("TWILIO_ACCOUNT_SID")
+        token = os.getenv("TWILIO_AUTH_TOKEN")
+        from_num = os.getenv("TWILIO_FROM_NUMBER")
+        
+        if not all([sid, token, from_num]):
+             return PowerResult(success=False, capability=PowerCapability.VOICE, operation="call_phone", result=None, duration_ms=0, error="Twilio credentials missing")
+
+        try:
+            # Use aiohttp to call Twilio API manually
+            auth = aiohttp.BasicAuth(login=sid, password=token)
+            url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Calls.json"
+            twiml = f'<Response><Say>{message}</Say></Response>'
+            data = {"To": number, "From": from_num, "Twiml": twiml}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, data=data, auth=auth) as resp:
+                    if resp.status not in (200, 201):
+                        raise Exception(f"Twilio error: {await resp.text()}")
+                    result_json = await resp.json()
+            
+            duration = (datetime.utcnow() - start).total_seconds() * 1000
+            return PowerResult(
+                success=True, 
+                capability=PowerCapability.VOICE, 
+                operation="call_phone", 
+                result={"call_sid": result_json.get("sid"), "status": result_json.get("status")}, 
+                duration_ms=duration
+            )
+        except Exception as e:
+            duration = (datetime.utcnow() - start).total_seconds() * 1000
+            return PowerResult(success=False, capability=PowerCapability.VOICE, operation="call_phone", result=None, duration_ms=duration, error=str(e))
+
+    # =========================================================================
+    # ADVANCED OBSERVABILITY & SCHEMA EXPLORATION
+    # =========================================================================
+
+    async def search_tables(self, query: str) -> PowerResult:
+        """Search the database schema for tables matching a pattern."""
+        sql = """
+            SELECT table_schema, table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name ILIKE $1 
+            ORDER BY table_name 
+            LIMIT 50
+        """
+        # Add wildcards
+        pattern = f"%{query}%"
+        return await self.query_database(sql, (pattern,))
+
+    async def get_service_logs(self, service_name: str, lines: int = 100) -> PowerResult:
+        """Fetch recent logs for a service from Render."""
+        start = datetime.utcnow()
+        
+        # Map friendly names to Render Service IDs
+        SERVICE_MAP = {
+            "agents": "srv-ai-agents",
+            "backend": "srv-d1tfs4idbo4c73di6k00", # From logs/config
+            "mcp": "srv-mcp-bridge",
+            "ai-agents": "srv-ai-agents",
+            "brainops-backend": "srv-d1tfs4idbo4c73di6k00"
+        }
+        
+        service_id = SERVICE_MAP.get(service_name, service_name)
+        
+        # If it looks like a service ID (starts with srv-), use it directly
+        if not service_id.startswith("srv-") and service_name not in SERVICE_MAP:
+             return PowerResult(success=False, capability=PowerCapability.MONITORING, operation="get_logs", result=None, duration_ms=0, error=f"Unknown service: {service_name}")
+
+        api_key = os.getenv("RENDER_API_KEY")
+        if not api_key:
+            return PowerResult(success=False, capability=PowerCapability.MONITORING, operation="get_logs", result=None, duration_ms=0, error="RENDER_API_KEY missing")
+
+        url = f"https://api.render.com/v1/services/{service_id}/logs?limit={lines}"
+        headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as resp:
+                    if resp.status != 200:
+                        raise Exception(f"Render API error {resp.status}: {await resp.text()}")
+                    
+                    data = await resp.json()
+                    # Parse logs (they come as a list of dicts)
+                    logs = [entry.get("message", "") for entry in data]
+                    
+            duration = (datetime.utcnow() - start).total_seconds() * 1000
+            return PowerResult(
+                success=True, 
+                capability=PowerCapability.MONITORING, 
+                operation="get_logs", 
+                result={"service": service_name, "lines": len(logs), "logs": logs}, 
+                duration_ms=duration
+            )
+        except Exception as e:
+            duration = (datetime.utcnow() - start).total_seconds() * 1000
+            return PowerResult(success=False, capability=PowerCapability.MONITORING, operation="get_logs", result=None, duration_ms=duration, error=str(e))
+
+    # =========================================================================
     # SKILL REGISTRY FOR NLU
     # =========================================================================
 
@@ -907,7 +1050,19 @@ class AUREAPowerLayer:
                 "parameters": {"table_name": "string", "schema": "string (default public)"},
                 "action": self.get_table_info
             },
+            "search_tables": {
+                "description": "Search for database tables by name.",
+                "parameters": {"query": "string"},
+                "action": self.search_tables
+            },
 
+            # Monitoring & Logs
+            "get_service_logs": {
+                "description": "Fetch recent logs for a service (agents, backend, mcp).",
+                "parameters": {"service_name": "string", "lines": "integer (default 100)"},
+                "action": self.get_service_logs
+            },
+            
             # Deployment
             "deploy_vercel": {
                 "description": "Deploy a project to Vercel.",
@@ -980,6 +1135,18 @@ class AUREAPowerLayer:
                 "description": "Execute a predefined workflow (full_deploy, health_check_all, db_backup_check, ui_smoke_test).",
                 "parameters": {"workflow_name": "string", "params": "object (optional)"},
                 "action": self.execute_workflow
+            },
+            
+            # Voice
+            "speak": {
+                "description": "Generate speech from text.",
+                "parameters": {"text": "string"},
+                "action": self.speak
+            },
+            "call_phone": {
+                "description": "Make a phone call to a number with a message.",
+                "parameters": {"number": "string", "message": "string"},
+                "action": self.call_phone
             }
         }
 
