@@ -291,8 +291,8 @@ except ImportError as e:
 
 try:
     from api.sop import router as sop_router
-SOP_ROUTER_AVAILABLE = True
-logger.info("SOP Generator Router loaded")
+    SOP_ROUTER_AVAILABLE = True
+    logger.info("SOP Generator Router loaded")
 except ImportError as e:
     SOP_ROUTER_AVAILABLE = False
     logger.warning(f"SOP Router not available: {e}")
