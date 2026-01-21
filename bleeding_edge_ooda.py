@@ -139,6 +139,23 @@ def execute_with_connection(query: str, params: tuple = None, fetch: bool = True
         conn.close()
 
 
+async def execute_with_async_pool(query: str, params: tuple = None) -> list[dict] | None:
+    """Execute a query using the global async pool (preferred method)"""
+    try:
+        from database.async_connection import get_pool
+        pool = get_pool()
+        # Convert %s placeholders to $1, $2, etc for asyncpg
+        converted_query = query
+        if params:
+            for i in range(len(params)):
+                converted_query = converted_query.replace('%s', f'${i+1}', 1)
+        rows = await pool.fetch(converted_query, *params) if params else await pool.fetch(converted_query)
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning(f"OODA async query failed: {e}")
+        return None
+
+
 # =============================================================================
 # INTEGRITY PATTERNS (Harvard/IEEE Research 2025)
 # =============================================================================
@@ -558,10 +575,10 @@ class ParallelObserver:
 
     async def _observe_new_customers(self) -> dict[str, Any]:
         """Observe new customers in last 5 minutes"""
-        rows = execute_with_connection("""
+        rows = await execute_with_async_pool("""
             SELECT id, name, email, created_at
             FROM customers
-            WHERE tenant_id = %s
+            WHERE tenant_id = $1
               AND created_at > NOW() - INTERVAL '5 minutes'
             ORDER BY created_at DESC
             LIMIT 10
@@ -578,11 +595,11 @@ class ParallelObserver:
 
     async def _observe_pending_estimates(self) -> dict[str, Any]:
         """Observe pending estimates with age tracking"""
-        rows = execute_with_connection("""
+        rows = await execute_with_async_pool("""
             SELECT id, customer_id, created_at,
                    EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600 as age_hours
             FROM estimates
-            WHERE tenant_id = %s
+            WHERE tenant_id = $1
               AND status = 'pending'
             ORDER BY created_at ASC
             LIMIT 20
@@ -601,13 +618,13 @@ class ParallelObserver:
 
     async def _observe_overdue_invoices(self) -> dict[str, Any]:
         """Observe overdue invoices with debt totals"""
-        rows = execute_with_connection("""
+        rows = await execute_with_async_pool("""
             SELECT i.id, i.customer_id, i.total, i.due_date,
                    c.name as customer_name,
                    EXTRACT(EPOCH FROM (NOW() - i.due_date)) / 86400 as days_overdue
             FROM invoices i
             JOIN customers c ON c.id = i.customer_id
-            WHERE i.tenant_id = %s
+            WHERE i.tenant_id = $1
               AND i.status = 'sent'
               AND i.due_date < NOW()
             ORDER BY i.due_date ASC
@@ -627,14 +644,14 @@ class ParallelObserver:
 
     async def _observe_scheduling_conflicts(self) -> dict[str, Any]:
         """Observe crew scheduling conflicts"""
-        rows = execute_with_connection("""
+        rows = await execute_with_async_pool("""
             SELECT j1.id as job1_id, j2.id as job2_id,
                    j1.scheduled_date, j1.assigned_crew_id
             FROM jobs j1
             JOIN jobs j2 ON j1.assigned_crew_id = j2.assigned_crew_id
               AND j1.scheduled_date = j2.scheduled_date
               AND j1.id < j2.id
-            WHERE j1.tenant_id = %s
+            WHERE j1.tenant_id = $1
               AND j1.scheduled_date >= CURRENT_DATE
               AND j1.status = 'scheduled'
               AND j2.status = 'scheduled'
@@ -652,13 +669,13 @@ class ParallelObserver:
 
     async def _observe_churn_risks(self) -> dict[str, Any]:
         """Observe customers at risk of churning (90+ days inactive)"""
-        rows = execute_with_connection("""
+        rows = await execute_with_async_pool("""
             SELECT c.id, c.name, c.email,
                    MAX(j.completed_date) as last_job_date,
                    EXTRACT(EPOCH FROM (NOW() - MAX(j.completed_date))) / 86400 as days_inactive
             FROM customers c
             LEFT JOIN jobs j ON j.customer_id = c.id AND j.status = 'completed'
-            WHERE c.tenant_id = %s
+            WHERE c.tenant_id = $1
             GROUP BY c.id, c.name, c.email
             HAVING MAX(j.completed_date) < NOW() - INTERVAL '90 days'
                OR MAX(j.completed_date) IS NULL

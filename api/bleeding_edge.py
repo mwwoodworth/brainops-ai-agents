@@ -13,10 +13,14 @@ Created: 2025-12-27
 """
 
 import logging
+import os
 from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query
+
+# Default tenant ID for OODA observations - must match ERP data
+DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457")
 
 # Import our bleeding-edge modules
 try:
@@ -74,7 +78,7 @@ _consciousness: Optional[ConsciousnessEmergenceController] = None
 _circuit_breaker: Optional[SelfHealingController] = None
 
 
-def get_ooda_controller(tenant_id: str = "default") -> Optional[BleedingEdgeOODAController]:
+def get_ooda_controller(tenant_id: str = DEFAULT_TENANT_ID) -> Optional[BleedingEdgeOODAController]:
     """Get or create OODA controller for tenant."""
     global _ooda_controllers
     if not OODA_AVAILABLE:
@@ -236,7 +240,7 @@ async def get_bleeding_edge_status() -> dict[str, Any]:
 # OODA Endpoints
 @router.post("/ooda/cycle")
 async def run_ooda_cycle(
-    tenant_id: str = Query("default"),
+    tenant_id: str = Query(DEFAULT_TENANT_ID),
     context: dict[str, Any] = Body(default={})
 ) -> dict[str, Any]:
     """Run a complete enhanced OODA cycle with all optimizations."""
@@ -257,7 +261,7 @@ async def run_ooda_cycle(
 
 
 @router.get("/ooda/metrics")
-async def get_ooda_metrics(tenant_id: str = Query("default")) -> dict[str, Any]:
+async def get_ooda_metrics(tenant_id: str = Query(DEFAULT_TENANT_ID)) -> dict[str, Any]:
     """Get metrics from the OODA controller."""
     controller = get_ooda_controller(tenant_id)
     if not controller:

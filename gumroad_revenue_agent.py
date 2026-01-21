@@ -363,11 +363,26 @@ class GumroadRevenueAgent:
 
         # Get existing products
         existing = await self.list_products()
-        existing_permalinks = {p.get("permalink"): p.get("id") for p in existing}
+        existing_permalinks = {}
+        for product in existing:
+            for key in ("custom_permalink", "permalink", "url", "short_url"):
+                value = product.get(key)
+                if value:
+                    existing_permalinks[value] = product.get("id")
 
         for product_spec in products:
             try:
                 permalink = product_spec.get("permalink", "")
+                description = product_spec.get("description", "") or ""
+                description_file = product_spec.get("description_file")
+                if description_file:
+                    desc_path = Path(description_file)
+                    if not desc_path.is_absolute():
+                        desc_path = config_file.parent / desc_path
+                    if desc_path.exists():
+                        description = desc_path.read_text()
+                    else:
+                        logger.warning(f"Description file missing: {desc_path}")
 
                 # Check if product exists
                 if permalink in existing_permalinks:
@@ -379,7 +394,7 @@ class GumroadRevenueAgent:
                         data={
                             "name": product_spec.get("name"),
                             "price": product_spec.get("price"),
-                            "description": product_spec.get("description", ""),
+                            "description": description,
                         }
                     )
                     results.append({
@@ -396,7 +411,7 @@ class GumroadRevenueAgent:
                             "name": product_spec.get("name"),
                             "price": product_spec.get("price"),
                             "url": product_spec.get("permalink"),
-                            "description": product_spec.get("description", ""),
+                            "description": description,
                         }
                     )
                     results.append({

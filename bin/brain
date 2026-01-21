@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""
+THE BRAIN CLI
+Your direct line to the BrainOps Unified Brain.
+"""
+
+import asyncio
+import json
+import os
+import sys
+import argparse
+from datetime import datetime
+
+# Adjust path to find the modules
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+from unified_brain import UnifiedBrain, get_brain
+from aurea_orchestrator import AUREA, AutonomyLevel
+
+async def query_brain(query: str, limit: int = 5):
+    """Ask the brain a question."""
+    brain = get_brain()
+    print(f"🧠 Asking the Brain: '{query}'...")
+    
+    results = await brain.search(query, limit=limit)
+    
+    if not results:
+        print("❌ The Brain is silent. No relevant memories found.")
+        return
+
+    print(f"\n✅ Found {len(results)} relevant memories:\n")
+    for i, res in enumerate(results, 1):
+        relevance = res.get('relevance_score', 0) * 100
+        category = res.get('category', 'unknown').upper()
+        summary = res.get('summary') or str(res.get('value'))[:100] + "..."
+        key = res.get('key')
+        
+        print(f"{i}. [{relevance:.0f}%] [{category}] {key}")
+        print(f"   {summary}\n")
+
+async def get_status():
+    """Get the absolute truth of the system status."""
+    print("🔮 Communing with AUREA for system truth...")
+    
+    # We need a tenant_id for AUREA. Defaulting to the known prod one or system default
+    tenant_id = os.getenv("DEFAULT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457")
+    
+    aurea = AUREA(autonomy_level=AutonomyLevel.AUTONOMOUS, tenant_id=tenant_id)
+    
+    # Force a health check
+    health = await aurea._check_system_health()
+    
+    print("\n" + "="*40)
+    print(f"  SYSTEM STATUS: {health.overall_score:.1f}/100")
+    print("="*40)
+    print(f"• Active Agents:      {health.active_agents}")
+    print(f"• Error Rate:         {health.error_rate*100:.1f}%")
+    print(f"• Decision Backlog:   {health.decision_backlog}")
+    print("-" * 20)
+    print("COMPONENT HEALTH:")
+    for comp, score in health.component_health.items():
+        status = "🟢" if score > 80 else "🟡" if score > 50 else "🔴"
+        print(f"{status} {comp.ljust(15)} {score:.1f}%")
+    print("="*40)
+
+async def store_memory(key: str, value: str, category: str):
+    """Manually implant a memory."""
+    brain = get_brain()
+    await brain.store(key=key, value=value, category=category, source="cli_manual")
+    print(f"✅ Memory implanted: {key}")
+
+def main():
+    parser = argparse.ArgumentParser(description="BrainOps AI OS - Absolute Control Interface")
+    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+
+    # Search Command
+    search_parser = subparsers.add_parser("ask", help="Query the Unified Brain")
+    search_parser.add_argument("query", type=str, help="What do you want to know?")
+    search_parser.add_argument("--limit", type=int, default=5, help="Max results")
+
+    # Status Command
+    subparsers.add_parser("status", help="Get real-time system health from AUREA")
+
+    # Store Command
+    store_parser = subparsers.add_parser("store", help="Manually store a memory")
+    store_parser.add_argument("key", type=str, help="Memory Key")
+    store_parser.add_argument("value", type=str, help="Content")
+    store_parser.add_argument("--category", type=str, default="manual", help="Category")
+
+    args = parser.parse_args()
+
+    if args.command == "ask":
+        asyncio.run(query_brain(args.query, args.limit))
+    elif args.command == "status":
+        asyncio.run(get_status())
+    elif args.command == "store":
+        asyncio.run(store_memory(args.key, args.value, args.category))
+    else:
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()

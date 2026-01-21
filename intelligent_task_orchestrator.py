@@ -963,10 +963,10 @@ class IntelligentTaskOrchestrator:
             cur = conn.cursor()
 
             cur.execute("""
-            INSERT INTO ai_autonomous_tasks (title, payload, priority, status, created_at)
-            VALUES (%s, %s, %s, 'pending', NOW())
+            INSERT INTO ai_autonomous_tasks (title, task_type, payload, priority, status, created_at)
+            VALUES (%s, %s, %s, %s, 'pending', NOW())
             RETURNING id
-            """, (title, Json({"type": task_type, **payload}), priority))
+            """, (title, task_type, Json({"type": task_type, **payload}), priority))
 
             task_id = str(cur.fetchone()[0])
             conn.commit()
