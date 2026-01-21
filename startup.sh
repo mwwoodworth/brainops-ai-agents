@@ -15,13 +15,14 @@ export PYTHONUNBUFFERED=1
 # Parse DATABASE_URL if individual vars not set (Render provides DATABASE_URL)
 if [ -n "$DATABASE_URL" ] && [ -z "$DB_PASSWORD" ]; then
     echo "📌 Parsing DATABASE_URL for database credentials..."
-    # Extract components from DATABASE_URL: postgresql://user:password@host:port/database
+    # Extract components from DATABASE_URL: postgresql://user:password@host[:port]/database
     export DB_USER=$(echo "$DATABASE_URL" | sed -n 's|.*://\([^:]*\):.*|\1|p')
     export DB_PASSWORD=$(echo "$DATABASE_URL" | sed -n 's|.*://[^:]*:\([^@]*\)@.*|\1|p')
-    export DB_HOST=$(echo "$DATABASE_URL" | sed -n 's|.*@\([^:]*\):.*|\1|p')
-    export DB_PORT=$(echo "$DATABASE_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
+    # Handle both host:port and host/database formats
+    export DB_HOST=$(echo "$DATABASE_URL" | sed -n 's|.*@\([^:/]*\).*|\1|p')
+    export DB_PORT=$(echo "$DATABASE_URL" | sed -n 's|.*@[^:]*:\([0-9]*\)/.*|\1|p')
     export DB_NAME=$(echo "$DATABASE_URL" | sed -n 's|.*/\([^?]*\).*|\1|p')
-    echo "✅ Extracted: host=$DB_HOST, db=$DB_NAME, user=$DB_USER"
+    echo "✅ Extracted: host=$DB_HOST, db=$DB_NAME, user=$DB_USER, port=${DB_PORT:-5432}"
 fi
 
 # Fallback for non-sensitive values only (port and database name)
