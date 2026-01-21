@@ -367,12 +367,19 @@ class AUREA:
             logger.warning(f"Async execute failed, falling back to sync: {e}")
             return self._sync_execute(query, *args)
 
+    def _convert_asyncpg_to_psycopg2(self, query: str) -> str:
+        """Convert asyncpg $1, $2 placeholders to psycopg2 %s format"""
+        import re
+        return re.sub(r'\$\d+', '%s', query)
+
     def _sync_fetch(self, query: str, *args) -> list[dict]:
         """Sync fallback for fetch - uses shared pool"""
         try:
             with _get_pooled_connection() as conn:
                 cur = conn.cursor(cursor_factory=RealDictCursor)
-                cur.execute(query, args if args else None)
+                # Convert asyncpg $1 placeholders to psycopg2 %s
+                converted_query = self._convert_asyncpg_to_psycopg2(query)
+                cur.execute(converted_query, args if args else None)
                 rows = cur.fetchall()
                 cur.close()
                 return [dict(r) for r in rows] if rows else []
@@ -385,7 +392,9 @@ class AUREA:
         try:
             with _get_pooled_connection() as conn:
                 cur = conn.cursor(cursor_factory=RealDictCursor)
-                cur.execute(query, args if args else None)
+                # Convert asyncpg $1 placeholders to psycopg2 %s
+                converted_query = self._convert_asyncpg_to_psycopg2(query)
+                cur.execute(converted_query, args if args else None)
                 row = cur.fetchone()
                 cur.close()
                 return dict(row) if row else None
@@ -398,7 +407,9 @@ class AUREA:
         try:
             with _get_pooled_connection() as conn:
                 cur = conn.cursor()
-                cur.execute(query, args if args else None)
+                # Convert asyncpg $1 placeholders to psycopg2 %s
+                converted_query = self._convert_asyncpg_to_psycopg2(query)
+                cur.execute(converted_query, args if args else None)
                 conn.commit()
                 cur.close()
                 return True
