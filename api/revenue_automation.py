@@ -162,7 +162,7 @@ async def get_revenue_status():
         }
     except Exception as e:
         logger.error(f"Revenue status error: {e}")
-        return {"system": "revenue_automation", "status": "error", "error": str(e)}
+        raise HTTPException(status_code=500, detail=f"Revenue system status error: {str(e)}")
 
 
 @router.post("/leads/capture")
@@ -218,7 +218,7 @@ async def list_leads(
         return {"leads": leads, "total": len(leads)}
     except Exception as e:
         logger.error(f"List leads error: {e}")
-        return {"leads": [], "error": str(e)}
+        raise HTTPException(status_code=500, detail=f"Failed to list leads: {str(e)}")
 
 
 @router.get("/leads/{lead_id}")
@@ -306,7 +306,7 @@ async def get_metrics():
         return engine.get_revenue_metrics()
     except Exception as e:
         logger.error(f"Metrics error: {e}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/pipeline")
@@ -317,7 +317,7 @@ async def get_pipeline():
         return engine.get_pipeline_dashboard()
     except Exception as e:
         logger.error(f"Pipeline error: {e}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/dashboard")
@@ -348,4 +348,4 @@ async def get_revenue_dashboard():
         }
     except Exception as e:
         logger.error(f"Dashboard error: {e}")
-        return {"error": str(e), "system_status": "error"}
+        raise HTTPException(status_code=500, detail=f"Dashboard error: {str(e)}")
