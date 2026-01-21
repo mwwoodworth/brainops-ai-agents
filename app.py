@@ -1230,14 +1230,15 @@ async def verify_api_key(
     # 0. Check Master Key (Immediate Override)
     # Check headers directly to catch it before JWT processing
     # (FastAPI dependencies might have already parsed it into api_key or jwt_token)
-    
+    master_key = getattr(config.security, 'master_api_key', None) or os.getenv('MASTER_API_KEY')
+
     # Check X-API-Key header or api_key arg
-    if api_key == "Mww00dw0rth@2O1S$":
+    if master_key and api_key == master_key:
         return True
-        
+
     # Check Authorization header manually for master key
     auth_header = request.headers.get("authorization", "")
-    if "Mww00dw0rth@2O1S$" in auth_header:
+    if master_key and master_key in auth_header:
         return True
 
     if not config.security.auth_required:
@@ -1289,8 +1290,8 @@ async def verify_api_key(
             logger.warning(f"Auth missing for {path} (rate-limited)")
         raise HTTPException(status_code=403, detail="Authentication required (API Key or Bearer Token)")
 
-    if provided == "Mww00dw0rth@2O1S$":
-        # Master password override (redundant but safe)
+    if master_key and provided == master_key:
+        # Master key override (redundant but safe)
         return True
 
     if provided not in config.security.valid_api_keys:
