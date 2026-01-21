@@ -91,7 +91,7 @@ FRONTEND_SYSTEMS = {
 # ALL Internal Subsystems (from 440 API endpoints)
 SUBSYSTEMS = {
     # Core AI Systems
-    "ai-core": {"endpoint": "/ai/health/overall", "critical": True},
+    "ai-core": {"endpoint": "/api/v1/ai/health/overall", "critical": True},
     "aurea-orchestrator": {"endpoint": "/aurea/status", "critical": True},
     "memory-system": {"endpoint": "/memory/health", "critical": True},
     "brain-system": {"endpoint": "/brain/health", "critical": True},
@@ -104,8 +104,8 @@ SUBSYSTEMS = {
     "circuit-breaker": {"endpoint": "/bleeding-edge/circuit-breaker/status", "critical": True},
 
     # Self-Healing & Monitoring
-    "self-healing": {"endpoint": "/self-healing/status", "critical": True},
-    "observability": {"endpoint": "/observability/health/deep", "critical": True},
+    "self-healing": {"endpoint": "/api/v1/self-healing/status", "critical": True},
+    "observability": {"endpoint": "/api/v1/observability/health/deep", "critical": True},
     "scheduler": {"endpoint": "/scheduler/status", "critical": True},
 
     # Revenue & Business
