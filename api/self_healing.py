@@ -254,17 +254,7 @@ async def get_self_healing_metrics():
         }
     except Exception as e:
         logger.error(f"Error getting self-healing metrics: {e}")
-        return {
-            "metrics": {},
-            "performance": {
-                "mttr_improvement": "67%",
-                "auto_remediation_rate": 0,
-                "successful_remediations": 0,
-                "failed_remediations": 0,
-                "avg_resolution_time_seconds": 0
-            },
-            "error": str(e)
-        }
+        raise HTTPException(status_code=500, detail=f"Metrics error: {str(e)}")
 
 
 @router.get("/remediations")
@@ -367,23 +357,7 @@ async def get_self_healing_dashboard():
         }
     except Exception as e:
         logger.error(f"Error in self-healing dashboard: {e}")
-        return {
-            "overview": {
-                "active_incidents": 0,
-                "pending_approvals": 0,
-                "auto_remediating": 0,
-                "mttr_improvement": "67%",
-                "error": str(e)
-            },
-            "incidents_by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
-            "metrics": {"total_incidents_24h": 0, "auto_remediated_24h": 0, "avg_resolution_seconds": 0, "success_rate": 0},
-            "autonomy_tiers": {
-                "tier_1_auto": "Routine issues (restarts, cache clears, scaling)",
-                "tier_2_supervised": "Complex issues (database, credentials, failover)",
-                "tier_3_manual": "Critical issues (data integrity, security, architecture)"
-            },
-            "recent_incidents": []
-        }
+        raise HTTPException(status_code=500, detail=f"Dashboard error: {str(e)}")
 
 
 # =============================================================================
@@ -450,7 +424,9 @@ async def mcp_list_services():
         if result.success:
             return {"success": True, "services": result.result}
         else:
-            return {"success": False, "error": result.error}
+            raise HTTPException(status_code=502, detail=f"MCP Error: {result.error}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"MCP list services error: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -469,12 +445,17 @@ async def mcp_get_service_logs(service_name: str, lines: int = 100):
 
     try:
         result = await healer.mcp.render_get_logs(service_id, lines)
-        return {
-            "success": result.success,
-            "service": service_name,
-            "logs": result.result,
-            "error": result.error
-        }
+        if result.success:
+            return {
+                "success": result.success,
+                "service": service_name,
+                "logs": result.result,
+                "error": result.error
+            }
+        else:
+            raise HTTPException(status_code=502, detail=f"MCP Error: {result.error}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"MCP get logs error: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -493,13 +474,18 @@ async def mcp_restart_service(service_name: str):
 
     try:
         result = await healer.mcp.render_restart_service(service_id)
-        return {
-            "success": result.success,
-            "service": service_name,
-            "action": "restart",
-            "result": result.result,
-            "error": result.error
-        }
+        if result.success:
+            return {
+                "success": result.success,
+                "service": service_name,
+                "action": "restart",
+                "result": result.result,
+                "error": result.error
+            }
+        else:
+            raise HTTPException(status_code=502, detail=f"MCP Restart Failed: {result.error}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"MCP restart error: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -518,14 +504,19 @@ async def mcp_scale_service(service_name: str, instances: int = 2):
 
     try:
         result = await healer.mcp.render_scale_service(service_id, instances)
-        return {
-            "success": result.success,
-            "service": service_name,
-            "action": "scale",
-            "instances": instances,
-            "result": result.result,
-            "error": result.error
-        }
+        if result.success:
+            return {
+                "success": result.success,
+                "service": service_name,
+                "action": "scale",
+                "instances": instances,
+                "result": result.result,
+                "error": result.error
+            }
+        else:
+            raise HTTPException(status_code=502, detail=f"MCP Scale Failed: {result.error}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"MCP scale error: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
