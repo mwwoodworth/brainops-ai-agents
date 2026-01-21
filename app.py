@@ -291,11 +291,19 @@ except ImportError as e:
 
 try:
     from api.sop import router as sop_router
-    SOP_ROUTER_AVAILABLE = True
-    logger.info("SOP Generator Router loaded")
+SOP_ROUTER_AVAILABLE = True
+logger.info("SOP Generator Router loaded")
 except ImportError as e:
     SOP_ROUTER_AVAILABLE = False
     logger.warning(f"SOP Router not available: {e}")
+
+# Voice Router (Added for AUREA)
+try:
+    from api.voice import router as voice_router
+    app.include_router(voice_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("✅ Voice Router loaded")
+except ImportError as e:
+    logger.warning(f"Voice Router not available: {e}")
 
 # Always-Know Observability Brain - Deep continuous monitoring (2025-12-29)
 try:
