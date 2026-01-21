@@ -151,7 +151,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.7.0')  # Deep Integration Protocol - Digital Revenue Events
+        self.version = os.getenv('VERSION', 'v3.7.1')  # DevOps endpoint path fix + consciousness activation
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
