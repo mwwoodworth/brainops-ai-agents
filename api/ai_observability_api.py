@@ -20,7 +20,7 @@ from fastapi.responses import PlainTextResponse
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/ai", tags=["AI Observability & Integration"])
+router = APIRouter(prefix="/api/v1/ai", tags=["AI Observability & Integration"])
 
 # Lazy import to avoid circular dependencies
 _observability = None

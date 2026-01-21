@@ -15,7 +15,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/observability", tags=["observability"])
+router = APIRouter(prefix="/api/v1/observability", tags=["observability"])
 
 
 class SystemHealth(BaseModel):

@@ -15,7 +15,7 @@ import httpx
 from config import config
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/voice", tags=["Voice & Comms"])
+router = APIRouter(prefix="/api/v1/voice", tags=["Voice & Comms"])
 
 # Security
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)

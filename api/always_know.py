@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/always-know", tags=["Always-Know Observability"])
+router = APIRouter(prefix="/api/v1/always-know", tags=["Always-Know Observability"])
 
 # Lazy import
 _brain = None
