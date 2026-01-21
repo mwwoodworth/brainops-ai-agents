@@ -25,7 +25,7 @@ async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return api_key
 
-router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base"])
+router = APIRouter(prefix="/api/v1/knowledge-base", tags=["Knowledge Base"])
 
 # Import the knowledge base with fallback
 try:
