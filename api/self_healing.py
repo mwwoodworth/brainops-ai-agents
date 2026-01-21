@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/self-healing", tags=["Self-Healing"])
+router = APIRouter(prefix="/api/v1/self-healing", tags=["Self-Healing"])
 
 # Lazy initialization
 _engine = None
