@@ -646,6 +646,28 @@ async def process_sale(sale_data: dict[str, Any], product_code: str, first_name:
     product_type = product_info.get('type', 'code_kit')
     download_url = sale_data.get('download_url', 'https://gumroad.com/library')
 
+    # CRITICAL: Trigger AUREA/Agent Activation for REAL revenue event
+    # This is REAL money - no dry_run protection needed!
+    try:
+        from agent_activation_system import BusinessEventType, get_activation_system
+        activation_system = get_activation_system(os.getenv("DEFAULT_TENANT_ID"))
+        await activation_system.handle_business_event(
+            BusinessEventType.GUMROAD_SALE,
+            {
+                "sale_id": sale_data.get("sale_id"),
+                "email": sale_data.get("email"),
+                "product_code": product_code,
+                "product_name": product_name,
+                "price": sale_data.get("price"),
+                "is_real_revenue": True,  # Explicitly mark as REAL revenue
+                "dry_run_outreach": False,  # REAL customer - outreach allowed!
+                "source": "gumroad_webhook"
+            }
+        )
+        logger.info(f"🎯 GUMROAD_SALE event triggered for agent activation: {sale_data.get('sale_id')}")
+    except Exception as agent_err:
+        logger.error(f"Failed to trigger agent activation for Gumroad sale: {agent_err}")
+
     # Import upsell engine
     try:
         from upsell_engine import process_purchase_for_upsell

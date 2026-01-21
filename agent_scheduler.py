@@ -47,6 +47,15 @@ except ImportError:
     run_scheduled_hygiene = None
     logging.warning("Memory Hygiene System unavailable")
 
+# Gumroad Revenue Agent (2026-01-21 - Deep Integration Protocol)
+try:
+    from gumroad_revenue_agent import GumroadRevenueAgent
+    GUMROAD_AGENT_AVAILABLE = True
+except ImportError:
+    GUMROAD_AGENT_AVAILABLE = False
+    GumroadRevenueAgent = None
+    logging.warning("GumroadRevenueAgent unavailable")
+
 # Learning Feedback Loop (2026-01-15 - Total Completion Protocol)
 # CRITICAL: This finally activates the 4,700+ insights that were sitting idle!
 try:
@@ -1271,6 +1280,29 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("RevenueDrive failed: %s", exc, exc_info=True)
 
+    def _run_gumroad_revenue_agent(self):
+        """Execute the Gumroad Revenue Agent for digital product revenue tracking."""
+        if not GUMROAD_AGENT_AVAILABLE:
+            logger.info("GumroadRevenueAgent skipped: not available")
+            return
+        try:
+            agent = GumroadRevenueAgent()
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Run daily sync to pull sales from Gumroad API
+                result = loop.run_until_complete(agent.execute("daily_sync"))
+                logger.info("🎯 GumroadRevenueAgent daily_sync completed: %s", result)
+
+                # Also check for revenue report
+                report = loop.run_until_complete(agent.execute("revenue_report", days=30))
+                logger.info("📊 GumroadRevenueAgent revenue report: total=%s", report.get("total_revenue", 0))
+            finally:
+                loop.close()
+        except Exception as exc:
+            logger.error("GumroadRevenueAgent failed: %s", exc, exc_info=True)
+
     def _run_ooda_loop(self):
         """Execute the Bleeding Edge OODA loop."""
         if not OODA_AVAILABLE:
@@ -1355,6 +1387,28 @@ class AgentScheduler:
                 logger.info("✅ Scheduled Learning Feedback Loop every 4 hours")
             except Exception as exc:
                 logger.error("Failed to schedule Learning Feedback Loop: %s", exc, exc_info=True)
+
+        # Register Gumroad Revenue Agent (2026-01-21 - Deep Integration Protocol)
+        # This agent handles digital product revenue - REAL money operations
+        if GUMROAD_AGENT_AVAILABLE:
+            try:
+                job_id = "gumroad_revenue_agent"
+                self.scheduler.add_job(
+                    func=self._run_gumroad_revenue_agent,
+                    trigger=IntervalTrigger(hours=6),  # Run every 6 hours for API sync
+                    id=job_id,
+                    name="Gumroad Revenue Agent",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "gumroad_revenue_agent",
+                    "agent_name": "GumroadRevenueAgent",
+                    "frequency_minutes": 360,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("✅ Scheduled GumroadRevenueAgent every 6 hours")
+            except Exception as exc:
+                logger.error("Failed to schedule GumroadRevenueAgent: %s", exc, exc_info=True)
 
         if not (REVENUE_DRIVE_AVAILABLE and ENABLE_REVENUE_DRIVE):
             return
