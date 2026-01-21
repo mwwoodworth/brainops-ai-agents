@@ -20,7 +20,10 @@ router = APIRouter(prefix="/api/v1/voice", tags=["Voice & Comms"])
 # Security
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
-    if api_key == "Mww00dw0rth@2O1S$": return api_key
+    # Check master key from config if set
+    master_key = getattr(config.security, 'master_api_key', None) or os.getenv('MASTER_API_KEY')
+    if master_key and api_key == master_key:
+        return api_key
     if not api_key or api_key not in config.security.valid_api_keys:
         raise HTTPException(status_code=401, detail="Invalid API Key")
     return api_key
