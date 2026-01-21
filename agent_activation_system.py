@@ -92,6 +92,12 @@ class BusinessEventType(Enum):
     QUOTE_REQUESTED = "quote_requested"
     PAYMENT_RECEIVED = "payment_received"
     JOB_SCHEDULED = "job_scheduled"
+    # Digital Revenue Events (Real money - not demo data)
+    GUMROAD_SALE = "gumroad_sale"
+    MRG_SUBSCRIPTION = "mrg_subscription"
+    AFFILIATE_SIGNUP = "affiliate_signup"
+    DIGITAL_PRODUCT_PURCHASE = "digital_product_purchase"
+    CONTENT_PUBLISHED = "content_published"
 
 
 def _coerce_uuid(value: Any) -> str | None:
@@ -421,6 +427,12 @@ class AgentActivationSystem:
             BusinessEventType.QUOTE_REQUESTED: ["pricing", "revenue", "proposal"],
             BusinessEventType.PAYMENT_RECEIVED: ["revenue"],
             BusinessEventType.JOB_SCHEDULED: ["system_improvement", "analytics"],
+            # Digital Revenue Events (REAL money - NO dry_run for these!)
+            BusinessEventType.GUMROAD_SALE: ["revenue", "analytics", "customer_success"],
+            BusinessEventType.MRG_SUBSCRIPTION: ["revenue", "analytics", "customer_success"],
+            BusinessEventType.AFFILIATE_SIGNUP: ["revenue", "analytics"],
+            BusinessEventType.DIGITAL_PRODUCT_PURCHASE: ["revenue", "analytics", "customer_success"],
+            BusinessEventType.CONTENT_PUBLISHED: ["analytics", "content"],
         }
 
         # Map event types to SPECIFIC agent names (for agents with generic 'workflow' type)
@@ -435,6 +447,11 @@ class AgentActivationSystem:
             BusinessEventType.ESTIMATE_REQUESTED: ["Elena", "EstimationAgent", "ProposalGenerator"],
             BusinessEventType.LEAD_CREATED: ["LeadGenerationAgent", "LeadScorer", "LeadQualificationAgent"],
             BusinessEventType.SYSTEM_HEALTH_CHECK: ["HealthMonitor", "LearningFeedbackLoop", "SystemMonitor"],
+            # Digital Revenue Events - Direct agent activation
+            BusinessEventType.GUMROAD_SALE: ["RevenueOptimizer", "CustomerIntelligence", "InsightsAnalyzer"],
+            BusinessEventType.MRG_SUBSCRIPTION: ["RevenueOptimizer", "CustomerIntelligence", "InsightsAnalyzer"],
+            BusinessEventType.AFFILIATE_SIGNUP: ["RevenueOptimizer", "InsightsAnalyzer"],
+            BusinessEventType.DIGITAL_PRODUCT_PURCHASE: ["RevenueOptimizer", "CustomerIntelligence"],
         }
 
         target_types = event_agent_mapping.get(event_type, [])
