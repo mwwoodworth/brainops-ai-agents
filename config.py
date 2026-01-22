@@ -151,7 +151,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.7.8')  # Add embedding diagnostic endpoint
+        self.version = os.getenv('VERSION', 'v3.7.9')  # Self-healing + AUREA decision persistence
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
