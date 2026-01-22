@@ -15,13 +15,22 @@ Part of Revenue Perfection Session.
 """
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 import json
 
+import httpx
+
 logger = logging.getLogger(__name__)
+
+
+# Email regex pattern for scraping
+EMAIL_PATTERN = re.compile(
+    r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+)
 
 
 def _parse_metadata(metadata: Any) -> dict:
@@ -589,6 +598,145 @@ class OutreachEngine:
                 "by_status": status_counts
             }
         }
+
+
+    async def scrape_email_from_website(self, website_url: str) -> Optional[str]:
+        """
+        Scrape contact email from a company website.
+
+        Tries common contact pages and extracts email addresses.
+        Filters out generic emails like noreply@, info@, etc.
+        """
+        if not website_url:
+            return None
+
+        # Normalize URL
+        if not website_url.startswith(('http://', 'https://')):
+            website_url = f'https://{website_url}'
+
+        # Common pages to check for contact info
+        pages_to_check = [
+            '',              # Homepage
+            '/contact',
+            '/contact-us',
+            '/about',
+            '/about-us',
+            '/team',
+        ]
+
+        emails_found = set()
+
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            for page in pages_to_check:
+                try:
+                    url = website_url.rstrip('/') + page
+                    response = await client.get(url, headers={
+                        'User-Agent': 'Mozilla/5.0 (compatible; BrainOps/1.0; business research)'
+                    })
+
+                    if response.status_code == 200:
+                        # Extract emails from page content
+                        found = EMAIL_PATTERN.findall(response.text.lower())
+                        emails_found.update(found)
+
+                except Exception as e:
+                    logger.debug(f"Failed to fetch {url}: {e}")
+                    continue
+
+        # Filter out generic/unwanted emails
+        bad_prefixes = ('noreply', 'no-reply', 'donotreply', 'mailer-daemon',
+                        'postmaster', 'webmaster', 'admin@', 'support@',
+                        'sales@', 'marketing@', 'info@')
+        bad_domains = ('example.com', 'test.com', 'sentry.io', 'google.com',
+                       'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com')
+
+        good_emails = []
+        for email in emails_found:
+            email_lower = email.lower()
+            if any(email_lower.startswith(p) for p in bad_prefixes):
+                continue
+            if any(d in email_lower for d in bad_domains):
+                continue
+            # Prefer emails with names (contain letters before @)
+            local_part = email.split('@')[0]
+            if re.match(r'^[a-z]+[a-z.]+$', local_part):
+                good_emails.insert(0, email)  # Prioritize name-based emails
+            else:
+                good_emails.append(email)
+
+        if good_emails:
+            return good_emails[0]
+
+        # Fallback to generic emails if nothing better found
+        for email in emails_found:
+            if 'info@' in email or 'contact@' in email:
+                return email
+
+        return None
+
+    async def enrich_leads_with_emails(self, limit: int = 10) -> dict[str, Any]:
+        """
+        Find leads with websites but no emails, and scrape emails from their websites.
+
+        Returns summary of enrichment results.
+        """
+        pool = self._get_pool()
+        if not pool:
+            return {"status": "error", "error": "Database not available"}
+
+        # Get leads with websites but no emails
+        leads = await pool.fetch("""
+            SELECT id, company_name, website
+            FROM revenue_leads
+            WHERE website IS NOT NULL
+              AND website != ''
+              AND (email IS NULL OR email = '')
+              AND is_test = false
+            ORDER BY score DESC NULLS LAST
+            LIMIT $1
+        """, limit)
+
+        results = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "leads_processed": 0,
+            "emails_found": 0,
+            "enriched_leads": [],
+            "failed_leads": []
+        }
+
+        for lead in leads:
+            lead_id = str(lead['id'])
+            company = lead['company_name']
+            website = lead['website']
+
+            results["leads_processed"] += 1
+
+            email = await self.scrape_email_from_website(website)
+
+            if email:
+                # Update lead with found email
+                await pool.execute("""
+                    UPDATE revenue_leads
+                    SET email = $1, updated_at = $2
+                    WHERE id = $3
+                """, email, datetime.now(timezone.utc), lead['id'])
+
+                results["emails_found"] += 1
+                results["enriched_leads"].append({
+                    "company": company,
+                    "website": website,
+                    "email": email
+                })
+                logger.info(f"Found email for {company}: {email}")
+            else:
+                results["failed_leads"].append({
+                    "company": company,
+                    "website": website,
+                    "reason": "No email found"
+                })
+                logger.info(f"No email found for {company} ({website})")
+
+        return results
 
 
 # Singleton instance
