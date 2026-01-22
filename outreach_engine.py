@@ -455,6 +455,9 @@ class OutreachEngine:
                 return False, "Draft not found"
 
             action_data = draft["action_data"]
+            # Parse JSON if it's a string
+            if isinstance(action_data, str):
+                action_data = json.loads(action_data)
             if action_data.get("status") not in ["draft", "pending_approval"]:
                 return False, f"Draft status is {action_data.get('status')}, cannot send"
 
