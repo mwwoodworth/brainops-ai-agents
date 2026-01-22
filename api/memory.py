@@ -219,6 +219,41 @@ async def get_memory_stats(
     return await get_memory_status(tenant_id)
 
 
+@router.get("/embedding-status")
+async def get_embedding_status():
+    """
+    Diagnostic endpoint to check embedding capability status.
+    """
+    openai_key = os.getenv("OPENAI_API_KEY")
+    key_status = "configured" if openai_key else "missing"
+    key_preview = f"{openai_key[:10]}...{openai_key[-4:]}" if openai_key and len(openai_key) > 14 else "N/A"
+
+    # Test actual embedding generation
+    test_result = "untested"
+    error_detail = None
+    if openai_key:
+        try:
+            import openai
+            client = openai.OpenAI(api_key=openai_key)
+            response = client.embeddings.create(
+                input="test",
+                model="text-embedding-3-small"
+            )
+            if response.data and len(response.data[0].embedding) > 0:
+                test_result = "working"
+        except Exception as e:
+            test_result = "failed"
+            error_detail = str(e)
+
+    return {
+        "openai_key_status": key_status,
+        "key_preview": key_preview,
+        "embedding_test": test_result,
+        "error": error_detail,
+        "semantic_search_available": test_result == "working"
+    }
+
+
 @router.get("/search")
 async def search_memories(
     query: str = Query(..., description="Search query"),
