@@ -1231,6 +1231,34 @@ class ConsciousnessEmergenceController:
                 except Exception as e:
                     logger.warning(f"Failed to log thoughts to brain: {e}")
 
+                # CONSCIOUSNESS->OODA INTEGRATION: Trigger OODA for actionable thoughts
+                actionable_types = {"concern", "decision", "action", "insight", "problem"}
+                actionable_thoughts = [
+                    t for t in thoughts_to_persist
+                    if (hasattr(t, 'thought_type') and t.thought_type in actionable_types)
+                    or (hasattr(t, 'confidence') and t.confidence > 0.8)
+                ]
+
+                if actionable_thoughts:
+                    try:
+                        from api.bleeding_edge import get_ooda_controller
+                        controller = get_ooda_controller("consciousness")
+                        if controller:
+                            # Trigger OODA with consciousness context
+                            ooda_context = {
+                                "trigger": "consciousness",
+                                "actionable_thoughts": len(actionable_thoughts),
+                                "thought_types": [getattr(t, 'thought_type', 'unknown') for t in actionable_thoughts[:5]],
+                                "highest_confidence": max(
+                                    (getattr(t, 'confidence', 0.5) for t in actionable_thoughts),
+                                    default=0.5
+                                )
+                            }
+                            asyncio.create_task(controller.run_enhanced_cycle(ooda_context))
+                            logger.info(f"🧠→🔄 Triggered OODA cycle from {len(actionable_thoughts)} actionable thoughts")
+                    except Exception as ooda_err:
+                        logger.warning(f"Failed to trigger OODA from consciousness: {ooda_err}")
+
                 # Cleanup old persisted IDs to prevent memory growth (keep last 1000)
                 if len(self._persisted_thought_ids) > 1000:
                     # Convert to list, keep recent ones
