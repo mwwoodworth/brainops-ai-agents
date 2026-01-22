@@ -122,6 +122,7 @@ from api.pipeline import router as pipeline_router  # Pipeline State Machine - l
 from api.proposals import router as proposals_router  # Proposal Engine - draft/approve/send workflow
 from api.outreach import router as outreach_router  # Outreach Engine - lead enrichment and sequences
 from api.payments import router as payments_router  # Payment Capture - invoices and revenue collection
+from api.communications import router as communications_router  # Communications - send estimates, invoices from ERP
 from api.revenue_operator import router as revenue_operator_router  # AI Revenue Operator - automated actions
 from api.relationships import router as relationships_router
 from api.roofing_labor_ml import router as roofing_labor_ml_router
@@ -452,13 +453,28 @@ except ImportError as e:
 
 # Import Self-Healing Recovery with fallback
 try:
-    from self_healing_recovery import SelfHealingRecovery
+    from self_healing_recovery import SelfHealingRecovery, ErrorContext, ErrorSeverity
     SELF_HEALING_AVAILABLE = True
     logger.info("✅ Self-Healing Recovery loaded")
 except ImportError as e:
     SELF_HEALING_AVAILABLE = False
     logger.warning(f"Self-Healing not available: {e}")
     SelfHealingRecovery = None
+    ErrorContext = None
+    ErrorSeverity = None
+
+# Global self-healing instance for exception handler integration
+_global_healer = None
+def _get_global_healer():
+    """Lazy initialization of global self-healer to avoid startup delays"""
+    global _global_healer
+    if _global_healer is None and SELF_HEALING_AVAILABLE:
+        try:
+            _global_healer = SelfHealingRecovery()
+            logger.info("✅ Global self-healer initialized for exception handling")
+        except Exception as e:
+            logger.warning(f"Failed to initialize global healer: {e}")
+    return _global_healer
 
 # Import Self-Healing Reconciler (continuous healing loop)
 try:
@@ -1338,6 +1354,7 @@ app.include_router(pipeline_router, dependencies=SECURED_DEPENDENCIES)  # Pipeli
 app.include_router(proposals_router, dependencies=SECURED_DEPENDENCIES)  # Proposal Engine - draft/approve/send workflow
 app.include_router(outreach_router, dependencies=SECURED_DEPENDENCIES)  # Outreach Engine - lead enrichment and sequences
 app.include_router(payments_router, dependencies=SECURED_DEPENDENCIES)  # Payment Capture - invoices and revenue collection
+app.include_router(communications_router, dependencies=SECURED_DEPENDENCIES)  # Communications - send estimates/invoices from Weathercraft ERP
 app.include_router(revenue_operator_router, dependencies=SECURED_DEPENDENCIES)  # AI Revenue Operator - automated actions
 app.include_router(roofing_labor_ml_router, dependencies=SECURED_DEPENDENCIES)  # Roofing labor ML (RandomForest)
 
@@ -2690,13 +2707,20 @@ async def execute_agent(
     pool = get_pool()
 
     try:
+        # Resolve agent aliases before database lookup (ERP compatibility)
+        resolved_agent_id = agent_id
+        if AGENTS_AVAILABLE and AGENT_EXECUTOR and hasattr(AGENT_EXECUTOR, 'AGENT_ALIASES'):
+            if agent_id in AGENT_EXECUTOR.AGENT_ALIASES:
+                resolved_agent_id = AGENT_EXECUTOR.AGENT_ALIASES[agent_id]
+                logger.info(f"Resolved agent alias: {agent_id} -> {resolved_agent_id}")
+
         # Get agent by UUID (text comparison) or legacy slug
         agent = await pool.fetchrow(
             "SELECT * FROM agents WHERE id::text = $1 OR name = $1",
-            agent_id,
+            resolved_agent_id,
         )
         if not agent:
-            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found (resolved: {resolved_agent_id})")
 
         if not agent["enabled"]:
             raise HTTPException(status_code=400, detail=f"Agent {agent_id} is disabled")
@@ -5892,8 +5916,52 @@ async def database_unavailable_handler(request: Request, exc: DatabaseUnavailabl
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler"""
+    """Global exception handler - feeds errors into self-healing system"""
+    import traceback
+    import uuid
+    from datetime import datetime
+
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
+
+    # Feed error into self-healing system for learning and recovery
+    if SELF_HEALING_AVAILABLE and ErrorContext is not None:
+        try:
+            healer = _get_global_healer()
+            if healer:
+                # Determine severity based on exception type
+                severity = ErrorSeverity.MEDIUM
+                if isinstance(exc, (ConnectionError, TimeoutError)):
+                    severity = ErrorSeverity.HIGH
+                elif isinstance(exc, (ValueError, TypeError, KeyError)):
+                    severity = ErrorSeverity.LOW
+
+                # Create error context
+                error_context = ErrorContext(
+                    error_id=f"api-{uuid.uuid4().hex[:12]}",
+                    error_type=type(exc).__name__,
+                    error_message=str(exc)[:1000],  # Truncate long messages
+                    stack_trace=traceback.format_exc()[:5000],  # Truncate long traces
+                    component="api",
+                    function_name=str(request.url.path),
+                    timestamp=datetime.utcnow(),
+                    severity=severity,
+                    retry_count=0,
+                    metadata={
+                        "method": request.method,
+                        "path": str(request.url.path),
+                        "query": str(request.query_params),
+                        "client_host": request.client.host if request.client else "unknown"
+                    }
+                )
+
+                # Log to database for pattern learning
+                healer._log_error(error_context)
+                logger.info(f"🩺 Error logged to self-healing: {error_context.error_id}")
+
+        except Exception as heal_err:
+            # Don't let self-healing failure break the error response
+            logger.warning(f"Self-healing error logging failed: {heal_err}")
+
     return JSONResponse(
         status_code=500,
         content={
