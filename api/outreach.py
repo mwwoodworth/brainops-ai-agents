@@ -314,3 +314,28 @@ async def batch_draft_outreach(
         "drafts_created": len(drafts_created),
         "drafts": drafts_created
     }
+
+
+@router.post("/batch/scrape-emails")
+async def batch_scrape_emails(
+    limit: int = Query(default=10, le=50, description="Max leads to process")
+) -> dict[str, Any]:
+    """
+    Scrape contact emails from lead websites.
+
+    Finds leads with websites but no emails, visits their sites,
+    and extracts contact email addresses.
+    """
+    engine = get_outreach_engine()
+
+    results = await engine.enrich_leads_with_emails(limit)
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "success": True,
+        "leads_processed": results["leads_processed"],
+        "emails_found": results["emails_found"],
+        "enriched_leads": results.get("enriched_leads", []),
+        "failed_leads_count": len(results.get("failed_leads", [])),
+        "next_step": "POST /outreach/batch/enrich-all to enrich leads with found emails"
+    }

@@ -1641,13 +1641,44 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
     similar_decisions = await decision_rag.find_similar_decisions(cycle_context, limit=3)
 
     decisions = []
+    # Observations that warrant decisions even without count > 0
+    actionable_observations = {
+        "system_degraded": ("investigate_degradation", 0.9),
+        "system_healthy": ("maintain_health", 0.6),
+        "estimates_pending": ("process_estimates", 0.8),
+        "no_overdue": ("continue_monitoring", 0.5),
+        "no_conflicts": ("continue_monitoring", 0.5),
+        "frontends_healthy": ("monitor_frontends", 0.5),
+        "agents_running": ("monitor_agents", 0.5),
+        "new_customers": ("onboard_customers", 0.85),
+        "overdue_invoices": ("collect_invoices", 0.9),
+        "schedule_conflicts": ("resolve_conflicts", 0.85),
+        "no_new_customers": ("generate_leads", 0.7),
+    }
+
     for obs in valid_observations:
-        if obs.get("count", 0) > 0:
+        obs_name = obs.get("observation", "unknown")
+        obs_count = obs.get("count", 0)
+
+        # Decision based on count > 0 (original behavior)
+        should_decide = obs_count > 0
+
+        # Also decide for actionable observations without counts
+        if not should_decide and obs_name in actionable_observations:
+            should_decide = True
+
+        # Skip low-value "continue_monitoring" decisions unless something needs attention
+        action_type, base_confidence = actionable_observations.get(obs_name, (f"handle_{obs_name}", 0.75))
+        if action_type == "continue_monitoring" and obs_count == 0:
+            continue  # Don't create noise decisions
+
+        if should_decide:
             decision = {
                 "id": str(uuid.uuid4()),
-                "type": f"handle_{obs.get('observation', 'unknown')}",
-                "confidence": 0.75,
-                "observation": obs
+                "type": action_type,
+                "confidence": base_confidence,
+                "observation": obs,
+                "priority": "high" if base_confidence >= 0.85 else ("medium" if base_confidence >= 0.7 else "low")
             }
 
             # Boost confidence with precedent
