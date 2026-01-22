@@ -77,6 +77,16 @@ except ImportError:
     run_scheduled_feedback_loop = None
     logging.warning("Learning Feedback Loop unavailable")
 
+# Platform Cross-Sell (2026-01-22 - Revenue Integration)
+# Enrolls MRG and BSS platform users in cross-sell sequences
+try:
+    from platform_cross_sell import process_platform_cross_sells
+    CROSS_SELL_AVAILABLE = True
+except ImportError:
+    CROSS_SELL_AVAILABLE = False
+    process_platform_cross_sells = None
+    logging.warning("Platform Cross-Sell unavailable")
+
 # Safe-by-default: autonomous revenue drive is OFF unless explicitly enabled.
 _revenue_drive_env = os.getenv("ENABLE_REVENUE_DRIVE")
 ENABLE_REVENUE_DRIVE = bool(_revenue_drive_env and _revenue_drive_env.lower() in ("1", "true", "yes"))
@@ -1356,6 +1366,24 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("RevenuePipelineFactory failed: %s", exc, exc_info=True)
 
+    def _run_platform_cross_sell(self):
+        """Execute platform cross-sell sequences for MRG and BSS users."""
+        if not CROSS_SELL_AVAILABLE:
+            logger.info("Platform Cross-Sell skipped: not available")
+            return
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(process_platform_cross_sells())
+                logger.info("📧 Platform Cross-Sell completed: MRG=%d, BSS=%d enrolled",
+                           result.get("mrg_enrolled", 0), result.get("bss_enrolled", 0))
+            finally:
+                loop.close()
+        except Exception as exc:
+            logger.error("Platform Cross-Sell failed: %s", exc, exc_info=True)
+
     def _register_internal_jobs(self):
         """Register internal recurring jobs (e.g., revenue drive)."""
         # Register OODA Loop (Consciousness)
@@ -1465,6 +1493,28 @@ class AgentScheduler:
                 logger.info("✅ Scheduled RevenuePipelineFactory every 6 hours")
             except Exception as exc:
                 logger.error("Failed to schedule RevenuePipelineFactory: %s", exc, exc_info=True)
+
+        # Register Platform Cross-Sell (2026-01-22 - Revenue Integration)
+        # Enrolls MRG and BSS platform users in targeted cross-sell email sequences
+        if CROSS_SELL_AVAILABLE:
+            try:
+                job_id = "platform_cross_sell"
+                self.scheduler.add_job(
+                    func=self._run_platform_cross_sell,
+                    trigger=IntervalTrigger(hours=24),  # Run daily to find new eligible users
+                    id=job_id,
+                    name="Platform Cross-Sell",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "platform_cross_sell",
+                    "agent_name": "PlatformCrossSell",
+                    "frequency_minutes": 1440,  # 24 hours
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("✅ Scheduled Platform Cross-Sell daily")
+            except Exception as exc:
+                logger.error("Failed to schedule Platform Cross-Sell: %s", exc, exc_info=True)
 
         if not (REVENUE_DRIVE_AVAILABLE and ENABLE_REVENUE_DRIVE):
             return
