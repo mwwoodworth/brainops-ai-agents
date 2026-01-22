@@ -874,6 +874,7 @@ class AgentExecutor:
         self.agents['TranslationProcessor'] = TranslationProcessorAgent()
         self.agents['SMSInterface'] = SMSInterfaceAgent()
         self.agents['VoiceInterface'] = VoiceInterfaceAgent()
+        self.agents['SchedulingAgent'] = SchedulingAgent()  # For crew-allocator alias
 
         # Meta Agent
         self.agents['SelfBuilder'] = SelfBuildingAgent()
@@ -1110,6 +1111,14 @@ class AgentExecutor:
 
         # Phantom agent aliases - route unimplemented names to real implementations
         'workflow-orchestrator': 'WorkflowEngine',
+        # Additional phantom agent aliases for ERP workflow compatibility
+        'crew-allocator': 'SchedulingAgent',  # For crew assignment tasks
+        'collections-manager': 'InvoicingAgent',  # For collections/follow-up tasks
+        'payment-handler': 'InvoicingAgent',  # For payment link tasks
+        'customer-intelligence': 'CustomerIntelligence',  # Maps to real CustomerIntelligence agent
+        'intelligent-estimator': 'ProposalGenerator',  # For estimation tasks (like Elena)
+        'general_agent': 'WorkflowEngine',  # General purpose workflow
+        'marcus_agent': 'PredictiveAnalyzer',  # For revenue prediction tasks
         'workflow_orchestrator': 'WorkflowEngine',
         'workflow': 'WorkflowEngine',
         'monitor': 'Monitor',
