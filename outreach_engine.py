@@ -48,53 +48,129 @@ def _parse_metadata(metadata: Any) -> dict:
     return {}
 
 
-# Email templates for outreach
-OUTREACH_TEMPLATES = {
+# Product URLs
+MYROOFGENIUS_URL = "https://myroofgenius.com"
+MYROOFGENIUS_PRICING = "https://myroofgenius.com/pricing"
+BRAINSTACK_URL = "https://brainstackstudio.com"
+GUMROAD_URL = "https://woodworthia.gumroad.com"
+
+# Email templates for outreach - ROOFING COMPANIES
+ROOFING_TEMPLATES = {
     "initial_contact": {
-        "subject": "Quick question about {company_name}",
+        "subject": "AI estimating tool for {company_name}",
         "body": """Hi {contact_name},
 
-I came across {company_name} and was impressed by your work in {industry}.
+I built MyRoofGenius specifically for roofing contractors like {company_name}.
 
-We've been helping similar companies increase their operational efficiency by 40-60% using AI automation - without replacing any staff.
+It's an AI-powered estimating tool that:
+- Generates accurate roof estimates in under 2 minutes
+- Analyzes roof photos to detect damage automatically
+- Tracks all your jobs from lead to completion
 
-Would you be open to a quick 15-minute call to see if there's a fit?
+Contractors using it are cutting estimate time by 70% and winning more bids.
+
+Plans start at $49/month. You can see the full pricing and features here:
+{pricing_url}
+
+Would love to get your feedback on it.
 
 Best,
 Matt Woodworth
-BrainOps AI OS
+MyRoofGenius
 
-P.S. No obligation, just a conversation about your current challenges."""
+P.S. Free trial available - no credit card required."""
     },
     "followup_1": {
-        "subject": "Re: Quick question about {company_name}",
+        "subject": "Re: AI estimating for {company_name}",
         "body": """Hi {contact_name},
 
-Just following up on my previous note. I know things get busy.
+Quick follow-up on MyRoofGenius.
 
-Quick question: Is {pain_point} something you're actively trying to solve?
+I know estimating takes forever - measuring, calculating materials, writing up proposals.
 
-If so, I'd love to share how we helped [similar company] achieve {benefit}.
+Our AI does it in 2 minutes from a roof photo.
 
-What does your calendar look like this week?
+Here's a quick look at how it works: {pricing_url}
+
+Worth 5 minutes to check out?
 
 Best,
 Matt"""
     },
     "followup_2": {
-        "subject": "Last try - {company_name}",
+        "subject": "Last note - {company_name}",
         "body": """Hi {contact_name},
 
-I don't want to be a pest, so this will be my last note.
+Final note from me.
 
-If now isn't the right time for {company_name}, no worries at all.
+If you're ever looking to speed up your estimating process, MyRoofGenius is ready when you are: {main_url}
 
-But if {pain_point} becomes a priority, here's a link to book a call whenever it makes sense: {calendar_link}
+Plans from $49/mo, free trial available.
+
+All the best with {company_name},
+Matt"""
+    }
+}
+
+# Email templates for outreach - TECH/DEV/GENERAL
+TECH_TEMPLATES = {
+    "initial_contact": {
+        "subject": "AI automation tools for {company_name}",
+        "body": """Hi {contact_name},
+
+I've been building AI automation tools that might be useful for {company_name}.
+
+Two things that might interest you:
+
+1. **BrainStack Studio** - Multi-AI playground with GPT-5, Claude, Gemini in one interface
+   {brainstack_url}
+
+2. **Code Kits & Prompts** - Ready-to-use AI templates, MCP servers, and automation scripts
+   {gumroad_url}
+
+If you're building anything with AI, these could save you weeks of development time.
+
+Worth a look?
+
+Best,
+Matt Woodworth
+BrainStack"""
+    },
+    "followup_1": {
+        "subject": "Re: AI tools for {company_name}",
+        "body": """Hi {contact_name},
+
+Just a quick follow-up.
+
+If you're working with AI at all, I have:
+- MCP Server Starter Kit ($97)
+- AI Orchestration Framework ($147)
+- Command Center UI Kit ($149)
+
+All on Gumroad: {gumroad_url}
+
+These are production-ready code, not tutorials.
+
+Best,
+Matt"""
+    },
+    "followup_2": {
+        "subject": "Resources for {company_name}",
+        "body": """Hi {contact_name},
+
+Last note from me.
+
+If you ever need AI development resources:
+- Code kits: {gumroad_url}
+- Multi-AI platform: {brainstack_url}
 
 All the best,
 Matt"""
     }
 }
+
+# Legacy template mapping for backwards compatibility
+OUTREACH_TEMPLATES = ROOFING_TEMPLATES
 
 
 @dataclass
@@ -309,11 +385,6 @@ class OutreachEngine:
         if not lead:
             return False, "Lead not found", None
 
-        # Get template
-        templates = {1: "initial_contact", 2: "followup_1", 3: "followup_2"}
-        template_key = templates.get(sequence_step, "initial_contact")
-        template = OUTREACH_TEMPLATES[template_key]
-
         # Get enrichment data
         metadata = _parse_metadata(lead.get("metadata"))
         enrichment = metadata.get("enrichment", {})
@@ -323,17 +394,41 @@ class OutreachEngine:
             except (json.JSONDecodeError, TypeError):
                 enrichment = {}
 
+        # Detect if roofing company (use roofing templates) or tech (use tech templates)
+        company_name = (lead["company_name"] or "").lower()
+        industry = (lead.get("industry") or "").lower()
+        source = (lead.get("source") or "").lower()
+
+        is_roofing = any(word in company_name or word in industry for word in
+                        ["roof", "roofing", "construction", "contractor", "solar", "siding", "gutter"])
+
+        # Select appropriate template set
+        if is_roofing:
+            template_set = ROOFING_TEMPLATES
+        else:
+            template_set = TECH_TEMPLATES
+
+        # Get template for sequence step
+        templates = {1: "initial_contact", 2: "followup_1", 3: "followup_2"}
+        template_key = templates.get(sequence_step, "initial_contact")
+        template = template_set[template_key]
+
         # Personalize template
-        pain_points = enrichment.get("pain_points", ["operational efficiency"])
-        first_pain = pain_points[0] if pain_points else "operational efficiency"
+        pain_points = enrichment.get("pain_points", ["estimating efficiency" if is_roofing else "AI development"])
+        first_pain = pain_points[0] if pain_points else ("estimating efficiency" if is_roofing else "AI development")
 
         variables = {
             "company_name": lead["company_name"] or "your company",
             "contact_name": lead.get("contact_name") or "there",
-            "industry": lead.get("industry", "your industry"),
+            "industry": lead.get("industry", "roofing" if is_roofing else "technology"),
             "pain_point": first_pain,
-            "benefit": "30% cost reduction",
-            "calendar_link": "https://calendly.com/brainops/15min"
+            "benefit": "70% faster estimates" if is_roofing else "weeks of development time saved",
+            "calendar_link": "https://calendly.com/brainops/15min",
+            # Product URLs
+            "pricing_url": MYROOFGENIUS_PRICING,
+            "main_url": MYROOFGENIUS_URL,
+            "brainstack_url": BRAINSTACK_URL,
+            "gumroad_url": GUMROAD_URL
         }
 
         subject = template["subject"].format(**variables)
