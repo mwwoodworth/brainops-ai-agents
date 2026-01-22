@@ -157,12 +157,19 @@ async def generate_embedding(text: str) -> Optional[list[float]]:
             result = genai.embed_content(
                 model="models/text-embedding-004",
                 content=text_truncated,
-                output_dimensionality=1536  # Match OpenAI dimensions
+                task_type="retrieval_query"  # Optimized for search queries
             )
             if result and "embedding" in result:
-                embedding = result["embedding"]
-                logger.info(f"Gemini embedding generated successfully ({len(embedding)} dims)")
-                return list(embedding)
+                embedding = list(result["embedding"])
+                # Gemini text-embedding-004 produces 768 dims, but our DB has 1536 (OpenAI)
+                # Pad with zeros to match dimensions for compatibility
+                if len(embedding) < 1536:
+                    padding = [0.0] * (1536 - len(embedding))
+                    embedding = embedding + padding
+                    logger.info(f"Gemini embedding padded from {len(result['embedding'])} to {len(embedding)} dims")
+                else:
+                    logger.info(f"Gemini embedding generated: {len(embedding)} dims")
+                return embedding
         except Exception as e:
             logger.error(f"Gemini embedding also failed: {e}")
 
@@ -265,6 +272,7 @@ async def get_embedding_status():
     gemini_status = "configured" if gemini_key else "missing"
     gemini_test = "untested"
     gemini_error = None
+    gemini_dims = None
     if gemini_key:
         try:
             import google.generativeai as genai
@@ -272,9 +280,10 @@ async def get_embedding_status():
             result = genai.embed_content(
                 model="models/text-embedding-004",
                 content="test",
-                output_dimensionality=1536
+                task_type="retrieval_query"
             )
             if result and "embedding" in result and len(result["embedding"]) > 0:
+                gemini_dims = len(result["embedding"])
                 gemini_test = "working"
         except Exception as e:
             gemini_test = "failed"
@@ -286,9 +295,10 @@ async def get_embedding_status():
 
     return {
         "openai": {"status": openai_status, "test": openai_test, "error": openai_error},
-        "gemini": {"status": gemini_status, "test": gemini_test, "error": gemini_error},
+        "gemini": {"status": gemini_status, "test": gemini_test, "error": gemini_error, "native_dims": gemini_dims, "padded_to": 1536 if gemini_test == "working" else None},
         "semantic_search_available": semantic_available,
-        "active_provider": active_provider
+        "active_provider": active_provider,
+        "db_embedding_dims": 1536
     }
 
 
@@ -457,7 +467,7 @@ async def search_memories(
         raise
     except Exception as e:
         logger.error("Memory search failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Search failed") from e
+        raise HTTPException(status_code=500, detail=f"Search failed: {type(e).__name__}: {str(e)[:200]}") from e
 
 
 @router.post("/store")
@@ -556,7 +566,7 @@ async def store_memory(
         raise
     except Exception as e:
         logger.error("Failed to store memory: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Store failed") from e
+        raise HTTPException(status_code=500, detail=f"Store failed: {type(e).__name__}: {str(e)[:200]}") from e
 
 
 @router.post("/semantic-search")
