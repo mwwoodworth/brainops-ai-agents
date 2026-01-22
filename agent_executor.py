@@ -1107,6 +1107,24 @@ class AgentExecutor:
         'IntegrationHub': 'SystemMonitor',
         'APIManager': 'Monitor',
         'WorkflowAutomation': 'WorkflowEngine',
+
+        # Phantom agent aliases - route unimplemented names to real implementations
+        'workflow-orchestrator': 'WorkflowEngine',
+        'workflow_orchestrator': 'WorkflowEngine',
+        'workflow': 'WorkflowEngine',
+        'monitor': 'Monitor',
+        'MonitoringAgent': 'Monitor',
+        'optimizer': 'RevenueOptimizer',
+        'analytics': 'PredictiveAnalyzer',
+        'analyzer': 'PredictiveAnalyzer',
+        'automation': 'WorkflowEngine',
+        'calculator': 'MetricsCalculator',
+        'generator': 'ContentGenerator',
+        'interface': 'CustomerAgent',
+        'processor': 'TranslationProcessor',
+        'universal': 'WorkflowEngine',
+        'InvoiceAgent': 'InvoicingAgent',
+        'LeadScoringAgent': 'LeadScorer',
     }
 
     def _resolve_agent_name(self, agent_name: str) -> str:
