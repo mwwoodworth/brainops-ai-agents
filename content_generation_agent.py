@@ -401,20 +401,38 @@ class ContentGeneratorAgent:
 
         return result
 
-    # ===== STAGE 5: IMAGE GENERATION (DALL-E 3) =====
+    # ===== STAGE 5: IMAGE GENERATION (DALL-E 3 with Gemini Fallback) =====
     async def _image_stage(self, image_prompt: str) -> Optional[str]:
         """
-        Stage 5: Hero Image Generation with DALL-E 3
+        Stage 5: Hero Image Generation
+        Primary: DALL-E 3
+        Fallback: Gemini Imagen 3
         Returns the image URL
         """
         logger.info(f"🖼️ Stage 5: Image Generation")
+        logger.info(f"Image prompt: {image_prompt[:100]}...")
 
+        # Try DALL-E 3 first
+        image_url = await self._generate_dalle_image(image_prompt)
+        if image_url:
+            return image_url
+
+        # Fallback to Gemini Imagen
+        logger.info("🔄 DALL-E failed, trying Gemini Imagen fallback...")
+        image_url = await self._generate_gemini_image(image_prompt)
+        if image_url:
+            return image_url
+
+        logger.warning("Both DALL-E and Gemini image generation failed")
+        return None
+
+    async def _generate_dalle_image(self, image_prompt: str) -> Optional[str]:
+        """Generate image with DALL-E 3"""
         if not self.openai_key:
-            logger.warning("OpenAI API key not found, skipping image generation")
+            logger.warning("OpenAI API key not found, skipping DALL-E")
             return None
 
-        logger.info(f"OpenAI key present: {self.openai_key[:8]}...")
-        logger.info(f"Image prompt: {image_prompt[:100]}...")
+        logger.info(f"Trying DALL-E 3 (key: {self.openai_key[:8]}...)")
 
         try:
             async with httpx.AsyncClient() as client:
@@ -436,25 +454,81 @@ class ContentGeneratorAgent:
                 )
 
                 if response.status_code != 200:
-                    logger.error(f"DALL-E API error: {response.status_code} - {response.text}")
+                    error_data = response.json() if response.text else {}
+                    error_msg = error_data.get("error", {}).get("message", response.text)
+                    logger.error(f"DALL-E API error: {response.status_code} - {error_msg}")
                     return None
 
                 data = response.json()
                 image_url = data.get("data", [{}])[0].get("url")
 
                 if not image_url:
-                    logger.error(f"No image URL in response: {data}")
+                    logger.error(f"No image URL in DALL-E response")
                     return None
 
                 self.models_used.append("openai:dall-e-3")
-                logger.info(f"✅ Image generated successfully: {image_url[:50]}...")
+                logger.info(f"✅ DALL-E image generated: {image_url[:50]}...")
                 return image_url
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Image generation HTTP error: {e.response.status_code} - {e.response.text}")
-            return None
         except Exception as e:
-            logger.error(f"Image generation failed: {type(e).__name__}: {e}")
+            logger.error(f"DALL-E generation failed: {type(e).__name__}: {e}")
+            return None
+
+    async def _generate_gemini_image(self, image_prompt: str) -> Optional[str]:
+        """Generate image with Gemini Imagen 3"""
+        gemini_key = os.getenv("GOOGLE_AI_API_KEY")
+        if not gemini_key:
+            logger.warning("Google AI API key not found, skipping Gemini Imagen")
+            return None
+
+        logger.info(f"Trying Gemini Imagen 3 (key: {gemini_key[:8]}...)")
+
+        try:
+            async with httpx.AsyncClient() as client:
+                # Gemini Imagen 3 API endpoint
+                response = await client.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={gemini_key}",
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "instances": [{"prompt": image_prompt}],
+                        "parameters": {
+                            "sampleCount": 1,
+                            "aspectRatio": "16:9",
+                            "personGeneration": "dont_allow",
+                            "safetySetting": "block_medium_and_above"
+                        }
+                    },
+                    timeout=120.0
+                )
+
+                if response.status_code != 200:
+                    error_text = response.text[:500] if response.text else "No error details"
+                    logger.error(f"Gemini Imagen API error: {response.status_code} - {error_text}")
+                    return None
+
+                data = response.json()
+                predictions = data.get("predictions", [])
+
+                if not predictions:
+                    logger.error(f"No predictions in Gemini Imagen response")
+                    return None
+
+                # Gemini returns base64 image data - we need to save it and return URL
+                image_data = predictions[0].get("bytesBase64Encoded")
+                if not image_data:
+                    logger.error("No image data in Gemini response")
+                    return None
+
+                # For now, we'll store the base64 data directly in the response
+                # In production, you'd upload this to a storage service
+                self.models_used.append("google:imagen-3")
+                logger.info(f"✅ Gemini Imagen generated image successfully")
+
+                # Return as data URL for now (can be displayed directly in HTML)
+                return f"data:image/png;base64,{image_data}"
+
+        except Exception as e:
+            logger.error(f"Gemini Imagen generation failed: {type(e).__name__}: {e}")
             return None
 
     def _ensure_tables(self):
