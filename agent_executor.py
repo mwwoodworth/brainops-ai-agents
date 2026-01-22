@@ -2193,6 +2193,30 @@ class SystemMonitorAgent(BaseAgent):
                     "error": status.get("error")
                 })
 
+        # Record incidents to self-healing system for tracking
+        incidents_recorded = 0
+        try:
+            from enhanced_self_healing import EnhancedSelfHealing
+            self_healing = EnhancedSelfHealing()
+            await self_healing.initialize()
+
+            for issue in issues:
+                # Build metrics dict for anomaly detection
+                metrics = {
+                    "error_rate": 1.0 if issue.get("status") == "error" else 0.5,
+                    "availability": 0.0 if issue.get("status") in ["offline", "error"] else 0.5
+                }
+                incident = await self_healing.detect_anomaly(
+                    component=issue["service"],
+                    metrics=metrics,
+                    context={"error": issue.get("error"), "detected_by": "SystemMonitorAgent"}
+                )
+                if incident:
+                    incidents_recorded += 1
+                    logger.info(f"Self-healing incident recorded for {issue['service']}: {incident.id}")
+        except Exception as e:
+            logger.warning(f"Could not record self-healing incidents: {e}")
+
         # Attempt fixes using MCP tools
         fixes = []
         for issue in issues:
@@ -2204,6 +2228,7 @@ class SystemMonitorAgent(BaseAgent):
             "health_check": health,
             "issues_found": len(issues),
             "issues": issues,
+            "incidents_recorded": incidents_recorded,
             "fixes_attempted": len(fixes),
             "fixes": fixes,
             "mcp_enabled": self._mcp_client is not None,

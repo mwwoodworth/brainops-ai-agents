@@ -1682,6 +1682,36 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
     metrics["act_duration_ms"] = (datetime.now() - act_start).total_seconds() * 1000
     metrics["actions_executed"] = actions_executed
 
+    # PHASE 6: PERSIST DECISIONS to aurea_decisions table
+    decisions_stored = 0
+    try:
+        conn = psycopg2.connect(**_get_db_config())
+        try:
+            with conn.cursor() as cur:
+                for decision in decisions:
+                    cur.execute("""
+                        INSERT INTO aurea_decisions (
+                            decision_type, description, confidence, outcome,
+                            success, context_patterns, tenant_id, created_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                    """, (
+                        decision.get("type", "unknown"),
+                        f"OODA Cycle {cycle_id}: {decision.get('observation', {}).get('observation', 'unknown')}",
+                        decision.get("confidence", 0.5),
+                        "executed",
+                        True,
+                        json.dumps({"cycle_id": cycle_id, "observation": decision.get("observation", {})}),
+                        tenant_id
+                    ))
+                    decisions_stored += 1
+                conn.commit()
+        finally:
+            conn.close()
+        logger.info(f"Stored {decisions_stored} decisions to aurea_decisions")
+    except Exception as e:
+        logger.warning(f"Failed to store decisions: {e}")
+    metrics["decisions_stored"] = decisions_stored
+
     # Total cycle metrics
     total_duration = (datetime.now() - start_time).total_seconds() * 1000
     metrics["total_duration_ms"] = total_duration
@@ -1690,6 +1720,7 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
         f"Enhanced OODA cycle {cycle_id}: "
         f"{metrics['observations_count']} obs, "
         f"{metrics['decisions_count']} decisions, "
+        f"{decisions_stored} stored, "
         f"{total_duration:.0f}ms total"
     )
 
@@ -1698,7 +1729,8 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
         "success": True,
         "metrics": metrics,
         "observations": [o.get("observation") for o in valid_observations],
-        "decisions": [d.get("type") for d in decisions]
+        "decisions": [d.get("type") for d in decisions],
+        "decisions_stored": decisions_stored
     }
 
 
