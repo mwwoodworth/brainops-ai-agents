@@ -126,29 +126,48 @@ def _require_real_database(operation: str) -> None:
 
 async def generate_embedding(text: str) -> Optional[list[float]]:
     """
-    Generate real embedding using OpenAI text-embedding-3-small.
-    Returns None if the provider is unavailable.
+    Generate embedding with OpenAI primary, Gemini fallback.
+    OpenAI: text-embedding-3-small (1536 dims)
+    Gemini: gemini-embedding-001 (configurable to 1536 dims for compatibility)
+    Returns None if both providers fail.
     """
+    # Truncate if too long
+    text_truncated = text[:30000] if len(text) > 30000 else text
+
+    # Try OpenAI first (primary)
     openai_key = os.getenv("OPENAI_API_KEY")
-    if not openai_key:
-        logger.warning("OPENAI_API_KEY not set - semantic search unavailable")
-        return None
+    if openai_key:
+        try:
+            import openai
+            client = openai.OpenAI(api_key=openai_key)
+            response = client.embeddings.create(
+                input=text_truncated,
+                model="text-embedding-3-small"
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            logger.warning(f"OpenAI embedding failed, trying Gemini fallback: {e}")
 
-    try:
-        import openai
-        client = openai.OpenAI(api_key=openai_key)
+    # Fallback to Gemini
+    gemini_key = os.getenv("GOOGLE_AI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    if gemini_key:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=gemini_key)
+            result = genai.embed_content(
+                model="models/text-embedding-004",
+                content=text_truncated,
+                output_dimensionality=1536  # Match OpenAI dimensions
+            )
+            if result and "embedding" in result:
+                embedding = result["embedding"]
+                logger.info(f"Gemini embedding generated successfully ({len(embedding)} dims)")
+                return list(embedding)
+        except Exception as e:
+            logger.error(f"Gemini embedding also failed: {e}")
 
-        # Truncate if too long (8191 token limit for text-embedding-3-small)
-        text_truncated = text[:30000] if len(text) > 30000 else text
-
-        response = client.embeddings.create(
-            input=text_truncated,
-            model="text-embedding-3-small"
-        )
-        return response.data[0].embedding
-    except Exception as e:
-        logger.error(f"Embedding generation failed: {e}")
-        return None
+    logger.error("All embedding providers failed - semantic search unavailable")
+    return None
 
 
 # =============================================================================
@@ -223,34 +242,53 @@ async def get_memory_stats(
 async def get_embedding_status():
     """
     Diagnostic endpoint to check embedding capability status.
+    Tests both OpenAI (primary) and Gemini (fallback) providers.
     """
+    # Check OpenAI
     openai_key = os.getenv("OPENAI_API_KEY")
-    key_status = "configured" if openai_key else "missing"
-    key_preview = f"{openai_key[:10]}...{openai_key[-4:]}" if openai_key and len(openai_key) > 14 else "N/A"
-
-    # Test actual embedding generation
-    test_result = "untested"
-    error_detail = None
+    openai_status = "configured" if openai_key else "missing"
+    openai_test = "untested"
+    openai_error = None
     if openai_key:
         try:
             import openai
             client = openai.OpenAI(api_key=openai_key)
-            response = client.embeddings.create(
-                input="test",
-                model="text-embedding-3-small"
-            )
+            response = client.embeddings.create(input="test", model="text-embedding-3-small")
             if response.data and len(response.data[0].embedding) > 0:
-                test_result = "working"
+                openai_test = "working"
         except Exception as e:
-            test_result = "failed"
-            error_detail = str(e)
+            openai_test = "failed"
+            openai_error = str(e)
+
+    # Check Gemini fallback
+    gemini_key = os.getenv("GOOGLE_AI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    gemini_status = "configured" if gemini_key else "missing"
+    gemini_test = "untested"
+    gemini_error = None
+    if gemini_key:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=gemini_key)
+            result = genai.embed_content(
+                model="models/text-embedding-004",
+                content="test",
+                output_dimensionality=1536
+            )
+            if result and "embedding" in result and len(result["embedding"]) > 0:
+                gemini_test = "working"
+        except Exception as e:
+            gemini_test = "failed"
+            gemini_error = str(e)
+
+    # Semantic search available if either provider works
+    semantic_available = openai_test == "working" or gemini_test == "working"
+    active_provider = "openai" if openai_test == "working" else ("gemini" if gemini_test == "working" else None)
 
     return {
-        "openai_key_status": key_status,
-        "key_preview": key_preview,
-        "embedding_test": test_result,
-        "error": error_detail,
-        "semantic_search_available": test_result == "working"
+        "openai": {"status": openai_status, "test": openai_test, "error": openai_error},
+        "gemini": {"status": gemini_status, "test": gemini_test, "error": gemini_error},
+        "semantic_search_available": semantic_available,
+        "active_provider": active_provider
     }
 
 
