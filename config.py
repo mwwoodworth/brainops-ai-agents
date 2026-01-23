@@ -151,7 +151,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.7.22')  # Fix agent alias mappings
+        self.version = os.getenv('VERSION', 'v3.7.23')  # Add autonomic status, cleanup duplicate imports
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))

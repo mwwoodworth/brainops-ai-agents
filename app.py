@@ -1384,10 +1384,15 @@ app.include_router(full_observability_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(self_awareness_router, dependencies=SECURED_DEPENDENCIES)  # Self-Awareness Dashboard
 app.include_router(ai_awareness_router, dependencies=SECURED_DEPENDENCIES)  # Complete AI Awareness - THE endpoint
 
+from api.autonomic_status import router as autonomic_status_router  # Autonomic Status API
+
 # Voice Router - AUREA voice & communications
 if VOICE_ROUTER_AVAILABLE:
     app.include_router(voice_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("🎤 Voice Router endpoints registered at /api/v1/voice/*")
+
+app.include_router(autonomic_status_router, dependencies=SECURED_DEPENDENCIES)
+logger.info("mounted: Autonomic Status API at /autonomic/status")
 
 # Permanent Observability Router - Never miss anything
 if PERMANENT_OBSERVABILITY_AVAILABLE:
