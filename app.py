@@ -298,6 +298,14 @@ except ImportError as e:
     SOP_ROUTER_AVAILABLE = False
     logger.warning(f"SOP Router not available: {e}")
 
+try:
+    from api.companycam import router as companycam_router
+    COMPANYCAM_ROUTER_AVAILABLE = True
+    logger.info("CompanyCam Router loaded")
+except ImportError as e:
+    COMPANYCAM_ROUTER_AVAILABLE = False
+    logger.warning(f"CompanyCam Router not available: {e}")
+
 # Voice Router (Added for AUREA)
 try:
     from api.voice import router as voice_router
@@ -1431,6 +1439,9 @@ if KNOWLEDGE_BASE_ROUTER_AVAILABLE:
 
 if SOP_ROUTER_AVAILABLE:
     app.include_router(sop_router, dependencies=SECURED_DEPENDENCIES)
+
+if COMPANYCAM_ROUTER_AVAILABLE:
+    app.include_router(companycam_router, dependencies=SECURED_DEPENDENCIES)
 
 # DevOps Loop API (2025-12-31) - Ultimate self-healing DevOps orchestrator
 try:
