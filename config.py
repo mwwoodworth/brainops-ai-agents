@@ -151,7 +151,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.7.24')  # Register WorkflowAutomation agent
+        self.version = os.getenv('VERSION', 'v3.7.25')  # Fix alias resolution by removing _agent suffix
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
