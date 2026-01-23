@@ -1113,8 +1113,8 @@ class AgentExecutor:
         'workflow-orchestrator': 'WorkflowAutomation',
         'WorkflowEngine': 'WorkflowAutomation',  # WorkflowEngine doesn't exist, use WorkflowAutomation
         # Additional phantom agent aliases for ERP workflow compatibility
-        'crew-allocator': 'Scheduler',  # For crew assignment tasks (SchedulingAgent doesn't exist)
-        'SchedulingAgent': 'Scheduler',  # Alias for compatibility
+        'crew-allocator': 'SchedulingAgent',  # For crew assignment tasks - maps to registered SchedulingAgent
+        'Scheduler': 'SchedulingAgent',  # Alias for compatibility - Scheduler maps to SchedulingAgent
         'collections-manager': 'InvoicingAgent',  # For collections/follow-up tasks
         'payment-handler': 'InvoicingAgent',  # For payment link tasks
         'customer-intelligence': 'CustomerIntelligence',  # Maps to real CustomerIntelligence agent
