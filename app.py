@@ -837,8 +837,12 @@ async def lifespan(app: FastAPI):
         # Initialize scheduler if available
         if SCHEDULER_AVAILABLE:
             try:
-                scheduler = AgentScheduler()
-                scheduler.start()
+                def _init_scheduler_sync():
+                    scheduler = AgentScheduler()
+                    scheduler.start()
+                    return scheduler
+
+                scheduler = await asyncio.to_thread(_init_scheduler_sync)
                 app.state.scheduler = scheduler
                 logger.info("✅ Agent Scheduler initialized and STARTED")
             except Exception as e:
@@ -847,7 +851,9 @@ async def lifespan(app: FastAPI):
         # Initialize AUREA Master Orchestrator
         if AUREA_AVAILABLE and tenant_id:
             try:
-                aurea_instance = AUREA(autonomy_level=AutonomyLevel.FULL_AUTO, tenant_id=tenant_id)
+                aurea_instance = await asyncio.to_thread(
+                    lambda: AUREA(autonomy_level=AutonomyLevel.FULL_AUTO, tenant_id=tenant_id)
+                )
                 app.state.aurea = aurea_instance
                 asyncio.create_task(aurea_instance.orchestrate())
                 logger.info("🧠 AUREA Master Orchestrator STARTED - Observe→Decide→Act loop ACTIVE")
@@ -859,7 +865,7 @@ async def lifespan(app: FastAPI):
         # Initialize Self-Healing Recovery System
         if SELF_HEALING_AVAILABLE:
             try:
-                healer = SelfHealingRecovery()
+                healer = await asyncio.to_thread(SelfHealingRecovery)
                 app.state.healer = healer
                 logger.info("🏥 Self-Healing Recovery System initialized")
             except Exception as e:
@@ -868,7 +874,7 @@ async def lifespan(app: FastAPI):
         # Start Self-Healing Reconciliation Loop
         if RECONCILER_AVAILABLE:
             try:
-                reconciler = get_reconciler()
+                reconciler = await asyncio.to_thread(get_reconciler)
                 app.state.reconciler = reconciler
                 asyncio.create_task(start_healing_loop())
                 logger.info("🔄 Self-Healing Reconciliation Loop STARTED")
@@ -878,7 +884,7 @@ async def lifespan(app: FastAPI):
         # Initialize Unified Memory Manager
         if MEMORY_AVAILABLE:
             try:
-                memory_manager_instance = UnifiedMemoryManager()
+                memory_manager_instance = await asyncio.to_thread(UnifiedMemoryManager)
                 app.state.memory = memory_manager_instance
                 logger.info("🧠 Unified Memory Manager initialized")
             except Exception as e:
@@ -923,7 +929,9 @@ async def lifespan(app: FastAPI):
         # Initialize System Improvement Agent
         if SYSTEM_IMPROVEMENT_AVAILABLE and SystemImprovementAgent:
             try:
-                app.state.system_improvement = SystemImprovementAgent(tenant_id=tenant_id)
+                app.state.system_improvement = await asyncio.to_thread(
+                    lambda: SystemImprovementAgent(tenant_id=tenant_id)
+                )
                 logger.info("⚙️ System Improvement Agent ACTIVATED")
             except Exception as e:
                 logger.error(f"❌ System Improvement Agent activation failed: {e}")
@@ -931,7 +939,9 @@ async def lifespan(app: FastAPI):
         # Initialize DevOps Optimization Agent
         if DEVOPS_AGENT_AVAILABLE and DevOpsOptimizationAgent:
             try:
-                app.state.devops_agent = DevOpsOptimizationAgent(tenant_id=tenant_id)
+                app.state.devops_agent = await asyncio.to_thread(
+                    lambda: DevOpsOptimizationAgent(tenant_id=tenant_id)
+                )
                 logger.info("🔧 DevOps Optimization Agent ACTIVATED")
             except Exception as e:
                 logger.error(f"❌ DevOps Agent activation failed: {e}")
@@ -939,7 +949,9 @@ async def lifespan(app: FastAPI):
         # Initialize Code Quality Agent
         if CODE_QUALITY_AVAILABLE and CodeQualityAgent:
             try:
-                app.state.code_quality = CodeQualityAgent(tenant_id=tenant_id)
+                app.state.code_quality = await asyncio.to_thread(
+                    lambda: CodeQualityAgent(tenant_id=tenant_id)
+                )
                 logger.info("✨ Code Quality Agent ACTIVATED")
             except Exception as e:
                 logger.error(f"❌ Code Quality Agent activation failed: {e}")
@@ -947,7 +959,9 @@ async def lifespan(app: FastAPI):
         # Initialize Customer Success Agent
         if CUSTOMER_SUCCESS_AVAILABLE and CustomerSuccessAgent:
             try:
-                app.state.customer_success = CustomerSuccessAgent(tenant_id=tenant_id)
+                app.state.customer_success = await asyncio.to_thread(
+                    lambda: CustomerSuccessAgent(tenant_id=tenant_id)
+                )
                 logger.info("🤝 Customer Success Agent ACTIVATED")
             except Exception as e:
                 logger.error(f"❌ Customer Success Agent activation failed: {e}")
@@ -955,7 +969,9 @@ async def lifespan(app: FastAPI):
         # Initialize Competitive Intelligence Agent
         if COMPETITIVE_INTEL_AVAILABLE and CompetitiveIntelligenceAgent:
             try:
-                app.state.competitive_intel = CompetitiveIntelligenceAgent(tenant_id=tenant_id)
+                app.state.competitive_intel = await asyncio.to_thread(
+                    lambda: CompetitiveIntelligenceAgent(tenant_id=tenant_id)
+                )
                 logger.info("🔍 Competitive Intelligence Agent ACTIVATED")
             except Exception as e:
                 logger.error(f"❌ Competitive Intel Agent activation failed: {e}")
@@ -963,7 +979,9 @@ async def lifespan(app: FastAPI):
         # Initialize Vision Alignment Agent
         if VISION_ALIGNMENT_AVAILABLE and VisionAlignmentAgent:
             try:
-                app.state.vision_alignment = VisionAlignmentAgent(tenant_id=tenant_id)
+                app.state.vision_alignment = await asyncio.to_thread(
+                    lambda: VisionAlignmentAgent(tenant_id=tenant_id)
+                )
                 logger.info("🎯 Vision Alignment Agent ACTIVATED")
             except Exception as e:
                 logger.error(f"❌ Vision Alignment Agent activation failed: {e}")
@@ -971,7 +989,7 @@ async def lifespan(app: FastAPI):
         # Initialize AI Self-Awareness Module
         if SELF_AWARENESS_AVAILABLE and get_self_aware_ai:
             try:
-                app.state.self_aware_ai = get_self_aware_ai()
+                app.state.self_aware_ai = await asyncio.to_thread(get_self_aware_ai)
                 logger.info("🧠 AI Self-Awareness Module ACTIVATED - The AI OS is now self-aware!")
             except Exception as e:
                 logger.error(f"❌ Self-Awareness Module activation failed: {e}")
@@ -1876,9 +1894,16 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
 
     async def _build_health_payload() -> dict[str, Any]:
         # Handle case where pool isn't initialized yet (during startup)
+        db_timeout = float(os.getenv("DB_HEALTH_TIMEOUT_S", "2.5"))
+        db_timed_out = False
         try:
             pool = get_pool()
-            db_healthy = await pool.test_connection()
+            try:
+                db_healthy = await asyncio.wait_for(pool.test_connection(), timeout=db_timeout)
+            except asyncio.TimeoutError:
+                db_timed_out = True
+                logger.warning("Health check DB test timed out after %.2fs", db_timeout)
+                db_healthy = False
         except RuntimeError as e:
             if "not initialized" in str(e):
                 # Pool not ready yet - return starting status
@@ -1890,7 +1915,10 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
                     "message": "Service is starting up, database pool initializing..."
                 }
             raise
-        db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
+        if db_timed_out:
+            db_status = "timeout"
+        else:
+            db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
         auth_configured = config.security.auth_configured
 
         active_systems = _collect_active_systems()
@@ -1979,6 +2007,16 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
         _build_health_payload,
     )
     return {**payload, "cached": from_cache}
+
+
+@app.get("/healthz")
+async def healthz() -> dict[str, Any]:
+    """Lightweight health endpoint for container checks (no DB calls)."""
+    return {
+        "status": "ok",
+        "version": VERSION,
+        "build": BUILD_TIME,
+    }
 
 
 def _require_diagnostics_key(request: Request) -> None:
