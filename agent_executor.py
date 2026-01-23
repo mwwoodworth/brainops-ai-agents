@@ -1107,31 +1107,32 @@ class AgentExecutor:
         'BackupManager': 'SystemMonitor',
         'IntegrationHub': 'SystemMonitor',
         'APIManager': 'Monitor',
-        'WorkflowAutomation': 'WorkflowEngine',
-
         # Phantom agent aliases - route unimplemented names to real implementations
-        'workflow-orchestrator': 'WorkflowEngine',
+        # NOTE: Target names must match ACTUAL loaded agent names (see /agents endpoint)
+        'workflow-orchestrator': 'WorkflowAutomation',
+        'WorkflowEngine': 'WorkflowAutomation',  # WorkflowEngine doesn't exist, use WorkflowAutomation
         # Additional phantom agent aliases for ERP workflow compatibility
-        'crew-allocator': 'SchedulingAgent',  # For crew assignment tasks
+        'crew-allocator': 'Scheduler',  # For crew assignment tasks (SchedulingAgent doesn't exist)
+        'SchedulingAgent': 'Scheduler',  # Alias for compatibility
         'collections-manager': 'InvoicingAgent',  # For collections/follow-up tasks
         'payment-handler': 'InvoicingAgent',  # For payment link tasks
         'customer-intelligence': 'CustomerIntelligence',  # Maps to real CustomerIntelligence agent
         'intelligent-estimator': 'ProposalGenerator',  # For estimation tasks (like Elena)
-        'general_agent': 'WorkflowEngine',  # General purpose workflow
+        'general_agent': 'WorkflowAutomation',  # General purpose workflow
         'marcus_agent': 'PredictiveAnalyzer',  # For revenue prediction tasks
-        'workflow_orchestrator': 'WorkflowEngine',
-        'workflow': 'WorkflowEngine',
+        'workflow_orchestrator': 'WorkflowAutomation',
+        'workflow': 'WorkflowAutomation',
         'monitor': 'Monitor',
         'MonitoringAgent': 'Monitor',
         'optimizer': 'RevenueOptimizer',
         'analytics': 'PredictiveAnalyzer',
         'analyzer': 'PredictiveAnalyzer',
-        'automation': 'WorkflowEngine',
+        'automation': 'WorkflowAutomation',
         'calculator': 'MetricsCalculator',
         'generator': 'ContentGenerator',
         'interface': 'CustomerAgent',
         'processor': 'TranslationProcessor',
-        'universal': 'WorkflowEngine',
+        'universal': 'WorkflowAutomation',
         'InvoiceAgent': 'InvoicingAgent',
         'LeadScoringAgent': 'LeadScorer',
     }
