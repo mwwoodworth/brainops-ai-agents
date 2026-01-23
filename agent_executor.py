@@ -849,6 +849,7 @@ class AgentExecutor:
 
         # Workflow Agents
         self.agents['WorkflowEngine'] = WorkflowEngineAgent()
+        self.agents['WorkflowAutomation'] = WorkflowEngineAgent()  # Alias for database 'WorkflowAutomation' agent
         self.agents['CustomerAgent'] = CustomerAgent()
         self.agents['InvoicingAgent'] = InvoicingAgent()
 
