@@ -151,7 +151,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.7.20')  # Self-healing error integration + Consciousness->OODA wiring
+        self.version = os.getenv('VERSION', 'v3.7.21')  # CompanyCam integration stub
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
