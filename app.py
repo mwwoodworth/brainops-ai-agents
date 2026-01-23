@@ -3546,7 +3546,8 @@ async def execute_agent_generic(
             """, f"%{agent_type}%")
 
         agent_id = str(agent["id"]) if agent else "system"
-        agent_name = agent["name"] if agent else f"{agent_type}_agent"
+        # Use agent_type directly for alias resolution (don't append _agent suffix)
+        agent_name = agent["name"] if agent else agent_type
 
         # Log execution start (use correct column names: task_type, no agent_id or started_at)
         await pool.execute("""
