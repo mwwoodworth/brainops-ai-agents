@@ -347,7 +347,7 @@ class E2ESystemVerification:
         self.tests.extend([
             EndpointTest(
                 name="Self-Healing - Status",
-                url=f"{BRAINOPS_API_URL}/self-healing/status",
+                url=f"{BRAINOPS_API_URL}/api/v1/self-healing/status",
                 headers=headers,
                 expected_fields=["system", "status", "capabilities", "recovery_improvement"],
                 category=SystemCategory.BLEEDING_EDGE,
@@ -355,7 +355,7 @@ class E2ESystemVerification:
             ),
             EndpointTest(
                 name="Self-Healing - Dashboard",
-                url=f"{BRAINOPS_API_URL}/self-healing/dashboard",
+                url=f"{BRAINOPS_API_URL}/api/v1/self-healing/dashboard",
                 headers=headers,
                 expected_fields=["overview", "autonomy_tiers"],
                 category=SystemCategory.BLEEDING_EDGE,
@@ -363,7 +363,7 @@ class E2ESystemVerification:
             ),
             EndpointTest(
                 name="Self-Healing - Active Incidents",
-                url=f"{BRAINOPS_API_URL}/self-healing/incidents/active",
+                url=f"{BRAINOPS_API_URL}/api/v1/self-healing/incidents/active",
                 headers=headers,
                 expected_fields=["active_incidents", "total"],
                 category=SystemCategory.BLEEDING_EDGE,
@@ -371,7 +371,7 @@ class E2ESystemVerification:
             ),
             EndpointTest(
                 name="Self-Healing - Metrics",
-                url=f"{BRAINOPS_API_URL}/self-healing/metrics",
+                url=f"{BRAINOPS_API_URL}/api/v1/self-healing/metrics",
                 headers=headers,
                 expected_fields=["metrics", "performance"],
                 category=SystemCategory.BLEEDING_EDGE,
@@ -482,7 +482,7 @@ class E2ESystemVerification:
         self.tests.extend([
             EndpointTest(
                 name="ChatGPT Agent UI - Quick",
-                url=f"{BRAINOPS_API_URL}/always-know/chatgpt-agent-test",
+                url=f"{BRAINOPS_API_URL}/api/v1/always-know/chatgpt-agent-test",
                 method="POST",
                 headers=headers,
                 expected_status=200,
@@ -687,7 +687,7 @@ class E2ESystemVerification:
         semaphore = asyncio.Semaphore(max_concurrency)
 
         def _should_run_serial(test: EndpointTest) -> bool:
-            return "/always-know/chatgpt-agent-test" in test.url or test.name.startswith("ChatGPT Agent UI")
+            return "/api/v1/always-know/chatgpt-agent-test" in test.url or test.name.startswith("ChatGPT Agent UI")
 
         serial_indices: list[int] = []
         parallel_indices: list[int] = []
@@ -845,7 +845,7 @@ class E2ESystemVerification:
         semaphore = asyncio.Semaphore(max_concurrency)
 
         def _should_run_serial(test: EndpointTest) -> bool:
-            return "/always-know/chatgpt-agent-test" in test.url or test.name.startswith("ChatGPT Agent UI")
+            return "/api/v1/always-know/chatgpt-agent-test" in test.url or test.name.startswith("ChatGPT Agent UI")
 
         async with aiohttp.ClientSession() as session:
             results_by_index: dict[int, TestResult] = {}
