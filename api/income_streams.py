@@ -184,10 +184,10 @@ async def get_income_streams_status():
         lead_stats = await pool.fetchrow("""
             SELECT
                 COUNT(*) as total,
-                COUNT(*) FILTER (WHERE stage = 'new') as new_leads,
-                COUNT(*) FILTER (WHERE stage = 'qualified') as qualified,
-                COUNT(*) FILTER (WHERE stage = 'proposal_sent') as proposal_sent,
-                COUNT(*) FILTER (WHERE stage = 'won') as won,
+                SUM(CASE WHEN stage = 'new' THEN 1 ELSE 0 END) as new_leads,
+                SUM(CASE WHEN stage = 'qualified' THEN 1 ELSE 0 END) as qualified,
+                SUM(CASE WHEN stage = 'proposal_sent' THEN 1 ELSE 0 END) as proposal_sent,
+                SUM(CASE WHEN stage = 'won' THEN 1 ELSE 0 END) as won,
                 COALESCE(SUM(value_estimate), 0) as pipeline_value
             FROM revenue_leads
             WHERE is_test = false OR is_test IS NULL
@@ -210,9 +210,9 @@ async def get_income_streams_status():
         email_stats = await pool.fetchrow("""
             SELECT
                 COUNT(*) as total_queued,
-                COUNT(*) FILTER (WHERE status = 'sent') as sent,
-                COUNT(*) FILTER (WHERE status = 'failed') as failed,
-                COUNT(*) FILTER (WHERE status = 'queued') as pending
+                SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+                SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) as pending
             FROM ai_email_queue
         """)
 
@@ -589,8 +589,8 @@ async def get_revenue_analytics():
         # Lead pipeline value
         leads = await pool.fetchrow("""
             SELECT
-                COALESCE(SUM(value_estimate), 0) FILTER (WHERE stage = 'won') as won_value,
-                COALESCE(SUM(value_estimate), 0) FILTER (WHERE stage IN ('qualified', 'proposal_sent', 'negotiating')) as pipeline_value
+                COALESCE(SUM(CASE WHEN stage = 'won' THEN value_estimate ELSE 0 END), 0) as won_value,
+                COALESCE(SUM(CASE WHEN stage IN ('qualified', 'proposal_sent', 'negotiating') THEN value_estimate ELSE 0 END), 0) as pipeline_value
             FROM revenue_leads
             WHERE (is_test = false OR is_test IS NULL)
             AND created_at > NOW() - INTERVAL '30 days'
@@ -604,9 +604,9 @@ async def get_revenue_analytics():
         # MRG subscriptions
         mrg = await pool.fetchrow("""
             SELECT
-                COUNT(*) FILTER (WHERE subscription_status = 'active') as active,
-                COUNT(*) FILTER (WHERE subscription_tier = 'professional') as pro,
-                COUNT(*) FILTER (WHERE subscription_tier = 'enterprise') as enterprise
+                SUM(CASE WHEN subscription_status = 'active' THEN 1 ELSE 0 END) as active,
+                SUM(CASE WHEN subscription_tier = 'professional' THEN 1 ELSE 0 END) as pro,
+                SUM(CASE WHEN subscription_tier = 'enterprise' THEN 1 ELSE 0 END) as enterprise
             FROM tenants
             WHERE stripe_subscription_id IS NOT NULL
         """)
