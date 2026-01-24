@@ -162,5 +162,10 @@ class AppConfig:
         self.security = SecurityConfig()
         self.tenant = TenantConfig()
 
+        # Autonomic Systems Feature Flags
+        self.enable_nerve_center = os.getenv('ENABLE_NERVE_CENTER', 'false').lower() == 'true'
+        self.enable_autonomic_loop = os.getenv('ENABLE_AUTONOMIC_LOOP', 'false').lower() == 'true'
+        self.autonomic_loop_interval = float(os.getenv('AUTONOMIC_LOOP_INTERVAL', '30'))
+
 
 config = AppConfig()
