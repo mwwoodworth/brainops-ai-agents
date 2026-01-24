@@ -15,9 +15,11 @@
 
 | Credential | Location |
 |------------|----------|
-| RENDER_API_KEY | `$RENDER_API_KEY` env var, stored in `brainops_credentials` table |
+| RENDER_API_KEY | `$RENDER_API_KEY` env var, stored **encrypted** in `brainops_credentials` |
 | Service IDs | Stored in `unified_brain` table, key: `render_service_ids` |
 | Deployment SOP | Stored in `unified_brain` table, key: `ai_agents_deployment_sop` |
+
+**Note:** Command Center credential decrypt requires `ENCRYPTION_KEY` in Vercel env (production).
 
 ---
 
