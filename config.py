@@ -97,11 +97,12 @@ class SecurityConfig:
             or os.getenv('DEFAULT_TEST_API_KEY')
         )
         default_local_test_key = "brainops-local-test-key"
-        allow_test_key = (
-            os.getenv('ALLOW_TEST_KEY', 'false').lower() == 'true'
-            or self.dev_mode
-            or self.environment != 'production'
-        )
+        allow_test_key_flag = os.getenv('ALLOW_TEST_KEY', 'false').lower() == 'true'
+        allow_test_key = allow_test_key_flag and self.environment != 'production'
+        if allow_test_key_flag and self.environment == 'production':
+            logger.critical(
+                "ALLOW_TEST_KEY is set in production; test API keys are disabled."
+            )
         self.test_api_key: Optional[str] = None
         if allow_test_key:
             effective_test_key = test_key or default_local_test_key
