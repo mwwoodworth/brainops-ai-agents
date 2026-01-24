@@ -238,6 +238,17 @@ class GumroadSale(BaseModel):
 def _as_convertkit_tag_name(value: str) -> str:
     return value.strip().replace("_", " ").replace("-", " ").strip()
 
+def _resolve_convertkit_auth(prefer_secret: bool = False) -> Optional[dict[str, str]]:
+    api_key = (CONVERTKIT_API_KEY or "").strip()
+    api_secret = (CONVERTKIT_API_SECRET or "").strip()
+    if prefer_secret and api_secret:
+        return {"key": "api_secret", "value": api_secret}
+    if api_key:
+        return {"key": "api_key", "value": api_key}
+    if api_secret:
+        return {"key": "api_secret", "value": api_secret}
+    return None
+
 async def _resolve_convertkit_tag_id(client: httpx.AsyncClient, tag_ref: str) -> Optional[str]:
     """
     ConvertKit tag references can be either:
@@ -250,16 +261,23 @@ async def _resolve_convertkit_tag_id(client: httpx.AsyncClient, tag_ref: str) ->
     if tag_ref.isdigit():
         return tag_ref
 
-    if not CONVERTKIT_API_KEY:
-        logger.warning("ConvertKit tagging requested but CONVERTKIT_API_KEY is missing")
+    auth = _resolve_convertkit_auth(False)
+    if not auth:
+        logger.warning("ConvertKit tagging requested but no API key/secret configured")
         return None
 
     # Lookup by name
     try:
         response = await client.get(
             "https://api.convertkit.com/v3/tags",
-            params={"api_key": CONVERTKIT_API_KEY},
+            params={auth["key"]: auth["value"]},
         )
+        if response.status_code in (401, 403) and auth["key"] == "api_key" and CONVERTKIT_API_SECRET:
+            # Retry with API secret if key is invalid
+            response = await client.get(
+                "https://api.convertkit.com/v3/tags",
+                params={"api_secret": CONVERTKIT_API_SECRET},
+            )
         if response.status_code == 200:
             data = response.json()
             tags = data.get("tags", []) if isinstance(data, dict) else []
@@ -302,22 +320,32 @@ async def add_to_convertkit(email: str, first_name: str, last_name: str, product
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             # Subscribe to form
-            if not (CONVERTKIT_API_KEY and CONVERTKIT_FORM_ID):
+            auth = _resolve_convertkit_auth(False)
+            if not (auth and CONVERTKIT_FORM_ID):
                 logger.warning("ConvertKit not configured; skipping ConvertKit sync for %s", email)
                 return False
 
+            payload = {
+                auth["key"]: auth["value"],
+                "email": email,
+                "first_name": first_name,
+                "fields[last_name]": last_name,
+                "fields[gumroad_customer]": "true",
+                "fields[last_purchase]": datetime.utcnow().isoformat(),
+                "fields[purchased_products]": product_code,
+            }
             response = await client.post(
                 f"https://api.convertkit.com/v3/forms/{CONVERTKIT_FORM_ID}/subscribe",
-                data={
-                    "api_key": CONVERTKIT_API_KEY,
-                    "email": email,
-                    "first_name": first_name,
-                    "fields[last_name]": last_name,
-                    "fields[gumroad_customer]": "true",
-                    "fields[last_purchase]": datetime.utcnow().isoformat(),
-                    "fields[purchased_products]": product_code,
-                },
+                data=payload,
             )
+            if response.status_code in (401, 403) and auth["key"] == "api_key" and CONVERTKIT_API_SECRET:
+                # Retry with API secret if key is invalid
+                payload.pop("api_key", None)
+                payload["api_secret"] = CONVERTKIT_API_SECRET
+                response = await client.post(
+                    f"https://api.convertkit.com/v3/forms/{CONVERTKIT_FORM_ID}/subscribe",
+                    data=payload,
+                )
 
             if response.status_code == 200:
                 # Add product tag
@@ -326,9 +354,14 @@ async def add_to_convertkit(email: str, first_name: str, last_name: str, product
                     tag_ref = str(product.get("convertkit_tag") or "").strip()
                     tag_id = await _resolve_convertkit_tag_id(client, tag_ref)
                     if tag_id:
+                        tag_auth = _resolve_convertkit_auth(True) or auth
+                        tag_payload = {
+                            (tag_auth["key"] if tag_auth else "api_key"): (tag_auth["value"] if tag_auth else auth["value"]),
+                            "email": email,
+                        }
                         await client.post(
                             f"https://api.convertkit.com/v3/tags/{tag_id}/subscribe",
-                            data={"api_key": CONVERTKIT_API_KEY, "email": email},
+                            data=tag_payload,
                         )
                     else:
                         logger.warning("ConvertKit tag not available for product_code=%s tag_ref=%s", product_code, tag_ref)
