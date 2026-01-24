@@ -38,6 +38,16 @@ from lib.events.schema import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/events", tags=["Unified Events"])
 
+# Import LangGraph workflow trigger with fallback
+try:
+    from langgraph_workflow_trigger import trigger_workflows_for_event
+    WORKFLOW_TRIGGER_AVAILABLE = True
+    logger.info("LangGraph workflow trigger loaded")
+except ImportError as e:
+    WORKFLOW_TRIGGER_AVAILABLE = False
+    trigger_workflows_for_event = None
+    logger.warning(f"LangGraph workflow trigger not available: {e}")
+
 # =============================================================================
 # DATABASE CONNECTION
 # =============================================================================
@@ -189,15 +199,83 @@ async def ensure_unified_events_table():
 
 
 async def store_event(event: UnifiedEvent) -> bool:
-    """Store event in unified_events table"""
+    """Store event in unified_events table with fallback to sync pool."""
     logger.info(f"store_event called: ASYNC_POOL_AVAILABLE={ASYNC_POOL_AVAILABLE}, using_fallback={using_fallback()}")
-    if not ASYNC_POOL_AVAILABLE:
-        logger.warning("ASYNC_POOL_AVAILABLE is False, event not stored in DB")
-        return False
-    if using_fallback():
-        logger.warning("Database pool is using fallback, event not stored in DB")
+
+    # Try async pool first
+    if ASYNC_POOL_AVAILABLE and not using_fallback():
+        result = await _store_event_async(event)
+        if result:
+            return True
+
+    # Fallback to sync pool
+    if SYNC_POOL_AVAILABLE and get_sync_pool:
+        logger.info("Falling back to sync pool for event storage")
+        result = _store_event_sync(event)
+        if result:
+            return True
+
+    # Log warning but don't fail - event may still be broadcast
+    logger.warning(f"Event {event.event_id} not stored in DB (no pool available)")
+    return False
+
+
+def _store_event_sync(event: UnifiedEvent) -> bool:
+    """Synchronous fallback for event storage."""
+    try:
+        import psycopg2
+        import psycopg2.extras
+
+        conn = get_sync_pool()
+        if not conn:
+            return False
+
+        record = event.to_db_record()
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO unified_events (
+                    event_id, version, event_type, category, priority,
+                    source, source_instance, tenant_id, timestamp, occurred_at,
+                    payload, metadata, correlation_id, causation_id,
+                    actor_type, actor_id, processed, processed_at,
+                    processing_result, retry_count
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING
+            """, (
+                record['event_id'],
+                record['version'],
+                record['event_type'],
+                record['category'],
+                record['priority'],
+                record['source'],
+                record['source_instance'],
+                record['tenant_id'],
+                record['timestamp'],
+                record['occurred_at'],
+                json.dumps(record['payload']),
+                json.dumps(record['metadata']),
+                record['correlation_id'],
+                record['causation_id'],
+                record['actor_type'],
+                record['actor_id'],
+                record['processed'],
+                record['processed_at'],
+                json.dumps(record['processing_result']) if record['processing_result'] else None,
+                record['retry_count'],
+            ))
+            conn.commit()
+        logger.info(f"Event {event.event_id} stored via sync pool")
+        return True
+    except Exception as e:
+        logger.error(f"Sync event storage failed: {e}")
         return False
 
+
+async def _store_event_async(event: UnifiedEvent) -> bool:
+    """Async event storage implementation."""
     try:
         pool = get_pool()
         record = event.to_db_record()
@@ -466,6 +544,28 @@ async def route_event_to_agents(event: UnifiedEvent, background_tasks: Backgroun
         except Exception as exc:
             logger.error("Failed enqueuing autonomous task for agent %s: %s", agent.get("name"), exc)
 
+    # Trigger LangGraph workflows for this event (runs in background)
+    workflow_results = []
+    if WORKFLOW_TRIGGER_AVAILABLE and trigger_workflows_for_event:
+        try:
+            # Run workflow triggering as a background task to not block the response
+            async def _trigger_workflows():
+                try:
+                    results = await trigger_workflows_for_event(
+                        event_type=event.event_type,
+                        event_payload=event.payload,
+                        tenant_id=event.tenant_id,
+                        correlation_id=event.correlation_id
+                    )
+                    if results:
+                        logger.info(f"Triggered {len(results)} workflows for event {event.event_type}")
+                except Exception as wf_err:
+                    logger.error(f"Workflow trigger failed for {event.event_type}: {wf_err}")
+
+            background_tasks.add_task(_trigger_workflows)
+        except Exception as e:
+            logger.error(f"Failed to schedule workflow trigger: {e}")
+
     # "processed" here means: routed + enqueued (or skipped due to idempotency).
     await mark_event_processed(
         event.event_id,
@@ -473,6 +573,7 @@ async def route_event_to_agents(event: UnifiedEvent, background_tasks: Backgroun
             "routed_to": routed_to,
             "tasks_created": tasks_created,
             "tasks_skipped": tasks_skipped,
+            "workflows_triggered": True if WORKFLOW_TRIGGER_AVAILABLE else False,
         },
     )
 
@@ -1056,6 +1157,81 @@ async def get_events_debug():
         "pool_test_connection": can_test,
         "insert_test": insert_test,
         "broadcaster_configured": _broadcaster.is_configured,
+    }
+
+
+@router.post("/verify")
+async def verify_event_flow(
+    tenant_id: str = Query(..., description="Tenant ID to test with"),
+    background_tasks: BackgroundTasks = None
+):
+    """
+    Publish a test event and verify it reaches all destinations.
+
+    This endpoint:
+    1. Creates a test event
+    2. Stores it in unified_events table
+    3. Broadcasts via Supabase Realtime
+    4. Triggers workflow processing
+
+    Use this to verify the complete event flow is working.
+    """
+    import uuid as uuid_mod
+
+    test_event = UnifiedEvent(
+        event_id=f"evt_verify_{uuid_mod.uuid4().hex[:12]}",
+        event_type="system.verification_test",
+        category=EventCategory.SYSTEM,
+        priority=EventPriority.LOW,
+        source=EventSource.AI_AGENTS,
+        tenant_id=tenant_id,
+        payload={
+            "test": True,
+            "timestamp": datetime.utcnow().isoformat(),
+            "purpose": "Event flow verification"
+        },
+        metadata={"verification": True}
+    )
+
+    # Test storage
+    stored = await store_event(test_event)
+
+    # Test broadcast
+    broadcast = await _broadcaster.broadcast(test_event)
+
+    # Test workflow trigger (if available)
+    workflows_triggered = False
+    workflow_count = 0
+    if WORKFLOW_TRIGGER_AVAILABLE and trigger_workflows_for_event:
+        try:
+            results = await trigger_workflows_for_event(
+                event_type=test_event.event_type,
+                event_payload=test_event.payload,
+                tenant_id=test_event.tenant_id,
+                correlation_id=test_event.correlation_id
+            )
+            workflows_triggered = True
+            workflow_count = len(results) if results else 0
+        except Exception as e:
+            logger.error(f"Workflow trigger verification failed: {e}")
+
+    return {
+        "event_id": test_event.event_id,
+        "tenant_id": tenant_id,
+        "verification_results": {
+            "stored_in_db": stored,
+            "broadcast_to_realtime": broadcast,
+            "workflows_triggered": workflows_triggered,
+            "workflow_count": workflow_count,
+        },
+        "system_status": {
+            "async_pool_available": ASYNC_POOL_AVAILABLE,
+            "sync_pool_available": SYNC_POOL_AVAILABLE,
+            "using_fallback": using_fallback(),
+            "broadcaster_configured": _broadcaster.is_configured,
+            "workflow_trigger_available": WORKFLOW_TRIGGER_AVAILABLE,
+        },
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 
