@@ -588,6 +588,21 @@ async def run_all_pipelines(background_tasks: BackgroundTasks):
     """
     results = {}
 
+    # 0. AI research lead enrichment (real emails only)
+    try:
+        from outreach_engine import get_outreach_engine
+        engine = get_outreach_engine()
+        enrichment = await engine.enrich_ai_revenue_leads(limit=20)
+        results["ai_lead_enrichment"] = {
+            "status": "completed",
+            "promoted": enrichment.get("promoted", 0),
+            "processed": enrichment.get("leads_processed", 0),
+            "duplicates": enrichment.get("duplicates", 0),
+            "failed": enrichment.get("failed", 0)
+        }
+    except Exception as e:
+        results["ai_lead_enrichment"] = {"status": "error", "error": str(e)}
+
     # 1. Lead Discovery
     try:
         from revenue_pipeline_agents import LeadDiscoveryAgentReal
