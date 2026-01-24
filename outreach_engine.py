@@ -23,6 +23,7 @@ from typing import Any, Optional
 import json
 
 import httpx
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,14 @@ EMAIL_PATTERN = re.compile(
     r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
 )
 
+TEST_EMAIL_PATTERNS = (
+    'test', 'example', 'demo', 'sample', 'fake', 'placeholder', 'localhost'
+)
+
+BAD_EMAIL_DOMAINS = (
+    'example.com', 'test.com', 'sentry.io', 'google.com',
+    'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com'
+)
 
 def _parse_metadata(metadata: Any) -> dict:
     """Parse metadata field which may be a string or dict."""
@@ -833,6 +842,165 @@ class OutreachEngine:
                     "reason": "No email found"
                 })
                 logger.info(f"No email found for {company} ({website})")
+
+        return results
+
+    def _extract_domain(self, website_url: str) -> Optional[str]:
+        if not website_url:
+            return None
+        if not website_url.startswith(('http://', 'https://')):
+            website_url = f'https://{website_url}'
+        try:
+            parsed = urlparse(website_url)
+            host = parsed.netloc.lower().strip()
+            if host.startswith('www.'):
+                host = host[4:]
+            return host or None
+        except Exception:
+            return None
+
+    def _is_real_email(self, email: str) -> bool:
+        email_lower = email.lower().strip()
+        if not email_lower or '@' not in email_lower:
+            return False
+        if any(token in email_lower for token in TEST_EMAIL_PATTERNS):
+            return False
+        domain = email_lower.split('@')[-1]
+        if domain in BAD_EMAIL_DOMAINS:
+            return False
+        return True
+
+    async def enrich_ai_revenue_leads(self, limit: int = 10) -> dict[str, Any]:
+        """
+        Promote AI-researched leads into revenue_leads ONLY if we can find
+        a real contact email from the company's website (no guessing).
+        """
+        pool = self._get_pool()
+        if not pool:
+            return {"status": "error", "error": "Database not available"}
+
+        leads = await pool.fetch("""
+            SELECT id, company_name, contact_name, contact_email, contact_phone,
+                   website, score, industry, metadata
+            FROM ai_revenue_leads
+            WHERE status IN ('research', 'new', 'enriched')
+              AND website IS NOT NULL
+              AND website != ''
+            ORDER BY score DESC NULLS LAST
+            LIMIT $1
+        """, limit)
+
+        results = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "leads_processed": 0,
+            "promoted": 0,
+            "duplicates": 0,
+            "failed": 0,
+            "items": []
+        }
+
+        for lead in leads:
+            lead_id = str(lead["id"])
+            company = lead["company_name"]
+            website = lead["website"]
+            email = (lead.get("contact_email") or "").strip()
+
+            results["leads_processed"] += 1
+
+            if not email:
+                email = await self.scrape_email_from_website(website)
+
+            if not email or not self._is_real_email(email):
+                results["failed"] += 1
+                results["items"].append({
+                    "lead_id": lead_id,
+                    "company": company,
+                    "status": "no_valid_email"
+                })
+                await pool.execute("""
+                    UPDATE ai_revenue_leads
+                    SET status = 'no_email', updated_at = $1
+                    WHERE id = $2
+                """, datetime.now(timezone.utc), lead["id"])
+                continue
+
+            website_domain = self._extract_domain(website)
+            email_domain = email.lower().split("@")[-1]
+            if website_domain and not (email_domain == website_domain or email_domain.endswith("." + website_domain)):
+                results["failed"] += 1
+                results["items"].append({
+                    "lead_id": lead_id,
+                    "company": company,
+                    "status": "domain_mismatch",
+                    "email": email
+                })
+                await pool.execute("""
+                    UPDATE ai_revenue_leads
+                    SET status = 'email_domain_mismatch', updated_at = $1
+                    WHERE id = $2
+                """, datetime.now(timezone.utc), lead["id"])
+                continue
+
+            existing = await pool.fetchval(
+                "SELECT id FROM revenue_leads WHERE email = $1 LIMIT 1",
+                email
+            )
+            if existing:
+                results["duplicates"] += 1
+                results["items"].append({
+                    "lead_id": lead_id,
+                    "company": company,
+                    "status": "duplicate_email",
+                    "email": email
+                })
+                await pool.execute("""
+                    UPDATE ai_revenue_leads
+                    SET status = 'duplicate', contact_email = $1, updated_at = $2
+                    WHERE id = $3
+                """, email, datetime.now(timezone.utc), lead["id"])
+                continue
+
+            metadata = _parse_metadata(lead.get("metadata"))
+            metadata.update({
+                "email_source": "website_scrape",
+                "email_source_url": website,
+                "email_verified_at": datetime.now(timezone.utc).isoformat(),
+                "ai_revenue_lead_id": lead_id
+            })
+
+            await pool.execute("""
+                INSERT INTO revenue_leads (
+                    id, company_name, contact_name, email, phone, website,
+                    stage, status, score, source, industry, metadata, created_at, updated_at,
+                    is_test, is_demo
+                ) VALUES ($1, $2, $3, $4, $5, $6,
+                          'new', 'new', $7, 'ai_revenue_enrichment', $8, $9, NOW(), NOW(),
+                          FALSE, FALSE)
+            """,
+                uuid.uuid4(),
+                company,
+                lead.get("contact_name"),
+                email,
+                lead.get("contact_phone"),
+                website,
+                lead.get("score") or 0,
+                lead.get("industry") or "roofing",
+                json.dumps(metadata)
+            )
+
+            await pool.execute("""
+                UPDATE ai_revenue_leads
+                SET status = 'promoted', contact_email = $1, updated_at = $2
+                WHERE id = $3
+            """, email, datetime.now(timezone.utc), lead["id"])
+
+            results["promoted"] += 1
+            results["items"].append({
+                "lead_id": lead_id,
+                "company": company,
+                "status": "promoted",
+                "email": email
+            })
 
         return results
 
