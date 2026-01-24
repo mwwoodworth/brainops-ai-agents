@@ -907,6 +907,14 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ Permanent Observability Daemon startup failed: {e}")
 
+        # Start Always-Know Observability Brain (continuous state awareness)
+        try:
+            from always_know_brain import initialize_always_know_brain
+            await initialize_always_know_brain()
+            logger.info("🧠 Always-Know Brain STARTED - Continuous state monitoring active")
+        except Exception as e:
+            logger.error(f"❌ Always-Know Brain startup failed: {e}")
+
         # === ACTIVATE ALL SPECIALIZED AGENTS - THE AI OS AWAKENS ===
         logger.info("🚀 Activating specialized AI agents...")
 
