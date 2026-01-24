@@ -339,3 +339,20 @@ async def batch_scrape_emails(
         "failed_leads_count": len(results.get("failed_leads", [])),
         "next_step": "POST /outreach/batch/enrich-all to enrich leads with found emails"
     }
+
+
+@router.post("/ai-leads/enrich")
+async def enrich_ai_research_leads(
+    limit: int = Query(default=10, le=100)
+) -> dict[str, Any]:
+    """
+    Promote AI research leads into revenue_leads ONLY when a real
+    email is found from the company's website (no guessing).
+    """
+    engine = get_outreach_engine()
+    results = await engine.enrich_ai_revenue_leads(limit=limit)
+
+    if results.get("status") == "error":
+        raise HTTPException(status_code=503, detail=results.get("error", "enrichment_failed"))
+
+    return results
