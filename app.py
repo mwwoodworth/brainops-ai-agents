@@ -608,6 +608,17 @@ except ImportError as e:
     get_self_aware_ai = None
     SelfAwareAI = None
 
+# Import NerveCenter - Central Nervous System of BrainOps AI OS
+try:
+    from nerve_center import NerveCenter, get_nerve_center
+    NERVE_CENTER_AVAILABLE = True
+    logger.info("✅ NerveCenter module loaded")
+except ImportError as e:
+    NERVE_CENTER_AVAILABLE = False
+    get_nerve_center = None
+    NerveCenter = None
+    logger.warning(f"NerveCenter not available: {e}")
+
 # Import AI Integration Layer with fallback
 try:
     from ai_integration_layer import (
@@ -827,6 +838,8 @@ async def lifespan(app: FastAPI):
     app.state.reconciler = None
     app.state.memory = None
     app.state.embedded_memory = None
+    app.state.nerve_center = None
+    app.state.nerve_center_error = None
 
     # DEFERRED HEAVY INITIALIZATION - runs AFTER server binds to port
     async def deferred_heavy_init():
@@ -914,6 +927,28 @@ async def lifespan(app: FastAPI):
             logger.info("🧠 Always-Know Brain STARTED - Continuous state monitoring active")
         except Exception as e:
             logger.error(f"❌ Always-Know Brain startup failed: {e}")
+
+        # Initialize NerveCenter - THE Central Nervous System of BrainOps AI OS
+        if NERVE_CENTER_AVAILABLE and config.enable_nerve_center:
+            try:
+                logger.info("🧬 Initializing NerveCenter - Central Nervous System...")
+                nerve_center = get_nerve_center()
+
+                # Activate the nerve center (starts AliveCore and autonomic MAPE-K loop)
+                await nerve_center.activate()
+
+                app.state.nerve_center = nerve_center
+                logger.info("🧬 NerveCenter ACTIVATED - AI OS Central Nervous System ONLINE")
+                logger.info("   └── Autonomic decisions, nerve signals, and consciousness coordination active")
+            except Exception as e:
+                logger.error(f"❌ NerveCenter activation failed: {e}")
+                app.state.nerve_center_error = str(e)
+                import traceback
+                logger.error(traceback.format_exc())
+        elif NERVE_CENTER_AVAILABLE and not config.enable_nerve_center:
+            logger.info("⚠️ NerveCenter available but disabled (set ENABLE_NERVE_CENTER=true to enable)")
+        elif not NERVE_CENTER_AVAILABLE:
+            logger.warning("⚠️ NerveCenter module not available")
 
         # === ACTIVATE ALL SPECIALIZED AGENTS - THE AI OS AWAKENS ===
         logger.info("🚀 Activating specialized AI agents...")
@@ -1146,6 +1181,14 @@ async def lifespan(app: FastAPI):
             logger.info("✅ AUREA Orchestrator stopped")
         except Exception as e:
             logger.error(f"❌ AUREA shutdown error: {e}")
+
+    # Stop NerveCenter
+    if hasattr(app.state, 'nerve_center') and app.state.nerve_center:
+        try:
+            await app.state.nerve_center.deactivate()
+            logger.info("✅ NerveCenter deactivated")
+        except Exception as e:
+            logger.error(f"❌ NerveCenter shutdown error: {e}")
 
     # Close database pool
     try:
