@@ -77,6 +77,8 @@ Frontend Applications (Vercel):
 | Anthropic | ANTHROPIC_API_KEY | AI model access |
 | Stripe | STRIPE_SECRET_KEY | Payment processing |
 | Vercel | VERCEL_TOKEN | Deployment automation |
+| GitHub | GITHUB_TOKEN | API access (prefer `gh auth login`, then `gh auth token`) |
+| Command Center | ENCRYPTION_KEY | Required to decrypt `brainops_credentials` |
 
 ### Database Connection
 ```bash
@@ -94,13 +96,16 @@ PGPASSWORD=${DB_PASSWORD} psql \
 
 **Standard Deployment:**
 ```bash
-# 1. Push to main branch
-git push origin main
+# AI Agents (Docker Hub + Render API)
+cd /home/matt-woodworth/dev/brainops-ai-agents
+./deploy.sh
 
-# 2. Render auto-deploys from GitHub
-# Monitor at: https://dashboard.render.com
+# Backend + MCP Bridge (Render API)
+curl -X POST "https://api.render.com/v1/services/<SERVICE_ID>/deploys" \
+  -H "Authorization: Bearer $RENDER_API_KEY" \
+  -H "Content-Type: application/json"
 
-# 3. Verify deployment
+# Verify deployment
 curl -s "https://brainops-ai-agents.onrender.com/health" \
   -H "X-API-Key: ${BRAINOPS_API_KEY}" | jq
 ```

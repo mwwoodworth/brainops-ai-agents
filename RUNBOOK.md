@@ -2,6 +2,10 @@
 
 Production: Render background worker (start command `python main.py`).
 
+Secrets:
+- Local development: load from `/home/matt-woodworth/dev/_secure/BrainOps.env` (never commit secrets).
+- Production: set Render service environment variables (project-level).
+
 ## Environment (minimum)
 - Database: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` (Supabase/pg).
 - AI keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` (as features require).
