@@ -767,15 +767,28 @@ class IntelligentTaskOrchestrator:
             # Batch analyze priorities
             for task in tasks:
                 # Simple age-based priority boost
-                age_hours = (datetime.now() - task["created_at"]).total_seconds() / 3600
+                created_at = task.get("created_at")
+                now = datetime.now(timezone.utc)
+                if isinstance(created_at, datetime) and created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                if not isinstance(created_at, datetime):
+                    created_at = now
+
+                age_hours = (now - created_at).total_seconds() / 3600
                 age_boost = min(age_hours * 2, 20)  # Max 20 point boost
 
-                adjusted_priority = task["priority"] + age_boost
+                raw_priority = task.get("priority", 50)
+                try:
+                    base_priority = float(str(raw_priority).strip())
+                except Exception:
+                    base_priority = 50.0
+
+                adjusted_priority = base_priority + age_boost
 
                 # Store adjustment
                 self._store_priority_adjustment(
                     str(task["id"]),
-                    task["priority"],
+                    int(base_priority),
                     adjusted_priority,
                     f"Age boost: +{age_boost:.1f} (task age: {age_hours:.1f}h)"
                 )

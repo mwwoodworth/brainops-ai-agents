@@ -152,7 +152,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.7.31')  # Fix orchestrator numeric coercion + LiveMemoryBrain schema bootstraps + consciousness cross-loop DB safety
+        self.version = os.getenv('VERSION', 'v3.7.32')  # Skip healthz rate limits + ai_autonomous_tasks updated_at backfill + priority adjustment coercion
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
