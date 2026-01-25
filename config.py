@@ -152,7 +152,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.0.1')  # Fixed AUREA tuple error, asyncio connection retry, OpenAI quota fallback, Command Center health check
+        self.version = os.getenv('VERSION', 'v10.0.2')  # Fixed rollback bug, enhanced connection retry, dropped unused indexes
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))

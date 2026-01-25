@@ -545,7 +545,7 @@ class UnifiedMemoryManager:
 
         except Exception as e:
             logger.error(f"❌ Failed to consolidate memories: {e}")
-            self.conn.rollback()
+            # Note: Connection rollback is handled automatically by the pool
 
     def migrate_from_chaos(self, tenant_id: str = None, limit: int = 1000):
         """Migrate data from the 53 chaotic memory tables"""
@@ -926,7 +926,7 @@ class UnifiedMemoryManager:
 
         except Exception as e:
             logger.error(f"❌ Failed to apply retention policy: {e}")
-            self.conn.rollback()
+            # Note: Connection rollback is handled automatically by the pool
             return {'error': str(e)}
 
     def auto_garbage_collect(self, tenant_id: str = None, dry_run: bool = False) -> dict[str, int]:
@@ -999,8 +999,7 @@ class UnifiedMemoryManager:
 
         except Exception as e:
             logger.error(f"❌ Failed to garbage collect: {e}")
-            if not dry_run:
-                self.conn.rollback()
+            # Note: Connection rollback is handled automatically by the pool
             return {'error': str(e)}
 
     def get_stats(self, tenant_id: str = None) -> dict:
