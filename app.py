@@ -129,6 +129,7 @@ except ImportError as e:
     AGENTS_AVAILABLE = False
     logging.warning(f"AgentExecutor not available: {e}")
 from pydantic import BaseModel
+from pydantic import EmailStr
 
 from api.a2ui import router as a2ui_router  # Google A2UI Protocol - Agent-to-User Interface
 from api.ai_awareness import (
@@ -2022,6 +2023,63 @@ async def run_product_agent(request: ProductRequest):
     except Exception as e:
         logger.error(f"Product Agent Failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _parse_csv_env(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    return {item.strip().lower() for item in value.split(",") if item.strip()}
+
+
+def _is_allowlisted_recipient(recipient: str | None) -> bool:
+    if not recipient:
+        return False
+    lowered = recipient.strip().lower()
+    allowlist_recipients = _parse_csv_env(os.getenv("OUTBOUND_EMAIL_ALLOWLIST", ""))
+    allowlist_domains = _parse_csv_env(os.getenv("OUTBOUND_EMAIL_ALLOWLIST_DOMAINS", ""))
+    if lowered in allowlist_recipients:
+        return True
+    if "@" not in lowered:
+        return False
+    domain = lowered.split("@", 1)[1]
+    if domain in allowlist_domains:
+        return True
+    return any(domain.endswith(f".{allowed}") for allowed in allowlist_domains)
+
+
+class SendEmailPayload(BaseModel):
+    recipient: EmailStr
+    subject: str
+    html: str
+    metadata: dict[str, Any] = {}
+
+
+@app.post("/email/send")
+async def send_email_endpoint(payload: SendEmailPayload, authenticated: bool = Depends(verify_api_key)):
+    """Send a one-off email (admin-only, API-key protected).
+
+    Safety rail: unless OUTBOUND_EMAIL_MODE=live, the recipient must be allowlisted
+    via OUTBOUND_EMAIL_ALLOWLIST / OUTBOUND_EMAIL_ALLOWLIST_DOMAINS.
+    """
+    mode = os.getenv("OUTBOUND_EMAIL_MODE", "disabled").strip().lower()
+    if mode != "live" and not _is_allowlisted_recipient(payload.recipient):
+        raise HTTPException(status_code=403, detail="Recipient is not allowlisted for outbound email")
+
+    from email_sender import send_email
+
+    # Avoid blocking the HTTP loop with synchronous HTTP (Resend) / SMTP operations.
+    subject = payload.subject.strip()[:200] if payload.subject else "BrainOps AI"
+    success, message = await asyncio.to_thread(
+        send_email,
+        str(payload.recipient),
+        subject,
+        payload.html,
+        payload.metadata or {},
+    )
+
+    recipient_masked = str(payload.recipient).split("@", 1)[0][:3] + "***@" + str(payload.recipient).split("@", 1)[1]
+    logger.info("One-off email send requested -> %s (success=%s)", recipient_masked, success)
+    return {"success": success, "message": message}
 
 @app.get("/health")
 async def health_check(force_refresh: bool = Query(False, description="Bypass cache and force live health checks")):
