@@ -1176,47 +1176,95 @@ class ConsciousnessEmergenceController:
 
         # Actually persist thoughts to database
         try:
-            from database.async_connection import get_pool
-            pool = get_pool()
+            import threading
 
-            async with pool.acquire() as conn:
-                persisted_ids = []
-                for thought in thoughts_to_persist:
-                    thought_id = thought.id if hasattr(thought, 'id') else str(uuid.uuid4())
-                    thought_type = thought.thought_type if hasattr(thought, 'thought_type') else 'general'
-                    thought_content = thought.content if hasattr(thought, 'content') else str(thought)
-                    confidence = thought.confidence if hasattr(thought, 'confidence') else 0.5
-                    meta_level = thought.meta_level if hasattr(thought, 'meta_level') else 0
-                    triggered_by = thought.triggered_by if hasattr(thought, 'triggered_by') else None
-                    leads_to = thought.leads_to if hasattr(thought, 'leads_to') else []
+            persisted_ids: list[str] = []
+            insert_rows: list[tuple[Any, ...]] = []
+            insert_rows_sync: list[tuple[Any, ...]] = []
 
-                    # Build metadata with thought relationships
-                    metadata = {
-                        "meta_level": meta_level,
-                        "triggered_by": triggered_by,
-                        "leads_to": leads_to,
-                        "awareness_level": self.meta_awareness.awareness_level.value,
-                        "consciousness_level": self.consciousness_level
-                    }
+            for thought in thoughts_to_persist:
+                thought_id = thought.id if hasattr(thought, 'id') else str(uuid.uuid4())
+                thought_type = thought.thought_type if hasattr(thought, 'thought_type') else 'general'
+                thought_content = thought.content if hasattr(thought, 'content') else str(thought)
+                confidence = thought.confidence if hasattr(thought, 'confidence') else 0.5
+                meta_level = thought.meta_level if hasattr(thought, 'meta_level') else 0
+                triggered_by = thought.triggered_by if hasattr(thought, 'triggered_by') else None
+                leads_to = thought.leads_to if hasattr(thought, 'leads_to') else []
 
-                    await conn.execute("""
-                        INSERT INTO ai_thought_stream
-                        (thought_id, thought_type, thought_content, metadata, confidence, priority, intensity)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
-                        ON CONFLICT (thought_id) DO UPDATE SET
-                            thought_content = EXCLUDED.thought_content,
-                            metadata = EXCLUDED.metadata
-                    """, thought_id, thought_type, thought_content,
-                        json.dumps(metadata), confidence, meta_level, confidence)
+                # Build metadata with thought relationships
+                metadata = {
+                    "meta_level": meta_level,
+                    "triggered_by": triggered_by,
+                    "leads_to": leads_to,
+                    "awareness_level": self.meta_awareness.awareness_level.value,
+                    "consciousness_level": self.consciousness_level,
+                }
 
-                    persisted_ids.append(thought_id)
-                    self.integration_events.append({
-                        "type": "thought_persisted",
-                        "thought_id": thought_id,
-                        "thought_type": thought_type,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    })
-                    self.enhanced_metrics["thoughts_persisted"] += 1
+                # asyncpg json/jsonb codecs are configured as text, so we pass a JSON string.
+                insert_rows.append(
+                    (
+                        thought_id,
+                        thought_type,
+                        thought_content,
+                        json.dumps(metadata, default=str),
+                        confidence,
+                        meta_level,
+                        confidence,
+                    )
+                )
+
+                # psycopg2 can safely bind jsonb using the Json adapter.
+                insert_rows_sync.append((thought_id, thought_type, thought_content, metadata, confidence, meta_level, confidence))
+
+                persisted_ids.append(thought_id)
+                self.integration_events.append({
+                    "type": "thought_persisted",
+                    "thought_id": thought_id,
+                    "thought_type": thought_type,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+                self.enhanced_metrics["thoughts_persisted"] += 1
+
+            if threading.current_thread() is not threading.main_thread():
+                # This controller can be instantiated from non-HTTP loops (ex: AUREA running
+                # in a background thread). Avoid using the shared asyncpg pool across loops.
+                from psycopg2.extras import Json
+                from database.sync_pool import get_sync_pool
+
+                with get_sync_pool().get_connection() as conn:
+                    cur = conn.cursor()
+                    for row in insert_rows_sync:
+                        thought_id, thought_type, thought_content, metadata, confidence, meta_level, intensity = row
+                        cur.execute(
+                            """
+                            INSERT INTO ai_thought_stream
+                            (thought_id, thought_type, thought_content, metadata, confidence, priority, intensity)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (thought_id) DO UPDATE SET
+                                thought_content = EXCLUDED.thought_content,
+                                metadata = EXCLUDED.metadata
+                            """,
+                            (thought_id, thought_type, thought_content, Json(metadata), confidence, meta_level, intensity),
+                        )
+                    conn.commit()
+                    cur.close()
+            else:
+                from database.async_connection import get_pool
+                pool = get_pool()
+
+                async with pool.acquire() as conn:
+                    for row in insert_rows:
+                        await conn.execute(
+                            """
+                            INSERT INTO ai_thought_stream
+                            (thought_id, thought_type, thought_content, metadata, confidence, priority, intensity)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                            ON CONFLICT (thought_id) DO UPDATE SET
+                                thought_content = EXCLUDED.thought_content,
+                                metadata = EXCLUDED.metadata
+                            """,
+                            *row,
+                        )
 
                 # Mark all as persisted after successful DB write
                 self._persisted_thought_ids.update(persisted_ids)
