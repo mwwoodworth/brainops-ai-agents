@@ -152,7 +152,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.7.29')  # Add allowlisted one-off email send endpoint for ops reporting
+        self.version = os.getenv('VERSION', 'v3.7.30')  # Fix asyncpg loop safety for background consumers + orchestrator payload guardrails
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
