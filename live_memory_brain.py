@@ -1301,7 +1301,15 @@ class LiveMemoryBrain:
         try:
             with self._shared_sync_pool.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
+
+                # Execute schema bootstrap statements one-by-one so older schemas can be
+                # upgraded in-place without aborting the full initialization.
+                statements = [
+                    # Optional pgvector (if enabled in the DB). Failure is non-fatal.
+                    "CREATE EXTENSION IF NOT EXISTS vector",
+
+                    # Base tables (kept vector-free; added via ALTER when available).
+                    """
                     CREATE TABLE IF NOT EXISTS live_brain_memories (
                         id TEXT PRIMARY KEY,
                         content JSONB NOT NULL,
@@ -1311,15 +1319,15 @@ class LiveMemoryBrain:
                         created_at TIMESTAMPTZ DEFAULT NOW(),
                         last_accessed TIMESTAMPTZ DEFAULT NOW(),
                         access_count INT DEFAULT 0,
-                        embedding vector(1536),
                         provenance JSONB DEFAULT '{}'::jsonb,
                         connections TEXT[],
                         temporal_context JSONB DEFAULT '{}'::jsonb,
                         predictions JSONB DEFAULT '[]'::jsonb,
                         contradictions TEXT[],
                         crystallization_count INT DEFAULT 0
-                    );
-
+                    )
+                    """,
+                    """
                     CREATE TABLE IF NOT EXISTS live_brain_wisdom (
                         id TEXT PRIMARY KEY,
                         wisdom_type TEXT NOT NULL,
@@ -1329,20 +1337,39 @@ class LiveMemoryBrain:
                         confidence FLOAT DEFAULT 0.5,
                         created_at TIMESTAMPTZ DEFAULT NOW(),
                         last_accessed TIMESTAMPTZ DEFAULT NOW()
-                    );
-
+                    )
+                    """,
+                    """
                     CREATE TABLE IF NOT EXISTS live_brain_events (
                         id SERIAL PRIMARY KEY,
                         event_type TEXT NOT NULL,
                         context JSONB NOT NULL,
                         caused_by TEXT,
                         timestamp TIMESTAMPTZ DEFAULT NOW()
-                    );
+                    )
+                    """,
 
-                    CREATE INDEX IF NOT EXISTS idx_live_brain_memories_type ON live_brain_memories(memory_type);
-                    CREATE INDEX IF NOT EXISTS idx_live_brain_memories_importance ON live_brain_memories(importance DESC);
-                    CREATE INDEX IF NOT EXISTS idx_live_brain_memories_accessed ON live_brain_memories(last_accessed DESC);
-                """)
+                    # Backfill missing columns on older schemas (safe no-ops when present).
+                    "ALTER TABLE live_brain_memories ADD COLUMN IF NOT EXISTS confidence FLOAT DEFAULT 1.0",
+                    "ALTER TABLE live_brain_memories ADD COLUMN IF NOT EXISTS last_accessed TIMESTAMPTZ DEFAULT NOW()",
+                    "ALTER TABLE live_brain_memories ADD COLUMN IF NOT EXISTS access_count INT DEFAULT 0",
+                    # Optional embedding column (requires pgvector).
+                    "ALTER TABLE live_brain_memories ADD COLUMN IF NOT EXISTS embedding vector(1536)",
+
+                    "ALTER TABLE live_brain_wisdom ADD COLUMN IF NOT EXISTS last_accessed TIMESTAMPTZ DEFAULT NOW()",
+
+                    # Indexes (after columns are ensured).
+                    "CREATE INDEX IF NOT EXISTS idx_live_brain_memories_type ON live_brain_memories(memory_type)",
+                    "CREATE INDEX IF NOT EXISTS idx_live_brain_memories_importance ON live_brain_memories(importance DESC)",
+                    "CREATE INDEX IF NOT EXISTS idx_live_brain_memories_accessed ON live_brain_memories(last_accessed DESC)",
+                ]
+
+                for statement in statements:
+                    try:
+                        cursor.execute(statement)
+                    except Exception as exc:
+                        logger.warning("LiveMemoryBrain schema statement failed: %s", exc)
+
                 conn.commit()
                 cursor.close()
                 logger.info("LiveMemoryBrain tables ensured")
@@ -1595,17 +1622,17 @@ class LiveMemoryBrain:
                         access_count = EXCLUDED.access_count
                 """, (
                     memory.id,
-                    json.dumps(memory.content),
+                    json.dumps(memory.content, default=str),
                     memory.memory_type.value,
                     memory.importance,
                     memory.confidence,
                     memory.created_at,
                     memory.last_accessed,
                     memory.access_count,
-                    json.dumps(memory.provenance),
+                    json.dumps(memory.provenance, default=str),
                     list(memory.connections),
-                    json.dumps(memory.temporal_context),
-                    json.dumps(memory.predictions),
+                    json.dumps(memory.temporal_context, default=str),
+                    json.dumps(memory.predictions, default=str),
                     memory.contradictions,
                     memory.crystallization_count
                 ))
