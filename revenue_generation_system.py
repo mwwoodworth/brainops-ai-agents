@@ -116,19 +116,25 @@ async def _generate_text(
         return response.content[0].text
 
     if openai is not None:
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        response = openai.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return response.choices[0].message.content
+        try:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            response = openai.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            content = response.choices[0].message.content
+            return content if content else ""
+        except Exception as e:
+            logger.warning(f"OpenAI API call failed: {e}")
+            return ""
 
-    raise RuntimeError("No AI provider available")
+    logger.warning("No AI provider available for text generation")
+    return ""
 
 # Database configuration - use config module for consistency
 # NO hardcoded credentials - all values MUST come from environment variables
@@ -452,15 +458,25 @@ class AutonomousRevenueSystem:
             Include: location, company size, indicators of need, budget range.
             Return as JSON."""
 
-            search_params = json.loads(
-                await _generate_text(
-                    prompt,
-                    model="gpt-4-turbo-preview",
-                    system_prompt="You are a lead generation expert.",
-                    temperature=0.7,
-                    max_tokens=800,
-                )
+            ai_response = await _generate_text(
+                prompt,
+                model="gpt-4-turbo-preview",
+                system_prompt="You are a lead generation expert.",
+                temperature=0.7,
+                max_tokens=800,
             )
+
+            # Handle empty/None response from AI (rate limiting, API errors)
+            if not ai_response or not ai_response.strip():
+                logger.warning("Empty AI response for lead identification - skipping this cycle")
+                return []
+
+            # Try to parse JSON, handling potential non-JSON responses
+            try:
+                search_params = json.loads(ai_response)
+            except json.JSONDecodeError as json_err:
+                logger.warning(f"AI returned non-JSON response for leads: {ai_response[:100]}... Error: {json_err}")
+                return []
 
             # Simulate lead discovery (would integrate with real data sources)
             new_leads = await self._discover_leads(search_params)
