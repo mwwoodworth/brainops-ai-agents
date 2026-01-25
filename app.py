@@ -1126,12 +1126,9 @@ async def lifespan(app: FastAPI):
         try:
             from task_queue_consumer import start_task_queue_consumer
 
-            bg_runner = getattr(app.state, "bg_runner", None)
-            if bg_runner is not None:
-                bg_runner.submit(start_task_queue_consumer())
-                app.state.task_queue_consumer = True
-            else:
-                app.state.task_queue_consumer = await start_task_queue_consumer()
+            # This consumer uses the shared asyncpg pool; it must run on the same
+            # event loop that created the pool (the HTTP server loop).
+            app.state.task_queue_consumer = await start_task_queue_consumer()
             logger.info("📋 Task Queue Consumer STARTED - ai_autonomous_tasks processing active")
         except Exception as e:
             logger.error(f"❌ Task Queue Consumer startup failed: {e}")
@@ -1140,12 +1137,9 @@ async def lifespan(app: FastAPI):
         try:
             from ai_task_queue_consumer import start_ai_task_queue_consumer
 
-            bg_runner = getattr(app.state, "bg_runner", None)
-            if bg_runner is not None:
-                bg_runner.submit(start_ai_task_queue_consumer())
-                app.state.ai_task_queue_consumer = True
-            else:
-                app.state.ai_task_queue_consumer = await start_ai_task_queue_consumer()
+            # This consumer uses the shared asyncpg pool; it must run on the same
+            # event loop that created the pool (the HTTP server loop).
+            app.state.ai_task_queue_consumer = await start_ai_task_queue_consumer()
             logger.info("🧠 AI Task Queue Consumer STARTED - ai_task_queue processing active")
         except Exception as e:
             logger.error(f"❌ AI Task Queue Consumer startup failed: {e}")

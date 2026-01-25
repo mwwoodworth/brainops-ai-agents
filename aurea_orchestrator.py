@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import threading
 import uuid
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -316,6 +317,11 @@ class AUREA:
         """Get async database pool - try injected first, then global"""
         if self._db_pool is not None:
             return self._db_pool
+        # The shared asyncpg pool is bound to the event loop/thread that created it (the
+        # HTTP server loop). AUREA often runs on a dedicated background loop thread; in
+        # that case, force sync DB access to avoid cross-event-loop asyncpg failures.
+        if threading.current_thread() is not threading.main_thread():
+            return None
         try:
             from database.async_connection import get_pool
             return get_pool()

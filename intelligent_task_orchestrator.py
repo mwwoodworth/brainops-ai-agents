@@ -457,13 +457,16 @@ class IntelligentTaskOrchestrator:
 
     async def _enhance_task_with_ai(self, row: dict[str, Any]) -> IntelligentTask:
         """Enhance task with AI-driven insights"""
-        payload = row.get("payload", {})
+        # Some rows have an explicit NULL payload; normalize to a dict so we can safely .get().
+        payload = row.get("payload") or {}
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
             except (json.JSONDecodeError, TypeError) as exc:
                 logger.debug("Failed to parse task payload JSON: %s", exc)
                 payload = {"raw": payload}
+        if not isinstance(payload, dict):
+            payload = {"raw": payload}
 
         # AI priority analysis
         ai_priority_score = row.get("priority", 50)
