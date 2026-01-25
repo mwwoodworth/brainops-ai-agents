@@ -33,7 +33,31 @@ logger = logging.getLogger(__name__)
 
 # Environment configuration - Resend is PRIMARY (it works!)
 RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
-RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', 'onboarding@resend.dev')
+_RESEND_FROM_EMAIL_RAW = os.getenv('RESEND_FROM_EMAIL', 'onboarding@resend.dev')
+
+def _sanitize_from_email(from_email: str) -> str:
+    """
+    Sanitize the from email to ensure it's in a valid format.
+    Handles cases like "Matt @ BrainStack <email>" by removing @ from display name.
+    """
+    import re
+    # Check if it's in "Display Name <email>" format
+    match = re.match(r'^(.+?)\s*<([^>]+)>$', from_email.strip())
+    if match:
+        display_name = match.group(1).strip()
+        email_addr = match.group(2).strip()
+        # Remove @ symbols from display name (they cause Resend validation errors)
+        display_name = display_name.replace('@', ' at ')
+        # Also handle other problematic characters
+        display_name = re.sub(r'[<>]', '', display_name)
+        return f"{display_name} <{email_addr}>"
+    # If it's just an email address, return as-is
+    if '@' in from_email and '<' not in from_email:
+        return from_email.strip()
+    # Fallback: return as-is
+    return from_email.strip()
+
+RESEND_FROM_EMAIL = _sanitize_from_email(_RESEND_FROM_EMAIL_RAW)
 
 # SendGrid as secondary option
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY', '')
