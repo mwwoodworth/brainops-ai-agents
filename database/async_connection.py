@@ -183,15 +183,66 @@ class AsyncDatabasePool(BasePool):
             raise RuntimeError("Database pool not initialized. Call initialize() first.")
         return self._pool.acquire()
 
+    async def _execute_with_retry(
+        self,
+        operation: str,
+        query: str,
+        *args: Any,
+        timeout: Optional[float] = None,
+        column: int = 0,
+        max_retries: int = 2
+    ) -> Any:
+        """
+        Execute database operation with automatic retry on connection errors.
+
+        Handles transient connection issues from Supabase pooler (pgbouncer)
+        that can close connections mid-operation.
+        """
+        last_error: Optional[Exception] = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                async with self.pool.acquire() as conn:
+                    if operation == "fetch":
+                        return await conn.fetch(query, *args, timeout=timeout)
+                    elif operation == "fetchrow":
+                        return await conn.fetchrow(query, *args, timeout=timeout)
+                    elif operation == "fetchval":
+                        return await conn.fetchval(query, *args, column=column, timeout=timeout)
+                    elif operation == "execute":
+                        return await conn.execute(query, *args, timeout=timeout)
+                    else:
+                        raise ValueError(f"Unknown operation: {operation}")
+            except (asyncpg.ConnectionDoesNotExistError, asyncpg.InterfaceError) as e:
+                last_error = e
+                if attempt < max_retries:
+                    logger.warning(
+                        "Connection error on %s (attempt %d/%d): %s - retrying...",
+                        operation, attempt + 1, max_retries + 1, e
+                    )
+                    await asyncio.sleep(0.1 * (attempt + 1))  # Brief backoff
+                else:
+                    logger.error(
+                        "Connection error on %s after %d attempts: %s",
+                        operation, max_retries + 1, e
+                    )
+            except Exception as e:
+                # Don't retry on non-connection errors (query errors, timeouts, etc.)
+                raise
+
+        # All retries exhausted
+        if last_error:
+            raise last_error
+        raise RuntimeError(f"Unexpected state: {operation} failed without error")
+
     async def fetch(
         self,
         query: str,
         *args: Any,
         timeout: Optional[float] = None
     ) -> list[asyncpg.Record]:
-        """Execute query and return all rows"""
-        async with self.pool.acquire() as conn:
-            return await conn.fetch(query, *args, timeout=timeout)
+        """Execute query and return all rows (with retry on connection errors)"""
+        return await self._execute_with_retry("fetch", query, *args, timeout=timeout)
 
     async def fetchrow(
         self,
@@ -199,9 +250,8 @@ class AsyncDatabasePool(BasePool):
         *args: Any,
         timeout: Optional[float] = None
     ) -> Optional[asyncpg.Record]:
-        """Execute query and return single row"""
-        async with self.pool.acquire() as conn:
-            return await conn.fetchrow(query, *args, timeout=timeout)
+        """Execute query and return single row (with retry on connection errors)"""
+        return await self._execute_with_retry("fetchrow", query, *args, timeout=timeout)
 
     async def fetchval(
         self,
@@ -210,9 +260,8 @@ class AsyncDatabasePool(BasePool):
         column: int = 0,
         timeout: Optional[float] = None
     ) -> Any:
-        """Execute query and return single value"""
-        async with self.pool.acquire() as conn:
-            return await conn.fetchval(query, *args, column=column, timeout=timeout)
+        """Execute query and return single value (with retry on connection errors)"""
+        return await self._execute_with_retry("fetchval", query, *args, timeout=timeout, column=column)
 
     async def execute(
         self,
@@ -220,9 +269,8 @@ class AsyncDatabasePool(BasePool):
         *args: Any,
         timeout: Optional[float] = None
     ) -> str:
-        """Execute query without returning data"""
-        async with self.pool.acquire() as conn:
-            return await conn.execute(query, *args, timeout=timeout)
+        """Execute query without returning data (with retry on connection errors)"""
+        return await self._execute_with_retry("execute", query, *args, timeout=timeout)
 
     async def executemany(
         self,
@@ -231,6 +279,8 @@ class AsyncDatabasePool(BasePool):
         timeout: Optional[float] = None
     ) -> str:
         """Execute query for multiple parameter sets"""
+        # executemany doesn't retry - it's typically used for bulk operations
+        # where partial completion would be problematic
         async with self.pool.acquire() as conn:
             return await conn.executemany(command, args, timeout=timeout)
 
