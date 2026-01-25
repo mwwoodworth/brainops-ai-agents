@@ -412,8 +412,12 @@ VERSION = config.version  # Use centralized config - never hardcode version
 LOCAL_EXECUTIONS: deque[dict[str, Any]] = deque(maxlen=200)
 REQUEST_METRICS = RequestMetrics(window=800)
 RESPONSE_CACHE = TTLCache(max_size=256)
+# Health endpoints are hit frequently by monitors and E2E sweeps. Keep caching
+# long enough to prevent thundering-herd stalls on Render under load.
+HEALTH_CACHE_TTL_S = float(os.getenv("HEALTH_CACHE_TTL_S", "30"))
+HEALTH_PAYLOAD_TIMEOUT_S = float(os.getenv("HEALTH_PAYLOAD_TIMEOUT_S", "5"))
 CACHE_TTLS = {
-    "health": 5.0,
+    "health": HEALTH_CACHE_TTL_S,
     "agents": 30.0,
     "systems_usage": 15.0
 }
@@ -2049,13 +2053,36 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
             "missing_systems": getattr(app.state, "missing_systems", []),
         }
 
+    async def _build_health_payload_safe() -> dict[str, Any]:
+        """Bound health work so transient stalls don't bubble up as 502s from Render."""
+        try:
+            return await asyncio.wait_for(_build_health_payload(), timeout=HEALTH_PAYLOAD_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            logger.warning("Health payload build timed out after %.2fs", HEALTH_PAYLOAD_TIMEOUT_S)
+            return {
+                "status": "degraded",
+                "version": VERSION,
+                "build": BUILD_TIME,
+                "database": "timeout",
+                "message": "Health payload timed out",
+            }
+        except Exception as exc:
+            logger.error("Health payload build failed: %s", exc, exc_info=True)
+            return {
+                "status": "degraded",
+                "version": VERSION,
+                "build": BUILD_TIME,
+                "database": "error",
+                "message": "Health payload error",
+            }
+
     if force_refresh:
-        return await _build_health_payload()
+        return await _build_health_payload_safe()
 
     payload, from_cache = await RESPONSE_CACHE.get_or_set(
         "health_status",
         CACHE_TTLS["health"],
-        _build_health_payload,
+        _build_health_payload_safe,
     )
     return {**payload, "cached": from_cache}
 
