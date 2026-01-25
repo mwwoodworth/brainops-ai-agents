@@ -373,19 +373,46 @@ class AUREA:
             logger.warning(f"Async execute failed, falling back to sync: {e}")
             return self._sync_execute(query, *args)
 
-    def _convert_asyncpg_to_psycopg2(self, query: str) -> str:
-        """Convert asyncpg $1, $2 placeholders to psycopg2 %s format"""
+    def _convert_asyncpg_to_psycopg2(self, query: str, args: tuple = ()) -> tuple[str, tuple]:
+        """
+        Convert asyncpg $1, $2 placeholders to psycopg2 %s format.
+
+        Handles repeated parameters correctly - e.g., if query uses $1 twice,
+        the args tuple is expanded to include that argument twice.
+
+        Returns: (converted_query, expanded_args)
+        """
         import re
-        return re.sub(r'\$\d+', '%s', query)
+
+        # Find all $N placeholders in order of appearance
+        placeholders = re.findall(r'\$(\d+)', query)
+
+        if not placeholders:
+            return query, args
+
+        # Build expanded args in the order placeholders appear
+        expanded_args = []
+        for placeholder in placeholders:
+            idx = int(placeholder) - 1  # $1 = args[0], $2 = args[1], etc.
+            if 0 <= idx < len(args):
+                expanded_args.append(args[idx])
+            else:
+                # Fallback: use None if index out of range
+                expanded_args.append(None)
+
+        # Replace all $N with %s
+        converted_query = re.sub(r'\$\d+', '%s', query)
+
+        return converted_query, tuple(expanded_args)
 
     def _sync_fetch(self, query: str, *args) -> list[dict]:
         """Sync fallback for fetch - uses shared pool"""
         try:
             with _get_pooled_connection() as conn:
                 cur = conn.cursor(cursor_factory=RealDictCursor)
-                # Convert asyncpg $1 placeholders to psycopg2 %s
-                converted_query = self._convert_asyncpg_to_psycopg2(query)
-                cur.execute(converted_query, args if args else None)
+                # Convert asyncpg $1 placeholders to psycopg2 %s (handles repeated params)
+                converted_query, expanded_args = self._convert_asyncpg_to_psycopg2(query, args)
+                cur.execute(converted_query, expanded_args if expanded_args else None)
                 rows = cur.fetchall()
                 cur.close()
                 return [dict(r) for r in rows] if rows else []
@@ -398,9 +425,9 @@ class AUREA:
         try:
             with _get_pooled_connection() as conn:
                 cur = conn.cursor(cursor_factory=RealDictCursor)
-                # Convert asyncpg $1 placeholders to psycopg2 %s
-                converted_query = self._convert_asyncpg_to_psycopg2(query)
-                cur.execute(converted_query, args if args else None)
+                # Convert asyncpg $1 placeholders to psycopg2 %s (handles repeated params)
+                converted_query, expanded_args = self._convert_asyncpg_to_psycopg2(query, args)
+                cur.execute(converted_query, expanded_args if expanded_args else None)
                 row = cur.fetchone()
                 cur.close()
                 return dict(row) if row else None
@@ -413,9 +440,9 @@ class AUREA:
         try:
             with _get_pooled_connection() as conn:
                 cur = conn.cursor()
-                # Convert asyncpg $1 placeholders to psycopg2 %s
-                converted_query = self._convert_asyncpg_to_psycopg2(query)
-                cur.execute(converted_query, args if args else None)
+                # Convert asyncpg $1 placeholders to psycopg2 %s (handles repeated params)
+                converted_query, expanded_args = self._convert_asyncpg_to_psycopg2(query, args)
+                cur.execute(converted_query, expanded_args if expanded_args else None)
                 conn.commit()
                 cur.close()
                 return True
