@@ -213,7 +213,12 @@ class AsyncDatabasePool(BasePool):
                         return await conn.execute(query, *args, timeout=timeout)
                     else:
                         raise ValueError(f"Unknown operation: {operation}")
-            except (asyncpg.ConnectionDoesNotExistError, asyncpg.InterfaceError) as e:
+            except (
+                asyncpg.ConnectionDoesNotExistError,
+                asyncpg.InterfaceError,
+                asyncpg.InternalClientError,
+                asyncpg.PostgresConnectionError,
+            ) as e:
                 last_error = e
                 if attempt < max_retries:
                     logger.warning(
@@ -226,6 +231,9 @@ class AsyncDatabasePool(BasePool):
                         "Connection error on %s after %d attempts: %s",
                         operation, max_retries + 1, e
                     )
+            except asyncio.CancelledError:
+                # Don't retry cancelled operations - propagate immediately
+                raise
             except Exception as e:
                 # Don't retry on non-connection errors (query errors, timeouts, etc.)
                 raise
