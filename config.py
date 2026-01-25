@@ -152,7 +152,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.7.32')  # Skip healthz rate limits + ai_autonomous_tasks updated_at backfill + priority adjustment coercion
+        self.version = os.getenv('VERSION', 'v10.0.1')  # Fixed AUREA tuple error, asyncio connection retry, OpenAI quota fallback, Command Center health check
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
