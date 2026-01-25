@@ -152,7 +152,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v3.7.27')  # Stabilize /health responsiveness under load (cache + timeout)
+        self.version = os.getenv('VERSION', 'v3.7.28')  # Isolate heavy background loops from HTTP event loop (Render 502 fix)
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
