@@ -352,18 +352,20 @@ class AlwaysKnowBrain:
             logger.warning(f"ERP check failed: {e}")
             state.erp_healthy = False
 
-        # BrainOps Command Center - check unified health endpoint (public)
+        # BrainOps Command Center - check public health endpoint
+        # NOTE: /api/unified-health requires auth; use /api/health instead
         try:
             start = time.time()
-            async with self._session.get("https://brainops-command-center.vercel.app/api/unified-health") as resp:
+            async with self._session.get("https://brainops-command-center.vercel.app/api/health") as resp:
                 state.command_center_response_time_ms = (time.time() - start) * 1000
                 if resp.status == 200:
                     try:
                         data = await resp.json()
-                        overall = (data.get("overall") or {}).get("status")
-                        # Treat "degraded" as still reachable; "critical" is considered unhealthy.
-                        state.command_center_healthy = overall != "critical"
+                        # Check status field from health endpoint
+                        status = data.get("status", "")
+                        state.command_center_healthy = status == "ok"
                     except Exception:
+                        # If response is 200 but can't parse, still consider healthy
                         state.command_center_healthy = True
                 else:
                     state.command_center_healthy = False

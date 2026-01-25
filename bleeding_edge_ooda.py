@@ -1372,6 +1372,7 @@ class DecisionRAG:
         """
         Get embedding from OpenAI with LRU caching and retry logic.
         ENHANCED: Uses class-level LRU cache, exponential backoff, and proper async execution.
+        Falls back gracefully on quota exhaustion (429 errors).
         """
         cache_key = hashlib.md5(text.encode()).hexdigest()
 
@@ -1402,7 +1403,16 @@ class DecisionRAG:
         try:
             embedding = await retry_with_backoff(get_embedding_with_retry)
         except Exception as e:
-            logger.error(f"Failed to get embedding after retries: {e}")
+            error_str = str(e).lower()
+            # Check for quota/rate limit errors - don't retry these
+            if "429" in str(e) or "insufficient_quota" in error_str or "rate_limit" in error_str:
+                logger.warning(
+                    f"OpenAI quota/rate limit exceeded - using keyword fallback: {e}"
+                )
+                # Disable OpenAI for this session to avoid repeated failures
+                self.openai_available = False
+            else:
+                logger.error(f"Failed to get embedding after retries: {e}")
             return []
 
         # ENHANCEMENT: LRU eviction if cache is full
