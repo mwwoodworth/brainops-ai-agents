@@ -9,6 +9,7 @@ import logging
 import os
 import time
 import uuid
+import threading
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -30,6 +31,45 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Background Event Loop Runner
+# ---------------------------------------------------------------------------
+# Some "always-on" BrainOps subsystems (AUREA, reconcilers, orchestrators) perform
+# synchronous I/O (e.g., psycopg2) inside async loops. If they run on Uvicorn's
+# main event loop they can block request handling and cause intermittent 502s
+# from Render. Run long-lived background coroutines on a dedicated loop thread
+# to keep the HTTP loop responsive.
+
+
+class BackgroundLoopRunner:
+    def __init__(self) -> None:
+        self.loop = asyncio.new_event_loop()
+        self._started = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="brainops-bg-loop", daemon=True
+        )
+
+    def _run(self) -> None:
+        asyncio.set_event_loop(self.loop)
+        self._started.set()
+        self.loop.run_forever()
+
+    def start(self, timeout_s: float = 5.0) -> None:
+        if self._thread.is_alive():
+            return
+        self._thread.start()
+        self._started.wait(timeout=timeout_s)
+
+    def submit(self, coro: "asyncio.coroutines.Coroutine[Any, Any, Any]"):
+        self.start()
+        return asyncio.run_coroutine_threadsafe(coro, self.loop)
+
+    def stop(self, timeout_s: float = 5.0) -> None:
+        if not self._thread.is_alive():
+            return
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self._thread.join(timeout=timeout_s)
 
 
 # ---------------------------------------------------------------------------
@@ -767,6 +807,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"🚀 Starting BrainOps AI Agents v{VERSION} - Build: {BUILD_TIME}")
     logger.info("⚡ Fast startup mode - deferring heavy init to background")
 
+    # Start a dedicated background event loop. This prevents long-running background
+    # coroutines from starving the HTTP server's event loop under load.
+    app.state.bg_runner = BackgroundLoopRunner()
+    try:
+        app.state.bg_runner.start()
+        logger.info("🧵 Background loop runner started")
+    except Exception as exc:
+        logger.error("Failed to start background loop runner: %s", exc, exc_info=True)
+        app.state.bg_runner = None
+
     # Get tenant configuration from centralized config
     from config import config as app_config
     DEFAULT_TENANT_ID = app_config.tenant.default_tenant_id
@@ -872,7 +922,11 @@ async def lifespan(app: FastAPI):
                     lambda: AUREA(autonomy_level=AutonomyLevel.FULL_AUTO, tenant_id=tenant_id)
                 )
                 app.state.aurea = aurea_instance
-                asyncio.create_task(aurea_instance.orchestrate())
+                bg_runner = getattr(app.state, "bg_runner", None)
+                if bg_runner is not None:
+                    bg_runner.submit(aurea_instance.orchestrate())
+                else:
+                    asyncio.create_task(aurea_instance.orchestrate())
                 logger.info("🧠 AUREA Master Orchestrator STARTED - Observe→Decide→Act loop ACTIVE")
             except Exception as e:
                 logger.error(f"❌ AUREA initialization failed: {e}")
@@ -893,7 +947,11 @@ async def lifespan(app: FastAPI):
             try:
                 reconciler = await asyncio.to_thread(get_reconciler)
                 app.state.reconciler = reconciler
-                asyncio.create_task(start_healing_loop())
+                bg_runner = getattr(app.state, "bg_runner", None)
+                if bg_runner is not None:
+                    bg_runner.submit(start_healing_loop())
+                else:
+                    asyncio.create_task(start_healing_loop())
                 logger.info("🔄 Self-Healing Reconciliation Loop STARTED")
             except Exception as e:
                 logger.error(f"❌ Reconciler initialization failed: {e}")
@@ -1067,7 +1125,12 @@ async def lifespan(app: FastAPI):
         try:
             from task_queue_consumer import start_task_queue_consumer
 
-            app.state.task_queue_consumer = await start_task_queue_consumer()
+            bg_runner = getattr(app.state, "bg_runner", None)
+            if bg_runner is not None:
+                bg_runner.submit(start_task_queue_consumer())
+                app.state.task_queue_consumer = True
+            else:
+                app.state.task_queue_consumer = await start_task_queue_consumer()
             logger.info("📋 Task Queue Consumer STARTED - ai_autonomous_tasks processing active")
         except Exception as e:
             logger.error(f"❌ Task Queue Consumer startup failed: {e}")
@@ -1076,7 +1139,12 @@ async def lifespan(app: FastAPI):
         try:
             from ai_task_queue_consumer import start_ai_task_queue_consumer
 
-            app.state.ai_task_queue_consumer = await start_ai_task_queue_consumer()
+            bg_runner = getattr(app.state, "bg_runner", None)
+            if bg_runner is not None:
+                bg_runner.submit(start_ai_task_queue_consumer())
+                app.state.ai_task_queue_consumer = True
+            else:
+                app.state.ai_task_queue_consumer = await start_ai_task_queue_consumer()
             logger.info("🧠 AI Task Queue Consumer STARTED - ai_task_queue processing active")
         except Exception as e:
             logger.error(f"❌ AI Task Queue Consumer startup failed: {e}")
@@ -1085,7 +1153,11 @@ async def lifespan(app: FastAPI):
         try:
             from intelligent_task_orchestrator import start_task_orchestrator, get_task_orchestrator
 
-            await start_task_orchestrator()
+            bg_runner = getattr(app.state, "bg_runner", None)
+            if bg_runner is not None:
+                bg_runner.submit(start_task_orchestrator())
+            else:
+                await start_task_orchestrator()
             app.state.task_orchestrator = get_task_orchestrator()
             logger.info("🎯 Intelligent Task Orchestrator STARTED - AI-driven task prioritization active")
         except Exception as e:
@@ -1137,6 +1209,14 @@ async def lifespan(app: FastAPI):
     # === EVERYTHING BELOW IS SHUTDOWN CODE - nothing after yield runs on startup ===
     # Shutdown
     logger.info("🛑 Shutting down BrainOps AI Agents...")
+
+    # Stop background loop runner (best-effort).
+    try:
+        bg_runner = getattr(app.state, "bg_runner", None)
+        if bg_runner is not None:
+            bg_runner.stop()
+    except Exception:
+        pass
 
     # Stop Task Queue Consumer
     try:
