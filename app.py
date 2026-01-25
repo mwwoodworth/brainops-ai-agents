@@ -432,6 +432,8 @@ except ImportError:
 # Also ensures ai_email_deliveries table exists for email tracking
 SCHEMA_BOOTSTRAP_SQL = [
     "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
+    # Backfill common missing columns on legacy tables used by task/orchestration subsystems.
+    "ALTER TABLE ai_autonomous_tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();",
     """
     CREATE TABLE IF NOT EXISTS ai_email_deliveries (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1326,7 +1328,7 @@ app.add_middleware(
 async def rate_limit_middleware(request: Request, call_next):
     """Apply rate limiting based on client IP."""
     # Skip rate limiting for health checks
-    if request.url.path in ("/health", "/", "/docs", "/openapi.json"):
+    if request.url.path in ("/health", "/healthz", "/", "/docs", "/openapi.json"):
         return await call_next(request)
 
     # Skip rate limiting for authenticated internal webhooks.
