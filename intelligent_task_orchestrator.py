@@ -468,8 +468,44 @@ class IntelligentTaskOrchestrator:
         if not isinstance(payload, dict):
             payload = {"raw": payload}
 
+        def _coerce_int(value: Any, default: int) -> int:
+            """Best-effort int coercion for legacy rows that store numerics as text."""
+            try:
+                if value is None:
+                    return default
+                if isinstance(value, bool):
+                    return default
+                if isinstance(value, (int, float)):
+                    return int(value)
+                if isinstance(value, str):
+                    stripped = value.strip()
+                    if not stripped:
+                        return default
+                    # Accept "10", "10.0", etc.
+                    return int(float(stripped))
+            except Exception:
+                return default
+            return default
+
+        priority = _coerce_int(row.get("priority"), 50)
+        retry_count = _coerce_int(row.get("retry_count"), 0)
+        max_retries = _coerce_int(payload.get("max_retries"), 3)
+        estimated_duration_mins = _coerce_int(payload.get("estimated_mins"), 10)
+
+        required_capabilities = payload.get("capabilities", [])
+        if isinstance(required_capabilities, str):
+            required_capabilities = [required_capabilities]
+        if not isinstance(required_capabilities, list):
+            required_capabilities = [required_capabilities]
+
+        dependencies = payload.get("dependencies", [])
+        if isinstance(dependencies, str):
+            dependencies = [dependencies]
+        if not isinstance(dependencies, list):
+            dependencies = [dependencies]
+
         # AI priority analysis
-        ai_priority_score = row.get("priority", 50)
+        ai_priority_score = priority
         ai_urgency_reason = "Standard priority"
 
         if self.ai_core:
@@ -483,7 +519,7 @@ class IntelligentTaskOrchestrator:
                 if analysis:
                     try:
                         score_match = json.loads(analysis) if "{" in analysis else {"score": 50}
-                        ai_priority_score = score_match.get("score", row.get("priority", 50))
+                        ai_priority_score = _coerce_int(score_match.get("score"), priority)
                         ai_urgency_reason = score_match.get("reason", "AI-analyzed priority")
                     except (json.JSONDecodeError, TypeError) as exc:
                         logger.debug("Failed to parse AI priority JSON: %s", exc)
@@ -496,16 +532,16 @@ class IntelligentTaskOrchestrator:
             description=payload.get("description", ""),
             task_type=payload.get("type", "general"),
             payload=payload,
-            priority=row.get("priority", 50),
+            priority=priority,
             status=row.get("status", "pending"),
             created_at=row.get("created_at", datetime.now()),
             ai_priority_score=ai_priority_score,
             ai_urgency_reason=ai_urgency_reason,
-            estimated_duration_mins=payload.get("estimated_mins", 10),
-            required_capabilities=payload.get("capabilities", []),
-            dependencies=payload.get("dependencies", []),
-            retry_count=row.get("retry_count", 0),
-            max_retries=payload.get("max_retries", 3)
+            estimated_duration_mins=estimated_duration_mins,
+            required_capabilities=required_capabilities,
+            dependencies=dependencies,
+            retry_count=retry_count,
+            max_retries=max_retries,
         )
 
         # Enhanced: Perform risk assessment
