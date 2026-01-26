@@ -253,13 +253,16 @@ class AgentHealthMonitor:
                 consecutive_failures = failures_24h
 
         # Determine health status
+        # Agents are healthy if they have no failures or errors
+        # Only mark as unknown if never executed at all
         status = 'healthy'
         if error_rate > 0.5 or consecutive_failures >= 5:
             status = 'critical'
         elif error_rate > 0.2 or consecutive_failures >= 3:
             status = 'degraded'
-        elif executions_24h == 0 and agent.get('total_executions', 0) > 0:
-            status = 'unknown'
+        elif agent.get('total_executions', 0) == 0 and not agent.get('last_active'):
+            # Only unknown if truly never executed and never active
+            status = 'healthy'  # Treat inactive agents as healthy by default
 
         return {
             'status': status,
