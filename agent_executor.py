@@ -1120,6 +1120,7 @@ class AgentExecutor:
         'customer-intelligence': 'CustomerIntelligence',  # Maps to real CustomerIntelligence agent
         'intelligent-estimator': 'ProposalGenerator',  # For estimation tasks (like Elena)
         'general_agent': 'WorkflowAutomation',  # General purpose workflow
+        'general': 'WorkflowAutomation',  # Fix: 'general' alias for fallback routing
         'marcus_agent': 'PredictiveAnalyzer',  # For revenue prediction tasks
         'workflow_orchestrator': 'WorkflowAutomation',
         'workflow': 'WorkflowAutomation',
