@@ -2231,6 +2231,186 @@ async def healthz() -> dict[str, Any]:
     }
 
 
+@app.get("/system/awareness", dependencies=SECURED_DEPENDENCIES)
+async def system_awareness():
+    """
+    CRITICAL: Self-awareness endpoint that reports what's actually broken.
+    This is the AI OS telling you its problems - listen to it!
+    """
+    pool = get_pool()
+    issues = []
+    warnings = []
+    healthy = []
+
+    try:
+        # Check Gumroad revenue
+        gumroad_sales = await pool.fetchval("SELECT COUNT(*) FROM gumroad_sales")
+        if gumroad_sales == 0:
+            issues.append({
+                "category": "REVENUE",
+                "problem": "Zero Gumroad sales recorded",
+                "impact": "No revenue tracking from digital products",
+                "fix": "Verify Gumroad webhook is receiving purchases at /gumroad/webhook"
+            })
+        else:
+            healthy.append(f"Gumroad: {gumroad_sales} sales tracked")
+
+        # Check MRG subscriptions
+        mrg_subs = await pool.fetchval("SELECT COUNT(*) FROM mrg_subscriptions")
+        if mrg_subs == 0:
+            issues.append({
+                "category": "REVENUE",
+                "problem": "Zero MRG subscriptions",
+                "impact": "No SaaS recurring revenue",
+                "fix": "Verify Stripe webhook integration for subscriptions"
+            })
+        else:
+            healthy.append(f"MRG Subscriptions: {mrg_subs} active")
+
+        # Check learning system (uses ai_learning_insights, not ai_learning_patterns)
+        learning = await pool.fetchval("SELECT COUNT(*) FROM ai_learning_insights")
+        learning_recent = await pool.fetchval("""
+            SELECT COUNT(*) FROM ai_learning_insights
+            WHERE created_at > NOW() - INTERVAL '24 hours'
+        """)
+        if learning == 0:
+            issues.append({
+                "category": "LEARNING",
+                "problem": "AI learning insights table is empty",
+                "impact": "System is not learning from operations",
+                "fix": "Check LearningFeedbackLoop agent and /api/learning/run-cycle endpoint"
+            })
+        elif learning_recent == 0:
+            warnings.append({
+                "category": "LEARNING",
+                "problem": "No learning insights in last 24 hours",
+                "impact": "Learning may be stalled",
+                "fix": "Run /api/learning/run-cycle to trigger learning"
+            })
+        else:
+            healthy.append(f"Learning active: {learning} total, {learning_recent} in 24h")
+
+        # Check agent activity
+        agents_1hr = await pool.fetchval("""
+            SELECT COUNT(DISTINCT agent_name) FROM agent_execution_logs
+            WHERE timestamp > NOW() - INTERVAL '1 hour' AND execution_phase = 'completed'
+        """)
+        if agents_1hr < 3:
+            warnings.append({
+                "category": "AGENTS",
+                "problem": f"Only {agents_1hr} agents ran in last hour",
+                "impact": "Autonomous operations may be stalled",
+                "fix": "Check scheduler at /scheduler/status and agent schedules in DB"
+            })
+        else:
+            healthy.append(f"Agents active: {agents_1hr} ran in last hour")
+
+        # Check unresolved alerts
+        unresolved = await pool.fetchval("SELECT COUNT(*) FROM brainops_alerts WHERE resolved = false")
+        if unresolved > 20:
+            warnings.append({
+                "category": "ALERTS",
+                "problem": f"{unresolved} unresolved system alerts",
+                "impact": "System issues are being ignored",
+                "fix": "Review alerts and resolve or acknowledge them"
+            })
+        elif unresolved > 0:
+            warnings.append({
+                "category": "ALERTS",
+                "problem": f"{unresolved} unresolved alerts need attention",
+                "impact": "Minor issues accumulating",
+                "fix": "Review at /system/alerts"
+            })
+
+        # Check memory activity
+        memories_today = await pool.fetchval("""
+            SELECT COUNT(*) FROM unified_ai_memory WHERE created_at::date = CURRENT_DATE
+        """)
+        if memories_today < 50:
+            warnings.append({
+                "category": "MEMORY",
+                "problem": f"Low memory activity today ({memories_today} entries)",
+                "impact": "System may not be learning from interactions",
+                "fix": "Check memory endpoints at /memory/store"
+            })
+        else:
+            healthy.append(f"Memory active: {memories_today} entries today")
+
+        # Check scheduled agents
+        scheduled = await pool.fetchval("""
+            SELECT COUNT(*) FROM agents
+            WHERE enabled = true AND array_length(schedule_hours, 1) > 0
+        """)
+        total_agents = await pool.fetchval("SELECT COUNT(*) FROM agents WHERE enabled = true")
+        if scheduled < total_agents * 0.5:
+            warnings.append({
+                "category": "SCHEDULER",
+                "problem": f"Only {scheduled}/{total_agents} agents have schedules",
+                "impact": "Most agents won't run automatically",
+                "fix": "Set schedule_hours for agents in database"
+            })
+        else:
+            healthy.append(f"Scheduled agents: {scheduled}/{total_agents}")
+
+        # Overall status
+        if issues:
+            overall_status = "CRITICAL"
+        elif warnings:
+            overall_status = "WARNING"
+        else:
+            overall_status = "HEALTHY"
+
+        return {
+            "status": overall_status,
+            "timestamp": datetime.utcnow().isoformat(),
+            "version": VERSION,
+            "critical_issues": issues,
+            "warnings": warnings,
+            "healthy_systems": healthy,
+            "summary": f"{len(issues)} critical, {len(warnings)} warnings, {len(healthy)} healthy",
+            "message": "This is your AI OS telling you what's broken. Fix the critical issues first."
+        }
+
+    except Exception as e:
+        logger.error(f"System awareness check failed: {e}")
+        return {
+            "status": "ERROR",
+            "error": str(e),
+            "message": "Could not complete system awareness check"
+        }
+
+
+@app.get("/system/alerts", dependencies=SECURED_DEPENDENCIES)
+async def get_system_alerts(limit: int = 50, unresolved_only: bool = True):
+    """Get system alerts that need attention."""
+    pool = get_pool()
+    try:
+        if unresolved_only:
+            alerts = await pool.fetch("""
+                SELECT alert_type, severity, message, details, created_at
+                FROM brainops_alerts
+                WHERE resolved = false
+                ORDER BY
+                    CASE severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+                    created_at DESC
+                LIMIT $1
+            """, limit)
+        else:
+            alerts = await pool.fetch("""
+                SELECT alert_type, severity, message, details, created_at, resolved
+                FROM brainops_alerts
+                ORDER BY created_at DESC
+                LIMIT $1
+            """, limit)
+
+        return {
+            "count": len(alerts),
+            "alerts": [dict(a) for a in alerts]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def _require_diagnostics_key(request: Request) -> None:
     api_key = (
         request.headers.get("X-API-Key")
@@ -3321,12 +3501,11 @@ async def execute_scheduled_agents(
                 datetime.utcnow()
                 agent_name = agent.get("name", "unknown")
 
-                # Log execution start (use correct columns: task_execution_id, agent_type, prompt)
-                # agent_executions uses created_at with DEFAULT, not started_at
+                # Log execution start - task_execution_id is NULL for scheduled executions
                 await pool.execute("""
-                    INSERT INTO agent_executions (id, task_execution_id, agent_type, status, prompt)
-                    VALUES ($1, $2, $3, $4, $5)
-                """, execution_id, uuid.UUID(execution_id), agent.get("type", "scheduled"), "running", json.dumps({"scheduled": True, "agent_name": agent_name}))
+                    INSERT INTO agent_executions (id, agent_type, status, prompt)
+                    VALUES ($1, $2, $3, $4)
+                """, execution_id, agent.get("type", "scheduled"), "running", json.dumps({"scheduled": True, "agent_name": agent_name}))
 
                 # ACTUALLY EXECUTE THE AGENT using AgentExecutor
                 result = {"status": "skipped", "message": "No executor available"}
