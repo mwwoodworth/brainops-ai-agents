@@ -310,7 +310,12 @@ class NeuralCore:
     async def _sense_system(self, client: httpx.AsyncClient, system_id: str, system: SystemAwareness):
         """Sense a single external system"""
         try:
-            health_url = f"{system.url}/health"
+            # Vercel frontends don't have /health endpoints - check root URL
+            # Render backends have /health endpoints
+            if system.system_type == SystemType.FRONTEND or "vercel.app" in system.url or ".com" in system.url and "onrender.com" not in system.url:
+                health_url = system.url  # Check root URL for frontends
+            else:
+                health_url = f"{system.url}/health"  # Check /health for backends
             headers = {"X-API-Key": self.api_key} if "render.com" in system.url or "onrender.com" in system.url else {}
 
             start = time.time()
@@ -353,29 +358,48 @@ class NeuralCore:
 
     async def _sense_internal_systems(self):
         """Sense internal systems (database, memory)"""
-        # Database - check via pool
+        # Database - check via pool (get_pool is sync, returns pool object)
         try:
             from database.async_connection import get_pool
-            pool = await get_pool()
+            pool = get_pool()  # Sync call - returns pool directly
             if pool:
-                self.systems["database"].last_known_state = "connected"
-                self.systems["database"].health_score = 1.0
+                # Test connection if pool has test_connection method
+                if hasattr(pool, 'test_connection'):
+                    try:
+                        await asyncio.wait_for(pool.test_connection(), timeout=5.0)
+                        self.systems["database"].last_known_state = "connected"
+                        self.systems["database"].health_score = 1.0
+                        self.systems["database"].issues = []
+                    except:
+                        self.systems["database"].last_known_state = "degraded"
+                        self.systems["database"].health_score = 0.5
+                else:
+                    # Pool exists, assume connected
+                    self.systems["database"].last_known_state = "connected"
+                    self.systems["database"].health_score = 1.0
+                    self.systems["database"].issues = []
                 self.systems["database"].last_contact = datetime.now(timezone.utc)
         except Exception as e:
             self.systems["database"].last_known_state = "error"
             self.systems["database"].health_score = 0.0
             self.systems["database"].issues = [str(e)]
 
-        # Memory - check embedded memory
+        # Memory - check embedded memory system
         try:
-            from embedded_memory import get_embedded_memory
-            memory = get_embedded_memory()
+            from embedded_memory_system import get_embedded_memory
+            memory = await get_embedded_memory()
             if memory:
-                stats = memory.get_stats()
-                self.systems["memory"].last_known_state = "active"
-                self.systems["memory"].health_score = 1.0
-                self.systems["memory"].last_contact = datetime.now(timezone.utc)
-                self.systems["memory"].metadata = stats
+                try:
+                    stats = memory.get_stats() if hasattr(memory, 'get_stats') else {}
+                    self.systems["memory"].last_known_state = "active"
+                    self.systems["memory"].health_score = 1.0
+                    self.systems["memory"].last_contact = datetime.now(timezone.utc)
+                    self.systems["memory"].metadata = stats
+                    self.systems["memory"].issues = []
+                except Exception as inner_e:
+                    self.systems["memory"].last_known_state = "degraded"
+                    self.systems["memory"].health_score = 0.5
+                    self.systems["memory"].issues = [str(inner_e)]
         except Exception as e:
             self.systems["memory"].last_known_state = "error"
             self.systems["memory"].health_score = 0.0
