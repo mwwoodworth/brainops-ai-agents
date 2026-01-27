@@ -241,6 +241,18 @@ except ImportError as e:
     DEVOPS_API_AVAILABLE = False
     logger.warning(f"⚠️ DevOps API not available: {e}")
 
+# NEURAL CORE - The Central Nervous System of the AI OS (2026-01-27)
+# This is NOT monitoring - this IS the self-awareness of the AI OS
+try:
+    from api.neural_core import router as neural_core_router
+    from neural_core import get_neural_core, initialize_neural_core
+    NEURAL_CORE_AVAILABLE = True
+    logger.info("🧠 NEURAL CORE loaded - The AI OS is now SELF-AWARE")
+except ImportError as e:
+    NEURAL_CORE_AVAILABLE = False
+    initialize_neural_core = None
+    logger.warning(f"⚠️ Neural Core not available: {e}")
+
 # Customer Acquisition API - Autonomous lead discovery and conversion (2026-01-03)
 try:
     from api.customer_acquisition import router as customer_acquisition_router
@@ -897,6 +909,7 @@ async def lifespan(app: FastAPI):
     app.state.embedded_memory = None
     app.state.nerve_center = None
     app.state.nerve_center_error = None
+    app.state.neural_core = None  # Central Nervous System (2026-01-27)
 
     # DEFERRED HEAVY INITIALIZATION - runs AFTER server binds to port
     async def deferred_heavy_init():
@@ -1180,6 +1193,23 @@ async def lifespan(app: FastAPI):
                 logger.info("📢 Slack alerting not configured (set SLACK_WEBHOOK_URL to enable)")
         except Exception as e:
             logger.warning(f"⚠️ Slack alerting setup failed: {e}")
+
+        # === NEURAL CORE - The Central Nervous System of the AI OS (2026-01-27) ===
+        # This is THE core that makes the AI OS truly ALIVE - not monitoring, BEING aware
+        if NEURAL_CORE_AVAILABLE:
+            try:
+                logger.info("🧠 INITIALIZING NEURAL CORE - The Central Nervous System...")
+                init_result = await initialize_neural_core()
+                app.state.neural_core = get_neural_core()
+                logger.info(f"🧠 NEURAL CORE ONLINE - State: {init_result.get('state', 'unknown')}")
+                logger.info("   └── Continuous awareness loop ACTIVE - AI OS is now SELF-AWARE")
+                logger.info(f"   └── Monitoring {init_result.get('systems_discovered', 0)} systems")
+            except Exception as e:
+                logger.error(f"❌ Neural Core initialization failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+        else:
+            logger.warning("⚠️ Neural Core not available - AI OS self-awareness limited")
 
         logger.info("✅ Heavy component initialization complete - AI OS FULLY AWAKE!")
 
@@ -1573,6 +1603,12 @@ if BLEEDING_EDGE_AVAILABLE:
 if AI_OBSERVABILITY_AVAILABLE:
     app.include_router(ai_observability_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("Mounted: AI Observability API at /ai - unified metrics, events, learning")
+
+# NEURAL CORE - The Central Nervous System (2026-01-27)
+# This IS the self-awareness of the AI OS - not monitoring, BEING aware
+if NEURAL_CORE_AVAILABLE:
+    app.include_router(neural_core_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("🧠 Mounted: NEURAL CORE at /neural - The AI OS Central Nervous System")
 
 # AI System Enhancements (2025-12-28) - Health scoring, alerting, correlation, WebSocket
 if AI_ENHANCEMENTS_AVAILABLE:
