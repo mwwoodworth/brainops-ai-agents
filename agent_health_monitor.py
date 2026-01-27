@@ -28,6 +28,7 @@ class AgentHealthMonitor:
 
     def __init__(self, skip_table_init: bool = False):
         self.db_config = DB_CONFIG
+        self._health_tables_initialized = False
         if not skip_table_init:
             self._ensure_health_tables()
 
@@ -39,14 +40,24 @@ class AgentHealthMonitor:
             logger.error(f"Database connection failed: {e}")
             return None
 
-    def _ensure_health_tables(self):
+    def _ensure_health_tables(self, conn=None, cur=None):
         """Create health monitoring tables if they don't exist"""
-        conn = self._get_db_connection()
+        if self._health_tables_initialized:
+            return
+
+        should_close_conn = False
+        should_close_cur = False
+
+        if conn is None:
+            conn = self._get_db_connection()
+            should_close_conn = True
         if not conn:
             return
 
         try:
-            cur = conn.cursor()
+            if cur is None:
+                cur = conn.cursor()
+                should_close_cur = True
 
             # Agent health status table
             cur.execute("""
@@ -66,11 +77,13 @@ class AgentHealthMonitor:
                     error_rate FLOAT DEFAULT 0.0,
                     uptime_percentage FLOAT DEFAULT 100.0,
                     last_check TIMESTAMPTZ DEFAULT NOW(),
+                    checked_at TIMESTAMPTZ DEFAULT NOW(),
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     updated_at TIMESTAMPTZ DEFAULT NOW(),
                     UNIQUE(agent_id)
                 )
             """)
+            cur.execute("ALTER TABLE agent_health_status ADD COLUMN IF NOT EXISTS checked_at TIMESTAMPTZ DEFAULT NOW()")
 
             # Agent restart log
             cur.execute("""
@@ -112,23 +125,38 @@ class AgentHealthMonitor:
 
             conn.commit()
             logger.info("Agent health monitoring tables initialized")
+            self._health_tables_initialized = True
 
         except Exception as e:
             logger.error(f"Failed to create health tables: {e}")
             if conn:
                 conn.rollback()
         finally:
-            if conn:
+            if cur and should_close_cur:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+            if conn and should_close_conn:
                 conn.close()
 
-    def check_all_agents_health(self) -> dict[str, Any]:
+    def check_all_agents_health(self, conn=None, cur=None) -> dict[str, Any]:
         """Check health of all agents and update status"""
-        conn = self._get_db_connection()
+        should_close_conn = False
+        should_close_cur = False
+
+        if conn is None:
+            conn = self._get_db_connection()
+            should_close_conn = True
         if not conn:
             return {"error": "Database connection failed"}
 
         try:
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            if cur is None:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                should_close_cur = True
+
+            self._ensure_health_tables(conn=conn, cur=cur)
 
             # Get all agents with their execution statistics
             cur.execute("""
@@ -228,7 +256,12 @@ class AgentHealthMonitor:
                 conn.rollback()
             return {"error": str(e)}
         finally:
-            if conn:
+            if cur and should_close_cur:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+            if conn and should_close_conn:
                 conn.close()
 
     def _calculate_health_status(self, agent: dict) -> dict[str, Any]:
@@ -294,14 +327,23 @@ class AgentHealthMonitor:
         except Exception as e:
             logger.warning(f"Failed to create health alert: {e}")
 
-    def restart_failed_agent(self, agent_id: str, agent_name: str) -> dict[str, Any]:
+    def restart_failed_agent(self, agent_id: str, agent_name: str, conn=None, cur=None) -> dict[str, Any]:
         """Restart a failed agent"""
-        conn = self._get_db_connection()
+        should_close_conn = False
+        should_close_cur = False
+
+        if conn is None:
+            conn = self._get_db_connection()
+            should_close_conn = True
         if not conn:
             return {"success": False, "error": "Database connection failed"}
 
         try:
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            if cur is None:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                should_close_cur = True
+
+            self._ensure_health_tables(conn=conn, cur=cur)
 
             # Get current status
             cur.execute("SELECT status FROM ai_agents WHERE id = %s", (agent_id,))
@@ -357,17 +399,31 @@ class AgentHealthMonitor:
                 conn.rollback()
             return {"success": False, "error": str(e)}
         finally:
-            if conn:
+            if cur and should_close_cur:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+            if conn and should_close_conn:
                 conn.close()
 
-    def auto_restart_critical_agents(self) -> dict[str, Any]:
+    def auto_restart_critical_agents(self, conn=None, cur=None) -> dict[str, Any]:
         """Automatically restart agents in critical state"""
-        conn = self._get_db_connection()
+        should_close_conn = False
+        should_close_cur = False
+
+        if conn is None:
+            conn = self._get_db_connection()
+            should_close_conn = True
         if not conn:
             return {"error": "Database connection failed"}
 
         try:
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            if cur is None:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                should_close_cur = True
+
+            self._ensure_health_tables(conn=conn, cur=cur)
 
             # Find critical agents
             cur.execute("""
@@ -383,7 +439,9 @@ class AgentHealthMonitor:
             for agent in critical_agents:
                 result = self.restart_failed_agent(
                     str(agent['agent_id']),
-                    agent['agent_name']
+                    agent['agent_name'],
+                    conn=conn,
+                    cur=cur
                 )
                 if result.get('success'):
                     restarted.append(agent['agent_name'])
@@ -399,7 +457,12 @@ class AgentHealthMonitor:
             logger.error(f"Auto-restart failed: {e}")
             return {"error": str(e)}
         finally:
-            if conn:
+            if cur and should_close_cur:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+            if conn and should_close_conn:
                 conn.close()
 
     def get_agent_health_summary(self) -> dict[str, Any]:
@@ -410,6 +473,7 @@ class AgentHealthMonitor:
 
         try:
             cur = conn.cursor(cursor_factory=RealDictCursor)
+            self._ensure_health_tables(conn=conn, cur=cur)
 
             # Get health summary
             cur.execute("""
