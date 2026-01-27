@@ -277,32 +277,47 @@ Respond in this exact JSON format:
                 errors.append(f"Gemini: {e}")
                 logger.warning(f"Gemini direct call failed: {e}")
 
-        # Try HuggingFace as last resort (always available)
+        # Try HuggingFace as last resort (try multiple models)
         hf_token = os.getenv("HUGGINGFACE_API_TOKEN", "")
-        try:
-            headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1",
-                    headers=headers,
-                    json={
-                        "inputs": prompt[:4000],  # Limit prompt size
-                        "parameters": {
-                            "max_new_tokens": 1000,
-                            "temperature": 0.7,
-                            "return_full_text": False
-                        }
-                    },
-                    timeout=30.0
-                )
-                if response.status_code == 200:
-                    result = response.json()
-                    if isinstance(result, list) and result:
-                        return result[0].get("generated_text", "")
-                errors.append(f"HuggingFace: HTTP {response.status_code}")
-        except Exception as e:
-            errors.append(f"HuggingFace: {e}")
-            logger.warning(f"HuggingFace direct call failed: {e}")
+        hf_models = [
+            "mistralai/Mixtral-8x7B-Instruct-v0.1",
+            "HuggingFaceH4/zephyr-7b-beta",
+            "microsoft/DialoGPT-large",
+            "gpt2"  # Always available
+        ]
+        headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+
+        for hf_model in hf_models:
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"https://api-inference.huggingface.co/models/{hf_model}",
+                        headers=headers,
+                        json={
+                            "inputs": prompt[:2000],  # Limit prompt size for smaller models
+                            "parameters": {
+                                "max_new_tokens": 500,
+                                "temperature": 0.7,
+                                "return_full_text": False
+                            }
+                        },
+                        timeout=15.0
+                    )
+                    if response.status_code == 200:
+                        result = response.json()
+                        text = ""
+                        if isinstance(result, list) and result:
+                            text = result[0].get("generated_text", "")
+                        elif isinstance(result, dict):
+                            text = result.get("generated_text", "")
+                        if text:
+                            logger.info(f"HuggingFace success with {hf_model}")
+                            return text
+            except Exception as e:
+                logger.debug(f"HuggingFace {hf_model} failed: {e}")
+                continue
+
+        errors.append("HuggingFace: All models failed")
 
         raise Exception(f"No AI API available. Tried: {'; '.join(errors)}")
 
