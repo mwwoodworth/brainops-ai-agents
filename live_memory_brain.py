@@ -42,6 +42,8 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Optional
 
+from safe_task import create_safe_task
+
 from psycopg2.pool import ThreadedConnectionPool
 
 # OPTIMIZATION: asyncpg for non-blocking database operations
@@ -1215,13 +1217,13 @@ class LiveMemoryBrain:
 
         # Start real-time sync
         self._running = True
-        self._sync_task = asyncio.create_task(self._continuous_sync())
+        self._sync_task = create_safe_task(self._continuous_sync(), "memory_continuous_sync")
 
         # ENHANCEMENT: Start memory decay background task
-        self._decay_task = asyncio.create_task(self._memory_decay_loop())
+        self._decay_task = create_safe_task(self._memory_decay_loop(), "memory_decay_loop")
 
         # ENHANCEMENT: Start memory consolidation background task
-        self._consolidation_task = asyncio.create_task(self._memory_consolidation_loop())
+        self._consolidation_task = create_safe_task(self._memory_consolidation_loop(), "memory_consolidation")
 
         logger.info("LiveMemoryBrain fully initialized with enhanced background tasks")
 

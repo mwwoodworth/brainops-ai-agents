@@ -17,6 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 
+from safe_task import create_safe_task
 import docx
 import httpx
 import openpyxl
@@ -354,7 +355,7 @@ class DocumentProcessor:
             """, ProcessingStatus.QUEUED.value, document_id)
 
             # Trigger async processing
-            asyncio.create_task(self.process_document(document_id))
+            create_safe_task(self.process_document(document_id))
 
         except Exception as e:
             logger.error(f"Failed to queue document: {e}")

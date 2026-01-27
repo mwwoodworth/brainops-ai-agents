@@ -15,7 +15,40 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
 
+from safe_task import create_safe_task
+from contextlib import contextmanager
+
 logger = logging.getLogger(__name__)
+
+# CRITICAL: Use shared connection pool to prevent MaxClientsInSessionMode
+try:
+    from database.sync_pool import get_sync_pool
+    _SYNC_POOL_AVAILABLE = True
+except ImportError:
+    _SYNC_POOL_AVAILABLE = False
+    get_sync_pool = None
+
+
+@contextmanager
+def _get_pooled_connection(db_config: dict):
+    """Get database connection from shared pool with fallback to direct."""
+    if _SYNC_POOL_AVAILABLE and get_sync_pool:
+        try:
+            pool = get_sync_pool()
+            with pool.get_connection() as conn:
+                yield conn
+                return
+        except Exception as e:
+            logger.debug(f"Pool unavailable, using direct: {e}")
+
+    # Fallback to direct connection
+    import psycopg2
+    conn = psycopg2.connect(**db_config)
+    try:
+        yield conn
+    finally:
+        if conn and not conn.closed:
+            conn.close()
 
 
 # ============================================================================
@@ -185,7 +218,7 @@ class MonitoringDashboard:
                 await self._initialize_database()
                 await self._setup_default_panels()
                 await self._setup_alert_rules()
-                self._collection_task = asyncio.create_task(self._collection_loop())
+                self._collection_task = create_safe_task(self._collection_loop())
                 self._initialized = True
                 logger.info("Monitoring dashboard initialized")
             except Exception as e:
@@ -194,90 +227,84 @@ class MonitoringDashboard:
     async def _initialize_database(self):
         """Initialize database tables"""
         try:
-            import psycopg2
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+                # Metrics table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_dashboard_metrics (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        metric_name VARCHAR(255) NOT NULL,
+                        metric_value FLOAT NOT NULL,
+                        metric_type VARCHAR(50) DEFAULT 'gauge',
+                        labels JSONB DEFAULT '{}'::jsonb,
+                        timestamp TIMESTAMPTZ DEFAULT NOW(),
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Metrics table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_dashboard_metrics (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    metric_name VARCHAR(255) NOT NULL,
-                    metric_value FLOAT NOT NULL,
-                    metric_type VARCHAR(50) DEFAULT 'gauge',
-                    labels JSONB DEFAULT '{}'::jsonb,
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Service status table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_dashboard_services (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        service_name VARCHAR(255) NOT NULL,
+                        health VARCHAR(50) NOT NULL,
+                        uptime_seconds FLOAT DEFAULT 0,
+                        last_check TIMESTAMPTZ DEFAULT NOW(),
+                        response_time_ms FLOAT DEFAULT 0,
+                        error_rate FLOAT DEFAULT 0,
+                        request_count INT DEFAULT 0,
+                        metadata JSONB DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Service status table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_dashboard_services (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    service_name VARCHAR(255) NOT NULL,
-                    health VARCHAR(50) NOT NULL,
-                    uptime_seconds FLOAT DEFAULT 0,
-                    last_check TIMESTAMPTZ DEFAULT NOW(),
-                    response_time_ms FLOAT DEFAULT 0,
-                    error_rate FLOAT DEFAULT 0,
-                    request_count INT DEFAULT 0,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Alerts table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_dashboard_alerts (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        alert_id VARCHAR(255) UNIQUE NOT NULL,
+                        severity VARCHAR(50) NOT NULL,
+                        title VARCHAR(500) NOT NULL,
+                        message TEXT NOT NULL,
+                        source VARCHAR(255),
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        acknowledged BOOLEAN DEFAULT false,
+                        acknowledged_at TIMESTAMPTZ,
+                        resolved BOOLEAN DEFAULT false,
+                        resolved_at TIMESTAMPTZ,
+                        metadata JSONB DEFAULT '{}'::jsonb
+                    )
+                """)
 
-            # Alerts table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_dashboard_alerts (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    alert_id VARCHAR(255) UNIQUE NOT NULL,
-                    severity VARCHAR(50) NOT NULL,
-                    title VARCHAR(500) NOT NULL,
-                    message TEXT NOT NULL,
-                    source VARCHAR(255),
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    acknowledged BOOLEAN DEFAULT false,
-                    acknowledged_at TIMESTAMPTZ,
-                    resolved BOOLEAN DEFAULT false,
-                    resolved_at TIMESTAMPTZ,
-                    metadata JSONB DEFAULT '{}'::jsonb
-                )
-            """)
+                # Dashboard panels table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_dashboard_panels (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        panel_id VARCHAR(255) UNIQUE NOT NULL,
+                        title VARCHAR(255) NOT NULL,
+                        panel_type VARCHAR(50) NOT NULL,
+                        metrics JSONB DEFAULT '[]'::jsonb,
+                        query TEXT,
+                        refresh_interval INT DEFAULT 60,
+                        options JSONB DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Dashboard panels table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_dashboard_panels (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    panel_id VARCHAR(255) UNIQUE NOT NULL,
-                    title VARCHAR(255) NOT NULL,
-                    panel_type VARCHAR(50) NOT NULL,
-                    metrics JSONB DEFAULT '[]'::jsonb,
-                    query TEXT,
-                    refresh_interval INT DEFAULT 60,
-                    options JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create indexes
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dashboard_metrics_name_time
+                    ON ai_dashboard_metrics(metric_name, timestamp DESC)
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dashboard_alerts_severity
+                    ON ai_dashboard_alerts(severity, created_at DESC)
+                """)
 
-            # Create indexes
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_dashboard_metrics_name_time
-                ON ai_dashboard_metrics(metric_name, timestamp DESC)
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_dashboard_alerts_severity
-                ON ai_dashboard_alerts(severity, created_at DESC)
-            """)
-
-            # Create partition for metrics (optional, for high-volume)
-            # This is a simplified version - production would use proper partitioning
-
-            conn.commit()
-            conn.close()
-            logger.info("Monitoring dashboard tables initialized")
+                conn.commit()
+                logger.info("Monitoring dashboard tables initialized")
 
         except Exception as e:
             logger.error(f"Database initialization error: {e}")
@@ -511,32 +538,29 @@ class MonitoringDashboard:
     async def _persist_metrics(self, name: str):
         """Persist metrics to database"""
         try:
-            import psycopg2
-
             if name not in self._metrics:
                 return
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            # Get last 100 metrics to persist
-            metrics_to_persist = self._metrics[name][-100:]
+                # Get last 100 metrics to persist
+                metrics_to_persist = self._metrics[name][-100:]
 
-            for metric in metrics_to_persist:
-                cur.execute("""
-                    INSERT INTO ai_dashboard_metrics (
-                        metric_name, metric_value, metric_type, labels, timestamp
-                    ) VALUES (%s, %s, %s, %s, %s)
-                """, (
-                    metric.name,
-                    metric.value,
-                    metric.metric_type.value,
-                    json.dumps(metric.labels),
-                    metric.timestamp
-                ))
+                for metric in metrics_to_persist:
+                    cur.execute("""
+                        INSERT INTO ai_dashboard_metrics (
+                            metric_name, metric_value, metric_type, labels, timestamp
+                        ) VALUES (%s, %s, %s, %s, %s)
+                    """, (
+                        metric.name,
+                        metric.value,
+                        metric.metric_type.value,
+                        json.dumps(metric.labels),
+                        metric.timestamp
+                    ))
 
-            conn.commit()
-            conn.close()
+                conn.commit()
 
         except Exception as e:
             logger.error(f"Failed to persist metrics: {e}")
@@ -544,62 +568,59 @@ class MonitoringDashboard:
     async def _collect_system_metrics(self):
         """Collect system-wide metrics"""
         try:
-            import psycopg2
             from psycopg2.extras import RealDictCursor
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            # Database statistics
-            cur.execute("SELECT COUNT(*) as count FROM pg_stat_activity")
-            result = cur.fetchone()
-            await self.set_gauge("db.connections", result['count'])
+                # Database statistics
+                cur.execute("SELECT COUNT(*) as count FROM pg_stat_activity")
+                result = cur.fetchone()
+                await self.set_gauge("db.connections", result['count'])
 
-            cur.execute("SELECT pg_database_size('postgres') / 1024 / 1024 as size_mb")
-            result = cur.fetchone()
-            await self.set_gauge("db.size_mb", result['size_mb'])
+                cur.execute("SELECT pg_database_size('postgres') / 1024 / 1024 as size_mb")
+                result = cur.fetchone()
+                await self.set_gauge("db.size_mb", result['size_mb'])
 
-            # Agent statistics
-            cur.execute("""
-                SELECT
-                    COUNT(*) as total,
-                    SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active
-                FROM ai_agents
-            """)
-            result = cur.fetchone()
-            await self.set_gauge("agents.total", result['total'] or 0)
-            await self.set_gauge("agents.active", result['active'] or 0)
+                # Agent statistics
+                cur.execute("""
+                    SELECT
+                        COUNT(*) as total,
+                        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active
+                    FROM ai_agents
+                """)
+                result = cur.fetchone()
+                await self.set_gauge("agents.total", result['total'] or 0)
+                await self.set_gauge("agents.active", result['active'] or 0)
 
-            # Task statistics
-            cur.execute("""
-                SELECT
-                    COUNT(*) as total,
-                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
-                FROM agent_executions
-                WHERE created_at > NOW() - INTERVAL '1 hour'
-            """)
-            result = cur.fetchone()
-            await self.set_gauge("tasks.total_hour", result['total'] or 0)
-            await self.set_gauge("tasks.completed", result['completed'] or 0)
-            await self.set_gauge("tasks.failed", result['failed'] or 0)
+                # Task statistics
+                cur.execute("""
+                    SELECT
+                        COUNT(*) as total,
+                        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+                        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+                    FROM agent_executions
+                    WHERE created_at > NOW() - INTERVAL '1 hour'
+                """)
+                result = cur.fetchone()
+                await self.set_gauge("tasks.total_hour", result['total'] or 0)
+                await self.set_gauge("tasks.completed", result['completed'] or 0)
+                await self.set_gauge("tasks.failed", result['failed'] or 0)
 
-            # Calculate error rate
-            total = (result['completed'] or 0) + (result['failed'] or 0)
-            if total > 0:
-                error_rate = (result['failed'] or 0) / total
-                await self.set_gauge("errors.rate", error_rate)
+                # Calculate error rate
+                total = (result['completed'] or 0) + (result['failed'] or 0)
+                if total > 0:
+                    error_rate = (result['failed'] or 0) / total
+                    await self.set_gauge("errors.rate", error_rate)
 
-            # Error count
-            cur.execute("""
-                SELECT COUNT(*) as count
-                FROM ai_error_events
-                WHERE timestamp > NOW() - INTERVAL '1 hour'
-            """)
-            result = cur.fetchone()
-            await self.set_gauge("errors.count", result['count'] or 0)
-
-            conn.close()
+                # Error count
+                cur.execute("""
+                    SELECT COUNT(*) as count
+                    FROM ai_error_events
+                    WHERE timestamp > NOW() - INTERVAL '1 hour'
+                """)
+                result = cur.fetchone()
+                await self.set_gauge("errors.count", result['count'] or 0)
 
             # Calculate overall health score
             health_score = await self._calculate_health_score()
@@ -665,18 +686,15 @@ class MonitoringDashboard:
 
         # Clean database
         try:
-            import psycopg2
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+                cur.execute("""
+                    DELETE FROM ai_dashboard_metrics
+                    WHERE timestamp < NOW() - INTERVAL '30 days'
+                """)
 
-            cur.execute("""
-                DELETE FROM ai_dashboard_metrics
-                WHERE timestamp < NOW() - INTERVAL '30 days'
-            """)
-
-            conn.commit()
-            conn.close()
+                conn.commit()
 
         except Exception as e:
             logger.error(f"Failed to cleanup old metrics: {e}")
@@ -904,31 +922,28 @@ class MonitoringDashboard:
     async def _persist_alert(self, alert: DashboardAlert):
         """Persist alert to database"""
         try:
-            import psycopg2
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO ai_dashboard_alerts (
+                        alert_id, severity, title, message, source,
+                        created_at, acknowledged, resolved, metadata
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (alert_id) DO NOTHING
+                """, (
+                    alert.alert_id,
+                    alert.severity.value,
+                    alert.title,
+                    alert.message,
+                    alert.source,
+                    alert.created_at,
+                    alert.acknowledged,
+                    alert.resolved,
+                    json.dumps(alert.metadata)
+                ))
 
-            cur.execute("""
-                INSERT INTO ai_dashboard_alerts (
-                    alert_id, severity, title, message, source,
-                    created_at, acknowledged, resolved, metadata
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (alert_id) DO NOTHING
-            """, (
-                alert.alert_id,
-                alert.severity.value,
-                alert.title,
-                alert.message,
-                alert.source,
-                alert.created_at,
-                alert.acknowledged,
-                alert.resolved,
-                json.dumps(alert.metadata)
-            ))
-
-            conn.commit()
-            conn.close()
+                conn.commit()
 
         except Exception as e:
             logger.error(f"Failed to persist alert: {e}")
@@ -936,28 +951,25 @@ class MonitoringDashboard:
     async def _update_alert(self, alert: DashboardAlert):
         """Update alert in database"""
         try:
-            import psycopg2
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+                cur.execute("""
+                    UPDATE ai_dashboard_alerts
+                    SET acknowledged = %s,
+                        acknowledged_at = CASE WHEN %s THEN NOW() ELSE acknowledged_at END,
+                        resolved = %s,
+                        resolved_at = CASE WHEN %s THEN NOW() ELSE resolved_at END
+                    WHERE alert_id = %s
+                """, (
+                    alert.acknowledged,
+                    alert.acknowledged,
+                    alert.resolved,
+                    alert.resolved,
+                    alert.alert_id
+                ))
 
-            cur.execute("""
-                UPDATE ai_dashboard_alerts
-                SET acknowledged = %s,
-                    acknowledged_at = CASE WHEN %s THEN NOW() ELSE acknowledged_at END,
-                    resolved = %s,
-                    resolved_at = CASE WHEN %s THEN NOW() ELSE resolved_at END
-                WHERE alert_id = %s
-            """, (
-                alert.acknowledged,
-                alert.acknowledged,
-                alert.resolved,
-                alert.resolved,
-                alert.alert_id
-            ))
-
-            conn.commit()
-            conn.close()
+                conn.commit()
 
         except Exception as e:
             logger.error(f"Failed to update alert: {e}")

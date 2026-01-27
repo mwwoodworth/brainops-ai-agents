@@ -13,6 +13,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
+from safe_task import create_safe_task
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from urllib.parse import urlparse
@@ -212,7 +213,7 @@ class AIIntegrationLayer:
         await self._load_agent_registry()
 
         # Start task executor
-        asyncio.create_task(self._task_executor_loop())
+        create_safe_task(self._task_executor_loop())
 
         logger.info("🚀 AI Integration Layer OPERATIONAL!")
 

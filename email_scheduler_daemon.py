@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+from safe_task import create_safe_task
+
 logger = logging.getLogger(__name__)
 
 # Email provider configuration (Resend is primary in prod)
@@ -585,7 +587,7 @@ async def start_email_scheduler():
     daemon = get_email_scheduler()
 
     if _daemon_task is None or _daemon_task.done():
-        _daemon_task = asyncio.create_task(daemon.start())
+        _daemon_task = create_safe_task(daemon.start())
         logger.info("📧 Email scheduler started as background task")
 
     return daemon

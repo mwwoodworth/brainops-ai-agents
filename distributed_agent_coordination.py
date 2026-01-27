@@ -15,7 +15,45 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Optional
 
+from safe_task import create_safe_task
+from contextlib import contextmanager
+
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# SHARED CONNECTION POOL HELPER
+# ============================================================================
+
+# Import shared pool with fallback
+try:
+    from database.sync_pool import get_sync_pool
+    _SYNC_POOL_AVAILABLE = True
+except ImportError:
+    _SYNC_POOL_AVAILABLE = False
+    get_sync_pool = None
+
+
+@contextmanager
+def _get_pooled_connection(db_config: dict):
+    """Get database connection from shared pool with fallback to direct."""
+    if _SYNC_POOL_AVAILABLE and get_sync_pool:
+        try:
+            pool = get_sync_pool()
+            with pool.get_connection() as conn:
+                yield conn
+                return
+        except Exception as e:
+            logger.debug(f"Pool unavailable, using direct: {e}")
+
+    # Fallback to direct connection
+    import psycopg2
+    conn = psycopg2.connect(**db_config)
+    try:
+        yield conn
+    finally:
+        if conn and not conn.closed:
+            conn.close()
 
 
 # ============================================================================
@@ -228,7 +266,7 @@ class DistributedAgentCoordinator:
             try:
                 await self._initialize_database()
                 await self._load_persisted_state()
-                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+                self._heartbeat_task = create_safe_task(self._heartbeat_loop())
                 self._initialized = True
                 logger.info("Distributed agent coordination system initialized")
             except Exception as e:
@@ -237,110 +275,107 @@ class DistributedAgentCoordinator:
     async def _initialize_database(self):
         """Initialize database tables"""
         try:
-            import psycopg2
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+                # Agent registry table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_agent_registry (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        agent_id VARCHAR(255) UNIQUE NOT NULL,
+                        agent_name VARCHAR(255) NOT NULL,
+                        agent_type VARCHAR(100) NOT NULL,
+                        capabilities JSONB DEFAULT '[]'::jsonb,
+                        state VARCHAR(50) DEFAULT 'idle',
+                        registered_at TIMESTAMPTZ DEFAULT NOW(),
+                        last_heartbeat TIMESTAMPTZ DEFAULT NOW(),
+                        current_task_id VARCHAR(255),
+                        max_concurrent_tasks INT DEFAULT 1,
+                        current_task_count INT DEFAULT 0,
+                        metadata JSONB DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Agent registry table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_agent_registry (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    agent_id VARCHAR(255) UNIQUE NOT NULL,
-                    agent_name VARCHAR(255) NOT NULL,
-                    agent_type VARCHAR(100) NOT NULL,
-                    capabilities JSONB DEFAULT '[]'::jsonb,
-                    state VARCHAR(50) DEFAULT 'idle',
-                    registered_at TIMESTAMPTZ DEFAULT NOW(),
-                    last_heartbeat TIMESTAMPTZ DEFAULT NOW(),
-                    current_task_id VARCHAR(255),
-                    max_concurrent_tasks INT DEFAULT 1,
-                    current_task_count INT DEFAULT 0,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Distributed tasks table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_distributed_tasks (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        task_id VARCHAR(255) UNIQUE NOT NULL,
+                        task_type VARCHAR(100) NOT NULL,
+                        payload JSONB NOT NULL,
+                        priority INT DEFAULT 2,
+                        status VARCHAR(50) DEFAULT 'pending',
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        assigned_at TIMESTAMPTZ,
+                        started_at TIMESTAMPTZ,
+                        completed_at TIMESTAMPTZ,
+                        assigned_agent_id VARCHAR(255),
+                        required_capabilities JSONB DEFAULT '[]'::jsonb,
+                        dependencies JSONB DEFAULT '[]'::jsonb,
+                        timeout_seconds INT DEFAULT 300,
+                        retry_count INT DEFAULT 0,
+                        max_retries INT DEFAULT 3,
+                        result JSONB,
+                        error TEXT,
+                        correlation_id VARCHAR(255),
+                        tenant_id VARCHAR(255),
+                        metadata JSONB DEFAULT '{}'::jsonb
+                    )
+                """)
 
-            # Distributed tasks table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_distributed_tasks (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    task_id VARCHAR(255) UNIQUE NOT NULL,
-                    task_type VARCHAR(100) NOT NULL,
-                    payload JSONB NOT NULL,
-                    priority INT DEFAULT 2,
-                    status VARCHAR(50) DEFAULT 'pending',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    assigned_at TIMESTAMPTZ,
-                    started_at TIMESTAMPTZ,
-                    completed_at TIMESTAMPTZ,
-                    assigned_agent_id VARCHAR(255),
-                    required_capabilities JSONB DEFAULT '[]'::jsonb,
-                    dependencies JSONB DEFAULT '[]'::jsonb,
-                    timeout_seconds INT DEFAULT 300,
-                    retry_count INT DEFAULT 0,
-                    max_retries INT DEFAULT 3,
-                    result JSONB,
-                    error TEXT,
-                    correlation_id VARCHAR(255),
-                    tenant_id VARCHAR(255),
-                    metadata JSONB DEFAULT '{}'::jsonb
-                )
-            """)
+                # Task groups table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_task_groups (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        group_id VARCHAR(255) UNIQUE NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        mode VARCHAR(50) NOT NULL,
+                        tasks JSONB DEFAULT '[]'::jsonb,
+                        status VARCHAR(50) DEFAULT 'pending',
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        completed_at TIMESTAMPTZ,
+                        leader_agent_id VARCHAR(255),
+                        participating_agents JSONB DEFAULT '[]'::jsonb,
+                        results JSONB DEFAULT '{}'::jsonb,
+                        metadata JSONB DEFAULT '{}'::jsonb
+                    )
+                """)
 
-            # Task groups table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_task_groups (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    group_id VARCHAR(255) UNIQUE NOT NULL,
-                    name VARCHAR(255) NOT NULL,
-                    mode VARCHAR(50) NOT NULL,
-                    tasks JSONB DEFAULT '[]'::jsonb,
-                    status VARCHAR(50) DEFAULT 'pending',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    completed_at TIMESTAMPTZ,
-                    leader_agent_id VARCHAR(255),
-                    participating_agents JSONB DEFAULT '[]'::jsonb,
-                    results JSONB DEFAULT '{}'::jsonb,
-                    metadata JSONB DEFAULT '{}'::jsonb
-                )
-            """)
+                # Coordination messages table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_coordination_messages (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        message_id VARCHAR(255) UNIQUE NOT NULL,
+                        from_agent_id VARCHAR(255) NOT NULL,
+                        to_agent_id VARCHAR(255),
+                        message_type VARCHAR(100) NOT NULL,
+                        payload JSONB NOT NULL,
+                        timestamp TIMESTAMPTZ DEFAULT NOW(),
+                        correlation_id VARCHAR(255),
+                        requires_ack BOOLEAN DEFAULT false,
+                        acked BOOLEAN DEFAULT false,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
 
-            # Coordination messages table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_coordination_messages (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    message_id VARCHAR(255) UNIQUE NOT NULL,
-                    from_agent_id VARCHAR(255) NOT NULL,
-                    to_agent_id VARCHAR(255),
-                    message_type VARCHAR(100) NOT NULL,
-                    payload JSONB NOT NULL,
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    correlation_id VARCHAR(255),
-                    requires_ack BOOLEAN DEFAULT false,
-                    acked BOOLEAN DEFAULT false,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                # Create indexes
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_distributed_tasks_status
+                    ON ai_distributed_tasks(status)
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_distributed_tasks_priority
+                    ON ai_distributed_tasks(priority DESC)
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_agent_registry_state
+                    ON ai_agent_registry(state)
+                """)
 
-            # Create indexes
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_distributed_tasks_status
-                ON ai_distributed_tasks(status)
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_distributed_tasks_priority
-                ON ai_distributed_tasks(priority DESC)
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_agent_registry_state
-                ON ai_agent_registry(state)
-            """)
-
-            conn.commit()
-            conn.close()
-            logger.info("Coordination database tables initialized")
+                conn.commit()
+                logger.info("Coordination database tables initialized")
 
         except Exception as e:
             logger.error(f"Database initialization error: {e}")
@@ -348,61 +383,59 @@ class DistributedAgentCoordinator:
     async def _load_persisted_state(self):
         """Load persisted state from database"""
         try:
-            import psycopg2
             from psycopg2.extras import RealDictCursor
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            # Load agents
-            cur.execute("SELECT * FROM ai_agent_registry WHERE state != 'offline'")
-            for row in cur.fetchall():
-                self._agents[row['agent_id']] = AgentRegistration(
-                    agent_id=row['agent_id'],
-                    agent_name=row['agent_name'],
-                    agent_type=row['agent_type'],
-                    capabilities=row['capabilities'] or [],
-                    state=AgentState(row['state']),
-                    registered_at=row['registered_at'],
-                    last_heartbeat=row['last_heartbeat'],
-                    current_task_id=row['current_task_id'],
-                    max_concurrent_tasks=row['max_concurrent_tasks'],
-                    current_task_count=row['current_task_count'],
-                    metadata=row['metadata'] or {}
-                )
+                # Load agents
+                cur.execute("SELECT * FROM ai_agent_registry WHERE state != 'offline'")
+                for row in cur.fetchall():
+                    self._agents[row['agent_id']] = AgentRegistration(
+                        agent_id=row['agent_id'],
+                        agent_name=row['agent_name'],
+                        agent_type=row['agent_type'],
+                        capabilities=row['capabilities'] or [],
+                        state=AgentState(row['state']),
+                        registered_at=row['registered_at'],
+                        last_heartbeat=row['last_heartbeat'],
+                        current_task_id=row['current_task_id'],
+                        max_concurrent_tasks=row['max_concurrent_tasks'],
+                        current_task_count=row['current_task_count'],
+                        metadata=row['metadata'] or {}
+                    )
 
-            # Load pending tasks
-            cur.execute("""
-                SELECT * FROM ai_distributed_tasks
-                WHERE status IN ('pending', 'queued', 'assigned', 'in_progress')
-                ORDER BY priority DESC, created_at ASC
-            """)
-            for row in cur.fetchall():
-                task = DistributedTask(
-                    task_id=row['task_id'],
-                    task_type=row['task_type'],
-                    payload=row['payload'],
-                    priority=TaskPriority(row['priority']),
-                    status=TaskStatus(row['status']),
-                    created_at=row['created_at'],
-                    assigned_at=row['assigned_at'],
-                    started_at=row['started_at'],
-                    assigned_agent_id=row['assigned_agent_id'],
-                    required_capabilities=row['required_capabilities'] or [],
-                    dependencies=row['dependencies'] or [],
-                    timeout_seconds=row['timeout_seconds'],
-                    retry_count=row['retry_count'],
-                    max_retries=row['max_retries'],
-                    correlation_id=row['correlation_id'],
-                    tenant_id=row['tenant_id'],
-                    metadata=row['metadata'] or {}
-                )
-                self._tasks[task.task_id] = task
-                if task.status in [TaskStatus.PENDING, TaskStatus.QUEUED]:
-                    self._task_queue.append(task.task_id)
+                # Load pending tasks
+                cur.execute("""
+                    SELECT * FROM ai_distributed_tasks
+                    WHERE status IN ('pending', 'queued', 'assigned', 'in_progress')
+                    ORDER BY priority DESC, created_at ASC
+                """)
+                for row in cur.fetchall():
+                    task = DistributedTask(
+                        task_id=row['task_id'],
+                        task_type=row['task_type'],
+                        payload=row['payload'],
+                        priority=TaskPriority(row['priority']),
+                        status=TaskStatus(row['status']),
+                        created_at=row['created_at'],
+                        assigned_at=row['assigned_at'],
+                        started_at=row['started_at'],
+                        assigned_agent_id=row['assigned_agent_id'],
+                        required_capabilities=row['required_capabilities'] or [],
+                        dependencies=row['dependencies'] or [],
+                        timeout_seconds=row['timeout_seconds'],
+                        retry_count=row['retry_count'],
+                        max_retries=row['max_retries'],
+                        correlation_id=row['correlation_id'],
+                        tenant_id=row['tenant_id'],
+                        metadata=row['metadata'] or {}
+                    )
+                    self._tasks[task.task_id] = task
+                    if task.status in [TaskStatus.PENDING, TaskStatus.QUEUED]:
+                        self._task_queue.append(task.task_id)
 
-            conn.close()
-            logger.info(f"Loaded {len(self._agents)} agents and {len(self._tasks)} tasks")
+                logger.info(f"Loaded {len(self._agents)} agents and {len(self._tasks)} tasks")
 
         except Exception as e:
             logger.error(f"Failed to load persisted state: {e}")
@@ -523,40 +556,37 @@ class DistributedAgentCoordinator:
     async def _persist_agent(self, agent: AgentRegistration):
         """Persist agent to database"""
         try:
-            import psycopg2
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO ai_agent_registry (
+                        agent_id, agent_name, agent_type, capabilities, state,
+                        registered_at, last_heartbeat, current_task_id,
+                        max_concurrent_tasks, current_task_count, metadata
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (agent_id) DO UPDATE SET
+                        state = EXCLUDED.state,
+                        last_heartbeat = EXCLUDED.last_heartbeat,
+                        current_task_id = EXCLUDED.current_task_id,
+                        current_task_count = EXCLUDED.current_task_count,
+                        metadata = EXCLUDED.metadata,
+                        updated_at = NOW()
+                """, (
+                    agent.agent_id,
+                    agent.agent_name,
+                    agent.agent_type,
+                    json.dumps(agent.capabilities),
+                    agent.state.value,
+                    agent.registered_at,
+                    agent.last_heartbeat,
+                    agent.current_task_id,
+                    agent.max_concurrent_tasks,
+                    agent.current_task_count,
+                    json.dumps(agent.metadata)
+                ))
 
-            cur.execute("""
-                INSERT INTO ai_agent_registry (
-                    agent_id, agent_name, agent_type, capabilities, state,
-                    registered_at, last_heartbeat, current_task_id,
-                    max_concurrent_tasks, current_task_count, metadata
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (agent_id) DO UPDATE SET
-                    state = EXCLUDED.state,
-                    last_heartbeat = EXCLUDED.last_heartbeat,
-                    current_task_id = EXCLUDED.current_task_id,
-                    current_task_count = EXCLUDED.current_task_count,
-                    metadata = EXCLUDED.metadata,
-                    updated_at = NOW()
-            """, (
-                agent.agent_id,
-                agent.agent_name,
-                agent.agent_type,
-                json.dumps(agent.capabilities),
-                agent.state.value,
-                agent.registered_at,
-                agent.last_heartbeat,
-                agent.current_task_id,
-                agent.max_concurrent_tasks,
-                agent.current_task_count,
-                json.dumps(agent.metadata)
-            ))
-
-            conn.commit()
-            conn.close()
+                conn.commit()
 
         except Exception as e:
             logger.error(f"Failed to persist agent: {e}")
@@ -875,54 +905,51 @@ class DistributedAgentCoordinator:
     async def _persist_task(self, task: DistributedTask):
         """Persist task to database"""
         try:
-            import psycopg2
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO ai_distributed_tasks (
+                        task_id, task_type, payload, priority, status,
+                        created_at, assigned_at, started_at, completed_at,
+                        assigned_agent_id, required_capabilities, dependencies,
+                        timeout_seconds, retry_count, max_retries, result,
+                        error, correlation_id, tenant_id, metadata
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (task_id) DO UPDATE SET
+                        status = EXCLUDED.status,
+                        assigned_at = EXCLUDED.assigned_at,
+                        started_at = EXCLUDED.started_at,
+                        completed_at = EXCLUDED.completed_at,
+                        assigned_agent_id = EXCLUDED.assigned_agent_id,
+                        retry_count = EXCLUDED.retry_count,
+                        result = EXCLUDED.result,
+                        error = EXCLUDED.error,
+                        metadata = EXCLUDED.metadata
+                """, (
+                    task.task_id,
+                    task.task_type,
+                    json.dumps(task.payload),
+                    task.priority.value,
+                    task.status.value,
+                    task.created_at,
+                    task.assigned_at,
+                    task.started_at,
+                    task.completed_at,
+                    task.assigned_agent_id,
+                    json.dumps(task.required_capabilities),
+                    json.dumps(task.dependencies),
+                    task.timeout_seconds,
+                    task.retry_count,
+                    task.max_retries,
+                    json.dumps(task.result) if task.result else None,
+                    task.error,
+                    task.correlation_id,
+                    task.tenant_id,
+                    json.dumps(task.metadata)
+                ))
 
-            cur.execute("""
-                INSERT INTO ai_distributed_tasks (
-                    task_id, task_type, payload, priority, status,
-                    created_at, assigned_at, started_at, completed_at,
-                    assigned_agent_id, required_capabilities, dependencies,
-                    timeout_seconds, retry_count, max_retries, result,
-                    error, correlation_id, tenant_id, metadata
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (task_id) DO UPDATE SET
-                    status = EXCLUDED.status,
-                    assigned_at = EXCLUDED.assigned_at,
-                    started_at = EXCLUDED.started_at,
-                    completed_at = EXCLUDED.completed_at,
-                    assigned_agent_id = EXCLUDED.assigned_agent_id,
-                    retry_count = EXCLUDED.retry_count,
-                    result = EXCLUDED.result,
-                    error = EXCLUDED.error,
-                    metadata = EXCLUDED.metadata
-            """, (
-                task.task_id,
-                task.task_type,
-                json.dumps(task.payload),
-                task.priority.value,
-                task.status.value,
-                task.created_at,
-                task.assigned_at,
-                task.started_at,
-                task.completed_at,
-                task.assigned_agent_id,
-                json.dumps(task.required_capabilities),
-                json.dumps(task.dependencies),
-                task.timeout_seconds,
-                task.retry_count,
-                task.max_retries,
-                json.dumps(task.result) if task.result else None,
-                task.error,
-                task.correlation_id,
-                task.tenant_id,
-                json.dumps(task.metadata)
-            ))
-
-            conn.commit()
-            conn.close()
+                conn.commit()
 
         except Exception as e:
             logger.error(f"Failed to persist task: {e}")
@@ -1010,40 +1037,37 @@ class DistributedAgentCoordinator:
     async def _persist_task_group(self, group: TaskGroup):
         """Persist task group to database"""
         try:
-            import psycopg2
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO ai_task_groups (
+                        group_id, name, mode, tasks, status, created_at,
+                        completed_at, leader_agent_id, participating_agents,
+                        results, metadata
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (group_id) DO UPDATE SET
+                        status = EXCLUDED.status,
+                        completed_at = EXCLUDED.completed_at,
+                        leader_agent_id = EXCLUDED.leader_agent_id,
+                        participating_agents = EXCLUDED.participating_agents,
+                        results = EXCLUDED.results,
+                        metadata = EXCLUDED.metadata
+                """, (
+                    group.group_id,
+                    group.name,
+                    group.mode.value,
+                    json.dumps(group.tasks),
+                    group.status.value,
+                    group.created_at,
+                    group.completed_at,
+                    group.leader_agent_id,
+                    json.dumps(group.participating_agents),
+                    json.dumps(group.results),
+                    json.dumps(group.metadata)
+                ))
 
-            cur.execute("""
-                INSERT INTO ai_task_groups (
-                    group_id, name, mode, tasks, status, created_at,
-                    completed_at, leader_agent_id, participating_agents,
-                    results, metadata
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (group_id) DO UPDATE SET
-                    status = EXCLUDED.status,
-                    completed_at = EXCLUDED.completed_at,
-                    leader_agent_id = EXCLUDED.leader_agent_id,
-                    participating_agents = EXCLUDED.participating_agents,
-                    results = EXCLUDED.results,
-                    metadata = EXCLUDED.metadata
-            """, (
-                group.group_id,
-                group.name,
-                group.mode.value,
-                json.dumps(group.tasks),
-                group.status.value,
-                group.created_at,
-                group.completed_at,
-                group.leader_agent_id,
-                json.dumps(group.participating_agents),
-                json.dumps(group.results),
-                json.dumps(group.metadata)
-            ))
-
-            conn.commit()
-            conn.close()
+                conn.commit()
 
         except Exception as e:
             logger.error(f"Failed to persist task group: {e}")
@@ -1119,30 +1143,27 @@ class DistributedAgentCoordinator:
     async def _persist_message(self, message: CoordinationMessage):
         """Persist message to database"""
         try:
-            import psycopg2
+            with _get_pooled_connection(self._get_db_config()) as conn:
+                cur = conn.cursor()
 
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO ai_coordination_messages (
+                        message_id, from_agent_id, to_agent_id, message_type,
+                        payload, timestamp, correlation_id, requires_ack, acked
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    message.message_id,
+                    message.from_agent_id,
+                    message.to_agent_id,
+                    message.message_type,
+                    json.dumps(message.payload),
+                    message.timestamp,
+                    message.correlation_id,
+                    message.requires_ack,
+                    message.acked
+                ))
 
-            cur.execute("""
-                INSERT INTO ai_coordination_messages (
-                    message_id, from_agent_id, to_agent_id, message_type,
-                    payload, timestamp, correlation_id, requires_ack, acked
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                message.message_id,
-                message.from_agent_id,
-                message.to_agent_id,
-                message.message_type,
-                json.dumps(message.payload),
-                message.timestamp,
-                message.correlation_id,
-                message.requires_ack,
-                message.acked
-            ))
-
-            conn.commit()
-            conn.close()
+                conn.commit()
 
         except Exception as e:
             logger.error(f"Failed to persist message: {e}")

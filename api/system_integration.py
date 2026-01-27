@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from safe_task import create_safe_task
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
@@ -68,7 +69,7 @@ class IntegrationPipeline:
             return
 
         # Start background event processor
-        self._processing_task = asyncio.create_task(self._process_events())
+        self._processing_task = create_safe_task(self._process_events())
         self._initialized = True
         logger.info("✅ Integration Pipeline initialized")
 

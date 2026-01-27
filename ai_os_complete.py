@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, TypedDict
 
+from safe_task import create_safe_task
+
 # random removed to ensure deterministic, real logic
 # Core dependencies
 from psycopg2.pool import ThreadedConnectionPool
@@ -591,10 +593,10 @@ class AIOperatingSystem:
         await self._register_agents()
 
         # Start WebSocket server
-        asyncio.create_task(self._start_websocket_server())
+        create_safe_task(self._start_websocket_server(), "websocket_server")
 
         # Start agent monitoring
-        asyncio.create_task(self._monitor_agents())
+        create_safe_task(self._monitor_agents(), "agent_monitor")
 
         logger.info(f"Initialized {len(self.orchestrator.agents)} agents")
         logger.info("AI Operating System OPERATIONAL")
