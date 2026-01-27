@@ -387,54 +387,168 @@ Return ONLY the final JSON response."""
         )
 
     def _heuristic_analysis(self, issue: str, context: Dict[str, Any]) -> AIAnalysisResult:
-        """Fallback heuristic analysis when AI is not available"""
+        """Enhanced heuristic analysis when AI is not available"""
 
         issue_lower = issue.lower()
 
-        # Basic pattern recognition as fallback
+        # 500 Internal Server Error
         if "500" in issue or "internal server error" in issue_lower:
             return AIAnalysisResult(
                 issue=issue,
                 root_cause="Internal server error - application crash or unhandled exception",
-                confidence=0.6,
+                confidence=0.7,
                 severity="high",
                 fix_strategies=[
+                    {"action": "check_logs", "description": "Check application logs for stack trace", "confidence": 0.9, "auto": False},
                     {"action": "restart", "description": "Restart the service", "confidence": 0.7, "auto": True},
-                    {"action": "check_logs", "description": "Check application logs", "confidence": 0.9, "auto": False}
+                    {"action": "check_memory", "description": "Check memory usage", "confidence": 0.6, "auto": False}
                 ],
                 auto_fixable=True,
-                reasoning="Pattern match fallback - AI not available",
+                reasoning="HTTP 500 indicates unhandled exception. Check logs for root cause.",
                 model_used="heuristic",
                 analysis_depth=AnalysisDepth.QUICK
             )
 
+        # Timeout issues
         if "timeout" in issue_lower:
             return AIAnalysisResult(
                 issue=issue,
-                root_cause="Network timeout or slow response",
-                confidence=0.6,
+                root_cause="Request timeout - slow response from service or database",
+                confidence=0.7,
                 severity="medium",
                 fix_strategies=[
-                    {"action": "restart", "description": "Restart the service", "confidence": 0.6, "auto": True},
-                    {"action": "check_performance", "description": "Check system performance", "confidence": 0.8, "auto": False}
+                    {"action": "check_db_queries", "description": "Check for slow database queries", "confidence": 0.8, "auto": False},
+                    {"action": "check_network", "description": "Check network latency", "confidence": 0.7, "auto": False},
+                    {"action": "scale_up", "description": "Consider scaling up resources", "confidence": 0.5, "auto": False}
                 ],
-                auto_fixable=True,
-                reasoning="Pattern match fallback - AI not available",
+                auto_fixable=False,
+                reasoning="Timeouts typically indicate slow queries, network issues, or insufficient resources.",
                 model_used="heuristic",
                 analysis_depth=AnalysisDepth.QUICK
             )
 
-        # Generic fallback
+        # Database issues
+        if any(kw in issue_lower for kw in ["database", "db", "postgres", "sql", "query", "connection pool"]):
+            return AIAnalysisResult(
+                issue=issue,
+                root_cause="Database connectivity or performance issue",
+                confidence=0.7,
+                severity="high",
+                fix_strategies=[
+                    {"action": "check_connections", "description": "Check database connection pool usage", "confidence": 0.8, "auto": False},
+                    {"action": "check_slow_queries", "description": "Identify slow queries", "confidence": 0.9, "auto": False},
+                    {"action": "restart_pool", "description": "Restart connection pool", "confidence": 0.6, "auto": True}
+                ],
+                auto_fixable=True,
+                reasoning="Database issues affect all services. Check connection pool and query performance.",
+                model_used="heuristic",
+                analysis_depth=AnalysisDepth.QUICK
+            )
+
+        # Memory issues
+        if any(kw in issue_lower for kw in ["memory", "oom", "out of memory", "heap"]):
+            return AIAnalysisResult(
+                issue=issue,
+                root_cause="Memory pressure or leak detected",
+                confidence=0.8,
+                severity="critical",
+                fix_strategies=[
+                    {"action": "restart", "description": "Restart service to reclaim memory", "confidence": 0.9, "auto": True},
+                    {"action": "profile_memory", "description": "Profile memory usage to find leak", "confidence": 0.7, "auto": False},
+                    {"action": "increase_limits", "description": "Increase memory limits if available", "confidence": 0.5, "auto": False}
+                ],
+                auto_fixable=True,
+                reasoning="Memory issues require immediate restart, then investigation for leaks.",
+                model_used="heuristic",
+                analysis_depth=AnalysisDepth.QUICK
+            )
+
+        # Performance/slow issues
+        if any(kw in issue_lower for kw in ["slow", "performance", "degradation", "latency", "lag"]):
+            return AIAnalysisResult(
+                issue=issue,
+                root_cause="Service performance degradation",
+                confidence=0.6,
+                severity="medium",
+                fix_strategies=[
+                    {"action": "check_cpu", "description": "Check CPU utilization", "confidence": 0.7, "auto": False},
+                    {"action": "check_db", "description": "Check database performance", "confidence": 0.8, "auto": False},
+                    {"action": "check_external", "description": "Check external API dependencies", "confidence": 0.6, "auto": False},
+                    {"action": "scale", "description": "Consider horizontal scaling", "confidence": 0.5, "auto": False}
+                ],
+                auto_fixable=False,
+                reasoning="Performance issues require profiling to identify bottleneck.",
+                model_used="heuristic",
+                analysis_depth=AnalysisDepth.QUICK
+            )
+
+        # Authentication/authorization issues
+        if any(kw in issue_lower for kw in ["401", "403", "auth", "unauthorized", "forbidden", "token", "api key"]):
+            return AIAnalysisResult(
+                issue=issue,
+                root_cause="Authentication or authorization failure",
+                confidence=0.8,
+                severity="high",
+                fix_strategies=[
+                    {"action": "check_credentials", "description": "Verify API keys/tokens are valid", "confidence": 0.9, "auto": False},
+                    {"action": "check_expiry", "description": "Check if tokens have expired", "confidence": 0.8, "auto": False},
+                    {"action": "rotate_keys", "description": "Rotate credentials if compromised", "confidence": 0.5, "auto": False}
+                ],
+                auto_fixable=False,
+                reasoning="Auth issues often indicate expired or invalid credentials.",
+                model_used="heuristic",
+                analysis_depth=AnalysisDepth.QUICK
+            )
+
+        # Deployment/crash issues
+        if any(kw in issue_lower for kw in ["crash", "restart", "deploy", "failed", "unhealthy"]):
+            return AIAnalysisResult(
+                issue=issue,
+                root_cause="Service crash or deployment failure",
+                confidence=0.7,
+                severity="high",
+                fix_strategies=[
+                    {"action": "check_logs", "description": "Review deployment/crash logs", "confidence": 0.9, "auto": False},
+                    {"action": "rollback", "description": "Rollback to previous version", "confidence": 0.7, "auto": False},
+                    {"action": "restart", "description": "Force restart the service", "confidence": 0.6, "auto": True}
+                ],
+                auto_fixable=True,
+                reasoning="Crashes require log analysis to identify root cause.",
+                model_used="heuristic",
+                analysis_depth=AnalysisDepth.QUICK
+            )
+
+        # Quota/rate limit issues
+        if any(kw in issue_lower for kw in ["quota", "rate limit", "429", "too many requests"]):
+            return AIAnalysisResult(
+                issue=issue,
+                root_cause="Rate limit or quota exceeded",
+                confidence=0.9,
+                severity="medium",
+                fix_strategies=[
+                    {"action": "wait", "description": "Wait for rate limit to reset", "confidence": 0.9, "auto": True},
+                    {"action": "add_credits", "description": "Add credits or upgrade plan", "confidence": 0.8, "auto": False},
+                    {"action": "implement_backoff", "description": "Implement exponential backoff", "confidence": 0.7, "auto": False}
+                ],
+                auto_fixable=True,
+                reasoning="Rate limits require waiting or plan upgrades.",
+                model_used="heuristic",
+                analysis_depth=AnalysisDepth.QUICK
+            )
+
+        # Generic fallback with better guidance
         return AIAnalysisResult(
             issue=issue,
-            root_cause="Unknown issue requiring investigation",
-            confidence=0.3,
+            root_cause="Issue requires investigation - no specific pattern matched",
+            confidence=0.4,
             severity="medium",
             fix_strategies=[
-                {"action": "investigate", "description": "Manual investigation required", "confidence": 1.0, "auto": False}
+                {"action": "check_logs", "description": "Review application and system logs", "confidence": 0.8, "auto": False},
+                {"action": "check_metrics", "description": "Review system metrics (CPU, memory, network)", "confidence": 0.7, "auto": False},
+                {"action": "investigate", "description": "Manual investigation needed", "confidence": 1.0, "auto": False}
             ],
             auto_fixable=False,
-            reasoning="No AI available and no pattern match - requires manual investigation",
+            reasoning="AI providers unavailable - using pattern-based analysis. Check logs for more details.",
             model_used="heuristic",
             analysis_depth=AnalysisDepth.QUICK
         )
