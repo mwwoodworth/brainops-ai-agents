@@ -198,7 +198,7 @@ class AIBoardOfDirectors:
             },
             BoardRole.COO: {
                 "provider": "gemini",
-                "model": os.getenv("AI_BOARD_MODEL_COO", "gemini-1.5-pro-002"),
+                "model": os.getenv("AI_BOARD_MODEL_COO", "gemini-2.0-flash"),
             },
             BoardRole.CMO: {
                 "provider": "anthropic",
