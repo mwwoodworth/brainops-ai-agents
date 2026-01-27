@@ -521,8 +521,15 @@ class RevenueAutomationEngine:
 
             conn = await asyncpg.connect(self._db_url)
             try:
-                # Load leads - handle schema variations
-                rows = await conn.fetch("SELECT * FROM revenue_leads ORDER BY created_at DESC LIMIT 10000")
+                # Load leads - select specific columns for performance
+                rows = await conn.fetch("""
+                    SELECT id, lead_id, email, phone, name, contact_name, company, company_name,
+                           industry, source, status, stage, score, estimated_value, value_estimate,
+                           created_at, updated_at, contacted_at, converted_at,
+                           tags, custom_fields, automation_history
+                    FROM revenue_leads
+                    ORDER BY created_at DESC LIMIT 10000
+                """)
                 for row in rows:
                     try:
                         # Handle column name variations
@@ -579,8 +586,14 @@ class RevenueAutomationEngine:
 
                 logger.info(f"Loaded {len(self.leads)} leads from database")
 
-                # Load transactions and calculate revenue
-                rows = await conn.fetch("SELECT * FROM revenue_transactions WHERE status = 'completed'")
+                # Load transactions and calculate revenue - select specific columns
+                rows = await conn.fetch("""
+                    SELECT transaction_id, lead_id, amount, currency, status,
+                           payment_method, processor_id, created_at, completed_at,
+                           industry, product_service, metadata
+                    FROM revenue_transactions
+                    WHERE status = 'completed'
+                """)
                 for row in rows:
                     self.total_revenue += Decimal(str(row['amount']))
                     tx = RevenueTransaction(

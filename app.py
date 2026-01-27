@@ -3230,7 +3230,9 @@ async def execute_agent(
 
         # Get agent by UUID (text comparison) or legacy slug
         agent = await pool.fetchrow(
-            "SELECT * FROM agents WHERE id::text = $1 OR name = $1",
+            """SELECT id, name, type, enabled, description, capabilities, configuration,
+                      schedule_hours, created_at, updated_at
+               FROM agents WHERE id::text = $1 OR name = $1""",
             resolved_agent_id,
         )
         if not agent:
@@ -3557,9 +3559,12 @@ async def execute_scheduled_agents(
 
         # Get agents scheduled for this hour
         agents = await pool.fetch("""
-            SELECT * FROM agents
+            SELECT id, name, type, enabled, description, capabilities, configuration,
+                   schedule_hours, created_at, updated_at
+            FROM agents
             WHERE enabled = true
             AND schedule_hours @> ARRAY[$1]::integer[]
+            LIMIT 50
         """, current_hour)
 
         results = []
