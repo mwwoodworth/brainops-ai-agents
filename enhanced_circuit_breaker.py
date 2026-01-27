@@ -28,6 +28,8 @@ import time
 from collections import deque
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
+
+from safe_task import create_safe_task
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable, Optional
@@ -701,7 +703,7 @@ class DeadlockDetector:
     async def start(self):
         """Start the deadlock detection loop"""
         self._running = True
-        self._detection_task = asyncio.create_task(self._detection_loop())
+        self._detection_task = create_safe_task(self._detection_loop())
         logger.info("DeadlockDetector started")
 
     async def stop(self):
@@ -995,7 +997,7 @@ class SidecarHealthMonitor:
     async def start(self):
         """Start the sidecar monitor"""
         self._running = True
-        self._check_task = asyncio.create_task(self._monitor_loop())
+        self._check_task = create_safe_task(self._monitor_loop())
         logger.info(f"Sidecar monitor started for {self.component_id}")
 
     async def stop(self):

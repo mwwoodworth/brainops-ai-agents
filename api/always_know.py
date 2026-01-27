@@ -6,9 +6,11 @@ API endpoints for the comprehensive observability brain.
 Provides instant access to system state without querying.
 """
 
+import asyncio
 import logging
 from typing import Any
 
+from safe_task import create_safe_task
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 
@@ -127,7 +129,7 @@ async def trigger_ui_tests() -> dict[str, Any]:
 
     try:
         import asyncio
-        asyncio.create_task(brain._run_ui_tests())
+        create_safe_task(brain._run_ui_tests())
         return {
             "status": "triggered",
             "message": "UI tests started in background. Check /always-know/state for results."

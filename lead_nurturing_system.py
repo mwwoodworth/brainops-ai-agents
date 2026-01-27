@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
 
+from safe_task import create_safe_task
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
@@ -787,7 +788,7 @@ class LeadNurturingSystem:
             conn.close()
 
             # Start test execution
-            asyncio.create_task(self._execute_ab_test(test_id))
+            create_safe_task(self._execute_ab_test(test_id))
 
             return test_id
 

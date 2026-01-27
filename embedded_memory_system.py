@@ -14,6 +14,8 @@ from typing import Any, Optional
 
 import numpy as np
 
+from safe_task import create_safe_task
+
 # Using OpenAI text-embedding-3-small for production-quality semantic embeddings
 # Includes circuit breaker pattern for quota/rate limit handling
 
@@ -63,7 +65,7 @@ class EmbeddedMemorySystem:
         await self.sync_from_master()
 
         # 5. Start background sync task (includes retry logic)
-        self.sync_task = asyncio.create_task(self._background_sync())
+        self.sync_task = create_safe_task(self._background_sync())
 
         logger.info("✅ Embedded Memory System initialized")
 
@@ -283,7 +285,7 @@ class EmbeddedMemorySystem:
         cursor = self.sqlite_conn.cursor()
         local_count = cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0]
         if local_count == 0 and not self.last_sync:
-            asyncio.create_task(self._auto_sync_if_empty())
+            create_safe_task(self._auto_sync_if_empty())
 
         # Get query embedding
         query_embedding = self._encode_embedding(query)
@@ -407,7 +409,7 @@ class EmbeddedMemorySystem:
             self.sqlite_conn.commit()
 
             # Async sync to master
-            asyncio.create_task(self._sync_memory_to_master(memory_id))
+            create_safe_task(self._sync_memory_to_master(memory_id))
 
             return True
         except Exception as e:
@@ -517,7 +519,7 @@ class EmbeddedMemorySystem:
             self.sqlite_conn.commit()
 
             # Async sync to master
-            asyncio.create_task(self._sync_task_to_master(task_id))
+            create_safe_task(self._sync_task_to_master(task_id))
 
             return True
         except Exception as e:

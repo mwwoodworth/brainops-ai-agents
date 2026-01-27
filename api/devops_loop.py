@@ -8,6 +8,7 @@ import asyncio
 import logging
 from typing import Optional
 
+from safe_task import create_safe_task
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ async def start_continuous(background_tasks: BackgroundTasks, interval_seconds: 
         async def run_continuous():
             await start_continuous_devops(interval_seconds)
 
-        _continuous_task = asyncio.create_task(run_continuous())
+        _continuous_task = create_safe_task(run_continuous())
 
         return {
             "status": "started",

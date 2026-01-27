@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Optional
 
+from safe_task import create_safe_task
 from ai_observability import Event, EventType, get_event_bus, get_observability, publish_event
 
 logger = logging.getLogger(__name__)
@@ -439,7 +440,7 @@ class ModuleIntegrationOrchestrator:
                 self._signal_queues[module] = asyncio.Queue(maxsize=100)
 
         if self._signal_processor_task is None:
-            self._signal_processor_task = asyncio.create_task(self._process_signals())
+            self._signal_processor_task = create_safe_task(self._process_signals())
             logger.info("Signal processor started")
 
     async def _process_signals(self):

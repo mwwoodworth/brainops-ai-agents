@@ -18,6 +18,7 @@ import os
 from datetime import datetime
 from typing import Any, Optional
 
+from safe_task import create_safe_task
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -181,7 +182,7 @@ async def process_customer_created(event: ERPSystemEvent, unified_event: Optiona
     if CUSTOMER_SUCCESS_AVAILABLE and CustomerSuccessAgent:
         try:
             csa = CustomerSuccessAgent(event.tenant_id)
-            asyncio.create_task(csa.generate_onboarding_plan(customer_id))
+            create_safe_task(csa.generate_onboarding_plan(customer_id))
             result["agents"].append("customer_success_agent")
             result["actions"].append("onboarding_plan_generation")
             logger.info(f"Triggered onboarding for customer {customer_id}")
@@ -195,7 +196,7 @@ async def process_customer_created(event: ERPSystemEvent, unified_event: Optiona
             revenue_system = get_revenue_system()
             if revenue_system:
                 # Log as new revenue opportunity
-                asyncio.create_task(revenue_system.track_opportunity(
+                create_safe_task(revenue_system.track_opportunity(
                     entity_type="customer",
                     entity_id=customer_id,
                     tenant_id=event.tenant_id,
@@ -224,7 +225,7 @@ async def process_lead_created(event: ERPSystemEvent, unified_event: Optional["U
     if LEAD_QUALIFICATION_AVAILABLE and LeadQualificationAgent:
         try:
             lqa = LeadQualificationAgent(event.tenant_id)
-            asyncio.create_task(lqa.qualify_lead(lead_id, event.payload))
+            create_safe_task(lqa.qualify_lead(lead_id, event.payload))
             result["agents"].append("lead_qualification_agent")
             result["actions"].append("lead_qualification")
         except Exception as e:
@@ -296,7 +297,7 @@ async def process_job_created(event: ERPSystemEvent, unified_event: Optional["Un
         try:
             revenue_system = get_revenue_system()
             if revenue_system:
-                asyncio.create_task(revenue_system.track_opportunity(
+                create_safe_task(revenue_system.track_opportunity(
                     entity_type="job",
                     entity_id=job_id,
                     tenant_id=event.tenant_id,
@@ -323,7 +324,7 @@ async def process_job_scheduled(event: ERPSystemEvent, unified_event: Optional["
         try:
             notification_system = get_notification_system()
             if notification_system:
-                asyncio.create_task(notification_system.send_job_scheduled_notification(
+                create_safe_task(notification_system.send_job_scheduled_notification(
                     job_id=job_id,
                     tenant_id=event.tenant_id,
                     scheduled_start=event.payload.get("scheduledStart"),
@@ -361,7 +362,7 @@ async def process_job_completed(event: ERPSystemEvent, unified_event: Optional["
                     "actual_hours": event.payload.get("actualHours"),
                 }
 
-                asyncio.create_task(followup_system.create_followup_sequence(
+                create_safe_task(followup_system.create_followup_sequence(
                     followup_type=FollowUpType.SERVICE_COMPLETION,
                     entity_id=customer_id,
                     entity_type="customer",
@@ -442,7 +443,7 @@ async def process_estimate_accepted(event: ERPSystemEvent, unified_event: Option
         try:
             revenue_system = get_revenue_system()
             if revenue_system:
-                asyncio.create_task(revenue_system.track_conversion(
+                create_safe_task(revenue_system.track_conversion(
                     source_type="estimate",
                     source_id=estimate_id,
                     target_type="job",
@@ -473,7 +474,7 @@ async def process_invoice_created(event: ERPSystemEvent, unified_event: Optional
         try:
             notification_system = get_notification_system()
             if notification_system:
-                asyncio.create_task(notification_system.send_invoice_notification(
+                create_safe_task(notification_system.send_invoice_notification(
                     invoice_id=invoice_id,
                     customer_id=customer_id,
                     amount=amount,
@@ -504,7 +505,7 @@ async def process_payment_received(event: ERPSystemEvent, unified_event: Optiona
         try:
             revenue_system = get_revenue_system()
             if revenue_system:
-                asyncio.create_task(revenue_system.record_payment(
+                create_safe_task(revenue_system.record_payment(
                     amount=amount,
                     invoice_id=invoice_id,
                     tenant_id=event.tenant_id,
@@ -520,7 +521,7 @@ async def process_payment_received(event: ERPSystemEvent, unified_event: Optiona
         try:
             followup_system = get_intelligent_followup_system()
             if followup_system:
-                asyncio.create_task(followup_system.create_followup_sequence(
+                create_safe_task(followup_system.create_followup_sequence(
                     followup_type=FollowUpType.PAYMENT_THANK_YOU,
                     entity_id=customer_id,
                     entity_type="customer",
