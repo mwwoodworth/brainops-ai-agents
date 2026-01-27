@@ -26,9 +26,10 @@ DB_CONFIG = {
 class AgentHealthMonitor:
     """Monitors and manages agent health across the system"""
 
-    def __init__(self):
+    def __init__(self, skip_table_init: bool = False):
         self.db_config = DB_CONFIG
-        self._ensure_health_tables()
+        if not skip_table_init:
+            self._ensure_health_tables()
 
     def _get_db_connection(self):
         """Get database connection"""
@@ -470,9 +471,13 @@ class AgentHealthMonitor:
 # Singleton instance
 _health_monitor = None
 
-def get_health_monitor() -> AgentHealthMonitor:
-    """Get or create health monitor instance"""
+def get_health_monitor(skip_table_init: bool = False) -> AgentHealthMonitor:
+    """Get or create health monitor instance
+
+    Args:
+        skip_table_init: If True, skips table creation on init (use when called from within a transaction)
+    """
     global _health_monitor
     if _health_monitor is None:
-        _health_monitor = AgentHealthMonitor()
+        _health_monitor = AgentHealthMonitor(skip_table_init=skip_table_init)
     return _health_monitor

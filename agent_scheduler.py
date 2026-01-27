@@ -985,9 +985,9 @@ class AgentScheduler:
         logger.info(f"Running health monitoring for agent: {agent['name']}")
 
         try:
-            # Import health monitor
+            # Import health monitor - skip table init to avoid nested DB connections
             from agent_health_monitor import get_health_monitor
-            health_monitor = get_health_monitor()
+            health_monitor = get_health_monitor(skip_table_init=True)
 
             # Run health check for all agents
             health_summary = health_monitor.check_all_agents_health()
