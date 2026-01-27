@@ -22,35 +22,45 @@ logger = logging.getLogger(__name__)
 def _check_openai(system: SmartAISystem) -> dict[str, Any]:
     configured = bool(system.openai_key)
     if not system.openai_client:
-        return {"configured": configured, "reachable": False, "last_error": None}
+        return {"configured": configured, "reachable": False, "last_error": "Client not initialized"}
 
     try:
-        text = system._try_openai("ping", max_tokens=4, timeout=3)
+        text = system._try_openai("Say OK", max_tokens=8, timeout=10)
         return {
             "configured": configured,
             "reachable": bool(text),
             "last_error": None if text else "No response from OpenAI with current key/model",
         }
     except Exception as exc:  # defensive
+        error_str = str(exc)
+        # Check for specific quota error
+        if "429" in error_str or "quota" in error_str.lower():
+            return {"configured": configured, "reachable": False, "last_error": "Quota exceeded - add credits"}
         logger.warning("OpenAI provider check failed: %s", exc)
-        return {"configured": configured, "reachable": False, "last_error": str(exc)}
+        return {"configured": configured, "reachable": False, "last_error": error_str}
 
 
 def _check_anthropic(system: SmartAISystem) -> dict[str, Any]:
     configured = bool(system.anthropic_key)
     if not system.anthropic_client:
-        return {"configured": configured, "reachable": False, "last_error": None}
+        return {"configured": configured, "reachable": False, "last_error": "Client not initialized"}
 
     try:
-        text = system._try_anthropic("ping", max_tokens=4, timeout=3)
+        text = system._try_anthropic("Say OK", max_tokens=8, timeout=10)
         return {
             "configured": configured,
             "reachable": bool(text),
             "last_error": None if text else "No response from Anthropic with current key/model",
         }
     except Exception as exc:  # defensive
+        error_str = str(exc)
+        # Check for specific errors
+        if "401" in error_str or "unauthorized" in error_str.lower():
+            return {"configured": configured, "reachable": False, "last_error": "Invalid API key"}
+        if "429" in error_str or "rate" in error_str.lower():
+            return {"configured": configured, "reachable": False, "last_error": "Rate limited"}
         logger.warning("Anthropic provider check failed: %s", exc)
-        return {"configured": configured, "reachable": False, "last_error": str(exc)}
+        return {"configured": configured, "reachable": False, "last_error": error_str}
 
 
 def _check_huggingface(system: SmartAISystem) -> dict[str, Any]:
