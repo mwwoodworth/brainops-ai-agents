@@ -28,6 +28,8 @@ from typing import Any, Callable, Optional
 
 import aiohttp
 
+from safe_task import create_safe_task
+
 logger = logging.getLogger(__name__)
 
 
@@ -107,7 +109,7 @@ class EventBus:
     async def start(self):
         """Start event processing"""
         self._running = True
-        asyncio.create_task(self._process_events())
+        create_safe_task(self._process_events(), "orchestrator_events")
 
     async def stop(self):
         """Stop event processing"""
@@ -198,7 +200,7 @@ class MessageQueue:
         """Start worker pool"""
         self._running = True
         for i in range(self._max_workers):
-            worker = asyncio.create_task(self._worker(i))
+            worker = create_safe_task(self._worker(i), f"worker_{i}")
             self._workers.append(worker)
         logger.info(f"Started {self._max_workers} workers")
 
@@ -941,7 +943,7 @@ class AutonomousSystemOrchestrator:
         await self._persist_system(system)
 
         # Initial health check
-        asyncio.create_task(self._check_system_health(system_id))
+        create_safe_task(self._check_system_health(system_id), f"health_check_{system_id}")
 
         logger.info(f"Registered system {name} with ID {system_id}")
         return system
@@ -1091,7 +1093,7 @@ class AutonomousSystemOrchestrator:
 
         # Trigger auto-remediation if enabled
         if self.auto_remediation_enabled and system.status in [SystemStatus.CRITICAL, SystemStatus.OFFLINE]:
-            asyncio.create_task(self._auto_remediate(system_id))
+            create_safe_task(self._auto_remediate(system_id), f"auto_remediate_{system_id}")
 
         return {
             "system_id": system_id,
@@ -1283,7 +1285,7 @@ class AutonomousSystemOrchestrator:
         system.status = SystemStatus.DEPLOYING
 
         # Start deployment pipeline
-        asyncio.create_task(self._run_deployment_pipeline(deployment))
+        create_safe_task(self._run_deployment_pipeline(deployment), f"deploy_{deployment.deployment_id}")
 
         await self._persist_deployment(deployment)
 
@@ -1710,6 +1712,21 @@ class AutonomousSystemOrchestrator:
             result = {
                 "status": "failed",
                 "error": "Task execution timed out",
+                "task_id": task.task_id,
+                "agent_name": agent_name,
+            }
+        except asyncio.CancelledError:
+            result = {
+                "status": "failed",
+                "error": "Task was cancelled",
+                "task_id": task.task_id,
+                "agent_name": agent_name,
+            }
+        except Exception as e:
+            logger.error(f"Task execution failed for {task.task_id}: {e}")
+            result = {
+                "status": "failed",
+                "error": str(e),
                 "task_id": task.task_id,
                 "agent_name": agent_name,
             }

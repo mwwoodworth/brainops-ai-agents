@@ -23,6 +23,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
+from safe_task import create_safe_task
+
 import psycopg2
 
 warnings.filterwarnings('ignore')
@@ -752,7 +754,7 @@ class AIOperatingSystem:
 
         elif command == 'autonomic:start':
             if self.autonomic_enabled:
-                asyncio.create_task(self.autonomic_manager.start_loop(
+                create_safe_task(self.autonomic_manager.start_loop(
                     interval=params.get('interval', 10.0)
                 ))
                 return {'status': 'started', 'interval': params.get('interval', 10.0)}

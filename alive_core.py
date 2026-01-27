@@ -23,6 +23,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Optional
 
+from safe_task import create_safe_task
+
 import psutil
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
@@ -837,9 +839,9 @@ class AliveCore:
 
         # Start background tasks
         self._tasks = [
-            asyncio.create_task(self._heartbeat_loop()),
-            asyncio.create_task(self._awareness_loop()),
-            asyncio.create_task(self._thinking_loop())
+            create_safe_task(self._heartbeat_loop(), "alive_heartbeat"),
+            create_safe_task(self._awareness_loop(), "alive_awareness"),
+            create_safe_task(self._thinking_loop(), "alive_thinking")
         ]
 
         # Transition to alert state

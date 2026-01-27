@@ -17,6 +17,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Optional
 
+from safe_task import create_safe_task
+
 # Use centralized MCPClient instead of duplicating MCP code
 try:
     from mcp_integration import MCPServer, get_mcp_client
@@ -106,36 +108,60 @@ class HealthPattern:
 
 
 from contextlib import asynccontextmanager
+import asyncpg
 
 
 # Connection pool helper - prefer shared pool, fallback to direct connection
 @asynccontextmanager
-async def _get_db_connection(db_url: str = None):
-    """Get database connection context, preferring shared pool"""
-    conn = None
-    try:
-        # Try shared pool first
-        from database.async_connection import get_pool
-        pool = get_pool()
-        # pool.acquire() returns an async context manager
-        async with pool.acquire() as conn:
-            yield conn
-    except Exception as exc:
-        logger.warning("Shared pool unavailable, falling back to direct connection: %s", exc, exc_info=True)
-        # Fallback to direct connection if pool unavailable
-        if not db_url:
-            db_url = os.getenv("DATABASE_URL")
+async def _get_db_connection(db_url: str = None, max_retries: int = 3):
+    """Get database connection context, preferring shared pool with retry logic"""
+    last_error = None
 
-        if db_url:
-            import asyncpg
-            conn = await asyncpg.connect(db_url)
-            try:
+    for attempt in range(max_retries):
+        try:
+            # Try shared pool first
+            from database.async_connection import get_pool
+            pool = get_pool()
+            # pool.acquire() returns an async context manager
+            async with pool.acquire() as conn:
                 yield conn
-            finally:
+                return  # Success - exit the retry loop
+        except (
+            asyncpg.InterfaceError,
+            asyncpg.ConnectionDoesNotExistError,
+            asyncpg.InternalClientError,
+        ) as exc:
+            last_error = exc
+            if attempt < max_retries - 1:
+                logger.warning(
+                    "Connection error (attempt %d/%d): %s - retrying...",
+                    attempt + 1, max_retries, exc
+                )
+                await asyncio.sleep(0.1 * (attempt + 1))  # Brief backoff
+                continue
+            else:
+                logger.error("Connection failed after %d attempts: %s", max_retries, exc)
+        except Exception as exc:
+            # For other exceptions, try direct connection fallback
+            logger.warning("Shared pool unavailable, falling back to direct connection: %s", exc)
+            break
+
+    # Fallback to direct connection if pool unavailable or all retries exhausted
+    if not db_url:
+        db_url = os.getenv("DATABASE_URL")
+
+    if db_url:
+        conn = None
+        try:
+            conn = await asyncpg.connect(db_url)
+            yield conn
+        finally:
+            if conn:
                 await conn.close()
-        else:
-            # If no DB URL and no pool, yield None or raise
-            yield None
+    else:
+        # If no DB URL and no pool, yield None
+        logger.error("No database connection available")
+        yield None
 
 class EnhancedSelfHealing:
     """
@@ -437,7 +463,7 @@ class EnhancedSelfHealing:
         await self._persist_incident(incident)
 
         # Start analysis and remediation
-        asyncio.create_task(self._analyze_and_remediate(incident))
+        create_safe_task(self._analyze_and_remediate(incident), f"remediate_{incident.incident_id}")
 
         return incident
 

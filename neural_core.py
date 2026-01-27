@@ -28,6 +28,8 @@ import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
+
+from safe_task import create_safe_task
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
@@ -417,7 +419,7 @@ class NeuralCore:
     def _start_continuous_awareness(self):
         """Start the continuous awareness loop"""
         if self._pulse_task is None or self._pulse_task.done():
-            self._pulse_task = asyncio.create_task(self._awareness_loop())
+            self._pulse_task = create_safe_task(self._awareness_loop(), "neural_awareness")
 
     async def _awareness_loop(self):
         """

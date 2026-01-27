@@ -9,6 +9,8 @@ import logging
 import os
 import uuid
 from collections import defaultdict
+
+from safe_task import create_safe_task
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -112,8 +114,24 @@ class RealtimeMonitor:
         self._setup_triggers()
 
     def _get_connection(self):
-        """Get database connection"""
-        return psycopg2.connect(**self.db_config)
+        """Get database connection from shared pool"""
+        try:
+            from database.sync_pool import get_sync_pool
+            pool = get_sync_pool()
+            return pool.get_connection()  # Returns context manager
+        except Exception as e:
+            logger.warning(f"Shared pool unavailable, using direct: {e}")
+            # Fallback to direct connection with context manager
+            from contextlib import contextmanager
+            @contextmanager
+            def fallback():
+                conn = psycopg2.connect(**self.db_config)
+                try:
+                    yield conn
+                finally:
+                    if conn and not conn.closed:
+                        conn.close()
+            return fallback()
 
     def _initialize_database(self):
         """Initialize database tables for real-time monitoring"""
@@ -309,14 +327,14 @@ class RealtimeMonitor:
         self.is_running = True
 
         # Start background tasks
-        asyncio.create_task(self._event_processor())
-        asyncio.create_task(self._database_listener())
-        asyncio.create_task(self._subscription_manager())
-        asyncio.create_task(self._activity_aggregator())
+        create_safe_task(self._event_processor(), "realtime_event_processor")
+        create_safe_task(self._database_listener(), "realtime_db_listener")
+        create_safe_task(self._subscription_manager(), "realtime_subscription_mgr")
+        create_safe_task(self._activity_aggregator(), "realtime_activity_aggregator")
 
         # Start digital twin monitoring if enabled
         if self._digital_twin_integration_enabled:
-            asyncio.create_task(self._digital_twin_monitor())
+            create_safe_task(self._digital_twin_monitor(), "digital_twin_monitor")
 
         logger.info("Realtime monitoring started")
 
@@ -808,7 +826,7 @@ class RealtimeMonitor:
         )
 
         # Add to queue
-        asyncio.create_task(self.event_queue.put(event))
+        create_safe_task(self.event_queue.put(event), "emit_event_queue")
 
     def get_activity_feed(self, limit: int = 50) -> list[dict]:
         """Get recent activity feed"""

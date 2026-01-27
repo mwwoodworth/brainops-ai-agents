@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from safe_task import create_safe_task
 from database.async_connection import get_pool
 
 logger = logging.getLogger(__name__)
@@ -454,7 +455,7 @@ async def start_ai_task_queue_consumer():
     consumer = get_ai_task_queue_consumer()
 
     if _ai_task_queue_consumer_task is None or _ai_task_queue_consumer_task.done():
-        _ai_task_queue_consumer_task = asyncio.create_task(consumer.start())
+        _ai_task_queue_consumer_task = create_safe_task(consumer.start())
         logger.info("📋 AI task queue consumer started as background task")
 
     return consumer

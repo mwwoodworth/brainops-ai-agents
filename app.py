@@ -23,6 +23,7 @@ from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredenti
 
 # Import our production-ready components
 from config import config
+from safe_task import create_safe_task, cancel_all_background_tasks
 from auth.jwt import verify_jwt
 
 # Configure logging
@@ -946,12 +947,12 @@ async def lifespan(app: FastAPI):
                 except Exception as e:
                     logger.error(f"❌ Background schema bootstrap failed: {e}")
 
-            asyncio.create_task(run_schema_bootstrap())
+            create_safe_task(run_schema_bootstrap(), "schema_bootstrap")
         except Exception as e:
             logger.error(f"❌ Deferred database init failed: {e}")
 
     # Schedule deferred init to run after yield
-    asyncio.create_task(deferred_init())
+    create_safe_task(deferred_init(), "deferred_init")
     logger.info("📋 Deferred initialization scheduled")
 
     # Set all app.state values to None initially (will be populated by deferred init)
@@ -996,7 +997,7 @@ async def lifespan(app: FastAPI):
                 if bg_runner is not None:
                     bg_runner.submit(aurea_instance.orchestrate())
                 else:
-                    asyncio.create_task(aurea_instance.orchestrate())
+                    create_safe_task(aurea_instance.orchestrate(), "aurea_orchestrate")
                 logger.info("🧠 AUREA Master Orchestrator STARTED - Observe→Decide→Act loop ACTIVE")
             except Exception as e:
                 logger.error(f"❌ AUREA initialization failed: {e}")
@@ -1021,7 +1022,7 @@ async def lifespan(app: FastAPI):
                 if bg_runner is not None:
                     bg_runner.submit(start_healing_loop())
                 else:
-                    asyncio.create_task(start_healing_loop())
+                    create_safe_task(start_healing_loop(), "healing_loop")
                 logger.info("🔄 Self-Healing Reconciliation Loop STARTED")
             except Exception as e:
                 logger.error(f"❌ Reconciler initialization failed: {e}")
@@ -1235,7 +1236,7 @@ async def lifespan(app: FastAPI):
                 await _auth_rate_limiter.cleanup()
                 logger.debug("🧹 Rate limiter buckets cleaned up")
 
-        asyncio.create_task(rate_limiter_cleanup_loop())
+        create_safe_task(rate_limiter_cleanup_loop(), "rate_limiter_cleanup")
         logger.info("✅ Rate limiter cleanup task started")
 
         # Initialize Slack alerting integration (Total Completion Protocol)
@@ -1267,7 +1268,7 @@ async def lifespan(app: FastAPI):
 
         logger.info("✅ Heavy component initialization complete - AI OS FULLY AWAKE!")
 
-    asyncio.create_task(deferred_heavy_init())
+    create_safe_task(deferred_heavy_init(), "heavy_init")
     logger.info("📋 Heavy initialization scheduled (runs after server binds)")
 
     # Set remaining app.state values to None initially
@@ -1298,6 +1299,13 @@ async def lifespan(app: FastAPI):
             bg_runner.stop()
     except Exception:
         pass
+
+    # Cancel all tracked background tasks
+    try:
+        await cancel_all_background_tasks(timeout=5.0)
+        logger.info("✅ Background tasks cancelled")
+    except Exception as e:
+        logger.error(f"❌ Background tasks cancellation error: {e}")
 
     # Stop Task Queue Consumer
     try:

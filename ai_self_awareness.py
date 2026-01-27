@@ -152,29 +152,45 @@ class SelfAwareAI:
         self.db_pool = None
 
     async def initialize(self):
-        """Initialize database connection - USE SHARED POOL"""
-        try:
-            # CRITICAL: Use the shared pool from database/async_connection.py
-            # instead of creating our own pool to prevent pool exhaustion
-            from database.async_connection import get_pool, using_fallback
+        """Initialize database connection - USE SHARED POOL with retry logic"""
+        import asyncpg
+        max_retries = 3
 
+        for attempt in range(max_retries):
             try:
-                shared_pool = get_pool()
-                if not using_fallback():
-                    self.db_pool = shared_pool
-                    await self._create_tables()
-                    logger.info("✅ AI Self-Awareness using SHARED database pool")
-                else:
-                    logger.warning("⚠️ Shared pool using fallback, AI Self-Awareness DB features disabled")
-                    self.db_pool = None
-            except RuntimeError:
-                # Pool not yet initialized - this is OK, app.py will initialize it
-                logger.warning("⚠️ Shared pool not initialized yet, AI Self-Awareness DB features disabled")
-                self.db_pool = None
+                # CRITICAL: Use the shared pool from database/async_connection.py
+                # instead of creating our own pool to prevent pool exhaustion
+                from database.async_connection import get_pool, using_fallback
 
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize AI Self-Awareness: {e}")
-            self.db_pool = None
+                try:
+                    shared_pool = get_pool()
+                    if not using_fallback():
+                        self.db_pool = shared_pool
+                        await self._create_tables()
+                        logger.info("✅ AI Self-Awareness using SHARED database pool")
+                        return  # Success
+                    else:
+                        logger.warning("⚠️ Shared pool using fallback, AI Self-Awareness DB features disabled")
+                        self.db_pool = None
+                        return
+                except RuntimeError:
+                    # Pool not yet initialized - this is OK, app.py will initialize it
+                    logger.warning("⚠️ Shared pool not initialized yet, AI Self-Awareness DB features disabled")
+                    self.db_pool = None
+                    return
+
+            except (asyncpg.InterfaceError, asyncpg.ConnectionDoesNotExistError) as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Connection error during init (attempt {attempt + 1}/{max_retries}): {e} - retrying...")
+                    await asyncio.sleep(0.2 * (attempt + 1))
+                    continue
+                else:
+                    logger.error(f"❌ Failed to initialize AI Self-Awareness after {max_retries} attempts: {e}")
+                    self.db_pool = None
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize AI Self-Awareness: {e}")
+                self.db_pool = None
+                return
 
     async def _create_tables(self):
         """Create required database tables"""

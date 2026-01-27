@@ -28,6 +28,8 @@ import traceback
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+
+from safe_task import create_safe_task
 from typing import Any, Optional
 
 import aiohttp
@@ -185,7 +187,7 @@ class AlwaysKnowBrain:
 
                 # Run UI tests if interval elapsed
                 if time.time() - self._last_ui_test > UI_TEST_INTERVAL:
-                    asyncio.create_task(self._run_ui_tests())
+                    create_safe_task(self._run_ui_tests())
                     self._last_ui_test = time.time()
 
             except Exception as e:
@@ -933,7 +935,7 @@ async def initialize_always_know_brain():
     await brain.initialize()
 
     # Start monitoring in background
-    asyncio.create_task(brain.start_continuous_monitoring())
+    create_safe_task(brain.start_continuous_monitoring())
 
     logger.info("Always-Know Brain started - continuous monitoring active")
     return brain
