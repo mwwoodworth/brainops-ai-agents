@@ -100,7 +100,7 @@ async def get_current_issues():
                 "stuck_agents": len(issues["stuck_agents"]),
                 "failed_agents": len(issues["failed_agents"]),
                 "memory_conflicts": issues["memory_conflicts"],
-                "unverified_memories": issues["unverified_memories"],
+                "stale_memories": issues["stale_memories"],
                 "unapplied_insights": issues["unapplied_insights"],
                 "pending_proposals": issues["pending_proposals"],
                 "total": issues["total_issues"]
