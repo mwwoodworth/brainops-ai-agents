@@ -325,20 +325,29 @@ class NeuralCore:
             system.last_contact = datetime.now(timezone.utc)
             system.response_time_ms = elapsed_ms
 
-            if response.status_code == 200:
+            # For frontends, 2xx and 3xx (redirects) are acceptable
+            # For backends, only 200 is healthy
+            is_frontend = system.system_type == SystemType.FRONTEND
+            is_healthy = (
+                response.status_code == 200 or
+                (is_frontend and 200 <= response.status_code < 400)  # 2xx and 3xx OK for frontends
+            )
+
+            if is_healthy:
                 system.last_known_state = "healthy"
                 system.health_score = 1.0
                 system.issues = []
 
-                # Extract additional info from health response
-                try:
-                    data = response.json()
-                    if "version" in data:
-                        system.metadata["version"] = data["version"]
-                    if "database" in data:
-                        system.metadata["database"] = data["database"]
-                except:
-                    pass
+                # Extract additional info from health response (backends only)
+                if not is_frontend:
+                    try:
+                        data = response.json()
+                        if "version" in data:
+                            system.metadata["version"] = data["version"]
+                        if "database" in data:
+                            system.metadata["database"] = data["database"]
+                    except:
+                        pass
             else:
                 system.last_known_state = "degraded"
                 system.health_score = 0.5
