@@ -1610,6 +1610,14 @@ if NEURAL_CORE_AVAILABLE:
     app.include_router(neural_core_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("🧠 Mounted: NEURAL CORE at /neural - The AI OS Central Nervous System")
 
+# CODE QUALITY MONITOR - Deep code-level monitoring (2026-01-27)
+try:
+    from api.code_quality import router as code_quality_router
+    app.include_router(code_quality_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("🔬 Mounted: Code Quality Monitor at /code-quality - Deep code-level monitoring")
+except ImportError as e:
+    logger.warning(f"Code Quality Router not available: {e}")
+
 # AI System Enhancements (2025-12-28) - Health scoring, alerting, correlation, WebSocket
 if AI_ENHANCEMENTS_AVAILABLE:
     app.include_router(ai_enhancements_router, dependencies=SECURED_DEPENDENCIES)
