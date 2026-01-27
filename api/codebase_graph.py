@@ -2,6 +2,11 @@ from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
 from database.async_connection import get_pool
+from database.schema_cache import (
+    get_cached_constraint_count,
+    get_cached_foreign_keys,
+    get_schema_cache,
+)
 
 router = APIRouter(prefix="/api/codebase-graph", tags=["codebase-graph"])
 
@@ -10,36 +15,39 @@ router = APIRouter(prefix="/api/codebase-graph", tags=["codebase-graph"])
 
 @router.get("/database/stats")
 async def get_database_stats():
-    """Get database schema statistics"""
+    """Get database schema statistics (with caching for slow queries)"""
     pool = get_pool()
 
-    # Count tables
+    # Count tables - fast pg_catalog query, no caching needed
     tables = await pool.fetchval("""
-        SELECT COUNT(*) FROM information_schema.tables
-        WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-        AND table_type = 'BASE TABLE'
+        SELECT COUNT(*) FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+        AND c.relkind = 'r'
     """)
 
-    # Count foreign keys
-    fks = await pool.fetchval("""
-        SELECT COUNT(*) FROM information_schema.table_constraints
-        WHERE constraint_type = 'FOREIGN KEY'
-    """)
+    # Count foreign keys - use cached query (was 72+ seconds)
+    fks = await get_cached_constraint_count(pool, "FOREIGN KEY")
 
-    # Count columns
+    # Count columns - use pg_catalog for speed
     columns = await pool.fetchval("""
-        SELECT COUNT(*) FROM information_schema.columns
-        WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+        SELECT COUNT(*) FROM pg_attribute a
+        JOIN pg_class c ON c.oid = a.attrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+        AND c.relkind = 'r'
+        AND a.attnum > 0
+        AND NOT a.attisdropped
     """)
 
-    # Get largest tables
+    # Get largest tables - already using pg_catalog, fast
     largest = await pool.fetch("""
-        SELECT tablename, reltuples::bigint as row_count
+        SELECT c.relname as tablename, c.reltuples::bigint as row_count
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        JOIN pg_tables t ON t.tablename = c.relname AND t.schemaname = n.nspname
         WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-        ORDER BY reltuples DESC
+        AND c.relkind = 'r'
+        ORDER BY c.reltuples DESC
         LIMIT 10
     """)
 
@@ -80,26 +88,11 @@ async def get_database_tables(schema: str = "public", limit: int = 100):
 
 @router.get("/database/relationships")
 async def get_database_relationships():
-    """Get all foreign key relationships for ERD visualization"""
+    """Get all foreign key relationships for ERD visualization (cached)"""
     pool = get_pool()
 
-    fks = await pool.fetch("""
-        SELECT
-            tc.table_name as source_table,
-            kcu.column_name as source_column,
-            ccu.table_name as target_table,
-            ccu.column_name as target_column,
-            tc.constraint_name
-        FROM information_schema.table_constraints tc
-        JOIN information_schema.key_column_usage kcu
-            ON tc.constraint_name = kcu.constraint_name
-            AND tc.table_schema = kcu.table_schema
-        JOIN information_schema.constraint_column_usage ccu
-            ON ccu.constraint_name = tc.constraint_name
-            AND ccu.table_schema = tc.table_schema
-        WHERE tc.constraint_type = 'FOREIGN KEY'
-        ORDER BY tc.table_name
-    """)
+    # Use cached foreign key query - was taking 72+ seconds
+    fks = await get_cached_foreign_keys(pool, schema="public")
 
     return [{
         "source": r["source_table"],
@@ -260,6 +253,21 @@ async def get_graph_stats():
     nodes = await pool.fetchval("SELECT COUNT(*) FROM codebase_nodes")
     edges = await pool.fetchval("SELECT COUNT(*) FROM codebase_edges")
     return {"nodes": nodes, "edges": edges}
+
+
+@router.get("/cache/stats")
+async def get_cache_stats():
+    """Get schema cache statistics"""
+    cache = get_schema_cache()
+    return await cache.get_stats()
+
+
+@router.post("/cache/clear")
+async def clear_cache():
+    """Clear the schema cache (use after DDL changes)"""
+    cache = get_schema_cache()
+    await cache.invalidate_all()
+    return {"status": "cleared", "message": "Schema cache has been cleared"}
 
 @router.get("/data")
 async def get_graph_data(limit: int = 2000):

@@ -1707,29 +1707,187 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
     )
     metrics["decision_chain_valid"] = process_integrity.valid
 
-    # PHASE 5: ACT (Placeholder - would execute via agents)
+    # PHASE 5: ACT - Execute Decisions via Real Agent System
     act_start = datetime.now()
     actions_executed = 0
+    actions_succeeded = 0
+    actions_failed = 0
+    action_results = []
+
+    # Decision type to agent mapping
+    decision_agent_mapping = {
+        "onboard_customers": "CustomerOnboarding",
+        "collect_invoices": "CollectionsAgent",
+        "resolve_conflicts": "SchedulingAgent",
+        "process_estimates": "EstimateProcessor",
+        "investigate_degradation": "SystemMonitor",
+        "maintain_health": "SystemMonitor",
+        "monitor_frontends": "SystemMonitor",
+        "monitor_agents": "SystemMonitor",
+        "generate_leads": "LeadGeneration",
+        "handle_churn_risks": "CustomerRetention",
+        "handle_overdue_invoices": "CollectionsAgent",
+        "handle_new_customers": "CustomerOnboarding",
+        "handle_scheduling_conflicts": "SchedulingAgent",
+    }
 
     for decision in decisions:
-        # Check if we have speculative result
-        spec_result = await speculator.get_speculation_result(decision["type"])
-        if spec_result:
-            metrics.setdefault("speculation_hits", 0)
-            metrics["speculation_hits"] += 1
+        decision_id = decision.get("id", str(uuid.uuid4()))
+        decision_type = decision.get("type", "unknown")
+        decision_confidence = decision.get("confidence", 0.5)
+        observation_data = decision.get("observation", {})
 
+        action_result = {
+            "decision_id": decision_id,
+            "decision_type": decision_type,
+            "status": "pending",
+            "started_at": datetime.now().isoformat(),
+            "duration_ms": 0,
+            "error": None,
+            "result": None,
+            "speculation_hit": False,
+            "retries": 0
+        }
+
+        try:
+            # Check if we have speculative result first
+            spec_result = await speculator.get_speculation_result(decision_type)
+            if spec_result:
+                metrics.setdefault("speculation_hits", 0)
+                metrics["speculation_hits"] += 1
+                action_result["speculation_hit"] = True
+                action_result["result"] = spec_result
+                action_result["status"] = "completed_from_speculation"
+                actions_succeeded += 1
+                # Learn from this pattern
+                await speculator.learn_pattern(
+                    observation_data.get("observation", "unknown"),
+                    decision_type,
+                    success=True
+                )
+            else:
+                # Execute via real agent system
+                agent_name = decision_agent_mapping.get(decision_type, "GenericAgent")
+                task = {
+                    "action": decision_type,
+                    "decision_id": decision_id,
+                    "observation": observation_data,
+                    "confidence": decision_confidence,
+                    "tenant_id": tenant_id,
+                    "cycle_id": cycle_id,
+                    "params": observation_data.get("data", {})
+                }
+
+                # Execute with retry logic
+                execution_result = None
+                max_retries = 2
+                for attempt in range(max_retries + 1):
+                    try:
+                        action_result["retries"] = attempt
+                        execution_result = await retry_with_backoff(
+                            lambda: real_agent_executor.execute(agent_name, task),
+                            max_retries=1,
+                            backoff_base=0.5
+                        )
+                        break
+                    except Exception as retry_error:
+                        if attempt == max_retries:
+                            raise retry_error
+                        logger.warning(f"Act retry {attempt + 1}/{max_retries} for {decision_type}: {retry_error}")
+
+                # Validate output integrity
+                output_validator = get_output_validator()
+                output_integrity = await output_validator.validate_action_result(
+                    action={"type": decision_type, "agent": agent_name},
+                    result=execution_result or {},
+                    expected={"status": ["success", "completed", "done"]}
+                )
+
+                if output_integrity.valid:
+                    action_result["status"] = "completed"
+                    action_result["result"] = execution_result
+                    actions_succeeded += 1
+                    # Learn successful pattern for future speculation
+                    await speculator.learn_pattern(
+                        observation_data.get("observation", "unknown"),
+                        decision_type,
+                        success=True
+                    )
+                else:
+                    action_result["status"] = "completed_with_warnings"
+                    action_result["result"] = execution_result
+                    action_result["integrity_issues"] = output_integrity.checks_failed
+                    actions_succeeded += 1
+                    logger.warning(
+                        f"Action {decision_type} completed but failed integrity: "
+                        f"{output_integrity.checks_failed}"
+                    )
+
+        except Exception as exec_error:
+            action_result["status"] = "failed"
+            action_result["error"] = str(exec_error)[:500]
+            actions_failed += 1
+            # Learn failed pattern
+            await speculator.learn_pattern(
+                observation_data.get("observation", "unknown"),
+                decision_type,
+                success=False
+            )
+            logger.error(f"Act phase failed for {decision_type}: {exec_error}")
+
+        # Record completion time
+        action_result["completed_at"] = datetime.now().isoformat()
+        action_result["duration_ms"] = (
+            datetime.fromisoformat(action_result["completed_at"]) -
+            datetime.fromisoformat(action_result["started_at"])
+        ).total_seconds() * 1000
+
+        action_results.append(action_result)
         actions_executed += 1
+
+        # Log execution for observability
+        logger.info(
+            f"OODA Act [{cycle_id}]: {decision_type} -> {action_result['status']} "
+            f"({action_result['duration_ms']:.0f}ms, retries={action_result['retries']})"
+        )
 
     metrics["act_duration_ms"] = (datetime.now() - act_start).total_seconds() * 1000
     metrics["actions_executed"] = actions_executed
+    metrics["actions_succeeded"] = actions_succeeded
+    metrics["actions_failed"] = actions_failed
+    metrics["action_success_rate"] = (
+        actions_succeeded / actions_executed * 100 if actions_executed > 0 else 0
+    )
 
-    # PHASE 6: PERSIST DECISIONS to aurea_decisions table
+    # PHASE 6: PERSIST DECISIONS with execution results to aurea_decisions table
     decisions_stored = 0
+    # Build a lookup for action results by decision_id
+    action_result_lookup = {ar["decision_id"]: ar for ar in action_results}
+
     try:
         conn = psycopg2.connect(**_get_db_config())
         try:
             with conn.cursor() as cur:
                 for decision in decisions:
+                    decision_id = decision.get("id", "")
+                    action_result = action_result_lookup.get(decision_id, {})
+                    execution_status = action_result.get("status", "not_executed")
+                    execution_success = execution_status in ("completed", "completed_from_speculation")
+
+                    # Build comprehensive context patterns with execution data
+                    context_patterns = {
+                        "cycle_id": cycle_id,
+                        "observation": decision.get("observation", {}),
+                        "execution": {
+                            "status": execution_status,
+                            "duration_ms": action_result.get("duration_ms", 0),
+                            "retries": action_result.get("retries", 0),
+                            "speculation_hit": action_result.get("speculation_hit", False),
+                            "error": action_result.get("error"),
+                            "integrity_issues": action_result.get("integrity_issues", [])
+                        }
+                    }
+
                     cur.execute("""
                         INSERT INTO aurea_decisions (
                             decision_type, description, confidence, outcome,
@@ -1737,18 +1895,18 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                     """, (
                         decision.get("type", "unknown"),
-                        f"OODA Cycle {cycle_id}: {decision.get('observation', {}).get('observation', 'unknown')}",
+                        f"OODA Cycle {cycle_id}: {decision.get('observation', {}).get('observation', 'unknown')} -> {execution_status}",
                         decision.get("confidence", 0.5),
-                        "executed",
-                        True,
-                        json.dumps({"cycle_id": cycle_id, "observation": decision.get("observation", {})}),
+                        execution_status,
+                        execution_success,
+                        json.dumps(context_patterns, default=str),
                         tenant_id
                     ))
                     decisions_stored += 1
                 conn.commit()
         finally:
             conn.close()
-        logger.info(f"Stored {decisions_stored} decisions to aurea_decisions")
+        logger.info(f"Stored {decisions_stored} decisions with execution results to aurea_decisions")
     except Exception as e:
         logger.warning(f"Failed to store decisions: {e}")
     metrics["decisions_stored"] = decisions_stored
@@ -1761,17 +1919,25 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
         f"Enhanced OODA cycle {cycle_id}: "
         f"{metrics['observations_count']} obs, "
         f"{metrics['decisions_count']} decisions, "
+        f"{actions_succeeded}/{actions_executed} actions succeeded, "
         f"{decisions_stored} stored, "
         f"{total_duration:.0f}ms total"
     )
 
     return {
         "cycle_id": cycle_id,
-        "success": True,
+        "success": actions_failed == 0,  # True only if all actions succeeded
+        "partial_success": actions_succeeded > 0,  # True if any actions succeeded
         "metrics": metrics,
         "observations": [o.get("observation") for o in valid_observations],
         "decisions": [d.get("type") for d in decisions],
-        "decisions_stored": decisions_stored
+        "decisions_stored": decisions_stored,
+        "actions": {
+            "executed": actions_executed,
+            "succeeded": actions_succeeded,
+            "failed": actions_failed,
+            "results": action_results  # Full execution details
+        }
     }
 
 
@@ -1809,6 +1975,183 @@ class BleedingEdgeOODAController:
     async def validate_output(self, action: dict[str, Any], result: dict[str, Any], expected: Optional[dict] = None) -> IntegrityReport:
         """Validate output integrity."""
         return await self.output_validator.validate_action_result(action, result, expected)
+
+    async def act(self, decision: dict[str, Any]) -> dict[str, Any]:
+        """
+        Execute a single decision action - the Act phase of OODA loop.
+
+        This method:
+        1. Maps the decision type to an appropriate agent
+        2. Executes the action via the AgentExecutor
+        3. Handles retries with exponential backoff
+        4. Validates output integrity
+        5. Logs execution results
+        6. Learns from patterns for future speculation
+        7. Returns success/failure status with full execution details
+
+        Args:
+            decision: A decision dict containing:
+                - type: The action type (e.g., "onboard_customers", "collect_invoices")
+                - id: Optional decision ID (auto-generated if not provided)
+                - confidence: Confidence score (0-1)
+                - observation: The observation that triggered this decision
+                - params: Optional additional parameters
+
+        Returns:
+            dict with:
+                - success: Whether the action completed successfully
+                - status: Detailed status (completed, failed, completed_with_warnings, etc.)
+                - decision_id: The decision ID
+                - decision_type: The action type
+                - duration_ms: Execution time
+                - result: The action result (if successful)
+                - error: Error message (if failed)
+                - speculation_hit: Whether a speculative result was used
+                - retries: Number of retry attempts
+                - integrity: Output integrity validation results
+        """
+        from agent_executor import AgentExecutor
+
+        decision_id = decision.get("id", str(uuid.uuid4()))
+        decision_type = decision.get("type", "unknown")
+        decision_confidence = decision.get("confidence", 0.5)
+        observation_data = decision.get("observation", {})
+        params = decision.get("params", {})
+
+        # Decision type to agent mapping
+        decision_agent_mapping = {
+            "onboard_customers": "CustomerOnboarding",
+            "collect_invoices": "CollectionsAgent",
+            "resolve_conflicts": "SchedulingAgent",
+            "process_estimates": "EstimateProcessor",
+            "investigate_degradation": "SystemMonitor",
+            "maintain_health": "SystemMonitor",
+            "monitor_frontends": "SystemMonitor",
+            "monitor_agents": "SystemMonitor",
+            "generate_leads": "LeadGeneration",
+            "handle_churn_risks": "CustomerRetention",
+            "handle_overdue_invoices": "CollectionsAgent",
+            "handle_new_customers": "CustomerOnboarding",
+            "handle_scheduling_conflicts": "SchedulingAgent",
+        }
+
+        action_result = {
+            "success": False,
+            "decision_id": decision_id,
+            "decision_type": decision_type,
+            "status": "pending",
+            "started_at": datetime.now().isoformat(),
+            "duration_ms": 0,
+            "error": None,
+            "result": None,
+            "speculation_hit": False,
+            "retries": 0,
+            "integrity": None
+        }
+
+        start_time = datetime.now()
+
+        try:
+            # Check if we have a speculative result first
+            spec_result = await self.speculative_executor.get_speculation_result(decision_type)
+            if spec_result:
+                action_result["speculation_hit"] = True
+                action_result["result"] = spec_result
+                action_result["status"] = "completed_from_speculation"
+                action_result["success"] = True
+                # Learn from this pattern
+                await self.speculative_executor.learn_pattern(
+                    observation_data.get("observation", "unknown"),
+                    decision_type,
+                    success=True
+                )
+            else:
+                # Execute via real agent system
+                agent_name = decision_agent_mapping.get(decision_type, "GenericAgent")
+                agent_executor = AgentExecutor()
+
+                task = {
+                    "action": decision_type,
+                    "decision_id": decision_id,
+                    "observation": observation_data,
+                    "confidence": decision_confidence,
+                    "tenant_id": self.tenant_id,
+                    "params": params
+                }
+
+                # Execute with retry logic
+                execution_result = None
+                max_retries = 2
+                for attempt in range(max_retries + 1):
+                    try:
+                        action_result["retries"] = attempt
+                        execution_result = await retry_with_backoff(
+                            lambda: agent_executor.execute(agent_name, task),
+                            max_retries=1,
+                            backoff_base=0.5
+                        )
+                        break
+                    except Exception as retry_error:
+                        if attempt == max_retries:
+                            raise retry_error
+                        logger.warning(f"Act retry {attempt + 1}/{max_retries} for {decision_type}: {retry_error}")
+
+                # Validate output integrity
+                output_integrity = await self.output_validator.validate_action_result(
+                    action={"type": decision_type, "agent": agent_name},
+                    result=execution_result or {},
+                    expected={"status": ["success", "completed", "done"]}
+                )
+
+                action_result["integrity"] = {
+                    "valid": output_integrity.valid,
+                    "confidence": output_integrity.confidence_score,
+                    "checks_passed": output_integrity.checks_passed,
+                    "checks_failed": output_integrity.checks_failed
+                }
+
+                if output_integrity.valid:
+                    action_result["status"] = "completed"
+                    action_result["result"] = execution_result
+                    action_result["success"] = True
+                    # Learn successful pattern for future speculation
+                    await self.speculative_executor.learn_pattern(
+                        observation_data.get("observation", "unknown"),
+                        decision_type,
+                        success=True
+                    )
+                else:
+                    action_result["status"] = "completed_with_warnings"
+                    action_result["result"] = execution_result
+                    action_result["success"] = True  # Still considered successful
+                    logger.warning(
+                        f"Action {decision_type} completed but failed integrity: "
+                        f"{output_integrity.checks_failed}"
+                    )
+
+        except Exception as exec_error:
+            action_result["status"] = "failed"
+            action_result["error"] = str(exec_error)[:500]
+            action_result["success"] = False
+            # Learn failed pattern
+            await self.speculative_executor.learn_pattern(
+                observation_data.get("observation", "unknown"),
+                decision_type,
+                success=False
+            )
+            logger.error(f"Act phase failed for {decision_type}: {exec_error}")
+
+        # Record completion time
+        action_result["completed_at"] = datetime.now().isoformat()
+        action_result["duration_ms"] = (datetime.now() - start_time).total_seconds() * 1000
+
+        # Log execution for observability
+        logger.info(
+            f"OODA Act: {decision_type} -> {action_result['status']} "
+            f"({action_result['duration_ms']:.0f}ms, retries={action_result['retries']})"
+        )
+
+        return action_result
 
     async def query_similar_decisions(self, decision_context: dict[str, Any], limit: int = 5) -> list[dict[str, Any]]:
         """Query RAG for similar historical decisions."""
