@@ -1618,6 +1618,14 @@ try:
 except ImportError as e:
     logger.warning(f"Code Quality Router not available: {e}")
 
+# AI OS UNIFIED DASHBOARD - The one endpoint to rule them all (2026-01-27)
+try:
+    from api.ai_os_dashboard import router as ai_os_dashboard_router
+    app.include_router(ai_os_dashboard_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("🌟 Mounted: AI OS Dashboard at /ai-os - UNIFIED COMMAND CENTER")
+except ImportError as e:
+    logger.warning(f"AI OS Dashboard Router not available: {e}")
+
 # AI System Enhancements (2025-12-28) - Health scoring, alerting, correlation, WebSocket
 if AI_ENHANCEMENTS_AVAILABLE:
     app.include_router(ai_enhancements_router, dependencies=SECURED_DEPENDENCIES)
