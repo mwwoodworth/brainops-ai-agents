@@ -44,7 +44,8 @@ class ConsensusStrategy(Enum):
     UNANIMOUS = "unanimous"
     HIGHEST_CONFIDENCE = "highest_confidence"
     ENSEMBLE = "ensemble"
-    DEBATE = "debate"
+    DEBATE = "debate"  # Simple single-round synthesis
+    MULTI_ROUND_DEBATE = "multi_round_debate"  # Full structured debate with rebuttals
     HIERARCHICAL = "hierarchical"
 
 
@@ -79,6 +80,46 @@ class ModelResponse:
     reasoning: Optional[str] = None
     latency_ms: float = 0.0
     tokens_used: int = 0
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class DebatePosition:
+    """A model's position in a debate round"""
+    model: ModelType
+    position: str
+    key_arguments: list[str]
+    confidence: float
+    round_number: int
+    is_rebuttal: bool = False
+    responding_to: Optional[str] = None  # Model being rebutted
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class DebateRound:
+    """A single round of debate"""
+    round_number: int
+    round_type: str  # "initial", "rebuttal", "synthesis"
+    positions: list[DebatePosition]
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    round_summary: Optional[str] = None
+
+
+@dataclass
+class DebateResult:
+    """Complete result of a multi-round debate"""
+    debate_id: str
+    topic: str
+    rounds: list[DebateRound]
+    final_consensus: str
+    confidence: float
+    participating_models: list[ModelType]
+    agreement_evolution: list[float]  # Agreement score per round
+    key_points_of_agreement: list[str]
+    remaining_disagreements: list[str]
+    total_rounds: int
+    debate_duration_ms: float
     metadata: dict = field(default_factory=dict)
 
 
@@ -328,6 +369,7 @@ class ConsensusEngine:
             ConsensusStrategy.HIGHEST_CONFIDENCE: self._highest_confidence,
             ConsensusStrategy.ENSEMBLE: self._ensemble,
             ConsensusStrategy.DEBATE: self._debate,
+            ConsensusStrategy.MULTI_ROUND_DEBATE: self._multi_round_debate_strategy,
             ConsensusStrategy.HIERARCHICAL: self._hierarchical
         }
 
@@ -567,6 +609,490 @@ class ConsensusEngine:
             dissenting_opinions=[]
         )
 
+    async def _multi_round_debate_strategy(
+        self,
+        responses: list[ModelResponse],
+        prompt: str
+    ) -> ConsensusResult:
+        """
+        Wrapper to call multi_round_debate from the strategy pattern.
+        Converts DebateResult to ConsensusResult.
+        """
+        if len(responses) < 2:
+            return await self._highest_confidence(responses, prompt)
+
+        # Extract models from responses
+        models = [r.model for r in responses]
+
+        # Run the full multi-round debate
+        debate_result = await self.multi_round_debate(
+            topic=prompt,
+            models=models,
+            rounds=3,
+            initial_responses=responses
+        )
+
+        # Convert DebateResult to ConsensusResult
+        all_responses = responses.copy()
+
+        # Add synthesis responses from debate rounds
+        for round_data in debate_result.rounds:
+            for position in round_data.positions:
+                all_responses.append(ModelResponse(
+                    model=position.model,
+                    response=position.position,
+                    confidence=position.confidence,
+                    reasoning="; ".join(position.key_arguments),
+                    metadata={
+                        "round": position.round_number,
+                        "is_rebuttal": position.is_rebuttal,
+                        "round_type": round_data.round_type
+                    }
+                ))
+
+        # Determine status based on remaining disagreements
+        if not debate_result.remaining_disagreements:
+            status = ConsensusStatus.CONSENSUS_REACHED
+        elif len(debate_result.remaining_disagreements) <= 2:
+            status = ConsensusStatus.PARTIAL_CONSENSUS
+        else:
+            status = ConsensusStatus.DISAGREEMENT
+
+        return ConsensusResult(
+            consensus_id=debate_result.debate_id,
+            final_response=debate_result.final_consensus,
+            confidence=debate_result.confidence,
+            strategy_used=ConsensusStrategy.MULTI_ROUND_DEBATE,
+            status=status,
+            participating_models=debate_result.participating_models,
+            model_responses=all_responses,
+            agreement_score=debate_result.agreement_evolution[-1] if debate_result.agreement_evolution else 0.0,
+            dissenting_opinions=[
+                {"disagreement": d} for d in debate_result.remaining_disagreements
+            ],
+            metadata={
+                "total_rounds": debate_result.total_rounds,
+                "debate_duration_ms": debate_result.debate_duration_ms,
+                "key_points_of_agreement": debate_result.key_points_of_agreement,
+                "agreement_evolution": debate_result.agreement_evolution
+            }
+        )
+
+    async def multi_round_debate(
+        self,
+        topic: str,
+        models: Optional[list[ModelType]] = None,
+        rounds: int = 3,
+        initial_responses: Optional[list[ModelResponse]] = None,
+        system_prompt: Optional[str] = None
+    ) -> DebateResult:
+        """
+        Conduct a structured multi-round debate between AI models.
+
+        Round 1: Initial positions from each model
+        Round 2: Rebuttals and counter-arguments
+        Round 3: Final synthesis and consensus building
+
+        Args:
+            topic: The topic/question to debate
+            models: List of models to participate (defaults to available models)
+            rounds: Number of debate rounds (default 3)
+            initial_responses: Pre-existing responses to use for Round 1
+            system_prompt: Optional system context
+
+        Returns:
+            DebateResult with complete debate history and final consensus
+        """
+        start_time = datetime.now(timezone.utc)
+        debate_id = str(uuid.uuid4())
+
+        if models is None:
+            models = [
+                ModelType.OPENAI_GPT4,
+                ModelType.ANTHROPIC_CLAUDE,
+                ModelType.OPENAI_GPT4O
+            ]
+
+        debate_rounds: list[DebateRound] = []
+        all_positions: dict[ModelType, list[DebatePosition]] = {m: [] for m in models}
+        agreement_evolution: list[float] = []
+
+        logger.info(f"Starting multi-round debate on topic: {topic[:100]}...")
+
+        # ============================================
+        # ROUND 1: INITIAL POSITIONS
+        # ============================================
+        round1_positions = []
+
+        if initial_responses:
+            # Use provided initial responses
+            for response in initial_responses:
+                if response.model in models:
+                    position = DebatePosition(
+                        model=response.model,
+                        position=response.response,
+                        key_arguments=self._extract_key_arguments(response.response),
+                        confidence=response.confidence,
+                        round_number=1,
+                        is_rebuttal=False
+                    )
+                    round1_positions.append(position)
+                    all_positions[response.model].append(position)
+        else:
+            # Query each model for initial position
+            initial_prompt = f"""
+You are participating in a structured debate. Present your initial position on the following topic.
+
+TOPIC: {topic}
+
+Provide:
+1. Your clear position/answer
+2. 3-5 key arguments supporting your position
+3. Any important caveats or conditions
+
+Be specific and well-reasoned. Other AI models will review and potentially challenge your position.
+"""
+            tasks = [
+                self.model_provider.query_model(
+                    model, initial_prompt, system_prompt
+                )
+                for model in models
+            ]
+
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for model, response in zip(models, responses):
+                if isinstance(response, ModelResponse) and response.confidence > 0:
+                    position = DebatePosition(
+                        model=model,
+                        position=response.response,
+                        key_arguments=self._extract_key_arguments(response.response),
+                        confidence=response.confidence,
+                        round_number=1,
+                        is_rebuttal=False
+                    )
+                    round1_positions.append(position)
+                    all_positions[model].append(position)
+
+        round1 = DebateRound(
+            round_number=1,
+            round_type="initial",
+            positions=round1_positions,
+            round_summary=f"Initial positions from {len(round1_positions)} models"
+        )
+        debate_rounds.append(round1)
+
+        # Calculate initial agreement
+        initial_agreement = self._calculate_position_agreement(round1_positions)
+        agreement_evolution.append(initial_agreement)
+
+        logger.info(f"Round 1 complete. Initial agreement: {initial_agreement:.2%}")
+
+        if len(round1_positions) < 2:
+            # Not enough participants for debate
+            return self._create_debate_result(
+                debate_id, topic, debate_rounds, round1_positions,
+                agreement_evolution, models, start_time
+            )
+
+        # ============================================
+        # ROUND 2: REBUTTALS AND COUNTER-ARGUMENTS
+        # ============================================
+        if rounds >= 2:
+            round2_positions = []
+
+            for current_model in models:
+                if current_model not in [p.model for p in round1_positions]:
+                    continue
+
+                # Get other models' positions
+                other_positions = [
+                    p for p in round1_positions
+                    if p.model != current_model
+                ]
+
+                if not other_positions:
+                    continue
+
+                # Format other positions for rebuttal
+                positions_text = "\n\n".join([
+                    f"**{p.model.value}**: {p.position}\n"
+                    f"Key arguments: {', '.join(p.key_arguments[:3])}"
+                    for p in other_positions
+                ])
+
+                # Get current model's own position
+                own_position = next(
+                    (p for p in round1_positions if p.model == current_model),
+                    None
+                )
+
+                rebuttal_prompt = f"""
+You are in Round 2 of a structured debate. Review the other participants' positions and provide rebuttals.
+
+ORIGINAL TOPIC: {topic}
+
+YOUR INITIAL POSITION:
+{own_position.position if own_position else "Not available"}
+
+OTHER PARTICIPANTS' POSITIONS:
+{positions_text}
+
+Provide a rebuttal that:
+1. Identifies weaknesses or gaps in other arguments
+2. Addresses any valid criticisms of your position
+3. Strengthens your argument with additional evidence or reasoning
+4. Acknowledges any points of agreement
+5. Clarifies any misunderstandings
+
+Be constructive but rigorous. The goal is to reach the best possible answer through debate.
+"""
+
+                response = await self.model_provider.query_model(
+                    current_model, rebuttal_prompt, system_prompt
+                )
+
+                if response.confidence > 0:
+                    position = DebatePosition(
+                        model=current_model,
+                        position=response.response,
+                        key_arguments=self._extract_key_arguments(response.response),
+                        confidence=response.confidence,
+                        round_number=2,
+                        is_rebuttal=True,
+                        responding_to=", ".join([p.model.value for p in other_positions])
+                    )
+                    round2_positions.append(position)
+                    all_positions[current_model].append(position)
+
+            round2 = DebateRound(
+                round_number=2,
+                round_type="rebuttal",
+                positions=round2_positions,
+                round_summary=f"Rebuttals from {len(round2_positions)} models"
+            )
+            debate_rounds.append(round2)
+
+            # Calculate agreement after rebuttals
+            rebuttal_agreement = self._calculate_position_agreement(round2_positions)
+            agreement_evolution.append(rebuttal_agreement)
+
+            logger.info(f"Round 2 complete. Agreement after rebuttals: {rebuttal_agreement:.2%}")
+
+        # ============================================
+        # ROUND 3: SYNTHESIS AND CONSENSUS BUILDING
+        # ============================================
+        if rounds >= 3:
+            round3_positions = []
+
+            # Collect all arguments from previous rounds
+            all_arguments = []
+            for model, positions in all_positions.items():
+                for pos in positions:
+                    all_arguments.extend([
+                        f"[{model.value}, Round {pos.round_number}] {arg}"
+                        for arg in pos.key_arguments
+                    ])
+
+            # Format debate history
+            debate_history = self._format_debate_history(debate_rounds)
+
+            for current_model in models:
+                if current_model not in [p.model for p in round1_positions]:
+                    continue
+
+                synthesis_prompt = f"""
+You are in the FINAL ROUND of a structured debate. Your goal is to synthesize all perspectives into a coherent consensus.
+
+ORIGINAL TOPIC: {topic}
+
+COMPLETE DEBATE HISTORY:
+{debate_history}
+
+ALL KEY ARGUMENTS RAISED:
+{chr(10).join(all_arguments[:20])}
+
+Provide a FINAL SYNTHESIS that:
+1. Identifies the core points of agreement across all participants
+2. Acknowledges remaining disagreements (if any)
+3. Presents the strongest, most well-supported answer
+4. Integrates the best arguments from each participant
+5. Notes any conditions or caveats that emerged
+
+Your response should represent what a reasonable observer would conclude after watching this entire debate.
+Rate your confidence in this synthesis (0-100%).
+"""
+
+                response = await self.model_provider.query_model(
+                    current_model, synthesis_prompt, system_prompt
+                )
+
+                if response.confidence > 0:
+                    position = DebatePosition(
+                        model=current_model,
+                        position=response.response,
+                        key_arguments=self._extract_key_arguments(response.response),
+                        confidence=response.confidence,
+                        round_number=3,
+                        is_rebuttal=False
+                    )
+                    round3_positions.append(position)
+                    all_positions[current_model].append(position)
+
+            round3 = DebateRound(
+                round_number=3,
+                round_type="synthesis",
+                positions=round3_positions,
+                round_summary=f"Final synthesis from {len(round3_positions)} models"
+            )
+            debate_rounds.append(round3)
+
+            # Calculate final agreement
+            final_agreement = self._calculate_position_agreement(round3_positions)
+            agreement_evolution.append(final_agreement)
+
+            logger.info(f"Round 3 complete. Final agreement: {final_agreement:.2%}")
+
+        return self._create_debate_result(
+            debate_id, topic, debate_rounds,
+            debate_rounds[-1].positions if debate_rounds else [],
+            agreement_evolution, models, start_time
+        )
+
+    def _extract_key_arguments(self, text: str, max_args: int = 5) -> list[str]:
+        """Extract key arguments from a response text"""
+        arguments = []
+
+        # Look for numbered points
+        import re
+        numbered_pattern = r'(?:^|\n)\s*(?:\d+[\.\)]\s*|[-•]\s*)(.+?)(?=\n|$)'
+        matches = re.findall(numbered_pattern, text, re.MULTILINE)
+
+        for match in matches[:max_args]:
+            cleaned = match.strip()
+            if len(cleaned) > 20 and len(cleaned) < 500:  # Reasonable argument length
+                arguments.append(cleaned)
+
+        # If not enough numbered points, extract sentences
+        if len(arguments) < 2:
+            sentences = text.split('.')
+            for sentence in sentences:
+                cleaned = sentence.strip()
+                if len(cleaned) > 30 and len(cleaned) < 300:
+                    if any(word in cleaned.lower() for word in
+                           ['because', 'therefore', 'however', 'important', 'key', 'main']):
+                        arguments.append(cleaned)
+                        if len(arguments) >= max_args:
+                            break
+
+        return arguments[:max_args] if arguments else ["Position stated without explicit arguments"]
+
+    def _calculate_position_agreement(self, positions: list[DebatePosition]) -> float:
+        """Calculate agreement score between debate positions"""
+        if len(positions) < 2:
+            return 1.0
+
+        texts = [p.position.lower() for p in positions]
+        words_sets = [set(t.split()) for t in texts]
+
+        total_similarity = 0
+        comparisons = 0
+
+        for i in range(len(words_sets)):
+            for j in range(i + 1, len(words_sets)):
+                intersection = len(words_sets[i] & words_sets[j])
+                union = len(words_sets[i] | words_sets[j])
+                if union > 0:
+                    total_similarity += intersection / union
+                comparisons += 1
+
+        return total_similarity / max(comparisons, 1)
+
+    def _format_debate_history(self, rounds: list[DebateRound]) -> str:
+        """Format debate history for synthesis prompt"""
+        history_parts = []
+
+        for round_data in rounds:
+            history_parts.append(f"\n=== ROUND {round_data.round_number}: {round_data.round_type.upper()} ===")
+            for position in round_data.positions:
+                history_parts.append(f"\n[{position.model.value}]:")
+                history_parts.append(position.position[:800])  # Truncate long positions
+                if position.is_rebuttal and position.responding_to:
+                    history_parts.append(f"  (Responding to: {position.responding_to})")
+
+        return "\n".join(history_parts)
+
+    def _create_debate_result(
+        self,
+        debate_id: str,
+        topic: str,
+        rounds: list[DebateRound],
+        final_positions: list[DebatePosition],
+        agreement_evolution: list[float],
+        models: list[ModelType],
+        start_time: datetime
+    ) -> DebateResult:
+        """Create the final debate result"""
+
+        # Build final consensus from synthesis positions
+        if final_positions:
+            # Use weighted combination of final positions
+            weighted_positions = [
+                (p, self.model_provider.get_model_weight(p.model) * p.confidence)
+                for p in final_positions
+            ]
+            weighted_positions.sort(key=lambda x: x[1], reverse=True)
+
+            # Use highest-weighted synthesis as primary consensus
+            best_position = weighted_positions[0][0]
+            final_consensus = best_position.position
+            final_confidence = best_position.confidence
+
+            # Extract points of agreement and disagreement
+            all_arguments = []
+            for pos in final_positions:
+                all_arguments.extend(pos.key_arguments)
+
+            # Find common themes (simplified)
+            argument_words = [set(arg.lower().split()) for arg in all_arguments]
+            common_words = set.intersection(*argument_words) if argument_words else set()
+
+            key_agreements = list(set([
+                arg for arg in all_arguments
+                if len(common_words & set(arg.lower().split())) > 3
+            ]))[:5]
+
+            # Find disagreements by checking low agreement
+            remaining_disagreements = []
+            if agreement_evolution and agreement_evolution[-1] < 0.7:
+                # There's still disagreement
+                for pos in final_positions[1:]:
+                    if not self._responses_similar(pos.position, best_position.position):
+                        remaining_disagreements.append(
+                            f"{pos.model.value} disagrees: {pos.key_arguments[0] if pos.key_arguments else 'Different conclusion'}"
+                        )
+        else:
+            final_consensus = "Debate could not reach a conclusion due to insufficient participation."
+            final_confidence = 0.0
+            key_agreements = []
+            remaining_disagreements = ["Insufficient participation"]
+
+        duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+
+        return DebateResult(
+            debate_id=debate_id,
+            topic=topic,
+            rounds=rounds,
+            final_consensus=final_consensus,
+            confidence=final_confidence,
+            participating_models=[p.model for p in final_positions] if final_positions else models,
+            agreement_evolution=agreement_evolution,
+            key_points_of_agreement=key_agreements,
+            remaining_disagreements=remaining_disagreements,
+            total_rounds=len(rounds),
+            debate_duration_ms=duration_ms
+        )
+
     async def _hierarchical(
         self,
         responses: list[ModelResponse],
@@ -780,6 +1306,143 @@ class MultiModelConsensusSystem:
 
         return result
 
+    async def run_multi_round_debate(
+        self,
+        topic: str,
+        models: Optional[list[ModelType]] = None,
+        rounds: int = 3,
+        system_prompt: Optional[str] = None,
+        timeout: float = 120.0
+    ) -> DebateResult:
+        """
+        Run a full multi-round debate on a topic.
+
+        This is the main entry point for conducting structured debates between
+        multiple AI models with proper argumentation, rebuttals, and synthesis.
+
+        Args:
+            topic: The topic/question to debate
+            models: List of models to participate (defaults to GPT-4, Claude, GPT-4o)
+            rounds: Number of debate rounds (default 3: initial, rebuttal, synthesis)
+            system_prompt: Optional system context for all models
+            timeout: Maximum time for debate in seconds (default 120s)
+
+        Returns:
+            DebateResult with complete debate history and final consensus
+
+        Example:
+            >>> system = get_multi_model_consensus()
+            >>> result = await system.run_multi_round_debate(
+            ...     topic="What is the best approach for implementing microservices?",
+            ...     models=[ModelType.OPENAI_GPT4, ModelType.ANTHROPIC_CLAUDE],
+            ...     rounds=3
+            ... )
+            >>> print(result.final_consensus)
+            >>> print(f"Agreement evolution: {result.agreement_evolution}")
+        """
+        if models is None:
+            models = [
+                ModelType.OPENAI_GPT4,
+                ModelType.ANTHROPIC_CLAUDE,
+                ModelType.OPENAI_GPT4O
+            ]
+
+        logger.info(f"Starting multi-round debate with {len(models)} models on: {topic[:100]}...")
+
+        try:
+            # Run the debate with timeout
+            result = await asyncio.wait_for(
+                self.consensus_engine.multi_round_debate(
+                    topic=topic,
+                    models=models,
+                    rounds=rounds,
+                    system_prompt=system_prompt
+                ),
+                timeout=timeout
+            )
+
+            # Log the debate result
+            await self._log_debate_result(result)
+
+            return result
+
+        except asyncio.TimeoutError:
+            logger.error(f"Multi-round debate timed out after {timeout}s")
+            return DebateResult(
+                debate_id=str(uuid.uuid4()),
+                topic=topic,
+                rounds=[],
+                final_consensus="Debate timed out before reaching consensus",
+                confidence=0.0,
+                participating_models=models,
+                agreement_evolution=[],
+                key_points_of_agreement=[],
+                remaining_disagreements=["Debate timed out"],
+                total_rounds=0,
+                debate_duration_ms=timeout * 1000,
+                metadata={"error": "timeout"}
+            )
+
+    async def _log_debate_result(self, result: DebateResult):
+        """Log debate result to database"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Store debate in consensus_requests table with special metadata
+            rounds_data = [
+                {
+                    "round_number": r.round_number,
+                    "round_type": r.round_type,
+                    "positions": [
+                        {
+                            "model": p.model.value,
+                            "position": p.position[:500],
+                            "key_arguments": p.key_arguments[:3],
+                            "confidence": p.confidence,
+                            "is_rebuttal": p.is_rebuttal
+                        }
+                        for p in r.positions
+                    ],
+                    "round_summary": r.round_summary
+                }
+                for r in result.rounds
+            ]
+
+            cursor.execute("""
+                INSERT INTO ai_consensus_requests
+                (id, prompt, strategy, models_requested, final_response,
+                 confidence, agreement_score, status, model_responses,
+                 dissenting_opinions, metadata, completed_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            """, (
+                result.debate_id,
+                result.topic,
+                ConsensusStrategy.MULTI_ROUND_DEBATE.value,
+                Json([m.value for m in result.participating_models]),
+                result.final_consensus,
+                result.confidence,
+                result.agreement_evolution[-1] if result.agreement_evolution else 0.0,
+                ConsensusStatus.CONSENSUS_REACHED.value if result.confidence > 0.5 else ConsensusStatus.PARTIAL_CONSENSUS.value,
+                Json(rounds_data),
+                Json([{"disagreement": d} for d in result.remaining_disagreements]),
+                Json({
+                    "debate_type": "multi_round",
+                    "total_rounds": result.total_rounds,
+                    "debate_duration_ms": result.debate_duration_ms,
+                    "agreement_evolution": result.agreement_evolution,
+                    "key_points_of_agreement": result.key_points_of_agreement
+                })
+            ))
+
+            conn.commit()
+            cursor.close()
+
+            logger.info(f"Debate {result.debate_id} logged to database")
+
+        except Exception as e:
+            logger.error(f"Failed to log debate result: {e}")
+
     async def _log_request(
         self,
         request_id: str,
@@ -982,5 +1645,8 @@ __all__ = [
     'ConsensusStatus',
     'ModelType',
     'ConsensusResult',
-    'ModelResponse'
+    'ModelResponse',
+    'DebatePosition',
+    'DebateRound',
+    'DebateResult'
 ]

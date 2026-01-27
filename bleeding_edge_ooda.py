@@ -1946,9 +1946,11 @@ class BleedingEdgeOODAController:
     Master controller for all bleeding-edge OODA enhancements.
     Integrates parallel observation, A2A protocol, speculative execution,
     decision RAG, and full integrity validation pipeline.
+
+    Now also integrates with PredictiveExecutor for safe proactive execution.
     """
 
-    def __init__(self, tenant_id: str = "default"):
+    def __init__(self, tenant_id: str = "default", use_predictive_executor: bool = True):
         self.tenant_id = tenant_id
         self.parallel_observer = ParallelObserver(tenant_id)
         self.a2a_protocol = A2AProtocol()
@@ -1958,11 +1960,88 @@ class BleedingEdgeOODAController:
         self.processing_validator = ProcessingIntegrityValidator()
         self.output_validator = OutputIntegrityValidator()
 
+        # Integration with PredictiveExecutor for safe proactive execution
+        self.use_predictive_executor = use_predictive_executor
+        self._predictive_executor = None
+        self._predictive_integration = None
+
         logger.info(f"BleedingEdgeOODAController initialized for tenant {tenant_id}")
 
     async def run_enhanced_cycle(self, context: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         """Run a complete enhanced OODA cycle with all optimizations."""
         return await enhanced_ooda_cycle(self.tenant_id, context or {})
+
+    def _get_predictive_executor(self):
+        """Lazy load the PredictiveExecutor integration."""
+        if self._predictive_executor is None and self.use_predictive_executor:
+            try:
+                from predictive_executor import get_predictive_executor, get_ooda_integration
+                self._predictive_executor = get_predictive_executor()
+                self._predictive_integration = get_ooda_integration()
+                logger.info("PredictiveExecutor integration loaded")
+            except ImportError as e:
+                logger.warning(f"PredictiveExecutor not available: {e}")
+                self.use_predictive_executor = False
+        return self._predictive_executor
+
+    async def execute_speculations_safely(
+        self,
+        speculations: list[dict[str, Any]],
+        fallback_executor: Optional[Callable] = None
+    ) -> dict[str, Any]:
+        """
+        Execute speculations through the PredictiveExecutor safety pipeline.
+
+        This is the recommended way to execute speculative actions as it:
+        1. Evaluates each speculation for safety (blocks dangerous actions)
+        2. Enforces confidence thresholds (default: 80%)
+        3. Assesses risk levels (default: <30% risk required)
+        4. Logs all executions for audit
+        5. Tracks prediction accuracy
+
+        Args:
+            speculations: List of speculated actions from OODA prediction
+            fallback_executor: Optional executor for tasks that pass safety checks
+
+        Returns:
+            Dict with execution results and statistics
+        """
+        executor = self._get_predictive_executor()
+
+        if executor is None:
+            # Fall back to direct speculation (no safety pipeline)
+            logger.warning("PredictiveExecutor not available, using direct speculation")
+            predictions = [
+                PredictedAction(
+                    action_type=s.get("type", s.get("action_type", "unknown")),
+                    probability=s.get("probability", s.get("confidence", 0.5)),
+                    parameters=s.get("params", s.get("parameters", {})),
+                    estimated_duration_ms=s.get("duration_ms", 1000)
+                )
+                for s in speculations
+            ]
+            return await self.speculative_executor.speculate(predictions, fallback_executor or (lambda t, p: {"status": "mock"}))
+
+        # Use the PredictiveExecutor safety pipeline
+        results = await self._predictive_integration.execute_ooda_speculations(
+            speculations,
+            fallback_executor
+        )
+
+        # Aggregate results
+        executed = sum(1 for r in results if r.get("executed"))
+        skipped = sum(1 for r in results if r.get("skipped"))
+        failed = sum(1 for r in results if r.get("error"))
+
+        return {
+            "source": "predictive_executor_safety_pipeline",
+            "total": len(results),
+            "executed": executed,
+            "skipped": skipped,
+            "failed": failed,
+            "results": results,
+            "safety_enabled": True
+        }
 
     async def validate_input(self, data: dict[str, Any], level: IntegrityLevel = IntegrityLevel.MEDIUM) -> IntegrityReport:
         """Validate input data integrity."""
