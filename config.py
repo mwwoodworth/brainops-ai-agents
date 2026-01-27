@@ -152,7 +152,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.6.0')  # Autonomous Issue Resolution - AI OS can FIND AND FIX issues
+        self.version = os.getenv('VERSION', 'v10.6.1')  # Autonomous Issue Resolution with schema fixes
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
