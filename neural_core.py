@@ -806,12 +806,66 @@ class IntelligenceEngine:
         self.analyses: List[IssueAnalysis] = []
         self.fix_history: List[Dict[str, Any]] = []
         self.optimization_suggestions: List[Dict[str, Any]] = []
+        self._ai_intelligence = None
+        self._ai_available = False
+        self._init_ai_intelligence()
 
-    def analyze_issue(self, system_name: str, issue: str) -> IssueAnalysis:
-        """Deep analysis of an issue"""
+    def _init_ai_intelligence(self):
+        """Initialize TRUE AI Intelligence for real analysis"""
+        try:
+            from ai_intelligence import get_ai_intelligence
+            self._ai_intelligence = get_ai_intelligence()
+            self._ai_available = True
+            logger.info("🧠 IntelligenceEngine: TRUE AI Intelligence connected")
+        except Exception as e:
+            logger.warning(f"AI Intelligence not available, using pattern fallback: {e}")
+            self._ai_available = False
+
+    async def analyze_issue_with_ai(self, system_name: str, issue: str, context: Optional[Dict] = None) -> IssueAnalysis:
+        """
+        REAL AI-POWERED ISSUE ANALYSIS
+
+        Uses actual LLM calls to understand issues, not just pattern matching.
+        Falls back to patterns only if AI is unavailable.
+        """
         analysis = IssueAnalysis(system_name, issue)
 
-        # Pattern matching for known issues
+        # Try REAL AI analysis first
+        if self._ai_available and self._ai_intelligence:
+            try:
+                ai_result = await self._ai_intelligence.analyze_issue(
+                    issue_description=f"System: {system_name}\nIssue: {issue}",
+                    context=context or {},
+                    depth="quick"  # Use quick for real-time, standard for scheduled
+                )
+
+                if ai_result and ai_result.confidence > 0.3:
+                    analysis.root_cause = ai_result.root_cause
+                    analysis.severity = ai_result.severity
+                    analysis.fix_strategies = ai_result.fix_strategies
+                    analysis.auto_fixable = ai_result.auto_fixable
+                    analysis.confidence = ai_result.confidence
+
+                    logger.info(f"🧠 AI Analysis complete: {system_name} - {analysis.severity} severity")
+                    self.analyses.append(analysis)
+                    return analysis
+
+            except Exception as e:
+                logger.warning(f"AI analysis failed, falling back to patterns: {e}")
+
+        # Fallback to pattern matching if AI unavailable or failed
+        return self.analyze_issue(system_name, issue)
+
+    def analyze_issue(self, system_name: str, issue: str) -> IssueAnalysis:
+        """
+        Pattern-based issue analysis (FALLBACK)
+
+        Only used when TRUE AI Intelligence is unavailable.
+        See analyze_issue_with_ai() for real AI analysis.
+        """
+        analysis = IssueAnalysis(system_name, issue)
+
+        # Pattern matching for known issues (FALLBACK ONLY)
         issue_lower = issue.lower()
         for pattern, details in self.ISSUE_PATTERNS.items():
             if pattern.lower() in issue_lower:
@@ -819,7 +873,7 @@ class IntelligenceEngine:
                 analysis.severity = details["severity"]
                 analysis.fix_strategies = details["strategies"]
                 analysis.auto_fixable = details["auto_fixable"]
-                analysis.confidence = 0.85
+                analysis.confidence = 0.7  # Lower confidence for pattern matching
                 break
 
         # If no pattern matched, use heuristics
@@ -831,7 +885,7 @@ class IntelligenceEngine:
                 {"action": "restart", "confidence": 0.4, "description": "Try restarting as fallback"}
             ]
             analysis.auto_fixable = False
-            analysis.confidence = 0.5
+            analysis.confidence = 0.3  # Low confidence for unknown
 
         self.analyses.append(analysis)
         return analysis
@@ -952,14 +1006,36 @@ def _extend_neural_core():
 
     NeuralCore.__init__ = new_init
 
-    # Add deep analysis method
+    # Add deep analysis method - NOW WITH REAL AI!
     async def deep_analyze_issues(self) -> Dict[str, Any]:
-        """Perform deep analysis of all current issues"""
+        """
+        Perform deep analysis of all current issues using TRUE AI INTELLIGENCE.
+
+        This method now uses actual LLM calls for analysis, not just pattern matching.
+        Falls back to patterns only if AI is unavailable.
+        """
         analyses = []
+        ai_analyses = 0
+        pattern_analyses = 0
 
         for system in self.systems.values():
             for issue in system.issues:
-                analysis = self.intelligence.analyze_issue(system.name, issue)
+                # Use async AI-powered analysis when available
+                try:
+                    analysis = await self.intelligence.analyze_issue_with_ai(
+                        system.name,
+                        issue,
+                        context={"system_type": system.system_type.value if hasattr(system, 'system_type') else "unknown"}
+                    )
+                    if analysis.confidence >= 0.5:
+                        ai_analyses += 1
+                    else:
+                        pattern_analyses += 1
+                except Exception as e:
+                    logger.warning(f"AI analysis failed for {system.name}: {e}, using fallback")
+                    analysis = self.intelligence.analyze_issue(system.name, issue)
+                    pattern_analyses += 1
+
                 analyses.append({
                     "system": system.name,
                     "issue": issue,
@@ -967,12 +1043,15 @@ def _extend_neural_core():
                     "severity": analysis.severity,
                     "auto_fixable": analysis.auto_fixable,
                     "confidence": analysis.confidence,
-                    "strategies": analysis.fix_strategies
+                    "strategies": analysis.fix_strategies,
+                    "analysis_method": "ai" if analysis.confidence >= 0.5 else "pattern"
                 })
 
         return {
             "total_issues": len(analyses),
             "auto_fixable": sum(1 for a in analyses if a["auto_fixable"]),
+            "ai_powered_analyses": ai_analyses,
+            "pattern_based_analyses": pattern_analyses,
             "analyses": analyses
         }
 
