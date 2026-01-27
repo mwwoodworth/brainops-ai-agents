@@ -152,7 +152,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.6.3')  # Multi-model HuggingFace fallback chain
+        self.version = os.getenv('VERSION', 'v10.6.4')  # Enhanced heuristic analysis for DevOps issues
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
