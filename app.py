@@ -119,6 +119,30 @@ _rate_limiter = RateLimiter(requests_per_minute=120, burst_size=20)  # General e
 _auth_rate_limiter = RateLimiter(requests_per_minute=10, burst_size=5)  # Auth/sensitive endpoints
 
 
+# ---------------------------------------------------------------------------
+# Safe JSON Serialization (handles UUIDs, datetimes, Decimals)
+# ---------------------------------------------------------------------------
+def safe_json_dumps(obj: Any, **kwargs) -> str:
+    """JSON dumps that handles UUIDs, datetimes, Decimals and other non-serializable types."""
+    from decimal import Decimal
+    from enum import Enum
+
+    def default_serializer(o):
+        if isinstance(o, uuid.UUID):
+            return str(o)
+        if isinstance(o, datetime):
+            return o.isoformat()
+        if isinstance(o, Decimal):
+            return float(o)
+        if isinstance(o, Enum):
+            return o.value
+        if hasattr(o, '__dict__'):
+            return o.__dict__
+        return str(o)  # Fallback to string representation
+
+    return json.dumps(obj, default=default_serializer, **kwargs)
+
+
 # Import agent executor for actual agent dispatch
 try:
     from agent_executor import AgentExecutor
@@ -3387,7 +3411,7 @@ async def execute_agent(
                 UPDATE ai_agent_executions
                 SET status = $1, output_data = $2, execution_time_ms = $3
                 WHERE id = $4
-            """, "completed", json.dumps(result), duration_ms, execution_id)
+            """, "completed", safe_json_dumps(result), duration_ms, execution_id)
             logger.info(f"✅ Logged execution completion for {agent_name}: {execution_id} ({duration_ms}ms)")
         except Exception as update_error:
             logger.warning("Failed to persist execution completion: %s", update_error)
@@ -3706,10 +3730,10 @@ async def execute_scheduled_agents(
                     UPDATE agent_executions
                     SET completed_at = $1, status = $2, response = $3
                     WHERE id = $4
-                """, datetime.utcnow(), final_status, json.dumps(result), execution_id)
+                """, datetime.utcnow(), final_status, safe_json_dumps(result), execution_id)
 
                 results.append({
-                    "agent_id": agent["id"],
+                    "agent_id": str(agent["id"]),
                     "agent_name": agent["name"],
                     "execution_id": execution_id,
                     "status": "completed"
@@ -3718,7 +3742,7 @@ async def execute_scheduled_agents(
             except Exception as e:
                 logger.error(f"Failed to execute agent {agent['id']}: {e}")
                 results.append({
-                    "agent_id": agent["id"],
+                    "agent_id": str(agent["id"]),
                     "agent_name": agent["name"],
                     "error": str(e),
                     "status": "failed"
