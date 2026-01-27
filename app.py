@@ -1626,6 +1626,22 @@ try:
 except ImportError as e:
     logger.warning(f"AI OS Dashboard Router not available: {e}")
 
+# TRUE AI INTELLIGENCE - Real LLM-powered analysis, not pattern matching (2026-01-27)
+try:
+    from api.ai_intelligence import router as ai_intelligence_router
+    app.include_router(ai_intelligence_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("🧠 Mounted: TRUE AI Intelligence at /intelligence - REAL LLM ANALYSIS")
+except ImportError as e:
+    logger.warning(f"AI Intelligence Router not available: {e}")
+
+# DATABASE INTELLIGENCE - AI-powered DB monitoring and optimization (2026-01-27)
+try:
+    from api.db_intelligence import router as db_intelligence_router
+    app.include_router(db_intelligence_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("🗄️ Mounted: Database Intelligence at /db-intelligence - AI DB OPTIMIZATION")
+except ImportError as e:
+    logger.warning(f"Database Intelligence Router not available: {e}")
+
 # AI System Enhancements (2025-12-28) - Health scoring, alerting, correlation, WebSocket
 if AI_ENHANCEMENTS_AVAILABLE:
     app.include_router(ai_enhancements_router, dependencies=SECURED_DEPENDENCIES)
