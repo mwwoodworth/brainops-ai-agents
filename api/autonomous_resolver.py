@@ -310,12 +310,12 @@ async def fix_memory_conflicts():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/fix/unverified-memories")
-async def fix_unverified_memories():
-    """Verify unverified memories"""
+@router.post("/fix/stale-memories")
+async def fix_stale_memories():
+    """Cleanup stale memories"""
     try:
         resolver = _get_resolver()
-        result = await resolver.verify_memories()
+        result = await resolver.cleanup_stale_memories()
         return {
             "success": result.success,
             "items_fixed": result.items_fixed,
