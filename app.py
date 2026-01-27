@@ -564,6 +564,26 @@ except ImportError as e:
     get_reconciler = None
     start_healing_loop = None
 
+# Import Service Circuit Breakers - Centralized circuit breaker management for all external services
+try:
+    from service_circuit_breakers import (
+        get_circuit_breaker_manager,
+        get_circuit_breaker_health,
+        get_all_circuit_statuses,
+        check_service_available,
+        report_service_success,
+        report_service_failure,
+        CIRCUIT_BREAKER_CONFIG,
+    )
+    SERVICE_CIRCUIT_BREAKERS_AVAILABLE = True
+    logger.info("✅ Service Circuit Breakers loaded - protecting all external service calls")
+except ImportError as e:
+    SERVICE_CIRCUIT_BREAKERS_AVAILABLE = False
+    logger.warning(f"Service Circuit Breakers not available: {e}")
+    get_circuit_breaker_manager = None
+    get_circuit_breaker_health = None
+    get_all_circuit_statuses = None
+
 # Import Unified Memory Manager with fallback
 try:
     from unified_memory_manager import UnifiedMemoryManager
@@ -1658,6 +1678,14 @@ try:
 except ImportError as e:
     logger.warning(f"Database Intelligence Router not available: {e}")
 
+# CIRCUIT BREAKERS API - Centralized circuit breaker management (2026-01-27)
+try:
+    from api.circuit_breakers import router as circuit_breakers_router
+    app.include_router(circuit_breakers_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("🔌 Mounted: Circuit Breakers API at /circuit-breakers - SERVICE PROTECTION")
+except ImportError as e:
+    logger.warning(f"Circuit Breakers Router not available: {e}")
+
 # AI System Enhancements (2025-12-28) - Health scoring, alerting, correlation, WebSocket
 if AI_ENHANCEMENTS_AVAILABLE:
     app.include_router(ai_enhancements_router, dependencies=SECURED_DEPENDENCIES)
@@ -1781,6 +1809,16 @@ except ImportError as e:
     MEMORY_OBSERVABILITY_AVAILABLE = False
     logger.warning(f"Memory Observability API not available: {e}")
 
+# Advanced LangGraph Workflow Engine (2026-01-27) - State machines, checkpoints, HITL, OODA
+try:
+    from api.workflows import router as workflows_router
+    app.include_router(workflows_router, dependencies=SECURED_DEPENDENCIES)
+    WORKFLOWS_AVAILABLE = True
+    logger.info("Mounted: Advanced Workflow Engine at /workflows - checkpoints, HITL, OODA loops")
+except ImportError as e:
+    WORKFLOWS_AVAILABLE = False
+    logger.warning(f"Advanced Workflow Engine not available: {e}")
+
 
 def _collect_active_systems() -> list[str]:
     """Return a list of systems that are initialized and active."""
@@ -1823,6 +1861,9 @@ def _collect_active_systems() -> list[str]:
         active.append("Memory Enforcement (RBA/WBA, Verification, Audit)")
     if MEMORY_HYGIENE_AVAILABLE:
         active.append("Memory Hygiene (Deduplication, Conflicts, Decay)")
+    # Advanced Workflow Engine (2026-01-27) - LangGraph-based orchestration
+    if WORKFLOWS_AVAILABLE:
+        active.append("Advanced Workflow Engine (LangGraph, OODA, HITL, Checkpoints)")
     return active
 
 
@@ -2267,8 +2308,11 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
                 "enhanced_learning": AI_ENHANCEMENTS_AVAILABLE,
                 # Phase 7 - Unified Self-Awareness (2025-12-27)
                 "unified_awareness": UNIFIED_AWARENESS_AVAILABLE,
-                "self_reporting": UNIFIED_AWARENESS_AVAILABLE
+                "self_reporting": UNIFIED_AWARENESS_AVAILABLE,
+                # Phase 8 - Service Protection (2026-01-27)
+                "service_circuit_breakers": SERVICE_CIRCUIT_BREAKERS_AVAILABLE
             },
+            "circuit_breakers": get_circuit_breaker_health() if SERVICE_CIRCUIT_BREAKERS_AVAILABLE and get_circuit_breaker_health else {"status": "unavailable"},
             "config": {
                 "environment": config.environment,
                 "security": {
