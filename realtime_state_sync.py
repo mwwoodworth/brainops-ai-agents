@@ -23,6 +23,8 @@ import asyncio
 import json
 import logging
 import os
+
+from safe_task import create_safe_task
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -204,7 +206,7 @@ class RealTimeStateSync:
                 import asyncio
                 # Convert component to metrics if it's a service
                 if component.component_type in ["service", "api_endpoint", "microservice"]:
-                    asyncio.create_task(self._sync_component_to_twin(component))
+                    create_safe_task(self._sync_component_to_twin(component))
             except Exception as e:
                 logger.error(f"Error syncing component to digital twin: {e}")
 

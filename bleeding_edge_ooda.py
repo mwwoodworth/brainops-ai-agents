@@ -28,6 +28,8 @@ from collections import defaultdict
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from datetime import datetime
+
+from safe_task import create_safe_task
 from enum import Enum
 from typing import Any, Callable, Optional
 
@@ -113,30 +115,41 @@ _pool_lock = asyncio.Lock() if hasattr(asyncio, 'Lock') else None
 
 
 def get_db_connection():
-    """Get a database connection with proper config"""
+    """Get a database connection from shared pool with fallback"""
     try:
-        return psycopg2.connect(**_get_db_config())
+        from database.sync_pool import get_sync_pool
+        pool = get_sync_pool()
+        return pool.get_connection()  # Returns context manager
     except Exception as e:
-        logger.warning(f"OODA DB connection failed: {e}")
-        return None
+        logger.debug(f"Shared pool unavailable, using direct: {e}")
+        # Fallback to direct connection with context manager
+        from contextlib import contextmanager
+        @contextmanager
+        def fallback():
+            conn = None
+            try:
+                conn = psycopg2.connect(**_get_db_config())
+                yield conn
+            finally:
+                if conn and not conn.closed:
+                    conn.close()
+        return fallback()
 
 
 def execute_with_connection(query: str, params: tuple = None, fetch: bool = True):
-    """Execute a query with automatic connection management using proper context managers"""
-    conn = get_db_connection()
-    if not conn:
-        return None
+    """Execute a query with automatic connection management using shared pool"""
     try:
-        with conn:  # Auto-commit on success, rollback on exception
+        with get_db_connection() as conn:
+            if not conn:
+                return None
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(query, params)
                 result = cur.fetchall() if fetch else None
+                conn.commit()
                 return result
     except Exception as e:
         logger.warning(f"OODA query failed: {e}")
         return None
-    finally:
-        conn.close()
 
 
 async def execute_with_async_pool(query: str, params: tuple = None) -> list[dict] | None:
@@ -844,7 +857,7 @@ class A2AProtocol:
     async def start(self):
         """Start the A2A message processing loop"""
         self.running = True
-        asyncio.create_task(self._process_messages())
+        create_safe_task(self._process_messages(), "a2a_message_processor")
         logger.info("A2A Protocol started")
 
     async def stop(self):
@@ -895,8 +908,8 @@ class A2AProtocol:
         logger.debug(f"A2A message queued: {from_agent} → {to_agent} [{message_type}]")
 
         if wait_response and message.correlation_id:
-            # Create future for response
-            future: asyncio.Future = asyncio.get_event_loop().create_future()
+            # Create future for response - use get_running_loop() to avoid event loop mismatch
+            future: asyncio.Future = asyncio.get_running_loop().create_future()
             self.pending_responses[message.correlation_id] = future
 
             try:
@@ -904,8 +917,16 @@ class A2AProtocol:
                 return response
             except asyncio.TimeoutError:
                 logger.warning(f"A2A response timeout for {message.correlation_id}")
-                del self.pending_responses[message.correlation_id]
                 return None
+            except asyncio.CancelledError:
+                logger.warning(f"A2A response cancelled for {message.correlation_id}")
+                return None
+            except Exception as e:
+                logger.error(f"A2A response error for {message.correlation_id}: {e}")
+                return None
+            finally:
+                # Always clean up pending responses to prevent memory leaks
+                self.pending_responses.pop(message.correlation_id, None)
 
         return message
 
@@ -1150,8 +1171,9 @@ class SpeculativeExecutor:
         # Execute in parallel
         tasks = []
         for pred in safe_predictions:
-            task = asyncio.create_task(
-                self._execute_speculation(pred, executor)
+            task = create_safe_task(
+                self._execute_speculation(pred, executor),
+                f"speculation_{pred.action_type}"
             )
             tasks.append((pred.action_type, task))
 
@@ -1289,9 +1311,8 @@ class DecisionRAG:
 
             embedding = await self._get_embedding(context_text)
 
-            # Search in database with proper connection handling
-            conn = psycopg2.connect(**_get_db_config())
-            try:
+            # Search in database with shared connection pool
+            with get_db_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     # Use pgvector for similarity search
                     cur.execute("""
@@ -1306,8 +1327,6 @@ class DecisionRAG:
                     """, (embedding, embedding, limit))
                     rows = cur.fetchall()
                     return [dict(r) for r in rows]
-            finally:
-                conn.close()
 
         except Exception as e:
             logger.warning(f"Decision RAG search failed: {e}")
@@ -1320,8 +1339,7 @@ class DecisionRAG:
     ) -> list[dict[str, Any]]:
         """Get patterns from successful decisions of a given type"""
         try:
-            conn = psycopg2.connect(**_get_db_config())
-            try:
+            with get_db_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute("""
                         SELECT
@@ -1338,8 +1356,6 @@ class DecisionRAG:
                     """, (decision_type, min_success_rate))
                     rows = cur.fetchall()
                     return [dict(r) for r in rows]
-            finally:
-                conn.close()
         except Exception as e:
             logger.warning(f"Success pattern lookup failed: {e}")
             return []
@@ -1453,8 +1469,7 @@ class DecisionRAG:
             if not keywords:
                 return []
 
-            conn = psycopg2.connect(**_get_db_config())
-            try:
+            with get_db_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     # Build ILIKE query
                     conditions = " OR ".join([
@@ -1474,8 +1489,6 @@ class DecisionRAG:
                     """, params)
                     rows = cur.fetchall()
                     return [dict(r) for r in rows]
-            finally:
-                conn.close()
         except Exception as e:
             logger.warning(f"Keyword search failed: {e}")
             return []
@@ -1865,8 +1878,7 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
     action_result_lookup = {ar["decision_id"]: ar for ar in action_results}
 
     try:
-        conn = psycopg2.connect(**_get_db_config())
-        try:
+        with get_db_connection() as conn:
             with conn.cursor() as cur:
                 for decision in decisions:
                     decision_id = decision.get("id", "")
@@ -1904,8 +1916,6 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
                     ))
                     decisions_stored += 1
                 conn.commit()
-        finally:
-            conn.close()
         logger.info(f"Stored {decisions_stored} decisions with execution results to aurea_decisions")
     except Exception as e:
         logger.warning(f"Failed to store decisions: {e}")

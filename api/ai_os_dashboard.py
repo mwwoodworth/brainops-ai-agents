@@ -23,6 +23,8 @@ Updated: 2026-01-27 - Added /observability endpoint
 import asyncio
 import logging
 import time
+
+from safe_task import create_safe_task
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
@@ -896,15 +898,15 @@ async def get_observability_dashboard() -> Dict[str, Any]:
 
     # Gather all metrics in parallel for maximum speed
     tasks = {
-        "health": asyncio.create_task(_get_system_health_metrics()),
-        "models": asyncio.create_task(_get_ai_model_usage()),
-        "performance": asyncio.create_task(_get_latency_percentiles()),
-        "errors": asyncio.create_task(_get_error_rates()),
-        "memory": asyncio.create_task(_get_memory_metrics()),
-        "agents": asyncio.create_task(_get_agent_execution_stats()),
-        "predictions": asyncio.create_task(_get_prediction_accuracy()),
-        "learning": asyncio.create_task(_get_learning_progress()),
-        "resources": asyncio.create_task(_get_resource_utilization()),
+        "health": create_safe_task(_get_system_health_metrics()),
+        "models": create_safe_task(_get_ai_model_usage()),
+        "performance": create_safe_task(_get_latency_percentiles()),
+        "errors": create_safe_task(_get_error_rates()),
+        "memory": create_safe_task(_get_memory_metrics()),
+        "agents": create_safe_task(_get_agent_execution_stats()),
+        "predictions": create_safe_task(_get_prediction_accuracy()),
+        "learning": create_safe_task(_get_learning_progress()),
+        "resources": create_safe_task(_get_resource_utilization()),
     }
 
     results = {}

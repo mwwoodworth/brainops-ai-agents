@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
 
+from safe_task import create_safe_task
 from ai_ui_testing import (
     ERP_ROUTES,
     MRG_ROUTES,
@@ -468,7 +469,7 @@ class UIPlaywrightTestRunner:
             route_path = route if str(route).startswith("/") else f"/{route}"
             url = f"{target.base_url.rstrip('/')}{route_path}"
             tasks.append(
-                asyncio.create_task(
+                create_safe_task(
                     self._run_route(target.name, url, route, semaphore, self.run_config.route_timeout_seconds)
                 )
             )

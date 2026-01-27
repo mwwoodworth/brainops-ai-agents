@@ -8,6 +8,7 @@ Build logs, database state, UI tests, issue detection - EVERYTHING.
 import asyncio
 import logging
 
+from safe_task import create_safe_task
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 logger = logging.getLogger(__name__)
@@ -179,7 +180,7 @@ async def start_continuous_monitoring(background_tasks: BackgroundTasks, interva
     async def run_monitoring():
         await system.start_continuous_monitoring(interval_seconds)
 
-    _monitoring_task = asyncio.create_task(run_monitoring())
+    _monitoring_task = create_safe_task(run_monitoring())
 
     return {
         "status": "started",

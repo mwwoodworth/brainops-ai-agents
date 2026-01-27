@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
 
+from safe_task import create_safe_task
+
 logger = logging.getLogger(__name__)
 
 # Database configuration - validate required environment variables
@@ -429,7 +431,7 @@ async def start_task_queue_consumer():
     consumer = get_task_queue_consumer()
 
     if _consumer_task is None or _consumer_task.done():
-        _consumer_task = asyncio.create_task(consumer.start())
+        _consumer_task = create_safe_task(consumer.start())
         logger.info("📋 Task queue consumer started as background task")
 
     return consumer

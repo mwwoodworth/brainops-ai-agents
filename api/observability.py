@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from safe_task import create_safe_task
 import aiohttp
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -436,14 +437,14 @@ async def get_full_dashboard() -> dict[str, Any]:
     uptime = time.time() - _startup_time
 
     # Gather all stats in parallel for speed
-    db_task = asyncio.create_task(_get_database_stats())
-    aurea_task = asyncio.create_task(_get_aurea_stats())
-    agent_task = asyncio.create_task(_get_agent_stats())
-    learning_task = asyncio.create_task(_get_learning_stats())
-    healing_task = asyncio.create_task(_get_self_healing_stats())
-    memory_task = asyncio.create_task(_get_memory_stats())
-    revenue_task = asyncio.create_task(_get_revenue_stats())
-    mcp_task = asyncio.create_task(_get_mcp_stats())
+    db_task = create_safe_task(_get_database_stats())
+    aurea_task = create_safe_task(_get_aurea_stats())
+    agent_task = create_safe_task(_get_agent_stats())
+    learning_task = create_safe_task(_get_learning_stats())
+    healing_task = create_safe_task(_get_self_healing_stats())
+    memory_task = create_safe_task(_get_memory_stats())
+    revenue_task = create_safe_task(_get_revenue_stats())
+    mcp_task = create_safe_task(_get_mcp_stats())
 
     # Wait for all
     db_stats = await db_task
@@ -912,14 +913,14 @@ async def get_live_system_status() -> dict[str, Any]:
 
     # Gather all data in parallel
     tasks = {
-        "database": asyncio.create_task(_get_database_stats()),
-        "aurea": asyncio.create_task(_get_aurea_stats()),
-        "agents": asyncio.create_task(_get_agent_stats()),
-        "learning": asyncio.create_task(_get_learning_stats()),
-        "healing": asyncio.create_task(_get_self_healing_stats()),
-        "memory": asyncio.create_task(_get_memory_stats()),
-        "revenue": asyncio.create_task(_get_revenue_stats()),
-        "mcp": asyncio.create_task(_get_mcp_stats()),
+        "database": create_safe_task(_get_database_stats()),
+        "aurea": create_safe_task(_get_aurea_stats()),
+        "agents": create_safe_task(_get_agent_stats()),
+        "learning": create_safe_task(_get_learning_stats()),
+        "healing": create_safe_task(_get_self_healing_stats()),
+        "memory": create_safe_task(_get_memory_stats()),
+        "revenue": create_safe_task(_get_revenue_stats()),
+        "mcp": create_safe_task(_get_mcp_stats()),
     }
 
     # Wait for all internal stats

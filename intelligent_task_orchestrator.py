@@ -28,7 +28,17 @@ from typing import Any, Callable, Optional
 
 import httpx
 import psycopg2
+
+from safe_task import create_safe_task
 from psycopg2.extras import Json, RealDictCursor
+
+# CRITICAL: Use shared connection pool to prevent MaxClientsInSessionMode
+try:
+    from database.sync_pool import get_sync_pool
+    SYNC_POOL_AVAILABLE = True
+except ImportError:
+    SYNC_POOL_AVAILABLE = False
+    get_sync_pool = None
 
 # Import our cutting-edge systems
 try:
@@ -85,6 +95,32 @@ def _get_db_config():
     }
 
 DB_CONFIG = _get_db_config()
+
+
+# Helper context manager to use shared pool with fallback
+from contextlib import contextmanager
+
+@contextmanager
+def get_db_connection():
+    """Get database connection from shared pool or create direct connection."""
+    conn = None
+    from_pool = False
+    try:
+        if SYNC_POOL_AVAILABLE and get_sync_pool:
+            pool = get_sync_pool()
+            with pool.get_connection() as pooled_conn:
+                if pooled_conn:
+                    yield pooled_conn
+                    return
+        # Fallback to direct connection
+        conn = psycopg2.connect(**DB_CONFIG)
+        yield conn
+    finally:
+        if conn and not from_pool:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 class TaskPriority(Enum):
@@ -253,24 +289,25 @@ class NotificationService:
     async def _store_notification(self, notification: TaskNotification):
         """Store notification in database"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            cur.execute("""
-            INSERT INTO task_notifications
-            (task_id, event_type, severity, message, details, channels, sent_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (
-                notification.task_id,
-                notification.event_type,
-                notification.severity,
-                notification.message,
-                Json(notification.details),
-                Json(notification.channels),
-                notification.sent_at
-            ))
-            conn.commit()
-            cur.close()
-            conn.close()
+            with get_db_connection() as conn:
+                if not conn:
+                    return
+                cur = conn.cursor()
+                cur.execute("""
+                INSERT INTO task_notifications
+                (task_id, event_type, severity, message, details, channels, sent_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    notification.task_id,
+                    notification.event_type,
+                    notification.severity,
+                    notification.message,
+                    Json(notification.details),
+                    Json(notification.channels),
+                    notification.sent_at
+                ))
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.error(f"Failed to store notification: {e}")
 
@@ -311,71 +348,73 @@ class IntelligentTaskOrchestrator:
     def _init_database(self):
         """Initialize task orchestrator tables"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
+            with get_db_connection() as conn:
+                if not conn:
+                    logger.warning("No database connection available for init")
+                    return
+                cur = conn.cursor()
 
-            cur.execute("""
-            -- Task notifications table
-            CREATE TABLE IF NOT EXISTS task_notifications (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                task_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                severity TEXT NOT NULL,
-                message TEXT,
-                details JSONB,
-                channels JSONB,
-                sent_at TIMESTAMP DEFAULT NOW(),
-                acknowledged BOOLEAN DEFAULT FALSE,
-                acknowledged_at TIMESTAMP,
-                acknowledged_by TEXT
-            );
+                cur.execute("""
+                -- Task notifications table
+                CREATE TABLE IF NOT EXISTS task_notifications (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    task_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    message TEXT,
+                    details JSONB,
+                    channels JSONB,
+                    sent_at TIMESTAMP DEFAULT NOW(),
+                    acknowledged BOOLEAN DEFAULT FALSE,
+                    acknowledged_at TIMESTAMP,
+                    acknowledged_by TEXT
+                );
 
-            -- Task execution history
-            CREATE TABLE IF NOT EXISTS task_execution_history (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                task_id TEXT NOT NULL,
-                status TEXT NOT NULL,
-                assigned_agent TEXT,
-                started_at TIMESTAMP,
-                completed_at TIMESTAMP,
-                duration_ms INT,
-                result JSONB,
-                error_message TEXT,
-                retry_count INT DEFAULT 0
-            );
+                -- Task execution history
+                CREATE TABLE IF NOT EXISTS task_execution_history (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    task_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    assigned_agent TEXT,
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    duration_ms INT,
+                    result JSONB,
+                    error_message TEXT,
+                    retry_count INT DEFAULT 0
+                );
 
-            -- AI priority adjustments
-            CREATE TABLE IF NOT EXISTS ai_priority_adjustments (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                task_id TEXT NOT NULL,
-                original_priority INT,
-                adjusted_priority FLOAT,
-                adjustment_reason TEXT,
-                adjusted_at TIMESTAMP DEFAULT NOW()
-            );
+                -- AI priority adjustments
+                CREATE TABLE IF NOT EXISTS ai_priority_adjustments (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    task_id TEXT NOT NULL,
+                    original_priority INT,
+                    adjusted_priority FLOAT,
+                    adjustment_reason TEXT,
+                    adjusted_at TIMESTAMP DEFAULT NOW()
+                );
 
-            CREATE INDEX IF NOT EXISTS idx_notifications_task ON task_notifications(task_id);
-            CREATE INDEX IF NOT EXISTS idx_notifications_severity ON task_notifications(severity);
-            CREATE INDEX IF NOT EXISTS idx_notifications_time ON task_notifications(sent_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_exec_history_task ON task_execution_history(task_id);
+                CREATE INDEX IF NOT EXISTS idx_notifications_task ON task_notifications(task_id);
+                CREATE INDEX IF NOT EXISTS idx_notifications_severity ON task_notifications(severity);
+                CREATE INDEX IF NOT EXISTS idx_notifications_time ON task_notifications(sent_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_exec_history_task ON task_execution_history(task_id);
 
-            -- Enhanced decision tracking
-            ALTER TABLE task_execution_history
-            ADD COLUMN IF NOT EXISTS risk_assessment JSONB;
+                -- Enhanced decision tracking
+                ALTER TABLE task_execution_history
+                ADD COLUMN IF NOT EXISTS risk_assessment JSONB;
 
-            ALTER TABLE task_execution_history
-            ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0;
+                ALTER TABLE task_execution_history
+                ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0;
 
-            ALTER TABLE task_execution_history
-            ADD COLUMN IF NOT EXISTS human_escalation_required BOOLEAN DEFAULT FALSE;
+                ALTER TABLE task_execution_history
+                ADD COLUMN IF NOT EXISTS human_escalation_required BOOLEAN DEFAULT FALSE;
 
-            ALTER TABLE task_execution_history
-            ADD COLUMN IF NOT EXISTS escalation_reason TEXT;
-            """)
+                ALTER TABLE task_execution_history
+                ADD COLUMN IF NOT EXISTS escalation_reason TEXT;
+                """)
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                conn.commit()
+                cur.close()
             logger.info("✅ Intelligent task orchestrator database initialized")
         except Exception as e:
             logger.warning(f"Task orchestrator database init failed: {e}")
@@ -389,9 +428,9 @@ class IntelligentTaskOrchestrator:
             "Intelligent Task Orchestrator is now online and processing tasks")
 
         # Start background processing
-        asyncio.create_task(self._process_task_queue())
-        asyncio.create_task(self._monitor_running_tasks())
-        asyncio.create_task(self._ai_priority_adjustment_loop())
+        create_safe_task(self._process_task_queue(), "task_queue_processor")
+        create_safe_task(self._monitor_running_tasks(), "task_monitor")
+        create_safe_task(self._ai_priority_adjustment_loop(), "priority_adjuster")
 
     async def stop(self):
         """Stop the orchestrator"""
@@ -411,7 +450,7 @@ class IntelligentTaskOrchestrator:
                 # Fetch next intelligent task
                 task = await self._get_next_task()
                 if task:
-                    asyncio.create_task(self._execute_task(task))
+                    create_safe_task(self._execute_task(task), f"execute_task_{task.task_id}")
 
                 await asyncio.sleep(2)
 
@@ -422,34 +461,35 @@ class IntelligentTaskOrchestrator:
     async def _get_next_task(self) -> Optional[IntelligentTask]:
         """Get next task with AI prioritization"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with get_db_connection() as conn:
+                if not conn:
+                    return None
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            # Get pending tasks ordered by AI-adjusted priority
-            # CAST t.priority to FLOAT to match ap.adjusted_priority type
-            cur.execute("""
-            SELECT t.*,
-                   COALESCE(ap.adjusted_priority,
-                            CASE WHEN t.priority ~ '^[0-9.]+$'
-                                 THEN t.priority::FLOAT
-                                 ELSE 0.5 END) as effective_priority
-            FROM ai_autonomous_tasks t
-            LEFT JOIN ai_priority_adjustments ap ON t.id::text = ap.task_id
-            WHERE t.status = 'pending'
-            ORDER BY effective_priority DESC, t.created_at ASC
-            LIMIT 1
-            """)
+                # Get pending tasks ordered by AI-adjusted priority
+                # CAST t.priority to FLOAT to match ap.adjusted_priority type
+                cur.execute("""
+                SELECT t.*,
+                       COALESCE(ap.adjusted_priority,
+                                CASE WHEN t.priority ~ '^[0-9.]+$'
+                                     THEN t.priority::FLOAT
+                                     ELSE 0.5 END) as effective_priority
+                FROM ai_autonomous_tasks t
+                LEFT JOIN ai_priority_adjustments ap ON t.id::text = ap.task_id
+                WHERE t.status = 'pending'
+                ORDER BY effective_priority DESC, t.created_at ASC
+                LIMIT 1
+                """)
 
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
+                row = cur.fetchone()
+                cur.close()
 
-            if not row:
-                return None
+                if not row:
+                    return None
 
-            # Enhance task with AI analysis
-            task = await self._enhance_task_with_ai(dict(row))
-            return task
+                # Enhance task with AI analysis
+                task = await self._enhance_task_with_ai(dict(row))
+                return task
 
         except Exception as e:
             logger.error(f"Failed to get next task: {e}")
@@ -643,18 +683,19 @@ class IntelligentTaskOrchestrator:
         """Execute data sync task"""
         # Count records to verify sync scope
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM customers")
-            count = cur.fetchone()[0]
-            cur.close()
-            conn.close()
-            return {
-                "synced": True,
-                "records_verified": count,
-                "timestamp": datetime.now().isoformat(),
-                "sync_type": "full_verification"
-            }
+            with get_db_connection() as conn:
+                if not conn:
+                    return {"synced": False, "records": 0, "error": "No connection"}
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM customers")
+                count = cur.fetchone()[0]
+                cur.close()
+                return {
+                    "synced": True,
+                    "records_verified": count,
+                    "timestamp": datetime.now().isoformat(),
+                    "sync_type": "full_verification"
+                }
         except Exception as e:
             logger.error(f"Data sync failed: {e}")
             return {"synced": False, "records": 0, "error": str(e)}
@@ -666,24 +707,25 @@ class IntelligentTaskOrchestrator:
 
         # Log the revenue event to audit table
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS revenue_audit_log (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    action TEXT,
-                    amount NUMERIC,
-                    task_id TEXT,
-                    created_at TIMESTAMP DEFAULT NOW()
+            with get_db_connection() as conn:
+                if not conn:
+                    return {"action": action, "status": "processed", "audit_logged": False}
+                cur = conn.cursor()
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS revenue_audit_log (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        action TEXT,
+                        amount NUMERIC,
+                        task_id TEXT,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    )
+                """)
+                cur.execute(
+                    "INSERT INTO revenue_audit_log (action, amount, task_id) VALUES (%s, %s, %s)",
+                    (action, amount, task.id)
                 )
-            """)
-            cur.execute(
-                "INSERT INTO revenue_audit_log (action, amount, task_id) VALUES (%s, %s, %s)",
-                (action, amount, task.id)
-            )
-            conn.commit()
-            cur.close()
-            conn.close()
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.warning(f"Failed to log revenue action: {e}")
 
@@ -746,20 +788,21 @@ class IntelligentTaskOrchestrator:
             return
 
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with get_db_connection() as conn:
+                if not conn:
+                    return
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            cur.execute("""
-            SELECT id, title, payload, priority, created_at
-            FROM ai_autonomous_tasks
-            WHERE status = 'pending'
-            ORDER BY created_at ASC
-            LIMIT 20
-            """)
+                cur.execute("""
+                SELECT id, title, payload, priority, created_at
+                FROM ai_autonomous_tasks
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT 20
+                """)
 
-            tasks = cur.fetchall()
-            cur.close()
-            conn.close()
+                tasks = cur.fetchall()
+                cur.close()
 
             if not tasks:
                 return
@@ -799,42 +842,37 @@ class IntelligentTaskOrchestrator:
     def _store_priority_adjustment(self, task_id: str, original: int, adjusted: float, reason: str):
         """Store priority adjustment record"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            cur.execute("""
-            INSERT INTO ai_priority_adjustments
-            (task_id, original_priority, adjusted_priority, adjustment_reason)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT DO NOTHING
-            """, (task_id, original, adjusted, reason))
-            conn.commit()
-            cur.close()
-            conn.close()
+            with get_db_connection() as conn:
+                if not conn:
+                    return
+                cur = conn.cursor()
+                cur.execute("""
+                INSERT INTO ai_priority_adjustments
+                (task_id, original_priority, adjusted_priority, adjustment_reason)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+                """, (task_id, original, adjusted, reason))
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.debug(f"Failed to store priority adjustment: {e}")
 
     async def _update_task_status(self, task_id: str, status: str, result: dict = None):
         """Update task status in database"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
+            with get_db_connection() as conn:
+                if not conn:
+                    return
+                cur = conn.cursor()
 
-            if result:
-                cur.execute("""
-                UPDATE ai_autonomous_tasks
-                SET status = %s, updated_at = NOW()
-                WHERE id = %s::uuid
-                """, (status, task_id))
-            else:
                 cur.execute("""
                 UPDATE ai_autonomous_tasks
                 SET status = %s, updated_at = NOW()
                 WHERE id = %s::uuid
                 """, (status, task_id))
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.error(f"Failed to update task status: {e}")
 
@@ -942,25 +980,26 @@ class IntelligentTaskOrchestrator:
             if task.started_at and task.completed_at:
                 duration_ms = int((task.completed_at - task.started_at).total_seconds() * 1000)
 
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
-            cur.execute("""
-            INSERT INTO task_execution_history
-            (task_id, status, assigned_agent, started_at, completed_at, duration_ms, result, retry_count,
-             risk_assessment, confidence_score, human_escalation_required, escalation_reason)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                task.id, status, task.assigned_agent,
-                task.started_at, task.completed_at, duration_ms,
-                Json(result), task.retry_count,
-                Json(task.risk_assessment) if task.risk_assessment else None,
-                task.confidence_score,
-                task.human_escalation_required,
-                task.escalation_reason
-            ))
-            conn.commit()
-            cur.close()
-            conn.close()
+            with get_db_connection() as conn:
+                if not conn:
+                    return
+                cur = conn.cursor()
+                cur.execute("""
+                INSERT INTO task_execution_history
+                (task_id, status, assigned_agent, started_at, completed_at, duration_ms, result, retry_count,
+                 risk_assessment, confidence_score, human_escalation_required, escalation_reason)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    task.id, status, task.assigned_agent,
+                    task.started_at, task.completed_at, duration_ms,
+                    Json(result), task.retry_count,
+                    Json(task.risk_assessment) if task.risk_assessment else None,
+                    task.confidence_score,
+                    task.human_escalation_required,
+                    task.escalation_reason
+                ))
+                conn.commit()
+                cur.close()
         except Exception as e:
             logger.error(f"Failed to store execution history: {e}")
 
@@ -1011,22 +1050,23 @@ class IntelligentTaskOrchestrator:
     ) -> str:
         """Submit a new task to the orchestrator"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor()
+            with get_db_connection() as conn:
+                if not conn:
+                    raise RuntimeError("Failed to get database connection")
+                cur = conn.cursor()
 
-            cur.execute("""
-            INSERT INTO ai_autonomous_tasks (title, task_type, payload, priority, status, created_at)
-            VALUES (%s, %s, %s, %s, 'pending', NOW())
-            RETURNING id
-            """, (title, task_type, Json({"type": task_type, **payload}), priority))
+                cur.execute("""
+                INSERT INTO ai_autonomous_tasks (title, task_type, payload, priority, status, created_at)
+                VALUES (%s, %s, %s, %s, 'pending', NOW())
+                RETURNING id
+                """, (title, task_type, Json({"type": task_type, **payload}), priority))
 
-            task_id = str(cur.fetchone()[0])
-            conn.commit()
-            cur.close()
-            conn.close()
+                task_id = str(cur.fetchone()[0])
+                conn.commit()
+                cur.close()
 
-            logger.info(f"Task submitted: {task_id} - {title}")
-            return task_id
+                logger.info(f"Task submitted: {task_id} - {title}")
+                return task_id
 
         except Exception as e:
             logger.error(f"Failed to submit task: {e}")
@@ -1035,35 +1075,36 @@ class IntelligentTaskOrchestrator:
     async def get_status(self) -> dict[str, Any]:
         """Get orchestrator status"""
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cur = conn.cursor(cursor_factory=RealDictCursor)
+            with get_db_connection() as conn:
+                if not conn:
+                    return {"error": "Failed to get database connection"}
+                cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            cur.execute("""
-            SELECT status, COUNT(*) as count
-            FROM ai_autonomous_tasks
-            GROUP BY status
-            """)
-            status_counts = {row["status"]: row["count"] for row in cur.fetchall()}
+                cur.execute("""
+                SELECT status, COUNT(*) as count
+                FROM ai_autonomous_tasks
+                GROUP BY status
+                """)
+                status_counts = {row["status"]: row["count"] for row in cur.fetchall()}
 
-            cur.execute("""
-            SELECT COUNT(*) as count FROM task_notifications
-            WHERE acknowledged = FALSE AND sent_at > NOW() - INTERVAL '24 hours'
-            """)
-            unread_notifications = cur.fetchone()["count"]
+                cur.execute("""
+                SELECT COUNT(*) as count FROM task_notifications
+                WHERE acknowledged = FALSE AND sent_at > NOW() - INTERVAL '24 hours'
+                """)
+                unread_notifications = cur.fetchone()["count"]
 
-            cur.close()
-            conn.close()
+                cur.close()
 
-            return {
-                "running": self.running,
-                "running_tasks": len(self.running_tasks),
-                "max_concurrent": self.max_concurrent_tasks,
-                "task_counts": status_counts,
-                "unread_notifications": unread_notifications,
-                "meta_critic_available": META_CRITIC_AVAILABLE,
-                "healing_available": HEALING_AVAILABLE,
-                "ai_core_available": AI_CORE_AVAILABLE,
-            }
+                return {
+                    "running": self.running,
+                    "running_tasks": len(self.running_tasks),
+                    "max_concurrent": self.max_concurrent_tasks,
+                    "task_counts": status_counts,
+                    "unread_notifications": unread_notifications,
+                    "meta_critic_available": META_CRITIC_AVAILABLE,
+                    "healing_available": HEALING_AVAILABLE,
+                    "ai_core_available": AI_CORE_AVAILABLE,
+                }
 
         except Exception as e:
             logger.error(f"Failed to get status: {e}")

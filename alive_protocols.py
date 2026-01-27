@@ -18,6 +18,8 @@ from typing import Any, Dict
 
 import httpx
 
+from safe_task import create_safe_task
+
 from database.async_connection import get_pool
 from revenue_pipeline_agents import NurtureExecutorAgentReal
 from unified_brain import brain
@@ -203,8 +205,8 @@ async def run_revenue_drive_daemon(interval_seconds: int | None = None) -> None:
 def start_alive_protocols(tenant_id: str = "system") -> None:
     """Fire-and-forget startup for alive protocol daemons."""
     if _env_flag("ENABLE_SELF_HEALTH_DAEMON", True):
-        asyncio.create_task(run_self_health_daemon())
+        create_safe_task(run_self_health_daemon())
         logger.info("✅ Self-Health daemon scheduled")
     if _env_flag("ENABLE_REVENUE_DRIVE_DAEMON", True):
-        asyncio.create_task(run_revenue_drive_daemon())
+        create_safe_task(run_revenue_drive_daemon())
         logger.info("✅ Revenue Drive daemon scheduled")

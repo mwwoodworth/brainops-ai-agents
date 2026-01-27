@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+from safe_task import create_safe_task
 from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,7 @@ class BackgroundTaskMonitor:
         if self._started:
             return
 
-        self._monitor_task = asyncio.create_task(self._monitor_loop())
+        self._monitor_task = create_safe_task(self._monitor_loop())
         self._started = True
         logger.info("✅ Background Task Monitor started")
 
@@ -342,8 +343,8 @@ async def start_all_monitoring(app_state):
     await monitor.start()
 
     # Start monitoring tasks
-    asyncio.create_task(monitor_aurea(app_state))
-    asyncio.create_task(monitor_scheduler(app_state))
-    asyncio.create_task(monitor_self_healing(app_state))
+    create_safe_task(monitor_aurea(app_state))
+    create_safe_task(monitor_scheduler(app_state))
+    create_safe_task(monitor_self_healing(app_state))
 
     logger.info("✅ All background task monitoring started")

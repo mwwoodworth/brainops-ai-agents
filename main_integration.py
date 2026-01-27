@@ -11,6 +11,7 @@ import os
 from datetime import datetime
 from typing import Any, Optional
 
+from safe_task import create_safe_task
 import psycopg2
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -362,7 +363,7 @@ async def startup_event():
     # Start AUREA in background if configured
     if os.getenv("AUTO_START_AUREA", "false").lower() == "true":
         # Note: Background task needs a specific tenant context, defaulting to system
-        asyncio.create_task(run_aurea_background("system-background"))
+        create_safe_task(run_aurea_background("system-background"))
 
     # Start Alive Protocol daemons (Self-Health + Revenue Drive)
     start_alive_protocols("system-startup")

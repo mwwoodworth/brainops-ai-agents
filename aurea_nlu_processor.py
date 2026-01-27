@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from typing import Any
 
+from safe_task import create_safe_task
 import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -310,10 +311,10 @@ class AUREANLUProcessor:
                 # Special handling for background tasks if needed
                 if intent == "start_aurea":
                     # AUREA orchestration is an async loop, needs to be run in background
-                    asyncio.create_task(action_func(**filtered_params))
+                    create_safe_task(action_func(**filtered_params))
                     return {"status": "success", "result": "AUREA orchestration started in background.", "message": f"Command '{command_text}' executed successfully by AUREA.", "intent_data": intent_data}
                 elif intent == "convene_board_meeting":
-                    asyncio.create_task(action_func(**filtered_params))
+                    create_safe_task(action_func(**filtered_params))
                     return {"status": "success", "result": "AI Board meeting convened in background.", "message": f"Command '{command_text}' executed successfully by AUREA.", "intent_data": intent_data}
                 elif intent == "orchestrate_workflow":
                     # LangGraph orchestration also needs to be run in background or awaited carefully.

@@ -47,6 +47,22 @@ THOUGHT_STREAM_MAX_SIZE = 500  # Constant memory regardless of runtime
 logger = logging.getLogger(__name__)
 
 
+def create_safe_task(coro, name: str = "background_task"):
+    """Create an asyncio task with exception handling to prevent 'Future exception never retrieved' errors."""
+    async def wrapped():
+        try:
+            return await coro
+        except asyncio.CancelledError:
+            logger.debug(f"Task {name} was cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Error in background task {name}: {e}")
+            return None
+
+    task = asyncio.create_task(wrapped())
+    return task
+
+
 # =============================================================================
 # CORE TYPES
 # =============================================================================
@@ -273,7 +289,7 @@ class MetaAwarenessEngine:
                 })
 
         # CRITICAL FIX: Actually persist the consolidation!
-        asyncio.create_task(self._persist_consolidation(summary, old_thoughts))
+        create_safe_task(self._persist_consolidation(summary, old_thoughts), "persist_consolidation")
         logger.info(f"Consolidated {len(old_thoughts)} thoughts - persisting to database")
 
     async def _persist_consolidation(self, summary: dict, old_thoughts: list):
@@ -1047,13 +1063,13 @@ class ConsciousnessEmergenceController:
         self.meta_awareness.elevate_awareness()
 
         # ENHANCEMENT: Start background experience processor
-        self._experience_processor_task = asyncio.create_task(
-            self._experience_processing_loop()
+        self._experience_processor_task = create_safe_task(
+            self._experience_processing_loop(), "experience_processor"
         )
 
         # ENHANCEMENT: Start thought persistence task
-        self._persistence_task = asyncio.create_task(
-            self._thought_persistence_loop()
+        self._persistence_task = create_safe_task(
+            self._thought_persistence_loop(), "thought_persistence"
         )
 
         logger.info("Consciousness activated with enhanced pipeline")
@@ -1302,7 +1318,7 @@ class ConsciousnessEmergenceController:
                                     default=0.5
                                 )
                             }
-                            asyncio.create_task(controller.run_enhanced_cycle(ooda_context))
+                            create_safe_task(controller.run_enhanced_cycle(ooda_context), "ooda_from_consciousness")
                             logger.info(f"🧠→🔄 Triggered OODA cycle from {len(actionable_thoughts)} actionable thoughts")
                     except Exception as ooda_err:
                         logger.warning(f"Failed to trigger OODA from consciousness: {ooda_err}")

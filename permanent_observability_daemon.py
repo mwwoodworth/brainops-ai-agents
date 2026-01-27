@@ -23,6 +23,8 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+
+from safe_task import create_safe_task
 from typing import Any, Optional
 
 import aiohttp
@@ -166,7 +168,7 @@ class PermanentObservabilityDaemon:
             return
 
         self.running = True
-        self._task = asyncio.create_task(self._run_loop())
+        self._task = create_safe_task(self._run_loop())
         logger.info("PermanentObservabilityDaemon started")
 
         # Persist daemon start event

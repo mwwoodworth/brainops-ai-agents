@@ -23,6 +23,8 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+from safe_task import create_safe_task
 from enum import Enum
 from typing import Any, Optional
 
@@ -521,8 +523,8 @@ class UltimateE2ESystem:
         }
 
         # Run all checks in parallel
-        build_task = asyncio.create_task(self.monitor_all_builds())
-        db_task = asyncio.create_task(self.get_database_state())
+        build_task = create_safe_task(self.monitor_all_builds())
+        db_task = create_safe_task(self.get_database_state())
 
         # Service health checks
         service_health = {}
@@ -622,7 +624,7 @@ class UltimateE2ESystem:
                 # Run UI tests periodically
                 if time.time() - last_test_time > test_interval:
                     logger.info("Running scheduled UI tests...")
-                    asyncio.create_task(self.run_comprehensive_ui_tests())
+                    create_safe_task(self.run_comprehensive_ui_tests())
                     last_test_time = time.time()
 
             except Exception as e:

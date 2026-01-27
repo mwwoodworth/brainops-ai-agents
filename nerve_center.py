@@ -20,6 +20,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Optional
 
+from safe_task import create_safe_task
 from ai_tracer import BrainOpsTracer
 
 # Import all alive components
@@ -467,15 +468,15 @@ class NerveCenter:
 
             # Start autonomic manager - FIX: Track task to allow proper cancellation
             if self.autonomic:
-                task = asyncio.create_task(self.autonomic.start_loop(interval=10))
+                task = create_safe_task(self.autonomic.start_loop(interval=10), "autonomic_loop")
                 self._tasks.append(task)
 
             # Start coordination loop
-            self._tasks.append(asyncio.create_task(self._coordination_loop()))
+            self._tasks.append(create_safe_task(self._coordination_loop(), "coordination_loop"))
 
             # Start consciousness loop if available - FIX: Track task
             if self.consciousness_loop and hasattr(self.consciousness_loop, 'start'):
-                task = asyncio.create_task(self.consciousness_loop.start())
+                task = create_safe_task(self.consciousness_loop.start(), "consciousness_loop")
                 self._tasks.append(task)
 
             self.is_online = True
