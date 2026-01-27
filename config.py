@@ -152,7 +152,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.4.0')  # Complete system intelligence overhaul
+        self.version = os.getenv('VERSION', 'v10.5.0')  # Complete system intelligence overhaul
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
