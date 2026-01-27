@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -984,16 +985,56 @@ class AgentScheduler:
         """Execute health monitoring agent - checks all agents and auto-restarts failed ones"""
         logger.info(f"Running health monitoring for agent: {agent['name']}")
 
+        timeout_seconds = 300  # 5 minutes
+        timeout_ms = timeout_seconds * 1000
+        started_at = time.monotonic()
+
+        previous_statement_timeout = None
+        previous_lock_timeout = None
+
+        def _check_timeout(stage: str) -> None:
+            elapsed = time.monotonic() - started_at
+            if elapsed > timeout_seconds:
+                raise TimeoutError(
+                    f"HealthMonitor timed out after {timeout_seconds}s during {stage} (elapsed={elapsed:.1f}s)"
+                )
+
         try:
             # Import health monitor - skip table init to avoid nested DB connections
             from agent_health_monitor import get_health_monitor
             health_monitor = get_health_monitor(skip_table_init=True)
 
+            # Apply DB-side timeouts on the pooled connection to avoid long hangs
+            try:
+                cur.execute("SHOW statement_timeout")
+                row = cur.fetchone()
+                if isinstance(row, dict):
+                    previous_statement_timeout = row.get("statement_timeout")
+                elif row:
+                    previous_statement_timeout = row[0]
+            except Exception:
+                previous_statement_timeout = None
+
+            try:
+                cur.execute("SHOW lock_timeout")
+                row = cur.fetchone()
+                if isinstance(row, dict):
+                    previous_lock_timeout = row.get("lock_timeout")
+                elif row:
+                    previous_lock_timeout = row[0]
+            except Exception:
+                previous_lock_timeout = None
+
+            cur.execute("SET statement_timeout = %s", (timeout_ms,))
+            cur.execute("SET lock_timeout = %s", (timeout_ms,))
+
             # Run health check for all agents
-            health_summary = health_monitor.check_all_agents_health()
+            _check_timeout("check_all_agents_health")
+            health_summary = health_monitor.check_all_agents_health(conn=conn, cur=cur)
 
             # Auto-restart critical agents
-            restart_result = health_monitor.auto_restart_critical_agents()
+            _check_timeout("auto_restart_critical_agents")
+            restart_result = health_monitor.auto_restart_critical_agents(conn=conn, cur=cur)
 
             # Store results in brain
             if self.brain:
@@ -1021,6 +1062,14 @@ class AgentScheduler:
                 "timestamp": datetime.utcnow().isoformat()
             }
 
+        except TimeoutError as e:
+            logger.error(f"Health monitoring timed out: {e}")
+            return {
+                "agent": agent['name'],
+                "error": str(e),
+                "timed_out": True,
+                "timestamp": datetime.utcnow().isoformat()
+            }
         except Exception as e:
             logger.error(f"Health monitoring failed: {e}")
             return {
@@ -1028,6 +1077,22 @@ class AgentScheduler:
                 "error": str(e),
                 "timestamp": datetime.utcnow().isoformat()
             }
+        finally:
+            # Restore session timeouts for pooled connection reuse safety
+            try:
+                if previous_statement_timeout is not None:
+                    cur.execute("SET statement_timeout = %s", (previous_statement_timeout,))
+                else:
+                    cur.execute("RESET statement_timeout")
+            except Exception:
+                pass
+            try:
+                if previous_lock_timeout is not None:
+                    cur.execute("SET lock_timeout = %s", (previous_lock_timeout,))
+                else:
+                    cur.execute("RESET lock_timeout")
+            except Exception:
+                pass
 
     def _execute_email_processor(self, agent: dict, cur, conn) -> dict:
         """Execute email processor agent - processes ai_email_queue"""
