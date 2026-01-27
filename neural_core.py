@@ -701,6 +701,364 @@ class NeuralCore:
 
 
 # =============================================================================
+# AI-POWERED INTELLIGENCE ENGINE
+# =============================================================================
+
+class IssueAnalysis:
+    """Deep analysis of a system issue"""
+    def __init__(self, system_name: str, issue: str):
+        self.system_name = system_name
+        self.issue = issue
+        self.root_cause: Optional[str] = None
+        self.severity: str = "unknown"  # low, medium, high, critical
+        self.fix_strategies: List[Dict[str, Any]] = []
+        self.auto_fixable: bool = False
+        self.confidence: float = 0.0
+        self.timestamp = datetime.now(timezone.utc)
+
+
+class IntelligenceEngine:
+    """
+    THE INTELLIGENCE ENGINE OF THE AI OS
+
+    This is what makes the AI OS truly intelligent:
+    - Deep understanding of WHY issues occur
+    - Multiple fix strategies with confidence scores
+    - Learning from past fixes
+    - Proactive optimization suggestions
+    """
+
+    # Issue patterns and their root causes
+    ISSUE_PATTERNS = {
+        "HTTP 500": {
+            "root_cause": "Internal server error - application crash or unhandled exception",
+            "severity": "high",
+            "strategies": [
+                {"action": "restart", "confidence": 0.7, "description": "Restart the service"},
+                {"action": "check_logs", "confidence": 0.9, "description": "Analyze recent error logs"},
+                {"action": "check_memory", "confidence": 0.6, "description": "Check memory usage"},
+                {"action": "redeploy", "confidence": 0.5, "description": "Redeploy from last known good build"}
+            ],
+            "auto_fixable": True
+        },
+        "HTTP 502": {
+            "root_cause": "Bad gateway - upstream service not responding",
+            "severity": "high",
+            "strategies": [
+                {"action": "restart", "confidence": 0.8, "description": "Restart the service"},
+                {"action": "check_dependencies", "confidence": 0.7, "description": "Verify dependency health"},
+                {"action": "scale_up", "confidence": 0.4, "description": "Scale up resources"}
+            ],
+            "auto_fixable": True
+        },
+        "HTTP 503": {
+            "root_cause": "Service unavailable - overloaded or maintenance",
+            "severity": "high",
+            "strategies": [
+                {"action": "wait_and_retry", "confidence": 0.6, "description": "Wait 30s and retry"},
+                {"action": "restart", "confidence": 0.7, "description": "Restart the service"},
+                {"action": "scale_up", "confidence": 0.5, "description": "Scale up resources"}
+            ],
+            "auto_fixable": True
+        },
+        "HTTP 504": {
+            "root_cause": "Gateway timeout - slow response from upstream",
+            "severity": "medium",
+            "strategies": [
+                {"action": "check_performance", "confidence": 0.8, "description": "Check response times"},
+                {"action": "increase_timeout", "confidence": 0.5, "description": "Increase timeout config"},
+                {"action": "optimize_queries", "confidence": 0.6, "description": "Optimize slow queries"}
+            ],
+            "auto_fixable": False
+        },
+        "timeout": {
+            "root_cause": "Network connectivity or resource exhaustion",
+            "severity": "high",
+            "strategies": [
+                {"action": "restart", "confidence": 0.7, "description": "Restart the service"},
+                {"action": "check_network", "confidence": 0.8, "description": "Verify network connectivity"},
+                {"action": "check_resources", "confidence": 0.6, "description": "Check CPU/Memory usage"}
+            ],
+            "auto_fixable": True
+        },
+        "unreachable": {
+            "root_cause": "Service not running or DNS issue",
+            "severity": "critical",
+            "strategies": [
+                {"action": "restart", "confidence": 0.9, "description": "Restart the service"},
+                {"action": "check_dns", "confidence": 0.5, "description": "Verify DNS resolution"},
+                {"action": "check_firewall", "confidence": 0.3, "description": "Check firewall rules"}
+            ],
+            "auto_fixable": True
+        },
+        "error": {
+            "root_cause": "Application error - needs investigation",
+            "severity": "medium",
+            "strategies": [
+                {"action": "check_logs", "confidence": 0.9, "description": "Analyze error logs"},
+                {"action": "restart", "confidence": 0.5, "description": "Restart the service"}
+            ],
+            "auto_fixable": False
+        }
+    }
+
+    def __init__(self):
+        self.analyses: List[IssueAnalysis] = []
+        self.fix_history: List[Dict[str, Any]] = []
+        self.optimization_suggestions: List[Dict[str, Any]] = []
+
+    def analyze_issue(self, system_name: str, issue: str) -> IssueAnalysis:
+        """Deep analysis of an issue"""
+        analysis = IssueAnalysis(system_name, issue)
+
+        # Pattern matching for known issues
+        issue_lower = issue.lower()
+        for pattern, details in self.ISSUE_PATTERNS.items():
+            if pattern.lower() in issue_lower:
+                analysis.root_cause = details["root_cause"]
+                analysis.severity = details["severity"]
+                analysis.fix_strategies = details["strategies"]
+                analysis.auto_fixable = details["auto_fixable"]
+                analysis.confidence = 0.85
+                break
+
+        # If no pattern matched, use heuristics
+        if not analysis.root_cause:
+            analysis.root_cause = "Unknown issue requiring manual investigation"
+            analysis.severity = "medium"
+            analysis.fix_strategies = [
+                {"action": "investigate", "confidence": 1.0, "description": "Manual investigation required"},
+                {"action": "restart", "confidence": 0.4, "description": "Try restarting as fallback"}
+            ]
+            analysis.auto_fixable = False
+            analysis.confidence = 0.5
+
+        self.analyses.append(analysis)
+        return analysis
+
+    def get_best_fix_strategy(self, analysis: IssueAnalysis) -> Optional[Dict[str, Any]]:
+        """Get the best fix strategy for an issue"""
+        if not analysis.fix_strategies:
+            return None
+
+        # Sort by confidence and return highest
+        sorted_strategies = sorted(
+            analysis.fix_strategies,
+            key=lambda x: x["confidence"],
+            reverse=True
+        )
+        return sorted_strategies[0] if sorted_strategies else None
+
+    def record_fix_attempt(self, system_name: str, action: str, success: bool, details: Dict[str, Any] = None):
+        """Record a fix attempt for learning"""
+        self.fix_history.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "system": system_name,
+            "action": action,
+            "success": success,
+            "details": details or {}
+        })
+
+    def generate_optimization_suggestions(self, systems: Dict[str, "SystemAwareness"]) -> List[Dict[str, Any]]:
+        """Generate proactive optimization suggestions"""
+        suggestions = []
+
+        for system_id, system in systems.items():
+            # Slow response time
+            if system.response_time_ms and system.response_time_ms > 2000:
+                suggestions.append({
+                    "system": system.name,
+                    "type": "performance",
+                    "severity": "medium",
+                    "suggestion": f"Response time is {system.response_time_ms:.0f}ms - consider optimization",
+                    "actions": [
+                        "Enable caching",
+                        "Optimize database queries",
+                        "Add CDN for static assets",
+                        "Scale up resources"
+                    ]
+                })
+
+            # Degraded health
+            if 0.5 <= system.health_score < 0.8:
+                suggestions.append({
+                    "system": system.name,
+                    "type": "reliability",
+                    "severity": "medium",
+                    "suggestion": f"Health score is {system.health_score:.0%} - monitor closely",
+                    "actions": [
+                        "Check error rates",
+                        "Review recent changes",
+                        "Add more health checks"
+                    ]
+                })
+
+            # Partial awareness
+            if system.awareness_level == AwarenessLevel.PARTIAL:
+                suggestions.append({
+                    "system": system.name,
+                    "type": "observability",
+                    "severity": "low",
+                    "suggestion": "Partial awareness - consider adding health endpoint",
+                    "actions": [
+                        "Add /health endpoint",
+                        "Expose metrics",
+                        "Add structured logging"
+                    ]
+                })
+
+        self.optimization_suggestions = suggestions
+        return suggestions
+
+    def get_intelligence_summary(self) -> Dict[str, Any]:
+        """Get a summary of the intelligence engine state"""
+        recent_analyses = self.analyses[-10:] if self.analyses else []
+        recent_fixes = self.fix_history[-10:] if self.fix_history else []
+
+        # Calculate fix success rate
+        successful_fixes = sum(1 for f in self.fix_history if f["success"])
+        total_fixes = len(self.fix_history)
+        success_rate = successful_fixes / total_fixes if total_fixes > 0 else 0
+
+        return {
+            "total_analyses": len(self.analyses),
+            "total_fix_attempts": len(self.fix_history),
+            "fix_success_rate": success_rate,
+            "recent_analyses": [
+                {
+                    "system": a.system_name,
+                    "issue": a.issue,
+                    "root_cause": a.root_cause,
+                    "severity": a.severity,
+                    "auto_fixable": a.auto_fixable
+                }
+                for a in recent_analyses
+            ],
+            "recent_fixes": recent_fixes,
+            "optimization_suggestions": self.optimization_suggestions[:5]
+        }
+
+
+# Add intelligence engine to NeuralCore
+def _extend_neural_core():
+    """Extend NeuralCore with intelligence capabilities"""
+
+    # Store original __init__
+    original_init = NeuralCore.__init__
+
+    def new_init(self):
+        original_init(self)
+        self.intelligence = IntelligenceEngine()
+
+    NeuralCore.__init__ = new_init
+
+    # Add deep analysis method
+    async def deep_analyze_issues(self) -> Dict[str, Any]:
+        """Perform deep analysis of all current issues"""
+        analyses = []
+
+        for system in self.systems.values():
+            for issue in system.issues:
+                analysis = self.intelligence.analyze_issue(system.name, issue)
+                analyses.append({
+                    "system": system.name,
+                    "issue": issue,
+                    "root_cause": analysis.root_cause,
+                    "severity": analysis.severity,
+                    "auto_fixable": analysis.auto_fixable,
+                    "confidence": analysis.confidence,
+                    "strategies": analysis.fix_strategies
+                })
+
+        return {
+            "total_issues": len(analyses),
+            "auto_fixable": sum(1 for a in analyses if a["auto_fixable"]),
+            "analyses": analyses
+        }
+
+    NeuralCore.deep_analyze_issues = deep_analyze_issues
+
+    # Add optimization suggestions method
+    async def get_optimization_suggestions(self) -> List[Dict[str, Any]]:
+        """Get proactive optimization suggestions"""
+        return self.intelligence.generate_optimization_suggestions(self.systems)
+
+    NeuralCore.get_optimization_suggestions = get_optimization_suggestions
+
+    # Add intelligence summary method
+    def get_intelligence_summary(self) -> Dict[str, Any]:
+        """Get intelligence engine summary"""
+        return self.intelligence.get_intelligence_summary()
+
+    NeuralCore.get_intelligence_summary = get_intelligence_summary
+
+    # Extend ask method to handle more questions
+    original_ask = NeuralCore.ask
+
+    async def enhanced_ask(self, question: str) -> Dict[str, Any]:
+        question_lower = question.lower()
+
+        # Analysis questions
+        if any(word in question_lower for word in ["analyze", "why", "root cause", "deep"]):
+            analysis = await self.deep_analyze_issues()
+            if analysis["total_issues"] > 0:
+                return {
+                    "answer": f"I've performed deep analysis on {analysis['total_issues']} issues. {analysis['auto_fixable']} can be auto-fixed.",
+                    "details": analysis
+                }
+            else:
+                return {
+                    "answer": "No issues to analyze - all systems are healthy.",
+                    "details": {"total_issues": 0, "analyses": []}
+                }
+
+        # Fix questions
+        if any(word in question_lower for word in ["fix", "repair", "heal", "auto"]):
+            analysis = await self.deep_analyze_issues()
+            fixable = [a for a in analysis["analyses"] if a["auto_fixable"]]
+            if fixable:
+                return {
+                    "answer": f"I can auto-fix {len(fixable)} issues. Request '/neural/heal' with system_id to trigger.",
+                    "details": {"fixable": fixable}
+                }
+            else:
+                return {
+                    "answer": "No auto-fixable issues found. Manual intervention may be required.",
+                    "details": {"fixable": []}
+                }
+
+        # Optimization questions
+        if any(word in question_lower for word in ["optimize", "improve", "enhance", "suggest"]):
+            suggestions = await self.get_optimization_suggestions()
+            if suggestions:
+                return {
+                    "answer": f"I have {len(suggestions)} optimization suggestions for your systems.",
+                    "details": {"suggestions": suggestions}
+                }
+            else:
+                return {
+                    "answer": "All systems are well-optimized. No suggestions at this time.",
+                    "details": {"suggestions": []}
+                }
+
+        # Intelligence questions
+        if any(word in question_lower for word in ["intelligence", "learn", "history"]):
+            summary = self.get_intelligence_summary()
+            return {
+                "answer": f"I've analyzed {summary['total_analyses']} issues and attempted {summary['total_fix_attempts']} fixes with {summary['fix_success_rate']:.0%} success rate.",
+                "details": summary
+            }
+
+        # Fall back to original ask
+        return await original_ask(self, question)
+
+    NeuralCore.ask = enhanced_ask
+
+# Apply extensions
+_extend_neural_core()
+
+
+# =============================================================================
 # GLOBAL INSTANCE
 # =============================================================================
 
