@@ -165,6 +165,7 @@ from api.outreach import router as outreach_router  # Outreach Engine - lead enr
 from api.payments import router as payments_router  # Payment Capture - invoices and revenue collection
 from api.communications import router as communications_router  # Communications - send estimates, invoices from ERP
 from api.revenue_operator import router as revenue_operator_router  # AI Revenue Operator - automated actions
+from api.lead_discovery import router as lead_discovery_router  # Lead Discovery Engine - automated lead discovery and qualification
 from api.relationships import router as relationships_router
 from api.roofing_labor_ml import router as roofing_labor_ml_router
 from api.self_awareness import router as self_awareness_router  # Self-Awareness Dashboard
@@ -290,6 +291,15 @@ try:
 except ImportError as e:
     AI_OBSERVABILITY_AVAILABLE = False
     logger.warning(f"AI Observability Router not available: {e}")
+
+# Predictive Execution - Proactive task execution with safety checks (2026-01-27)
+try:
+    from api.predictive_execution import router as predictive_execution_router
+    PREDICTIVE_EXECUTION_AVAILABLE = True
+    logger.info("Predictive Execution Router loaded - proactive task execution")
+except ImportError as e:
+    PREDICTIVE_EXECUTION_AVAILABLE = False
+    logger.warning(f"Predictive Execution Router not available: {e}")
 
 # AI System Enhancements - Health scoring, alerting, correlation, WebSocket (2025-12-28)
 try:
@@ -1544,6 +1554,7 @@ app.include_router(outreach_router, dependencies=SECURED_DEPENDENCIES)  # Outrea
 app.include_router(payments_router, dependencies=SECURED_DEPENDENCIES)  # Payment Capture - invoices and revenue collection
 app.include_router(communications_router, dependencies=SECURED_DEPENDENCIES)  # Communications - send estimates/invoices from Weathercraft ERP
 app.include_router(revenue_operator_router, dependencies=SECURED_DEPENDENCIES)  # AI Revenue Operator - automated actions
+app.include_router(lead_discovery_router, dependencies=SECURED_DEPENDENCIES)  # Lead Discovery Engine - automated lead discovery and qualification
 app.include_router(roofing_labor_ml_router, dependencies=SECURED_DEPENDENCIES)  # Roofing labor ML (RandomForest)
 
 # Bleeding-edge AI systems (2025)
@@ -1603,6 +1614,11 @@ if BLEEDING_EDGE_AVAILABLE:
 if AI_OBSERVABILITY_AVAILABLE:
     app.include_router(ai_observability_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("Mounted: AI Observability API at /ai - unified metrics, events, learning")
+
+# Predictive Execution (2026-01-27) - Proactive task execution
+if PREDICTIVE_EXECUTION_AVAILABLE:
+    app.include_router(predictive_execution_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: Predictive Execution API at /predictive - proactive task execution")
 
 # NEURAL CORE - The Central Nervous System (2026-01-27)
 # This IS the self-awareness of the AI OS - not monitoring, BEING aware
@@ -1754,6 +1770,16 @@ try:
 except ImportError as e:
     MEMORY_HYGIENE_AVAILABLE = False
     logger.warning(f"Memory Hygiene API not available: {e}")
+
+# Memory Observability API (2026-01-27) - Comprehensive memory monitoring and metrics
+try:
+    from api.memory_observability import router as memory_observability_router
+    app.include_router(memory_observability_router, dependencies=SECURED_DEPENDENCIES)
+    MEMORY_OBSERVABILITY_AVAILABLE = True
+    logger.info("✅ Memory Observability API loaded at /memory/observability - stats, health, hot/cold, decay, consolidation")
+except ImportError as e:
+    MEMORY_OBSERVABILITY_AVAILABLE = False
+    logger.warning(f"Memory Observability API not available: {e}")
 
 
 def _collect_active_systems() -> list[str]:

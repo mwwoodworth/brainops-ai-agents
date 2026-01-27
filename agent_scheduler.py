@@ -77,6 +77,16 @@ except ImportError:
     run_scheduled_feedback_loop = None
     logging.warning("Learning Feedback Loop unavailable")
 
+# Lead Discovery Engine (2026-01-27 - Automated Lead Discovery)
+try:
+    from lead_discovery_scheduler import handle_lead_discovery_task, get_scheduler as get_lead_scheduler
+    LEAD_DISCOVERY_AVAILABLE = True
+except ImportError:
+    LEAD_DISCOVERY_AVAILABLE = False
+    handle_lead_discovery_task = None
+    get_lead_scheduler = None
+    logging.warning("Lead Discovery Scheduler unavailable")
+
 # Platform Cross-Sell (2026-01-22 - Revenue Integration)
 # Enrolls MRG and BSS platform users in cross-sell sequences
 try:
@@ -751,6 +761,40 @@ class AgentScheduler:
         except Exception as e:
             logger.error(f"Advanced lead scoring section failed: {e}")
 
+        # === LEAD DISCOVERY ENGINE INTEGRATION ===
+        # Run automated lead discovery from ERP data
+        leads_discovered = 0
+        leads_synced = 0
+        if LEAD_DISCOVERY_AVAILABLE and agent.get('name') in ['LeadDiscoveryAgent', 'LeadGenerationAgent']:
+            try:
+                # Run lead discovery in async context
+                loop = asyncio.new_event_loop()
+                try:
+                    discovery_result = loop.run_until_complete(
+                        handle_lead_discovery_task({
+                            'id': str(uuid.uuid4()),
+                            'sources': ['erp_reactivation', 'erp_upsell', 'erp_referral'],
+                            'limit': 50,
+                            'sync_revenue': True,
+                            'sync_erp': False
+                        })
+                    )
+                    if discovery_result.get('status') == 'completed':
+                        result_data = discovery_result.get('result', {})
+                        leads_discovered = result_data.get('leads_discovered', 0)
+                        leads_synced = result_data.get('synced_to_revenue', 0)
+                        actions_taken.append({
+                            'action': 'lead_discovery_completed',
+                            'leads_discovered': leads_discovered,
+                            'leads_synced': leads_synced,
+                            'sources': result_data.get('by_source', {})
+                        })
+                        logger.info(f"Lead Discovery: {leads_discovered} discovered, {leads_synced} synced")
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.warning(f"Lead discovery engine failed: {e}")
+
         return {
             "agent": agent['name'],
             "total_customers": stats['total_customers'],
@@ -759,6 +803,8 @@ class AgentScheduler:
             "dormant_valuable_found": len(dormant_valuable_customers),
             "leads_scored": len([a for a in actions_taken if a['action'] == 'updated_lead_score']),
             "advanced_leads_scored": advanced_scores_updated,
+            "leads_discovered": leads_discovered,
+            "leads_synced": leads_synced,
             "reengagements_scheduled": len([a for a in actions_taken if a['action'] == 'scheduled_reengagement']),
             "actions_taken": actions_taken,
             "timestamp": datetime.utcnow().isoformat()
