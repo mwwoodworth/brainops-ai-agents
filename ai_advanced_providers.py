@@ -28,7 +28,7 @@ class AdvancedAIProviders:
         self.gemini_key = os.getenv("GOOGLE_API_KEY")
         if self.gemini_key and GEMINI_AVAILABLE:
             genai.configure(api_key=self.gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-1.5-pro-002')
+            self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
             logger.info("Gemini AI configured")
         else:
             self.gemini_model = None
@@ -260,7 +260,7 @@ Focus on:
         return {
             "gemini": {
                 "available": bool(self.gemini_key),
-                "model": "gemini-1.5-pro-002",
+                "model": "gemini-2.0-flash",
                 "capabilities": ["text-generation", "analysis", "reasoning", "coding"]
             },
             "perplexity": {
