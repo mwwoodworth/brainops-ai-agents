@@ -1819,6 +1819,16 @@ except ImportError as e:
     WORKFLOWS_AVAILABLE = False
     logger.warning(f"Advanced Workflow Engine not available: {e}")
 
+# Autonomous Issue Resolver (2026-01-27) - ACTUALLY FIXES detected issues
+try:
+    from api.autonomous_resolver import router as autonomous_resolver_router
+    app.include_router(autonomous_resolver_router, dependencies=SECURED_DEPENDENCIES)
+    AUTONOMOUS_RESOLVER_AVAILABLE = True
+    logger.info("🔧 Mounted: Autonomous Issue Resolver at /resolver - detects AND FIXES AI OS issues")
+except ImportError as e:
+    AUTONOMOUS_RESOLVER_AVAILABLE = False
+    logger.warning(f"Autonomous Issue Resolver not available: {e}")
+
 
 def _collect_active_systems() -> list[str]:
     """Return a list of systems that are initialized and active."""
@@ -1856,6 +1866,9 @@ def _collect_active_systems() -> list[str]:
     # Bleeding Edge AI Systems (2025-12-27)
     if BLEEDING_EDGE_AVAILABLE:
         active.append("Bleeding Edge AI (OODA, Hallucination, Memory, Dependability, Consciousness, Circuit Breaker)")
+    # Autonomous Issue Resolver (2026-01-27) - ACTUALLY FIXES issues
+    if AUTONOMOUS_RESOLVER_AVAILABLE:
+        active.append("Autonomous Issue Resolver (Detects AND FIXES AI OS Issues)")
     # Memory Enforcement & Hygiene (2026-01-15) - Total Completion Protocol
     if MEMORY_ENFORCEMENT_AVAILABLE:
         active.append("Memory Enforcement (RBA/WBA, Verification, Audit)")
