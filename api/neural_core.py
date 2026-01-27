@@ -297,6 +297,135 @@ async def initialize():
     return result
 
 
+# =============================================================================
+# INTELLIGENCE ENGINE ENDPOINTS
+# =============================================================================
+
+@router.get("/analyze")
+async def deep_analyze():
+    """
+    🔬 DEEP ANALYSIS OF ALL ISSUES
+
+    Perform intelligent root cause analysis on all current issues.
+    Returns:
+    - Root cause identification
+    - Severity assessment
+    - Fix strategies with confidence scores
+    - Auto-fixability determination
+    """
+    if not NEURAL_CORE_AVAILABLE:
+        return {"error": "Neural core not available"}
+
+    core = get_neural_core()
+    analysis = await core.deep_analyze_issues()
+
+    return {
+        "analysis_complete": True,
+        "total_issues": analysis["total_issues"],
+        "auto_fixable": analysis["auto_fixable"],
+        "manual_intervention_required": analysis["total_issues"] - analysis["auto_fixable"],
+        "analyses": analysis["analyses"]
+    }
+
+
+@router.get("/optimize")
+async def get_optimizations():
+    """
+    ⚡ GET OPTIMIZATION SUGGESTIONS
+
+    Proactive suggestions for improving your systems:
+    - Performance optimizations
+    - Reliability improvements
+    - Observability enhancements
+    """
+    if not NEURAL_CORE_AVAILABLE:
+        return {"suggestions": [], "message": "Neural core not loaded"}
+
+    core = get_neural_core()
+    suggestions = await core.get_optimization_suggestions()
+
+    return {
+        "total_suggestions": len(suggestions),
+        "suggestions": suggestions,
+        "action_required": len([s for s in suggestions if s.get("severity") in ["high", "critical"]])
+    }
+
+
+@router.get("/intelligence")
+async def get_intelligence():
+    """
+    🧠 INTELLIGENCE ENGINE SUMMARY
+
+    View the AI OS's learning and decision history:
+    - Issues analyzed
+    - Fix attempts and success rate
+    - Active optimizations
+    """
+    if not NEURAL_CORE_AVAILABLE:
+        return {"message": "Neural core not loaded"}
+
+    core = get_neural_core()
+    summary = core.get_intelligence_summary()
+
+    return {
+        "intelligence_active": True,
+        "total_analyses": summary["total_analyses"],
+        "total_fix_attempts": summary["total_fix_attempts"],
+        "fix_success_rate": f"{summary['fix_success_rate']:.0%}",
+        "recent_analyses": summary["recent_analyses"],
+        "recent_fixes": summary["recent_fixes"],
+        "optimization_suggestions": summary["optimization_suggestions"]
+    }
+
+
+@router.post("/auto-heal")
+async def trigger_auto_heal():
+    """
+    🚀 AUTO-HEAL ALL FIXABLE ISSUES
+
+    Automatically analyze and fix all issues that can be auto-fixed.
+    The AI OS will:
+    1. Analyze all current issues
+    2. Identify auto-fixable ones
+    3. Execute the best fix strategy for each
+    """
+    if not NEURAL_CORE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Neural core not loaded")
+
+    core = get_neural_core()
+
+    # Deep analyze first
+    analysis = await core.deep_analyze_issues()
+    fixable = [a for a in analysis["analyses"] if a["auto_fixable"]]
+
+    if not fixable:
+        return {
+            "auto_heal_triggered": False,
+            "message": "No auto-fixable issues found",
+            "issues_analyzed": analysis["total_issues"]
+        }
+
+    # Trigger healing for each fixable issue
+    healed = []
+    for issue_analysis in fixable:
+        system = core.systems.get(issue_analysis["system"].lower().replace(" ", "_").replace("(", "").replace(")", ""))
+        if system:
+            await core._trigger_healing(system)
+            healed.append({
+                "system": issue_analysis["system"],
+                "issue": issue_analysis["issue"],
+                "action": "restart"
+            })
+
+    return {
+        "auto_heal_triggered": True,
+        "issues_analyzed": analysis["total_issues"],
+        "issues_fixed": len(healed),
+        "healed": healed,
+        "message": f"Auto-healing triggered for {len(healed)} issues"
+    }
+
+
 @router.get("/")
 async def neural_root():
     """
@@ -312,8 +441,12 @@ async def neural_root():
             "GET /neural/status": "Ask: How are you?",
             "GET /neural/systems": "Ask: What do you know about?",
             "GET /neural/signals": "Ask: What have you observed?",
+            "GET /neural/analyze": "Deep analysis of issues",
+            "GET /neural/optimize": "Get optimization suggestions",
+            "GET /neural/intelligence": "Intelligence engine summary",
             "POST /neural/ask": "Have a conversation",
-            "POST /neural/heal": "Request healing",
+            "POST /neural/heal": "Request healing for a system",
+            "POST /neural/auto-heal": "Auto-heal all fixable issues",
             "POST /neural/initialize": "Wake up the neural core"
         },
         "state": get_neural_core().state.value if NEURAL_CORE_AVAILABLE else "unavailable"
