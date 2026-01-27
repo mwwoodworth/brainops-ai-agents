@@ -192,10 +192,12 @@ Respond in this exact JSON format:
         return await self._direct_api_call(prompt, model)
 
     async def _direct_api_call(self, prompt: str, model: str) -> str:
-        """Direct API call as fallback"""
+        """Direct API call as fallback - tries multiple providers"""
         import httpx
 
-        # Try Anthropic
+        errors = []
+
+        # Try Anthropic first (best for analysis)
         anthropic_key = os.getenv("ANTHROPIC_API_KEY")
         if anthropic_key:
             try:
@@ -217,7 +219,9 @@ Respond in this exact JSON format:
                     if response.status_code == 200:
                         data = response.json()
                         return data["content"][0]["text"]
+                    errors.append(f"Anthropic: HTTP {response.status_code}")
             except Exception as e:
+                errors.append(f"Anthropic: {e}")
                 logger.warning(f"Anthropic direct call failed: {e}")
 
         # Try OpenAI
@@ -241,10 +245,66 @@ Respond in this exact JSON format:
                     if response.status_code == 200:
                         data = response.json()
                         return data["choices"][0]["message"]["content"]
+                    errors.append(f"OpenAI: HTTP {response.status_code}")
             except Exception as e:
+                errors.append(f"OpenAI: {e}")
                 logger.warning(f"OpenAI direct call failed: {e}")
 
-        raise Exception("No AI API available")
+        # Try Gemini
+        gemini_key = os.getenv("GOOGLE_API_KEY")
+        if gemini_key:
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}",
+                        headers={"Content-Type": "application/json"},
+                        json={
+                            "contents": [{"parts": [{"text": prompt}]}],
+                            "generationConfig": {"maxOutputTokens": 2000}
+                        },
+                        timeout=30.0
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            content = candidates[0].get("content", {})
+                            parts = content.get("parts", [])
+                            if parts:
+                                return parts[0].get("text", "")
+                    errors.append(f"Gemini: HTTP {response.status_code}")
+            except Exception as e:
+                errors.append(f"Gemini: {e}")
+                logger.warning(f"Gemini direct call failed: {e}")
+
+        # Try HuggingFace as last resort (always available)
+        hf_token = os.getenv("HUGGINGFACE_API_TOKEN", "")
+        try:
+            headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1",
+                    headers=headers,
+                    json={
+                        "inputs": prompt[:4000],  # Limit prompt size
+                        "parameters": {
+                            "max_new_tokens": 1000,
+                            "temperature": 0.7,
+                            "return_full_text": False
+                        }
+                    },
+                    timeout=30.0
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    if isinstance(result, list) and result:
+                        return result[0].get("generated_text", "")
+                errors.append(f"HuggingFace: HTTP {response.status_code}")
+        except Exception as e:
+            errors.append(f"HuggingFace: {e}")
+            logger.warning(f"HuggingFace direct call failed: {e}")
+
+        raise Exception(f"No AI API available. Tried: {'; '.join(errors)}")
 
     async def _build_consensus(self, responses: List[str], original_prompt: str) -> str:
         """Build consensus from multiple AI responses"""
