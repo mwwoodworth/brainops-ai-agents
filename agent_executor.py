@@ -6312,7 +6312,7 @@ class SecurityMonitorAgent(BaseAgent):
                 "status": "completed",
                 "unresolved_count": unresolved or 0,
                 "severity_breakdown": [dict(row) for row in severity_counts],
-                "recent_events": [dict(row) for row in recent],
+                "recent_events": [{**dict(row), 'id': str(row['id'])} for row in recent],
                 "data_source": "security_events"
             }
         except Exception as e:
@@ -6327,7 +6327,7 @@ class SecurityMonitorAgent(BaseAgent):
                 ORDER BY created_at DESC
                 LIMIT $1
             """, max(1, min(limit, 200)))
-            return {"status": "completed", "events": [dict(row) for row in events]}
+            return {"status": "completed", "events": [{**dict(row), 'id': str(row['id'])} for row in events]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -6341,7 +6341,7 @@ class SecurityMonitorAgent(BaseAgent):
                 ORDER BY created_at DESC
                 LIMIT 50
             """)
-            return {"status": "completed", "events": [dict(row) for row in events]}
+            return {"status": "completed", "events": [{**dict(row), 'id': str(row['id'])} for row in events]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
