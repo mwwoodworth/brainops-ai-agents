@@ -699,9 +699,12 @@ class RealtimeMonitor:
             cur = conn.cursor(cursor_factory=RealDictCursor)
 
             cur.execute("""
-                SELECT * FROM ai_realtime_events
+                SELECT event_id, event_type, source, payload, severity,
+                       timestamp, metadata, created_at
+                FROM ai_realtime_events
                 WHERE timestamp > NOW() - INTERVAL '%s minutes'
                 ORDER BY timestamp DESC
+                LIMIT 500
             """, (minutes,))
 
             events = cur.fetchall()
@@ -814,7 +817,9 @@ class RealtimeMonitor:
             cur = conn.cursor(cursor_factory=RealDictCursor)
 
             cur.execute("""
-                SELECT * FROM ai_activity_feed
+                SELECT id, activity_type, title, description, severity,
+                       timestamp, metadata, created_at
+                FROM ai_activity_feed
                 ORDER BY timestamp DESC
                 LIMIT %s
             """, (limit,))
@@ -840,14 +845,18 @@ class RealtimeMonitor:
 
             if event_type:
                 cur.execute("""
-                    SELECT * FROM ai_realtime_events
+                    SELECT event_id, event_type, source, payload, severity,
+                           timestamp, metadata, created_at
+                    FROM ai_realtime_events
                     WHERE event_type = %s
                     ORDER BY timestamp DESC
                     LIMIT %s
                 """, (event_type.value, limit))
             else:
                 cur.execute("""
-                    SELECT * FROM ai_realtime_events
+                    SELECT event_id, event_type, source, payload, severity,
+                           timestamp, metadata, created_at
+                    FROM ai_realtime_events
                     ORDER BY timestamp DESC
                     LIMIT %s
                 """, (limit,))

@@ -502,7 +502,10 @@ class UnifiedMemoryCoordinator:
         conn, cursor = self._get_connection()
 
         cursor.execute("""
-            SELECT * FROM memory_context_registry
+            SELECT id, key, value, layer, scope, priority, category, source,
+                   tenant_id, user_id, session_id, agent_id, metadata,
+                   created_at, updated_at, expires_at, access_count, sync_version
+            FROM memory_context_registry
             WHERE key = %s
               AND scope = %s
               AND (tenant_id = %s OR tenant_id IS NULL OR scope != 'tenant')
@@ -571,7 +574,9 @@ class UnifiedMemoryCoordinator:
 
         # Get or create session record
         cursor.execute("""
-            SELECT * FROM memory_session_context
+            SELECT id, session_id, tenant_id, user_id, context_snapshot,
+                   created_at, updated_at, last_access_at
+            FROM memory_session_context
             WHERE session_id = %s
         """, (session_id,))
 
@@ -587,13 +592,17 @@ class UnifiedMemoryCoordinator:
             session = cursor.fetchone()
             conn.commit()
 
-        # Get all context entries for this session
+        # Get all context entries for this session (with limit for performance)
         cursor.execute("""
-            SELECT * FROM memory_context_registry
+            SELECT id, key, value, layer, scope, priority, category, source,
+                   tenant_id, user_id, session_id, agent_id, metadata,
+                   created_at, updated_at, expires_at, access_count, sync_version
+            FROM memory_context_registry
             WHERE session_id = %s
                OR scope = 'global'
                OR (scope = 'tenant' AND tenant_id = %s)
             ORDER BY priority DESC, updated_at DESC
+            LIMIT 500
         """, (session_id, session.get('tenant_id')))
 
         entries = cursor.fetchall()
@@ -690,7 +699,10 @@ class UnifiedMemoryCoordinator:
         params.append(limit)
 
         cursor.execute(f"""
-            SELECT * FROM memory_context_registry
+            SELECT id, key, value, layer, scope, priority, category, source,
+                   tenant_id, user_id, session_id, agent_id, metadata,
+                   created_at, updated_at, expires_at, access_count, sync_version
+            FROM memory_context_registry
             WHERE {where_clause}
             ORDER BY priority DESC, updated_at DESC
             LIMIT %s

@@ -14,6 +14,12 @@ from typing import Any, Optional
 
 from config import config
 from database.async_connection import PoolConfig, close_pool, get_pool, init_pool
+from database.schema_cache import (
+    get_cached_columns,
+    get_cached_foreign_keys,
+    get_cached_primary_keys,
+    get_cached_tables,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -125,40 +131,31 @@ class DatabaseSchemaCrawler:
         return self.schema
 
     async def _get_tables(self, pool) -> list[Table]:
-        """Get all user tables from database"""
-        rows = await pool.fetch("""
-            SELECT
-                table_schema,
-                table_name,
-                obj_description((table_schema || '.' || table_name)::regclass, 'pg_class') as description
-            FROM information_schema.tables
-            WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-                AND table_type = 'BASE TABLE'
-            ORDER BY table_schema, table_name
-        """)
+        """Get all user tables from database (with caching)"""
+        # Use cached query for table list
+        tables_data = await get_cached_tables(pool, schema="public")
 
-        return [
-            Table(
+        # Get descriptions separately (these are fast pg_catalog queries)
+        tables = []
+        for row in tables_data:
+            try:
+                description = await pool.fetchval("""
+                    SELECT obj_description($1::regclass, 'pg_class')
+                """, f"{row['table_schema']}.{row['table_name']}")
+            except Exception:
+                description = None
+
+            tables.append(Table(
                 name=row['table_name'],
                 schema_name=row['table_schema'],
-                description=row['description']
-            )
-            for row in rows
-        ]
+                description=description
+            ))
+
+        return tables
 
     async def _get_columns(self, pool, schema: str, table: str) -> list[Column]:
-        """Get columns for a table"""
-        rows = await pool.fetch("""
-            SELECT
-                column_name,
-                data_type,
-                is_nullable,
-                column_default,
-                character_maximum_length
-            FROM information_schema.columns
-            WHERE table_schema = $1 AND table_name = $2
-            ORDER BY ordinal_position
-        """, schema, table)
+        """Get columns for a table (with caching)"""
+        rows = await get_cached_columns(pool, schema, table)
 
         return [
             Column(
@@ -166,35 +163,18 @@ class DatabaseSchemaCrawler:
                 data_type=row['data_type'],
                 is_nullable=row['is_nullable'] == 'YES',
                 column_default=row['column_default'],
-                character_maximum_length=row['character_maximum_length']
+                character_maximum_length=row.get('character_maximum_length')
             )
             for row in rows
         ]
 
     async def _get_foreign_keys(self, pool, schema: str, table: str) -> list[ForeignKey]:
-        """Get foreign key relationships for a table"""
-        rows = await pool.fetch("""
-            SELECT
-                tc.constraint_name,
-                kcu.column_name as source_column,
-                ccu.table_name as target_table,
-                ccu.column_name as target_column,
-                rc.delete_rule as on_delete,
-                rc.update_rule as on_update
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-                ON tc.constraint_name = kcu.constraint_name
-                AND tc.table_schema = kcu.table_schema
-            JOIN information_schema.constraint_column_usage ccu
-                ON ccu.constraint_name = tc.constraint_name
-                AND ccu.table_schema = tc.table_schema
-            LEFT JOIN information_schema.referential_constraints rc
-                ON rc.constraint_name = tc.constraint_name
-                AND rc.constraint_schema = tc.table_schema
-            WHERE tc.constraint_type = 'FOREIGN KEY'
-                AND tc.table_schema = $1
-                AND tc.table_name = $2
-        """, schema, table)
+        """Get foreign key relationships for a table (with caching)"""
+        # Get all foreign keys from cache (much faster than per-table queries)
+        all_fks = await get_cached_foreign_keys(pool, schema)
+
+        # Filter for this table
+        table_fks = [fk for fk in all_fks if fk['source_table'] == table]
 
         return [
             ForeignKey(
@@ -203,10 +183,10 @@ class DatabaseSchemaCrawler:
                 source_column=row['source_column'],
                 target_table=row['target_table'],
                 target_column=row['target_column'],
-                on_delete=row['on_delete'],
-                on_update=row['on_update']
+                on_delete=None,  # Not included in cached query for performance
+                on_update=None   # These are rarely needed
             )
-            for row in rows
+            for row in table_fks
         ]
 
     async def _get_indexes(self, pool, schema: str, table: str) -> list[Index]:
@@ -239,19 +219,8 @@ class DatabaseSchemaCrawler:
         ]
 
     async def _get_primary_key_columns(self, pool, schema: str, table: str) -> list[str]:
-        """Get primary key columns for a table"""
-        rows = await pool.fetch("""
-            SELECT kcu.column_name
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-                ON tc.constraint_name = kcu.constraint_name
-                AND tc.table_schema = kcu.table_schema
-            WHERE tc.constraint_type = 'PRIMARY KEY'
-                AND tc.table_schema = $1
-                AND tc.table_name = $2
-        """, schema, table)
-
-        return [row['column_name'] for row in rows]
+        """Get primary key columns for a table (with caching)"""
+        return await get_cached_primary_keys(pool, schema, table)
 
     async def _get_row_count(self, pool, schema: str, table: str) -> int:
         """Get approximate row count for a table"""
