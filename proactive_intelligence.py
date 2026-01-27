@@ -626,8 +626,17 @@ class ProactiveIntelligence:
             logger.error(f"Briefing generation error: {e}")
             return {'error': str(e)}
 
-    async def run_proactive_cycle(self):
-        """Run a complete proactive intelligence cycle"""
+    async def run_proactive_cycle(self, execute_predictions: bool = False):
+        """
+        Run a complete proactive intelligence cycle.
+
+        Args:
+            execute_predictions: If True, execute high-confidence recommendations
+                                through the PredictiveExecutor safety pipeline
+
+        Returns:
+            Dict with patterns, predictions, recommendations, and optionally execution results
+        """
         logger.info("🧠 Running proactive intelligence cycle...")
 
         # 1. Analyze patterns
@@ -642,11 +651,78 @@ class ProactiveIntelligence:
         recommendations = await self.recommend_actions()
         logger.info(f"  Generated {len(recommendations)} recommendations")
 
-        return {
+        result = {
             'patterns': patterns,
             'predictions': [p.to_dict() for p in predictions],
             'recommendations': recommendations
         }
+
+        # 4. Optionally execute predictions through safety pipeline
+        if execute_predictions and recommendations:
+            execution_results = await self.execute_recommendations_safely(recommendations)
+            result['execution_results'] = execution_results
+            logger.info(f"  Executed {execution_results.get('executed', 0)} recommendations")
+
+        return result
+
+    async def execute_recommendations_safely(
+        self,
+        recommendations: Optional[list[dict]] = None
+    ) -> dict:
+        """
+        Execute recommendations through the PredictiveExecutor safety pipeline.
+
+        This ensures:
+        1. Dangerous actions (delete, send_email, etc.) are blocked
+        2. Only high-confidence predictions are executed
+        3. All executions are logged for audit
+        4. Accuracy can be tracked over time
+
+        Args:
+            recommendations: List of recommendations to execute.
+                           If None, generates new recommendations.
+
+        Returns:
+            Dict with execution statistics and results
+        """
+        try:
+            from predictive_executor import get_proactive_intel_integration
+
+            integration = get_proactive_intel_integration()
+
+            if recommendations is None:
+                recommendations = await self.recommend_actions()
+
+            if not recommendations:
+                return {
+                    "executed": 0,
+                    "skipped": 0,
+                    "message": "No recommendations to execute"
+                }
+
+            results = await integration.execute_proactive_recommendations(recommendations)
+
+            executed = sum(1 for r in results if r.get("executed"))
+            skipped = sum(1 for r in results if r.get("skipped"))
+            failed = sum(1 for r in results if r.get("error"))
+
+            return {
+                "total": len(results),
+                "executed": executed,
+                "skipped": skipped,
+                "failed": failed,
+                "results": results,
+                "safety_pipeline": True
+            }
+
+        except ImportError as e:
+            logger.warning(f"PredictiveExecutor not available: {e}")
+            return {
+                "executed": 0,
+                "skipped": len(recommendations) if recommendations else 0,
+                "error": "PredictiveExecutor not available",
+                "safety_pipeline": False
+            }
 
 
 # Singleton
