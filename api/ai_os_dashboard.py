@@ -120,8 +120,8 @@ async def get_complete_status() -> Dict[str, Any]:
 
     # Get Bleeding Edge capabilities
     try:
-        from bleeding_edge_ai import get_bleeding_edge_status
-        be_status = get_bleeding_edge_status()
+        from api.bleeding_edge import get_bleeding_edge_status
+        be_status = await get_bleeding_edge_status()
         result["capabilities"] = {
             "bleeding_edge": be_status.get("capabilities", []),
             "total_capabilities": be_status.get("total_capabilities", 0),
@@ -253,8 +253,8 @@ async def get_capabilities() -> Dict[str, Any]:
 
     # Get bleeding edge
     try:
-        from bleeding_edge_ai import get_bleeding_edge_status
-        be_status = get_bleeding_edge_status()
+        from api.bleeding_edge import get_bleeding_edge_status
+        be_status = await get_bleeding_edge_status()
         capabilities["bleeding_edge"] = be_status.get("capabilities", [])
     except:
         capabilities["bleeding_edge"] = ["Unable to enumerate"]

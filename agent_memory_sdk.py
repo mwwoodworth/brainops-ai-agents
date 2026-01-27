@@ -259,6 +259,7 @@ class AgentMemoryClient:
                     SELECT id::text, memory_type, content, verification_state
                     FROM unified_ai_memory
                     WHERE $1::uuid = ANY(supersedes)
+                    LIMIT 100
                 """, memory_id)
             elif relationship == "parent":
                 rows = await self.engine.pool.fetch("""
@@ -267,6 +268,7 @@ class AgentMemoryClient:
                     WHERE id = (
                         SELECT parent_memory_id FROM unified_ai_memory WHERE id = $1::uuid
                     )
+                    LIMIT 1
                 """, memory_id)
             else:
                 rows = await self.engine.pool.fetch("""
@@ -276,6 +278,7 @@ class AgentMemoryClient:
                        OR id = ANY(
                            SELECT UNNEST(related_memories) FROM unified_ai_memory WHERE id = $1::uuid
                        )
+                    LIMIT 100
                 """, memory_id)
 
             self._rba_completed = True

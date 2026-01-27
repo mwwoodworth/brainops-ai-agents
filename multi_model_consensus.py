@@ -907,8 +907,12 @@ class MultiModelConsensusSystem:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             cursor.execute("""
-                SELECT * FROM ai_model_performance
+                SELECT model_id, model_name, total_queries, successful_queries,
+                       failed_queries, avg_latency_ms, accuracy_score, cost_efficiency,
+                       last_used_at, created_at, updated_at
+                FROM ai_model_performance
                 ORDER BY total_queries DESC
+                LIMIT 100
             """)
 
             stats = cursor.fetchall()

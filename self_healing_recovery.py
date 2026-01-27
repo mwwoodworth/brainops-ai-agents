@@ -382,9 +382,13 @@ class SelfHealingRecovery:
                 cur = conn.cursor(cursor_factory=RealDictCursor)
 
                 cur.execute("""
-                    SELECT * FROM ai_healing_rules
+                    SELECT rule_id, rule_name, error_pattern, recovery_action,
+                           priority, enabled, max_retries, cooldown_seconds,
+                           component, created_at, updated_at
+                    FROM ai_healing_rules
                     WHERE enabled = true
                     ORDER BY priority DESC
+                    LIMIT 200
                 """)
 
                 rules = cur.fetchall()
@@ -604,9 +608,12 @@ class SelfHealingRecovery:
                 # Create error signature
                 signature = f"{error_context.error_type}:{error_context.component}"
 
-                # Check for matching pattern
+                # Check for matching pattern - select specific columns
                 cur.execute("""
-                    SELECT * FROM ai_error_patterns
+                    SELECT id, error_signature, error_type, component,
+                           recovery_strategy, occurrence_count, last_seen,
+                           success_rate, avg_recovery_time_ms, metadata
+                    FROM ai_error_patterns
                     WHERE error_signature = %s
                     LIMIT 1
                 """, (signature,))
