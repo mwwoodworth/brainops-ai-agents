@@ -244,7 +244,7 @@ Return a JSON object with this structure:
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=GOOGLE_API_KEY)
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                model = genai.GenerativeModel('gemini-2.0-flash')
 
                 # Create image part
                 image_data = base64.b64decode(screenshot_base64)
@@ -261,7 +261,7 @@ Return a JSON object with this structure:
                     response_text = response_text.split("```")[1].split("```")[0]
 
                 analysis = json.loads(response_text.strip())
-                analysis["ai_model"] = "gemini-1.5-flash"
+                analysis["ai_model"] = "gemini-2.0-flash"
                 return analysis
 
             except Exception as e:
