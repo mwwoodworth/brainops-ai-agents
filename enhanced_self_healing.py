@@ -114,54 +114,72 @@ import asyncpg
 # Connection pool helper - prefer shared pool, fallback to direct connection
 @asynccontextmanager
 async def _get_db_connection(db_url: str = None, max_retries: int = 3):
-    """Get database connection context, preferring shared pool with retry logic"""
-    last_error = None
+    """Get database connection context, preferring shared pool with retry logic.
 
+    IMPORTANT: This function yields exactly once to avoid
+    'generator didn't stop after athrow()' errors.  All retry logic runs
+    *before* the single yield so that an exception thrown into the generator
+    never causes a second yield.
+    """
+    acquired_conn = None
+    conn_source = None  # 'pool' or 'direct'
+    pool = None
+
+    # --- Phase 1: Acquire a connection (retries allowed, no yield) ---
     for attempt in range(max_retries):
         try:
-            # Try shared pool first
             from database.async_connection import get_pool
             pool = get_pool()
-            # pool.acquire() returns an async context manager
-            async with pool.acquire() as conn:
-                yield conn
-                return  # Success - exit the retry loop
+            acquired_conn = await pool.acquire()
+            conn_source = "pool"
+            break
         except (
             asyncpg.InterfaceError,
             asyncpg.ConnectionDoesNotExistError,
             asyncpg.InternalClientError,
         ) as exc:
-            last_error = exc
             if attempt < max_retries - 1:
                 logger.warning(
                     "Connection error (attempt %d/%d): %s - retrying...",
-                    attempt + 1, max_retries, exc
+                    attempt + 1, max_retries, exc,
                 )
-                await asyncio.sleep(0.1 * (attempt + 1))  # Brief backoff
-                continue
+                await asyncio.sleep(0.1 * (attempt + 1))
             else:
-                logger.error("Connection failed after %d attempts: %s", max_retries, exc)
+                logger.error(
+                    "Pool connection failed after %d attempts: %s", max_retries, exc
+                )
         except Exception as exc:
-            # For other exceptions, try direct connection fallback
-            logger.warning("Shared pool unavailable, falling back to direct connection: %s", exc)
+            logger.warning(
+                "Shared pool unavailable, falling back to direct connection: %s", exc
+            )
             break
 
-    # Fallback to direct connection if pool unavailable or all retries exhausted
-    if not db_url:
-        db_url = os.getenv("DATABASE_URL")
+    # Fallback to direct connection
+    if acquired_conn is None:
+        if not db_url:
+            db_url = os.getenv("DATABASE_URL")
+        if db_url:
+            try:
+                acquired_conn = await asyncpg.connect(db_url)
+                conn_source = "direct"
+            except Exception as exc:
+                logger.error("Direct connection also failed: %s", exc)
 
-    if db_url:
-        conn = None
-        try:
-            conn = await asyncpg.connect(db_url)
-            yield conn
-        finally:
-            if conn:
-                await conn.close()
-    else:
-        # If no DB URL and no pool, yield None
+    if acquired_conn is None:
         logger.error("No database connection available")
-        yield None
+
+    # --- Phase 2: Yield exactly once, then clean up ---
+    try:
+        yield acquired_conn
+    finally:
+        if acquired_conn is not None:
+            try:
+                if conn_source == "pool" and pool is not None:
+                    await pool.release(acquired_conn)
+                elif conn_source == "direct":
+                    await acquired_conn.close()
+            except Exception as exc:
+                logger.warning("Error releasing connection: %s", exc)
 
 class EnhancedSelfHealing:
     """
