@@ -2042,54 +2042,65 @@ class MonitorAgent(BaseAgent):
             return await self.full_system_check()
 
     async def full_system_check(self) -> dict[str, Any]:
-        """Perform complete system health check"""
+        """Perform complete system health check with parallel I/O"""
         results = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "checks": {}
         }
 
-        # Check backend
-        try:
-            response = await _http_get(f"{BACKEND_URL}/api/v1/health", timeout_seconds=5.0)
-            results["checks"]["backend"] = {
-                "status": "healthy" if response.status_code == 200 else "unhealthy",
-                "code": response.status_code,
-                "data": response.json() if response.status_code == 200 else None
-            }
-        except Exception as e:
-            results["checks"]["backend"] = {"status": "error", "error": str(e)}
+        # Run ALL checks in parallel for speed
+        async def _check_backend():
+            try:
+                response = await _http_get(f"{BACKEND_URL}/api/v1/health", timeout_seconds=5.0)
+                return "backend", {
+                    "status": "healthy" if response.status_code == 200 else "unhealthy",
+                    "code": response.status_code,
+                    "data": response.json() if response.status_code == 200 else None
+                }
+            except Exception as e:
+                return "backend", {"status": "error", "error": str(e)[:200]}
 
-        # Check database
-        try:
-            pool = get_pool()
-            customer_row = await pool.fetchrow("SELECT COUNT(*) as customers FROM customers")
-            customer_count = customer_row['customers'] if customer_row else 0
-            job_row = await pool.fetchrow("SELECT COUNT(*) as jobs FROM jobs")
-            job_count = job_row['jobs'] if job_row else 0
+        async def _check_database():
+            try:
+                pool = get_pool()
+                # Single query instead of two sequential COUNT(*)s
+                row = await pool.fetchrow(
+                    "SELECT "
+                    "(SELECT COUNT(*) FROM customers) as customers, "
+                    "(SELECT COUNT(*) FROM jobs) as jobs"
+                )
+                return "database", {
+                    "status": "healthy",
+                    "customers": row['customers'] if row else 0,
+                    "jobs": row['jobs'] if row else 0
+                }
+            except Exception as e:
+                return "database", {"status": "error", "error": str(e)[:200]}
 
-            results["checks"]["database"] = {
-                "status": "healthy",
-                "customers": customer_count,
-                "jobs": job_count
-            }
-        except Exception as e:
-            results["checks"]["database"] = {"status": "error", "error": str(e)}
-
-        # Check frontends
-        frontends = {
-            "MyRoofGenius": "https://myroofgenius.com",
-            "WeatherCraft": "https://weathercraft-erp.vercel.app"
-        }
-
-        for name, url in frontends.items():
+        async def _check_frontend(name, url):
             try:
                 response = await _http_get(url, timeout_seconds=5.0)
-                results["checks"][name] = {
+                return name, {
                     "status": "online" if response.status_code == 200 else "error",
                     "code": response.status_code
                 }
             except Exception as e:
-                results["checks"][name] = {"status": "error", "error": str(e)}
+                return name, {"status": "error", "error": str(e)[:200]}
+
+        # Execute all checks concurrently (max ~5s instead of ~15s)
+        check_results = await asyncio.gather(
+            _check_backend(),
+            _check_database(),
+            _check_frontend("MyRoofGenius", "https://myroofgenius.com"),
+            _check_frontend("WeatherCraft", "https://weathercraft-erp.vercel.app"),
+            return_exceptions=True
+        )
+
+        for result in check_results:
+            if isinstance(result, Exception):
+                continue
+            name, data = result
+            results["checks"][name] = data
 
         # Determine overall status
         all_healthy = all(
