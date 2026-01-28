@@ -184,7 +184,7 @@ class UltimateAISystem:
         try:
             model_name = "gpt-4-0125-preview" if "gpt-4" in model else "gpt-3.5-turbo"
 
-            response = await asyncio.get_event_loop().run_in_executor(
+            response = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: self.openai_client.chat.completions.create(
                     model=model_name,
@@ -207,7 +207,7 @@ class UltimateAISystem:
             return None
 
         try:
-            response = await asyncio.get_event_loop().run_in_executor(
+            response = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: self.anthropic_client.messages.create(
                     model="claude-3-haiku-20240307",  # Fast model
@@ -230,7 +230,7 @@ class UltimateAISystem:
             return None
 
         try:
-            response = await asyncio.get_event_loop().run_in_executor(
+            response = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: self.gemini_model.generate_content(
                     prompt,
@@ -266,7 +266,7 @@ class UltimateAISystem:
                 "return_citations": True
             }
 
-            response = await asyncio.get_event_loop().run_in_executor(
+            response = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: requests.post(
                     "https://api.perplexity.ai/chat/completions",
@@ -300,7 +300,7 @@ class UltimateAISystem:
 
         for model_id in models:
             try:
-                response = await asyncio.get_event_loop().run_in_executor(
+                response = await asyncio.get_running_loop().run_in_executor(
                     None,
                     lambda: requests.post(
                         f"https://api-inference.huggingface.co/models/{model_id}",

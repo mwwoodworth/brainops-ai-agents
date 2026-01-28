@@ -46,11 +46,24 @@ def create_safe_task(
 
     task = asyncio.create_task(wrapped(), name=name)
 
-    # Track task and auto-remove when done
+    # Track task and auto-remove when done.
+    # The callback MUST retrieve the exception to prevent
+    # "Future exception was never retrieved" warnings.
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    task.add_done_callback(_safe_done_callback)
 
     return task
+
+
+def _safe_done_callback(task: asyncio.Task) -> None:
+    """Done callback that retrieves exceptions to suppress asyncio warnings."""
+    _background_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        # Already logged inside wrapped(), nothing more to do
+        pass
 
 
 def fire_and_forget(coro: Coroutine, name: str = "fire_and_forget") -> None:

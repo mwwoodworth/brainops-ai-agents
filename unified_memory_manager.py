@@ -317,8 +317,7 @@ class UnifiedMemoryManager:
         )
 
         # Run sync store in thread pool
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.store, mem)
+        return await asyncio.to_thread(self.store, mem)
 
     def recall(self, query: Union[str, dict], tenant_id: str = None, context: Optional[str] = None,
                limit: int = 10, memory_type: Optional[MemoryType] = None) -> list[dict]:
@@ -406,8 +405,7 @@ class UnifiedMemoryManager:
             except ValueError as exc:
                 logger.debug("Invalid memory_type %s: %s", memory_type, exc)
 
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: self.recall(query, self.tenant_id, limit=limit, memory_type=mem_type))
+        return await asyncio.to_thread(self.recall, query, self.tenant_id, limit=limit, memory_type=mem_type)
 
     def synthesize(self, tenant_id: str = None, time_window: timedelta = timedelta(hours=24)) -> list[dict]:
         """Synthesize insights from recent memories"""

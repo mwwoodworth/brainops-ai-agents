@@ -248,7 +248,7 @@ class EventBus:
                     tasks.append(callback(payload))
                 else:
                     # Wrap sync callbacks
-                    tasks.append(asyncio.get_event_loop().run_in_executor(
+                    tasks.append(asyncio.get_running_loop().run_in_executor(
                         None, callback, payload
                     ))
 

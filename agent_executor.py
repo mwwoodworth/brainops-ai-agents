@@ -320,7 +320,7 @@ class AgentExecutionLogger:
             )
             self._logger.debug(f"Logged phase '{phase}' for task {self.task_id}")
         except Exception as e:
-            self._logger.warning(f"Failed to log execution phase '{phase}': {e}")
+            self._logger.warning(f"Failed to log execution phase '{phase}': {e!r}")
 
     def start_phase(self, phase: str) -> None:
         """Mark the start of a phase for duration tracking."""
@@ -1196,7 +1196,7 @@ class AgentExecutor:
                 "running"
             )
         except Exception as e:
-            logger.warning(f"Failed to log execution start to ai_agent_executions: {e}")
+            logger.warning(f"Failed to log execution start to ai_agent_executions: {e!r}")
 
     async def _log_ai_agent_execution_end(
         self,
@@ -1234,7 +1234,7 @@ class AgentExecutor:
                 error_message
             )
         except Exception as e:
-            logger.warning(f"Failed to log execution completion to ai_agent_executions: {e}")
+            logger.warning(f"Failed to log execution completion to ai_agent_executions: {e!r}")
 
     async def execute(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
         """Execute task with specific agent - NOW WITH UNIFIED SYSTEM INTEGRATION"""

@@ -633,7 +633,7 @@ async def query_memory_get(request: Request, query: Optional[str] = None, limit:
     try:
         # Run sync memory recall in thread pool to avoid blocking event loop
         import asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         memories = await loop.run_in_executor(
             None,
             lambda: memory_manager.recall(
@@ -666,7 +666,7 @@ async def query_memory(request: Request, query_request: MemoryQueryRequest):
     try:
         # Run sync memory recall in thread pool to avoid blocking event loop
         import asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         memories = await loop.run_in_executor(
             None,
             lambda: memory_manager.recall(
@@ -737,7 +737,7 @@ async def store_memory(request: Request, memory_data: dict[str, Any]):
 
         # Run sync memory store in thread pool to avoid blocking event loop
         import asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         memory_id = await loop.run_in_executor(None, lambda: memory_manager.store(memory))
         return {"success": True, "memory_id": memory_id}
     except Exception as e:
@@ -764,7 +764,7 @@ async def recall_memory(
     try:
         # Run sync memory recall in thread pool to avoid blocking event loop
         import asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         memories = await loop.run_in_executor(
             None,
             lambda: memory_manager.recall(
