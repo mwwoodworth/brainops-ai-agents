@@ -1625,7 +1625,11 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
     # Initialize Real Agent Executor (must load agents before Act phase checks registry)
     from agent_executor import AgentExecutor
     real_agent_executor = AgentExecutor()
-    await real_agent_executor._ensure_agents_loaded()
+    try:
+        await real_agent_executor._ensure_agents_loaded()
+        logger.info(f"OODA: AgentExecutor loaded {len(real_agent_executor.agents)} agents: {list(real_agent_executor.agents.keys())[:10]}...")
+    except Exception as load_err:
+        logger.error(f"OODA: Failed to load agents: {load_err!r}")
 
     # PHASE 1: OBSERVE (Parallel)
     obs_start = datetime.now()
@@ -1815,10 +1819,12 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
                 agent_name = decision_agent_mapping.get(decision_type, "GenericAgent")
 
                 # Skip agents that aren't implemented (avoid costly retries)
-                if hasattr(real_agent_executor, 'agents') and agent_name not in real_agent_executor.agents:
+                has_agents = hasattr(real_agent_executor, 'agents')
+                in_registry = agent_name in real_agent_executor.agents if has_agents else False
+                if has_agents and not in_registry:
                     action_result["status"] = "skipped"
-                    action_result["reason"] = f"Agent '{agent_name}' not yet implemented"
-                    logger.debug(f"OODA Act: skipping {decision_type} - agent {agent_name} not registered")
+                    action_result["reason"] = f"Agent '{agent_name}' not in registry ({len(real_agent_executor.agents)} agents loaded)"
+                    logger.info(f"OODA Act: skipping {decision_type} - agent '{agent_name}' not in {len(real_agent_executor.agents)}-agent registry")
                     action_result["completed_at"] = datetime.now().isoformat()
                     action_result["duration_ms"] = 0
                     action_results.append(action_result)
