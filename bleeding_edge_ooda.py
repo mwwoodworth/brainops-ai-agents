@@ -1758,20 +1758,20 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
     actions_failed = 0
     action_results = []
 
-    # Decision type to agent mapping
+    # Decision type to agent mapping (names must match AgentExecutor registry)
     decision_agent_mapping = {
-        "onboard_customers": "CustomerOnboarding",
-        "collect_invoices": "CollectionsAgent",
+        "onboard_customers": "OnboardingAgent",
+        "collect_invoices": "InvoicingAgent",
         "resolve_conflicts": "SchedulingAgent",
-        "process_estimates": "EstimateProcessor",
+        "process_estimates": "CustomerIntelligence",
         "investigate_degradation": "SystemMonitor",
         "maintain_health": "SystemMonitor",
         "monitor_frontends": "SystemMonitor",
         "monitor_agents": "SystemMonitor",
-        "generate_leads": "LeadGeneration",
-        "handle_churn_risks": "CustomerRetention",
-        "handle_overdue_invoices": "CollectionsAgent",
-        "handle_new_customers": "CustomerOnboarding",
+        "generate_leads": "LeadQualificationAgent",
+        "handle_churn_risks": "CustomerSuccess",
+        "handle_overdue_invoices": "InvoicingAgent",
+        "handle_new_customers": "OnboardingAgent",
         "handle_scheduling_conflicts": "SchedulingAgent",
     }
 
@@ -1818,6 +1818,10 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
                     action_result["status"] = "skipped"
                     action_result["reason"] = f"Agent '{agent_name}' not yet implemented"
                     logger.debug(f"OODA Act: skipping {decision_type} - agent {agent_name} not registered")
+                    action_result["completed_at"] = datetime.now().isoformat()
+                    action_result["duration_ms"] = 0
+                    action_results.append(action_result)
+                    actions_executed += 1
                     continue
 
                 task = {
@@ -1879,16 +1883,19 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
             action_result["status"] = "failed"
             action_result["error"] = str(exec_error)[:500]
             actions_failed += 1
-            # Learn failed pattern
-            await speculator.learn_pattern(
-                observation_data.get("observation", "unknown"),
-                decision_type,
-                success=False
-            )
+            # Learn failed pattern (protected - must not crash the loop)
+            try:
+                await speculator.learn_pattern(
+                    observation_data.get("observation", "unknown"),
+                    decision_type,
+                    success=False
+                )
+            except Exception:
+                pass  # Don't let learning failure crash the act phase
             if "is not implemented" in str(exec_error):
                 logger.debug(f"Act phase skipped {decision_type}: agent not implemented")
             else:
-                logger.error(f"Act phase failed for {decision_type}: {exec_error}")
+                logger.error(f"Act phase failed for {decision_type}: {exec_error!r}")
 
         # Record completion time
         action_result["completed_at"] = datetime.now().isoformat()
@@ -2149,20 +2156,20 @@ class BleedingEdgeOODAController:
         observation_data = decision.get("observation", {})
         params = decision.get("params", {})
 
-        # Decision type to agent mapping
+        # Decision type to agent mapping (names must match AgentExecutor registry)
         decision_agent_mapping = {
-            "onboard_customers": "CustomerOnboarding",
-            "collect_invoices": "CollectionsAgent",
+            "onboard_customers": "OnboardingAgent",
+            "collect_invoices": "InvoicingAgent",
             "resolve_conflicts": "SchedulingAgent",
-            "process_estimates": "EstimateProcessor",
+            "process_estimates": "CustomerIntelligence",
             "investigate_degradation": "SystemMonitor",
             "maintain_health": "SystemMonitor",
             "monitor_frontends": "SystemMonitor",
             "monitor_agents": "SystemMonitor",
-            "generate_leads": "LeadGeneration",
-            "handle_churn_risks": "CustomerRetention",
-            "handle_overdue_invoices": "CollectionsAgent",
-            "handle_new_customers": "CustomerOnboarding",
+            "generate_leads": "LeadQualificationAgent",
+            "handle_churn_risks": "CustomerSuccess",
+            "handle_overdue_invoices": "InvoicingAgent",
+            "handle_new_customers": "OnboardingAgent",
             "handle_scheduling_conflicts": "SchedulingAgent",
         }
 
