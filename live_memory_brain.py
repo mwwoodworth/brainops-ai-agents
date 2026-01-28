@@ -36,6 +36,7 @@ import logging
 import os
 import threading
 import time
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -189,7 +190,7 @@ class TemporalConsciousness:
         caused_by: Optional[str] = None
     ) -> str:
         """Record a moment and update all learning models"""
-        marker_id = hashlib.md5(f"{time.time()}{event_type}".encode()).hexdigest()[:16]
+        marker_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
 
         marker = TemporalMarker(
@@ -990,7 +991,7 @@ class SemanticCompressor:
             combined_connections.update(m.connections)
 
         return MemoryNode(
-            id=hashlib.md5(f"consolidated_{time.time()}".encode()).hexdigest()[:16],
+            id=str(uuid.uuid4()),
             content=base.content,
             memory_type=MemoryType.SEMANTIC,  # Consolidated memories become semantic
             importance=min(1.0, base.importance + 0.1 * len(group)),  # Boost importance
@@ -1016,7 +1017,7 @@ class SemanticCompressor:
         wisdom_content = f"Pattern observed {len(group)} times: {' '.join(sorted(common)[:20])}"
 
         return MemoryNode(
-            id=hashlib.md5(f"wisdom_{time.time()}".encode()).hexdigest()[:16],
+            id=str(uuid.uuid4()),
             content=wisdom_content,
             memory_type=MemoryType.CRYSTALLIZED,
             importance=0.95,  # Wisdom is highly important
@@ -1098,7 +1099,7 @@ class KnowledgeCrystallizer:
 
         # Extract the pattern
         wisdom = {
-            "id": hashlib.md5(f"wisdom_{time.time()}".encode()).hexdigest()[:16],
+            "id": str(uuid.uuid4()),
             "type": "crystallized_wisdom",
             "pattern_signature": pattern["signature"],
             "occurrence_count": pattern["count"],
@@ -1420,7 +1421,7 @@ class LiveMemoryBrain:
         context: Optional[dict] = None
     ) -> str:
         """Store a new memory"""
-        memory_id = hashlib.md5(f"{content}{time.time()}".encode()).hexdigest()[:16]
+        memory_id = str(uuid.uuid4())
 
         memory = MemoryNode(
             id=memory_id,
