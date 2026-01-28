@@ -28,10 +28,15 @@ logger = logging.getLogger(__name__)
 
 # Initialize OpenAI client
 _openai_client = None
+_openai_disabled_until: float = 0  # Unix timestamp; skip OpenAI calls until this time
+_OPENAI_BACKOFF_SECS = 3600  # 1 hour backoff on quota errors
 
 def get_openai_client():
-    """Get or create OpenAI client singleton"""
-    global _openai_client
+    """Get or create OpenAI client singleton (with quota circuit breaker)"""
+    global _openai_client, _openai_disabled_until
+    import time
+    if time.time() < _openai_disabled_until:
+        return None  # Circuit breaker open - quota exceeded
     if _openai_client is None:
         api_key = os.getenv('OPENAI_API_KEY')
         if not api_key:
@@ -43,6 +48,13 @@ def get_openai_client():
         if api_key:
             _openai_client = OpenAI(api_key=api_key)
     return _openai_client
+
+def _trip_openai_breaker():
+    """Disable OpenAI calls for BACKOFF period after quota error."""
+    global _openai_disabled_until
+    import time
+    _openai_disabled_until = time.time() + _OPENAI_BACKOFF_SECS
+    logger.warning(f"OpenAI quota exceeded - disabling calls for {_OPENAI_BACKOFF_SECS}s")
 
 # Database configuration - uses centralized config
 from config import config as app_config
@@ -369,7 +381,10 @@ class NotebookLMPlus:
             }
 
         except Exception as e:
-            logger.error(f"Content analysis failed: {e}")
+            if '429' in str(e) or 'quota' in str(e).lower():
+                _trip_openai_breaker()
+            else:
+                logger.error(f"Content analysis failed: {e!r}")
             return {
                 'processed_content': content,
                 'type': KnowledgeType.FACT,
@@ -392,7 +407,10 @@ class NotebookLMPlus:
             )
             return response.data[0].embedding
         except Exception as e:
-            logger.error(f"Failed to generate embedding: {e}")
+            if '429' in str(e) or 'quota' in str(e).lower():
+                _trip_openai_breaker()
+            else:
+                logger.error(f"Failed to generate embedding: {e!r}")
             return [0.0] * 1536
 
     def _find_related_knowledge(self, embedding: list[float], limit: int = 5) -> list[dict]:
