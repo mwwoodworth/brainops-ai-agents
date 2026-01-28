@@ -152,7 +152,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.7.8')  # FIX: OODA tenant UUID, empty error messages
+        self.version = os.getenv('VERSION', 'v10.7.9')  # FIX: asyncpg UUID serialization, empty error repr
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
