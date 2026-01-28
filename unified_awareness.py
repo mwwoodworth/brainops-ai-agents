@@ -21,6 +21,8 @@ from typing import Any, Callable
 
 import psutil
 
+from safe_task import create_safe_task
+
 logger = logging.getLogger("UNIFIED_AWARENESS")
 
 
@@ -184,8 +186,8 @@ class UnifiedAwareness:
             try:
                 if asyncio.iscoroutinefunction(callback):
                     try:
-                        loop = asyncio.get_running_loop()
-                        loop.create_task(callback(data))
+                        asyncio.get_running_loop()  # Verify loop is running
+                        create_safe_task(callback(data), name=f"awareness_callback_{event_type}")
                     except RuntimeError:
                         logger.debug("No running event loop; skipped async callback")
                 else:
