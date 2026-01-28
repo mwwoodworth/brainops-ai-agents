@@ -1496,7 +1496,7 @@ class LiveMemoryBrain:
             if os.getenv("GOOGLE_API_KEY"):
                 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
                 result = genai.embed_content(
-                    model="models/gemini-embedding-001",
+                    model="models/text-embedding-004",
                     content=text[:8000],
                     task_type="retrieval_query"
                 )
