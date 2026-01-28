@@ -732,7 +732,7 @@ class UnifiedMemoryManager:
                 import google.generativeai as genai
                 genai.configure(api_key=gemini_key)
                 result = genai.embed_content(
-                    model="models/embedding-001",
+                    model="models/gemini-embedding-001",
                     content=text_content,
                     task_type="retrieval_document"
                 )

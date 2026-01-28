@@ -198,7 +198,7 @@ class VectorMemorySystem:
         if GEMINI_AVAILABLE and genai is not None:
             try:
                 result = genai.embed_content(
-                    model="models/embedding-001",
+                    model="models/gemini-embedding-001",
                     content=text,
                     task_type="retrieval_document"
                 )
