@@ -29,6 +29,14 @@ fi
 export DB_NAME=${DB_NAME:-"postgres"}
 export DB_PORT=${DB_PORT:-5432}
 
+# Auto-switch to transaction mode (port 6543) when using Supabase pooler.
+# Transaction mode supports many more concurrent connections than session mode (5432),
+# preventing MaxClientsInSessionMode errors during startup.
+if echo "$DB_HOST" | grep -q "pooler.supabase.com" && [ "$DB_PORT" = "5432" ]; then
+    echo "🔄 Supabase pooler detected - switching to transaction mode (port 6543)"
+    export DB_PORT=6543
+fi
+
 # SECURITY: Host, User, and Password are REQUIRED - fail if not set
 if [ -z "$DB_HOST" ]; then
     echo "❌ ERROR: DB_HOST not set!"
