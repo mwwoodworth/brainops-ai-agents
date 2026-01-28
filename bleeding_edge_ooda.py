@@ -1684,11 +1684,18 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
         task = {
             "action": action_type,
             "params": params,
-            "speculative": True  # Flag to indicate this is a speculative run
+            "speculative": True,  # Flag to indicate this is a speculative run
+            "_skip_ai_agent_log": True,  # Skip expensive DB logging in speculation
         }
 
         try:
-            return await real_agent_executor.execute(agent_name, task)
+            return await asyncio.wait_for(
+                real_agent_executor.execute(agent_name, task),
+                timeout=10.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Speculative execution timed out for {action_type}")
+            return {"status": "timeout", "error": f"Timed out after 10s"}
         except Exception as e:
             logger.warning(f"Speculative execution failed for {action_type}: {e}")
             return {"status": "failed", "error": str(e)}
@@ -1840,25 +1847,19 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
                     "confidence": decision_confidence,
                     "tenant_id": tenant_id,
                     "cycle_id": cycle_id,
-                    "params": observation_data.get("data", {})
+                    "params": observation_data.get("data", {}),
+                    "_skip_ai_agent_log": True,  # Skip expensive DB logging in OODA
                 }
 
-                # Execute with retry logic
+                # Execute with timeout (15s max per agent)
                 execution_result = None
-                max_retries = 2
-                for attempt in range(max_retries + 1):
-                    try:
-                        action_result["retries"] = attempt
-                        execution_result = await retry_with_backoff(
-                            lambda: real_agent_executor.execute(agent_name, task),
-                            max_retries=1,
-                            backoff_base=0.5
-                        )
-                        break
-                    except Exception as retry_error:
-                        if attempt == max_retries:
-                            raise retry_error
-                        logger.warning(f"Act retry {attempt + 1}/{max_retries} for {decision_type}: {retry_error}")
+                try:
+                    execution_result = await asyncio.wait_for(
+                        real_agent_executor.execute(agent_name, task),
+                        timeout=15.0
+                    )
+                except asyncio.TimeoutError:
+                    raise TimeoutError(f"Agent '{agent_name}' timed out after 15s")
 
                 # Validate output integrity
                 output_validator = get_output_validator()
@@ -1919,7 +1920,7 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
         # Log execution for observability
         logger.info(
             f"OODA Act [{cycle_id}]: {decision_type} -> {action_result['status']} "
-            f"({action_result['duration_ms']:.0f}ms, retries={action_result['retries']})"
+            f"({action_result['duration_ms']:.0f}ms)"
         )
 
     metrics["act_duration_ms"] = (datetime.now() - act_start).total_seconds() * 1000
@@ -2037,7 +2038,14 @@ class BleedingEdgeOODAController:
 
     async def run_enhanced_cycle(self, context: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         """Run a complete enhanced OODA cycle with all optimizations."""
-        return await enhanced_ooda_cycle(self.tenant_id, context or {})
+        try:
+            return await asyncio.wait_for(
+                enhanced_ooda_cycle(self.tenant_id, context or {}),
+                timeout=90.0  # Overall cycle timeout
+            )
+        except asyncio.TimeoutError:
+            logger.error("OODA cycle timed out after 90s")
+            return {"status": "timeout", "error": "Cycle exceeded 90s timeout"}
 
     def _get_predictive_executor(self):
         """Lazy load the PredictiveExecutor integration."""
