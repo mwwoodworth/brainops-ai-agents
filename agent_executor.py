@@ -3580,9 +3580,7 @@ class CustomerIntelligenceAgent(BaseAgent):
             pool = get_pool()
             stored_count = 0
 
-            # Prepare all rows first, then batch insert (avoids 100 sequential INSERTs)
-            rows = []
-            for customer in customers[:100]:
+            for customer in customers[:20]:  # Limit to 20 per OODA run for speed
                 try:
                     days_inactive = customer.get('days_since_last_job') or 999
                     total_revenue = float(customer.get('total_revenue') or 0)
@@ -3623,27 +3621,25 @@ class CustomerIntelligenceAgent(BaseAgent):
                         ]
 
                     tenant_id = customer.get('tenant_id', '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457')
-                    rows.append((
+
+                    await pool.execute("""
+                        INSERT INTO ai_customer_health (
+                            customer_id, tenant_id, health_score, health_category,
+                            churn_probability, churn_risk, lifetime_value,
+                            days_since_last_activity, health_status,
+                            retention_strategies, measured_at, created_at, updated_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW(), NOW())
+                        ON CONFLICT (id) DO NOTHING
+                    """,
                         customer['id'], tenant_id, health_score, health_category,
                         churn_probability, churn_risk, total_revenue, days_inactive,
                         f"Inactive for {days_inactive} days" if days_inactive else "Unknown",
                         retention_strategies
-                    ))
+                    )
+                    stored_count += 1
                 except Exception as inner_e:
-                    self.logger.warning(f"Failed to prepare health for customer {customer.get('id')}: {inner_e!r}")
-
-            # Batch insert all rows at once
-            if rows:
-                await pool.executemany("""
-                    INSERT INTO ai_customer_health (
-                        customer_id, tenant_id, health_score, health_category,
-                        churn_probability, churn_risk, lifetime_value,
-                        days_since_last_activity, health_status,
-                        retention_strategies, measured_at, created_at, updated_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW(), NOW())
-                    ON CONFLICT (id) DO NOTHING
-                """, rows)
-                stored_count = len(rows)
+                    self.logger.warning(f"Failed to store health for customer {customer.get('id')}: {inner_e!r}")
+                    continue
 
             self.logger.info(f"Stored {stored_count} customer health insights")
             return stored_count
