@@ -2243,7 +2243,7 @@ class SystemMonitorAgent(BaseAgent):
                 )
                 if incident:
                     incidents_recorded += 1
-                    logger.info(f"Self-healing incident recorded for {issue['service']}: {incident.id}")
+                    logger.info(f"Self-healing incident recorded for {issue['service']}: {incident.incident_id}")
         except Exception as e:
             logger.warning(f"Could not record self-healing incidents: {e}")
 
