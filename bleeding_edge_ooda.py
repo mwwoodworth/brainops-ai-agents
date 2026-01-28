@@ -1780,7 +1780,8 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
         "handle_scheduling_conflicts": "SchedulingAgent",
     }
 
-    for decision in decisions:
+    async def _execute_decision(decision: dict) -> dict:
+        """Execute a single decision with timeout and integrity validation."""
         decision_id = decision.get("id", str(uuid.uuid4()))
         decision_type = decision.get("type", "unknown")
         decision_confidence = decision.get("confidence", 0.5)
@@ -1797,15 +1798,12 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
         }
 
         try:
-            # Check speculative result first (faster if available)
+            # Check speculative result first
             spec_result = await speculator.get_speculation_result(decision_type)
             if spec_result:
-                metrics.setdefault("speculation_hits", 0)
-                metrics["speculation_hits"] += 1
                 action_result["speculation_hit"] = True
                 action_result["result"] = spec_result
                 action_result["status"] = "completed_from_speculation"
-                actions_succeeded += 1
                 await speculator.learn_pattern(
                     observation_data.get("observation", "unknown"),
                     decision_type, success=True
@@ -1822,10 +1820,10 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
                     "_skip_ai_agent_log": True,
                 }
 
-                # Execute with strict timeout (15s max per agent)
+                # Execute with timeout (30s max per agent)
                 execution_result = await asyncio.wait_for(
                     shared_executor.execute(agent_name, task),
-                    timeout=15.0
+                    timeout=30.0
                 )
 
                 # Validate output integrity
@@ -1838,15 +1836,12 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
 
                 if output_integrity.valid:
                     action_result["status"] = "completed"
-                    actions_succeeded += 1
                 else:
                     action_result["status"] = "completed_with_warnings"
                     action_result["integrity_issues"] = output_integrity.checks_failed
-                    actions_succeeded += 1
 
                 action_result["result"] = execution_result
 
-                # Learn successful pattern
                 try:
                     await speculator.learn_pattern(
                         observation_data.get("observation", "unknown"),
@@ -1857,13 +1852,11 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
 
         except asyncio.TimeoutError:
             action_result["status"] = "timeout"
-            action_result["error"] = f"Agent '{agent_name}' timed out after 15s"
-            actions_failed += 1
+            action_result["error"] = f"Agent '{agent_name}' timed out after 30s"
             logger.warning(f"OODA Act: {decision_type} agent '{agent_name}' timed out")
         except Exception as exec_error:
             action_result["status"] = "failed"
             action_result["error"] = str(exec_error)[:500]
-            actions_failed += 1
             logger.error(f"OODA Act: {decision_type} failed: {exec_error!r}")
             try:
                 await speculator.learn_pattern(
@@ -1879,13 +1872,32 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
             datetime.fromisoformat(action_result["started_at"])
         ).total_seconds() * 1000
 
-        action_results.append(action_result)
-        actions_executed += 1
-
         logger.info(
             f"OODA Act [{cycle_id}]: {decision_type} -> {action_result['status']} "
             f"({action_result['duration_ms']:.0f}ms)"
         )
+        return action_result
+
+    # Execute all decisions in PARALLEL for maximum speed
+    if decisions:
+        parallel_results = await asyncio.gather(
+            *[_execute_decision(d) for d in decisions],
+            return_exceptions=True
+        )
+        for r in parallel_results:
+            if isinstance(r, Exception):
+                action_results.append({
+                    "status": "failed", "error": str(r)[:500],
+                    "duration_ms": 0, "decision_type": "unknown"
+                })
+                actions_failed += 1
+            else:
+                action_results.append(r)
+                if r.get("status") in ("completed", "completed_from_speculation", "completed_with_warnings"):
+                    actions_succeeded += 1
+                else:
+                    actions_failed += 1
+            actions_executed += 1
 
     metrics["act_duration_ms"] = (datetime.now() - act_start).total_seconds() * 1000
     metrics["actions_executed"] = actions_executed

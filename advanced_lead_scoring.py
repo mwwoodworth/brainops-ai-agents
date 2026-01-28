@@ -330,7 +330,7 @@ class AdvancedLeadScoringEngine:
 
         except Exception as e:
             conn.rollback()
-            logger.error(f"Failed to initialize scoring tables: {e}")
+            logger.error(f"Failed to initialize scoring tables: {e!r}")
             raise
         finally:
             conn.close()
@@ -676,7 +676,7 @@ class AdvancedLeadScoringEngine:
                 conn.commit()
         except Exception as e:
             conn.rollback()
-            logger.error(f"Failed to store lead score: {e}")
+            logger.error(f"Failed to store lead score: {e!r}")
         finally:
             conn.close()
 
@@ -707,7 +707,7 @@ class AdvancedLeadScoringEngine:
 
         except Exception as e:
             conn.rollback()
-            logger.error(f"Failed to record engagement: {e}")
+            logger.error(f"Failed to record engagement: {e!r}")
         finally:
             conn.close()
 

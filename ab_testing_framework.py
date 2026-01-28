@@ -149,7 +149,7 @@ class ExperimentDesigner:
             return experiment_id
 
         except Exception as e:
-            logger.error(f"Error creating experiment: {e}")
+            logger.error(f"Error creating experiment: {e!r}")
             raise
 
     def _calculate_allocation(self, num_variants: int) -> dict:
@@ -255,7 +255,7 @@ class TrafficSplitter:
             return assignment
 
         except Exception as e:
-            logger.error(f"Error assigning variant: {e}")
+            logger.error(f"Error assigning variant: {e!r}")
             return "control"  # Default to control on error
 
     def _hash_assignment(
@@ -343,7 +343,7 @@ class MetricsCollector:
             return True
 
         except Exception as e:
-            logger.error(f"Error tracking event: {e}")
+            logger.error(f"Error tracking event: {e!r}")
             return False
 
     async def calculate_metrics(
@@ -394,7 +394,7 @@ class MetricsCollector:
             }
 
         except Exception as e:
-            logger.error(f"Error calculating metrics: {e}")
+            logger.error(f"Error calculating metrics: {e!r}")
             raise
 
 class StatisticalAnalyzer:
@@ -473,7 +473,7 @@ class StatisticalAnalyzer:
             return analysis
 
         except Exception as e:
-            logger.error(f"Error analyzing experiment: {e}")
+            logger.error(f"Error analyzing experiment: {e!r}")
             raise
 
     def _format_variant_stats(self, variant: dict) -> dict:
@@ -583,7 +583,7 @@ class ExperimentManager:
             return False
 
         except Exception as e:
-            logger.error(f"Error starting experiment: {e}")
+            logger.error(f"Error starting experiment: {e!r}")
             return False
 
     async def stop_experiment(self, experiment_id: str) -> dict:
@@ -618,7 +618,7 @@ class ExperimentManager:
             return final_results
 
         except Exception as e:
-            logger.error(f"Error stopping experiment: {e}")
+            logger.error(f"Error stopping experiment: {e!r}")
             raise
 
     async def get_experiment_status(self, experiment_id: str) -> dict:
@@ -638,7 +638,7 @@ class ExperimentManager:
             }
 
         except Exception as e:
-            logger.error(f"Error getting experiment status: {e}")
+            logger.error(f"Error getting experiment status: {e!r}")
             raise
 
 class ABTestingFramework:
