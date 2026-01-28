@@ -19,6 +19,7 @@ References:
 """
 
 import asyncio
+import gc
 import hashlib
 import json
 import logging
@@ -1982,6 +1983,9 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
         f"{decisions_stored} stored, "
         f"{total_duration:.0f}ms total"
     )
+
+    # Force garbage collection to prevent OOM on 512MB instances
+    gc.collect()
 
     return {
         "cycle_id": cycle_id,

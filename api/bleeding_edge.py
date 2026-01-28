@@ -12,6 +12,7 @@ Exposes the most advanced AI systems ever built:
 Created: 2025-12-27
 """
 
+import gc
 import logging
 import os
 import threading
@@ -269,6 +270,7 @@ async def run_ooda_cycle(
         raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
         _ooda_lock.release()
+        gc.collect()
 
 
 @router.get("/ooda/metrics")

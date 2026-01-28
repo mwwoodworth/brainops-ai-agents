@@ -4,6 +4,7 @@ Schedules and executes AI agents based on configured intervals
 """
 
 import asyncio
+import gc
 import json
 import logging
 import os
@@ -1465,6 +1466,7 @@ class AgentScheduler:
             logger.error("OODA Loop failed: %s", exc, exc_info=True)
         finally:
             _ooda_lock.release()
+            gc.collect()
 
     def _run_revenue_pipeline_factory(self):
         """Execute all revenue pipelines: lead nurturing, content marketing, etc."""
