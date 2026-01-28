@@ -161,14 +161,16 @@ async def generate_embedding(text: str) -> Optional[list[float]]:
             )
             if result and "embedding" in result:
                 embedding = list(result["embedding"])
-                # Gemini embedding-001 produces 768 dims, but our DB has 1536 (OpenAI)
-                # Pad with zeros to match dimensions for compatibility
-                if len(embedding) < 1536:
+                # Gemini gemini-embedding-001 produces 3072 dims, but our DB has 1536 (OpenAI)
+                # Truncate or pad to match 1536 dimensions for compatibility
+                original_len = len(embedding)
+                if len(embedding) > 1536:
+                    embedding = embedding[:1536]  # Truncate to 1536
+                    logger.info(f"Gemini embedding truncated from {original_len} to 1536 dims")
+                elif len(embedding) < 1536:
                     padding = [0.0] * (1536 - len(embedding))
                     embedding = embedding + padding
-                    logger.info(f"Gemini embedding padded from {len(result['embedding'])} to {len(embedding)} dims")
-                else:
-                    logger.info(f"Gemini embedding generated: {len(embedding)} dims")
+                    logger.info(f"Gemini embedding padded from {original_len} to 1536 dims")
                 return embedding
         except Exception as e:
             logger.error(f"Gemini embedding also failed: {e}")

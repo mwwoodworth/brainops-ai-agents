@@ -255,13 +255,18 @@ class EmbeddingService:
                 content=text,
                 task_type="retrieval_document"
             )
-            embedding = result['embedding']
+            embedding = list(result['embedding'])
 
-            # Zero-pad to match OpenAI dimension (1536)
-            if len(embedding) < EMBEDDING_DIMENSION:
+            # Truncate or pad to match OpenAI dimension (1536)
+            original_len = len(embedding)
+            if len(embedding) > EMBEDDING_DIMENSION:
+                embedding = embedding[:EMBEDDING_DIMENSION]
+                logger.debug(f"Used Gemini embedding (truncated from {original_len} to 1536d)")
+            elif len(embedding) < EMBEDDING_DIMENSION:
                 embedding = embedding + [0.0] * (EMBEDDING_DIMENSION - len(embedding))
-
-            logger.debug("Used Gemini embedding (padded to 1536d)")
+                logger.debug(f"Used Gemini embedding (padded from {original_len} to 1536d)")
+            else:
+                logger.debug("Used Gemini embedding")
             return embedding
         except Exception as e:
             self._stats["gemini_errors"] += 1
