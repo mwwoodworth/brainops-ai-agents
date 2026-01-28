@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.8.8')  # OODA: parallel Act phase, 30s timeouts, full power
+        self.version = os.getenv('VERSION', 'v10.8.9')  # OODA: bounded parallel Act (semaphore=2), prevent OOM
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
