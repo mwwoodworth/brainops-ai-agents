@@ -177,7 +177,7 @@ class AgentActivationSystem:
                     conn = psycopg2.connect(**DB_CONFIG)
                     yield conn
                 except Exception as e:
-                    logger.error(f"Database connection failed: {e}")
+                    logger.error(f"Database connection failed: {e!r}")
                     yield None
                 finally:
                     if conn and not conn.closed:
@@ -231,7 +231,7 @@ class AgentActivationSystem:
                 cur.close()
 
         except Exception as e:
-            logger.error(f"Failed to activate agent {agent_id}: {e}")
+            logger.error(f"Failed to activate agent {agent_id}: {e!r}")
             result["success"] = False
             result["error"] = str(e)
 
@@ -283,7 +283,7 @@ class AgentActivationSystem:
                 cur.close()
 
         except Exception as e:
-            logger.error(f"Failed to deactivate agent {agent_id}: {e}")
+            logger.error(f"Failed to deactivate agent {agent_id}: {e!r}")
             result["success"] = False
             result["error"] = str(e)
 
@@ -329,7 +329,7 @@ class AgentActivationSystem:
                 cur.close()
 
         except Exception as e:
-            logger.error(f"Failed to get agent status {agent_id}: {e}")
+            logger.error(f"Failed to get agent status {agent_id}: {e!r}")
             result["status"] = "error"
             result["error"] = str(e)
 
@@ -381,7 +381,7 @@ class AgentActivationSystem:
                 cur.close()
 
         except Exception as e:
-            logger.error(f"Failed to get all agents status: {e}")
+            logger.error(f"Failed to get all agents status: {e!r}")
             result["error"] = str(e)
 
         return result
@@ -559,7 +559,7 @@ class AgentActivationSystem:
                 logger.info(f"Triggered {len(result['triggered_agents'])} agents for event {event_type.value}")
 
         except Exception as e:
-            logger.error(f"Failed to trigger agents for event {event_type.value}: {e}")
+            logger.error(f"Failed to trigger agents for event {event_type.value}: {e!r}")
             result["success"] = False
             result["error"] = str(e)
 
@@ -608,7 +608,7 @@ class AgentActivationSystem:
 
                 cur.close()
         except Exception as e:
-            logger.error(f"Failed to get agent stats: {e}")
+            logger.error(f"Failed to get agent stats: {e!r}")
 
         return stats
 
@@ -658,7 +658,7 @@ class AgentActivationSystem:
             self._log_business_event(event_type, event_data, result)
 
         except Exception as e:
-            logger.error(f"Failed to handle business event {event_type.value}: {e}")
+            logger.error(f"Failed to handle business event {event_type.value}: {e!r}")
             result["success"] = False
             result["error"] = str(e)
 
@@ -719,4 +719,4 @@ class AgentActivationSystem:
                 conn.commit()
                 cur.close()
         except Exception as e:
-            logger.warning(f"Failed to log business event: {e}")
+            logger.warning(f"Failed to log business event: {e!r}")

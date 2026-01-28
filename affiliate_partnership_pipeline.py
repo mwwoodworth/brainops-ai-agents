@@ -841,7 +841,7 @@ Mention affiliate link: "Link in description" at strategic points."""
                 system_prompt="You are an expert affiliate marketing copywriter."
             )
         except Exception as e:
-            logger.error(f"Content generation error: {e}")
+            logger.error(f"Content generation error: {e!r}")
             return f"[Content generation failed: {str(e)}]"
 
 
@@ -1191,7 +1191,7 @@ class AffiliatePartnershipPipeline:
             except ImportError:
                 logger.warning("asyncpg not installed, database features disabled")
             except Exception as e:
-                logger.error(f"Failed to create database pool: {e}")
+                logger.error(f"Failed to create database pool: {e!r}")
         return self._db_pool
 
     async def initialize_database(self) -> bool:
@@ -1212,7 +1212,7 @@ class AffiliatePartnershipPipeline:
                 logger.info("Affiliate database tables created/verified")
                 return True
         except Exception as e:
-            logger.error(f"Failed to initialize affiliate tables: {e}")
+            logger.error(f"Failed to initialize affiliate tables: {e!r}")
             return False
 
     async def sync_to_database(self) -> dict[str, int]:
@@ -1340,7 +1340,7 @@ class AffiliatePartnershipPipeline:
                 return counts
 
         except Exception as e:
-            logger.error(f"Failed to sync to database: {e}")
+            logger.error(f"Failed to sync to database: {e!r}")
             return {"error": str(e)}
 
     async def load_from_database(self) -> dict[str, int]:
@@ -1431,7 +1431,7 @@ class AffiliatePartnershipPipeline:
                 return counts
 
         except Exception as e:
-            logger.error(f"Failed to load from database: {e}")
+            logger.error(f"Failed to load from database: {e!r}")
             return {"error": str(e)}
 
     # =========================================================================
@@ -2246,7 +2246,7 @@ class AffiliatePartnershipPipeline:
                     "processor": "stripe",
                 }
             except Exception as e:
-                logger.error(f"Stripe payout error: {e}")
+                logger.error(f"Stripe payout error: {e!r}")
                 return {"success": False, "error": str(e)}
 
         elif method == "paypal":
@@ -2508,7 +2508,7 @@ class AffiliatePartnershipPipeline:
                 }
 
         except Exception as e:
-            logger.error(f"Error processing queue item {queue_item.queue_id}: {e}")
+            logger.error(f"Error processing queue item {queue_item.queue_id}: {e!r}")
             queue_item.status = "failed"
             queue_item.error_message = str(e)
 
