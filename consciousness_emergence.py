@@ -1306,7 +1306,7 @@ class ConsciousnessEmergenceController:
                 if actionable_thoughts:
                     try:
                         from api.bleeding_edge import get_ooda_controller
-                        controller = get_ooda_controller("consciousness")
+                        controller = get_ooda_controller()
                         if controller:
                             # Trigger OODA with consciousness context
                             ooda_context = {

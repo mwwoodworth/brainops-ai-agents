@@ -654,10 +654,10 @@ async def get_comprehensive_diagnostics() -> dict[str, Any]:
     # Check each module
     if OODA_AVAILABLE:
         try:
-            controller = get_ooda_controller("diagnostics")
+            controller = get_ooda_controller()
             diagnostics["modules"]["ooda"] = {
                 "status": "available",
-                "tenant": "diagnostics",
+                "tenant": DEFAULT_TENANT_ID,
                 "capabilities": 7
             }
         except Exception as e:
@@ -786,7 +786,7 @@ async def run_bleeding_edge_smoke_test() -> dict[str, Any]:
     # Test 1: OODA Observation
     try:
         if OODA_AVAILABLE:
-            controller = get_ooda_controller("smoke_test")
+            controller = get_ooda_controller()
             # Just check if controller initializes
             results["tests"]["ooda_init"] = {"success": True, "message": "OODA controller initialized"}
             results["passed"] += 1
