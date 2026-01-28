@@ -641,7 +641,10 @@ class UnifiedSystemIntegration:
         Called when an agent fails.
         Captures error for learning and potentially triggers recovery.
         """
-        self.logger.error(f"[{ctx.execution_id}] ERROR: {error}")
+        if "is not implemented" in str(error):
+            self.logger.debug(f"[{ctx.execution_id}] Agent not yet implemented: {error}")
+        else:
+            self.logger.error(f"[{ctx.execution_id}] ERROR: {error}")
 
         recovery_actions = []
 
