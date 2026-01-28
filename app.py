@@ -1012,11 +1012,9 @@ async def lifespan(app: FastAPI):
                     lambda: AUREA(autonomy_level=AutonomyLevel.FULL_AUTO, tenant_id=tenant_id)
                 )
                 app.state.aurea = aurea_instance
-                bg_runner = getattr(app.state, "bg_runner", None)
-                if bg_runner is not None:
-                    bg_runner.submit(aurea_instance.orchestrate())
-                else:
-                    create_safe_task(aurea_instance.orchestrate(), "aurea_orchestrate")
+                # Always run on the main event loop so AUREA can use the
+                # shared database pool (which is bound to the main loop).
+                create_safe_task(aurea_instance.orchestrate(), "aurea_orchestrate")
                 logger.info("🧠 AUREA Master Orchestrator STARTED - Observe→Decide→Act loop ACTIVE")
             except Exception as e:
                 logger.error(f"❌ AUREA initialization failed: {e}")
@@ -1037,11 +1035,9 @@ async def lifespan(app: FastAPI):
             try:
                 reconciler = await asyncio.to_thread(get_reconciler)
                 app.state.reconciler = reconciler
-                bg_runner = getattr(app.state, "bg_runner", None)
-                if bg_runner is not None:
-                    bg_runner.submit(start_healing_loop())
-                else:
-                    create_safe_task(start_healing_loop(), "healing_loop")
+                # Always run on the main event loop so the healing loop
+                # can use the shared database pool.
+                create_safe_task(start_healing_loop(), "healing_loop")
                 logger.info("🔄 Self-Healing Reconciliation Loop STARTED")
             except Exception as e:
                 logger.error(f"❌ Reconciler initialization failed: {e}")
@@ -1237,11 +1233,9 @@ async def lifespan(app: FastAPI):
         try:
             from intelligent_task_orchestrator import start_task_orchestrator, get_task_orchestrator
 
-            bg_runner = getattr(app.state, "bg_runner", None)
-            if bg_runner is not None:
-                bg_runner.submit(start_task_orchestrator())
-            else:
-                await start_task_orchestrator()
+            # Run on the main event loop so the task orchestrator
+            # can use the shared database pool.
+            create_safe_task(start_task_orchestrator(), "task_orchestrator")
             app.state.task_orchestrator = get_task_orchestrator()
             logger.info("🎯 Intelligent Task Orchestrator STARTED - AI-driven task prioritization active")
         except Exception as e:
@@ -4468,7 +4462,7 @@ async def get_consciousness_status():
         if nerve_center and hasattr(nerve_center, "alive_core"):
             try:
                 consciousness_state = nerve_center.alive_core.state.value
-            except:
+            except Exception:
                 consciousness_state = "active"
         elif BLEEDING_EDGE_AVAILABLE:
             consciousness_state = "emerging"
@@ -4622,7 +4616,7 @@ async def check_self_healing():
         db_healthy = True
         try:
             await pool.fetchval("SELECT 1")
-        except:
+        except Exception:
             db_healthy = False
             issues.append({"type": "database", "severity": "critical", "message": "Database connection failed"})
             health_score -= 30
