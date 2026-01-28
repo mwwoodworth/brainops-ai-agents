@@ -232,7 +232,7 @@ async def enroll_mrg_user_in_cross_sell(
         return email_ids
 
     except Exception as e:
-        logger.error(f"Failed to enroll MRG user in cross-sell: {e}")
+        logger.error(f"Failed to enroll MRG user in cross-sell: {e!r}")
         return []
 
 
@@ -293,7 +293,7 @@ async def enroll_bss_user_in_cross_sell(
         return email_ids
 
     except Exception as e:
-        logger.error(f"Failed to enroll BSS user in cross-sell: {e}")
+        logger.error(f"Failed to enroll BSS user in cross-sell: {e!r}")
         return []
 
 
@@ -344,7 +344,7 @@ async def process_platform_cross_sells(limit: int = 100) -> dict:
                 else:
                     results["skipped"] += 1
             except Exception as e:
-                logger.error(f"Error enrolling MRG user {user.get('email')}: {e}")
+                logger.error(f"Error enrolling MRG user {user.get('email')}: {e!r}")
                 results["errors"] += 1
 
         # BSS users would be found from a different database/table
@@ -358,7 +358,7 @@ async def process_platform_cross_sells(limit: int = 100) -> dict:
         }
 
     except Exception as e:
-        logger.error(f"Error processing platform cross-sells: {e}")
+        logger.error(f"Error processing platform cross-sells: {e!r}")
         return {"success": False, "error": str(e)}
 
 

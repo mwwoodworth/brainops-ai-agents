@@ -218,7 +218,7 @@ class HealthMonitor:
                 time.sleep(self.check_interval)
 
             except Exception as e:
-                logger.error(f"Monitoring error: {e}")
+                logger.error(f"Monitoring error: {e!r}")
 
     def _check_service_health(self, service_name: str, service_info: dict) -> ServiceHealth:
         """Check individual service health"""
@@ -249,7 +249,7 @@ class HealthMonitor:
             )
 
         except Exception as e:
-            logger.error(f"Health check failed for {service_name}: {e}")
+            logger.error(f"Health check failed for {service_name}: {e!r}")
             return ServiceHealth(
                 service_name=service_name,
                 status=ServiceStatus.FAILED,
@@ -287,7 +287,7 @@ class HealthMonitor:
             conn.commit()
 
         except Exception as e:
-            logger.error(f"Failed to store health status: {e}")
+            logger.error(f"Failed to store health status: {e!r}")
         finally:
             if cursor:
                 try:
@@ -440,7 +440,7 @@ class DataReplicator:
                 time.sleep(1)
 
             except Exception as e:
-                logger.error(f"Replication error: {e}")
+                logger.error(f"Replication error: {e!r}")
 
     async def _replicate_batch(self, batch: list[dict]):
         """Replicate a batch of data"""
@@ -457,7 +457,7 @@ class DataReplicator:
                 await self._write_to_database(batch, _get_db_config())
 
         except Exception as e:
-            logger.error(f"Batch replication failed: {e}")
+            logger.error(f"Batch replication failed: {e!r}")
 
     async def _write_to_database(self, batch: list[dict], config: dict) -> bool:
         """Write batch to database"""
@@ -477,7 +477,7 @@ class DataReplicator:
             return True
 
         except Exception as e:
-            logger.error(f"Database write failed: {e}")
+            logger.error(f"Database write failed: {e!r}")
             return False
         finally:
             if cursor:
@@ -588,7 +588,7 @@ class FailoverManager:
             return True
 
         except Exception as e:
-            logger.error(f"Failover failed for {service_name}: {e}")
+            logger.error(f"Failover failed for {service_name}: {e!r}")
             return False
 
     async def _store_failover_event(self, event: FailoverEvent):
@@ -619,7 +619,7 @@ class FailoverManager:
             conn.commit()
 
         except Exception as e:
-            logger.error(f"Failed to store failover event: {e}")
+            logger.error(f"Failed to store failover event: {e!r}")
         finally:
             if cursor:
                 try:
@@ -682,7 +682,7 @@ class DisasterRecovery:
             return recovery_point
 
         except Exception as e:
-            logger.error(f"Backup creation failed: {e}")
+            logger.error(f"Backup creation failed: {e!r}")
             return {'error': str(e)}
 
     async def _backup_database(self, service_name: str, backup_path: Path) -> dict:
@@ -728,7 +728,7 @@ class DisasterRecovery:
             }
 
         except Exception as e:
-            logger.error(f"Database backup failed: {e}")
+            logger.error(f"Database backup failed: {e!r}")
             return {'error': str(e)}
         finally:
             if cursor:
@@ -761,7 +761,7 @@ class DisasterRecovery:
             }
 
         except Exception as e:
-            logger.error(f"Config backup failed: {e}")
+            logger.error(f"Config backup failed: {e!r}")
             return {'error': str(e)}
 
     async def restore_from_backup(self, backup_id: str) -> bool:
@@ -789,7 +789,7 @@ class DisasterRecovery:
             return db_restored and config_restored
 
         except Exception as e:
-            logger.error(f"Restore failed: {e}")
+            logger.error(f"Restore failed: {e!r}")
             return False
 
     async def _restore_database(self, backup_path: Path) -> bool:
@@ -814,7 +814,7 @@ class DisasterRecovery:
             return True
 
         except Exception as e:
-            logger.error(f"Database restore failed: {e}")
+            logger.error(f"Database restore failed: {e!r}")
             return False
 
     async def _restore_configuration(self, backup_path: Path) -> bool:
@@ -840,7 +840,7 @@ class DisasterRecovery:
             return True
 
         except Exception as e:
-            logger.error(f"Config restore failed: {e}")
+            logger.error(f"Config restore failed: {e!r}")
             return False
 
 
@@ -1000,7 +1000,7 @@ async def setup_database():
         logger.info("Database tables created successfully")
 
     except Exception as e:
-        logger.error(f"Database setup error: {e}")
+        logger.error(f"Database setup error: {e!r}")
 
 
 def get_redundancy_orchestrator() -> RedundancyOrchestrator:

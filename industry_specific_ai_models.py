@@ -167,7 +167,7 @@ class RoofingEstimator:
             return breakdown
 
         except Exception as e:
-            logger.error(f"Error estimating project: {e}")
+            logger.error(f"Error estimating project: {e!r}")
             raise
 
     def _calculate_additional_costs(
@@ -268,7 +268,7 @@ class RoofingEstimator:
             conn.close()
 
         except Exception as e:
-            logger.error(f"Error storing estimate: {e}")
+            logger.error(f"Error storing estimate: {e!r}")
 
 class DamageAssessmentModel:
     """AI model for assessing roof damage"""
@@ -351,7 +351,7 @@ class DamageAssessmentModel:
             return assessment
 
         except Exception as e:
-            logger.error(f"Error assessing damage: {e}")
+            logger.error(f"Error assessing damage: {e!r}")
             raise
 
     def _determine_severity(
@@ -508,7 +508,7 @@ class DamageAssessmentModel:
             conn.close()
 
         except Exception as e:
-            logger.error(f"Error storing assessment: {e}")
+            logger.error(f"Error storing assessment: {e!r}")
 
 class MaterialRecommendationEngine:
     """AI engine for recommending roofing materials"""
@@ -690,7 +690,7 @@ class IndustrySpecificAIModels:
                 raise ValueError(f"Unknown request type: {request_type}")
 
         except Exception as e:
-            logger.error(f"Error processing request: {e}")
+            logger.error(f"Error processing request: {e!r}")
             raise
 
 # Singleton instance
