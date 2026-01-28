@@ -128,7 +128,7 @@ async def generate_embedding(text: str) -> Optional[list[float]]:
     """
     Generate embedding with OpenAI primary, Gemini fallback.
     OpenAI: text-embedding-3-small (1536 dims)
-    Gemini: gemini-embedding-001 (configurable to 1536 dims for compatibility)
+    Gemini: text-embedding-004 (configurable to 1536 dims for compatibility)
     Returns None if both providers fail.
     """
     # Truncate if too long
@@ -155,13 +155,13 @@ async def generate_embedding(text: str) -> Optional[list[float]]:
             import google.generativeai as genai
             genai.configure(api_key=gemini_key)
             result = genai.embed_content(
-                model="models/gemini-embedding-001",
+                model="models/text-embedding-004",
                 content=text_truncated,
                 task_type="retrieval_query"  # Optimized for search queries
             )
             if result and "embedding" in result:
                 embedding = list(result["embedding"])
-                # Gemini gemini-embedding-001 produces 3072 dims, but our DB has 1536 (OpenAI)
+                # Gemini text-embedding-004 produces 3072 dims, but our DB has 1536 (OpenAI)
                 # Truncate or pad to match 1536 dimensions for compatibility
                 original_len = len(embedding)
                 if len(embedding) > 1536:
@@ -280,7 +280,7 @@ async def get_embedding_status():
             import google.generativeai as genai
             genai.configure(api_key=gemini_key)
             result = genai.embed_content(
-                model="models/gemini-embedding-001",
+                model="models/text-embedding-004",
                 content="test",
                 task_type="retrieval_query"
             )

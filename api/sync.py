@@ -128,7 +128,7 @@ async def generate_embedding(text: str) -> Optional[list[float]]:
             import google.generativeai as genai
             genai.configure(api_key=gemini_key)
             result = genai.embed_content(
-                model="models/gemini-embedding-001",
+                model="models/text-embedding-004",
                 content=text,
                 task_type="retrieval_document"
             )
