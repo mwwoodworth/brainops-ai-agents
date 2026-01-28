@@ -736,11 +736,17 @@ class UnifiedMemoryManager:
                     content=text_content,
                     task_type="retrieval_document"
                 )
-                embedding = result['embedding']
-                # Zero-pad to 1536 dimensions to match OpenAI embeddings in database
-                if len(embedding) < 1536:
+                embedding = list(result['embedding'])
+                # Truncate or pad to 1536 dimensions to match OpenAI embeddings in database
+                original_len = len(embedding)
+                if len(embedding) > 1536:
+                    embedding = embedding[:1536]
+                    logger.info(f"✅ Used Gemini embedding fallback (truncated from {original_len} to 1536d)")
+                elif len(embedding) < 1536:
                     embedding = embedding + [0.0] * (1536 - len(embedding))
-                logger.info("✅ Used Gemini embedding fallback (padded to 1536d)")
+                    logger.info(f"✅ Used Gemini embedding fallback (padded from {original_len} to 1536d)")
+                else:
+                    logger.info("✅ Used Gemini embedding fallback")
                 return embedding
             except Exception as e:
                 logger.warning(f"⚠️ Gemini embedding failed: {e}, trying local fallback")
