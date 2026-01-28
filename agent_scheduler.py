@@ -28,10 +28,11 @@ DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08
 
 # Bleeding Edge OODA (Consciousness)
 try:
-    from api.bleeding_edge import get_ooda_controller
+    from api.bleeding_edge import get_ooda_controller, _ooda_lock
     OODA_AVAILABLE = True
 except ImportError:
     OODA_AVAILABLE = False
+    _ooda_lock = None
     logging.warning("BleedingEdgeOODA unavailable")
 
 # Revenue Drive (autonomous goals)
@@ -1443,34 +1444,27 @@ class AgentScheduler:
         """Execute the Bleeding Edge OODA loop."""
         if not OODA_AVAILABLE:
             return
+        # Acquire cross-thread lock (non-blocking) to prevent concurrent cycles
+        # This lock is shared with the API endpoint in api/bleeding_edge.py
+        if _ooda_lock is None or not _ooda_lock.acquire(blocking=False):
+            logger.info("OODA Loop skipped - cycle already running")
+            return
         try:
-            # Use proper UUID tenant_id instead of string "scheduler"
             controller = get_ooda_controller(DEFAULT_TENANT_ID)
-            if controller:
-                # Safely run async method - reuse existing loop if available
-                try:
-                    loop = asyncio.get_running_loop()
-                    # If we're in an async context, create a task
-                    create_safe_task(self._run_ooda_cycle_async(controller))
-                except RuntimeError:
-                    # No running loop - create one safely
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        result = loop.run_until_complete(controller.run_enhanced_cycle())
-                        logger.info("OODA Loop completed: %s", result.get("cycle_id"))
-                    finally:
-                        loop.close()
+            if not controller:
+                logger.warning("OODA controller not available")
+                return
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(controller.run_enhanced_cycle())
+                logger.info("OODA Loop completed: %s", result.get("cycle_id"))
+            finally:
+                loop.close()
         except Exception as exc:
             logger.error("OODA Loop failed: %s", exc, exc_info=True)
-
-    async def _run_ooda_cycle_async(self, controller):
-        """Helper to run OODA cycle asynchronously."""
-        try:
-            result = await controller.run_enhanced_cycle()
-            logger.info("OODA Loop completed (async): %s", result.get("cycle_id"))
-        except Exception as exc:
-            logger.error("OODA Loop async failed: %s", exc, exc_info=True)
+        finally:
+            _ooda_lock.release()
 
     def _run_revenue_pipeline_factory(self):
         """Execute all revenue pipelines: lead nurturing, content marketing, etc."""
