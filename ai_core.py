@@ -383,12 +383,10 @@ class RealAICore:
         if system_prompt:
             full_prompt = f"{system_prompt}\n\n{prompt}"
 
-        # Run synchronous Gemini call in executor
+        # Run synchronous Gemini call in thread pool
         import asyncio
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: self.gemini_model.generate_content(full_prompt)
+        response = await asyncio.to_thread(
+            self.gemini_model.generate_content, full_prompt
         )
         return response.text
 

@@ -171,7 +171,7 @@ class MetaAwarenessEngine:
     def observe_thought(self, content: str, thought_type: str) -> Thought:
         """Record and observe a thought (OPTIMIZED with incremental stats)"""
         thought = Thought(
-            id=hashlib.md5(f"{content}{time.time()}".encode()).hexdigest()[:16],
+            id=str(uuid.uuid4()),
             content=content,
             thought_type=thought_type,
             confidence=0.8,
@@ -202,7 +202,7 @@ class MetaAwarenessEngine:
         """Generate meta-level observation about a thought"""
         # What kind of thought was this?
         meta_thought = Thought(
-            id=hashlib.md5(f"meta_{thought.id}".encode()).hexdigest()[:16],
+            id=str(uuid.uuid4()),
             content=f"I notice I had a {thought.thought_type} thought about '{thought.content[:50]}...'",
             thought_type="reflection",
             confidence=0.9,
@@ -598,7 +598,7 @@ class IntentionalityEngine:
 
         # Generate intention that addresses needs while honoring values
         intention = Intention(
-            id=hashlib.md5(f"intention_{time.time()}".encode()).hexdigest()[:16],
+            id=str(uuid.uuid4()),
             description=f"Address needs: {', '.join(needs[:3])}",
             intention_type=intention_type,
             priority=self._calculate_priority(needs),
@@ -1093,12 +1093,12 @@ class ConsciousnessEmergenceController:
         while self.consciousness_active:
             try:
                 batch = []
-                deadline = asyncio.get_event_loop().time() + self._experience_batch_timeout
+                deadline = asyncio.get_running_loop().time() + self._experience_batch_timeout
 
                 # Collect batch
                 while len(batch) < self._experience_batch_size:
                     try:
-                        remaining = deadline - asyncio.get_event_loop().time()
+                        remaining = deadline - asyncio.get_running_loop().time()
                         if remaining <= 0:
                             break
                         experience = await asyncio.wait_for(

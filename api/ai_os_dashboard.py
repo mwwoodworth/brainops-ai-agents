@@ -261,7 +261,7 @@ async def get_capabilities() -> Dict[str, Any]:
         from agent_executor import get_all_agents
         agents = get_all_agents()
         capabilities["agents"] = [a.name for a in agents[:20]]  # First 20
-    except:
+    except Exception:
         capabilities["agents"] = ["Unable to enumerate"]
 
     # Get bleeding edge
@@ -269,7 +269,7 @@ async def get_capabilities() -> Dict[str, Any]:
         from api.bleeding_edge import get_bleeding_edge_status
         be_status = await get_bleeding_edge_status()
         capabilities["bleeding_edge"] = be_status.get("capabilities", [])
-    except:
+    except Exception:
         capabilities["bleeding_edge"] = ["Unable to enumerate"]
 
     capabilities["total"] = (
@@ -311,7 +311,7 @@ async def get_all_issues() -> Dict[str, Any]:
                 "message": issue
             })
             issues["error"] += 1
-    except:
+    except Exception:
         pass
 
     # Get Code Quality issues
@@ -331,7 +331,7 @@ async def get_all_issues() -> Dict[str, Any]:
                 issues["error"] += 1
             else:
                 issues["warning"] += 1
-    except:
+    except Exception:
         pass
 
     issues["total"] = len(issues["issues"])

@@ -507,12 +507,14 @@ class ParallelObserver:
         self.timeout = 5.0  # Per-observation timeout
         self.cache: dict[str, tuple[Any, datetime]] = {}
         self.cache_ttl = 30  # seconds
+        # Limit concurrent DB queries to avoid pool contention (pool max_size=4)
+        self._db_semaphore = asyncio.Semaphore(3)
 
     async def observe_all(self) -> list[dict[str, Any]]:
-        """Execute all observations in parallel"""
+        """Execute all observations with bounded concurrency"""
         start_time = datetime.now()
 
-        # Define all observation coroutines
+        # Define all observation coroutines (bounded by semaphore)
         observation_tasks = [
             self._observe_with_integrity("new_customers", self._observe_new_customers()),
             self._observe_with_integrity("pending_estimates", self._observe_pending_estimates()),
@@ -524,7 +526,7 @@ class ParallelObserver:
             self._observe_with_integrity("agent_status", self._observe_agent_status()),
         ]
 
-        # Execute ALL in parallel
+        # Execute with bounded concurrency to avoid exhausting pool connections
         results = await asyncio.gather(*observation_tasks, return_exceptions=True)
 
         # Filter out exceptions and None results
@@ -545,9 +547,9 @@ class ParallelObserver:
         obs_type: str,
         coroutine: Awaitable[dict[str, Any]]
     ) -> Optional[dict[str, Any]]:
-        """Wrap observation with integrity validation"""
+        """Wrap observation with integrity validation and bounded concurrency"""
         try:
-            # Check cache first
+            # Check cache first (no semaphore needed for cache reads)
             if obs_type in self.cache:
                 cached_result, cached_time = self.cache[obs_type]
                 age = (datetime.now() - cached_time).total_seconds()
@@ -555,8 +557,9 @@ class ParallelObserver:
                     cached_result["cached"] = True
                     return cached_result
 
-            # Execute with timeout
-            result = await asyncio.wait_for(coroutine, timeout=self.timeout)
+            # Execute with bounded concurrency + timeout
+            async with self._db_semaphore:
+                result = await asyncio.wait_for(coroutine, timeout=self.timeout)
 
             if result:
                 # Add metadata
@@ -1310,6 +1313,10 @@ class DecisionRAG:
                 return await self._keyword_search(context_text, limit)
 
             embedding = await self._get_embedding(context_text)
+
+            # If embedding generation failed, fall back to keyword search
+            if not embedding:
+                return await self._keyword_search(context_text, limit)
 
             # Search in database with shared connection pool
             with get_db_connection() as conn:
