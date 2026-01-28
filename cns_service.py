@@ -251,7 +251,7 @@ class EmbeddingService:
             self._stats["gemini_calls"] += 1
 
             result = genai.embed_content(
-                model="models/gemini-embedding-001",
+                model="models/text-embedding-004",
                 content=text,
                 task_type="retrieval_document"
             )
