@@ -45,6 +45,13 @@ class DatabaseConfig:
                 except Exception as e:
                     logger.error(f"Failed to parse DATABASE_URL: {e}")
 
+        # Auto-switch Supabase pooler to transaction mode (port 6543).
+        # Session mode (5432) limits connections to pool_size causing
+        # MaxClientsInSessionMode errors under load.
+        if 'pooler.supabase.com' in self.host and self.port == 5432:
+            self.port = 6543
+            logger.info("Supabase pooler detected - using transaction mode (port 6543)")
+
     @property
     def connection_string(self) -> str:
         """Get PostgreSQL connection string"""
@@ -152,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.7.9')  # FIX: asyncpg UUID serialization, empty error repr
+        self.version = os.getenv('VERSION', 'v10.8.0')  # FIX: force transaction mode for all DB connections
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
