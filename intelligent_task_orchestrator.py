@@ -450,7 +450,7 @@ class IntelligentTaskOrchestrator:
                 # Fetch next intelligent task
                 task = await self._get_next_task()
                 if task:
-                    create_safe_task(self._execute_task(task), f"execute_task_{task.task_id}")
+                    create_safe_task(self._execute_task(task), f"execute_task_{task.id}")
 
                 await asyncio.sleep(2)
 
