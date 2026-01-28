@@ -91,8 +91,8 @@ class AutonomousIssueResolver:
                 user=os.getenv("DB_USER"),
                 password=os.getenv("DB_PASSWORD"),
                 port=int(os.getenv("DB_PORT", "5432")),
-                min_size=2,
-                max_size=10,
+                min_size=1,
+                max_size=2,
                 ssl="require" if os.getenv("DB_SSL", "true").lower() == "true" else None
             )
         return self._pool

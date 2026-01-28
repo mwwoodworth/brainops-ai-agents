@@ -460,17 +460,8 @@ class DevOpsLoop:
     async def _check_consciousness(self) -> dict[str, Any]:
         """Check consciousness/thought stream"""
         try:
-            import asyncpg
-            pool = await asyncpg.create_pool(
-                host=DB_CONFIG['host'],
-                database=DB_CONFIG['database'],
-                user=DB_CONFIG['user'],
-                password=DB_CONFIG['password'],
-                port=DB_CONFIG['port'],
-                ssl='require',
-                min_size=1,
-                max_size=2
-            )
+            from database.async_connection import get_pool
+            pool = get_pool()
 
             thoughts_count = await pool.fetchval("""
                 SELECT COUNT(*) FROM ai_thought_stream
@@ -481,8 +472,6 @@ class DevOpsLoop:
                 SELECT thought_type, timestamp FROM ai_thought_stream
                 ORDER BY timestamp DESC LIMIT 1
             """)
-
-            await pool.close()
 
             return {
                 "thoughts_1hr": thoughts_count,
@@ -592,17 +581,8 @@ class DevOpsLoop:
     async def _check_database_health(self) -> dict[str, Any]:
         """Check database health and key metrics"""
         try:
-            import asyncpg
-            pool = await asyncpg.create_pool(
-                host=DB_CONFIG['host'],
-                database=DB_CONFIG['database'],
-                user=DB_CONFIG['user'],
-                password=DB_CONFIG['password'],
-                port=DB_CONFIG['port'],
-                ssl='require',
-                min_size=1,
-                max_size=2
-            )
+            from database.async_connection import get_pool
+            pool = get_pool()
 
             # Count key tables
             counts = await pool.fetch("""
@@ -616,8 +596,6 @@ class DevOpsLoop:
             """)
 
             row = counts[0] if counts else {}
-
-            await pool.close()
 
             return {
                 "health": "healthy",
@@ -891,17 +869,8 @@ class DevOpsLoop:
     async def _learn(self, observations: dict, anomalies: list, actions: list):
         """LEARN: Store comprehensive metrics for ALL systems"""
         try:
-            import asyncpg
-            pool = await asyncpg.create_pool(
-                host=DB_CONFIG['host'],
-                database=DB_CONFIG['database'],
-                user=DB_CONFIG['user'],
-                password=DB_CONFIG['password'],
-                port=DB_CONFIG['port'],
-                ssl='require',
-                min_size=1,
-                max_size=2
-            )
+            from database.async_connection import get_pool
+            pool = get_pool()
 
             # ================================================================
             # STORE COMPREHENSIVE CYCLE SUMMARY
@@ -1035,7 +1004,6 @@ class DevOpsLoop:
                     json.dumps(anomaly)
                 )
 
-            await pool.close()
         except Exception as e:
             logger.warning(f"Failed to store learning: {e}")
 

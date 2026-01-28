@@ -60,7 +60,7 @@ async def get_workflow_pool() -> asyncpg.Pool:
             _db_pool = await asyncpg.create_pool(
                 database_url,
                 min_size=1,
-                max_size=5,
+                max_size=2,
                 command_timeout=60,
                 ssl='require'
             )
