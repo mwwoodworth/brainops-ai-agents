@@ -656,8 +656,8 @@ class ModuleIntegrationOrchestrator:
         if contradiction.get("severity") == "high":
             # FIX: Safely create task only if event loop is running
             try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self._coordinate_recovery("memory", contradiction))
+                asyncio.get_running_loop()  # Verify loop is running
+                create_safe_task(self._coordinate_recovery("memory", contradiction), name="memory_recovery")
             except RuntimeError:
                 logger.warning("No running event loop, skipping recovery task for memory contradiction")
 
@@ -673,8 +673,8 @@ class ModuleIntegrationOrchestrator:
         if severity in ["critical", "high"]:
             # FIX: Safely create task only if event loop is running
             try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self._coordinate_recovery("dependability", violation))
+                asyncio.get_running_loop()  # Verify loop is running
+                create_safe_task(self._coordinate_recovery("dependability", violation), name="dependability_recovery")
             except RuntimeError:
                 logger.warning("No running event loop, skipping recovery task for guard violation")
 

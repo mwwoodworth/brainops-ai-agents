@@ -530,8 +530,8 @@ class AliveCore:
 
         # Emit thought event - FIX: Safely create task only if event loop is running
         try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._emit_event('thought', thought))
+            asyncio.get_running_loop()  # Verify loop is running
+            create_safe_task(self._emit_event('thought', thought), name="emit_thought_event")
         except RuntimeError:
             # No running event loop - skip async callback
             logger.debug("No running event loop; skipped thought event emission")
@@ -591,12 +591,12 @@ class AliveCore:
         # FIX: Safely create task only if event loop is running
         # Convert enum values to strings to avoid JSON serialization errors
         try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._emit_event('state_change', {
+            asyncio.get_running_loop()  # Verify loop is running
+            create_safe_task(self._emit_event('state_change', {
                 'old': old_state.value if hasattr(old_state, 'value') else str(old_state),
                 'new': new_state.value if hasattr(new_state, 'value') else str(new_state),
                 'reason': reason
-            }))
+            }), name="emit_state_change_event")
         except RuntimeError:
             # No running event loop - skip async callback
             logger.debug("No running event loop; skipped state change emission")
