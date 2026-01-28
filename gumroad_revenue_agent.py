@@ -51,17 +51,21 @@ class GumroadRevenueAgent:
         Main execution entry point for scheduled agent.
 
         Tasks:
-        - daily_sync: Sync sales and update analytics
+        - daily_sync: Sync sales and update analytics (last 2 days)
+        - full_backfill: Sync ALL historical sales from Gumroad (one-time catchup)
         - register_webhook: Register webhook with Gumroad
         - publish_products: Publish products from JSON config
         - revenue_report: Generate revenue analytics report
         - optimize_products: AI recommendations for product optimization
+        - health_check: Verify Gumroad API connectivity
         """
         logger.info(f"GumroadRevenueAgent executing task: {task}")
 
         try:
             if task == "daily_sync":
                 return await self.daily_sales_sync()
+            elif task == "full_backfill":
+                return await self.full_backfill(days=kwargs.get("days", 365))
             elif task == "register_webhook":
                 return await self.register_webhook()
             elif task == "publish_products":
@@ -239,6 +243,12 @@ class GumroadRevenueAgent:
                 price = Decimal(str(price_cents)) / 100
 
                 if pool:
+                    created_at_raw = sale.get("created_at", datetime.utcnow().isoformat())
+                    if created_at_raw.endswith("Z"):
+                        created_at_raw = created_at_raw[:-1] + "+00:00"
+                    sale_ts = datetime.fromisoformat(created_at_raw)
+                    is_test = sale.get("test", False)
+
                     await pool.execute("""
                         INSERT INTO gumroad_sales (
                             sale_id, email, customer_name, product_code,
@@ -255,12 +265,36 @@ class GumroadRevenueAgent:
                         sale.get("product_name", ""),
                         price,
                         sale.get("currency", "USD"),
-                        datetime.fromisoformat(sale.get("created_at", datetime.utcnow().isoformat()).replace("Z", "+00:00")),
+                        sale_ts,
                         json.dumps(sale),
-                        sale.get("test", False)
+                        is_test
                     )
                     synced_count += 1
                     total_revenue += price
+
+                    # Also track in real_revenue_tracking for consolidated view
+                    if not is_test:
+                        try:
+                            await pool.execute("""
+                                INSERT INTO real_revenue_tracking (
+                                    revenue_date, source, amount, description,
+                                    customer_email, is_verified, gumroad_sale_id,
+                                    currency, is_recurring
+                                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                                ON CONFLICT DO NOTHING
+                            """,
+                                sale_ts.date(),
+                                "Gumroad",
+                                price,
+                                f"Gumroad: {sale.get('product_name', 'Unknown')}",
+                                sale.get("email", ""),
+                                True,
+                                sale_id,
+                                sale.get("currency", "USD"),
+                                False
+                            )
+                        except Exception:
+                            pass  # Non-critical - gumroad_sales is the source of truth
 
             except Exception as e:
                 logger.error(f"Failed to sync sale {sale.get('id')}: {e}")
@@ -272,6 +306,131 @@ class GumroadRevenueAgent:
             "total_revenue": float(total_revenue),
             "period_start": after.isoformat(),
             "period_end": datetime.utcnow().isoformat(),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    async def full_backfill(self, days: int = 365) -> dict:
+        """
+        Full historical backfill of ALL Gumroad sales.
+        Use this once to catch up on any sales that occurred before
+        the webhook was connected. Safe to run multiple times (upserts).
+        """
+        try:
+            from database.async_connection import get_pool
+            pool = get_pool()
+        except Exception as e:
+            logger.warning(f"Database pool unavailable for backfill: {e}")
+            return {"success": False, "error": f"Database unavailable: {e}"}
+
+        after = datetime.utcnow() - timedelta(days=days)
+        logger.info(f"Starting full backfill from {after.isoformat()} ({days} days)")
+
+        sales = await self.get_sales(after=after)
+
+        if not sales:
+            return {
+                "success": True,
+                "task": "full_backfill",
+                "message": "No sales found in Gumroad API for this period",
+                "period_days": days,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        synced_count = 0
+        skipped_count = 0
+        total_revenue = Decimal("0")
+        errors = []
+
+        for sale in sales:
+            try:
+                sale_id = sale.get("id")
+                price_cents = sale.get("price", 0)
+                price = Decimal(str(price_cents)) / 100
+                is_test = sale.get("test", False)
+
+                created_at_raw = sale.get("created_at", datetime.utcnow().isoformat())
+                if created_at_raw.endswith("Z"):
+                    created_at_raw = created_at_raw[:-1] + "+00:00"
+
+                await pool.execute("""
+                    INSERT INTO gumroad_sales (
+                        sale_id, email, customer_name, product_code,
+                        product_name, price, currency, sale_timestamp,
+                        metadata, is_test
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    ON CONFLICT (sale_id) DO UPDATE SET
+                        email = EXCLUDED.email,
+                        customer_name = EXCLUDED.customer_name,
+                        product_code = EXCLUDED.product_code,
+                        product_name = EXCLUDED.product_name,
+                        price = EXCLUDED.price,
+                        metadata = EXCLUDED.metadata,
+                        is_test = EXCLUDED.is_test,
+                        updated_at = NOW()
+                """,
+                    sale_id,
+                    sale.get("email", ""),
+                    sale.get("full_name", ""),
+                    sale.get("product_permalink", "").upper(),
+                    sale.get("product_name", ""),
+                    price,
+                    sale.get("currency", "USD"),
+                    datetime.fromisoformat(created_at_raw),
+                    json.dumps(sale),
+                    is_test
+                )
+                synced_count += 1
+                if not is_test:
+                    total_revenue += price
+
+            except Exception as e:
+                errors.append(f"sale {sale.get('id')}: {e}")
+                logger.error(f"Failed to backfill sale {sale.get('id')}: {e}")
+
+        # Also record to real_revenue_tracking for non-test sales
+        try:
+            real_sales = [s for s in sales if not s.get("test", False)]
+            for sale in real_sales:
+                price_cents = sale.get("price", 0)
+                price = Decimal(str(price_cents)) / 100
+                created_at_raw = sale.get("created_at", datetime.utcnow().isoformat())
+                if created_at_raw.endswith("Z"):
+                    created_at_raw = created_at_raw[:-1] + "+00:00"
+
+                await pool.execute("""
+                    INSERT INTO real_revenue_tracking (
+                        revenue_date, source, amount, description,
+                        customer_email, is_verified, gumroad_sale_id,
+                        currency, is_recurring, metadata
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    ON CONFLICT DO NOTHING
+                """,
+                    datetime.fromisoformat(created_at_raw).date(),
+                    "Gumroad",
+                    price,
+                    f"Gumroad: {sale.get('product_name', 'Unknown')}",
+                    sale.get("email", ""),
+                    True,
+                    sale.get("id"),
+                    sale.get("currency", "USD"),
+                    False,
+                    json.dumps({"backfilled": True, "sale_id": sale.get("id")})
+                )
+        except Exception as e:
+            logger.warning(f"Failed to update real_revenue_tracking during backfill: {e}")
+
+        logger.info(f"Backfill complete: {synced_count} sales synced, {len(errors)} errors")
+
+        return {
+            "success": len(errors) == 0,
+            "task": "full_backfill",
+            "sales_found": len(sales),
+            "sales_synced": synced_count,
+            "real_revenue": float(total_revenue),
+            "test_sales": len(sales) - synced_count + len([s for s in sales if s.get("test", False)]),
+            "errors": errors[:10] if errors else [],
+            "period_days": days,
+            "period_start": after.isoformat(),
             "timestamp": datetime.utcnow().isoformat()
         }
 
