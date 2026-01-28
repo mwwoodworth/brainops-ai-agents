@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.8.0')  # FIX: force transaction mode for all DB connections
+        self.version = os.getenv('VERSION', 'v10.8.1')  # OpenAI circuit breaker + error repr fixes
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
