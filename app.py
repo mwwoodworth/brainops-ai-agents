@@ -15,6 +15,16 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Optional
 
+# CRITICAL: Auto-switch Supabase pooler to transaction mode BEFORE any module
+# imports trigger database config. Session mode (port 5432) has a low connection
+# limit that causes MaxClientsInSessionMode under load. Transaction mode (port
+# 6543) shares connections across transactions, supporting far more concurrency.
+_db_host = os.getenv('DB_HOST', '')
+_db_url = os.getenv('DATABASE_URL', '')
+if ('pooler.supabase.com' in _db_host or 'pooler.supabase.com' in _db_url) \
+        and os.getenv('DB_PORT', '5432') == '5432':
+    os.environ['DB_PORT'] = '6543'
+
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query, Request, Security
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware

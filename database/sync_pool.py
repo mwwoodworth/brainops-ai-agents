@@ -36,6 +36,12 @@ if not all([_db_host, _db_user, _db_password]):
         _db_port = str(_parsed.port) if _parsed.port else _db_port
         logger.info(f"sync_pool: Parsed DATABASE_URL: host={_db_host}, db={_db_name}")
 
+# Auto-switch Supabase pooler to transaction mode (port 6543).
+# Session mode (5432) limits connections causing MaxClientsInSessionMode.
+if _db_host and 'pooler.supabase.com' in _db_host and int(_db_port) == 5432:
+    _db_port = '6543'
+    logger.info("sync_pool: Supabase pooler detected - using transaction mode (port 6543)")
+
 DB_CONFIG = {
     "host": _db_host,
     "database": _db_name,

@@ -28,6 +28,10 @@ def get_db_config():
     if not all([db_host, db_user, db_password]):
         raise RuntimeError("Missing required: DB_HOST/DB_USER/DB_PASSWORD or DATABASE_URL")
 
+    # Auto-switch Supabase pooler to transaction mode (port 6543).
+    if db_host and 'pooler.supabase.com' in db_host and int(db_port) == 5432:
+        db_port = '6543'
+
     return {
         'host': db_host,
         'database': db_name,
