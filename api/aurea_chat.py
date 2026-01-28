@@ -407,10 +407,8 @@ NOW RESPOND TO: {message}"""
                 try:
                     import asyncio
                     full_prompt = f"{aurea_system}\n\n{system_prompt}"
-                    loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(
-                        None,
-                        lambda: ai.gemini_model.generate_content(full_prompt)
+                    response = await asyncio.to_thread(
+                        ai.gemini_model.generate_content, full_prompt
                     )
                     yield response.text
                     return

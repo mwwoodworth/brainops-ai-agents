@@ -23,6 +23,7 @@ Version: 1.0.0
 import asyncio
 import base64
 import hashlib
+import uuid
 import json
 import logging
 import os
@@ -500,7 +501,7 @@ Return a JSON object with this structure:
 
         target = self.targets[app_key]
         start_time = datetime.now(timezone.utc)
-        test_id = hashlib.md5(f"{app_key}{start_time.isoformat()}".encode()).hexdigest()[:16]
+        test_id = str(uuid.uuid4())
 
         logger.info(f"Starting TRUE E2E test for {target['name']} ({len(target['routes'])} routes)")
 

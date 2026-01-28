@@ -348,7 +348,7 @@ class NeuralCore:
                             system.metadata["version"] = data["version"]
                         if "database" in data:
                             system.metadata["database"] = data["database"]
-                    except:
+                    except Exception:
                         pass
             else:
                 system.last_known_state = "degraded"
@@ -381,7 +381,7 @@ class NeuralCore:
                         self.systems["database"].last_known_state = "connected"
                         self.systems["database"].health_score = 1.0
                         self.systems["database"].issues = []
-                    except:
+                    except Exception:
                         self.systems["database"].last_known_state = "degraded"
                         self.systems["database"].health_score = 0.5
                 else:
