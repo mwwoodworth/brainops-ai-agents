@@ -152,7 +152,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.7.7')  # FIX: Event loop isolation, Future handling, UUID format, bare excepts
+        self.version = os.getenv('VERSION', 'v10.7.8')  # FIX: OODA tenant UUID, empty error messages
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))

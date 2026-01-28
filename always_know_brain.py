@@ -318,7 +318,7 @@ class AlwaysKnowBrain:
                     state.aurea_decisions = data.get("decisions_last_hour", 0)
                     state.aurea_active_agents = data.get("active_agents", 0)
         except Exception as e:
-            logger.warning(f"AUREA check failed: {e}")
+            logger.warning(f"AUREA check failed: {e!r}")
             state.aurea_operational = False
 
     async def _check_frontends(self, state: SystemState):
