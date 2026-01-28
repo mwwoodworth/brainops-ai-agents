@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.9.3')  # OODA fast-path: skip middleware, 20s timeout, minimal DB writes
+        self.version = os.getenv('VERSION', 'v10.9.4')  # Cross-thread OODA lock: threading.Lock prevents concurrent cycles from scheduler + API
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
