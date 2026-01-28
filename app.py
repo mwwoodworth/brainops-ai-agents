@@ -50,6 +50,7 @@ class BackgroundLoopRunner:
         self._thread = threading.Thread(
             target=self._run, name="brainops-bg-loop", daemon=True
         )
+        self._futures: set = set()  # Track futures for cleanup
 
     def _run(self) -> None:
         asyncio.set_event_loop(self.loop)
@@ -62,13 +63,31 @@ class BackgroundLoopRunner:
         self._thread.start()
         self._started.wait(timeout=timeout_s)
 
+    def _handle_future_exception(self, future):
+        """Callback to handle exceptions from background futures - prevents 'Future exception never retrieved'"""
+        self._futures.discard(future)
+        try:
+            exc = future.exception()
+            if exc is not None:
+                logger.error(f"Background coroutine failed: {exc}", exc_info=exc)
+        except Exception:
+            pass  # Future was cancelled or not done
+
     def submit(self, coro: "asyncio.coroutines.Coroutine[Any, Any, Any]"):
+        """Submit coroutine to background loop with exception handling"""
         self.start()
-        return asyncio.run_coroutine_threadsafe(coro, self.loop)
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        # Add callback to handle exceptions (prevents "Future exception never retrieved")
+        self._futures.add(future)
+        future.add_done_callback(self._handle_future_exception)
+        return future
 
     def stop(self, timeout_s: float = 5.0) -> None:
         if not self._thread.is_alive():
             return
+        # Cancel pending futures
+        for future in list(self._futures):
+            future.cancel()
         self.loop.call_soon_threadsafe(self.loop.stop)
         self._thread.join(timeout=timeout_s)
 
