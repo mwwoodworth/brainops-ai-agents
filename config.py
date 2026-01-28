@@ -152,7 +152,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.7.2')  # FIX: Gemini embedding model (embedding-001)
+        self.version = os.getenv('VERSION', 'v10.7.3')  # FIX: Gemini embedding model (gemini-embedding-001)
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
