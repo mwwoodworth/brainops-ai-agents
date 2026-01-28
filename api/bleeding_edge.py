@@ -14,10 +14,15 @@ Created: 2025-12-27
 
 import logging
 import os
+import threading
 from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query
+
+# Prevent concurrent OODA cycles across threads (scheduler thread + API event loop)
+# threading.Lock works across threads unlike asyncio.Lock which is single-loop only
+_ooda_lock = threading.Lock()
 
 # Default tenant ID for OODA observations - must match ERP data
 DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457")
@@ -244,8 +249,12 @@ async def run_ooda_cycle(
     context: dict[str, Any] = Body(default={})
 ) -> dict[str, Any]:
     """Run a complete enhanced OODA cycle with all optimizations."""
+    if not _ooda_lock.acquire(blocking=False):
+        return {"success": False, "error": "OODA cycle already running", "timestamp": datetime.utcnow().isoformat()}
+
     controller = get_ooda_controller(tenant_id)
     if not controller:
+        _ooda_lock.release()
         raise HTTPException(status_code=503, detail="OODA controller not available")
 
     try:
@@ -256,8 +265,10 @@ async def run_ooda_cycle(
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
-        logger.error(f"OODA cycle failed: {e}")
+        logger.error(f"OODA cycle failed: {e!r}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+    finally:
+        _ooda_lock.release()
 
 
 @router.get("/ooda/metrics")
