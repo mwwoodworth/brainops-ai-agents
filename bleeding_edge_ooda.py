@@ -1878,10 +1878,16 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
         )
         return action_result
 
-    # Execute all decisions in PARALLEL for maximum speed
+    # Execute decisions with bounded parallelism (max 2 concurrent to avoid OOM)
+    agent_semaphore = asyncio.Semaphore(2)
+
+    async def _throttled_execute(decision: dict) -> dict:
+        async with agent_semaphore:
+            return await _execute_decision(decision)
+
     if decisions:
         parallel_results = await asyncio.gather(
-            *[_execute_decision(d) for d in decisions],
+            *[_throttled_execute(d) for d in decisions],
             return_exceptions=True
         )
         for r in parallel_results:
