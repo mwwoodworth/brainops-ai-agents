@@ -225,7 +225,7 @@ class UnifiedBrain:
         """
         Generate embedding vector for text with intelligent fallback.
         1. OpenAI (text-embedding-3-small) - Best quality
-        2. Gemini (text-embedding-004) - Good fallback
+        2. Gemini (embedding-001) - Good fallback
         3. Local (all-MiniLM-L6-v2) - Offline backup
         """
         # Convert text to string if it's not
@@ -255,7 +255,7 @@ class UnifiedBrain:
                 import google.generativeai as genai
                 genai.configure(api_key=gemini_key)
                 result = genai.embed_content(
-                    model="models/text-embedding-004",
+                    model="models/embedding-001",
                     content=text,
                     task_type="retrieval_document"
                 )

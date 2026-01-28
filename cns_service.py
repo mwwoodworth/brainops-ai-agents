@@ -126,7 +126,7 @@ class EmbeddingService:
 
     Fallback order:
     1. OpenAI text-embedding-3-small (fastest, most accurate)
-    2. Google Gemini text-embedding-004 (good alternative)
+    2. Google Gemini embedding-001 (good alternative)
     3. Local sentence-transformers all-MiniLM-L6-v2 (always available)
     """
 
@@ -251,7 +251,7 @@ class EmbeddingService:
             self._stats["gemini_calls"] += 1
 
             result = genai.embed_content(
-                model="models/text-embedding-004",
+                model="models/embedding-001",
                 content=text,
                 task_type="retrieval_document"
             )
