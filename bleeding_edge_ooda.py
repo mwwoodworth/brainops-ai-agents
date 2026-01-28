@@ -1812,6 +1812,14 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
             else:
                 # Execute via real agent system
                 agent_name = decision_agent_mapping.get(decision_type, "GenericAgent")
+
+                # Skip agents that aren't implemented (avoid costly retries)
+                if hasattr(real_agent_executor, 'agents') and agent_name not in real_agent_executor.agents:
+                    action_result["status"] = "skipped"
+                    action_result["reason"] = f"Agent '{agent_name}' not yet implemented"
+                    logger.debug(f"OODA Act: skipping {decision_type} - agent {agent_name} not registered")
+                    continue
+
                 task = {
                     "action": decision_type,
                     "decision_id": decision_id,
@@ -1877,7 +1885,10 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
                 decision_type,
                 success=False
             )
-            logger.error(f"Act phase failed for {decision_type}: {exec_error}")
+            if "is not implemented" in str(exec_error):
+                logger.debug(f"Act phase skipped {decision_type}: agent not implemented")
+            else:
+                logger.error(f"Act phase failed for {decision_type}: {exec_error}")
 
         # Record completion time
         action_result["completed_at"] = datetime.now().isoformat()
