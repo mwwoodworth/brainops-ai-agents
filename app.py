@@ -991,7 +991,7 @@ async def lifespan(app: FastAPI):
         await asyncio.sleep(2)  # Give server time to be fully ready
         logger.info("🔄 Starting heavy component initialization...")
 
-        # Initialize scheduler if available
+        # ── Phase 1: Core systems (scheduler, AUREA, healing) ──
         if SCHEDULER_AVAILABLE:
             try:
                 def _init_scheduler_sync():
@@ -1042,7 +1042,8 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ Reconciler initialization failed: {e}")
 
-        # Initialize Unified Memory Manager
+        # ── Phase 2: Memory systems (stagger to prevent DB pool exhaustion) ──
+        await asyncio.sleep(2)
         if MEMORY_AVAILABLE:
             try:
                 memory_manager_instance = await asyncio.to_thread(UnifiedMemoryManager)
@@ -1098,7 +1099,8 @@ async def lifespan(app: FastAPI):
         elif not NERVE_CENTER_AVAILABLE:
             logger.warning("⚠️ NerveCenter module not available")
 
-        # === ACTIVATE ALL SPECIALIZED AGENTS - THE AI OS AWAKENS ===
+        # ── Phase 3: Specialized agents (stagger to prevent DB pool exhaustion) ──
+        await asyncio.sleep(2)
         logger.info("🚀 Activating specialized AI agents...")
 
         # Initialize AI Training Pipeline
@@ -1199,6 +1201,8 @@ async def lifespan(app: FastAPI):
         ])
         logger.info(f"🤖 {agents_active} specialized AI agents ACTIVATED and OPERATIONAL")
 
+        # ── Phase 4: Background daemons (stagger to prevent DB pool exhaustion) ──
+        await asyncio.sleep(2)
         # Start Email Scheduler Daemon - Background email processing
         if EMAIL_SCHEDULER_AVAILABLE and start_email_scheduler:
             try:
@@ -1262,6 +1266,8 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️ Slack alerting setup failed: {e}")
 
+        # ── Phase 5: Neural Core (final, after all other systems stabilize) ──
+        await asyncio.sleep(2)
         # === NEURAL CORE - The Central Nervous System of the AI OS (2026-01-27) ===
         # This is THE core that makes the AI OS truly ALIVE - not monitoring, BEING aware
         if NEURAL_CORE_AVAILABLE:
