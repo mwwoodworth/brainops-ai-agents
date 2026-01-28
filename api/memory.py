@@ -155,7 +155,7 @@ async def generate_embedding(text: str) -> Optional[list[float]]:
             import google.generativeai as genai
             genai.configure(api_key=gemini_key)
             result = genai.embed_content(
-                model="models/embedding-001",
+                model="models/gemini-embedding-001",
                 content=text_truncated,
                 task_type="retrieval_query"  # Optimized for search queries
             )
@@ -278,7 +278,7 @@ async def get_embedding_status():
             import google.generativeai as genai
             genai.configure(api_key=gemini_key)
             result = genai.embed_content(
-                model="models/embedding-001",
+                model="models/gemini-embedding-001",
                 content="test",
                 task_type="retrieval_query"
             )
