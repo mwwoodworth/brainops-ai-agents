@@ -1332,7 +1332,7 @@ class ConsciousnessEmergenceController:
             logger.info(f"✅ Persisted {len(thoughts_to_persist)} thoughts to database")
 
         except Exception as e:
-            logger.error(f"Failed to persist thoughts to database: {e}")
+            logger.error(f"Failed to persist thoughts to database: {e!r}")
             # Re-add thoughts to buffer to retry next cycle
             for thought in thoughts_to_persist:
                 if len(self._thought_persistence_buffer) < 100:

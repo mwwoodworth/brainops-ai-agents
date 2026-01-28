@@ -5534,7 +5534,7 @@ async def get_aurea_status():
             }
         }
     except Exception as e:
-        logger.error(f"Failed to get AUREA status: {e}", exc_info=True)
+        logger.error(f"Failed to get AUREA status: {e!r}", exc_info=True)
         return JSONResponse(
             status_code=500,
             content={
