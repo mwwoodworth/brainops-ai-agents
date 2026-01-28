@@ -447,10 +447,12 @@ class AgentExecutor:
         # Agents are loaded lazily on first execute()
 
     async def _ensure_agents_loaded(self) -> None:
-        if self._agents_loaded:
+        if self._agents_loaded or self.agents:
+            self._agents_loaded = True
             return
         async with self._agents_lock:
-            if self._agents_loaded:
+            if self._agents_loaded or self.agents:
+                self._agents_loaded = True
                 return
             self._load_agent_implementations()
             self._agents_loaded = True
@@ -978,6 +980,9 @@ class AgentExecutor:
         except Exception as e:
             logger.warning(f"Failed to initialize real stub agents: {e}")
 
+        # Mark loaded if this is called directly (avoid double-load on first execute)
+        self._agents_loaded = True
+
     # Agent name aliases - maps database names to code implementations
     # This allows scheduled agents to use real implementations instead of AI fallback
     # NOTE: Agents with REAL implementations are now registered directly and removed from aliases
@@ -1277,14 +1282,16 @@ class AgentExecutor:
             or task.get("skip_execution_log")
         )
 
-        # Log execution start
-        await exec_logger.log_started(task)
+        # Log execution start (skip DB log for OODA fast-path tasks)
+        if not skip_db_log:
+            await exec_logger.log_started(task)
         if not skip_db_log:
             await self._log_ai_agent_execution_start(execution_id, agent_name, task_type, task)
 
         # UNIFIED INTEGRATION: Pre-execution hooks - enrich context from ALL systems
         context_enriched = False
-        if UNIFIED_INTEGRATION_AVAILABLE:
+        skip_unified = bool(task.get("_skip_unified_integration"))
+        if UNIFIED_INTEGRATION_AVAILABLE and not skip_unified:
             try:
                 integration = get_unified_integration()
                 unified_ctx = await integration.pre_execution(agent_name, task_type, task)
@@ -1304,14 +1311,15 @@ class AgentExecutor:
         if task.get("codebase_context"):
             context_enriched = True
 
-        # Log context enrichment
-        await exec_logger.log_context_enrichment(
-            enriched=context_enriched,
-            context_info={
-                "unified_integration": UNIFIED_INTEGRATION_AVAILABLE and unified_ctx is not None,
-                "codebase_context": bool(task.get("codebase_context"))
-            }
-        )
+        # Log context enrichment (skip for OODA fast-path)
+        if not skip_db_log:
+            await exec_logger.log_context_enrichment(
+                enriched=context_enriched,
+                context_info={
+                    "unified_integration": UNIFIED_INTEGRATION_AVAILABLE and unified_ctx is not None,
+                    "codebase_context": bool(task.get("codebase_context"))
+                }
+            )
 
         assessment_context = None
         if self._is_high_stakes_action(agent_name, task):
@@ -1434,6 +1442,9 @@ class AgentExecutor:
 
                 return result
 
+        memory_context = None
+        memory_client = None
+        task_description = None
         try:
             # RETRY LOGIC for Agent Execution
             RETRY_ATTEMPTS = 3
@@ -1445,12 +1456,13 @@ class AgentExecutor:
             if resolved_agent_name != agent_name:
                 logger.info(f"Agent alias resolved: {agent_name} -> {resolved_agent_name}")
 
-            # Log agent resolution
-            await exec_logger.log_agent_resolution(
-                original_name=original_agent_name,
-                resolved_name=resolved_agent_name,
-                found_in_registry=resolved_agent_name in self.agents
-            )
+            # Log agent resolution (skip for OODA fast-path)
+            if not skip_db_log:
+                await exec_logger.log_agent_resolution(
+                    original_name=original_agent_name,
+                    resolved_name=resolved_agent_name,
+                    found_in_registry=resolved_agent_name in self.agents
+                )
 
             if resolved_agent_name not in self.agents:
                 raise RuntimeError(
@@ -1460,8 +1472,6 @@ class AgentExecutor:
             # RBA/WBA ENFORCEMENT (Total Completion Protocol)
             # Retrieve memory context before agent acts
             # PRODUCTION: Enforce memory protocol by default for AGI-level operation
-            memory_context = None
-            memory_client = None
             # Environment variable to control enforcement (default: enforce)
             memory_enforcement_bypass = os.getenv("MEMORY_ENFORCEMENT_BYPASS", "false").lower() in ("true", "1", "yes")
             if AGENT_MEMORY_SDK_AVAILABLE and not task.get("_skip_memory_enforcement"):
@@ -1485,7 +1495,10 @@ class AgentExecutor:
                         query=task_description,
                         include_verified_only=False
                     )
-                    task["_memory_context"] = memory_context[:5] if memory_context else []
+                    memory_context = memory_context or []
+                    if memory_context:
+                        memory_context = memory_context[:5]
+                    task["_memory_context"] = memory_context
                     task["_memory_correlation_id"] = memory_client.correlation_id
                     logger.info(
                         f"[RBA] Agent {resolved_agent_name} retrieved {len(memory_context)} memories | "
@@ -1507,14 +1520,15 @@ class AgentExecutor:
                             f"Agent '{agent_name}' is not implemented and no fallback is allowed."
                         )
 
-                    # Log successful attempt
+                    # Log successful attempt (skip for OODA fast-path)
                     attempt_duration = (datetime.now(timezone.utc) - attempt_start).total_seconds() * 1000
-                    await exec_logger.log_execution_attempt(
-                        attempt=attempt + 1,
-                        max_attempts=RETRY_ATTEMPTS,
-                        duration_ms=attempt_duration,
-                        success=True
-                    )
+                    if not skip_db_log:
+                        await exec_logger.log_execution_attempt(
+                            attempt=attempt + 1,
+                            max_attempts=RETRY_ATTEMPTS,
+                            duration_ms=attempt_duration,
+                            success=True
+                        )
                     attempt + 1
 
                     # If successful, break the retry loop
@@ -1523,14 +1537,15 @@ class AgentExecutor:
                     last_exception = e
                     attempt_duration = (datetime.now(timezone.utc) - attempt_start).total_seconds() * 1000
 
-                    # Log failed attempt (retry)
-                    await exec_logger.log_execution_attempt(
-                        attempt=attempt + 1,
-                        max_attempts=RETRY_ATTEMPTS,
-                        duration_ms=attempt_duration,
-                        success=False,
-                        error=str(e)
-                    )
+                    # Log failed attempt (skip for OODA fast-path)
+                    if not skip_db_log:
+                        await exec_logger.log_execution_attempt(
+                            attempt=attempt + 1,
+                            max_attempts=RETRY_ATTEMPTS,
+                            duration_ms=attempt_duration,
+                            success=False,
+                            error=str(e)
+                        )
 
                     if attempt < RETRY_ATTEMPTS - 1:
                         wait_time = 2 ** attempt
@@ -1543,8 +1558,9 @@ class AgentExecutor:
             # Calculate total duration
             total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
 
-            # Log successful completion
-            await exec_logger.log_completed(result, total_duration_ms)
+            # Log successful completion (skip for OODA fast-path)
+            if not skip_db_log:
+                await exec_logger.log_completed(result, total_duration_ms)
 
             # WBA ENFORCEMENT (Total Completion Protocol)
             # Write execution decision back to memory
@@ -1581,9 +1597,6 @@ class AgentExecutor:
                         f"[WBA] Agent {resolved_agent_name} wrote decision | "
                         f"memory_id={memory_id} | correlation_id={memory_client.correlation_id}"
                     )
-
-                    # Close the memory client
-                    await memory_client.__aexit__(None, None, None)
 
                 except Exception as e:
                     logger.warning(f"[WBA] Memory decision write failed (non-blocking): {e}")
@@ -1622,8 +1635,8 @@ class AgentExecutor:
                 except Exception as e:
                     logger.warning(f"Hallucination prevention check failed: {e}")
 
-            # LIVE MEMORY BRAIN: Store execution results for learning
-            if LIVE_MEMORY_BRAIN_AVAILABLE:
+            # LIVE MEMORY BRAIN: Store execution results for learning (skip for OODA fast-path)
+            if LIVE_MEMORY_BRAIN_AVAILABLE and not skip_db_log:
                 try:
                     brain = await get_live_brain()
                     await brain.store(
@@ -1696,6 +1709,12 @@ class AgentExecutor:
                 except Exception as ue:
                     logger.warning(f"Unified error handler failed: {ue}")
             raise
+        finally:
+            if memory_client:
+                try:
+                    await memory_client.__aexit__(None, None, None)
+                except Exception as e:
+                    logger.warning(f"[RBA/WBA] Memory client close failed (non-blocking): {e}")
 
     async def _generic_execute(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
         """Generic execution is disabled to prevent simulated responses."""
@@ -7503,4 +7522,5 @@ class VisionAlignmentAgentAdapter(BaseAgent):
 
 # Create executor instance AFTER all classes are defined
 executor = AgentExecutor()
-executor._load_agent_implementations()  # Load agents after classes are defined
+if os.getenv("BRAINOPS_PRELOAD_AGENTS", "").lower() in ("1", "true", "yes"):
+    executor._load_agent_implementations()

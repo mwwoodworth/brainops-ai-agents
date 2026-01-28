@@ -1818,12 +1818,14 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
                     "cycle_id": cycle_id,
                     "params": observation_data.get("data", {}),
                     "_skip_ai_agent_log": True,
+                    "_skip_memory_enforcement": True,
+                    "_skip_unified_integration": True,
                 }
 
-                # Execute with timeout (15s max per agent)
+                # Execute with timeout (20s per agent - agents need ~17s based on profiling)
                 execution_result = await asyncio.wait_for(
                     shared_executor.execute(agent_name, task),
-                    timeout=15.0
+                    timeout=20.0
                 )
 
                 # Validate output integrity
@@ -1852,7 +1854,7 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
 
         except asyncio.TimeoutError:
             action_result["status"] = "timeout"
-            action_result["error"] = f"Agent '{agent_name}' timed out after 15s"
+            action_result["error"] = f"Agent '{agent_name}' timed out after 20s"
             logger.warning(f"OODA Act: {decision_type} agent '{agent_name}' timed out")
         except Exception as exec_error:
             action_result["status"] = "failed"
@@ -1878,8 +1880,14 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
         )
         return action_result
 
-    # Execute decisions with bounded parallelism (max 2 concurrent to avoid OOM)
-    agent_semaphore = asyncio.Semaphore(2)
+    # Execute decisions with bounded parallelism (default 1 in production to avoid OOM)
+    ooda_agent_concurrency = int(
+        os.getenv(
+            "OODA_AGENT_CONCURRENCY",
+            "1" if ENVIRONMENT == "production" else "2"
+        )
+    )
+    agent_semaphore = asyncio.Semaphore(max(1, ooda_agent_concurrency))
 
     async def _throttled_execute(decision: dict) -> dict:
         async with agent_semaphore:
