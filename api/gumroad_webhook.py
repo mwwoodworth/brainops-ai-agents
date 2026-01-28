@@ -418,7 +418,32 @@ async def record_sale_to_database(sale_data: dict[str, Any]):
             is_test,
             sale_data
         )
-        logger.info(f"Recorded sale {sale_data.get('sale_id')} to database")
+        logger.info(f"Recorded sale {sale_data.get('sale_id')} to database (is_test={is_test})")
+
+        # Also track in real_revenue_tracking for consolidated revenue view
+        if not is_test:
+            try:
+                await pool.execute("""
+                    INSERT INTO real_revenue_tracking (
+                        revenue_date, source, amount, description,
+                        customer_email, is_verified, gumroad_sale_id,
+                        currency, is_recurring
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    ON CONFLICT DO NOTHING
+                """,
+                    sale_timestamp.date() if hasattr(sale_timestamp, 'date') else sale_timestamp,
+                    "Gumroad",
+                    _parse_price(sale_data.get("price")),
+                    f"Gumroad: {sale_data.get('product_name', 'Unknown')}",
+                    sale_data.get('email', ''),
+                    True,
+                    sale_data.get('sale_id'),
+                    sale_data.get('currency', 'USD'),
+                    False
+                )
+            except Exception as rev_err:
+                logger.warning(f"Failed to record to real_revenue_tracking: {rev_err}")
+
         return True
 
     except Exception as e:
