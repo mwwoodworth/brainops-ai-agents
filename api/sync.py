@@ -132,10 +132,15 @@ async def generate_embedding(text: str) -> Optional[list[float]]:
                 content=text,
                 task_type="retrieval_document"
             )
-            embedding = result['embedding']
-            # Zero-pad to 1536d
-            if len(embedding) < EMBEDDING_DIMENSION:
+            embedding = list(result['embedding'])
+            # Truncate or pad to 1536d
+            original_len = len(embedding)
+            if len(embedding) > EMBEDDING_DIMENSION:
+                embedding = embedding[:EMBEDDING_DIMENSION]
+                logger.info(f"Gemini embedding truncated from {original_len} to {EMBEDDING_DIMENSION}d")
+            elif len(embedding) < EMBEDDING_DIMENSION:
                 embedding = embedding + [0.0] * (EMBEDDING_DIMENSION - len(embedding))
+                logger.info(f"Gemini embedding padded from {original_len} to {EMBEDDING_DIMENSION}d")
             return embedding
         except Exception as e:
             logger.warning(f"Gemini embedding failed: {e}")

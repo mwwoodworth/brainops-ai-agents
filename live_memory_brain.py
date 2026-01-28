@@ -1499,7 +1499,11 @@ class LiveMemoryBrain:
                     content=text[:8000],
                     task_type="retrieval_query"
                 )
-                return result['embedding']
+                embedding = list(result['embedding'])
+                # Truncate to 1536d for DB compatibility (Gemini produces 3072d)
+                if len(embedding) > 1536:
+                    embedding = embedding[:1536]
+                return embedding
         except Exception as e:
             logger.debug(f"Gemini embedding failed: {e}")
 
