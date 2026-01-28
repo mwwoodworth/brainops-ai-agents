@@ -152,7 +152,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.7.4')  # FIX: Gemini embedding dimension truncation (3072→1536)
+        self.version = os.getenv('VERSION', 'v10.7.5')  # FIX: Prevent 'Future exception never retrieved' errors
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
