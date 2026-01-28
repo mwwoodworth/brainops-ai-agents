@@ -1689,7 +1689,10 @@ class AgentExecutor:
             if UNIFIED_INTEGRATION_AVAILABLE and unified_ctx:
                 try:
                     error_info = await get_unified_integration().on_error(unified_ctx, e)
-                    logger.error(f"Agent {agent_name} failed with unified error tracking: {error_info}")
+                    if "is not implemented" in str(e):
+                        logger.debug(f"Agent {agent_name} not yet implemented (skipped)")
+                    else:
+                        logger.error(f"Agent {agent_name} failed with unified error tracking: {error_info}")
                 except Exception as ue:
                     logger.warning(f"Unified error handler failed: {ue}")
             raise
