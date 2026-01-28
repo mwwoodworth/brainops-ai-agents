@@ -1820,10 +1820,10 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
                     "_skip_ai_agent_log": True,
                 }
 
-                # Execute with timeout (30s max per agent)
+                # Execute with timeout (15s max per agent)
                 execution_result = await asyncio.wait_for(
                     shared_executor.execute(agent_name, task),
-                    timeout=30.0
+                    timeout=15.0
                 )
 
                 # Validate output integrity
@@ -1852,7 +1852,7 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
 
         except asyncio.TimeoutError:
             action_result["status"] = "timeout"
-            action_result["error"] = f"Agent '{agent_name}' timed out after 30s"
+            action_result["error"] = f"Agent '{agent_name}' timed out after 15s"
             logger.warning(f"OODA Act: {decision_type} agent '{agent_name}' timed out")
         except Exception as exec_error:
             action_result["status"] = "failed"
