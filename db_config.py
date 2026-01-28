@@ -68,6 +68,12 @@ def get_db_config() -> dict:
             "or provide DATABASE_URL."
         )
 
+    # Auto-switch Supabase pooler to transaction mode (port 6543).
+    # Session mode (5432) limits connections causing MaxClientsInSessionMode.
+    if host and 'pooler.supabase.com' in host and int(port) == 5432:
+        port = '6543'
+        logger.info("Supabase pooler detected - using transaction mode (port 6543)")
+
     _cached_config = {
         "host": host,
         "database": database,
