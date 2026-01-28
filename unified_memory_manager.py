@@ -702,7 +702,7 @@ class UnifiedMemoryManager:
 
         Fallback order:
         1. OpenAI text-embedding-3-small (fastest, most accurate)
-        2. Google Gemini text-embedding-004 (good fallback)
+        2. Google Gemini embedding-001 (good fallback)
         3. Anthropic via voyage-3 (if available)
         4. Local sentence-transformers (last resort, always available)
         """
@@ -732,7 +732,7 @@ class UnifiedMemoryManager:
                 import google.generativeai as genai
                 genai.configure(api_key=gemini_key)
                 result = genai.embed_content(
-                    model="models/text-embedding-004",
+                    model="models/embedding-001",
                     content=text_content,
                     task_type="retrieval_document"
                 )
