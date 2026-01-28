@@ -2175,24 +2175,32 @@ class MonitorAgent(BaseAgent):
             return {"status": "error", "error": str(e)}
 
     async def check_frontends(self) -> dict[str, Any]:
-        """Check frontend sites"""
+        """Check frontend sites in parallel"""
         sites = {
             "MyRoofGenius": "https://myroofgenius.com",
             "WeatherCraft": "https://weathercraft-erp.vercel.app",
             "TaskOS": "https://brainops-task-os.vercel.app"
         }
 
-        results = {}
-        for name, url in sites.items():
+        async def _check(name, url):
             try:
                 response = await _http_get(url, timeout_seconds=5.0)
-                results[name] = {
+                return name, {
                     "status": "online" if response.status_code in [200, 307] else "error",
                     "code": response.status_code
                 }
             except Exception as e:
-                results[name] = {"status": "error", "error": str(e)}
+                return name, {"status": "error", "error": str(e)[:200]}
 
+        check_results = await asyncio.gather(
+            *[_check(name, url) for name, url in sites.items()],
+            return_exceptions=True
+        )
+
+        results = {}
+        for r in check_results:
+            if not isinstance(r, Exception):
+                results[r[0]] = r[1]
         return results
 
 
@@ -3572,13 +3580,14 @@ class CustomerIntelligenceAgent(BaseAgent):
             pool = get_pool()
             stored_count = 0
 
-            for customer in customers[:100]:  # Limit to 100 per run
+            # Prepare all rows first, then batch insert (avoids 100 sequential INSERTs)
+            rows = []
+            for customer in customers[:100]:
                 try:
                     days_inactive = customer.get('days_since_last_job') or 999
                     total_revenue = float(customer.get('total_revenue') or 0)
                     total_jobs = int(customer.get('total_jobs') or 0)
 
-                    # Calculate health score (0-100, higher is better)
                     health_score = 100
                     if days_inactive > 365:
                         health_score -= 50
@@ -3586,28 +3595,20 @@ class CustomerIntelligenceAgent(BaseAgent):
                         health_score -= 30
                     elif days_inactive > 90:
                         health_score -= 15
-
                     if total_jobs == 0:
                         health_score -= 20
 
-                    # Calculate churn probability
                     churn_probability = min(0.95, days_inactive / 500.0) if days_inactive else 0.1
 
-                    # Determine risk category
                     if days_inactive > 365:
-                        churn_risk = 'critical'
-                        health_category = 'at_risk'
+                        churn_risk, health_category = 'critical', 'at_risk'
                     elif days_inactive > 180:
-                        churn_risk = 'high'
-                        health_category = 'declining'
+                        churn_risk, health_category = 'high', 'declining'
                     elif days_inactive > 90:
-                        churn_risk = 'medium'
-                        health_category = 'watch'
+                        churn_risk, health_category = 'medium', 'watch'
                     else:
-                        churn_risk = 'low'
-                        health_category = 'healthy'
+                        churn_risk, health_category = 'low', 'healthy'
 
-                    # Determine retention strategies
                     retention_strategies = []
                     if churn_risk in ('critical', 'high'):
                         retention_strategies = [
@@ -3622,31 +3623,27 @@ class CustomerIntelligenceAgent(BaseAgent):
                         ]
 
                     tenant_id = customer.get('tenant_id', '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457')
-
-                    await pool.execute("""
-                        INSERT INTO ai_customer_health (
-                            customer_id, tenant_id, health_score, health_category,
-                            churn_probability, churn_risk, lifetime_value,
-                            days_since_last_activity, health_status,
-                            retention_strategies, measured_at, created_at, updated_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW(), NOW())
-                        ON CONFLICT (id) DO NOTHING
-                    """,
-                        customer['id'],
-                        tenant_id,
-                        health_score,
-                        health_category,
-                        churn_probability,
-                        churn_risk,
-                        total_revenue,
-                        days_inactive,
+                    rows.append((
+                        customer['id'], tenant_id, health_score, health_category,
+                        churn_probability, churn_risk, total_revenue, days_inactive,
                         f"Inactive for {days_inactive} days" if days_inactive else "Unknown",
                         retention_strategies
-                    )
-                    stored_count += 1
+                    ))
                 except Exception as inner_e:
-                    self.logger.warning(f"Failed to store health for customer {customer.get('id')}: {inner_e}")
-                    continue
+                    self.logger.warning(f"Failed to prepare health for customer {customer.get('id')}: {inner_e!r}")
+
+            # Batch insert all rows at once
+            if rows:
+                await pool.executemany("""
+                    INSERT INTO ai_customer_health (
+                        customer_id, tenant_id, health_score, health_category,
+                        churn_probability, churn_risk, lifetime_value,
+                        days_since_last_activity, health_status,
+                        retention_strategies, measured_at, created_at, updated_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW(), NOW())
+                    ON CONFLICT (id) DO NOTHING
+                """, rows)
+                stored_count = len(rows)
 
             self.logger.info(f"Stored {stored_count} customer health insights")
             return stored_count
