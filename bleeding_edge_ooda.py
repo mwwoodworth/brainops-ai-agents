@@ -1622,17 +1622,6 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
     decision_rag = get_decision_rag()
     speculator = get_speculative_executor()
 
-    # Initialize Real Agent Executor (must load agents before Act phase checks registry)
-    from agent_executor import AgentExecutor
-    real_agent_executor = AgentExecutor()
-    if not real_agent_executor._agents_loaded:
-        try:
-            real_agent_executor._load_agent_implementations()
-            real_agent_executor._agents_loaded = True
-            logger.info(f"OODA: Loaded {len(real_agent_executor.agents)} agents for Act phase")
-        except Exception as load_err:
-            logger.error(f"OODA: Failed to load agents: {load_err!r}")
-
     # PHASE 1: OBSERVE (Parallel)
     obs_start = datetime.now()
     observations = await observer.observe_all()
@@ -1665,43 +1654,42 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
     }
     metrics["orient_duration_ms"] = (datetime.now() - orient_start).total_seconds() * 1000
 
-    # PHASE 3: PREDICT & SPECULATE
+    # PHASE 3: PREDICT & SPECULATE (using shared executor singleton)
     spec_start = datetime.now()
     predictions = await speculator.predict_next_actions(valid_observations)
 
-    async def real_executor_wrapper(action_type: str, params: dict) -> Any:
-        """Execute real agent actions based on prediction"""
-        # Map action types to specific agents
-        agent_name = "SystemMonitor"  # Default safe agent
+    # Use the app's shared AgentExecutor singleton (avoids OOM from loading agents twice)
+    from agent_executor import executor as shared_executor
 
+    async def speculative_executor_wrapper(action_type: str, params: dict) -> Any:
+        """Execute speculative actions via shared executor with timeout"""
+        agent_name = "SystemMonitor"  # Default safe agent
         if "analyze" in action_type or "predict" in action_type:
             agent_name = "PredictiveAnalyzer"
         elif "query" in action_type or "search" in action_type:
-            agent_name = "KnowledgeAgent"
+            agent_name = "CustomerIntelligence"
         elif "validate" in action_type:
             agent_name = "Monitor"
 
         task = {
             "action": action_type,
             "params": params,
-            "speculative": True,  # Flag to indicate this is a speculative run
-            "_skip_ai_agent_log": True,  # Skip expensive DB logging in speculation
+            "speculative": True,
+            "_skip_ai_agent_log": True,
         }
-
         try:
             return await asyncio.wait_for(
-                real_agent_executor.execute(agent_name, task),
+                shared_executor.execute(agent_name, task),
                 timeout=10.0
             )
         except asyncio.TimeoutError:
-            logger.warning(f"Speculative execution timed out for {action_type}")
             return {"status": "timeout", "error": f"Timed out after 10s"}
         except Exception as e:
-            logger.warning(f"Speculative execution failed for {action_type}: {e}")
-            return {"status": "failed", "error": str(e)}
+            return {"status": "failed", "error": str(e)[:200]}
 
-    speculated_results = await speculator.speculate(predictions, real_executor_wrapper)
+    speculated_results = await speculator.speculate(predictions, speculative_executor_wrapper)
     metrics["speculated_actions"] = len(speculated_results)
+    metrics["predicted_actions"] = len(predictions)
     metrics["speculation_duration_ms"] = (datetime.now() - spec_start).total_seconds() * 1000
 
     # PHASE 4: DECIDE (with RAG)
@@ -1765,12 +1753,15 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
     )
     metrics["decision_chain_valid"] = process_integrity.valid
 
-    # PHASE 5: ACT - Execute Decisions via Real Agent System
+    # PHASE 5: ACT - Execute Decisions via shared Agent Executor singleton
     act_start = datetime.now()
     actions_executed = 0
     actions_succeeded = 0
     actions_failed = 0
     action_results = []
+
+    # Use the app's shared AgentExecutor singleton (avoids OOM from loading agents twice)
+    from agent_executor import executor as shared_executor
 
     # Decision type to agent mapping (names must match AgentExecutor registry)
     decision_agent_mapping = {
@@ -1794,21 +1785,19 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
         decision_type = decision.get("type", "unknown")
         decision_confidence = decision.get("confidence", 0.5)
         observation_data = decision.get("observation", {})
+        agent_name = decision_agent_mapping.get(decision_type, "SystemMonitor")
 
         action_result = {
             "decision_id": decision_id,
             "decision_type": decision_type,
+            "agent_name": agent_name,
             "status": "pending",
             "started_at": datetime.now().isoformat(),
             "duration_ms": 0,
-            "error": None,
-            "result": None,
-            "speculation_hit": False,
-            "retries": 0
         }
 
         try:
-            # Check if we have speculative result first
+            # Check speculative result first (faster if available)
             spec_result = await speculator.get_speculation_result(decision_type)
             if spec_result:
                 metrics.setdefault("speculation_hits", 0)
@@ -1817,29 +1806,11 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
                 action_result["result"] = spec_result
                 action_result["status"] = "completed_from_speculation"
                 actions_succeeded += 1
-                # Learn from this pattern
                 await speculator.learn_pattern(
                     observation_data.get("observation", "unknown"),
-                    decision_type,
-                    success=True
+                    decision_type, success=True
                 )
             else:
-                # Execute via real agent system
-                agent_name = decision_agent_mapping.get(decision_type, "GenericAgent")
-
-                # Skip agents that aren't implemented (avoid costly retries)
-                has_agents = hasattr(real_agent_executor, 'agents')
-                in_registry = agent_name in real_agent_executor.agents if has_agents else False
-                if has_agents and not in_registry:
-                    action_result["status"] = "skipped"
-                    action_result["reason"] = f"Agent '{agent_name}' not in registry ({len(real_agent_executor.agents)} agents loaded)"
-                    logger.info(f"OODA Act: skipping {decision_type} - agent '{agent_name}' not in {len(real_agent_executor.agents)}-agent registry")
-                    action_result["completed_at"] = datetime.now().isoformat()
-                    action_result["duration_ms"] = 0
-                    action_results.append(action_result)
-                    actions_executed += 1
-                    continue
-
                 task = {
                     "action": decision_type,
                     "decision_id": decision_id,
@@ -1848,18 +1819,14 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
                     "tenant_id": tenant_id,
                     "cycle_id": cycle_id,
                     "params": observation_data.get("data", {}),
-                    "_skip_ai_agent_log": True,  # Skip expensive DB logging in OODA
+                    "_skip_ai_agent_log": True,
                 }
 
-                # Execute with timeout (15s max per agent)
-                execution_result = None
-                try:
-                    execution_result = await asyncio.wait_for(
-                        real_agent_executor.execute(agent_name, task),
-                        timeout=15.0
-                    )
-                except asyncio.TimeoutError:
-                    raise TimeoutError(f"Agent '{agent_name}' timed out after 15s")
+                # Execute with strict timeout (15s max per agent)
+                execution_result = await asyncio.wait_for(
+                    shared_executor.execute(agent_name, task),
+                    timeout=15.0
+                )
 
                 # Validate output integrity
                 output_validator = get_output_validator()
@@ -1871,43 +1838,41 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
 
                 if output_integrity.valid:
                     action_result["status"] = "completed"
-                    action_result["result"] = execution_result
                     actions_succeeded += 1
-                    # Learn successful pattern for future speculation
-                    await speculator.learn_pattern(
-                        observation_data.get("observation", "unknown"),
-                        decision_type,
-                        success=True
-                    )
                 else:
                     action_result["status"] = "completed_with_warnings"
-                    action_result["result"] = execution_result
                     action_result["integrity_issues"] = output_integrity.checks_failed
                     actions_succeeded += 1
-                    logger.warning(
-                        f"Action {decision_type} completed but failed integrity: "
-                        f"{output_integrity.checks_failed}"
-                    )
 
+                action_result["result"] = execution_result
+
+                # Learn successful pattern
+                try:
+                    await speculator.learn_pattern(
+                        observation_data.get("observation", "unknown"),
+                        decision_type, success=True
+                    )
+                except Exception:
+                    pass
+
+        except asyncio.TimeoutError:
+            action_result["status"] = "timeout"
+            action_result["error"] = f"Agent '{agent_name}' timed out after 15s"
+            actions_failed += 1
+            logger.warning(f"OODA Act: {decision_type} agent '{agent_name}' timed out")
         except Exception as exec_error:
             action_result["status"] = "failed"
             action_result["error"] = str(exec_error)[:500]
             actions_failed += 1
-            # Learn failed pattern (protected - must not crash the loop)
+            logger.error(f"OODA Act: {decision_type} failed: {exec_error!r}")
             try:
                 await speculator.learn_pattern(
                     observation_data.get("observation", "unknown"),
-                    decision_type,
-                    success=False
+                    decision_type, success=False
                 )
             except Exception:
-                pass  # Don't let learning failure crash the act phase
-            if "is not implemented" in str(exec_error):
-                logger.debug(f"Act phase skipped {decision_type}: agent not implemented")
-            else:
-                logger.error(f"Act phase failed for {decision_type}: {exec_error!r}")
+                pass
 
-        # Record completion time
         action_result["completed_at"] = datetime.now().isoformat()
         action_result["duration_ms"] = (
             datetime.fromisoformat(action_result["completed_at"]) -
@@ -1917,7 +1882,6 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
         action_results.append(action_result)
         actions_executed += 1
 
-        # Log execution for observability
         logger.info(
             f"OODA Act [{cycle_id}]: {decision_type} -> {action_result['status']} "
             f"({action_result['duration_ms']:.0f}ms)"
@@ -2165,7 +2129,7 @@ class BleedingEdgeOODAController:
                 - retries: Number of retry attempts
                 - integrity: Output integrity validation results
         """
-        from agent_executor import AgentExecutor
+        from agent_executor import executor as shared_executor
 
         decision_id = decision.get("id", str(uuid.uuid4()))
         decision_type = decision.get("type", "unknown")
@@ -2222,8 +2186,7 @@ class BleedingEdgeOODAController:
                 )
             else:
                 # Execute via real agent system
-                agent_name = decision_agent_mapping.get(decision_type, "GenericAgent")
-                agent_executor = AgentExecutor()
+                agent_name = decision_agent_mapping.get(decision_type, "SystemMonitor")
 
                 task = {
                     "action": decision_type,
@@ -2231,25 +2194,15 @@ class BleedingEdgeOODAController:
                     "observation": observation_data,
                     "confidence": decision_confidence,
                     "tenant_id": self.tenant_id,
-                    "params": params
+                    "params": params,
+                    "_skip_ai_agent_log": True,
                 }
 
-                # Execute with retry logic
-                execution_result = None
-                max_retries = 2
-                for attempt in range(max_retries + 1):
-                    try:
-                        action_result["retries"] = attempt
-                        execution_result = await retry_with_backoff(
-                            lambda: agent_executor.execute(agent_name, task),
-                            max_retries=1,
-                            backoff_base=0.5
-                        )
-                        break
-                    except Exception as retry_error:
-                        if attempt == max_retries:
-                            raise retry_error
-                        logger.warning(f"Act retry {attempt + 1}/{max_retries} for {decision_type}: {retry_error}")
+                # Execute with timeout (15s max)
+                execution_result = await asyncio.wait_for(
+                    shared_executor.execute(agent_name, task),
+                    timeout=15.0
+                )
 
                 # Validate output integrity
                 output_integrity = await self.output_validator.validate_action_result(
