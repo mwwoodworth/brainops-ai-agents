@@ -255,7 +255,7 @@ class UnifiedBrain:
                 import google.generativeai as genai
                 genai.configure(api_key=gemini_key)
                 result = genai.embed_content(
-                    model="models/embedding-001",
+                    model="models/gemini-embedding-001",
                     content=text,
                     task_type="retrieval_document"
                 )
