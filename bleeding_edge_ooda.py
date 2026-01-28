@@ -524,8 +524,15 @@ class ParallelObserver:
         self.timeout = 5.0  # Per-observation timeout
         self.cache: dict[str, tuple[Any, datetime]] = {}
         self.cache_ttl = 30  # seconds
-        # Limit concurrent DB queries to avoid pool contention (pool max_size=4)
-        self._db_semaphore = asyncio.Semaphore(3)
+        # Lazy-init: Semaphore must be created in the running event loop,
+        # not at __init__ time (which may be a different loop).
+        self._db_semaphore: asyncio.Semaphore | None = None
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """Get or create semaphore in the current event loop."""
+        if self._db_semaphore is None:
+            self._db_semaphore = asyncio.Semaphore(3)
+        return self._db_semaphore
 
     async def observe_all(self) -> list[dict[str, Any]]:
         """Execute all observations with bounded concurrency"""
@@ -575,7 +582,7 @@ class ParallelObserver:
                     return cached_result
 
             # Execute with bounded concurrency + timeout
-            async with self._db_semaphore:
+            async with self._get_semaphore():
                 result = await asyncio.wait_for(coroutine, timeout=self.timeout)
 
             if result:
