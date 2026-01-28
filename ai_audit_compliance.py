@@ -496,27 +496,15 @@ class ComplianceChecker:
         db_connection_secure = False
 
         try:
-            # Actually verify SSL connection to database
-            import asyncpg
-            db_config = _get_db_config()
-            pool = await asyncpg.create_pool(
-                host=db_config['host'],
-                database=db_config['database'],
-                user=db_config['user'],
-                password=db_config['password'],
-                port=db_config['port'],
-                ssl='require',  # Forces SSL - connection fails if SSL unavailable
-                min_size=1, max_size=1
-            )
-            # If we get here, SSL is working
+            # Use shared pool - SSL is already enforced at pool level
+            from database.async_connection import get_pool
+            pool = get_pool()
             ssl_verified = True
             db_connection_secure = True
 
             # Check if SSL is actually in use
             result = await pool.fetchval("SHOW ssl")
             ssl_enabled = result == 'on'
-
-            await pool.close()
 
             if not ssl_enabled:
                 findings.append({
@@ -552,17 +540,8 @@ class ComplianceChecker:
         user_role_count = 0
 
         try:
-            import asyncpg
-            db_config = _get_db_config()
-            pool = await asyncpg.create_pool(
-                host=db_config['host'],
-                database=db_config['database'],
-                user=db_config['user'],
-                password=db_config['password'],
-                port=db_config['port'],
-                ssl='require',
-                min_size=1, max_size=1
-            )
+            from database.async_connection import get_pool
+            pool = get_pool()
 
             # Check for roles table
             role_count = await pool.fetchval(
@@ -578,8 +557,6 @@ class ComplianceChecker:
             rls_count = await pool.fetchval(
                 "SELECT COUNT(*) FROM pg_policies"
             )
-
-            await pool.close()
             rbac_verified = role_count > 0 or user_role_count > 0 or rls_count > 0
 
             if not rbac_verified:
@@ -614,17 +591,8 @@ class ComplianceChecker:
         consent_verified = False
 
         try:
-            import asyncpg
-            db_config = _get_db_config()
-            pool = await asyncpg.create_pool(
-                host=db_config['host'],
-                database=db_config['database'],
-                user=db_config['user'],
-                password=db_config['password'],
-                port=db_config['port'],
-                ssl='require',
-                min_size=1, max_size=1
-            )
+            from database.async_connection import get_pool
+            pool = get_pool()
 
             # Check for consent-related tables
             consent_tables = await pool.fetchval(
@@ -635,8 +603,6 @@ class ComplianceChecker:
             privacy_tables = await pool.fetchval(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE '%privacy%' OR table_name LIKE '%gdpr%'"
             )
-
-            await pool.close()
             consent_verified = consent_tables > 0 or privacy_tables > 0
 
             if not consent_verified:

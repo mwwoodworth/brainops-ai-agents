@@ -1183,8 +1183,8 @@ class AffiliatePartnershipPipeline:
                 import asyncpg
                 self._db_pool = await asyncpg.create_pool(
                     self.db_url,
-                    min_size=2,
-                    max_size=10,
+                    min_size=1,
+                    max_size=2,
                     command_timeout=60
                 )
                 logger.info("Database connection pool created")
