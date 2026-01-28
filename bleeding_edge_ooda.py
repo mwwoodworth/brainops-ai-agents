@@ -1622,9 +1622,10 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
     decision_rag = get_decision_rag()
     speculator = get_speculative_executor()
 
-    # Initialize Real Agent Executor
+    # Initialize Real Agent Executor (must load agents before Act phase checks registry)
     from agent_executor import AgentExecutor
     real_agent_executor = AgentExecutor()
+    await real_agent_executor._ensure_agents_loaded()
 
     # PHASE 1: OBSERVE (Parallel)
     obs_start = datetime.now()
