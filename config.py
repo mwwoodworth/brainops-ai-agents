@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.8.5')  # Fix OODA: sync agent load (bypass async lock issue)
+        self.version = os.getenv('VERSION', 'v10.8.6')  # Fix OODA: add execution timeouts, skip redundant DB logs
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
