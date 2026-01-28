@@ -152,6 +152,23 @@ def execute_with_connection(query: str, params: tuple = None, fetch: bool = True
         return None
 
 
+def _json_safe_row(row) -> dict:
+    """Convert an asyncpg Record to a JSON-serializable dict."""
+    from datetime import datetime as _dt
+    from decimal import Decimal as _Dec
+    result = {}
+    for k, v in dict(row).items():
+        if hasattr(v, 'hex'):  # asyncpg UUID
+            result[k] = str(v)
+        elif isinstance(v, _dt):
+            result[k] = v.isoformat()
+        elif isinstance(v, _Dec):
+            result[k] = float(v)
+        else:
+            result[k] = v
+    return result
+
+
 async def execute_with_async_pool(query: str, params: tuple = None) -> list[dict] | None:
     """Execute a query using the global async pool (preferred method)"""
     try:
@@ -163,7 +180,7 @@ async def execute_with_async_pool(query: str, params: tuple = None) -> list[dict
             for i in range(len(params)):
                 converted_query = converted_query.replace('%s', f'${i+1}', 1)
         rows = await pool.fetch(converted_query, *params) if params else await pool.fetch(converted_query)
-        return [dict(r) for r in rows]
+        return [_json_safe_row(r) for r in rows]
     except Exception as e:
         logger.warning(f"OODA async query failed: {e}")
         return None
@@ -686,7 +703,7 @@ class ParallelObserver:
     async def _observe_churn_risks(self) -> dict[str, Any]:
         """Observe customers at risk of churning (90+ days inactive)"""
         rows = await execute_with_async_pool("""
-            SELECT c.id, c.name, c.email,
+            SELECT c.id::text, c.name, c.email,
                    MAX(j.completed_date) as last_job_date,
                    EXTRACT(EPOCH FROM (NOW() - MAX(j.completed_date))) / 86400 as days_inactive
             FROM customers c
@@ -703,7 +720,7 @@ class ParallelObserver:
             return {"data": [], "count": 0, "observation": "query_failed"}
 
         return {
-            "data": [dict(r) for r in rows],
+            "data": [{k: str(v) if hasattr(v, 'hex') else v for k, v in dict(r).items()} for r in rows],
             "count": len(rows),
             "observation": "churn_risks" if rows else "no_churn_risks"
         }

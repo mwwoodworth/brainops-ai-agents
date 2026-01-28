@@ -680,7 +680,7 @@ class EmbeddedMemorySystem:
                 logger.info(f"✅ Synced {len(memories)} memories, {len(tasks)} tasks from master")
 
         except Exception as e:
-            logger.error(f"❌ Sync from master failed: {e}")
+            logger.error(f"❌ Sync from master failed: {e!r}")
 
     async def _background_sync(self):
         """Background task for periodic sync with retry logic
