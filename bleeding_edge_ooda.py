@@ -1625,11 +1625,13 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
     # Initialize Real Agent Executor (must load agents before Act phase checks registry)
     from agent_executor import AgentExecutor
     real_agent_executor = AgentExecutor()
-    try:
-        await real_agent_executor._ensure_agents_loaded()
-        logger.info(f"OODA: AgentExecutor loaded {len(real_agent_executor.agents)} agents: {list(real_agent_executor.agents.keys())[:10]}...")
-    except Exception as load_err:
-        logger.error(f"OODA: Failed to load agents: {load_err!r}")
+    if not real_agent_executor._agents_loaded:
+        try:
+            real_agent_executor._load_agent_implementations()
+            real_agent_executor._agents_loaded = True
+            logger.info(f"OODA: Loaded {len(real_agent_executor.agents)} agents for Act phase")
+        except Exception as load_err:
+            logger.error(f"OODA: Failed to load agents: {load_err!r}")
 
     # PHASE 1: OBSERVE (Parallel)
     obs_start = datetime.now()
