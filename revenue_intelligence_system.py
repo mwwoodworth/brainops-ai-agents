@@ -428,8 +428,8 @@ class RevenueIntelligenceSystem:
                     COUNT(*) as active_subs,
                     COALESCE(SUM(
                         CASE
-                            WHEN billing_cycle = 'monthly' THEN price_amount
-                            WHEN billing_cycle = 'annual' THEN price_amount / 12
+                            WHEN billing_cycle = 'monthly' THEN amount
+                            WHEN billing_cycle = 'annual' THEN amount / 12
                             ELSE 0
                         END
                     ), 0) as mrr
@@ -737,12 +737,12 @@ class RevenueIntelligenceSystem:
 
             for entry in brain_entries:
                 cursor.execute("""
-                    INSERT INTO unified_brain (key, value, category, updated_at)
+                    INSERT INTO unified_brain (key, value, category, last_updated)
                     VALUES (%s, %s, %s, NOW())
                     ON CONFLICT (key) DO UPDATE SET
                         value = EXCLUDED.value,
                         category = EXCLUDED.category,
-                        updated_at = NOW()
+                        last_updated = NOW()
                 """, (entry["key"], json.dumps(entry["value"]), entry["category"]))
 
             conn.commit()
