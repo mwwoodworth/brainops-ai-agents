@@ -27,11 +27,13 @@ except ImportError:
 
 # Gemini Vision for AI-powered visual analysis
 try:
-    import google.generativeai as genai
-    GEMINI_VISION_AVAILABLE = bool(os.getenv("GOOGLE_API_KEY"))
-    if GEMINI_VISION_AVAILABLE:
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+    from google import genai as _genai_mod
+    _gemini_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    GEMINI_VISION_AVAILABLE = bool(_gemini_api_key)
+    _gemini_vision_client = _genai_mod.Client(api_key=_gemini_api_key) if GEMINI_VISION_AVAILABLE else None
 except ImportError:
+    _genai_mod = None
+    _gemini_vision_client = None
     GEMINI_VISION_AVAILABLE = False
 
 class TestStatus(Enum):
@@ -472,8 +474,8 @@ class UITesterAgent:
             screenshot_bytes = await page.screenshot(full_page=True)
             screenshot_b64 = base64.b64encode(screenshot_bytes).decode('utf-8')
 
-            # Initialize Gemini Vision model
-            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            # Use Gemini Vision client
+            from google.genai import types as _genai_types
 
             # Comprehensive visual analysis prompt
             analysis_prompt = f"""You are an expert UI/UX analyst. Analyze this screenshot of {app_name} ({url}) and provide a comprehensive assessment.
@@ -517,9 +519,13 @@ Return your analysis in this exact JSON format:
             # Send to Gemini Vision
             import asyncio
             response = await asyncio.to_thread(
-                model.generate_content,
-                [analysis_prompt, {"mime_type": "image/png", "data": screenshot_b64}],
-                generation_config={"temperature": 0.1}
+                _gemini_vision_client.models.generate_content,
+                model='gemini-2.0-flash',
+                contents=[
+                    analysis_prompt,
+                    _genai_types.Part.from_bytes(data=base64.b64decode(screenshot_b64), mime_type="image/png")
+                ],
+                config=_genai_types.GenerateContentConfig(temperature=0.1)
             )
 
             # Parse JSON response
@@ -599,7 +605,7 @@ Return your analysis in this exact JSON format:
             baseline_b64 = base64.b64encode(baseline_bytes).decode('utf-8')
 
             # Use Gemini to compare
-            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            from google.genai import types as _genai_types
 
             comparison_prompt = """Compare these two screenshots (baseline vs current).
 Identify any meaningful visual changes that could affect user experience.
@@ -628,15 +634,16 @@ Return JSON:
 
             import asyncio
             response = await asyncio.to_thread(
-                model.generate_content,
-                [
+                _gemini_vision_client.models.generate_content,
+                model='gemini-2.0-flash',
+                contents=[
                     comparison_prompt,
                     "BASELINE IMAGE:",
-                    {"mime_type": "image/png", "data": baseline_b64},
+                    _genai_types.Part.from_bytes(data=base64.b64decode(baseline_b64), mime_type="image/png"),
                     "CURRENT IMAGE:",
-                    {"mime_type": "image/png", "data": current_b64}
+                    _genai_types.Part.from_bytes(data=base64.b64decode(current_b64), mime_type="image/png")
                 ],
-                generation_config={"temperature": 0.1}
+                config=_genai_types.GenerateContentConfig(temperature=0.1)
             )
 
             response_text = response.text.strip()

@@ -211,19 +211,20 @@ class AIVisionAnalyzer:
     ) -> dict[str, Any]:
         """Analyze using Google Gemini"""
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=GEMINI_API_KEY)
+            from google import genai
+            from google.genai import types as _genai_types
+            client = genai.Client(api_key=GEMINI_API_KEY)
 
-            model = genai.GenerativeModel("gemini-2.0-flash")
             prompt = self._build_analysis_prompt(context)
 
             # Decode base64 to bytes for Gemini
             image_bytes = base64.b64decode(screenshot_base64)
 
             response = await asyncio.to_thread(
-                model.generate_content,
-                [
-                    {"mime_type": "image/png", "data": image_bytes},
+                client.models.generate_content,
+                model='gemini-2.0-flash',
+                contents=[
+                    _genai_types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
                     prompt
                 ]
             )

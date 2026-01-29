@@ -22,10 +22,11 @@ except ImportError as exc:
     OPENAI_AVAILABLE = False
 
 try:
-    import google.generativeai as genai
+    from google import genai as _genai_mod
     GEMINI_AVAILABLE = True
 except ImportError as exc:
     logging.warning("Gemini SDK not available: %s", exc)
+    _genai_mod = None
     GEMINI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ class KnowledgeAgent:
         self.tenant_id = tenant_id
         self.agent_type = "knowledge"
         self.openai_client = None
-        self.gemini_model = None
+        self._gemini_client = None
         self._codebase_graph = CodebaseGraph() if CodebaseGraph else None
         self._graph_loaded = False
 
@@ -62,8 +63,7 @@ class KnowledgeAgent:
             logger.info("✅ OpenAI client initialized for embeddings")
 
         if GEMINI_AVAILABLE and os.getenv("GOOGLE_API_KEY"):
-            genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-            self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+            self._gemini_client = _genai_mod.Client(api_key=os.getenv("GOOGLE_API_KEY"))
             logger.info("✅ Gemini 2.0 Flash model initialized for Q&A")
 
     def _ensure_codebase_graph(self) -> None:
@@ -297,7 +297,7 @@ class KnowledgeAgent:
                     'weathercraft_jobs': quick_facts.get('weathercraft_jobs', 0),
                     'active_agents': quick_facts.get('active_agents', 0),
                     'operational_status': 'ONLINE',
-                    'ai_tier': 'gemini' if self.gemini_model else 'openai',
+                    'ai_tier': 'gemini' if self._gemini_client else 'openai',
                     'cost_per_month': '$0'
                 },
                 'graph_summary': graph_summary
@@ -486,7 +486,7 @@ class KnowledgeAgent:
         ])
 
         # Generate answer with AI
-        if self.gemini_model:
+        if self._gemini_client:
             try:
                 prompt = f"""Based on the following knowledge base entries, answer this question:
 
@@ -498,7 +498,9 @@ Relevant Knowledge:
 Provide a concise, accurate answer based only on the information provided.
 Include actionable recommendations if applicable."""
 
-                response = self.gemini_model.generate_content(prompt)
+                response = self._gemini_client.models.generate_content(
+                    model='gemini-2.0-flash', contents=prompt
+                )
                 answer = response.text
             except Exception as e:
                 logger.error(f"Gemini generation error: {e}")

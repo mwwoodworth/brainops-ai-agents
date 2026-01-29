@@ -727,14 +727,13 @@ class UnifiedMemoryManager:
         gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if gemini_key:
             try:
-                import google.generativeai as genai
-                genai.configure(api_key=gemini_key)
-                result = genai.embed_content(
-                    model="models/text-embedding-004",
-                    content=text_content,
-                    task_type="retrieval_document"
+                from google import genai
+                _client = genai.Client(api_key=gemini_key)
+                result = _client.models.embed_content(
+                    model="text-embedding-004",
+                    contents=text_content
                 )
-                embedding = list(result['embedding'])
+                embedding = list(result.embeddings[0].values)
                 # Truncate or pad to 1536 dimensions to match OpenAI embeddings in database
                 original_len = len(embedding)
                 if len(embedding) > 1536:
