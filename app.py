@@ -6626,7 +6626,7 @@ class ContentGenerationRequest(BaseModel):
 async def generate_content(
     request: ContentGenerationRequest,
     background_tasks: BackgroundTasks,
-    api_key: str = Depends(get_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """
     Generate content using Multi-AI Orchestration.
@@ -6682,7 +6682,7 @@ async def _run_content_generation(orchestrator, task, job_id):
 async def generate_newsletter(
     topic: str = Body(..., embed=True),
     brand: str = Body("BrainOps", embed=True),
-    api_key: str = Depends(get_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """Generate a complete newsletter with HTML template."""
     if not CONTENT_ORCHESTRATOR_AVAILABLE:
@@ -6699,7 +6699,7 @@ async def generate_ebook(
     chapters: int = Body(5, embed=True),
     author: str = Body("BrainOps AI", embed=True),
     background_tasks: BackgroundTasks = None,
-    api_key: str = Depends(get_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """Generate a complete ebook with multiple chapters."""
     if not CONTENT_ORCHESTRATOR_AVAILABLE:
@@ -6719,7 +6719,7 @@ async def generate_training_doc(
     topic: str = Body(..., embed=True),
     module_number: int = Body(1, embed=True),
     skill_level: str = Body("beginner", embed=True),
-    api_key: str = Depends(get_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """Generate training documentation with exercises and quizzes."""
     if not CONTENT_ORCHESTRATOR_AVAILABLE:
@@ -6754,7 +6754,7 @@ async def get_content_types():
 # ==================== PRODUCT & REVENUE INVENTORY ====================
 
 @app.get("/inventory/products", tags=["Inventory"])
-async def get_product_inventory(api_key: str = Depends(get_api_key)):
+async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
     """
     Get complete product inventory across all platforms.
     This is the source of truth for what products exist and their status.
@@ -6914,7 +6914,7 @@ async def get_product_inventory(api_key: str = Depends(get_api_key)):
 
 
 @app.get("/inventory/revenue", tags=["Inventory"])
-async def get_revenue_status(api_key: str = Depends(get_api_key)):
+async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
     """
     Get real revenue status across all platforms.
     Separates real revenue from demo data.
@@ -7004,7 +7004,7 @@ except ImportError as e:
 
 
 @app.get("/revenue/state", tags=["Revenue Intelligence"])
-async def get_complete_business_state(api_key: str = Depends(get_api_key)):
+async def get_complete_business_state(authenticated: bool = Depends(verify_api_key)):
     """
     Get COMPLETE business state snapshot.
     This is the PRIMARY endpoint for understanding full business state.
@@ -7018,7 +7018,7 @@ async def get_complete_business_state(api_key: str = Depends(get_api_key)):
 
 
 @app.get("/revenue/live", tags=["Revenue Intelligence"])
-async def get_live_revenue_data(api_key: str = Depends(get_api_key)):
+async def get_live_revenue_data(authenticated: bool = Depends(verify_api_key)):
     """Get live revenue data across all platforms."""
     if not REVENUE_INTEL_AVAILABLE:
         raise HTTPException(status_code=503, detail="Revenue Intelligence not available")
@@ -7027,7 +7027,7 @@ async def get_live_revenue_data(api_key: str = Depends(get_api_key)):
 
 
 @app.get("/revenue/products", tags=["Revenue Intelligence"])
-async def get_all_products_inventory(api_key: str = Depends(get_api_key)):
+async def get_all_products_inventory(authenticated: bool = Depends(verify_api_key)):
     """Get complete product inventory across all platforms."""
     if not REVENUE_INTEL_AVAILABLE:
         raise HTTPException(status_code=503, detail="Revenue Intelligence not available")
@@ -7041,7 +7041,7 @@ async def get_all_products_inventory(api_key: str = Depends(get_api_key)):
 
 
 @app.get("/revenue/automations", tags=["Revenue Intelligence"])
-async def get_automation_health(api_key: str = Depends(get_api_key)):
+async def get_automation_health(authenticated: bool = Depends(verify_api_key)):
     """Get status of all revenue-related automations."""
     if not REVENUE_INTEL_AVAILABLE:
         raise HTTPException(status_code=503, detail="Revenue Intelligence not available")
@@ -7051,7 +7051,7 @@ async def get_automation_health(api_key: str = Depends(get_api_key)):
 
 
 @app.post("/revenue/sync-brain", tags=["Revenue Intelligence"])
-async def sync_business_state_to_brain(api_key: str = Depends(get_api_key)):
+async def sync_business_state_to_brain(authenticated: bool = Depends(verify_api_key)):
     """
     Sync complete business state to AI brain.
     This ensures ALL AI agents have current business awareness.
@@ -7068,7 +7068,7 @@ async def record_revenue_event(
     platform: str = Body(..., embed=True),
     amount: float = Body(0, embed=True),
     metadata: dict = Body(None, embed=True),
-    api_key: str = Depends(get_api_key)
+    authenticated: bool = Depends(verify_api_key)
 ):
     """Record a revenue event for tracking."""
     if not REVENUE_INTEL_AVAILABLE:
