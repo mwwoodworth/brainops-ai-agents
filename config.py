@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v11.0.5')  # Added timeouts to brain endpoints, /brain/ping
+        self.version = os.getenv('VERSION', 'v11.0.6')  # Brain warmup on startup, increased pool size
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))

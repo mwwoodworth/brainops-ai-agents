@@ -1077,6 +1077,17 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ Embedded Memory initialization failed: {e}")
 
+        # Warm up Unified Brain for fast /brain/* endpoint responses
+        try:
+            from api.brain import brain, BRAIN_AVAILABLE
+            if BRAIN_AVAILABLE and brain:
+                await asyncio.wait_for(brain._ensure_table(), timeout=15.0)
+                logger.info("🧠 Unified Brain warmed up and ready")
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ Unified Brain warmup timed out (will initialize on first request)")
+        except Exception as e:
+            logger.error(f"⚠️ Unified Brain warmup failed: {e}")
+
         # Start Permanent Observability Daemon - Never miss anything
         if PERMANENT_OBSERVABILITY_AVAILABLE and start_observability_daemon:
             try:
