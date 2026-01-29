@@ -299,7 +299,8 @@ class ModelProvider:
     ) -> ModelResponse:
         """Query Google Gemini"""
         try:
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types as _genai_types
 
             api_key = os.getenv("GOOGLE_API_KEY")
             if not api_key:
@@ -310,8 +311,7 @@ class ModelProvider:
                     metadata={"available": False}
                 )
 
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-2.0-flash')
+            client = genai.Client(api_key=api_key)
 
             # Combine system prompt and user prompt
             full_prompt = prompt
@@ -321,9 +321,10 @@ class ModelProvider:
             # Run in thread pool for async compatibility
             response = await asyncio.get_running_loop().run_in_executor(
                 None,
-                lambda: model.generate_content(
-                    full_prompt,
-                    generation_config=genai.types.GenerationConfig(
+                lambda: client.models.generate_content(
+                    model='gemini-2.0-flash',
+                    contents=full_prompt,
+                    config=_genai_types.GenerateContentConfig(
                         max_output_tokens=max_tokens,
                         temperature=temperature
                     )

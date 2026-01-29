@@ -23,10 +23,10 @@ except ImportError:
     OpenAI = None
 
 try:
-    import google.generativeai as genai
+    from google import genai as _genai_mod
     GEMINI_AVAILABLE = True
 except ImportError:
-    genai = None
+    _genai_mod = None
     GEMINI_AVAILABLE = False
 import requests
 
@@ -48,7 +48,7 @@ class UltimateAISystem:
         # Initialize all AI clients
         self.openai_client = None
         self.anthropic_client = None
-        self.gemini_model = None
+        self._gemini_client = None
 
         # Initialize OpenAI
         if OPENAI_API_KEY and OpenAI is not None:
@@ -73,15 +73,14 @@ class UltimateAISystem:
         # Initialize Gemini
         if GOOGLE_API_KEY and GEMINI_AVAILABLE:
             try:
-                genai.configure(api_key=GOOGLE_API_KEY)
-                self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+                self._gemini_client = _genai_mod.Client(api_key=GOOGLE_API_KEY)
                 logger.info("✅ Gemini initialized")
             except Exception as e:
                 logger.error(f"Gemini init error: {e}")
         else:
-            self.gemini_model = None
+            self._gemini_client = None
             if not GEMINI_AVAILABLE:
-                logger.warning("Gemini not available: google-generativeai not installed")
+                logger.warning("Gemini not available: google-genai not installed")
 
         # Store API keys for other services
         self.perplexity_key = PERPLEXITY_API_KEY
@@ -120,7 +119,7 @@ class UltimateAISystem:
             response_text = await self._use_perplexity(prompt, max_tokens)
             provider_used = "perplexity"
 
-        elif task_type == "analysis" and self.gemini_model:
+        elif task_type == "analysis" and self._gemini_client:
             # Use Gemini for deep analysis
             response_text = await self._use_gemini(prompt, max_tokens)
             provider_used = "gemini"
@@ -226,15 +225,17 @@ class UltimateAISystem:
 
     async def _use_gemini(self, prompt: str, max_tokens: int) -> Optional[str]:
         """Use Google Gemini"""
-        if not self.gemini_model or not GEMINI_AVAILABLE:
+        if not self._gemini_client or not GEMINI_AVAILABLE:
             return None
 
         try:
+            from google.genai import types as _genai_types
             response = await asyncio.get_running_loop().run_in_executor(
                 None,
-                lambda: self.gemini_model.generate_content(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
+                lambda: self._gemini_client.models.generate_content(
+                    model='gemini-2.0-flash',
+                    contents=prompt,
+                    config=_genai_types.GenerateContentConfig(
                         max_output_tokens=max_tokens,
                         temperature=0.7
                     )
@@ -359,7 +360,7 @@ class UltimateAISystem:
                 tasks.append(("openai", self._use_openai(prompt, 500)))
             elif model == "anthropic" and self.anthropic_client:
                 tasks.append(("anthropic", self._use_anthropic(prompt, 500)))
-            elif model == "gemini" and self.gemini_model:
+            elif model == "gemini" and self._gemini_client:
                 tasks.append(("gemini", self._use_gemini(prompt, 500)))
             elif model == "perplexity" and self.perplexity_key:
                 tasks.append(("perplexity", self._use_perplexity(prompt, 500)))
@@ -442,7 +443,7 @@ Operation Type: {operation_type}"""
             "providers": {
                 "openai": "✅ Active" if self.openai_client else "❌ Inactive",
                 "anthropic": "✅ Active" if self.anthropic_client else "❌ Inactive",
-                "gemini": "✅ Active" if self.gemini_model else "❌ Inactive",
+                "gemini": "✅ Active" if self._gemini_client else "❌ Inactive",
                 "perplexity": "✅ Active" if self.perplexity_key else "❌ Inactive",
                 "huggingface": "✅ Active" if self.hf_token else "❌ Inactive"
             },
@@ -451,7 +452,7 @@ Operation Type: {operation_type}"""
                 "complex_reasoning": bool(self.openai_client),
                 "creative_writing": bool(self.anthropic_client),
                 "real_time_search": bool(self.perplexity_key),
-                "deep_analysis": bool(self.gemini_model),
+                "deep_analysis": bool(self._gemini_client),
                 "multi_model_consensus": True,
                 "roofing_specialist": True
             },

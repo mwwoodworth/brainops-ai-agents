@@ -163,12 +163,12 @@ class EmbeddingService:
             api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
             if api_key:
                 try:
-                    import google.generativeai as genai
-                    genai.configure(api_key=api_key)
+                    from google import genai
+                    self._gemini_client = genai.Client(api_key=api_key)
                     self._gemini_configured = True
                     logger.info("Gemini API configured for embeddings")
                 except ImportError:
-                    logger.warning("google-generativeai package not installed")
+                    logger.warning("google-genai package not installed")
         return self._gemini_configured
 
     def _init_local_model(self):
@@ -247,15 +247,13 @@ class EmbeddingService:
             return None
 
         try:
-            import google.generativeai as genai
             self._stats["gemini_calls"] += 1
 
-            result = genai.embed_content(
-                model="models/text-embedding-004",
-                content=text,
-                task_type="retrieval_document"
+            result = self._gemini_client.models.embed_content(
+                model="text-embedding-004",
+                contents=text
             )
-            embedding = list(result['embedding'])
+            embedding = list(result.embeddings[0].values)
 
             # Truncate or pad to match OpenAI dimension (1536)
             original_len = len(embedding)

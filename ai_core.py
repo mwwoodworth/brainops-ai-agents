@@ -174,12 +174,11 @@ class RealAICore:
 
         # Initialize Gemini (powerful fallback when OpenAI/Claude rate limited)
         self.gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        self.gemini_model = None
+        self._gemini_client = None
         if self.gemini_key:
             try:
-                import google.generativeai as genai
-                genai.configure(api_key=self.gemini_key)
-                self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+                from google import genai
+                self._gemini_client = genai.Client(api_key=self.gemini_key)
                 logger.info("Gemini 2.0 Flash initialized - powerful fallback available")
             except Exception as e:
                 logger.warning(f"Gemini initialization failed: {e}")
@@ -325,7 +324,7 @@ class RealAICore:
                     temperature=temperature
                 )
                 return response.content[0].text
-            if self.gemini_model:
+            if self._gemini_client:
                 return await self._try_gemini(prompt, system_prompt, max_tokens)
             if self.perplexity_key:
                 return await self._try_perplexity(prompt, max_tokens)
@@ -357,7 +356,7 @@ class RealAICore:
                 except Exception as anthropic_error:
                     logger.warning(f"Anthropic fallback failed: {anthropic_error}")
 
-            if self.gemini_model:
+            if self._gemini_client:
                 try:
                     logger.info("🔄 Trying Gemini fallback...")
                     return await self._try_gemini(prompt, system_prompt, max_tokens)
@@ -376,7 +375,7 @@ class RealAICore:
 
     async def _try_gemini(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 2000) -> str:
         """Use Gemini as fallback AI provider"""
-        if not self.gemini_model:
+        if not self._gemini_client:
             raise RuntimeError("Gemini not configured")
 
         full_prompt = prompt
@@ -386,7 +385,9 @@ class RealAICore:
         # Run synchronous Gemini call in thread pool
         import asyncio
         response = await asyncio.to_thread(
-            self.gemini_model.generate_content, full_prompt
+            self._gemini_client.models.generate_content,
+            model='gemini-2.0-flash',
+            contents=full_prompt
         )
         return response.text
 
