@@ -220,6 +220,7 @@ from api.payments import router as payments_router  # Payment Capture - invoices
 from api.communications import router as communications_router  # Communications - send estimates, invoices from ERP
 from api.revenue_operator import router as revenue_operator_router  # AI Revenue Operator - automated actions
 from api.lead_discovery import router as lead_discovery_router  # Lead Discovery Engine - automated lead discovery and qualification
+from api.email_capture import router as email_capture_router  # Email Capture - Lead generation for Gumroad products
 from api.relationships import router as relationships_router
 from api.roofing_labor_ml import router as roofing_labor_ml_router
 from api.self_awareness import router as self_awareness_router  # Self-Awareness Dashboard
@@ -1636,6 +1637,7 @@ app.include_router(payments_router, dependencies=SECURED_DEPENDENCIES)  # Paymen
 app.include_router(communications_router, dependencies=SECURED_DEPENDENCIES)  # Communications - send estimates/invoices from Weathercraft ERP
 app.include_router(revenue_operator_router, dependencies=SECURED_DEPENDENCIES)  # AI Revenue Operator - automated actions
 app.include_router(lead_discovery_router, dependencies=SECURED_DEPENDENCIES)  # Lead Discovery Engine - automated lead discovery and qualification
+app.include_router(email_capture_router)  # Email Capture - PUBLIC endpoint for lead generation (no auth required)
 app.include_router(roofing_labor_ml_router, dependencies=SECURED_DEPENDENCIES)  # Roofing labor ML (RandomForest)
 
 # Bleeding-edge AI systems (2025)
