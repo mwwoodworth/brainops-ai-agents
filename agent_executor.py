@@ -1142,6 +1142,18 @@ class AgentExecutor:
         'universal': 'WorkflowAutomation',
         'InvoiceAgent': 'InvoicingAgent',
         'LeadScoringAgent': 'LeadScorer',
+        # FIX: Add missing agent aliases for OODA-generated task names
+        # These exact names appear in ai_agent_executions as failures
+        'LeadGeneration': 'LeadDiscoveryAgentReal',  # OODA uses this name
+        'EstimateProcessor': 'ProposalGenerator',  # For estimate processing tasks
+        'CustomerRetention': 'CustomerAgent',  # For retention workflows
+        'system_improvement': 'SystemImprovement',  # lowercase version
+        'collections-manager_agent': 'InvoicingAgent',  # with _agent suffix
+        'payment-handler_agent': 'InvoicingAgent',  # with _agent suffix
+        'customer-intelligence_agent': 'CustomerIntelligence',  # with _agent suffix
+        'crew-allocator_agent': 'SchedulingAgent',  # with _agent suffix
+        'workflow-orchestrator_agent': 'WorkflowAutomation',  # with _agent suffix
+        'general_agent_agent': 'WorkflowAutomation',  # double-suffix fix
     }
 
     def _resolve_agent_name(self, agent_name: str) -> str:

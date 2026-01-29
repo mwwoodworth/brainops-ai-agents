@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.9.8')  # Migrate google-generativeai → google-genai SDK + Gemini embedding fix + OODA stability
+        self.version = os.getenv('VERSION', 'v10.9.9')  # Fix unimplemented agent aliases - route LeadGeneration, EstimateProcessor, CustomerRetention to real agents
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
