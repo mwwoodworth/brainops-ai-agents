@@ -416,3 +416,98 @@ async def get_insights_summary() -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed to get insights summary: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class FeedbackRequest(BaseModel):
+    """Request body for submitting user feedback on AI suggestions"""
+    feedback_type: str  # 'draft_rejection', 'suggestion_feedback', 'quality_issue', 'improvement_idea'
+    agent_name: Optional[str] = None  # Which agent produced the output
+    context_id: Optional[str] = None  # ID of the proposal, lead, or item being rated
+    rating: Optional[int] = None  # 1-5 satisfaction rating
+    reason: str  # Why was the draft bad / what needs improvement
+    suggested_improvement: Optional[str] = None  # User's suggested fix
+
+
+@router.post("/feedback")
+async def submit_user_feedback(request: FeedbackRequest) -> dict[str, Any]:
+    """
+    Submit user feedback on AI-generated content (Human Override Loop).
+
+    This enables the AI to learn from user corrections:
+    - When ERP users reject a draft, they can explain WHY
+    - The AI uses this feedback to improve future suggestions
+    - Tracks patterns in rejections to identify systematic issues
+
+    Gemini Finding #2: The Human Override Loop
+    """
+    try:
+        from database.async_connection import get_pool
+
+        pool = get_pool()
+
+        # Store the feedback as a learning insight
+        insight_id = await pool.fetchval("""
+            INSERT INTO ai_learning_insights (
+                insight_type,
+                category,
+                insight,
+                context,
+                confidence,
+                impact_score,
+                source,
+                metadata,
+                applied
+            ) VALUES (
+                'user_feedback',
+                $1,
+                $2,
+                $3,
+                0.9,
+                CASE
+                    WHEN $4 = 1 THEN 0.9
+                    WHEN $4 = 2 THEN 0.7
+                    WHEN $4 = 3 THEN 0.5
+                    WHEN $4 = 4 THEN 0.3
+                    ELSE 0.5
+                END,
+                'human_override',
+                $5::jsonb,
+                false
+            )
+            RETURNING id
+        """,
+            request.feedback_type,
+            request.reason,
+            request.context_id or 'general',
+            request.rating or 3,
+            {
+                'agent_name': request.agent_name,
+                'rating': request.rating,
+                'suggested_improvement': request.suggested_improvement,
+                'feedback_type': request.feedback_type,
+                'submitted_at': datetime.now(timezone.utc).isoformat()
+            }
+        )
+
+        # Log to unified brain for visibility
+        await pool.execute("""
+            INSERT INTO unified_brain_logs (system, action, data)
+            VALUES ('learning_system', 'user_feedback_received', $1::jsonb)
+        """, {
+            'insight_id': str(insight_id),
+            'feedback_type': request.feedback_type,
+            'agent_name': request.agent_name,
+            'reason': request.reason[:100] if request.reason else None
+        })
+
+        return {
+            "success": True,
+            "insight_id": str(insight_id),
+            "message": "Feedback recorded - AI will learn from this",
+            "feedback_type": request.feedback_type,
+            "submitted_at": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to submit feedback: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
