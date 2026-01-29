@@ -1492,15 +1492,15 @@ class LiveMemoryBrain:
 
         # Try Google Gemini
         try:
-            import google.generativeai as genai
-            if os.getenv("GOOGLE_API_KEY"):
-                genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-                result = genai.embed_content(
-                    model="models/text-embedding-004",
-                    content=text[:8000],
-                    task_type="retrieval_query"
+            from google import genai
+            _gapi_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            if _gapi_key:
+                _client = genai.Client(api_key=_gapi_key)
+                result = _client.models.embed_content(
+                    model="text-embedding-004",
+                    contents=text[:8000]
                 )
-                embedding = list(result['embedding'])
+                embedding = list(result.embeddings[0].values)
                 # Truncate to 1536d for DB compatibility (Gemini produces 3072d)
                 if len(embedding) > 1536:
                     embedding = embedding[:1536]

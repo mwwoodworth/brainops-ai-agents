@@ -12,10 +12,10 @@ from typing import Any, Optional
 import requests
 
 try:
-    import google.generativeai as genai
+    from google import genai as _genai_mod
     GEMINI_AVAILABLE = True
 except ImportError:
-    genai = None
+    _genai_mod = None
     GEMINI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
@@ -27,13 +27,12 @@ class AdvancedAIProviders:
         # Gemini (Google AI)
         self.gemini_key = os.getenv("GOOGLE_API_KEY")
         if self.gemini_key and GEMINI_AVAILABLE:
-            genai.configure(api_key=self.gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+            self._gemini_client = _genai_mod.Client(api_key=self.gemini_key)
             logger.info("Gemini AI configured")
         else:
-            self.gemini_model = None
+            self._gemini_client = None
             if not GEMINI_AVAILABLE:
-                logger.warning("Gemini not available: google-generativeai not installed")
+                logger.warning("Gemini not available: google-genai not installed")
 
         # Perplexity API
         self.perplexity_key = os.getenv("PERPLEXITY_API_KEY")
@@ -44,14 +43,15 @@ class AdvancedAIProviders:
 
     def generate_with_gemini(self, prompt: str, max_tokens: int = 1000) -> Optional[str]:
         """Generate using Google's Gemini AI"""
-        if not self.gemini_model or not GEMINI_AVAILABLE:
+        if not self._gemini_client or not GEMINI_AVAILABLE:
             return None
 
         try:
-            # Gemini has excellent reasoning and coding capabilities
-            response = self.gemini_model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
+            from google.genai import types as _genai_types
+            response = self._gemini_client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt,
+                config=_genai_types.GenerateContentConfig(
                     max_output_tokens=max_tokens,
                     temperature=0.7,
                     top_p=0.9,

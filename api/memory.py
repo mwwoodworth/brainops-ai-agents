@@ -152,15 +152,14 @@ async def generate_embedding(text: str) -> Optional[list[float]]:
     gemini_key = os.getenv("GOOGLE_AI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if gemini_key:
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=gemini_key)
-            result = genai.embed_content(
-                model="models/text-embedding-004",
-                content=text_truncated,
-                task_type="retrieval_query"  # Optimized for search queries
+            from google import genai
+            _client = genai.Client(api_key=gemini_key)
+            result = _client.models.embed_content(
+                model="text-embedding-004",
+                contents=text_truncated
             )
-            if result and "embedding" in result:
-                embedding = list(result["embedding"])
+            if result and result.embeddings:
+                embedding = list(result.embeddings[0].values)
                 # Gemini text-embedding-004 produces 3072 dims, but our DB has 1536 (OpenAI)
                 # Truncate or pad to match 1536 dimensions for compatibility
                 original_len = len(embedding)
@@ -277,15 +276,14 @@ async def get_embedding_status():
     gemini_dims = None
     if gemini_key:
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=gemini_key)
-            result = genai.embed_content(
-                model="models/text-embedding-004",
-                content="test",
-                task_type="retrieval_query"
+            from google import genai
+            _client = genai.Client(api_key=gemini_key)
+            result = _client.models.embed_content(
+                model="text-embedding-004",
+                contents="test"
             )
-            if result and "embedding" in result and len(result["embedding"]) > 0:
-                gemini_dims = len(result["embedding"])
+            if result and result.embeddings and len(result.embeddings[0].values) > 0:
+                gemini_dims = len(result.embeddings[0].values)
                 gemini_test = "working"
         except Exception as e:
             gemini_test = "failed"
