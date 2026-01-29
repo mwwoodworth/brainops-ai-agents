@@ -441,13 +441,18 @@ async def submit_user_feedback(request: FeedbackRequest) -> dict[str, Any]:
     Gemini Finding #2: The Human Override Loop
     """
     try:
+        from config import config
         from database.async_connection import get_pool
 
         pool = get_pool()
 
+        # Get default tenant ID for RLS-protected tables
+        tenant_id = config.tenant.default_tenant_id
+
         # Store the feedback as a learning insight
         insight_id = await pool.fetchval("""
             INSERT INTO ai_learning_insights (
+                tenant_id,
                 insight_type,
                 category,
                 insight,
@@ -458,24 +463,26 @@ async def submit_user_feedback(request: FeedbackRequest) -> dict[str, Any]:
                 metadata,
                 applied
             ) VALUES (
+                $1::uuid,
                 'user_feedback',
-                $1,
                 $2,
                 $3,
+                $4,
                 0.9,
                 CASE
-                    WHEN $4 = 1 THEN 0.9
-                    WHEN $4 = 2 THEN 0.7
-                    WHEN $4 = 3 THEN 0.5
-                    WHEN $4 = 4 THEN 0.3
+                    WHEN $5 = 1 THEN 0.9
+                    WHEN $5 = 2 THEN 0.7
+                    WHEN $5 = 3 THEN 0.5
+                    WHEN $5 = 4 THEN 0.3
                     ELSE 0.5
                 END,
                 'human_override',
-                $5::jsonb,
+                $6::jsonb,
                 false
             )
             RETURNING id
         """,
+            tenant_id,
             request.feedback_type,
             request.reason,
             request.context_id or 'general',
