@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Free AI Automation Starter Kit | BrainStack</title>
+    <meta name="description" content="Get 5 free AI prompts and 2 automation scripts to kickstart your AI journey. No credit card required.">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            max-width: 600px;
+            padding: 40px;
+            text-align: center;
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 16px;
+            background: linear-gradient(90deg, #00d4ff, #7c3aed);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .subtitle {
+            font-size: 1.2rem;
+            color: #a0aec0;
+            margin-bottom: 32px;
+        }
+        .benefits {
+            text-align: left;
+            margin: 32px 0;
+            padding: 24px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+        }
+        .benefit {
+            display: flex;
+            align-items: center;
+            margin: 12px 0;
+            font-size: 1.1rem;
+        }
+        .benefit::before {
+            content: "✓";
+            color: #00d4ff;
+            font-weight: bold;
+            margin-right: 12px;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-top: 24px;
+        }
+        input[type="email"] {
+            padding: 16px 20px;
+            font-size: 1rem;
+            border: 2px solid #3d4852;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+            transition: border-color 0.3s;
+        }
+        input[type="email"]:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+        button {
+            padding: 16px 32px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            background: linear-gradient(90deg, #00d4ff, #7c3aed);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px rgba(0,212,255,0.3);
+        }
+        .trust {
+            margin-top: 24px;
+            font-size: 0.9rem;
+            color: #718096;
+        }
+        .products {
+            margin-top: 48px;
+            padding-top: 32px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .products h3 {
+            color: #a0aec0;
+            margin-bottom: 16px;
+        }
+        .product-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .product {
+            padding: 16px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            text-decoration: none;
+            color: #fff;
+            transition: background 0.3s;
+        }
+        .product:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        .product-name {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .product-price {
+            color: #00d4ff;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Free AI Automation Starter Kit</h1>
+        <p class="subtitle">5 production-ready prompts + 2 automation scripts delivered instantly</p>
+
+        <div class="benefits">
+            <div class="benefit">5 battle-tested AI prompts for business automation</div>
+            <div class="benefit">2 Python scripts for lead qualification & data extraction</div>
+            <div class="benefit">Quick-start guide to deploying your first AI agent</div>
+            <div class="benefit">Exclusive discount on our full product lineup</div>
+        </div>
+
+        <form action="https://brainops-ai-agents.onrender.com/email/capture" method="POST" id="capture-form">
+            <input type="email" name="email" placeholder="Enter your email" required>
+            <button type="submit">Get Free Starter Kit</button>
+        </form>
+
+        <p class="trust">No spam. Unsubscribe anytime. Join 500+ developers.</p>
+
+        <div class="products">
+            <h3>Upgrade Your AI Game</h3>
+            <div class="product-grid">
+                <a href="https://brainstack.gumroad.com/l/prompt-pack" class="product" target="_blank">
+                    <div class="product-name">AI Prompt Pack</div>
+                    <div class="product-price">$29</div>
+                </a>
+                <a href="https://brainstack.gumroad.com/l/biz-automation" class="product" target="_blank">
+                    <div class="product-name">Automation Toolkit</div>
+                    <div class="product-price">$29</div>
+                </a>
+                <a href="https://brainstack.gumroad.com/l/mcp-starter" class="product" target="_blank">
+                    <div class="product-name">MCP Starter Kit</div>
+                    <div class="product-price">$49</div>
+                </a>
+                <a href="https://brainstack.gumroad.com/l/ai-orchestration" class="product" target="_blank">
+                    <div class="product-name">AI Orchestration</div>
+                    <div class="product-price">$97</div>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('capture-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = e.target.email.value;
+            const btn = e.target.querySelector('button');
+            btn.textContent = 'Sending...';
+
+            try {
+                const res = await fetch('https://brainops-ai-agents.onrender.com/email/capture', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({email, source: 'landing_page'})
+                });
+
+                if (res.ok) {
+                    btn.textContent = 'Check your inbox!';
+                    btn.style.background = '#10b981';
+                } else {
+                    throw new Error('Failed');
+                }
+            } catch (err) {
+                btn.textContent = 'Try again';
+                btn.style.background = '#ef4444';
+            }
+        });
+    </script>
+</body>
+</html>
