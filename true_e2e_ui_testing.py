@@ -243,16 +243,19 @@ Return a JSON object with this structure:
         # Try Gemini Vision first
         if GOOGLE_API_KEY:
             try:
-                import google.generativeai as genai
-                genai.configure(api_key=GOOGLE_API_KEY)
-                model = genai.GenerativeModel('gemini-2.0-flash')
+                from google import genai
+                from google.genai import types as _genai_types
+                client = genai.Client(api_key=GOOGLE_API_KEY)
 
                 # Create image part
                 image_data = base64.b64decode(screenshot_base64)
-                response = model.generate_content([
-                    prompt,
-                    {"mime_type": "image/png", "data": image_data}
-                ])
+                response = client.models.generate_content(
+                    model='gemini-2.0-flash',
+                    contents=[
+                        prompt,
+                        _genai_types.Part.from_bytes(data=image_data, mime_type="image/png")
+                    ]
+                )
 
                 # Parse JSON from response
                 response_text = response.text

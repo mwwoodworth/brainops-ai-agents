@@ -180,7 +180,7 @@ class TestMultiModelConsensus:
         with open("multi_model_consensus.py", "r") as f:
             content = f.read()
 
-        assert "google.generativeai" in content, "Google GenAI not imported"
+        assert "from google import genai" in content, "Google GenAI not imported"
         assert "gemini-pro" in content or "GOOGLE_GEMINI" in content, "Gemini model not configured"
         # Should not have placeholder response
         assert "integration pending" not in content.lower(), "Gemini still has placeholder"

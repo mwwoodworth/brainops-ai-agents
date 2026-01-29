@@ -25,12 +25,13 @@ except ImportError:
 
 # Optional Google Gemini dependency for embedding fallback
 try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = bool(os.getenv("GOOGLE_API_KEY"))
-    if GEMINI_AVAILABLE:
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+    from google import genai as _genai_mod
+    _gemini_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    GEMINI_AVAILABLE = bool(_gemini_api_key)
+    _gemini_embed_client = _genai_mod.Client(api_key=_gemini_api_key) if GEMINI_AVAILABLE else None
 except ImportError:
-    genai = None
+    _genai_mod = None
+    _gemini_embed_client = None
     GEMINI_AVAILABLE = False
 
 # Optional sentence-transformers for local embeddings (ultimate fallback)
@@ -195,14 +196,13 @@ class VectorMemorySystem:
                 logger.warning(f"OpenAI embedding failed, trying fallback: {e}")
 
         # Tier 2: Google Gemini embeddings
-        if GEMINI_AVAILABLE and genai is not None:
+        if GEMINI_AVAILABLE and _gemini_embed_client is not None:
             try:
-                result = genai.embed_content(
-                    model="models/text-embedding-004",
-                    content=text,
-                    task_type="retrieval_document"
+                result = _gemini_embed_client.models.embed_content(
+                    model="text-embedding-004",
+                    contents=text
                 )
-                embedding = result['embedding']
+                embedding = list(result.embeddings[0].values)
                 # Pad or truncate to match expected dimension
                 if len(embedding) < self.embedding_dimension:
                     embedding = embedding + [0.0] * (self.embedding_dimension - len(embedding))
