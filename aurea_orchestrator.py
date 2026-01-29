@@ -256,6 +256,15 @@ class AUREA:
         self.tenant_id = tenant_id
         self.autonomy_level = autonomy_level
         self._db_pool = db_pool  # Injected async pool
+
+        # Live mode controls whether real outreach actions are taken
+        # Set AUREA_LIVE_MODE=true to enable real autonomous actions (not dry_run)
+        self.live_mode = os.getenv("AUREA_LIVE_MODE", "false").lower() in ("true", "1", "yes")
+        if self.live_mode:
+            logger.info("🚀 AUREA LIVE MODE ENABLED - Real autonomous actions will be executed")
+        else:
+            logger.info("🔒 AUREA in protected mode - Outreach actions are dry_run (set AUREA_LIVE_MODE=true to enable)")
+
         self.memory = get_memory_manager()
         self.activation_system = get_activation_system(tenant_id)
         self.ai = RealAICore()
@@ -1478,12 +1487,13 @@ class AUREA:
             return {"action": "restart_service", "error": str(e), "mode": "fallback"}
 
     async def _activate_collection_agents(self, context: dict) -> dict:
-        """Activate agents for collections (Active, outreach protected for seeded data)"""
+        """Activate agents for collections (Live mode enables real outreach)"""
+        dry_run = not self.live_mode  # Only dry_run if NOT in live mode
         result = await self.activation_system.handle_business_event(
             BusinessEventType.INVOICE_OVERDUE,
-            {"context": context, "aurea_initiated": True, "execution_active": True, "dry_run_outreach": True}
+            {"context": context, "aurea_initiated": True, "execution_active": True, "dry_run_outreach": dry_run}
         )
-        return {"action": "collection_agents", "result": result, "mode": "active", "outreach_protected": True}
+        return {"action": "collection_agents", "result": result, "mode": "live" if self.live_mode else "protected", "outreach_protected": dry_run}
 
     async def _activate_scheduling_optimization(self, context: dict) -> dict:
         """Activate scheduling optimization (Fully active - internal operation)"""
@@ -1494,20 +1504,22 @@ class AUREA:
         return {"action": "scheduling_optimization", "result": result, "mode": "active"}
 
     async def _activate_retention_campaign(self, context: dict) -> dict:
-        """Activate customer retention campaign (Active, outreach protected for seeded data)"""
+        """Activate customer retention campaign (Live mode enables real outreach)"""
+        dry_run = not self.live_mode  # Only dry_run if NOT in live mode
         result = await self.activation_system.handle_business_event(
             BusinessEventType.CUSTOMER_CHURN_RISK,
-            {"context": context, "aurea_initiated": True, "execution_active": True, "dry_run_outreach": True}
+            {"context": context, "aurea_initiated": True, "execution_active": True, "dry_run_outreach": dry_run}
         )
-        return {"action": "retention_campaign", "result": result, "mode": "active", "outreach_protected": True}
+        return {"action": "retention_campaign", "result": result, "mode": "live" if self.live_mode else "protected", "outreach_protected": dry_run}
 
     async def _activate_sales_acceleration(self, context: dict) -> dict:
-        """Activate sales acceleration (Active, outreach protected for seeded data)"""
+        """Activate sales acceleration (Live mode enables real outreach)"""
+        dry_run = not self.live_mode  # Only dry_run if NOT in live mode
         result = await self.activation_system.handle_business_event(
             BusinessEventType.QUOTE_REQUESTED,
-            {"context": context, "aurea_initiated": True, "execution_active": True, "dry_run_outreach": True}
+            {"context": context, "aurea_initiated": True, "execution_active": True, "dry_run_outreach": dry_run}
         )
-        return {"action": "sales_acceleration", "result": result, "mode": "active", "outreach_protected": True}
+        return {"action": "sales_acceleration", "result": result, "mode": "live" if self.live_mode else "protected", "outreach_protected": dry_run}
 
     async def _activate_agents_for_decision(self, decision: Decision) -> dict:
         """Generic agent activation based on decision type (ACTIVE mode)"""
@@ -1522,16 +1534,17 @@ class AUREA:
         # Serialize decision to ensure datetime/Decimal objects are JSON-safe
         decision_dict = json_safe_serialize(asdict(decision))
 
-        # Outreach to seeded contacts protected, internal operations fully active
+        # Live mode enables real outreach; protected mode keeps dry_run for customer-facing actions
         requires_outreach = decision.type in [DecisionType.CUSTOMER]
+        dry_run = requires_outreach and not self.live_mode  # Only dry_run if requires outreach AND not live mode
         result = await self.activation_system.handle_business_event(
             event_type,
             {"decision": decision_dict, "aurea_initiated": True, "execution_active": True,
-             "dry_run_outreach": requires_outreach}
+             "dry_run_outreach": dry_run}
         )
 
         return {"action": "generic_activation", "event_type": event_type.value, "result": result,
-                "mode": "active", "outreach_protected": requires_outreach}
+                "mode": "live" if self.live_mode else "protected", "outreach_protected": dry_run}
 
     async def _learn(self, results: list[dict[str, Any]]):
         """

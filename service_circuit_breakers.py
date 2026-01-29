@@ -464,7 +464,9 @@ class ServiceCircuitBreakerManager:
 
     def _get_single_status(self, service_name: str) -> dict[str, Any]:
         """Get status of a single circuit"""
-        circuit = self._circuits.get(service_name)
+        # Be consistent with other call sites (allows_request/reset/etc) which
+        # auto-create unknown circuits on first use.
+        circuit = self.get_circuit(service_name)
         config = self._configs.get(service_name)
 
         if not circuit:
