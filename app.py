@@ -6940,8 +6940,8 @@ async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
                 COUNT(*) as active_subscriptions,
                 COALESCE(SUM(
                     CASE
-                        WHEN billing_cycle = 'monthly' THEN price_amount
-                        WHEN billing_cycle = 'annual' THEN price_amount / 12
+                        WHEN billing_cycle = 'monthly' THEN amount
+                        WHEN billing_cycle = 'annual' THEN amount / 12
                         ELSE 0
                     END
                 ), 0) as mrr
