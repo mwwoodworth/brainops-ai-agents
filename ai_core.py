@@ -339,8 +339,16 @@ class RealAICore:
             else:
                 logger.error(f"AI generation error: {e}")
 
-            # Intelligent fallback chain: Anthropic → Gemini → Perplexity
-            # If original was OpenAI and failed, try Anthropic first
+            # Intelligent fallback chain: Gemini FIRST (no quota limits) → Anthropic → Perplexity
+            # OPTIMIZATION: Try Gemini first since OpenAI/Anthropic have quota issues
+            if self._gemini_client:
+                try:
+                    logger.info("🔄 Trying Gemini fallback (primary - no quota limits)...")
+                    return await self._try_gemini(prompt, system_prompt, max_tokens)
+                except Exception as gemini_error:
+                    logger.warning(f"Gemini fallback failed: {gemini_error}")
+
+            # If Gemini failed, try Anthropic as secondary
             if is_openai_model and self.async_anthropic:
                 try:
                     logger.info("🔄 Trying Anthropic fallback...")
@@ -356,7 +364,8 @@ class RealAICore:
                 except Exception as anthropic_error:
                     logger.warning(f"Anthropic fallback failed: {anthropic_error}")
 
-            if self._gemini_client:
+            # Removed duplicate Gemini check - already tried first
+            if False and self._gemini_client:
                 try:
                     logger.info("🔄 Trying Gemini fallback...")
                     return await self._try_gemini(prompt, system_prompt, max_tokens)
