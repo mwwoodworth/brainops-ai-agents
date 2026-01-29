@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.9.24')  # Fixed feedback endpoint RLS tenant_id
+        self.version = os.getenv('VERSION', 'v11.0.0')  # Multi-AI Content Orchestrator + Revenue Intelligence System
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
