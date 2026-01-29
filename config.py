@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.9.22')  # Performance fix - agents endpoint optimization + DB indexes
+        self.version = os.getenv('VERSION', 'v10.9.23')  # Increased DB pool size for better concurrency
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
