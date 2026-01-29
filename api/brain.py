@@ -132,9 +132,21 @@ async def get_full_context():
         }
 
 
+@router.get("/ping")
+async def brain_ping():
+    """Ultra-fast brain availability check - no database queries."""
+    return {
+        "status": "ok" if BRAIN_AVAILABLE else "unavailable",
+        "brain_loaded": BRAIN_AVAILABLE,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
 @router.get("/status")
 async def get_brain_status():
     """Lightweight health/status check for the unified brain."""
+    import asyncio
+
     if not BRAIN_AVAILABLE or not brain:
         logger.warning("Unified Brain not available for /brain/status")
         return {
@@ -144,21 +156,32 @@ async def get_brain_status():
         }
 
     try:
-        await brain._ensure_table()
+        # Add timeout to prevent hanging
+        await asyncio.wait_for(brain._ensure_table(), timeout=5.0)
         from database.async_connection import get_pool
 
         pool = get_pool()
-        stats = await pool.fetchrow("""
-            SELECT
-                COUNT(*) as total_entries,
-                MAX(last_updated) as last_update
-            FROM unified_brain
-        """)
+        stats = await asyncio.wait_for(
+            pool.fetchrow("""
+                SELECT
+                    COUNT(*) as total_entries,
+                    MAX(last_updated) as last_update
+                FROM unified_brain
+            """),
+            timeout=5.0
+        )
 
         return {
             "status": "ok",
             "total_entries": stats["total_entries"] if stats else 0,
             "last_update": stats["last_update"].isoformat() if stats and stats["last_update"] else None,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except asyncio.TimeoutError:
+        logger.error("Brain status check timed out")
+        return {
+            "status": "timeout",
+            "message": "Database query timed out after 5s",
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
@@ -173,6 +196,8 @@ async def get_brain_status():
 @router.get("/critical")
 async def get_critical_context():
     """Get ALL critical context across all categories"""
+    import asyncio
+
     if not BRAIN_AVAILABLE or not brain:
         logger.warning("Unified Brain not available for /brain/critical")
         return {
@@ -183,11 +208,21 @@ async def get_critical_context():
         }
 
     try:
-        critical_items = [_sanitize_entry(item) for item in await brain.get_all_critical()]
+        # Add timeout to prevent 502 errors
+        raw_items = await asyncio.wait_for(brain.get_all_critical(), timeout=10.0)
+        critical_items = [_sanitize_entry(item) for item in raw_items]
         return {
             "status": "ok",
             "critical_items": critical_items,
             "count": len(critical_items),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except asyncio.TimeoutError:
+        logger.error("Critical context query timed out")
+        return {
+            "status": "timeout",
+            "message": "Database query timed out after 10s",
+            "critical_items": [],
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
@@ -206,11 +241,16 @@ async def get_by_category(
     limit: int = Query(100, ge=1, le=500)
 ):
     """Get all context in a specific category"""
+    import asyncio
+
     if not BRAIN_AVAILABLE or not brain:
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        return [_sanitize_entry(item) for item in await brain.get_by_category(category, limit)]
+        items = await asyncio.wait_for(brain.get_by_category(category, limit), timeout=10.0)
+        return [_sanitize_entry(item) for item in items]
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Database query timed out")
     except Exception as e:
         logger.error(f"Failed to get category: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -222,14 +262,21 @@ async def get_context(
     include_related: bool = Query(False, description="Include related entries")
 ):
     """Retrieve a specific piece of context with optional related entries"""
+    import asyncio
+
     if not BRAIN_AVAILABLE or not brain:
         raise HTTPException(status_code=503, detail="Unified Brain not available")
 
     try:
-        result = await brain.get(key, include_related=include_related)
+        result = await asyncio.wait_for(
+            brain.get(key, include_related=include_related),
+            timeout=10.0
+        )
         if not result:
             raise HTTPException(status_code=404, detail=f"Key not found: {key}")
         return _sanitize_entry(result)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Database query timed out")
     except HTTPException:
         raise
     except Exception as e:
