@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v11.0.3')  # Fixed priority column in brain sync
+        self.version = os.getenv('VERSION', 'v11.0.4')  # Fixed get_db_connection import in inventory
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
