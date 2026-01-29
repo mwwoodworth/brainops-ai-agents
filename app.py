@@ -2292,7 +2292,7 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
 
     async def _build_health_payload() -> dict[str, Any]:
         # Handle case where pool isn't initialized yet (during startup)
-        db_timeout = float(os.getenv("DB_HEALTH_TIMEOUT_S", "2.5"))
+        db_timeout = float(os.getenv("DB_HEALTH_TIMEOUT_S", "4.0"))
         db_timed_out = False
         try:
             pool = get_pool()

@@ -292,13 +292,14 @@ class AsyncDatabasePool(BasePool):
         async with self.pool.acquire() as conn:
             return await conn.executemany(command, args, timeout=timeout)
 
-    async def test_connection(self, timeout: float = 3.0) -> bool:
+    async def test_connection(self, timeout: float = 4.0) -> bool:
         """Test database connection with timeout protection"""
         try:
             # Add timeout to prevent health checks from hanging
+            # Use a simple query that doesn't require connection acquisition delay
             result = await asyncio.wait_for(
                 self.fetchval("SELECT 1", timeout=timeout),
-                timeout=timeout + 1.0  # Extra buffer for asyncio overhead
+                timeout=timeout + 2.0  # Extra buffer for pool acquisition + asyncio overhead
             )
             return result == 1
         except asyncio.TimeoutError:
