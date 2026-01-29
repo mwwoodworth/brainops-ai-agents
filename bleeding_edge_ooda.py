@@ -112,7 +112,6 @@ def _get_db_config():
 
 # Connection pool for efficient DB usage
 _db_pool = None
-_pool_lock = asyncio.Lock() if hasattr(asyncio, 'Lock') else None
 
 
 def get_db_connection():
@@ -528,11 +527,26 @@ class ParallelObserver:
         # Lazy-init: Semaphore must be created in the running event loop,
         # not at __init__ time (which may be a different loop).
         self._db_semaphore: asyncio.Semaphore | None = None
+        self._semaphore_loop: asyncio.AbstractEventLoop | None = None
 
     def _get_semaphore(self) -> asyncio.Semaphore:
-        """Get or create semaphore in the current event loop."""
-        if self._db_semaphore is None:
+        """Get or create semaphore in the current event loop.
+
+        Recreates semaphore if event loop has changed to avoid
+        'bound to a different event loop' errors.
+        """
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop - create new semaphore
             self._db_semaphore = asyncio.Semaphore(3)
+            self._semaphore_loop = None
+            return self._db_semaphore
+
+        # Recreate if loop changed or semaphore doesn't exist
+        if self._db_semaphore is None or self._semaphore_loop is not current_loop:
+            self._db_semaphore = asyncio.Semaphore(3)
+            self._semaphore_loop = current_loop
         return self._db_semaphore
 
     async def observe_all(self) -> list[dict[str, Any]]:
