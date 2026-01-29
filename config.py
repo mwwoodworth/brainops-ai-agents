@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v11.0.4')  # Fixed get_db_connection import in inventory
+        self.version = os.getenv('VERSION', 'v11.0.5')  # Added timeouts to brain endpoints, /brain/ping
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
