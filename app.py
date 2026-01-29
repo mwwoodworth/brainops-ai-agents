@@ -6920,6 +6920,8 @@ async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
     Separates real revenue from demo data.
     """
     try:
+        from email_sender import get_db_connection
+        from psycopg2.extras import RealDictCursor
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
