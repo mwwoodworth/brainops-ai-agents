@@ -219,7 +219,11 @@ class DynamicCircuitBreaker:
         # State
         self._state = CircuitState.CLOSED
         self._state_changed_at = datetime.now()
-        self._lock = threading.Lock()
+        # Re-entrant lock: several state transitions emit alerts that call
+        # `get_metrics()`, which also acquires the lock. A plain Lock can
+        # deadlock when alerts are emitted inside a locked section (e.g. reset,
+        # or OPEN->HALF_OPEN->CLOSED transitions).
+        self._lock = threading.RLock()
 
         # Counters
         self._failure_count = 0
