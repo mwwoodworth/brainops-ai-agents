@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v10.9.12')  # Health check uses direct connection to avoid pool contention
+        self.version = os.getenv('VERSION', 'v10.9.15')  # Enhanced OODA integrity validation - more lenient success detection
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
