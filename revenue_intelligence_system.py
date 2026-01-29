@@ -737,8 +737,8 @@ class RevenueIntelligenceSystem:
 
             for entry in brain_entries:
                 cursor.execute("""
-                    INSERT INTO unified_brain (key, value, category, last_updated)
-                    VALUES (%s, %s, %s, NOW())
+                    INSERT INTO unified_brain (key, value, category, priority, last_updated)
+                    VALUES (%s, %s, %s, 5, NOW())
                     ON CONFLICT (key) DO UPDATE SET
                         value = EXCLUDED.value,
                         category = EXCLUDED.category,
