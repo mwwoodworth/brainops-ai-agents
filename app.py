@@ -526,6 +526,9 @@ SCHEMA_BOOTSTRAP_SQL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_email_deliveries_email_id ON ai_email_deliveries(email_id);",
     "CREATE INDEX IF NOT EXISTS idx_email_deliveries_recipient ON ai_email_deliveries(recipient);",
+    # Agents endpoint performance: avoid full-table scans when looking up execution stats.
+    "CREATE INDEX IF NOT EXISTS idx_ai_agent_executions_agent_name ON ai_agent_executions(agent_name);",
+    "CREATE INDEX IF NOT EXISTS idx_ai_agent_executions_agent_name_created_at ON ai_agent_executions(agent_name, created_at DESC);",
 ]
 
 # Build info
@@ -3314,20 +3317,12 @@ async def get_agents(
 
                 total = await pool.fetchval(f"SELECT COUNT(*) FROM agents a {where_sql}", *params) or 0
 
-                # Build query with execution statistics
-                # Join with ai_agent_executions to get total_executions and last_active
+                # IMPORTANT: Do NOT aggregate the full ai_agent_executions table inside the agents list query.
+                # That can hang under load (large execution history). Instead, fetch agents first, then
+                # compute execution stats for just the returned page.
                 query = f"""
-                    SELECT {select_sql},
-                           COALESCE(e.exec_count, 0) as total_executions,
-                           e.last_exec as last_active
+                    SELECT {select_sql}
                     FROM agents a
-                    LEFT JOIN (
-                        SELECT agent_name,
-                               COUNT(*) as exec_count,
-                               MAX(created_at) as last_exec
-                        FROM ai_agent_executions
-                        GROUP BY agent_name
-                    ) e ON a.name = e.agent_name
                     {where_sql}
                     ORDER BY a.category, a.name
                     LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
@@ -3335,10 +3330,41 @@ async def get_agents(
 
                 rows = await pool.fetch(query, *params, limit, offset)
 
-                agents = [
-                    _row_to_agent(row if isinstance(row, dict) else dict(row))
-                    for row in rows
-                ]
+                exec_stats_by_agent_name: dict[str, dict[str, Any]] = {}
+                try:
+                    agent_names = [
+                        (row.get("name") if isinstance(row, dict) else dict(row).get("name"))
+                        for row in rows
+                    ]
+                    agent_names = [name for name in agent_names if isinstance(name, str) and name]
+                    if agent_names:
+                        exec_rows = await pool.fetch(
+                            """
+                            SELECT agent_name,
+                                   COUNT(*) as exec_count,
+                                   MAX(created_at) as last_exec
+                            FROM ai_agent_executions
+                            WHERE agent_name = ANY($1::text[])
+                            GROUP BY agent_name
+                            """,
+                            agent_names,
+                        )
+                        exec_stats_by_agent_name = {
+                            str(r.get("agent_name")): (r if isinstance(r, dict) else dict(r))
+                            for r in exec_rows
+                            if (r.get("agent_name") if isinstance(r, dict) else dict(r).get("agent_name"))
+                        }
+                except Exception as stats_error:
+                    # Execution stats are nice-to-have; never block /agents on them.
+                    logger.warning("Failed to load agent execution stats: %s", stats_error)
+
+                agents: list[Agent] = []
+                for row in rows:
+                    data = row if isinstance(row, dict) else dict(row)
+                    stats = exec_stats_by_agent_name.get(str(data.get("name") or ""), {})
+                    data["total_executions"] = int(stats.get("exec_count") or 0)
+                    data["last_active"] = stats.get("last_exec") or None
+                    agents.append(_row_to_agent(data))
 
                 return AgentList(
                     agents=agents,
