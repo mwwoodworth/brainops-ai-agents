@@ -35,10 +35,11 @@ async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     return api_key
 
 
+# NOTE: Auth is handled at app.py level via SECURED_DEPENDENCIES
+# Don't add duplicate dependencies here - causes double auth failures
 router = APIRouter(
     prefix="/api/neural",
-    tags=["neural-reconnection"],
-    dependencies=[Depends(verify_api_key)]
+    tags=["neural-reconnection"]
 )
 
 
