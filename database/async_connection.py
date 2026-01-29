@@ -31,8 +31,8 @@ class PoolConfig:
     user: str
     password: str
     database: str
-    min_size: int = 1  # Keep minimum connections ready
-    max_size: int = 4  # REDUCED: Supabase session mode has limited connections
+    min_size: int = 2  # Keep minimum connections ready
+    max_size: int = 10  # Increased for better concurrency with transaction mode pooler
     command_timeout: int = 30
     connect_timeout: float = 30.0  # Increased to prevent timeouts on slow networks
     max_inactive_connection_lifetime: float = 60.0  # Recycle idle connections after 60s
