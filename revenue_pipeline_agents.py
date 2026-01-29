@@ -19,9 +19,21 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from database.async_connection import get_pool
+from database.async_connection import get_pool, DatabaseUnavailableError
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_get_pool():
+    """Get pool with proper error handling."""
+    try:
+        return get_pool()
+    except DatabaseUnavailableError as e:
+        logger.error(f"Database pool not initialized: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error getting pool: {e}")
+        raise
 
 
 class BaseAgent:
@@ -38,7 +50,7 @@ class BaseAgent:
     async def log_execution(self, task: dict, result: dict):
         """Log execution to database"""
         try:
-            pool = get_pool()
+            pool = _safe_get_pool()
             exec_id = str(uuid.uuid4())
             await pool.execute("""
                 INSERT INTO agent_executions (
@@ -75,6 +87,9 @@ class LeadDiscoveryAgentReal(BaseAgent):
         action = task.get('action', 'discover_all')
 
         try:
+            # Verify database is available before running
+            _safe_get_pool()
+
             if action == 'discover_reengagement':
                 return await self.discover_reengagement_leads()
             elif action == 'discover_upsell':
@@ -83,6 +98,9 @@ class LeadDiscoveryAgentReal(BaseAgent):
                 return await self.discover_referral_leads()
             else:
                 return await self.discover_all_leads()
+        except DatabaseUnavailableError as e:
+            self.logger.error(f"Database not available: {e}")
+            return {"status": "error", "error": "Database not initialized", "recoverable": True}
         except Exception as e:
             self.logger.error(f"Lead discovery failed: {e}")
             return {"status": "error", "error": str(e)}
@@ -121,7 +139,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
     async def discover_reengagement_leads(self) -> dict[str, Any]:
         """Find customers who haven't had jobs in 12+ months."""
         try:
-            pool = get_pool()
+            pool = _safe_get_pool()
 
             leads = await pool.fetch("""
                 SELECT DISTINCT
@@ -173,7 +191,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
     async def discover_upsell_leads(self) -> dict[str, Any]:
         """Find high-value customers for upselling premium services."""
         try:
-            pool = get_pool()
+            pool = _safe_get_pool()
 
             leads = await pool.fetch("""
                 WITH customer_stats AS (
@@ -241,7 +259,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
     async def discover_referral_leads(self) -> dict[str, Any]:
         """Find active, satisfied customers who could provide referrals."""
         try:
-            pool = get_pool()
+            pool = _safe_get_pool()
 
             leads = await pool.fetch("""
                 SELECT DISTINCT
@@ -300,7 +318,7 @@ class LeadDiscoveryAgentReal(BaseAgent):
     ) -> bool:
         """Store discovered lead in revenue_leads table"""
         try:
-            pool = get_pool()
+            pool = _safe_get_pool()
 
             email = lead.get('email')
             if not email:
@@ -399,7 +417,7 @@ class NurtureExecutorAgentReal(BaseAgent):
     async def nurture_new_leads(self) -> dict[str, Any]:
         """Process all new leads and create nurture sequences"""
         try:
-            pool = get_pool()
+            pool = _safe_get_pool()
 
             leads = await pool.fetch("""
                 SELECT rl.*
@@ -464,7 +482,7 @@ class NurtureExecutorAgentReal(BaseAgent):
     ) -> dict[str, Any]:
         """Create a nurture sequence for a specific lead"""
         try:
-            pool = get_pool()
+            pool = _safe_get_pool()
 
             if not lead_data:
                 lead_row = await pool.fetchrow(
@@ -594,7 +612,7 @@ class NurtureExecutorAgentReal(BaseAgent):
     ) -> int:
         """Queue emails from touchpoints to ai_email_queue"""
         try:
-            pool = get_pool()
+            pool = _safe_get_pool()
             emails_queued = 0
             lead_is_demo = bool(lead_data.get('is_demo'))
             lead_is_test = bool(lead_data.get('is_test')) or lead_is_demo
@@ -654,7 +672,7 @@ class NurtureExecutorAgentReal(BaseAgent):
     async def queue_pending_emails(self) -> dict[str, Any]:
         """Process any pending emails that haven't been queued yet"""
         try:
-            pool = get_pool()
+            pool = _safe_get_pool()
 
             sequences = await pool.fetch("""
                 SELECT id, configuration
