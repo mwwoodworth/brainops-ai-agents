@@ -293,20 +293,39 @@ class AsyncDatabasePool(BasePool):
             return await conn.executemany(command, args, timeout=timeout)
 
     async def test_connection(self, timeout: float = 4.0) -> bool:
-        """Test database connection with timeout protection"""
+        """Test database connection with timeout protection.
+
+        Uses a direct connection instead of pool to avoid contention during
+        health checks when the pool is busy with actual work.
+        """
         try:
-            # Add timeout to prevent health checks from hanging
-            # Use a simple query that doesn't require connection acquisition delay
-            result = await asyncio.wait_for(
-                self.fetchval("SELECT 1", timeout=timeout),
-                timeout=timeout + 2.0  # Extra buffer for pool acquisition + asyncio overhead
+            # Direct connection test - bypasses pool to avoid contention
+            direct_conn = await asyncio.wait_for(
+                asyncpg.connect(
+                    host=self.config.host,
+                    port=self.config.port,
+                    user=self.config.user,
+                    password=self.config.password,
+                    database=self.config.database,
+                    ssl=self._ssl_context,
+                    timeout=timeout,
+                    statement_cache_size=0,
+                ),
+                timeout=timeout + 1.0
             )
-            return result == 1
+            try:
+                result = await asyncio.wait_for(
+                    direct_conn.fetchval("SELECT 1"),
+                    timeout=2.0
+                )
+                return result == 1
+            finally:
+                await direct_conn.close()
         except asyncio.TimeoutError:
-            logger.error("Connection test timed out after %.1fs", timeout)
+            logger.warning("Health check connection timed out after %.1fs", timeout)
             return False
         except Exception as exc:
-            logger.error("Connection test failed: %s", exc)
+            logger.warning("Health check connection failed: %s", exc)
             return False
 
 
