@@ -6601,6 +6601,487 @@ async def get_unified_system_status():
 # ==================== END UNIFIED OBSERVABILITY ====================
 
 
+# ==================== MULTI-AI CONTENT ORCHESTRATION ====================
+
+try:
+    from multi_ai_content_orchestrator import MultiAIContentOrchestrator, ContentType
+    CONTENT_ORCHESTRATOR_AVAILABLE = True
+    logger.info("Multi-AI Content Orchestrator loaded")
+except ImportError as e:
+    CONTENT_ORCHESTRATOR_AVAILABLE = False
+    logger.warning(f"Multi-AI Content Orchestrator not available: {e}")
+
+
+class ContentGenerationRequest(BaseModel):
+    content_type: str = "blog_post"  # blog_post, newsletter, ebook, training
+    topic: str
+    brand: str = "BrainOps"
+    target_audience: str = "tech professionals"
+    chapters: int = 5  # for ebooks
+    module_number: int = 1  # for training docs
+    include_image: bool = True
+
+
+@app.post("/content/generate", tags=["Content"])
+async def generate_content(
+    request: ContentGenerationRequest,
+    background_tasks: BackgroundTasks,
+    api_key: str = Depends(get_api_key)
+):
+    """
+    Generate content using Multi-AI Orchestration.
+
+    Supported content types:
+    - blog_post: SEO-optimized blog articles
+    - newsletter: Complete email newsletters with HTML
+    - ebook: Full ebooks with multiple chapters
+    - training: Training documentation with exercises and quizzes
+    """
+    if not CONTENT_ORCHESTRATOR_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Content orchestrator not available")
+
+    orchestrator = MultiAIContentOrchestrator()
+
+    task = {
+        "content_type": request.content_type,
+        "topic": request.topic,
+        "brand": request.brand,
+        "target_audience": request.target_audience,
+        "chapters": request.chapters,
+        "module_number": request.module_number,
+        "include_image": request.include_image
+    }
+
+    # Run in background for long-running content
+    if request.content_type in ["ebook", "ebook_full"]:
+        job_id = str(uuid.uuid4())
+        background_tasks.add_task(_run_content_generation, orchestrator, task, job_id)
+        return {
+            "status": "accepted",
+            "job_id": job_id,
+            "message": f"Ebook generation started for: {request.topic}",
+            "check_status": f"/content/status/{job_id}"
+        }
+
+    # Run synchronously for faster content types
+    result = await orchestrator.execute(task)
+    return result
+
+
+async def _run_content_generation(orchestrator, task, job_id):
+    """Background content generation with status tracking."""
+    try:
+        result = await orchestrator.execute(task)
+        # Store result for retrieval
+        logger.info(f"Content job {job_id} completed: {result.get('status')}")
+    except Exception as e:
+        logger.error(f"Content job {job_id} failed: {e}")
+
+
+@app.post("/content/newsletter", tags=["Content"])
+async def generate_newsletter(
+    topic: str = Body(..., embed=True),
+    brand: str = Body("BrainOps", embed=True),
+    api_key: str = Depends(get_api_key)
+):
+    """Generate a complete newsletter with HTML template."""
+    if not CONTENT_ORCHESTRATOR_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Content orchestrator not available")
+
+    orchestrator = MultiAIContentOrchestrator()
+    result = await orchestrator.generate_newsletter({"topic": topic, "brand": brand})
+    return result
+
+
+@app.post("/content/ebook", tags=["Content"])
+async def generate_ebook(
+    topic: str = Body(..., embed=True),
+    chapters: int = Body(5, embed=True),
+    author: str = Body("BrainOps AI", embed=True),
+    background_tasks: BackgroundTasks = None,
+    api_key: str = Depends(get_api_key)
+):
+    """Generate a complete ebook with multiple chapters."""
+    if not CONTENT_ORCHESTRATOR_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Content orchestrator not available")
+
+    orchestrator = MultiAIContentOrchestrator()
+    result = await orchestrator.generate_ebook({
+        "topic": topic,
+        "chapters": chapters,
+        "author": author
+    })
+    return result
+
+
+@app.post("/content/training", tags=["Content"])
+async def generate_training_doc(
+    topic: str = Body(..., embed=True),
+    module_number: int = Body(1, embed=True),
+    skill_level: str = Body("beginner", embed=True),
+    api_key: str = Depends(get_api_key)
+):
+    """Generate training documentation with exercises and quizzes."""
+    if not CONTENT_ORCHESTRATOR_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Content orchestrator not available")
+
+    orchestrator = MultiAIContentOrchestrator()
+    result = await orchestrator.generate_training_doc({
+        "topic": topic,
+        "module_number": module_number,
+        "skill_level": skill_level
+    })
+    return result
+
+
+@app.get("/content/types", tags=["Content"])
+async def get_content_types():
+    """Get available content generation types."""
+    return {
+        "types": [
+            {"id": "blog_post", "name": "Blog Post", "description": "SEO-optimized blog articles with research"},
+            {"id": "newsletter", "name": "Newsletter", "description": "Complete email newsletters with HTML templates"},
+            {"id": "ebook", "name": "Ebook", "description": "Full ebooks with multiple chapters and TOC"},
+            {"id": "training", "name": "Training Doc", "description": "Training modules with exercises and quizzes"}
+        ],
+        "models_used": ["perplexity:sonar-pro", "anthropic:claude-3-sonnet", "google:gemini-2.0-flash", "openai:gpt-4-turbo-preview", "openai:dall-e-3"]
+    }
+
+
+# ==================== END MULTI-AI CONTENT ORCHESTRATION ====================
+
+
+# ==================== PRODUCT & REVENUE INVENTORY ====================
+
+@app.get("/inventory/products", tags=["Inventory"])
+async def get_product_inventory(api_key: str = Depends(get_api_key)):
+    """
+    Get complete product inventory across all platforms.
+    This is the source of truth for what products exist and their status.
+    """
+    inventory = {
+        "last_updated": datetime.utcnow().isoformat(),
+        "platforms": {
+            "gumroad": {
+                "store_url": "https://woodworthia.gumroad.com",
+                "products": [
+                    {
+                        "code": "HJHMSM",
+                        "name": "MCP Server Starter Kit",
+                        "price": 97,
+                        "type": "code_kit",
+                        "url": "https://woodworthia.gumroad.com/l/hjhmsm",
+                        "status": "active",
+                        "description": "Build AI tool integrations fast with MCP Server patterns"
+                    },
+                    {
+                        "code": "GSAAVB",
+                        "name": "AI Orchestration Framework",
+                        "price": 147,
+                        "type": "code_kit",
+                        "url": "https://woodworthia.gumroad.com/l/gsaavb",
+                        "status": "active",
+                        "description": "Multi-LLM smart routing and orchestration system"
+                    },
+                    {
+                        "code": "VJXCEW",
+                        "name": "SaaS Automation Scripts",
+                        "price": 67,
+                        "type": "code_kit",
+                        "url": "https://woodworthia.gumroad.com/l/vjxcew",
+                        "status": "active"
+                    },
+                    {
+                        "code": "UPSYKR",
+                        "name": "Command Center UI Kit",
+                        "price": 149,
+                        "type": "code_kit",
+                        "url": "https://woodworthia.gumroad.com/l/upsykr",
+                        "status": "active"
+                    },
+                    {
+                        "code": "XGFKP",
+                        "name": "AI Prompt Engineering Pack",
+                        "price": 47,
+                        "type": "prompt_pack",
+                        "url": "https://woodworthia.gumroad.com/l/xgfkp",
+                        "status": "active"
+                    },
+                    {
+                        "code": "CAWVO",
+                        "name": "Business Automation Toolkit",
+                        "price": 49,
+                        "type": "prompt_pack",
+                        "url": "https://woodworthia.gumroad.com/l/cawvo",
+                        "status": "active"
+                    },
+                    {
+                        "code": "GR-ERP-START",
+                        "name": "SaaS ERP Starter Kit",
+                        "price": 197,
+                        "type": "code_kit",
+                        "url": "https://woodworthia.gumroad.com/l/gr-erp-start",
+                        "status": "active",
+                        "description": "Multi-tenant SaaS foundation with auth, CRM, jobs, invoicing"
+                    },
+                    {
+                        "code": "GR-CONTENT",
+                        "name": "AI Content Production Pipeline",
+                        "price": 347,
+                        "type": "automation",
+                        "url": "https://woodworthia.gumroad.com/l/gr-content",
+                        "status": "active",
+                        "description": "Scale content 10x with multi-stage AI pipeline"
+                    },
+                    {
+                        "code": "GR-ONBOARD",
+                        "name": "Intelligent Client Onboarding",
+                        "price": 297,
+                        "type": "automation",
+                        "url": "https://woodworthia.gumroad.com/l/gr-onboard",
+                        "status": "active"
+                    },
+                    {
+                        "code": "GR-PMCMD",
+                        "name": "AI Project Command Center (Notion)",
+                        "price": 197,
+                        "type": "template",
+                        "url": "https://woodworthia.gumroad.com/l/gr-pmcmd",
+                        "status": "active"
+                    }
+                ],
+                "pricing_model": "one_time",
+                "total_products": 10
+            },
+            "myroofgenius": {
+                "url": "https://myroofgenius.com",
+                "products": [
+                    {
+                        "name": "Starter",
+                        "price_monthly": 49,
+                        "price_annual": 588,
+                        "type": "subscription",
+                        "status": "ready",
+                        "features": ["1-3 users", "2-10 jobs/month", "Basic analysis"]
+                    },
+                    {
+                        "name": "Professional",
+                        "price_monthly": 99,
+                        "price_annual": 1188,
+                        "type": "subscription",
+                        "status": "ready",
+                        "features": ["Up to 10 users", "10-30 jobs/month", "Advanced analytics"]
+                    },
+                    {
+                        "name": "Enterprise",
+                        "price_monthly": 199,
+                        "price_annual": 2388,
+                        "type": "subscription",
+                        "status": "ready",
+                        "features": ["Unlimited users", "30+ jobs/month", "Full features"]
+                    }
+                ],
+                "pricing_model": "subscription",
+                "payment_processor": "stripe",
+                "current_mrr": 0,
+                "active_subscribers": 0
+            },
+            "brainstack_studio": {
+                "url": "https://brainstackstudio.com",
+                "products": [
+                    {
+                        "name": "AI Playground",
+                        "price": 0,
+                        "type": "free",
+                        "status": "active",
+                        "features": ["Claude, GPT, Gemini access", "Local storage", "Basic highlighting"]
+                    }
+                ],
+                "pricing_model": "freemium",
+                "monetization_status": "needs_setup",
+                "notes": "Currently free - needs subscription model or upsell to Gumroad products"
+            }
+        },
+        "revenue_summary": {
+            "gumroad_lifetime": 4985.00,
+            "mrg_mrr": 0,
+            "total_real_revenue": 4985.00,
+            "note": "All other data in ERP is demo/seed data"
+        }
+    }
+
+    return inventory
+
+
+@app.get("/inventory/revenue", tags=["Inventory"])
+async def get_revenue_status(api_key: str = Depends(get_api_key)):
+    """
+    Get real revenue status across all platforms.
+    Separates real revenue from demo data.
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Get real Gumroad sales
+        cursor.execute("""
+            SELECT
+                COUNT(*) as total_sales,
+                COALESCE(SUM(price::numeric), 0) as total_revenue,
+                MAX(sale_timestamp) as last_sale
+            FROM gumroad_sales
+            WHERE is_test = false OR is_test IS NULL
+        """)
+        gumroad = cursor.fetchone() or {"total_sales": 0, "total_revenue": 0}
+
+        # Get MRG subscriptions
+        cursor.execute("""
+            SELECT
+                COUNT(*) as active_subscriptions,
+                COALESCE(SUM(
+                    CASE
+                        WHEN billing_cycle = 'monthly' THEN price_amount
+                        WHEN billing_cycle = 'annual' THEN price_amount / 12
+                        ELSE 0
+                    END
+                ), 0) as mrr
+            FROM mrg_subscriptions
+            WHERE status = 'active'
+        """)
+        mrg = cursor.fetchone() or {"active_subscriptions": 0, "mrr": 0}
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "timestamp": datetime.utcnow().isoformat(),
+            "real_revenue": {
+                "gumroad": {
+                    "total_sales": gumroad.get("total_sales", 0),
+                    "total_revenue": float(gumroad.get("total_revenue", 0)),
+                    "last_sale": str(gumroad.get("last_sale")) if gumroad.get("last_sale") else None
+                },
+                "myroofgenius": {
+                    "active_subscriptions": mrg.get("active_subscriptions", 0),
+                    "mrr": float(mrg.get("mrr", 0))
+                },
+                "total_lifetime_revenue": float(gumroad.get("total_revenue", 0)),
+                "total_mrr": float(mrg.get("mrr", 0))
+            },
+            "warning": "ERP customer/job/invoice data is DEMO DATA - not real revenue"
+        }
+
+    except Exception as e:
+        logger.error(f"Revenue status failed: {e}")
+        return {
+            "timestamp": datetime.utcnow().isoformat(),
+            "real_revenue": {
+                "gumroad": {"total_sales": 0, "total_revenue": 0},
+                "myroofgenius": {"active_subscriptions": 0, "mrr": 0}
+            },
+            "error": str(e)
+        }
+
+
+# ==================== END PRODUCT & REVENUE INVENTORY ====================
+
+
+# ==================== REVENUE INTELLIGENCE SYSTEM ====================
+
+try:
+    from revenue_intelligence_system import (
+        RevenueIntelligenceSystem,
+        get_revenue_system,
+        get_business_state,
+        get_revenue,
+        sync_to_brain
+    )
+    REVENUE_INTEL_AVAILABLE = True
+    logger.info("Revenue Intelligence System loaded")
+except ImportError as e:
+    REVENUE_INTEL_AVAILABLE = False
+    logger.warning(f"Revenue Intelligence System not available: {e}")
+
+
+@app.get("/revenue/state", tags=["Revenue Intelligence"])
+async def get_complete_business_state(api_key: str = Depends(get_api_key)):
+    """
+    Get COMPLETE business state snapshot.
+    This is the PRIMARY endpoint for understanding full business state.
+    Includes products, revenue, social presence, automations, and action items.
+    """
+    if not REVENUE_INTEL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Revenue Intelligence not available")
+
+    state = await get_business_state()
+    return state
+
+
+@app.get("/revenue/live", tags=["Revenue Intelligence"])
+async def get_live_revenue_data(api_key: str = Depends(get_api_key)):
+    """Get live revenue data across all platforms."""
+    if not REVENUE_INTEL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Revenue Intelligence not available")
+
+    return await get_revenue()
+
+
+@app.get("/revenue/products", tags=["Revenue Intelligence"])
+async def get_all_products_inventory(api_key: str = Depends(get_api_key)):
+    """Get complete product inventory across all platforms."""
+    if not REVENUE_INTEL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Revenue Intelligence not available")
+
+    system = get_revenue_system()
+    return {
+        "products": system.get_all_products(),
+        "social": system.get_social_presence(),
+        "websites": system.get_websites()
+    }
+
+
+@app.get("/revenue/automations", tags=["Revenue Intelligence"])
+async def get_automation_health(api_key: str = Depends(get_api_key)):
+    """Get status of all revenue-related automations."""
+    if not REVENUE_INTEL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Revenue Intelligence not available")
+
+    system = get_revenue_system()
+    return await system.get_automation_status()
+
+
+@app.post("/revenue/sync-brain", tags=["Revenue Intelligence"])
+async def sync_business_state_to_brain(api_key: str = Depends(get_api_key)):
+    """
+    Sync complete business state to AI brain.
+    This ensures ALL AI agents have current business awareness.
+    """
+    if not REVENUE_INTEL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Revenue Intelligence not available")
+
+    return await sync_to_brain()
+
+
+@app.post("/revenue/event", tags=["Revenue Intelligence"])
+async def record_revenue_event(
+    event_type: str = Body(..., embed=True),
+    platform: str = Body(..., embed=True),
+    amount: float = Body(0, embed=True),
+    metadata: dict = Body(None, embed=True),
+    api_key: str = Depends(get_api_key)
+):
+    """Record a revenue event for tracking."""
+    if not REVENUE_INTEL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Revenue Intelligence not available")
+
+    system = get_revenue_system()
+    event_id = await system.record_revenue_event(event_type, platform, amount, metadata)
+    return {"status": "recorded", "event_id": event_id}
+
+
+# ==================== END REVENUE INTELLIGENCE SYSTEM ====================
+
+
 @app.exception_handler(DatabaseUnavailableError)
 async def database_unavailable_handler(request: Request, exc: DatabaseUnavailableError):
     """Surface database connectivity issues with a 503 response."""
