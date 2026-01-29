@@ -223,8 +223,12 @@ except Exception as exc:
 try:
     from revenue_pipeline_agents import LeadDiscoveryAgentReal, NurtureExecutorAgentReal
     REVENUE_PIPELINE_AVAILABLE = True
+    logger.info("✅ Revenue pipeline agents loaded successfully")
 except Exception as exc:
+    import traceback
     REVENUE_PIPELINE_AVAILABLE = False
+    logger.error("❌ Revenue pipeline agents FAILED to load: %s", exc)
+    logger.error("Traceback: %s", traceback.format_exc())
     _handle_optional_import("Revenue pipeline agents", exc)
 
 # Hallucination Prevention - SAC3 validation for all AI outputs
