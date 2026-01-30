@@ -23,6 +23,7 @@ from psycopg2.extras import RealDictCursor
 from revenue_generation_system import get_revenue_system
 from advanced_lead_scoring import get_scoring_engine
 from utils.outbound import email_block_reason
+from loop_bridge import run_on_main_loop
 
 # Default tenant ID from environment
 DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457")
@@ -541,23 +542,9 @@ class AgentScheduler:
                 }
 
             # Run autonomous tasks - create dedicated event loop for this thread
-            # This avoids deadlocks from nested asyncio.run() calls
-            def run_in_new_loop():
-                """Run async tasks in a fresh event loop"""
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    return loop.run_until_complete(
-                        asyncio.wait_for(run_autonomous_tasks(), timeout=300)
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("Autonomous tasks timed out after 300s")
-                    return {"timed_out": True}
-                finally:
-                    loop.close()
-
             try:
-                auto_stats = run_in_new_loop()
+                # Schedule onto the FastAPI main loop to avoid cross-loop asyncpg usage.
+                auto_stats = run_on_main_loop(run_autonomous_tasks(), timeout=300)
             except Exception as e:
                 logger.error(f"Failed to run autonomous tasks: {e}")
                 auto_stats = {"error": str(e)}
@@ -742,22 +729,19 @@ class AgentScheduler:
                         }
 
                         # Calculate advanced multi-factor score (async)
-                        loop = asyncio.new_event_loop()
-                        try:
-                            result = loop.run_until_complete(
-                                scoring_engine.calculate_multi_factor_score(str(lead['id']), lead_data)
-                            )
-                            advanced_scores_updated += 1
-                            actions_taken.append({
-                                'action': 'advanced_lead_scored',
-                                'lead_id': str(lead['id']),
-                                'composite_score': result.composite_score,
-                                'tier': result.tier.value,
-                                'next_best_action': result.next_best_action
-                            })
-                            logger.info(f"Advanced scored lead {lead['id']}: {result.composite_score} ({result.tier.value})")
-                        finally:
-                            loop.close()
+                        result = run_on_main_loop(
+                            scoring_engine.calculate_multi_factor_score(str(lead['id']), lead_data),
+                            timeout=60,
+                        )
+                        advanced_scores_updated += 1
+                        actions_taken.append({
+                            'action': 'advanced_lead_scored',
+                            'lead_id': str(lead['id']),
+                            'composite_score': result.composite_score,
+                            'tier': result.tier.value,
+                            'next_best_action': result.next_best_action
+                        })
+                        logger.info(f"Advanced scored lead {lead['id']}: {result.composite_score} ({result.tier.value})")
 
                     except Exception as e:
                         logger.warning(f"Advanced scoring failed for lead {lead['id']}: {e}")
@@ -774,31 +758,27 @@ class AgentScheduler:
         leads_synced = 0
         if LEAD_DISCOVERY_AVAILABLE and agent.get('name') in ['LeadDiscoveryAgent', 'LeadGenerationAgent']:
             try:
-                # Run lead discovery in async context
-                loop = asyncio.new_event_loop()
-                try:
-                    discovery_result = loop.run_until_complete(
-                        handle_lead_discovery_task({
-                            'id': str(uuid.uuid4()),
-                            'sources': ['erp_reactivation', 'erp_upsell', 'erp_referral'],
-                            'limit': 50,
-                            'sync_revenue': True,
-                            'sync_erp': False
-                        })
-                    )
-                    if discovery_result.get('status') == 'completed':
-                        result_data = discovery_result.get('result', {})
-                        leads_discovered = result_data.get('leads_discovered', 0)
-                        leads_synced = result_data.get('synced_to_revenue', 0)
-                        actions_taken.append({
-                            'action': 'lead_discovery_completed',
-                            'leads_discovered': leads_discovered,
-                            'leads_synced': leads_synced,
-                            'sources': result_data.get('by_source', {})
-                        })
-                        logger.info(f"Lead Discovery: {leads_discovered} discovered, {leads_synced} synced")
-                finally:
-                    loop.close()
+                discovery_result = run_on_main_loop(
+                    handle_lead_discovery_task({
+                        'id': str(uuid.uuid4()),
+                        'sources': ['erp_reactivation', 'erp_upsell', 'erp_referral'],
+                        'limit': 50,
+                        'sync_revenue': True,
+                        'sync_erp': False
+                    }),
+                    timeout=300,
+                )
+                if discovery_result.get('status') == 'completed':
+                    result_data = discovery_result.get('result', {})
+                    leads_discovered = result_data.get('leads_discovered', 0)
+                    leads_synced = result_data.get('synced_to_revenue', 0)
+                    actions_taken.append({
+                        'action': 'lead_discovery_completed',
+                        'leads_discovered': leads_discovered,
+                        'leads_synced': leads_synced,
+                        'sources': result_data.get('by_source', {})
+                    })
+                    logger.info(f"Lead Discovery: {leads_discovered} discovered, {leads_synced} synced")
             except Exception as e:
                 logger.warning(f"Lead discovery engine failed: {e}")
 
@@ -1179,23 +1159,8 @@ class AgentScheduler:
             # Import the feedback loop
             from learning_feedback_loop import run_scheduled_feedback_loop
 
-            # Run the feedback loop cycle - create dedicated event loop for this thread
-            def run_in_new_loop():
-                """Run async tasks in a fresh event loop"""
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    return loop.run_until_complete(
-                        asyncio.wait_for(run_scheduled_feedback_loop(), timeout=300)
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("Learning feedback loop timed out after 300s")
-                    return {"timed_out": True}
-                finally:
-                    loop.close()
-
             try:
-                cycle_result = run_in_new_loop()
+                cycle_result = run_on_main_loop(run_scheduled_feedback_loop(), timeout=300)
             except Exception as e:
                 logger.error(f"Failed to run learning feedback loop: {e}")
                 cycle_result = {"error": str(e)}
@@ -1263,21 +1228,11 @@ class AgentScheduler:
             topic = None
             if "idea" in agent['name'].lower():
                 action = "generate_topic_ideas"
-            
-            # Run in new loop
-            def run_in_new_loop():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    return loop.run_until_complete(
-                        asyncio.wait_for(agent_instance.execute({"action": action, "topic": topic}), timeout=300)
-                    )
-                except asyncio.TimeoutError:
-                    return {"error": "Content generation timed out"}
-                finally:
-                    loop.close()
 
-            result = run_in_new_loop()
+            result = run_on_main_loop(
+                agent_instance.execute({"action": action, "topic": topic}),
+                timeout=300,
+            )
             return {"status": "completed", "result": result, "timestamp": datetime.utcnow().isoformat()}
 
         except Exception as e:
@@ -1292,27 +1247,19 @@ class AgentScheduler:
             if not ACQUISITION_AGENTS_AVAILABLE:
                 return {"status": "skipped", "error": "Acquisition agents unavailable"}
 
-            # Run in new loop
-            def run_in_new_loop():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    if 'WebSearch' in agent['name']:
-                        instance = WebSearchAgent()
-                        return loop.run_until_complete(instance.search_for_leads({"industry": "roofing"}))
-                    elif 'SocialMedia' in agent['name']:
-                        instance = SocialMediaAgent()
-                        return loop.run_until_complete(instance.monitor_social_signals())
-                    elif 'Outreach' in agent['name']:
-                        # Outreach usually needs a target_id, placeholder for now
-                        return {"status": "outreach_scan_completed"} 
-                    elif 'Conversion' in agent['name']:
-                        return {"status": "conversion_optimization_completed"}
-                    return {"status": "unknown_acquisition_agent"}
-                finally:
-                    loop.close()
-
-            result = run_in_new_loop()
+            if 'WebSearch' in agent['name']:
+                instance = WebSearchAgent()
+                result = run_on_main_loop(instance.search_for_leads({"industry": "roofing"}), timeout=300)
+            elif 'SocialMedia' in agent['name']:
+                instance = SocialMediaAgent()
+                result = run_on_main_loop(instance.monitor_social_signals(), timeout=300)
+            elif 'Outreach' in agent['name']:
+                # Outreach usually needs a target_id, placeholder for now
+                result = {"status": "outreach_scan_completed"}
+            elif 'Conversion' in agent['name']:
+                result = {"status": "conversion_optimization_completed"}
+            else:
+                result = {"status": "unknown_acquisition_agent"}
             
             # Count results
             count = len(result) if isinstance(result, list) else 0
@@ -1372,14 +1319,8 @@ class AgentScheduler:
         if not MEMORY_HYGIENE_AVAILABLE:
             return
         try:
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(run_scheduled_hygiene())
-                logger.info("Memory Hygiene completed: %s operations", result.get("operations", {}))
-            finally:
-                loop.close()
+            result = run_on_main_loop(run_scheduled_hygiene(), timeout=300)
+            logger.info("Memory Hygiene completed: %s operations", result.get("operations", {}))
         except Exception as exc:
             logger.error("Memory Hygiene failed: %s", exc, exc_info=True)
 
@@ -1388,19 +1329,13 @@ class AgentScheduler:
         if not LEARNING_FEEDBACK_AVAILABLE:
             return
         try:
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(run_scheduled_feedback_loop())
-                logger.info(
-                    "Learning Feedback Loop completed: %d patterns -> %d proposals -> %d applied",
-                    result.get("patterns_found", 0),
-                    result.get("proposals_generated", 0),
-                    result.get("improvements_applied", 0)
-                )
-            finally:
-                loop.close()
+            result = run_on_main_loop(run_scheduled_feedback_loop(), timeout=300)
+            logger.info(
+                "Learning Feedback Loop completed: %d patterns -> %d proposals -> %d applied",
+                result.get("patterns_found", 0),
+                result.get("proposals_generated", 0),
+                result.get("improvements_applied", 0)
+            )
         except Exception as exc:
             logger.error("Learning Feedback Loop failed: %s", exc, exc_info=True)
 
@@ -1425,19 +1360,13 @@ class AgentScheduler:
             return
         try:
             agent = GumroadRevenueAgent()
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                # Run daily sync to pull sales from Gumroad API
-                result = loop.run_until_complete(agent.execute("daily_sync"))
-                logger.info("🎯 GumroadRevenueAgent daily_sync completed: %s", result)
+            # Run daily sync to pull sales from Gumroad API
+            result = run_on_main_loop(agent.execute("daily_sync"), timeout=300)
+            logger.info("🎯 GumroadRevenueAgent daily_sync completed: %s", result)
 
-                # Also check for revenue report
-                report = loop.run_until_complete(agent.execute("revenue_report", days=30))
-                logger.info("📊 GumroadRevenueAgent revenue report: total=%s", report.get("total_revenue", 0))
-            finally:
-                loop.close()
+            # Also check for revenue report
+            report = run_on_main_loop(agent.execute("revenue_report", days=30), timeout=300)
+            logger.info("📊 GumroadRevenueAgent revenue report: total=%s", report.get("total_revenue", 0))
         except Exception as exc:
             logger.error("GumroadRevenueAgent failed: %s", exc, exc_info=True)
 
@@ -1455,13 +1384,10 @@ class AgentScheduler:
             if not controller:
                 logger.warning("OODA controller not available")
                 return
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(controller.run_enhanced_cycle())
-                logger.info("OODA Loop completed: %s", result.get("cycle_id"))
-            finally:
-                loop.close()
+            # CRITICAL: run on the FastAPI main loop so asyncpg + AgentExecutor
+            # use the same loop that created the shared connection pool.
+            result = run_on_main_loop(controller.run_enhanced_cycle(), timeout=120)
+            logger.info("OODA Loop completed: %s", result.get("cycle_id"))
         except Exception as exc:
             logger.error("OODA Loop failed: %s", exc, exc_info=True)
         finally:
@@ -1475,19 +1401,13 @@ class AgentScheduler:
             return
         try:
             factory = get_factory()
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                # Initialize if needed
-                if not factory.pipelines:
-                    loop.run_until_complete(factory.initialize())
-                # Run all pipelines
-                result = loop.run_until_complete(factory.run_all_pipelines())
-                logger.info("💰 RevenuePipelineFactory completed: %d pipelines, %d leads generated",
-                           result.get("pipelines_run", 0), result.get("total_leads", 0))
-            finally:
-                loop.close()
+            # Initialize if needed
+            if not factory.pipelines:
+                run_on_main_loop(factory.initialize(), timeout=300)
+            # Run all pipelines
+            result = run_on_main_loop(factory.run_all_pipelines(), timeout=600)
+            logger.info("💰 RevenuePipelineFactory completed: %d pipelines, %d leads generated",
+                       result.get("pipelines_run", 0), result.get("total_leads", 0))
         except Exception as exc:
             logger.error("RevenuePipelineFactory failed: %s", exc, exc_info=True)
 
@@ -1497,15 +1417,9 @@ class AgentScheduler:
             logger.info("Platform Cross-Sell skipped: not available")
             return
         try:
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(process_platform_cross_sells())
-                logger.info("📧 Platform Cross-Sell completed: MRG=%d, BSS=%d enrolled",
-                           result.get("mrg_enrolled", 0), result.get("bss_enrolled", 0))
-            finally:
-                loop.close()
+            result = run_on_main_loop(process_platform_cross_sells(), timeout=300)
+            logger.info("📧 Platform Cross-Sell completed: MRG=%d, BSS=%d enrolled",
+                       result.get("mrg_enrolled", 0), result.get("bss_enrolled", 0))
         except Exception as exc:
             logger.error("Platform Cross-Sell failed: %s", exc, exc_info=True)
 
