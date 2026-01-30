@@ -31,17 +31,61 @@ class PoolConfig:
     user: str
     password: str
     database: str
+    # NOTE: Defaults favor production stability on Supabase transaction pooler (6543).
+    # Values can be overridden via env (see __post_init__).
     min_size: int = 3  # Keep minimum connections ready
-    max_size: int = 15  # Increased for better concurrency with transaction mode pooler
+    max_size: int = 25  # Higher ceiling to avoid periodic pool exhaustion under OODA/scheduler bursts
     # If the pool is exhausted (or a connection is leaked), asyncpg will wait
     # indefinitely by default. We enforce an acquire timeout so HTTP handlers
     # fail fast instead of hanging forever.
-    acquire_timeout: float = 5.0
+    acquire_timeout: float = 15.0
     command_timeout: int = 30
     connect_timeout: float = 30.0  # Increased to prevent timeouts on slow networks
     max_inactive_connection_lifetime: float = 60.0  # Recycle idle connections after 60s
     ssl: bool = True  # Supabase requires TLS; allow override for local/dev
     ssl_verify: bool = True  # Enable SSL verification by default for security; disable only for local dev
+
+    def __post_init__(self) -> None:
+        """
+        Apply optional env overrides for production tuning without redeploy.
+
+        Supported env vars:
+          - DB_POOL_MIN_SIZE
+          - DB_POOL_MAX_SIZE
+          - DB_POOL_ACQUIRE_TIMEOUT
+          - DB_POOL_COMMAND_TIMEOUT
+          - DB_POOL_CONNECT_TIMEOUT
+          - DB_POOL_MAX_INACTIVE_SECS
+        """
+        def _int_env(name: str, default: int) -> int:
+            raw = os.getenv(name)
+            if raw is None or raw.strip() == "":
+                return default
+            try:
+                return int(raw)
+            except Exception:
+                logger.warning("Invalid %s=%r (expected int); using %s", name, raw, default)
+                return default
+
+        def _float_env(name: str, default: float) -> float:
+            raw = os.getenv(name)
+            if raw is None or raw.strip() == "":
+                return default
+            try:
+                return float(raw)
+            except Exception:
+                logger.warning("Invalid %s=%r (expected float); using %s", name, raw, default)
+                return default
+
+        self.min_size = max(0, _int_env("DB_POOL_MIN_SIZE", self.min_size))
+        self.max_size = max(self.min_size, _int_env("DB_POOL_MAX_SIZE", self.max_size))
+        self.acquire_timeout = max(0.1, _float_env("DB_POOL_ACQUIRE_TIMEOUT", self.acquire_timeout))
+        self.command_timeout = max(1, _int_env("DB_POOL_COMMAND_TIMEOUT", self.command_timeout))
+        self.connect_timeout = max(1.0, _float_env("DB_POOL_CONNECT_TIMEOUT", self.connect_timeout))
+        self.max_inactive_connection_lifetime = max(
+            1.0,
+            _float_env("DB_POOL_MAX_INACTIVE_SECS", self.max_inactive_connection_lifetime),
+        )
 
 
 class BasePool:
@@ -781,6 +825,7 @@ async def init_pool(config: PoolConfig) -> BasePool:
             database=config.database,
             min_size=config.min_size,
             max_size=config.max_size,
+            acquire_timeout=config.acquire_timeout,
             command_timeout=config.command_timeout,
             connect_timeout=config.connect_timeout,
             max_inactive_connection_lifetime=config.max_inactive_connection_lifetime,
