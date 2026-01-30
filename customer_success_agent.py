@@ -7,13 +7,26 @@ Uses OpenAI for real analysis and persists results to database.
 import json
 import logging
 import os
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+# Prefer the shared sync pool in production to avoid connection churn and
+# MaxClientsInSessionMode. Fall back to direct psycopg2 connections only when
+# the pool module isn't available.
+try:
+    from database.sync_pool import get_sync_pool
+
+    _SYNC_POOL_AVAILABLE = True
+except Exception:
+    get_sync_pool = None
+    _SYNC_POOL_AVAILABLE = False
 
 # Lazy OpenAI client initialization
 _openai_client = None
@@ -31,13 +44,41 @@ def get_openai_client():
             logger.error(f"Failed to initialize OpenAI client: {e}")
     return _openai_client
 
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST'),
-    'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'),
-    'port': int(os.getenv('DB_PORT', 5432))
-}
+def _resolve_db_config() -> dict[str, Any]:
+    """Resolve DB config from DB_* vars or DATABASE_URL (Render/Supabase)."""
+    host = os.getenv("DB_HOST")
+    database = os.getenv("DB_NAME", "postgres")
+    user = os.getenv("DB_USER")
+    password = os.getenv("DB_PASSWORD")
+    port = os.getenv("DB_PORT", "5432")
+
+    if not all([host, user, password]):
+        database_url = os.getenv("DATABASE_URL", "").strip()
+        if database_url:
+            parsed = urlparse(database_url)
+            host = parsed.hostname or host
+            database = parsed.path.lstrip("/") if parsed.path else database
+            user = parsed.username or user
+            password = parsed.password or password
+            port = str(parsed.port) if parsed.port else port
+
+    # Supabase pooler: prefer transaction mode (6543) over session (5432).
+    try:
+        if host and "pooler.supabase.com" in host and int(port) == 5432:
+            port = "6543"
+    except Exception:
+        pass
+
+    return {
+        "host": host,
+        "database": database,
+        "user": user,
+        "password": password,
+        "port": int(port) if str(port).isdigit() else 5432,
+    }
+
+
+DB_CONFIG = _resolve_db_config()
 
 class CustomerSuccessAgent:
     """AI-powered customer success analysis agent with AUREA integration"""
@@ -56,13 +97,29 @@ class CustomerSuccessAgent:
             logger.warning("AUREA integration not available")
             self.aurea = None
 
-    def _get_db_connection(self):
-        """Get database connection"""
+    @contextmanager
+    def _db_connection(self):
+        """Get a DB connection via shared pool (preferred) with safe fallback."""
+        if _SYNC_POOL_AVAILABLE and get_sync_pool is not None:
+            pool = get_sync_pool()
+            with pool.get_connection() as conn:
+                yield conn
+            return
+
+        conn = None
         try:
-            return psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**DB_CONFIG)
         except Exception as e:
             logger.error(f"Database connection failed: {e}")
-            return None
+            conn = None
+        try:
+            yield conn
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     async def analyze_customer_health(self, customer_id: str) -> dict[str, Any]:
         """Analyze health score for a specific customer using real data and AI"""
@@ -74,58 +131,55 @@ class CustomerSuccessAgent:
             }
 
             # Get real customer data from database
-            conn = self._get_db_connection()
-            if conn:
-                try:
-                    cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._db_connection() as conn:
+                if conn:
+                    try:
+                        cur = conn.cursor(cursor_factory=RealDictCursor)
+                        try:
+                            # Get customer info
+                            cur.execute("""
+                                SELECT id, name, email, created_at, status
+                                FROM customers
+                                WHERE id::text = %s OR name ILIKE %s
+                                LIMIT 1
+                            """, (customer_id, f"%{customer_id}%"))
+                            customer = cur.fetchone()
 
-                    # Get customer info
-                    cur.execute("""
-                        SELECT id, name, email, created_at, status
-                        FROM customers
-                        WHERE id::text = %s OR name ILIKE %s
-                        LIMIT 1
-                    """, (customer_id, f"%{customer_id}%"))
-                    customer = cur.fetchone()
+                            if customer:
+                                results["customer_data"]["info"] = dict(customer)
 
-                    if customer:
-                        results["customer_data"]["info"] = dict(customer)
+                                # Get job history
+                                cur.execute("""
+                                    SELECT
+                                        COUNT(*) as total_jobs,
+                                        COUNT(*) FILTER (WHERE status = 'completed') as completed,
+                                        COUNT(*) FILTER (WHERE status IN ('pending', 'in_progress')) as active,
+                                        MAX(created_at) as last_job_date
+                                    FROM jobs
+                                    WHERE customer_id = %s
+                                """, (customer['id'],))
+                                jobs = cur.fetchone()
+                                results["customer_data"]["jobs"] = dict(jobs) if jobs else {}
 
-                        # Get job history
-                        cur.execute("""
-                            SELECT
-                                COUNT(*) as total_jobs,
-                                COUNT(*) FILTER (WHERE status = 'completed') as completed,
-                                COUNT(*) FILTER (WHERE status IN ('pending', 'in_progress')) as active,
-                                MAX(created_at) as last_job_date
-                            FROM jobs
-                            WHERE customer_id = %s
-                        """, (customer['id'],))
-                        jobs = cur.fetchone()
-                        results["customer_data"]["jobs"] = dict(jobs) if jobs else {}
-
-                        # Get invoice/payment history
-                        cur.execute("""
-                            SELECT
-                                COUNT(*) as total_invoices,
-                                SUM(total_amount) as total_revenue,
-                                COUNT(*) FILTER (WHERE status = 'paid') as paid_invoices,
-                                AVG(total_amount) as avg_invoice_value
-                            FROM invoices
-                            WHERE customer_id = %s
-                        """, (customer['id'],))
-                        invoices = cur.fetchone()
-                        results["customer_data"]["invoices"] = {
-                            k: float(v) if isinstance(v, (int, float)) and v else v
-                            for k, v in dict(invoices).items()
-                        } if invoices else {}
-
-                    cur.close()
-                    conn.close()
-                except Exception as e:
-                    logger.warning(f"Could not fetch customer data: {e}")
-                    if conn:
-                        conn.close()
+                                # Get invoice/payment history
+                                cur.execute("""
+                                    SELECT
+                                        COUNT(*) as total_invoices,
+                                        SUM(total_amount) as total_revenue,
+                                        COUNT(*) FILTER (WHERE status = 'paid') as paid_invoices,
+                                        AVG(total_amount) as avg_invoice_value
+                                    FROM invoices
+                                    WHERE customer_id = %s
+                                """, (customer['id'],))
+                                invoices = cur.fetchone()
+                                results["customer_data"]["invoices"] = {
+                                    k: float(v) if isinstance(v, (int, float)) and v else v
+                                    for k, v in dict(invoices).items()
+                                } if invoices else {}
+                        finally:
+                            cur.close()
+                    except Exception as e:
+                        logger.warning(f"Could not fetch customer data: {e}")
 
             # Use AI for health scoring and analysis
             client = get_openai_client()
@@ -189,27 +243,24 @@ Respond with JSON only:
                 "generated_at": datetime.utcnow().isoformat()
             }
 
-            # Get customer info for personalization
-            conn = self._get_db_connection()
             customer_info = {}
-            if conn:
-                try:
-                    cur = conn.cursor(cursor_factory=RealDictCursor)
-                    cur.execute("""
-                        SELECT name, email, created_at
-                        FROM customers
-                        WHERE id::text = %s OR name ILIKE %s
-                        LIMIT 1
-                    """, (customer_id, f"%{customer_id}%"))
-                    customer = cur.fetchone()
-                    if customer:
-                        customer_info = dict(customer)
-                    cur.close()
-                    conn.close()
-                except Exception as e:
-                    logger.warning(f"Could not fetch customer: {e}")
-                    if conn:
-                        conn.close()
+            # Get customer info for personalization
+            with self._db_connection() as conn:
+                if conn:
+                    try:
+                        cur = conn.cursor(cursor_factory=RealDictCursor)
+                        cur.execute("""
+                            SELECT name, email, created_at
+                            FROM customers
+                            WHERE id::text = %s OR name ILIKE %s
+                            LIMIT 1
+                        """, (customer_id, f"%{customer_id}%"))
+                        customer = cur.fetchone()
+                        if customer:
+                            customer_info = dict(customer)
+                        cur.close()
+                    except Exception as e:
+                        logger.warning(f"Could not fetch customer: {e}")
 
             # AI-generated personalized onboarding plan
             client = get_openai_client()
@@ -279,50 +330,47 @@ Respond with JSON only:
                 "at_risk_customers": []
             }
 
-            conn = self._get_db_connection()
-            if conn:
-                try:
-                    cur = conn.cursor(cursor_factory=RealDictCursor)
+            with self._db_connection() as conn:
+                if conn:
+                    try:
+                        cur = conn.cursor(cursor_factory=RealDictCursor)
+                        try:
+                            # Find customers with risk indicators
+                            cur.execute("""
+                                SELECT
+                                    c.id,
+                                    c.name,
+                                    c.created_at,
+                                    COUNT(j.id) as job_count,
+                                    MAX(j.created_at) as last_job_date,
+                                    COALESCE(SUM(i.total_amount), 0) as total_revenue
+                                FROM customers c
+                                LEFT JOIN jobs j ON j.customer_id = c.id
+                                LEFT JOIN invoices i ON i.customer_id = c.id AND i.status = 'paid'
+                                WHERE c.created_at < NOW() - INTERVAL '30 days'
+                                GROUP BY c.id, c.name, c.created_at
+                                HAVING MAX(j.created_at) < NOW() - INTERVAL '60 days'
+                                   OR COUNT(j.id) = 0
+                                ORDER BY total_revenue DESC
+                                LIMIT 20
+                            """)
+                            at_risk = cur.fetchall()
+                            results["at_risk_customers"] = [dict(c) for c in at_risk] if at_risk else []
 
-                    # Find customers with risk indicators
-                    cur.execute("""
-                        SELECT
-                            c.id,
-                            c.name,
-                            c.created_at,
-                            COUNT(j.id) as job_count,
-                            MAX(j.created_at) as last_job_date,
-                            COALESCE(SUM(i.total_amount), 0) as total_revenue
-                        FROM customers c
-                        LEFT JOIN jobs j ON j.customer_id = c.id
-                        LEFT JOIN invoices i ON i.customer_id = c.id AND i.status = 'paid'
-                        WHERE c.created_at < NOW() - INTERVAL '30 days'
-                        GROUP BY c.id, c.name, c.created_at
-                        HAVING MAX(j.created_at) < NOW() - INTERVAL '60 days'
-                           OR COUNT(j.id) = 0
-                        ORDER BY total_revenue DESC
-                        LIMIT 20
-                    """)
-                    at_risk = cur.fetchall()
-                    results["at_risk_customers"] = [dict(c) for c in at_risk] if at_risk else []
-
-                    # Get overall customer health stats
-                    cur.execute("""
-                        SELECT
-                            COUNT(*) as total_customers,
-                            COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') as new_customers,
-                            COUNT(*) FILTER (WHERE status = 'inactive') as inactive_customers
-                        FROM customers
-                    """)
-                    stats = cur.fetchone()
-                    results["customer_stats"] = dict(stats) if stats else {}
-
-                    cur.close()
-                    conn.close()
-                except Exception as e:
-                    logger.warning(f"Could not fetch churn data: {e}")
-                    if conn:
-                        conn.close()
+                            # Get overall customer health stats
+                            cur.execute("""
+                                SELECT
+                                    COUNT(*) as total_customers,
+                                    COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') as new_customers,
+                                    COUNT(*) FILTER (WHERE status = 'inactive') as inactive_customers
+                                FROM customers
+                            """)
+                            stats = cur.fetchone()
+                            results["customer_stats"] = dict(stats) if stats else {}
+                        finally:
+                            cur.close()
+                    except Exception as e:
+                        logger.warning(f"Could not fetch churn data: {e}")
 
             # AI analysis of churn patterns
             client = get_openai_client()
@@ -374,39 +422,39 @@ Respond with JSON only:
     async def calculate_health_score(self, customer_id: str) -> dict[str, Any]:
         """Calculate comprehensive customer health score with multiple factors"""
         try:
-            conn = self._get_db_connection()
-            if not conn:
-                return {"error": "Database connection failed", "health_score": 0}
+            customer_data = None
+            with self._db_connection() as conn:
+                if not conn:
+                    return {"error": "Database connection failed", "health_score": 0}
 
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-
-            # Get comprehensive customer data
-            cur.execute("""
-                SELECT
-                    c.id,
-                    c.name,
-                    c.created_at,
-                    c.status,
-                    COUNT(DISTINCT j.id) as total_jobs,
-                    COUNT(DISTINCT j.id) FILTER (WHERE j.created_at > NOW() - INTERVAL '30 days') as recent_jobs,
-                    COUNT(DISTINCT j.id) FILTER (WHERE j.status = 'completed') as completed_jobs,
-                    MAX(j.created_at) as last_job_date,
-                    COUNT(DISTINCT i.id) as total_invoices,
-                    COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'paid') as paid_invoices,
-                    COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'overdue') as overdue_invoices,
-                    COALESCE(SUM(i.total_amount) FILTER (WHERE i.status = 'paid'), 0) as total_revenue,
-                    COALESCE(AVG(i.total_amount), 0) as avg_invoice_value,
-                    EXTRACT(EPOCH FROM (NOW() - MAX(j.created_at)))/86400 as days_since_last_job
-                FROM customers c
-                LEFT JOIN jobs j ON j.customer_id = c.id
-                LEFT JOIN invoices i ON i.customer_id = c.id
-                WHERE c.id::text = %s OR c.name ILIKE %s
-                GROUP BY c.id, c.name, c.created_at, c.status
-            """, (customer_id, f"%{customer_id}%"))
-
-            customer_data = cur.fetchone()
-            cur.close()
-            conn.close()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                try:
+                    # Get comprehensive customer data
+                    cur.execute("""
+                        SELECT
+                            c.id,
+                            c.name,
+                            c.created_at,
+                            c.status,
+                            COUNT(DISTINCT j.id) as total_jobs,
+                            COUNT(DISTINCT j.id) FILTER (WHERE j.created_at > NOW() - INTERVAL '30 days') as recent_jobs,
+                            COUNT(DISTINCT j.id) FILTER (WHERE j.status = 'completed') as completed_jobs,
+                            MAX(j.created_at) as last_job_date,
+                            COUNT(DISTINCT i.id) as total_invoices,
+                            COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'paid') as paid_invoices,
+                            COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'overdue') as overdue_invoices,
+                            COALESCE(SUM(i.total_amount) FILTER (WHERE i.status = 'paid'), 0) as total_revenue,
+                            COALESCE(AVG(i.total_amount), 0) as avg_invoice_value,
+                            EXTRACT(EPOCH FROM (NOW() - MAX(j.created_at)))/86400 as days_since_last_job
+                        FROM customers c
+                        LEFT JOIN jobs j ON j.customer_id = c.id
+                        LEFT JOIN invoices i ON i.customer_id = c.id
+                        WHERE c.id::text = %s OR c.name ILIKE %s
+                        GROUP BY c.id, c.name, c.created_at, c.status
+                    """, (customer_id, f"%{customer_id}%"))
+                    customer_data = cur.fetchone()
+                finally:
+                    cur.close()
 
             if not customer_data:
                 return {"error": "Customer not found", "health_score": 0}
@@ -540,34 +588,34 @@ Respond with JSON only:
             # Get health score first
             health_data = await self.calculate_health_score(customer_id)
 
-            conn = self._get_db_connection()
-            if not conn:
-                return {"error": "Database connection failed", "churn_risk": 0}
+            churn_data = None
+            with self._db_connection() as conn:
+                if not conn:
+                    return {"error": "Database connection failed", "churn_risk": 0}
 
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-
-            # Get additional churn indicators
-            cur.execute("""
-                SELECT
-                    c.id,
-                    c.name,
-                    c.created_at,
-                    EXTRACT(EPOCH FROM (NOW() - MAX(j.created_at)))/86400 as days_inactive,
-                    COUNT(DISTINCT j.id) FILTER (WHERE j.created_at > NOW() - INTERVAL '90 days') as jobs_last_90d,
-                    COUNT(DISTINCT j.id) FILTER (WHERE j.created_at > NOW() - INTERVAL '180 days'
-                                                   AND j.created_at <= NOW() - INTERVAL '90 days') as jobs_prev_90d,
-                    COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'overdue') as overdue_count,
-                    COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'cancelled') as cancelled_count
-                FROM customers c
-                LEFT JOIN jobs j ON j.customer_id = c.id
-                LEFT JOIN invoices i ON i.customer_id = c.id
-                WHERE c.id = %s
-                GROUP BY c.id, c.name, c.created_at
-            """, (health_data.get('customer_id'),))
-
-            churn_data = cur.fetchone()
-            cur.close()
-            conn.close()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                try:
+                    # Get additional churn indicators
+                    cur.execute("""
+                        SELECT
+                            c.id,
+                            c.name,
+                            c.created_at,
+                            EXTRACT(EPOCH FROM (NOW() - MAX(j.created_at)))/86400 as days_inactive,
+                            COUNT(DISTINCT j.id) FILTER (WHERE j.created_at > NOW() - INTERVAL '90 days') as jobs_last_90d,
+                            COUNT(DISTINCT j.id) FILTER (WHERE j.created_at > NOW() - INTERVAL '180 days'
+                                                           AND j.created_at <= NOW() - INTERVAL '90 days') as jobs_prev_90d,
+                            COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'overdue') as overdue_count,
+                            COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'cancelled') as cancelled_count
+                        FROM customers c
+                        LEFT JOIN jobs j ON j.customer_id = c.id
+                        LEFT JOIN invoices i ON i.customer_id = c.id
+                        WHERE c.id = %s
+                        GROUP BY c.id, c.name, c.created_at
+                    """, (health_data.get('customer_id'),))
+                    churn_data = cur.fetchone()
+                finally:
+                    cur.close()
 
             if not churn_data:
                 return {"error": "Customer data not found", "churn_risk": 0}
@@ -791,34 +839,34 @@ Respond with JSON only:
             health_data = await self.calculate_health_score(customer_id)
             churn_data = await self.predict_churn_risk(customer_id)
 
-            conn = self._get_db_connection()
-            if not conn:
-                return {"error": "Database connection failed", "satisfaction_score": 0}
+            satisfaction_data = None
+            with self._db_connection() as conn:
+                if not conn:
+                    return {"error": "Database connection failed", "satisfaction_score": 0}
 
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-
-            # Get behavioral indicators
-            cur.execute("""
-                SELECT
-                    c.id,
-                    c.name,
-                    COUNT(DISTINCT j.id) as total_jobs,
-                    AVG(CASE WHEN j.status = 'completed' THEN 1 ELSE 0 END) * 100 as completion_rate,
-                    COUNT(DISTINCT j.id) FILTER (WHERE j.created_at > NOW() - INTERVAL '30 days') as recent_activity,
-                    AVG(i.total_amount) as avg_order_value,
-                    COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'paid'
-                                                   AND i.paid_at <= i.due_date) as on_time_payments,
-                    COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'paid') as total_paid_invoices
-                FROM customers c
-                LEFT JOIN jobs j ON j.customer_id = c.id
-                LEFT JOIN invoices i ON i.customer_id = c.id
-                WHERE c.id = %s
-                GROUP BY c.id, c.name
-            """, (health_data.get('customer_id'),))
-
-            satisfaction_data = cur.fetchone()
-            cur.close()
-            conn.close()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                try:
+                    # Get behavioral indicators
+                    cur.execute("""
+                        SELECT
+                            c.id,
+                            c.name,
+                            COUNT(DISTINCT j.id) as total_jobs,
+                            AVG(CASE WHEN j.status = 'completed' THEN 1 ELSE 0 END) * 100 as completion_rate,
+                            COUNT(DISTINCT j.id) FILTER (WHERE j.created_at > NOW() - INTERVAL '30 days') as recent_activity,
+                            AVG(i.total_amount) as avg_order_value,
+                            COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'paid'
+                                                           AND i.paid_at <= i.due_date) as on_time_payments,
+                            COUNT(DISTINCT i.id) FILTER (WHERE i.status = 'paid') as total_paid_invoices
+                        FROM customers c
+                        LEFT JOIN jobs j ON j.customer_id = c.id
+                        LEFT JOIN invoices i ON i.customer_id = c.id
+                        WHERE c.id = %s
+                        GROUP BY c.id, c.name
+                    """, (health_data.get('customer_id'),))
+                    satisfaction_data = cur.fetchone()
+                finally:
+                    cur.close()
 
             if not satisfaction_data:
                 return {"error": "Customer data not found", "satisfaction_score": 0}
@@ -1025,20 +1073,17 @@ Respond with JSON only:
 
     async def _save_analysis(self, analysis_type: str, results: dict[str, Any]):
         """Save analysis results to database"""
-        conn = self._get_db_connection()
-        if not conn:
-            return
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO ai_customer_success_analyses (tenant_id, analysis_type, results, analyzed_at)
-                VALUES (%s, %s, %s, NOW())
-            """, (self.tenant_id, analysis_type, json.dumps(results, default=str)))
-            conn.commit()
-            cur.close()
-            conn.close()
-            logger.info(f"Saved {analysis_type} analysis for tenant {self.tenant_id}")
-        except Exception as e:
-            logger.warning(f"Failed to save analysis (table may not exist): {e}")
-            if conn:
-                conn.close()
+        with self._db_connection() as conn:
+            if not conn:
+                return
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO ai_customer_success_analyses (tenant_id, analysis_type, results, analyzed_at)
+                    VALUES (%s, %s, %s, NOW())
+                """, (self.tenant_id, analysis_type, json.dumps(results, default=str)))
+                conn.commit()
+                cur.close()
+                logger.info(f"Saved {analysis_type} analysis for tenant {self.tenant_id}")
+            except Exception as e:
+                logger.warning(f"Failed to save analysis (table may not exist): {e}")
