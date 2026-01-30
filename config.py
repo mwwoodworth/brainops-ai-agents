@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v11.0.7')  # Loop-bridge: prevent cross-loop asyncpg/AgentExecutor errors
+        self.version = os.getenv('VERSION', 'v11.0.8')  # Fix CustomerSuccess DB connectivity + task orchestrator timezone import
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
