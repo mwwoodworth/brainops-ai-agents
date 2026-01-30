@@ -958,6 +958,26 @@ async def lifespan(app: FastAPI):
                     ):
                         logger.debug("Suppressed unhandled CancelledError future: %s", msg)
                         return
+                    # For DB connection flaps, log a real traceback (default handler
+                    # often omits useful frames) so we can fix the root cause.
+                    try:
+                        import asyncpg
+
+                        if isinstance(exc, asyncpg.ConnectionDoesNotExistError):
+                            fut = context.get("future")
+                            coro = getattr(fut, "get_coro", lambda: None)()
+                            coro_name = getattr(coro, "__qualname__", None) or repr(coro)
+                            logger.error(
+                                "Unhandled asyncpg ConnectionDoesNotExistError (future=%r coro=%s): %s",
+                                fut,
+                                coro_name,
+                                exc,
+                                exc_info=exc,
+                            )
+                            return
+                    except Exception:
+                        pass
+
                     loop.default_exception_handler(context)
 
                 loop.set_exception_handler(_brainops_exception_handler)
