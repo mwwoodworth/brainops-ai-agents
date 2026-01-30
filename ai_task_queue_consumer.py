@@ -94,33 +94,36 @@ class AITaskQueueConsumer:
             try:
                 pool = get_pool()
 
-                # Advisory locks are session-scoped. Hold the lock on the same connection
-                # for the duration of processing, then release on that same connection.
+                tasks: list[dict[str, Any]] = []
+                lock_acquired = False
+
+                # Advisory locks are session-scoped. Acquire/release the lock quickly to avoid
+                # holding a database connection while executing long-running tasks (LLM calls).
                 async with pool.acquire() as lock_conn:
-                    lock_acquired = await lock_conn.fetchval(
-                        "SELECT pg_try_advisory_lock($1)",
-                        ADVISORY_LOCK_KEY,
+                    lock_acquired = bool(
+                        await lock_conn.fetchval("SELECT pg_try_advisory_lock($1)", ADVISORY_LOCK_KEY)
                     )
 
-                    if not lock_acquired:
-                        # Another instance is processing, wait and retry
-                        logger.debug("AITaskQueueConsumer: Another instance holds the lock, waiting...")
-                        await asyncio.sleep(5)  # Short wait before retry
-                        continue
-
-                    try:
-                        await self._reconcile_stale_processing_tasks()
-                        tasks = await self._fetch_pending_tasks()
-                        if tasks:
-                            logger.info("📥 Fetched %s ai_task_queue tasks", len(tasks))
-                            for task in tasks:
-                                await self._process_task(task)
-                        self._stats["last_poll"] = datetime.now(timezone.utc).isoformat()
-                    finally:
+                    if lock_acquired:
                         try:
-                            await lock_conn.execute("SELECT pg_advisory_unlock($1)", ADVISORY_LOCK_KEY)
-                        except Exception as unlock_exc:
-                            logger.warning("AITaskQueueConsumer: failed to release advisory lock: %s", unlock_exc)
+                            await self._reconcile_stale_processing_tasks()
+                            tasks = await self._fetch_pending_tasks()
+                            self._stats["last_poll"] = datetime.now(timezone.utc).isoformat()
+                        finally:
+                            try:
+                                await lock_conn.execute("SELECT pg_advisory_unlock($1)", ADVISORY_LOCK_KEY)
+                            except Exception as unlock_exc:
+                                logger.warning("AITaskQueueConsumer: failed to release advisory lock: %s", unlock_exc)
+
+                if not lock_acquired:
+                    logger.debug("AITaskQueueConsumer: Another instance holds the lock, waiting...")
+                    await asyncio.sleep(5)
+                    continue
+
+                if tasks:
+                    logger.info("📥 Fetched %s ai_task_queue tasks", len(tasks))
+                    for task in tasks:
+                        await self._process_task(task)
 
             except Exception as exc:
                 logger.error("Error in ai_task_queue consume loop: %s", exc)
