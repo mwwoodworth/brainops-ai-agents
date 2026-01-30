@@ -32,6 +32,18 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
+# -----------------------------------------------------------------------------
+# Ops safety defaults
+# -----------------------------------------------------------------------------
+# MCP tools can mutate prod infra (Render deploy/rollback), prod DB (Supabase SQL),
+# or external systems (Stripe/GitHub). By default, we treat MCP as READ-ONLY in
+# production and require an explicit opt-in to allow writes.
+_MCP_WRITE_ENABLE_ENV_KEYS = (
+    "BRAINOPS_OPS_AUTOFIX_ENABLED",
+    "BRAINOPS_AUTOFIX_ENABLED",
+    "BRAINOPS_MCP_WRITE_ENABLED",
+)
+
 # MCP Bridge Configuration
 # The MCP_API_KEY must match the key set on the MCP Bridge Render service
 # SECURITY: No fallback default - must be set via environment
@@ -628,6 +640,103 @@ class MCPClient:
     # ENHANCED EXECUTE_TOOL METHOD
     # =========================================================================
 
+    @staticmethod
+    def _ops_write_enabled() -> bool:
+        """True if MCP write tools are explicitly enabled via env var."""
+        for key in _MCP_WRITE_ENABLE_ENV_KEYS:
+            val = os.getenv(key)
+            if val and val.strip().lower() in ("1", "true", "yes", "y", "on"):
+                return True
+        return False
+
+    @staticmethod
+    def _strip_leading_sql_comments(sql: str) -> str:
+        """Best-effort stripping of leading SQL comments to classify intent."""
+        s = (sql or "").lstrip()
+        while True:
+            if s.startswith("--"):
+                s = s.split("\n", 1)[1] if "\n" in s else ""
+                s = s.lstrip()
+                continue
+            if s.startswith("/*"):
+                end = s.find("*/")
+                if end == -1:
+                    return ""
+                s = s[end + 2 :].lstrip()
+                continue
+            return s
+
+    @classmethod
+    def _supabase_sql_is_read_only(cls, sql: str) -> bool:
+        """Heuristic: allow SELECT/EXPLAIN/SHOW, block anything that looks like a write."""
+        import re
+
+        s = cls._strip_leading_sql_comments(sql)
+        if not s:
+            return False
+
+        s_lower = s.strip().lower()
+        if not s_lower:
+            return False
+
+        # Fast allowlist by starting keyword
+        allowed_starts = ("select", "explain", "show", "with")
+        if not s_lower.startswith(allowed_starts):
+            return False
+
+        # Blocklist of write-ish verbs. This is intentionally conservative.
+        blocked = re.compile(
+            r"\b(insert|update|delete|alter|create|drop|truncate|grant|revoke|merge|call|do|copy)\b",
+            re.IGNORECASE,
+        )
+        if blocked.search(s_lower):
+            return False
+
+        return True
+
+    @classmethod
+    def _mcp_tool_is_write_intent(cls, server_str: str, tool: str, params: dict[str, Any] | None) -> bool:
+        """Classify tool intent (read vs write) for safety gating."""
+        server = (server_str or "").lower()
+        tool_name = tool or ""
+        p = params or {}
+
+        # AI model calls are not "infra writes"
+        if server in ("openai", "anthropic"):
+            return False
+
+        # Browser automation is treated as safe-ish by default (no infra mutations).
+        if server in ("playwright",):
+            return False
+
+        # Render tools: allow get/list; block everything else by default.
+        if server == "render":
+            if tool_name.startswith(("render_get_", "render_list_")):
+                return False
+            return True
+
+        # Vercel/GitHub/Stripe/Docker: allow get/list; block everything else by default.
+        if server in ("vercel", "github", "stripe", "docker"):
+            if tool_name.startswith(("get", "list")):
+                return False
+            return True
+
+        # Supabase: allow get/list/select; allow sql_query only when query is read-only.
+        if server == "supabase":
+            if tool_name in ("sql_query", "execute_sql"):
+                sql = p.get("query") or p.get("sql") or ""
+                return not cls._supabase_sql_is_read_only(str(sql))
+            if tool_name.startswith(("get", "list", "select")):
+                return False
+            return True
+
+        # python-executor is effectively arbitrary code execution.
+        if server in ("python-executor", "python"):
+            return True
+
+        # Unknown server/tool: assume write for safety.
+        return True
+
     async def execute_tool(
         self,
         server: MCPServer,
@@ -649,8 +758,26 @@ class MCPClient:
         Returns:
             MCPToolResult with execution details including metrics
         """
+        start_time = datetime.utcnow()
         self._execution_count += 1
         server_str = server.value if isinstance(server, MCPServer) else server
+
+        # Safety gate: block MCP write operations unless explicitly enabled.
+        if self._mcp_tool_is_write_intent(server_str, tool, params) and not self._ops_write_enabled():
+            duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+            result = MCPToolResult(
+                success=False,
+                server=server_str,
+                tool=tool,
+                result=None,
+                duration_ms=duration_ms,
+                error=(
+                    f"MCP tool blocked (write operations disabled). "
+                    f"Set one of {', '.join(_MCP_WRITE_ENABLE_ENV_KEYS)}=true to enable."
+                ),
+            )
+            self._log_execution(result)
+            return result
 
         # Periodic cache cleanup
         if self._execution_count % 100 == 0:
@@ -737,14 +864,28 @@ class MCPClient:
         import re
         # Validate table name
         if not re.match(r'^[a-z_][a-z0-9_]*$', table, re.IGNORECASE):
-            return MCPToolResult(success=False, error=f"Invalid table name: {table}")
+            return MCPToolResult(
+                success=False,
+                server=MCPServer.SUPABASE.value,
+                tool="supabase_select",
+                result=None,
+                duration_ms=0.0,
+                error=f"Invalid table name: {table}",
+            )
 
         # Validate columns (only allow *, or comma-separated alphanumeric identifiers)
         if columns != "*":
             for col in columns.split(','):
                 col = col.strip()
                 if not re.match(r'^[a-z_][a-z0-9_]*$', col, re.IGNORECASE):
-                    return MCPToolResult(success=False, error=f"Invalid column name: {col}")
+                    return MCPToolResult(
+                        success=False,
+                        server=MCPServer.SUPABASE.value,
+                        tool="supabase_select",
+                        result=None,
+                        duration_ms=0.0,
+                        error=f"Invalid column name: {col}",
+                    )
 
         sql = f'SELECT {columns} FROM "{table}"'
         if where:
@@ -757,12 +898,26 @@ class MCPClient:
         import re
         # Validate table name
         if not re.match(r'^[a-z_][a-z0-9_]*$', table, re.IGNORECASE):
-            return MCPToolResult(success=False, error=f"Invalid table name: {table}")
+            return MCPToolResult(
+                success=False,
+                server=MCPServer.SUPABASE.value,
+                tool="supabase_insert",
+                result=None,
+                duration_ms=0.0,
+                error=f"Invalid table name: {table}",
+            )
 
         # Validate column names
         for col in data.keys():
             if not re.match(r'^[a-z_][a-z0-9_]*$', col, re.IGNORECASE):
-                return MCPToolResult(success=False, error=f"Invalid column name: {col}")
+                return MCPToolResult(
+                    success=False,
+                    server=MCPServer.SUPABASE.value,
+                    tool="supabase_insert",
+                    result=None,
+                    duration_ms=0.0,
+                    error=f"Invalid column name: {col}",
+                )
 
         columns = ", ".join([f'"{k}"' for k in data.keys()])
         placeholders = ", ".join([f"${i+1}" for i in range(len(data))])
