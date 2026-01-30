@@ -1613,6 +1613,44 @@ class LiveMemoryBrain:
             return
 
         try:
+            # NOTE: Production schema drift exists for live_brain_memories (some
+            # environments use predictions as text[] instead of jsonb). Always
+            # coerce predictions into a postgres-safe TEXT[] payload to avoid:
+            #   malformed array literal: "[]"
+            predictions_payload: list[str] = []
+            raw_predictions = memory.predictions or []
+            if isinstance(raw_predictions, str):
+                # Best-effort: treat JSON string as list, else store single string.
+                try:
+                    raw_predictions = json.loads(raw_predictions)
+                except Exception:
+                    raw_predictions = [raw_predictions]
+            if isinstance(raw_predictions, (list, tuple, set)):
+                for item in raw_predictions:
+                    if item is None:
+                        continue
+                    if isinstance(item, str):
+                        predictions_payload.append(item)
+                    else:
+                        try:
+                            predictions_payload.append(json.dumps(item, default=str))
+                        except Exception:
+                            predictions_payload.append(str(item))
+            else:
+                predictions_payload = [str(raw_predictions)]
+
+            contradictions_payload: list[str] = []
+            raw_contradictions = memory.contradictions or []
+            if isinstance(raw_contradictions, str):
+                try:
+                    raw_contradictions = json.loads(raw_contradictions)
+                except Exception:
+                    raw_contradictions = [raw_contradictions]
+            if isinstance(raw_contradictions, (list, tuple, set)):
+                contradictions_payload = [str(x) for x in raw_contradictions if x]
+            else:
+                contradictions_payload = [str(raw_contradictions)]
+
             with self._shared_sync_pool.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -1639,8 +1677,8 @@ class LiveMemoryBrain:
                     json.dumps(memory.provenance, default=str),
                     list(memory.connections),
                     json.dumps(memory.temporal_context, default=str),
-                    json.dumps(memory.predictions, default=str),
-                    memory.contradictions,
+                    predictions_payload,
+                    contradictions_payload,
                     memory.crystallization_count
                 ))
                 conn.commit()

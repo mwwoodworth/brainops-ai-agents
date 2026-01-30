@@ -1248,6 +1248,11 @@ class SpeculativeExecutor:
                 results[action_type] = result
             except asyncio.TimeoutError:
                 logger.debug(f"Speculation timeout for {action_type}")
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             except Exception as e:
                 logger.debug(f"Speculation failed for {action_type}: {e}")
 
@@ -1710,12 +1715,18 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
             "_skip_ai_agent_log": True,
         }
         try:
-            return await asyncio.wait_for(
-                shared_executor.execute(agent_name, task),
-                timeout=10.0
-            )
+            exec_task = asyncio.create_task(shared_executor.execute(agent_name, task))
+            try:
+                return await asyncio.wait_for(exec_task, timeout=10.0)
+            except asyncio.TimeoutError:
+                exec_task.cancel()
+                try:
+                    await exec_task
+                except asyncio.CancelledError:
+                    pass
+                return {"status": "timeout", "error": "Timed out after 10s"}
         except asyncio.TimeoutError:
-            return {"status": "timeout", "error": f"Timed out after 10s"}
+            return {"status": "timeout", "error": "Timed out after 10s"}
         except Exception as e:
             return {"status": "failed", "error": str(e)[:200]}
 
@@ -1859,10 +1870,16 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
                 # Monitoring actions need more time for health checks and self-healing
                 monitoring_actions = {"monitor_frontends", "monitor_agents", "maintain_health", "investigate_degradation"}
                 agent_timeout = base_timeout + 15 if decision_type in monitoring_actions else base_timeout
-                execution_result = await asyncio.wait_for(
-                    shared_executor.execute(agent_name, task),
-                    timeout=agent_timeout
-                )
+                exec_task = asyncio.create_task(shared_executor.execute(agent_name, task))
+                try:
+                    execution_result = await asyncio.wait_for(exec_task, timeout=agent_timeout)
+                except asyncio.TimeoutError:
+                    exec_task.cancel()
+                    try:
+                        await exec_task
+                    except asyncio.CancelledError:
+                        pass
+                    raise
 
                 # Validate output integrity
                 output_validator = get_output_validator()
@@ -1890,7 +1907,7 @@ async def enhanced_ooda_cycle(tenant_id: str, context: Optional[dict[str, Any]] 
 
         except asyncio.TimeoutError:
             action_result["status"] = "timeout"
-            action_result["error"] = f"Agent '{agent_name}' timed out after 20s"
+            action_result["error"] = f"Agent '{agent_name}' timed out after {agent_timeout:.0f}s"
             logger.warning(f"OODA Act: {decision_type} agent '{agent_name}' timed out")
         except Exception as exec_error:
             action_result["status"] = "failed"
