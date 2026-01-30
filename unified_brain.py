@@ -414,9 +414,26 @@ class UnifiedBrain:
         await self._ensure_table()
         pool = get_pool()
 
-        # Generate enhanced features
+        # Generate enhanced features.
+        #
+        # IMPORTANT: embedding generation can involve slow network calls (OpenAI/Gemini)
+        # or heavy local model loads (sentence-transformers). Never block the event loop.
         text_content = value if isinstance(value, str) else json.dumps(value)
-        embedding = self._generate_embedding(text_content)
+        embedding_timeout_s = float(os.getenv("BRAIN_EMBEDDING_TIMEOUT_S", "2.5"))
+        embedding: Optional[list[float]] = None
+        try:
+            embedding = await asyncio.wait_for(
+                asyncio.to_thread(self._generate_embedding, text_content),
+                timeout=embedding_timeout_s,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "⚠️ Embedding generation timed out after %.1fs for key=%s; storing without embedding",
+                embedding_timeout_s,
+                key,
+            )
+        except Exception as e:
+            logger.warning("⚠️ Embedding generation failed for key=%s: %s", key, e)
         summary = self._generate_summary(text_content)
         tags = self._extract_tags(key, value, category)
 
@@ -462,10 +479,14 @@ class UnifiedBrain:
         entry_id = str(result['id'])
         related_keys = []
 
-        # Find and store related entries using vector similarity
+        # Find and store related entries using vector similarity (time-bounded).
         if embedding:
             try:
-                related_keys = await self._find_related_entries(key, embedding)
+                related_timeout_s = float(os.getenv("BRAIN_RELATED_KEYS_TIMEOUT_S", "2.0"))
+                related_keys = await asyncio.wait_for(
+                    self._find_related_entries(key, embedding),
+                    timeout=related_timeout_s,
+                )
                 if related_keys:
                     await pool.execute("""
                         UPDATE unified_brain
@@ -476,6 +497,8 @@ class UnifiedBrain:
                     # Also create bidirectional references
                     for related_key in related_keys:
                         await self._add_reference(key, related_key, 'related', 0.8)
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ Related-keys lookup timed out for key=%s; skipping", key)
             except Exception as e:
                 logger.warning(f"⚠️ Failed to update related keys: {e}")
 
@@ -483,7 +506,9 @@ class UnifiedBrain:
         if self.embedded_memory:
             try:
                 importance = 0.9 if priority == 'critical' else 0.7 if priority == 'high' else 0.5
-                self.embedded_memory.store_memory(
+                # store_memory can do local embedding work; keep it off the event loop too.
+                await asyncio.to_thread(
+                    self.embedded_memory.store_memory,
                     content=text_content,
                     memory_type=category,
                     importance_score=importance,
@@ -492,7 +517,7 @@ class UnifiedBrain:
                         **(metadata or {}),
                         'brain_key': key,
                         'brain_id': entry_id
-                    }
+                    },
                 )
                 logger.info(f"✅ Dual-write: Stored '{key}' with semantic search enabled")
             except Exception as e:
