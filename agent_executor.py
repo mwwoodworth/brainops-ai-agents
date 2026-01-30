@@ -2254,6 +2254,30 @@ class SystemMonitorAgent(BaseAgent):
         super().__init__("SystemMonitor", "universal")
         self._mcp_client = None
 
+    @staticmethod
+    def _truthy(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
+        return False
+
+    def _autofix_enabled(self, task: dict[str, Any]) -> bool:
+        # Task-level override for tests/manual runs.
+        if isinstance(task, dict) and "autofix" in task:
+            return self._truthy(task.get("autofix"))
+        # Safe-by-default in production: disabled unless explicitly enabled.
+        env_value = (
+            os.getenv("BRAINOPS_OPS_AUTOFIX_ENABLED")
+            or os.getenv("BRAINOPS_AUTOFIX_ENABLED")
+            or ""
+        )
+        return self._truthy(env_value)
+
     async def _get_mcp_client(self):
         """Lazily initialize MCP client"""
         if self._mcp_client is None:
@@ -2270,6 +2294,8 @@ class SystemMonitorAgent(BaseAgent):
         monitor = MonitorAgent()
         health = await monitor.full_system_check()
 
+        autofix_enabled = self._autofix_enabled(task)
+
         # Analyze issues
         issues = []
         for service, status in health["checks"].items():
@@ -2279,6 +2305,35 @@ class SystemMonitorAgent(BaseAgent):
                     "status": status.get("status"),
                     "error": status.get("error")
                 })
+
+        # PROTECTED MODE (default): suggestions only, no infra changes.
+        # This avoids autonomous restarts/rollbacks that can destabilize production.
+        if not autofix_enabled:
+            recommended = []
+            for issue in issues:
+                service = issue.get("service")
+                if not service:
+                    continue
+                recommended.append({
+                    "service": service,
+                    "suggested_action": "investigate",
+                    "note": "Autofix disabled; no infrastructure actions executed",
+                })
+
+            return {
+                "status": "completed",
+                "mode": "protected",
+                "autofix_enabled": False,
+                "health_check": health,
+                "issues_found": len(issues),
+                "issues": issues,
+                "incidents_recorded": 0,
+                "fixes_attempted": 0,
+                "fixes": [],
+                "recommended_fixes": recommended,
+                "mcp_enabled": False,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
         # Record incidents to self-healing system for tracking
         incidents_recorded = 0
@@ -2324,6 +2379,13 @@ class SystemMonitorAgent(BaseAgent):
 
     async def attempt_fix(self, issue: dict) -> dict:
         """Attempt to fix an issue using MCP tools for real infrastructure control"""
+        if not self._autofix_enabled({}):
+            return {
+                "service": issue.get("service"),
+                "action": "autofix_disabled",
+                "status": "blocked",
+                "error": "Autofix disabled (set BRAINOPS_OPS_AUTOFIX_ENABLED=true to enable infra actions)",
+            }
         service = issue["service"]
         mcp = await self._get_mcp_client()
 
