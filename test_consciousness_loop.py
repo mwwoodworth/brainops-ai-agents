@@ -1,6 +1,12 @@
 import asyncio
 import os
 
+if __name__ != "__main__":
+    # Manual/operational script; not a unit test. Requires live DB credentials.
+    import pytest
+
+    pytest.skip("manual consciousness loop runner (not collected as a unit test)", allow_module_level=True)
+
 from consciousness_loop import ConsciousnessLoop
 
 # SECURITY: Load credentials from environment or .env file

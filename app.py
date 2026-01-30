@@ -922,6 +922,17 @@ async def lifespan(app: FastAPI):
         logger.error("Failed to start background loop runner: %s", exc, exc_info=True)
         app.state.bg_runner = None
 
+    # Register the main asyncio loop so thread-based schedulers can safely
+    # schedule async work onto the correct loop (avoids cross-loop Future errors).
+    try:
+        from loop_bridge import set_main_loop
+
+        set_main_loop(asyncio.get_running_loop())
+        logger.info("🧠 Main asyncio loop registered for loop_bridge")
+    except Exception:
+        # Never fail startup due to observability helpers.
+        pass
+
     # Get tenant configuration from centralized config
     from config import config as app_config
     DEFAULT_TENANT_ID = app_config.tenant.default_tenant_id

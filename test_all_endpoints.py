@@ -5,6 +5,12 @@ from datetime import datetime
 
 import requests
 
+if __name__ != "__main__":
+    # Manual/operational script; not a unit test. Avoid pytest collection errors.
+    import pytest
+
+    pytest.skip("manual endpoint verification script (not collected as a unit test)", allow_module_level=True)
+
 
 def test_endpoint(name, url, method="GET", data=None):
     """Test an endpoint and return status"""
