@@ -2319,6 +2319,7 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
         # Handle case where pool isn't initialized yet (during startup)
         db_timeout = float(os.getenv("DB_HEALTH_TIMEOUT_S", "4.0"))
         db_timed_out = False
+        pool_metrics: dict[str, Any] | None = None
         try:
             pool = get_pool()
             try:
@@ -2344,6 +2345,19 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
             db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
         auth_configured = config.security.auth_configured
 
+        # Best-effort pool metrics: helps diagnose pool exhaustion vs. connectivity issues.
+        try:
+            raw_pool = getattr(pool, "pool", None)
+            if raw_pool is not None:
+                pool_metrics = {
+                    "min_size": getattr(raw_pool, "get_min_size", lambda: None)(),
+                    "max_size": getattr(raw_pool, "get_max_size", lambda: None)(),
+                    "size": getattr(raw_pool, "get_size", lambda: None)(),
+                    "idle": getattr(raw_pool, "get_idle_size", lambda: None)(),
+                }
+        except Exception as exc:
+            pool_metrics = {"error": str(exc)}
+
         active_systems = _collect_active_systems()
 
         embedded_memory_stats = None
@@ -2359,6 +2373,7 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
             "version": VERSION,
             "build": BUILD_TIME,
             "database": db_status,
+            "db_pool": pool_metrics,
             "active_systems": active_systems,
             "system_count": len(active_systems),
             "embedded_memory_active": EMBEDDED_MEMORY_AVAILABLE and hasattr(app.state, 'embedded_memory') and app.state.embedded_memory is not None,
