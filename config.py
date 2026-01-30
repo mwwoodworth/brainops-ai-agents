@@ -159,7 +159,7 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v11.0.8')  # Fix CustomerSuccess DB connectivity + task orchestrator timezone import
+        self.version = os.getenv('VERSION', 'v11.0.9')  # Fix AI UI testing screenshot failure path (no missing-file errors)
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
