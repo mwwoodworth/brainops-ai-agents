@@ -53,6 +53,7 @@ class EventCategory(str, Enum):
     AI = "ai"                   # AI agent/learning events
     USER = "user"               # User action events
     INTEGRATION = "integration" # Cross-system integration events
+    PHYSICAL = "physical"       # Physical world events (drones, robots, sensors)
 
 
 # =============================================================================
@@ -171,6 +172,27 @@ class SystemEventType(str, Enum):
     DEPLOYMENT_STARTED = "deployment.started"
     DEPLOYMENT_COMPLETED = "deployment.completed"
     DEPLOYMENT_FAILED = "deployment.failed"
+
+
+class PhysicalEventType(str, Enum):
+    """Events from Physical World (Robotics/IoT)"""
+    # Drone events
+    DRONE_MISSION_REQUESTED = "drone.mission_requested"
+    DRONE_TRAJECTORY_PLANNED = "drone.trajectory_planned"
+    DRONE_MISSION_STARTED = "drone.mission_started"
+    DRONE_WAYPOINT_REACHED = "drone.waypoint_reached"
+    DRONE_ANOMALY_DETECTED = "drone.anomaly_detected"
+    DRONE_MISSION_COMPLETED = "drone.mission_completed"
+
+    # Robot events
+    ROBOT_TASK_ASSIGNED = "robot.task_assigned"
+    ROBOT_PATH_PLANNED = "robot.path_planned"
+    ROBOT_ACTION_EXECUTED = "robot.action_executed"
+    ROBOT_STATE_CHANGED = "robot.state_changed"
+
+    # Sensor events
+    SENSOR_READING_RECEIVED = "sensor.reading_received"
+    SENSOR_THRESHOLD_EXCEEDED = "sensor.threshold_exceeded"
 
 
 # =============================================================================
@@ -468,6 +490,36 @@ class AnomalyDetectedPayload(UnifiedEventPayload):
     auto_healable: bool = False
 
 
+class DroneMissionPayload(UnifiedEventPayload):
+    """Payload for drone mission events"""
+    mission_id: str
+    drone_id: str
+    mission_type: str  # inspection, surveillance, delivery
+    coordinates: Optional[list[dict[str, float]]] = None  # Lat/Lon/Alt
+    trajectory: Optional[list[dict[str, Any]]] = None  # Planned path
+    status: str
+
+
+class RobotTaskPayload(UnifiedEventPayload):
+    """Payload for robot task events"""
+    task_id: str
+    robot_id: str
+    action: str
+    target_object: Optional[str] = None
+    target_coordinates: Optional[list[float]] = None  # [x, y, z]
+    confidence: Optional[float] = None
+
+
+class SensorReadingPayload(UnifiedEventPayload):
+    """Payload for sensor reading events"""
+    sensor_id: str
+    sensor_type: str
+    value: float
+    unit: str
+    threshold: Optional[float] = None
+    location: Optional[str] = None
+
+
 # =============================================================================
 # EVENT TYPE REGISTRY
 # =============================================================================
@@ -486,6 +538,10 @@ EVENT_PAYLOAD_REGISTRY: dict[str, type] = {
     'agent.completed': AgentExecutionPayload,
     'agent.failed': AgentExecutionPayload,
     'anomaly.detected': AnomalyDetectedPayload,
+    'drone.mission_requested': DroneMissionPayload,
+    'drone.mission_completed': DroneMissionPayload,
+    'robot.task_assigned': RobotTaskPayload,
+    'sensor.reading_received': SensorReadingPayload,
 }
 
 # Maps event types to their processing agents
