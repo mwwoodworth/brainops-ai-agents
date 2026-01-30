@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import ssl
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -33,6 +34,10 @@ class PoolConfig:
     database: str
     min_size: int = 3  # Keep minimum connections ready
     max_size: int = 15  # Increased for better concurrency with transaction mode pooler
+    # If the pool is exhausted (or a connection is leaked), asyncpg will wait
+    # indefinitely by default. We enforce an acquire timeout so HTTP handlers
+    # fail fast instead of hanging forever.
+    acquire_timeout: float = 5.0
     command_timeout: int = 30
     connect_timeout: float = 30.0  # Increased to prevent timeouts on slow networks
     max_inactive_connection_lifetime: float = 60.0  # Recycle idle connections after 60s
@@ -80,6 +85,8 @@ class AsyncDatabasePool(BasePool):
     def __init__(self, config: PoolConfig) -> None:
         self.config = config
         self._pool: Optional[asyncpg.Pool] = None
+        self._reset_lock = asyncio.Lock()
+        self._last_reset_at = 0.0
         if config.ssl:
             ctx = ssl.create_default_context()
             if not config.ssl_verify:
@@ -181,7 +188,28 @@ class AsyncDatabasePool(BasePool):
         """
         if self._pool is None:
             raise RuntimeError("Database pool not initialized. Call initialize() first.")
-        return self._pool.acquire()
+        return self._pool.acquire(timeout=self.config.acquire_timeout)
+
+    async def _reset_pool(self, reason: str) -> None:
+        """Best-effort pool reset for self-healing when acquire/query stalls."""
+        async with self._reset_lock:
+            now = time.monotonic()
+            # Avoid thrashing if multiple callers detect the same failure.
+            if now - self._last_reset_at < 10.0:
+                return
+            self._last_reset_at = now
+
+            logger.error("🔄 Resetting asyncpg pool (reason=%s)", reason)
+            try:
+                await self.close()
+            except Exception as exc:
+                logger.warning("Pool close during reset failed: %s", exc)
+            self._pool = None
+            try:
+                await self.initialize()
+            except Exception as exc:
+                # Leave pool unset; callers will surface DB-unavailable errors.
+                logger.error("Pool re-initialize failed after reset: %s", exc)
 
     async def _execute_with_retry(
         self,
@@ -202,7 +230,7 @@ class AsyncDatabasePool(BasePool):
 
         for attempt in range(max_retries + 1):
             try:
-                async with self.pool.acquire() as conn:
+                async with self.pool.acquire(timeout=self.config.acquire_timeout) as conn:
                     if operation == "fetch":
                         return await conn.fetch(query, *args, timeout=timeout)
                     elif operation == "fetchrow":
@@ -213,6 +241,18 @@ class AsyncDatabasePool(BasePool):
                         return await conn.execute(query, *args, timeout=timeout)
                     else:
                         raise ValueError(f"Unknown operation: {operation}")
+            except asyncio.TimeoutError as e:
+                last_error = e
+                logger.error(
+                    "DB pool acquire timed out on %s (attempt %d/%d) (acquire_timeout=%.1fs)",
+                    operation, attempt + 1, max_retries + 1, self.config.acquire_timeout,
+                )
+                # Reset once to self-heal a wedged pool; then retry.
+                if attempt < max_retries:
+                    await self._reset_pool(reason=f"acquire_timeout:{operation}")
+                    await asyncio.sleep(0.1 * (attempt + 1))
+                    continue
+                raise
             except (
                 asyncpg.ConnectionDoesNotExistError,
                 asyncpg.InterfaceError,
@@ -289,7 +329,7 @@ class AsyncDatabasePool(BasePool):
         """Execute query for multiple parameter sets"""
         # executemany doesn't retry - it's typically used for bulk operations
         # where partial completion would be problematic
-        async with self.pool.acquire() as conn:
+        async with self.pool.acquire(timeout=self.config.acquire_timeout) as conn:
             return await conn.executemany(command, args, timeout=timeout)
 
     async def test_connection(self, timeout: float = 4.0) -> bool:
