@@ -3,8 +3,10 @@ Unified Brain API Endpoints
 Single source of truth for ALL BrainOps memory
 """
 import logging
+import os
 import re
 from datetime import datetime
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Security
@@ -99,6 +101,9 @@ class BrainQuery(BaseModel):
     limit: int = Field(20, ge=1, le=100)
     use_semantic: bool = Field(True, description="Use semantic vector search if available")
 
+_BRAIN_STATUS_CACHE: tuple[dict[str, Any], float] | None = None
+_BRAIN_STATUS_CACHE_TTL_S = float(os.getenv("BRAIN_STATUS_CACHE_TTL_S", "30"))
+
 
 @router.get("/context")
 async def get_full_context():
@@ -155,28 +160,45 @@ async def get_brain_status():
             "timestamp": datetime.utcnow().isoformat()
         }
 
+    global _BRAIN_STATUS_CACHE
+    now = time.monotonic()
+    if _BRAIN_STATUS_CACHE is not None:
+        cached_payload, expires_at = _BRAIN_STATUS_CACHE
+        if expires_at > now:
+            return {**cached_payload, "cached": True}
+
     try:
         # Add timeout to prevent hanging
-        await asyncio.wait_for(brain._ensure_table(), timeout=5.0)
+        await asyncio.wait_for(brain._ensure_pool(), timeout=5.0)
         from database.async_connection import get_pool
 
         pool = get_pool()
         stats = await asyncio.wait_for(
             pool.fetchrow("""
                 SELECT
-                    COUNT(*) as total_entries,
-                    MAX(last_updated) as last_update
-                FROM unified_brain
+                    -- Avoid COUNT(*) full-table scans in hot-path health checks.
+                    COALESCE(
+                        (SELECT n_live_tup::bigint FROM pg_stat_user_tables WHERE relname = 'unified_brain' LIMIT 1),
+                        0
+                    ) as total_entries,
+                    -- Prefer index-backed lookup when available.
+                    (SELECT last_updated
+                     FROM unified_brain
+                     ORDER BY last_updated DESC NULLS LAST
+                     LIMIT 1) as last_update
             """),
             timeout=5.0
         )
 
-        return {
+        payload = {
             "status": "ok",
             "total_entries": stats["total_entries"] if stats else 0,
             "last_update": stats["last_update"].isoformat() if stats and stats["last_update"] else None,
+            "approximate_total": True,
             "timestamp": datetime.utcnow().isoformat()
         }
+        _BRAIN_STATUS_CACHE = (payload, now + _BRAIN_STATUS_CACHE_TTL_S)
+        return payload
     except asyncio.TimeoutError:
         logger.error("Brain status check timed out")
         return {
