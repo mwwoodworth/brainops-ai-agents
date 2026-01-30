@@ -1,6 +1,13 @@
 import os
 import sys
 
+if __name__ != "__main__":
+    # Manual script for local experimentation (requires API keys/DB). Avoid
+    # breaking `pytest` collection in CI/dev environments.
+    import pytest
+
+    pytest.skip("manual local agent runner (not collected as a unit test)", allow_module_level=True)
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import asyncio

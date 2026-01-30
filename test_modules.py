@@ -5,6 +5,12 @@ Test script to verify all modules can be imported
 
 import sys
 
+if __name__ != "__main__":
+    # Manual script; not a unit test. Avoid pytest collection errors.
+    import pytest
+
+    pytest.skip("manual module import script (not collected as a unit test)", allow_module_level=True)
+
 
 def test_import(module_name, description):
     """Test if a module can be imported"""
