@@ -3,6 +3,12 @@
 Test REAL AI in Production - Both GPT-4 and Claude
 """
 
+if __name__ != "__main__":
+    # Manual/operational script; not a unit test. Avoid breaking pytest runs.
+    import pytest
+
+    pytest.skip("manual production AI verification script (not collected as a unit test)", allow_module_level=True)
+
 import time
 from datetime import datetime
 

@@ -3,6 +3,13 @@
 Complete system test - assume nothing, test everything directly
 """
 
+if __name__ != "__main__":
+    # This is an operational/manual script (requires live DB creds and prod URLs).
+    # Skip during pytest collection so unit tests can run in dev/CI without secrets.
+    import pytest
+
+    pytest.skip("manual operational script (not collected as a unit test)", allow_module_level=True)
+
 import json
 import os
 import subprocess

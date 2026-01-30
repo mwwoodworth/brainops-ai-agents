@@ -4,6 +4,12 @@ Comprehensive test of upgraded paid AI agents service
 Tests performance improvements, consistency, and identifies any runtime errors
 """
 
+if __name__ != "__main__":
+    # Manual/operational script; not a unit test. Requires live DB credentials.
+    import pytest
+
+    pytest.skip("manual paid-upgrade verification script (not collected as a unit test)", allow_module_level=True)
+
 import asyncio
 import json
 import os
