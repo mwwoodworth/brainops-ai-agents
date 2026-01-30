@@ -523,17 +523,6 @@ class AIUITestingEngine:
                     message=f"Page failed to load: HTTP {response.status if response else 'No response'}"
                 )
 
-            # Take screenshot with timeout
-            screenshot_path = f"{self.screenshot_dir}/{test_id}.png"
-            try:
-                await asyncio.wait_for(page.screenshot(path=screenshot_path, full_page=True), timeout=30)
-            except asyncio.TimeoutError:
-                logger.warning(f"Screenshot timed out for {url}")
-
-            # Read screenshot as base64
-            with open(screenshot_path, "rb") as f:
-                screenshot_base64 = base64.b64encode(f.read()).decode()
-
             # Get page context
             title = await page.title()
             page_context = {
@@ -542,11 +531,36 @@ class AIUITestingEngine:
                 "viewport": {"width": 1920, "height": 1080}
             }
 
-            # AI Vision Analysis
-            ai_analysis = await self.vision_analyzer.analyze_screenshot(
-                screenshot_base64,
-                page_context
-            )
+            # Take screenshot for AI vision analysis. If this fails (timeouts, disk
+            # issues, CSP, etc), degrade gracefully to basic analysis instead of
+            # throwing (this engine runs in production monitoring loops).
+            screenshot_path = None
+            screenshot_base64 = None
+            try:
+                os.makedirs(self.screenshot_dir, exist_ok=True)
+                candidate_path = f"{self.screenshot_dir}/{test_id}.png"
+                try:
+                    await asyncio.wait_for(page.screenshot(path=candidate_path, full_page=True), timeout=30)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Screenshot timed out for {url}")
+                except Exception as e:
+                    logger.warning(f"Screenshot capture failed for {url}: {e}")
+
+                if os.path.exists(candidate_path):
+                    screenshot_path = candidate_path
+                    with open(candidate_path, "rb") as f:
+                        screenshot_base64 = base64.b64encode(f.read()).decode()
+            except Exception as e:
+                logger.warning(f"Screenshot preparation failed for {url}: {e}")
+
+            # AI Vision Analysis (or basic fallback when no screenshot is available)
+            if screenshot_base64:
+                ai_analysis = await self.vision_analyzer.analyze_screenshot(
+                    screenshot_base64,
+                    page_context
+                )
+            else:
+                ai_analysis = self.vision_analyzer._basic_analysis(page_context)
 
             # Performance metrics
             performance_metrics = None
