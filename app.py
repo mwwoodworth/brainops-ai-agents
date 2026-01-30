@@ -972,7 +972,7 @@ async def lifespan(app: FastAPI):
                                 fut,
                                 coro_name,
                                 exc,
-                                exc_info=exc,
+                                exc_info=(exc.__class__, exc, exc.__traceback__),
                             )
                             return
                     except Exception:
