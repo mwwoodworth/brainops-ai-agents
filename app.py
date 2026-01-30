@@ -1007,6 +1007,24 @@ async def lifespan(app: FastAPI):
         await asyncio.sleep(2)  # Give server time to be fully ready
         logger.info("🔄 Starting heavy component initialization...")
 
+        # Some long-running BrainOps subsystems still perform synchronous I/O
+        # (psycopg2, shell-outs, CPU-heavy work). Run those loops on a dedicated
+        # background event loop thread so they can't starve Uvicorn's HTTP loop
+        # and trigger Render health check timeouts (502).
+        bg_runner = getattr(app.state, "bg_runner", None)
+
+        def _run_on_bg_loop(coro: "asyncio.coroutines.Coroutine[Any, Any, Any]", name: str):
+            """Best-effort: schedule coroutine on background loop runner, else main loop."""
+            if bg_runner is not None:
+                try:
+                    future = bg_runner.submit(coro)
+                    logger.info("🧵 Scheduled %s on background loop", name)
+                    return future
+                except Exception as exc:
+                    logger.error("Failed to schedule %s on background loop: %s", name, exc, exc_info=True)
+            create_safe_task(coro, name)
+            return None
+
         # ── Phase 1: Core systems (scheduler, AUREA, healing) ──
         if SCHEDULER_AVAILABLE:
             try:
@@ -1028,9 +1046,9 @@ async def lifespan(app: FastAPI):
                     lambda: AUREA(autonomy_level=AutonomyLevel.FULL_AUTO, tenant_id=tenant_id)
                 )
                 app.state.aurea = aurea_instance
-                # Always run on the main event loop so AUREA can use the
-                # shared database pool (which is bound to the main loop).
-                create_safe_task(aurea_instance.orchestrate(), "aurea_orchestrate")
+                # AUREA uses synchronous DB operations (psycopg2) internally; run
+                # it off the HTTP event loop to prevent intermittent 502s.
+                app.state.aurea_future = _run_on_bg_loop(aurea_instance.orchestrate(), "aurea_orchestrate")
                 logger.info("🧠 AUREA Master Orchestrator STARTED - Observe→Decide→Act loop ACTIVE")
             except Exception as e:
                 logger.error(f"❌ AUREA initialization failed: {e}")
@@ -1051,9 +1069,9 @@ async def lifespan(app: FastAPI):
             try:
                 reconciler = await asyncio.to_thread(get_reconciler)
                 app.state.reconciler = reconciler
-                # Always run on the main event loop so the healing loop
-                # can use the shared database pool.
-                create_safe_task(start_healing_loop(), "healing_loop")
+                # The reconciler performs synchronous DB work; keep it off the
+                # HTTP event loop to avoid health check timeouts under load.
+                app.state.healing_future = _run_on_bg_loop(start_healing_loop(), "healing_loop")
                 logger.info("🔄 Self-Healing Reconciliation Loop STARTED")
             except Exception as e:
                 logger.error(f"❌ Reconciler initialization failed: {e}")
@@ -1264,9 +1282,9 @@ async def lifespan(app: FastAPI):
         try:
             from intelligent_task_orchestrator import start_task_orchestrator, get_task_orchestrator
 
-            # Run on the main event loop so the task orchestrator
-            # can use the shared database pool.
-            create_safe_task(start_task_orchestrator(), "task_orchestrator")
+            # This orchestrator uses synchronous psycopg2 connections; run it off
+            # the HTTP loop to prevent Render health check failures.
+            app.state.task_orchestrator_future = _run_on_bg_loop(start_task_orchestrator(), "task_orchestrator")
             app.state.task_orchestrator = get_task_orchestrator()
             logger.info("🎯 Intelligent Task Orchestrator STARTED - AI-driven task prioritization active")
         except Exception as e:
