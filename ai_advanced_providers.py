@@ -275,8 +275,134 @@ Focus on:
             }
         }
 
+
+class GeminiRoboticsProvider:
+    """Gemini Robotics ER 1.5 for physical world reasoning"""
+
+    MODEL = "gemini-robotics-er-1.5-preview"
+
+    def __init__(self):
+        self.api_key = os.getenv("GOOGLE_API_KEY")
+        if self.api_key and GEMINI_AVAILABLE:
+            from google import genai
+            self.client = genai.Client(api_key=self.api_key)
+            logger.info("Gemini Robotics ER 1.5 configured")
+        else:
+            self.client = None
+            logger.warning("Gemini Robotics not available")
+
+    async def plan_trajectory(
+        self,
+        image: bytes,
+        task: str,
+        num_waypoints: int = 10
+    ) -> list[dict]:
+        """Generate collision-free trajectory for physical task"""
+        if not self.client:
+            return []
+            
+        prompt = f"""
+        Task: {task}
+
+        Generate a collision-free trajectory of {num_waypoints} points.
+        Format as JSON array of waypoints with [y, x] coordinates (0-1000 scale):
+        [
+            {{"point": [y, x], "label": "waypoint_0", "action": "move"}},
+            ...
+        ]
+        """
+        
+        try:
+            # Note: Actual API call structure depends on specific client version
+            # This follows the genai.Client pattern
+            from google.genai import types
+            response = self.client.models.generate_content(
+                model=self.MODEL,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_bytes(data=image, mime_type="image/jpeg"),
+                            types.Part.from_text(text=prompt)
+                        ]
+                    )
+                ]
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            logger.error(f"Trajectory planning failed: {e}")
+            return []
+
+    async def detect_objects(
+        self,
+        image: bytes,
+        target_objects: list[str] = None
+    ) -> list[dict]:
+        """Detect objects with precise coordinates"""
+        if not self.client:
+            return []
+
+        prompt = f"""
+        Identify all objects in this image.
+        {"Focus on: " + ", ".join(target_objects) if target_objects else ""}
+
+        Return JSON with bounding boxes [ymin, xmin, ymax, xmax]:
+        [{{"box_2d": [y1, x1, y2, x2], "label": "object_name", "confidence": 0.95}}]
+        """
+        
+        try:
+            from google.genai import types
+            response = self.client.models.generate_content(
+                model=self.MODEL,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_bytes(data=image, mime_type="image/jpeg"),
+                            types.Part.from_text(text=prompt)
+                        ]
+                    )
+                ]
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            logger.error(f"Object detection failed: {e}")
+            return []
+
+    async def track_state_changes(
+        self,
+        video_frames: list[bytes],
+        watch_for: str
+    ) -> list[dict]:
+        """Track object state changes across video frames"""
+        if not self.client:
+            return []
+
+        prompt = f"""
+        Analyze this video sequence and track: {watch_for}
+
+        Return state changes with frame numbers:
+        [{{"frame": 0, "state": "closed", "object": "container", "point": [y, x]}}]
+        """
+        
+        try:
+            from google.genai import types
+            parts = [types.Part.from_bytes(data=f, mime_type="image/jpeg") for f in video_frames]
+            parts.append(types.Part.from_text(text=prompt))
+            
+            response = self.client.models.generate_content(
+                model=self.MODEL,
+                contents=[types.Content(role="user", parts=parts)]
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            logger.error(f"State tracking failed: {e}")
+            return []
+
+
 # Global instance
 advanced_ai = AdvancedAIProviders()
+gemini_robotics = GeminiRoboticsProvider()
 
 # FastAPI endpoint functions
 async def generate_with_gemini_endpoint(prompt: str, max_tokens: int = 1000) -> dict[str, Any]:
@@ -312,6 +438,8 @@ async def roofing_research_endpoint(topic: str) -> dict[str, Any]:
 # Export for use in app.py
 __all__ = [
     "advanced_ai",
+    "gemini_robotics",
+    "GeminiRoboticsProvider",
     "generate_with_gemini_endpoint",
     "search_with_perplexity_endpoint",
     "notebook_lm_analyze_endpoint",
