@@ -40,6 +40,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from unified_memory_manager import get_memory_manager
+from safe_task import create_safe_task as _central_create_safe_task
 
 # OPTIMIZATION: Ring Buffer for O(1) memory footprint
 THOUGHT_STREAM_MAX_SIZE = 500  # Constant memory regardless of runtime
@@ -48,19 +49,8 @@ logger = logging.getLogger(__name__)
 
 
 def create_safe_task(coro, name: str = "background_task"):
-    """Create an asyncio task with exception handling to prevent 'Future exception never retrieved' errors."""
-    async def wrapped():
-        try:
-            return await coro
-        except asyncio.CancelledError:
-            logger.debug(f"Task {name} was cancelled")
-            raise
-        except Exception as e:
-            logger.error(f"Error in background task {name}: {e}")
-            return None
-
-    task = asyncio.create_task(wrapped())
-    return task
+    """Compatibility wrapper around the global safe_task.create_safe_task()."""
+    return _central_create_safe_task(coro, name=name)
 
 
 # =============================================================================
