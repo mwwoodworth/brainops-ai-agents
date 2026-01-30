@@ -119,8 +119,11 @@ class TaskQueueConsumer:
 
                     if lock_acquired:
                         try:
-                            await self._reconcile_stale_processing_tasks()
-                            tasks = await self._fetch_pending_tasks()
+                            # IMPORTANT: Do not acquire additional pool connections while holding
+                            # the advisory lock connection. Nested acquisitions can deadlock the pool
+                            # under load and starve HTTP endpoints.
+                            await self._reconcile_stale_processing_tasks(lock_conn)
+                            tasks = await self._fetch_pending_tasks(lock_conn)
                             self._stats["last_poll"] = datetime.now(timezone.utc).isoformat()
                         finally:
                             try:
@@ -144,7 +147,7 @@ class TaskQueueConsumer:
 
             await asyncio.sleep(self.poll_interval)
 
-    async def _reconcile_stale_processing_tasks(self) -> None:
+    async def _reconcile_stale_processing_tasks(self, conn: Any | None = None) -> None:
         """Requeue tasks stuck in processing for too long (self-healing)."""
         stale_after_seconds = int(os.getenv("TASK_QUEUE_STALE_AFTER_SECONDS", "600"))
         max_retries = int(os.getenv("TASK_QUEUE_MAX_RETRIES", "3"))
@@ -153,11 +156,15 @@ class TaskQueueConsumer:
             return
 
         try:
-            from database.async_connection import get_pool
+            if conn is None:
+                from database.async_connection import get_pool
 
-            pool = get_pool()
-            async with pool.acquire() as conn:
-                async with conn.transaction():
+                pool = get_pool()
+                async with pool.acquire() as pooled_conn:
+                    await self._reconcile_stale_processing_tasks(pooled_conn)
+                return
+
+            async with conn.transaction():
                     stale_rows = await conn.fetch(
                         """
                         SELECT id, retry_count
@@ -234,14 +241,17 @@ class TaskQueueConsumer:
         except Exception as e:
             logger.error("Failed to reconcile stale tasks: %s", e)
 
-    async def _fetch_pending_tasks(self) -> list[dict[str, Any]]:
+    async def _fetch_pending_tasks(self, conn: Any | None = None) -> list[dict[str, Any]]:
         """Fetch pending tasks from database with row locking"""
         try:
-            from database.async_connection import get_pool
-            pool = get_pool()
+            if conn is None:
+                from database.async_connection import get_pool
 
-            async with pool.acquire() as conn:
-                async with conn.transaction():
+                pool = get_pool()
+                async with pool.acquire() as pooled_conn:
+                    return await self._fetch_pending_tasks(pooled_conn)
+
+            async with conn.transaction():
                     # Lock and fetch pending tasks
                     rows = await conn.fetch(
                         """

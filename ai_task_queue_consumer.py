@@ -106,8 +106,11 @@ class AITaskQueueConsumer:
 
                     if lock_acquired:
                         try:
-                            await self._reconcile_stale_processing_tasks()
-                            tasks = await self._fetch_pending_tasks()
+                            # IMPORTANT: Do not acquire additional pool connections while holding
+                            # the advisory lock connection. Nested acquisitions can deadlock the pool
+                            # under load and starve HTTP endpoints.
+                            await self._reconcile_stale_processing_tasks(lock_conn)
+                            tasks = await self._fetch_pending_tasks(lock_conn)
                             self._stats["last_poll"] = datetime.now(timezone.utc).isoformat()
                         finally:
                             try:
@@ -129,60 +132,64 @@ class AITaskQueueConsumer:
                 logger.error("Error in ai_task_queue consume loop: %s", exc)
             await asyncio.sleep(self.poll_interval)
 
-    async def _reconcile_stale_processing_tasks(self) -> None:
+    async def _reconcile_stale_processing_tasks(self, conn: Any | None = None) -> None:
         """Fail or requeue tasks stuck in processing for too long (self-healing)."""
         stale_after_seconds = int(os.getenv("AI_TASK_QUEUE_STALE_AFTER_SECONDS", "600"))
         if stale_after_seconds <= 0:
             return
 
-        pool = get_pool()
-        async with pool.acquire() as conn:
-            stale_rows = await conn.fetch(
+        if conn is None:
+            pool = get_pool()
+            async with pool.acquire() as pooled_conn:
+                await self._reconcile_stale_processing_tasks(pooled_conn)
+            return
+
+        stale_rows = await conn.fetch(
+            """
+            SELECT id, task_type
+            FROM ai_task_queue
+            WHERE status = 'processing'
+              AND started_at IS NOT NULL
+              AND started_at < NOW() - ($1 * INTERVAL '1 second')
+            LIMIT 100
+            """,
+            stale_after_seconds,
+        )
+
+        if not stale_rows:
+            return
+
+        quality_ids = [row["id"] for row in stale_rows if (row["task_type"] or "").lower() == "quality_check"]
+        other_ids = [row["id"] for row in stale_rows if row["id"] not in quality_ids]
+
+        requeued = 0
+        failed = 0
+
+        if quality_ids:
+            requeued = await conn.execute(
                 """
-                SELECT id, task_type
-                FROM ai_task_queue
-                WHERE status = 'processing'
-                  AND started_at IS NOT NULL
-                  AND started_at < NOW() - ($1 * INTERVAL '1 second')
-                LIMIT 100
+                UPDATE ai_task_queue
+                SET status = 'pending',
+                    started_at = NULL,
+                    updated_at = NOW(),
+                    error_message = 'stale_processing_requeued'
+                WHERE id = ANY($1)
                 """,
-                stale_after_seconds,
+                quality_ids,
             )
 
-            if not stale_rows:
-                return
-
-            quality_ids = [row["id"] for row in stale_rows if (row["task_type"] or "").lower() == "quality_check"]
-            other_ids = [row["id"] for row in stale_rows if row["id"] not in quality_ids]
-
-            requeued = 0
-            failed = 0
-
-            if quality_ids:
-                requeued = await conn.execute(
-                    """
-                    UPDATE ai_task_queue
-                    SET status = 'pending',
-                        started_at = NULL,
-                        updated_at = NOW(),
-                        error_message = 'stale_processing_requeued'
-                    WHERE id = ANY($1)
-                    """,
-                    quality_ids,
-                )
-
-            if other_ids:
-                failed = await conn.execute(
-                    """
-                    UPDATE ai_task_queue
-                    SET status = 'failed',
-                        completed_at = NOW(),
-                        updated_at = NOW(),
-                        error_message = 'stale_processing_timeout'
-                    WHERE id = ANY($1)
-                    """,
-                    other_ids,
-                )
+        if other_ids:
+            failed = await conn.execute(
+                """
+                UPDATE ai_task_queue
+                SET status = 'failed',
+                    completed_at = NOW(),
+                    updated_at = NOW(),
+                    error_message = 'stale_processing_timeout'
+                WHERE id = ANY($1)
+                """,
+                other_ids,
+            )
 
         # asyncpg returns "UPDATE <n>" strings
         try:
@@ -202,11 +209,14 @@ class AITaskQueueConsumer:
                 stale_after_seconds,
             )
 
-    async def _fetch_pending_tasks(self) -> list[dict[str, Any]]:
+    async def _fetch_pending_tasks(self, conn: Any | None = None) -> list[dict[str, Any]]:
         try:
-            pool = get_pool()
-            async with pool.acquire() as conn:
-                rows = await conn.fetch(
+            if conn is None:
+                pool = get_pool()
+                async with pool.acquire() as pooled_conn:
+                    return await self._fetch_pending_tasks(pooled_conn)
+
+            rows = await conn.fetch(
                     """
                     SELECT id, tenant_id, task_type, payload, input_data, priority, status, created_at
                     FROM ai_task_queue
@@ -218,18 +228,18 @@ class AITaskQueueConsumer:
                     self.batch_size,
                 )
 
-                if rows:
-                    task_ids = [row["id"] for row in rows]
-                    await conn.execute(
-                        """
-                        UPDATE ai_task_queue
-                        SET status = 'processing', started_at = NOW(), updated_at = NOW()
-                        WHERE id = ANY($1)
-                        """,
-                        task_ids,
-                    )
+            if rows:
+                task_ids = [row["id"] for row in rows]
+                await conn.execute(
+                    """
+                    UPDATE ai_task_queue
+                    SET status = 'processing', started_at = NOW(), updated_at = NOW()
+                    WHERE id = ANY($1)
+                    """,
+                    task_ids,
+                )
 
-                return [dict(row) for row in rows]
+            return [dict(row) for row in rows]
         except Exception as exc:
             logger.error("Failed to fetch ai_task_queue tasks: %s", exc)
             return []
