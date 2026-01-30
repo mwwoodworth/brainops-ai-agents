@@ -210,6 +210,15 @@ class EnhancedSelfHealing:
         self.tiered_autonomy_enabled = True
         self.learning_enabled = True
 
+        # Safe-by-default: do NOT execute infra-changing MCP actions unless explicitly enabled.
+        # This prevents autonomous restarts/rollbacks from destabilizing production.
+        _autofix_env = (
+            os.getenv("BRAINOPS_OPS_AUTOFIX_ENABLED")
+            or os.getenv("BRAINOPS_AUTOFIX_ENABLED")
+            or ""
+        ).strip().lower()
+        self.autofix_enabled = _autofix_env in ("1", "true", "yes", "on")
+
         # Metrics
         self.total_incidents = 0
         self.auto_resolved_incidents = 0
@@ -347,6 +356,19 @@ class EnhancedSelfHealing:
         if not MCP_AVAILABLE:
             logger.warning("MCP integration not available, falling back to internal healing only")
             return {"success": False, "error": "MCP integration not available"}
+
+        # Guardrail: block destructive tool execution unless autofix is enabled.
+        # Allow-list common read-only verbs; everything else is treated as a write.
+        safe_prefixes = ("get_", "list_", "fetch_", "describe_", "status", "health")
+        is_read_only = str(tool).startswith(safe_prefixes)
+        if not self.autofix_enabled and not is_read_only:
+            return {
+                "success": False,
+                "error": "Autofix disabled (set BRAINOPS_OPS_AUTOFIX_ENABLED=true to allow MCP write actions)",
+                "blocked": True,
+                "platform": platform,
+                "tool": tool,
+            }
 
         # Map platform to MCPServer enum
         server_map = {
@@ -566,6 +588,7 @@ class EnhancedSelfHealing:
 
         # Step 3: Decide if auto-remediation is appropriate
         can_auto_remediate = (
+            self.autofix_enabled and
             self.tiered_autonomy_enabled and
             plan.confidence >= self.auto_remediate_threshold and
             len(plan.actions) <= self.max_auto_actions and
