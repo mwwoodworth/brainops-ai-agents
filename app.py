@@ -942,6 +942,30 @@ async def lifespan(app: FastAPI):
         await asyncio.sleep(1)  # Give server time to bind
         logger.info("🔄 Starting deferred initialization...")
 
+        # Reduce noisy asyncio errors in production logs. Some subsystems and/or
+        # third-party libs may cancel background futures during startup/shutdown
+        # (timeouts, retries). CancelledError is expected and shouldn't emit
+        # "Future exception was never retrieved" at ERROR level.
+        try:
+            loop = asyncio.get_running_loop()
+            if not getattr(loop, "_brainops_exception_handler_set", False):
+                def _brainops_exception_handler(loop, context):
+                    msg = context.get("message") or ""
+                    exc = context.get("exception")
+                    if (
+                        "Future exception was never retrieved" in msg
+                        and isinstance(exc, asyncio.CancelledError)
+                    ):
+                        logger.debug("Suppressed unhandled CancelledError future: %s", msg)
+                        return
+                    loop.default_exception_handler(context)
+
+                loop.set_exception_handler(_brainops_exception_handler)
+                setattr(loop, "_brainops_exception_handler_set", True)
+        except Exception:
+            # Never fail startup due to logging/handler issues.
+            pass
+
         # Initialize database pool
         try:
             pool_config = PoolConfig(
