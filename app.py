@@ -1227,7 +1227,9 @@ async def lifespan(app: FastAPI):
         # Initialize AI Self-Awareness Module
         if SELF_AWARENESS_AVAILABLE and get_self_aware_ai:
             try:
-                app.state.self_aware_ai = await asyncio.to_thread(get_self_aware_ai)
+                # get_self_aware_ai is async (asyncpg). Running it in a thread
+                # returns a coroutine object and can cause init race/cancel noise.
+                app.state.self_aware_ai = await get_self_aware_ai()
                 logger.info("🧠 AI Self-Awareness Module ACTIVATED - The AI OS is now self-aware!")
             except Exception as e:
                 logger.error(f"❌ Self-Awareness Module activation failed: {e}")
