@@ -1,7 +1,8 @@
 import sys
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+import httpx
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -16,30 +17,35 @@ def _authorize():
     return {"X-API-Key": "test-key"}
 
 
-def test_memory_status_returns_503_when_fallback(monkeypatch):
+@pytest.mark.asyncio
+async def test_memory_status_returns_503_when_fallback(monkeypatch):
     monkeypatch.setattr(memory_api, "using_fallback", lambda: True)
 
-    client = TestClient(ai_app.app)
-    response = client.get("/memory/status", headers=_authorize())
+    transport = httpx.ASGITransport(app=ai_app.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/memory/status", headers=_authorize())
 
     assert response.status_code == 503
     assert "in-memory fallback" in response.json()["detail"].lower()
 
 
-def test_memory_store_returns_503_when_fallback(monkeypatch):
+@pytest.mark.asyncio
+async def test_memory_store_returns_503_when_fallback(monkeypatch):
     monkeypatch.setattr(memory_api, "using_fallback", lambda: True)
 
-    client = TestClient(ai_app.app)
-    response = client.post(
-        "/memory/store",
-        headers=_authorize(),
-        json={"content": "hello", "memory_type": "semantic"},
-    )
+    transport = httpx.ASGITransport(app=ai_app.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/memory/store",
+            headers=_authorize(),
+            json={"content": "hello", "memory_type": "semantic"},
+        )
 
     assert response.status_code == 503
 
 
-def test_semantic_search_requires_embedding(monkeypatch):
+@pytest.mark.asyncio
+async def test_semantic_search_requires_embedding(monkeypatch):
     monkeypatch.setattr(memory_api, "using_fallback", lambda: False)
 
     async def _none_embedding(_: str):
@@ -48,12 +54,13 @@ def test_semantic_search_requires_embedding(monkeypatch):
     monkeypatch.setattr(memory_api, "generate_embedding", _none_embedding)
     monkeypatch.setattr(memory_api, "get_pool", lambda: object())
 
-    client = TestClient(ai_app.app)
-    response = client.get(
-        "/memory/search",
-        headers=_authorize(),
-        params={"query": "roof", "use_semantic": "true"},
-    )
+    transport = httpx.ASGITransport(app=ai_app.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(
+            "/memory/search",
+            headers=_authorize(),
+            params={"query": "roof", "use_semantic": "true"},
+        )
 
     assert response.status_code == 503
     assert "semantic search unavailable" in response.json()["detail"].lower()

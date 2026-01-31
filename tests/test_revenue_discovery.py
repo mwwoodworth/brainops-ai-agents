@@ -1,7 +1,8 @@
 import sys
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+import httpx
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -19,18 +20,20 @@ def _authorize():
     return {"X-API-Key": "test-key"}
 
 
-def test_discover_leads_surfaces_db_unavailable(monkeypatch):
+@pytest.mark.asyncio
+async def test_discover_leads_surfaces_db_unavailable(monkeypatch):
     async def _raise(*_args, **_kwargs):
         raise DatabaseUnavailableError("db down")
 
     monkeypatch.setattr(revenue_api, "generate_realistic_leads", _raise)
     monkeypatch.setattr(revenue_api, "get_pool", lambda: object())
 
-    client = TestClient(ai_app.app)
-    response = client.post(
-        "/api/v1/revenue/discover-leads",
-        json={"industry": "roofing", "location": "USA", "limit": 1},
-        headers=_authorize(),
-    )
+    transport = httpx.ASGITransport(app=ai_app.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/revenue/discover-leads",
+            json={"industry": "roofing", "location": "USA", "limit": 1},
+            headers=_authorize(),
+        )
 
     assert response.status_code == 503
