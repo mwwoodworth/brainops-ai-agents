@@ -114,6 +114,14 @@ except Exception as e:
 # STANDARDIZED: Use STRIPE_SECRET_KEY consistently across all components
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY") or os.getenv("STRIPE_API_KEY") or ""
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
+SENDGRID_FROM_EMAIL = (
+    os.getenv("SENDGRID_FROM_EMAIL", "").strip()
+    or os.getenv("SMTP_FROM_EMAIL", "").strip()
+    or os.getenv("RESEND_FROM_EMAIL", "").strip()
+    or os.getenv("SUPPORT_EMAIL", "").strip()
+    or "noreply@brainstackstudio.com"
+)
+SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "BrainOps AI")
 TWILIO_SID = os.getenv("TWILIO_SID", "")
 TWILIO_TOKEN = os.getenv("TWILIO_TOKEN", "")
 
@@ -1044,7 +1052,7 @@ class RevenueAutomationEngine:
 
             sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
             message = Mail(
-                from_email=Email("noreply@brainops.ai", "BrainOps AI"),
+                from_email=Email(SENDGRID_FROM_EMAIL, SENDGRID_FROM_NAME),
                 to_emails=To(lead.email, f"{lead.first_name} {lead.last_name}"),
                 subject=template_content.get("subject", "Message from BrainOps"),
                 html_content=Content("text/html", template_content.get("body", ""))
