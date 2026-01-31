@@ -33,7 +33,8 @@ DATABASE_CONFIG = {
 # AI Model Preferences (non-secret)
 AI_MODELS = {
     "fast": os.getenv("BRAINOPS_MODEL_FAST", "gpt-4o-mini"),
-    "smart": os.getenv("BRAINOPS_MODEL_SMART", "gpt-5"),
+    # Default to a known production model name. Override via BRAINOPS_MODEL_SMART.
+    "smart": os.getenv("BRAINOPS_MODEL_SMART", "gpt-4o"),
     "creative": os.getenv("BRAINOPS_MODEL_CREATIVE", "claude-sonnet-4-5-20250929"),
     "research": os.getenv("BRAINOPS_MODEL_RESEARCH", "perplexity-70b-online"),
     "analysis": os.getenv("BRAINOPS_MODEL_ANALYSIS", "gemini-2.5-flash"),
