@@ -3,6 +3,7 @@ BrainOps AI Agents Service - Enhanced Production Version
 Type-safe, async, fully operational
 """
 import asyncio
+import hashlib
 import inspect
 import json
 import logging
@@ -146,8 +147,14 @@ class RateLimiter:
 
 
 # Global rate limiters
-_rate_limiter = RateLimiter(requests_per_minute=120, burst_size=20)  # General endpoints
+#
+# NOTE: We intentionally rate-limit *unauthenticated* traffic much more aggressively than
+# authenticated (API-key) traffic. Many internal loops (E2E verification, orchestrator,
+# self-healing dashboards) can burst across many endpoints in a short window and should not
+# self-DOS the service via the IP-based limiter.
+_rate_limiter = RateLimiter(requests_per_minute=120, burst_size=20)  # General (unauthenticated)
 _auth_rate_limiter = RateLimiter(requests_per_minute=10, burst_size=5)  # Auth/sensitive endpoints
+_trusted_rate_limiter = RateLimiter(requests_per_minute=1200, burst_size=200)  # Valid API key traffic
 
 
 # ---------------------------------------------------------------------------
@@ -1353,6 +1360,7 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(300)  # 5 minutes
                 await _rate_limiter.cleanup()
                 await _auth_rate_limiter.cleanup()
+                await _trusted_rate_limiter.cleanup()
                 logger.debug("🧹 Rate limiter buckets cleaned up")
 
         create_safe_task(rate_limiter_cleanup_loop(), "rate_limiter_cleanup")
@@ -1555,19 +1563,40 @@ async def rate_limit_middleware(request: Request, call_next):
     if request.url.path == "/events/webhook/erp":
         return await call_next(request)
 
-    # Get client IP (handle proxies)
-    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    if not client_ip:
-        client_ip = request.client.host if request.client else "unknown"
+    def _extract_api_key(req: Request) -> str | None:
+        key = req.headers.get("X-API-Key") or req.headers.get("x-api-key") or req.headers.get("X-Api-Key")
+        if key:
+            return key.strip()
+        auth = req.headers.get("Authorization") or req.headers.get("authorization") or ""
+        if auth.startswith("ApiKey "):
+            return auth[len("ApiKey ") :].strip()
+        if auth.startswith("Bearer "):
+            return auth[len("Bearer ") :].strip()
+        return None
 
-    # Use stricter rate limit for auth-related paths
-    if any(p in request.url.path for p in ["/auth", "/login", "/api-key"]):
-        limiter = _auth_rate_limiter
+    # Identify the caller for rate limiting. Prefer API key identity when valid so internal/admin
+    # workflows don't get bucketed together behind a shared proxy egress IP.
+    api_key = _extract_api_key(request)
+    identity = None
+    if api_key and api_key in config.security.valid_api_keys:
+        # Never log raw secrets; use a short stable fingerprint for troubleshooting.
+        identity = "key:" + hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:12]
+        limiter = _trusted_rate_limiter
     else:
-        limiter = _rate_limiter
+        # Get client IP (handle proxies)
+        client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        if not client_ip:
+            client_ip = request.client.host if request.client else "unknown"
+        identity = "ip:" + client_ip
 
-    if not await limiter.is_allowed(client_ip):
-        logger.warning(f"Rate limit exceeded for {client_ip} on {request.url.path}")
+        # Use stricter rate limit for auth-related paths
+        if any(p in request.url.path for p in ["/auth", "/login", "/api-key"]):
+            limiter = _auth_rate_limiter
+        else:
+            limiter = _rate_limiter
+
+    if not await limiter.is_allowed(identity):
+        logger.warning("Rate limit exceeded for %s on %s", identity, request.url.path)
         return JSONResponse(
             status_code=429,
             content={"detail": "Too many requests. Please slow down."},

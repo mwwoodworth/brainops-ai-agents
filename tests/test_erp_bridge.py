@@ -1,10 +1,10 @@
-
 import os
 import sys
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi.testclient import TestClient
+import httpx
+import pytest
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,12 +16,13 @@ from erp_event_bridge import router
 app = FastAPI()
 app.include_router(router)
 
-client = TestClient(app)
+transport = httpx.ASGITransport(app=app)
 
 @patch("erp_event_bridge.CustomerSuccessAgent")
 @patch("erp_event_bridge.get_revenue_system")
 @patch("erp_event_bridge.get_intelligent_followup_system")
-def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
+@pytest.mark.asyncio
+async def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
     # Mock systems
     mock_csa_instance = MagicMock()
     mock_csa_instance.generate_onboarding_plan = AsyncMock()
@@ -43,9 +44,10 @@ def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
         "timestamp": datetime.utcnow().isoformat()
     }
 
-    response = client.post("/events/webhook", json=payload)
-    assert response.status_code == 200
-    data = response.json()
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/events/webhook", json=payload)
+        assert response.status_code == 200
+        data = response.json()
     assert data["status"] == "processed"
     assert data["event_id"] == "evt_123"
 
@@ -61,8 +63,9 @@ def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
         "timestamp": datetime.utcnow().isoformat()
     }
 
-    response = client.post("/events/webhook", json=payload_job)
-    assert response.status_code == 200
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/events/webhook", json=payload_job)
+        assert response.status_code == 200
 
     # Verify Followup System called
     mock_followup.assert_called()
