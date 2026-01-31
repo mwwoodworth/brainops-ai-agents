@@ -35,6 +35,8 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Any, Optional, Callable
 
+from safe_task import create_safe_task
+
 logger = logging.getLogger(__name__)
 
 
@@ -1320,7 +1322,10 @@ class MetaIntelligenceController:
         if improvements:
             # Execute top improvement asynchronously
             top_improvement = improvements[0]
-            asyncio.create_task(self.self_improvement.execute_improvement(top_improvement))
+            create_safe_task(
+                self.self_improvement.execute_improvement(top_improvement),
+                name="meta_intelligence_self_improvement",
+            )
             results["improvement_initiated"] = top_improvement.domain.value
 
         # 5. Generate purpose-driven goal if needed
