@@ -18,12 +18,6 @@ PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "")
 HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN", "")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 
-# FREE LLM Providers (no paid credits needed)
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Free tier: unlimited (rate-limited)
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")  # Free tier: 50 req/day
-TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY", "")  # Free tier available
-CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")  # Free tier: 1M tokens/day
-
 # Supabase / Postgres
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "") or os.getenv("SUPABASE_SERVICE_KEY", "")
@@ -58,11 +52,6 @@ AI_FEATURES = {
     "realtime_search": bool(PERPLEXITY_API_KEY),
     "multi_model_consensus": os.getenv("BRAINOPS_MULTI_MODEL_CONSENSUS", "true").lower() == "true",
     "smart_fallback": os.getenv("BRAINOPS_SMART_FALLBACK", "true").lower() == "true",
-    # FREE LLM providers (no paid credits needed)
-    "groq_enabled": bool(GROQ_API_KEY),
-    "openrouter_enabled": bool(OPENROUTER_API_KEY),
-    "together_enabled": bool(TOGETHER_API_KEY),
-    "cerebras_enabled": bool(CEREBRAS_API_KEY),
 }
 
 
@@ -74,11 +63,6 @@ def get_api_status() -> dict[str, str]:
         "perplexity": "configured" if PERPLEXITY_API_KEY else "missing",
         "huggingface": "configured" if HUGGINGFACE_API_TOKEN else "missing",
         "elevenlabs": "configured" if ELEVENLABS_API_KEY else "missing",
-        # FREE LLM providers
-        "groq": "configured" if GROQ_API_KEY else "missing",
-        "openrouter": "configured" if OPENROUTER_API_KEY else "missing",
-        "together": "configured" if TOGETHER_API_KEY else "missing",
-        "cerebras": "configured" if CEREBRAS_API_KEY else "missing",
         "database_password": "configured" if DATABASE_CONFIG.get("password") else "missing",
         "supabase_service_key": "configured" if SUPABASE_SERVICE_KEY else "missing",
     }
@@ -101,11 +85,6 @@ __all__ = [
     "PERPLEXITY_API_KEY",
     "HUGGINGFACE_API_TOKEN",
     "ELEVENLABS_API_KEY",
-    # FREE LLM providers
-    "GROQ_API_KEY",
-    "OPENROUTER_API_KEY",
-    "TOGETHER_API_KEY",
-    "CEREBRAS_API_KEY",
     "DATABASE_CONFIG",
     "SUPABASE_URL",
     "SUPABASE_SERVICE_KEY",

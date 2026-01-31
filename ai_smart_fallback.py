@@ -33,12 +33,6 @@ class SmartAISystem:
         self.hf_token = os.getenv("HUGGINGFACE_API_TOKEN")
         self.perplexity_key = os.getenv("PERPLEXITY_API_KEY")
 
-        # FREE LLM providers (no paid credits needed!)
-        self.groq_key = os.getenv("GROQ_API_KEY")  # Free tier: unlimited (rate-limited)
-        self.openrouter_key = os.getenv("OPENROUTER_API_KEY")  # Free tier: 50 req/day
-        self.together_key = os.getenv("TOGETHER_API_KEY")  # Free tier available
-        self.cerebras_key = os.getenv("CEREBRAS_API_KEY")  # Free tier: 1M tokens/day
-
         # Initialize clients
         self.openai_client = OpenAI(api_key=self.openai_key) if self.openai_key and OpenAI else None
         self.anthropic_client = Anthropic(api_key=self.anthropic_key) if self.anthropic_key and Anthropic else None
@@ -49,184 +43,13 @@ class SmartAISystem:
 
         # Track provider performance
         self.provider_stats = {
-            "groq": {"successes": 0, "failures": 0, "avg_time": 0, "free": True},
-            "openrouter": {"successes": 0, "failures": 0, "avg_time": 0, "free": True},
-            "together": {"successes": 0, "failures": 0, "avg_time": 0, "free": True},
-            "cerebras": {"successes": 0, "failures": 0, "avg_time": 0, "free": True},
-            "openai": {"successes": 0, "failures": 0, "avg_time": 0, "free": False},
-            "anthropic": {"successes": 0, "failures": 0, "avg_time": 0, "free": False},
-            "perplexity": {"successes": 0, "failures": 0, "avg_time": 0, "free": False},
-            "huggingface": {"successes": 0, "failures": 0, "avg_time": 0, "free": True}
+            "openai": {"successes": 0, "failures": 0, "avg_time": 0},
+            "anthropic": {"successes": 0, "failures": 0, "avg_time": 0},
+            "perplexity": {"successes": 0, "failures": 0, "avg_time": 0},
+            "huggingface": {"successes": 0, "failures": 0, "avg_time": 0}
         }
 
-        logger.info(f"Smart AI System initialized - Groq: {bool(self.groq_key)}, OpenRouter: {bool(self.openrouter_key)}, OpenAI: {bool(self.openai_key)}, Anthropic: {bool(self.anthropic_key)}, HF: {bool(self.hf_token)}")
-
-    def _try_groq(self, prompt: str, max_tokens: int = 1000, timeout: int = 10) -> Optional[str]:
-        """Try Groq API - FREE tier with ultra-fast inference"""
-        if not self.groq_key:
-            return None
-
-        start_time = time.time()
-        try:
-            response = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.groq_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "llama-3.3-70b-versatile",  # Fast and capable
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": max_tokens,
-                    "temperature": 0.7
-                },
-                timeout=timeout
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                if text:
-                    elapsed = time.time() - start_time
-                    self.provider_stats["groq"]["successes"] += 1
-                    self.provider_stats["groq"]["avg_time"] = (self.provider_stats["groq"]["avg_time"] + elapsed) / 2
-                    logger.info(f"Groq (FREE) success in {elapsed:.2f}s")
-                    return text
-            elif response.status_code == 429:
-                logger.debug("Groq rate limited - trying next provider")
-
-        except Exception as e:
-            self.provider_stats["groq"]["failures"] += 1
-            logger.debug(f"Groq failed in {time.time() - start_time:.2f}s: {e}")
-
-        return None
-
-    def _try_openrouter(self, prompt: str, max_tokens: int = 1000, timeout: int = 10) -> Optional[str]:
-        """Try OpenRouter API - FREE tier with multiple free models"""
-        if not self.openrouter_key:
-            return None
-
-        start_time = time.time()
-        try:
-            # Use free models available on OpenRouter
-            free_models = [
-                "google/gemini-2.0-flash-exp:free",
-                "meta-llama/llama-3.3-70b-instruct:free",
-                "mistralai/mistral-7b-instruct:free",
-            ]
-
-            for model in free_models:
-                try:
-                    response = requests.post(
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {self.openrouter_key}",
-                            "Content-Type": "application/json",
-                            "HTTP-Referer": "https://brainops.ai",
-                            "X-Title": "BrainOps AI OS"
-                        },
-                        json={
-                            "model": model,
-                            "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": max_tokens,
-                            "temperature": 0.7
-                        },
-                        timeout=timeout
-                    )
-
-                    if response.status_code == 200:
-                        data = response.json()
-                        text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                        if text:
-                            elapsed = time.time() - start_time
-                            self.provider_stats["openrouter"]["successes"] += 1
-                            self.provider_stats["openrouter"]["avg_time"] = (self.provider_stats["openrouter"]["avg_time"] + elapsed) / 2
-                            logger.info(f"OpenRouter (FREE: {model}) success in {elapsed:.2f}s")
-                            return text
-                except Exception:
-                    continue
-
-        except Exception as e:
-            self.provider_stats["openrouter"]["failures"] += 1
-            logger.debug(f"OpenRouter failed in {time.time() - start_time:.2f}s: {e}")
-
-        return None
-
-    def _try_together(self, prompt: str, max_tokens: int = 1000, timeout: int = 10) -> Optional[str]:
-        """Try Together AI - FREE tier available"""
-        if not self.together_key:
-            return None
-
-        start_time = time.time()
-        try:
-            response = requests.post(
-                "https://api.together.xyz/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.together_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": max_tokens,
-                    "temperature": 0.7
-                },
-                timeout=timeout
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                if text:
-                    elapsed = time.time() - start_time
-                    self.provider_stats["together"]["successes"] += 1
-                    self.provider_stats["together"]["avg_time"] = (self.provider_stats["together"]["avg_time"] + elapsed) / 2
-                    logger.info(f"Together AI (FREE) success in {elapsed:.2f}s")
-                    return text
-
-        except Exception as e:
-            self.provider_stats["together"]["failures"] += 1
-            logger.debug(f"Together AI failed in {time.time() - start_time:.2f}s: {e}")
-
-        return None
-
-    def _try_cerebras(self, prompt: str, max_tokens: int = 1000, timeout: int = 10) -> Optional[str]:
-        """Try Cerebras API - FREE tier with 1M tokens/day"""
-        if not self.cerebras_key:
-            return None
-
-        start_time = time.time()
-        try:
-            response = requests.post(
-                "https://api.cerebras.ai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.cerebras_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "llama3.3-70b",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": max_tokens,
-                    "temperature": 0.7
-                },
-                timeout=timeout
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                if text:
-                    elapsed = time.time() - start_time
-                    self.provider_stats["cerebras"]["successes"] += 1
-                    self.provider_stats["cerebras"]["avg_time"] = (self.provider_stats["cerebras"]["avg_time"] + elapsed) / 2
-                    logger.info(f"Cerebras (FREE) success in {elapsed:.2f}s")
-                    return text
-
-        except Exception as e:
-            self.provider_stats["cerebras"]["failures"] += 1
-            logger.debug(f"Cerebras failed in {time.time() - start_time:.2f}s: {e}")
-
-        return None
+        logger.info(f"Smart AI System initialized - OpenAI: {bool(self.openai_key)}, Anthropic: {bool(self.anthropic_key)}, Perplexity: {bool(self.perplexity_key)}, HF: {bool(self.hf_token)}")
 
     def _try_openai(self, prompt: str, max_tokens: int = 1000, timeout: int = 3) -> Optional[str]:
         """Try OpenAI with quick timeout"""
@@ -383,32 +206,19 @@ class SmartAISystem:
         provider_used = None
         response_text = None
 
-        # Try FREE providers FIRST, then paid providers
-        # This saves money while ensuring 100% uptime
+        # Try providers in order of preference (based on past performance)
         providers = [
-            # FREE providers (no paid credits needed!)
-            ("groq", self._try_groq),
-            ("openrouter", self._try_openrouter),
-            ("together", self._try_together),
-            ("cerebras", self._try_cerebras),
-            # Paid providers (only used if all free fail)
             ("openai", self._try_openai),
             ("anthropic", self._try_anthropic),
             ("perplexity", self._try_perplexity),
-            # Always-available fallback
             ("huggingface", self._try_huggingface)
         ]
 
-        # Sort free providers by success rate, keeping free before paid
-        free_providers = [(n, f) for n, f in providers if self.provider_stats.get(n, {}).get("free", False)]
-        paid_providers = [(n, f) for n, f in providers if not self.provider_stats.get(n, {}).get("free", True)]
-
-        free_providers.sort(key=lambda x: (
+        # Sort by success rate
+        providers.sort(key=lambda x: (
             self.provider_stats[x[0]]["successes"] /
             max(1, self.provider_stats[x[0]]["successes"] + self.provider_stats[x[0]]["failures"])
         ), reverse=True)
-
-        providers = free_providers + paid_providers
 
         # Try each provider
         for provider_name, provider_func in providers:
@@ -458,20 +268,13 @@ class SmartAISystem:
         """Get system status"""
         return {
             "providers": {
-                # FREE providers (prioritized)
-                "groq": "active (FREE)" if self.groq_key else "unavailable",
-                "openrouter": "active (FREE)" if self.openrouter_key else "unavailable",
-                "together": "active (FREE)" if self.together_key else "unavailable",
-                "cerebras": "active (FREE)" if self.cerebras_key else "unavailable",
-                # Paid providers
                 "openai": "active" if self.openai_client else "unavailable",
                 "anthropic": "active" if self.anthropic_client else "unavailable",
                 "perplexity": "active" if self.perplexity_key else "unavailable",
-                "huggingface": "active (FREE)"  # Always available
+                "huggingface": "active"  # Always available
             },
             "statistics": self.provider_stats,
-            "recommendation": self._get_best_provider(),
-            "free_providers_count": sum(1 for k in [self.groq_key, self.openrouter_key, self.together_key, self.cerebras_key] if k)
+            "recommendation": self._get_best_provider()
         }
 
     def _get_best_provider(self) -> str:
