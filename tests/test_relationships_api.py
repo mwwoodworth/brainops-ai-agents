@@ -1,9 +1,10 @@
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
+import pytest_asyncio
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -27,8 +28,8 @@ class DummyPool:
         return []
 
 
-@pytest.fixture
-def client(monkeypatch):
+@pytest_asyncio.fixture
+async def client(monkeypatch):
     app = FastAPI()
     app.include_router(relationships_api.router)
 
@@ -36,11 +37,14 @@ def client(monkeypatch):
     monkeypatch.setattr(relationships_api, "using_fallback", lambda: False)
     monkeypatch.setattr(relationships_api, "get_pool", lambda: DummyPool())
 
-    return TestClient(app)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
 
 
-def test_relationship_path(client):
-    response = client.post(
+@pytest.mark.asyncio
+async def test_relationship_path(client):
+    response = await client.post(
         "/relationships/path",
         json={"source_id": "a", "target_id": "c", "max_depth": 4},
         headers={"X-API-Key": "test-key", "X-Tenant-ID": "tenant"},
