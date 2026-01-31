@@ -132,6 +132,24 @@ class ModelRouter:
             return self._fast_model(prefer_anthropic)
         return self._strong_model(prefer_anthropic)
 
+class _GeminiModelAdapter:
+    """Adapter to provide a `.generate_content()` API compatible with older call sites.
+
+    The newer `google.genai` client exposes `client.models.generate_content(...)`, while older
+    code paths expect `gemini_model.generate_content(prompt)`.
+    """
+
+    def __init__(self, client: Any, model: str) -> None:
+        self._client = client
+        self._model = model
+
+    def generate_content(self, prompt: str, **kwargs: Any):
+        return self._client.models.generate_content(
+            model=self._model,
+            contents=prompt,
+            **kwargs,
+        )
+
 class RealAICore:
     """REAL AI implementation - no fake responses"""
 
@@ -173,13 +191,24 @@ class RealAICore:
             logger.warning("Perplexity API key not found - fallback unavailable")
 
         # Initialize Gemini (powerful fallback when OpenAI/Claude rate limited)
-        self.gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        self.gemini_key = (
+            os.getenv("GOOGLE_GENERATIVE_AI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+            or os.getenv("GEMINI_API_KEY")
+        )
         self._gemini_client = None
+        # Backward-compat shim: older callers expect `.gemini_model.generate_content(...)`.
+        # When we use the newer `google.genai` client, provide a small adapter with the same shape.
+        self.gemini_model = None
         if self.gemini_key:
             try:
                 from google import genai
                 self._gemini_client = genai.Client(api_key=self.gemini_key)
                 logger.info("Gemini 2.0 Flash initialized - powerful fallback available")
+                self.gemini_model = _GeminiModelAdapter(
+                    self._gemini_client,
+                    model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+                )
             except Exception as e:
                 logger.warning(f"Gemini initialization failed: {e}")
         else:
