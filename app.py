@@ -237,6 +237,7 @@ from api.self_healing import router as self_healing_router
 from api.state_sync import router as state_sync_router
 from api.sync import router as sync_router  # Memory migration & consolidation
 from api.system_orchestrator import router as system_orchestrator_router
+from api.victoria import router as victoria_router  # ERP scheduling agent compatibility (draft suggestions)
 from database.async_connection import (
     DatabaseUnavailableError,
     PoolConfig,
@@ -1774,6 +1775,7 @@ app.include_router(system_orchestrator_router, dependencies=SECURED_DEPENDENCIES
 app.include_router(self_healing_router, dependencies=SECURED_DEPENDENCIES)  # Enhanced self-healing AI infrastructure
 app.include_router(e2e_verification_router, dependencies=SECURED_DEPENDENCIES)  # E2E System Verification
 app.include_router(logistics_router, dependencies=SECURED_DEPENDENCIES)  # Neuro-Symbolic Logistics
+app.include_router(victoria_router, dependencies=SECURED_DEPENDENCIES)  # Victoria scheduling agent (ERP compatibility)
 app.include_router(infrastructure_router, dependencies=SECURED_DEPENDENCIES)  # Self-Provisioning Infra
 app.include_router(revenue_automation_router, dependencies=SECURED_DEPENDENCIES)  # Revenue Automation Engine
 app.include_router(income_streams_router, dependencies=SECURED_DEPENDENCIES)  # Automated Income Streams (email, subscriptions, affiliates)
