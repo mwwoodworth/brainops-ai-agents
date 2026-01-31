@@ -19,6 +19,8 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+from safe_task import create_safe_task
+
 # Slack webhook URL from environment
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "#brainops-alerts")
@@ -114,10 +116,17 @@ class SlackNotifier:
             return False
 
     def send_message_sync(self, message: SlackMessage) -> bool:
-        """Synchronous wrapper for send_message"""
+        """
+        Synchronous wrapper for send_message.
+
+        Note: if called from inside a running asyncio loop, this cannot block.
+        In that case we schedule a safe background task and return True to mean
+        "scheduled" (the actual send result will be logged by the task).
+        """
         try:
             loop = asyncio.get_running_loop()
-            return loop.create_task(self.send_message(message))
+            create_safe_task(self.send_message(message), name="slack.send_message")
+            return True
         except RuntimeError:
             # No running loop, create one
             return asyncio.run(self.send_message(message))
@@ -175,12 +184,20 @@ class SlackNotifier:
         fields: Optional[dict[str, str]] = None,
         url: Optional[str] = None
     ) -> bool:
-        """Synchronous wrapper for send_alert"""
+        """
+        Synchronous wrapper for send_alert.
+
+        Note: if called from inside a running asyncio loop, this cannot block.
+        In that case we schedule a safe background task and return True to mean
+        "scheduled" (the actual send result will be logged by the task).
+        """
         try:
             loop = asyncio.get_running_loop()
-            return loop.create_task(
-                self.send_alert(title, message, severity, fields, url)
+            create_safe_task(
+                self.send_alert(title, message, severity, fields, url),
+                name="slack.send_alert",
             )
+            return True
         except RuntimeError:
             return asyncio.run(
                 self.send_alert(title, message, severity, fields, url)
