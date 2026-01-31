@@ -25,6 +25,8 @@ import logging
 import threading
 from typing import Any, Coroutine, Optional
 
+from safe_task import create_safe_task
+
 logger = logging.getLogger(__name__)
 
 _MAIN_LOOP: Optional[asyncio.AbstractEventLoop] = None
@@ -59,11 +61,11 @@ def run_on_main_loop(coro: Coroutine[Any, Any, Any], *, timeout: Optional[float]
             return asyncio.run(coro)
         except RuntimeError:
             # Already in an event loop but no main loop registered; schedule locally.
-            return asyncio.create_task(coro)
+            return create_safe_task(coro, name="run_on_main_loop_fallback")
 
     if _MAIN_THREAD_ID == threading.get_ident():
         # We're on the main loop thread; never block here (would deadlock).
-        return asyncio.create_task(coro)
+        return create_safe_task(coro, name="run_on_main_loop")
 
     fut = asyncio.run_coroutine_threadsafe(coro, loop)
     try:
@@ -75,4 +77,3 @@ def run_on_main_loop(coro: Coroutine[Any, Any, Any], *, timeout: Optional[float]
         except Exception:
             pass
         raise
-
