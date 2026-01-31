@@ -657,7 +657,7 @@ async def run_quick_health_test() -> dict[str, Any]:
     timeout_seconds = float(os.getenv("CHATGPT_AGENT_TESTER_HTTP_TIMEOUT_SECONDS", "12"))
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
     headers = {
-        "User-Agent": "BrainOpsChatGPTAgentTester/1.0 (+https://brainops.ai)",
+        "User-Agent": "BrainOpsChatGPTAgentTester/1.0 (+https://brainstackstudio.com)",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
 

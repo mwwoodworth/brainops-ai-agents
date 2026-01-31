@@ -26,6 +26,13 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# Avoid hardcoding domains we don't own. Operators can override via env.
+_PRICING_URL = (
+    os.getenv("PRICING_URL", "").strip()
+    or os.getenv("SUPPORT_URL", "").strip()
+    or "https://brainstackstudio.com/pricing"
+)
+
 # Pricing tiers
 class PricingTier(str, Enum):
     FREE = "free"
@@ -231,7 +238,7 @@ class APIMonetizationEngine:
                 "error": "Monthly API limit exceeded",
                 "usage": current_usage,
                 "limit": limit,
-                "upgrade_url": "https://brainops.ai/pricing"
+                "upgrade_url": _PRICING_URL
             }
 
         return {

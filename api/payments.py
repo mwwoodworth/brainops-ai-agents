@@ -7,6 +7,7 @@ Part of Revenue Perfection Session.
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -22,6 +23,12 @@ from payment_capture import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/payments", tags=["Payment Capture"])
+
+PAYMENTS_CONTACT_EMAIL = (
+    os.getenv("PAYMENTS_CONTACT_EMAIL", "").strip()
+    or os.getenv("SUPPORT_EMAIL", "").strip()
+    or "support@brainstackstudio.com"
+)
 
 
 class MarkPaidRequest(BaseModel):
@@ -294,11 +301,11 @@ async def manual_payment_page(invoice_id: str) -> dict[str, Any]:
         "payment_instructions": {
             "method_1": {
                 "name": "Bank Transfer",
-                "details": "Contact matt@brainops.ai for wire transfer instructions"
+                "details": f"Contact {PAYMENTS_CONTACT_EMAIL} for wire transfer instructions"
             },
             "method_2": {
                 "name": "PayPal",
-                "details": "Send to matt@brainops.ai with invoice ID in notes"
+                "details": f"Send to {PAYMENTS_CONTACT_EMAIL} with invoice ID in notes"
             },
             "method_3": {
                 "name": "Crypto",
