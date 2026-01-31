@@ -118,7 +118,11 @@ class RevenueDrive:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self.run_async())
-        return loop.create_task(self.run_async())
+        # IMPORTANT: use safe_task to prevent:
+        #   asyncio - ERROR - Future exception was never retrieved
+        # when this is scheduled as fire-and-forget.
+        from safe_task import create_safe_task
+        return create_safe_task(self.run_async(), name="RevenueDrive.run_async")
 
     async def run_async(self) -> dict[str, Any]:
         """Run the revenue drive scan and trigger events."""
