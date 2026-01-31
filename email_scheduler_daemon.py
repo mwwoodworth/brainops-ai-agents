@@ -33,8 +33,14 @@ RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
 
 # SendGrid fallback configuration (optional)
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY', '')
-SENDGRID_FROM_EMAIL = os.getenv('SENDGRID_FROM_EMAIL', 'noreply@brainops.ai')
-SENDGRID_FROM_NAME = os.getenv('SENDGRID_FROM_NAME', 'BrainOps AI')
+SENDGRID_FROM_EMAIL = (
+    os.getenv("SENDGRID_FROM_EMAIL", "").strip()
+    or os.getenv("SMTP_FROM_EMAIL", "").strip()
+    or os.getenv("RESEND_FROM_EMAIL", "").strip()
+    or os.getenv("SUPPORT_EMAIL", "").strip()
+    or "noreply@brainstackstudio.com"
+)
+SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "BrainOps AI")
 
 RESEND_RATE_LIMIT_PER_SECOND = float(os.getenv("RESEND_RATE_LIMIT_PER_SECOND", "2"))
 _RESEND_MIN_INTERVAL = 1.0 / RESEND_RATE_LIMIT_PER_SECOND if RESEND_RATE_LIMIT_PER_SECOND > 0 else 0.0
