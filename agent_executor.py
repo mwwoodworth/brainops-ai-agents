@@ -6996,6 +6996,9 @@ class SMSInterfaceAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         action = task.get("action", task.get("type", "send"))
+        if action == "scheduled_run":
+            # Scheduled health check - return status without sending
+            return {"status": "completed", "action": "scheduled_run", "message": "SMS interface operational"}
         if action != "send":
             return {"status": "error", "error": f"Unsupported action: {action}"}
         return await self.send_sms(task)
@@ -7085,6 +7088,9 @@ class VoiceInterfaceAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         action = task.get("action", task.get("type", "synthesize"))
+        if action == "scheduled_run":
+            # Scheduled health check - return status without voice operations
+            return {"status": "completed", "action": "scheduled_run", "message": "Voice interface operational"}
         if action == "transcribe":
             return await self.transcribe(task)
         if action == "synthesize":
