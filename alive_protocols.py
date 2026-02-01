@@ -133,7 +133,7 @@ async def run_revenue_drive_daemon(interval_seconds: int | None = None) -> None:
 
             leads = await pool.fetch(
                 """
-                SELECT id, contact_email, contact_name, stage, last_contact, updated_at, metadata
+                SELECT id, email, contact_name, stage, last_contact, updated_at, metadata
                 FROM revenue_leads
                 WHERE stage NOT IN ('won', 'lost')
                   AND (last_contact IS NULL OR last_contact < $1)
