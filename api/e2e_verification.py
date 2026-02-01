@@ -65,6 +65,14 @@ async def run_verification(
         raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}") from e
 
 
+@router.post("/verify")
+async def run_verification_post(
+    request: Request,
+    quick: bool = Query(False, description="Run quick health check only (critical endpoints)")
+):
+    return await run_verification(request, quick)
+
+
 @router.get("/status")
 async def get_verification_status():
     """Get the status of the E2E verification system"""

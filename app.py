@@ -452,6 +452,14 @@ except ImportError as e:
     ALWAYS_KNOW_AVAILABLE = False
     logger.warning(f"Always-Know Brain Router not available: {e}")
 
+try:
+    from api.always_know_compat import router as always_know_compat_router
+    ALWAYS_KNOW_COMPAT_AVAILABLE = True
+    logger.info("🧠 Always-Know Compat Router loaded - legacy paths")
+except ImportError as e:
+    ALWAYS_KNOW_COMPAT_AVAILABLE = False
+    logger.warning(f"Always-Know Compat Router not available: {e}")
+
 # Ultimate E2E System - COMPLETE e2e awareness (2025-12-31)
 try:
     from api.ultimate_e2e import router as ultimate_e2e_router
@@ -1928,7 +1936,11 @@ if BG_MONITORING_AVAILABLE:
 # Always-Know Observability Brain (2025-12-29) - Deep continuous monitoring
 if ALWAYS_KNOW_AVAILABLE:
     app.include_router(always_know_router, dependencies=SECURED_DEPENDENCIES)
-    logger.info("Mounted: Always-Know Brain at /always-know - continuous state awareness")
+    logger.info("Mounted: Always-Know Brain at /api/v1/always-know - continuous state awareness")
+
+if ALWAYS_KNOW_COMPAT_AVAILABLE:
+    app.include_router(always_know_compat_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: Always-Know Brain compat at /always-know")
 
 # Ultimate E2E System (2025-12-31) - COMPLETE e2e awareness
 if ULTIMATE_E2E_AVAILABLE:
