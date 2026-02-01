@@ -19,6 +19,23 @@ _background_verification_running = False
 _last_background_result = None
 
 
+def _extract_api_key(request: Request) -> str | None:
+    api_key = (
+        request.headers.get("X-API-Key")
+        or request.headers.get("x-api-key")
+        or request.headers.get("X-Api-Key")
+    )
+    if api_key:
+        return api_key
+
+    authorization = request.headers.get("Authorization") or request.headers.get("authorization") or ""
+    if authorization.startswith("ApiKey "):
+        return authorization[len("ApiKey ") :].strip() or None
+    if authorization.startswith("Bearer "):
+        return authorization[len("Bearer ") :].strip() or None
+    return None
+
+
 @router.get("/verify")
 async def run_verification(
     request: Request,
@@ -35,17 +52,7 @@ async def run_verification(
     try:
         from e2e_system_verification import run_full_e2e_verification, run_quick_health_check
 
-        api_key_override = (
-            request.headers.get("X-API-Key")
-            or request.headers.get("x-api-key")
-            or request.headers.get("X-Api-Key")
-        )
-        if not api_key_override:
-            authorization = request.headers.get("Authorization") or request.headers.get("authorization") or ""
-            if authorization.startswith("ApiKey "):
-                api_key_override = authorization[len("ApiKey ") :].strip()
-            elif authorization.startswith("Bearer "):
-                api_key_override = authorization[len("Bearer ") :].strip()
+        api_key_override = _extract_api_key(request)
 
         if quick:
             result = await run_quick_health_check(api_key_override=api_key_override)
@@ -171,7 +178,7 @@ async def get_health_matrix():
 
 
 @router.post("/verify/background")
-async def start_background_verification(background_tasks: BackgroundTasks):
+async def start_background_verification(request: Request, background_tasks: BackgroundTasks):
     """Start E2E verification in the background"""
     global _background_verification_running, _last_background_result
 
@@ -181,12 +188,14 @@ async def start_background_verification(background_tasks: BackgroundTasks):
             "message": "Background verification is already in progress"
         }
 
+    api_key_override = _extract_api_key(request)
+
     async def run_bg_verification():
         global _background_verification_running, _last_background_result
         try:
             from e2e_system_verification import run_full_e2e_verification
             _background_verification_running = True
-            _last_background_result = await run_full_e2e_verification()
+            _last_background_result = await run_full_e2e_verification(api_key_override=api_key_override)
         finally:
             _background_verification_running = False
 
