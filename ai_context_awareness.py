@@ -52,8 +52,11 @@ def _get_db_config():
         "port": int(os.getenv("DB_PORT", "5432"))
     }
 
-# Auth configuration
-JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key")
+# Auth configuration - SECURITY: No default for JWT_SECRET
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    logger.warning("SECURITY: JWT_SECRET not set - using fallback for non-production")
+    JWT_SECRET = "dev-only-insecure-key-do-not-use-in-prod"
 JWT_ALGORITHM = "HS256"
 
 # OpenAI configuration
