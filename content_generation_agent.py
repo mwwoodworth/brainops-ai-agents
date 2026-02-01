@@ -692,6 +692,11 @@ class ContentGeneratorAgent:
             excerpt = seo_data.get("meta_description", content[:200].split(".")[0] + "...")
 
             # Build comprehensive post data
+            requested_status = task.get("status", "published")
+            final_status = requested_status
+            if requested_status == "published" and not qa_result.passed:
+                final_status = "review"
+
             post_data = BlogPost(
                 title=topic,
                 slug=seo_data.get("slug", ""),
@@ -722,7 +727,7 @@ class ContentGeneratorAgent:
                 models_used=self.models_used,
                 word_count=word_count,
                 reading_time_minutes=reading_time,
-                status=task.get("status", "published"),
+                status=final_status,
                 created_at=datetime.now(timezone.utc).isoformat()
             )
 
@@ -746,6 +751,7 @@ class ContentGeneratorAgent:
                 "reading_time_minutes": reading_time,
                 "qa_score": qa_result.score,
                 "qa_passed": qa_result.passed,
+                "post_status": final_status,
                 "image_generated": image_url is not None,
                 "models_used": self.models_used,
                 "duration_seconds": duration,

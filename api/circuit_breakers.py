@@ -122,61 +122,6 @@ async def get_configuration() -> dict[str, Any]:
     }
 
 
-@router.get("/{service_name}")
-async def get_service_circuit_status(service_name: str) -> dict[str, Any]:
-    """
-    Get circuit breaker status for a specific service.
-
-    Args:
-        service_name: Name of the service (e.g., 'openai', 'database', 'webhook_stripe')
-    """
-    _ensure_available()
-
-    manager = get_circuit_breaker_manager()
-    status = manager.get_status(service_name)
-
-    if "error" in status:
-        raise HTTPException(status_code=404, detail=status["error"])
-
-    return status
-
-
-@router.post("/{service_name}/reset")
-async def reset_service_circuit(service_name: str) -> dict[str, Any]:
-    """
-    Force reset a circuit breaker to closed state.
-
-    Use this to manually recover a circuit after the underlying issue is resolved.
-
-    Args:
-        service_name: Name of the service to reset
-    """
-    _ensure_available()
-
-    manager = get_circuit_breaker_manager()
-
-    # Get current state first
-    current_status = manager.get_status(service_name)
-    if "error" in current_status:
-        raise HTTPException(status_code=404, detail=current_status["error"])
-
-    old_state = current_status.get("state", "unknown")
-
-    # Reset the circuit
-    manager.reset(service_name)
-
-    # Get new state
-    new_status = manager.get_status(service_name)
-
-    return {
-        "service_name": service_name,
-        "action": "reset",
-        "old_state": old_state,
-        "new_state": new_status.get("state", "closed"),
-        "message": f"Circuit breaker for {service_name} has been reset"
-    }
-
-
 @router.get("/metrics/recent")
 async def get_recent_metrics(
     limit: int = Query(100, ge=1, le=1000, description="Number of recent metrics to return")
@@ -366,4 +311,63 @@ async def simulate_failure(
         "current_state": status.get("state"),
         "failure_count": status.get("failure_count", 0),
         "consecutive_failures": status.get("consecutive_failures", 0)
+    }
+
+
+# NOTE: Keep generic `/{service_name}` routes at the bottom so they don't shadow
+# static one-segment routes like `/ai-providers` and `/databases`.
+
+
+@router.get("/{service_name}")
+async def get_service_circuit_status(service_name: str) -> dict[str, Any]:
+    """
+    Get circuit breaker status for a specific service.
+
+    Args:
+        service_name: Name of the service (e.g., 'openai', 'database', 'webhook_stripe')
+    """
+    _ensure_available()
+
+    manager = get_circuit_breaker_manager()
+    status = manager.get_status(service_name)
+
+    if "error" in status:
+        raise HTTPException(status_code=404, detail=status["error"])
+
+    return status
+
+
+@router.post("/{service_name}/reset")
+async def reset_service_circuit(service_name: str) -> dict[str, Any]:
+    """
+    Force reset a circuit breaker to closed state.
+
+    Use this to manually recover a circuit after the underlying issue is resolved.
+
+    Args:
+        service_name: Name of the service to reset
+    """
+    _ensure_available()
+
+    manager = get_circuit_breaker_manager()
+
+    # Get current state first
+    current_status = manager.get_status(service_name)
+    if "error" in current_status:
+        raise HTTPException(status_code=404, detail=current_status["error"])
+
+    old_state = current_status.get("state", "unknown")
+
+    # Reset the circuit
+    manager.reset(service_name)
+
+    # Get new state
+    new_status = manager.get_status(service_name)
+
+    return {
+        "service_name": service_name,
+        "action": "reset",
+        "old_state": old_state,
+        "new_state": new_status.get("state", "closed"),
+        "message": f"Circuit breaker for {service_name} has been reset"
     }
