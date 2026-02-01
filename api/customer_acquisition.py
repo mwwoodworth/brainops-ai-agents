@@ -127,10 +127,8 @@ async def monitor_social_signals(
         from customer_acquisition_agents import SocialMediaAgent
 
         agent = SocialMediaAgent()
-        signals = await agent.monitor_signals(
-            keywords=keywords.split(","),
-            platforms=platforms.split(",")
-        )
+        # Use the actual method name and let it use its built-in keywords
+        signals = await agent.monitor_social_signals()
 
         return {
             "status": "success",
