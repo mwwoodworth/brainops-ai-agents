@@ -3335,7 +3335,10 @@ class InvoicingAgent(BaseAgent):
         """Execute invoicing task"""
         action = task.get('action', 'generate')
 
-        if action == 'generate':
+        if action == 'scheduled_run':
+            # Scheduled health check - return status report
+            return await self.invoice_report()
+        elif action == 'generate':
             return await self.generate_invoice(task)
         elif action == 'send':
             return await self.send_invoice(task)
