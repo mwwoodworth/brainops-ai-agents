@@ -9,11 +9,18 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Database config
-DB_HOST = os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com")
-DB_NAME = os.getenv("DB_NAME", "postgres")
-DB_USER = os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "REDACTED_SUPABASE_DB_PASSWORD") # Sourced from context
-DB_PORT = os.getenv("DB_PORT", "5432")
+# SECURITY: Never hardcode credentials (this repo is public).
+DATABASE_URL = (
+    os.getenv("DATABASE_URL")
+    or os.getenv("SUPABASE_DB_URL")
+    or os.getenv("RLS_TEST_DATABASE_URL")
+    or os.getenv("MCP_DATABASE_URL")
+)
+if not DATABASE_URL:
+    raise RuntimeError(
+        "Missing DATABASE_URL (or SUPABASE_DB_URL/RLS_TEST_DATABASE_URL/MCP_DATABASE_URL). "
+        "Load BrainOps env first."
+    )
 
 def migrate_memories():
     """
@@ -22,13 +29,7 @@ def migrate_memories():
     logger.info("🚀 Starting Memory Migration Protocol (Sync)...")
     
     try:
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            database=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            port=DB_PORT
-        )
+        conn = psycopg2.connect(DATABASE_URL)
         conn.autocommit = True
         cur = conn.cursor()
         
