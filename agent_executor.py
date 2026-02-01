@@ -4730,9 +4730,9 @@ class SelfBuildingAgent(BaseAgent):
             if os.getenv("ENABLE_DSPY_OPTIMIZATION", "false").lower() == "true":
                 try:
                     lead_rows = await pool.fetch("""
-                        SELECT contact_name, contact_email, lead_source, estimated_value, stage, metadata
+                        SELECT contact_name, email, lead_source, estimated_value, stage, metadata
                         FROM revenue_leads
-                        WHERE contact_email IS NOT NULL
+                        WHERE email IS NOT NULL
                         ORDER BY updated_at DESC NULLS LAST
                         LIMIT 25
                     """)
@@ -4743,7 +4743,7 @@ class SelfBuildingAgent(BaseAgent):
                         leads_context = json.dumps(
                             {
                                 "contact_name": name,
-                                "contact_email": lead.get("contact_email"),
+                                "contact_email": lead.get("email"),
                                 "lead_source": lead.get("lead_source"),
                                 "stage": lead.get("stage"),
                                 "metadata": lead.get("metadata"),
@@ -4848,7 +4848,7 @@ class LeadScorerAgent(BaseAgent):
                 SELECT
                     rl.id,
                     rl.company_name,
-                    rl.contact_email,
+                    rl.email,
                     rl.lead_source,
                     rl.stage,
                     rl.estimated_value,
@@ -4963,7 +4963,7 @@ class LeadScorerAgent(BaseAgent):
                     rl.id,
                     rl.company_name,
                     rl.contact_name,
-                    rl.contact_email,
+                    rl.email,
                     rl.stage,
                     rl.estimated_value,
                     alm.composite_score,
@@ -5226,7 +5226,7 @@ class EmailMarketingAgent(BaseAgent):
                     es.created_at,
                     es.executed_at,
                     rl.company_name,
-                    rl.contact_email,
+                    rl.email,
                     jsonb_array_length(es.emails) as email_count
                 FROM ai_email_sequences es
                 LEFT JOIN revenue_leads rl ON es.lead_id = rl.id
