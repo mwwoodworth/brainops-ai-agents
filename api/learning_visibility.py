@@ -19,12 +19,18 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+
+from auth import verify_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/learning-visibility", tags=["Learning Visibility"])
+router = APIRouter(
+    prefix="/api/learning-visibility",
+    tags=["Learning Visibility"],
+    dependencies=[Depends(verify_api_key)]
+)
 
 # Lazy initialization of the learning bridge
 _bridge = None
@@ -253,8 +259,8 @@ async def get_recent_insights(
             }
 
         # Query for learning-related insights
-        # Use system tenant for cross-tenant learning insights
-        SYSTEM_TENANT_ID = "system"
+        # Use system tenant for cross-tenant learning insights (must be valid UUID)
+        SYSTEM_TENANT_ID = "00000000-0000-0000-0000-000000000001"
         insights_raw = memory.recall(
             "learning insight pattern outcome success failure error",
             tenant_id=SYSTEM_TENANT_ID,

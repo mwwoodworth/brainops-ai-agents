@@ -303,7 +303,7 @@ async def execute_task_in_background(task_request: TaskExecutionRequest, tenant_
 
 
 # Initialize all systems
-async def initialize_systems(tenant_id: str = "system-init"):
+async def initialize_systems(tenant_id: str = "00000000-0000-0000-0000-000000000001"):
     """Initialize all AI systems"""
     global memory_manager, activation_system, aurea, ai_board, system_initialized
 

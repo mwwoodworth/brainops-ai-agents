@@ -92,8 +92,8 @@ class OperationalVerifier:
             from config import config
             from unified_memory_manager import UnifiedMemoryManager
 
-            # Use default tenant_id from config (required for multi-tenancy)
-            tenant_id = config.tenant.default_tenant_id or "system_verification"
+            # Use default tenant_id from config (required for multi-tenancy, must be valid UUID)
+            tenant_id = config.tenant.default_tenant_id or "00000000-0000-0000-0000-000000000001"
             memory = UnifiedMemoryManager(tenant_id=tenant_id)
             test_content = f"verification_test_{int(time.time())}"
 

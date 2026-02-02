@@ -21,13 +21,19 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from auth import verify_api_key
+
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/aurea/chat", tags=["AUREA Conversational AI"])
+router = APIRouter(
+    prefix="/aurea/chat",
+    tags=["AUREA Conversational AI"],
+    dependencies=[Depends(verify_api_key)]
+)
 
 # =============================================================================
 # AUREA STATE CACHE - Fast access to what's ACTUALLY happening
