@@ -16,15 +16,32 @@ Version: 1.0.0
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
-from auth import verify_api_key
-
 logger = logging.getLogger(__name__)
+
+# API Key Security
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+try:
+    from config import config
+    VALID_API_KEYS = config.security.valid_api_keys
+except (ImportError, AttributeError):
+    fallback_key = os.getenv("BRAINOPS_API_KEY") or os.getenv("AGENTS_API_KEY") or os.getenv("API_KEY")
+    VALID_API_KEYS = {fallback_key} if fallback_key else set()
+
+
+async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
+    """Verify API key for authentication"""
+    if not api_key or api_key not in VALID_API_KEYS:
+        raise HTTPException(status_code=401, detail="Authentication required (API Key or Bearer Token)")
+    return api_key
 
 router = APIRouter(
     prefix="/api/learning-visibility",
