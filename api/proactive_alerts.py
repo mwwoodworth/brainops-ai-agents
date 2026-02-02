@@ -44,7 +44,11 @@ async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     return api_key
 
 
-router = APIRouter(prefix="/proactive", tags=["Proactive Alerts"])
+router = APIRouter(
+    prefix="/proactive",
+    tags=["Proactive Alerts"],
+    dependencies=[Depends(verify_api_key)]
+)
 
 
 # =============================================================================

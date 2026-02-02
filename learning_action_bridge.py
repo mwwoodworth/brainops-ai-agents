@@ -40,8 +40,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# System-level tenant ID for cross-tenant learning operations
-SYSTEM_TENANT_ID = "system"
+# System-level tenant ID for cross-tenant learning operations (must be valid UUID)
+SYSTEM_TENANT_ID = "00000000-0000-0000-0000-000000000001"
 
 
 class RuleType(Enum):
