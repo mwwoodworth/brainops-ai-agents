@@ -514,6 +514,16 @@ except ImportError as e:
     logger.warning(f"Unified Events router not available: {e}")
 from observability import RequestMetrics, TTLCache
 
+# System Observability - Makes AI OS transparent and queryable
+try:
+    from system_observability import router as system_observability_router
+    SYSTEM_OBSERVABILITY_AVAILABLE = True
+    logger.info("✅ System Observability Layer loaded - AI OS now queryable")
+except ImportError as e:
+    SYSTEM_OBSERVABILITY_AVAILABLE = False
+    system_observability_router = None
+    logger.warning(f"System Observability not available: {e}")
+
 # Agent Health Monitoring
 try:
     from agent_health_monitor import get_health_monitor
@@ -1781,6 +1791,11 @@ app.include_router(digital_twin_router, dependencies=SECURED_DEPENDENCIES)  # Di
 app.include_router(market_intelligence_router, dependencies=SECURED_DEPENDENCIES)  # Predictive market intelligence
 app.include_router(system_orchestrator_router, dependencies=SECURED_DEPENDENCIES)  # Autonomous system orchestration (1-10K systems)
 app.include_router(self_healing_router, dependencies=SECURED_DEPENDENCIES)  # Enhanced self-healing AI infrastructure
+
+# System Observability - THE visibility layer that makes AI OS transparent
+if SYSTEM_OBSERVABILITY_AVAILABLE and system_observability_router:
+    app.include_router(system_observability_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: System Observability at /observe - status, problems, healing, ask")
 app.include_router(e2e_verification_router, dependencies=SECURED_DEPENDENCIES)  # E2E System Verification
 app.include_router(logistics_router, dependencies=SECURED_DEPENDENCIES)  # Neuro-Symbolic Logistics
 app.include_router(victoria_router, dependencies=SECURED_DEPENDENCIES)  # Victoria scheduling agent (ERP compatibility)
