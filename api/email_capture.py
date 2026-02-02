@@ -6,10 +6,10 @@ Captures email addresses and adds them to nurture sequences.
 
 import os
 import logging
-from datetime import datetime, timezone
+import ipaddress
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,9 @@ class EmailCaptureRequest(BaseModel):
     email: EmailStr
     source: Optional[str] = "landing_page"
     name: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
 
 
 class EmailCaptureResponse(BaseModel):
@@ -65,7 +68,7 @@ def _get_db_connection():
 
 
 @router.post("/capture", response_model=EmailCaptureResponse)
-async def capture_email(request: EmailCaptureRequest):
+async def capture_email(payload: EmailCaptureRequest, http_request: Request):
     """
     Capture an email for lead nurturing.
     - Stores in email_captures table
@@ -73,13 +76,15 @@ async def capture_email(request: EmailCaptureRequest):
     - Sends free starter kit
     """
     try:
+        from psycopg2.extras import Json
+
         conn = _get_db_connection()
         cur = conn.cursor()
 
         # Check if email already exists
         cur.execute(
             "SELECT id FROM email_captures WHERE email = %s",
-            (request.email,)
+            (payload.email,)
         )
         existing = cur.fetchone()
 
@@ -90,22 +95,61 @@ async def capture_email(request: EmailCaptureRequest):
                 message="You're already on our list! Check your inbox for the starter kit."
             )
 
+        # Capture IP/user-agent safely (do not error if headers are missing/invalid).
+        forwarded_for = (http_request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        client_ip = forwarded_for or (http_request.client.host if http_request.client else "")
+        try:
+            ipaddress.ip_address(client_ip)
+        except Exception:
+            client_ip = None
+
+        user_agent = http_request.headers.get("user-agent")
+
+        meta_data = {"captured_via": "email_capture_api"}
+        if payload.name:
+            meta_data["name"] = payload.name
+
         # Insert new capture
         cur.execute("""
-            INSERT INTO email_captures (email, source, name, created_at)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO email_captures (
+              email,
+              source,
+              meta_data,
+              utm_source,
+              utm_medium,
+              utm_campaign,
+              ip_address,
+              user_agent
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (request.email, request.source, request.name, datetime.now(timezone.utc)))
+        """, (
+            payload.email,
+            payload.source,
+            Json(meta_data),
+            payload.utm_source,
+            payload.utm_medium,
+            payload.utm_campaign,
+            client_ip,
+            user_agent,
+        ))
 
         capture_id = cur.fetchone()['id']
-        conn.commit()
 
         # Queue welcome email with free starter kit
+        email_metadata = {"source": "email_capture", "capture_id": str(capture_id)}
+        if payload.utm_source:
+            email_metadata["utm_source"] = payload.utm_source
+        if payload.utm_medium:
+            email_metadata["utm_medium"] = payload.utm_medium
+        if payload.utm_campaign:
+            email_metadata["utm_campaign"] = payload.utm_campaign
+
         cur.execute("""
             INSERT INTO ai_email_queue (recipient, subject, body, status, scheduled_for, metadata)
             VALUES (%s, %s, %s, 'queued', NOW(), %s)
         """, (
-            request.email,
+            payload.email,
             "Your Free AI Automation Starter Kit is Ready!",
             f"""Hi there!
 
@@ -139,12 +183,12 @@ Matt @ BrainStack
 
 P.S. Reply to this email if you have any questions. I read every message.
 """,
-            '{"source": "email_capture", "capture_id": "' + str(capture_id) + '"}'
+            Json(email_metadata),
         ))
         conn.commit()
         conn.close()
 
-        logger.info(f"Email captured: {request.email} from {request.source}")
+        logger.info("Email captured: %s from %s", payload.email, payload.source)
 
         return EmailCaptureResponse(
             success=True,
