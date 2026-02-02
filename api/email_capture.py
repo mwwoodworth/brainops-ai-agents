@@ -34,6 +34,15 @@ def _get_db_connection():
         import psycopg2
         from psycopg2.extras import RealDictCursor
 
+        # Prefer DATABASE_URL (Render/Supabase); ensure SSL is required.
+        database_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
+        if database_url:
+            if "sslmode=" not in database_url:
+                sep = "&" if "?" in database_url else "?"
+                database_url = f"{database_url}{sep}sslmode=require"
+            return psycopg2.connect(database_url, cursor_factory=RealDictCursor)
+
+        # Fallback to individual environment variables (Supabase requires SSL).
         db_host = os.getenv("DB_HOST")
         db_user = os.getenv("DB_USER")
         db_password = os.getenv("DB_PASSWORD")
@@ -44,12 +53,14 @@ def _get_db_connection():
             host=db_host,
             user=db_user,
             password=db_password,
-            database=db_name,
+            dbname=db_name,
             port=int(db_port),
-            cursor_factory=RealDictCursor
+            sslmode="require",
+            cursor_factory=RealDictCursor,
         )
     except Exception as e:
-        logger.error(f"Database connection failed: {e}")
+        # Do not leak connection details; keep error high-level.
+        logger.error("Database connection failed for email_capture", exc_info=True)
         raise
 
 
