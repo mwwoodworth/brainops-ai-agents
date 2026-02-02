@@ -40,6 +40,9 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# System-level tenant ID for cross-tenant learning operations
+SYSTEM_TENANT_ID = "system"
+
 
 class RuleType(Enum):
     """Types of behavior rules"""
@@ -121,9 +124,10 @@ class LearningActionBridge:
         rules_created = 0
 
         try:
-            # Get recent learning insights
+            # Get recent learning insights (use system tenant for cross-tenant learning)
             learnings = memory.recall(
                 "learning insight pattern outcome success failure",
+                tenant_id=SYSTEM_TENANT_ID,
                 limit=100
             )
 
@@ -260,7 +264,8 @@ class LearningActionBridge:
                 source_agent="rule_persister",
                 created_by="learning_bridge",
                 importance_score=0.95,  # Very important
-                tags=["behavior_rules", "learning", "snapshot"]
+                tags=["behavior_rules", "learning", "snapshot"],
+                tenant_id=SYSTEM_TENANT_ID  # System-level rules
             ))
 
             logger.info(f"Persisted {len(rules_data)} behavior rules to memory")
@@ -275,9 +280,10 @@ class LearningActionBridge:
             return
 
         try:
-            # Find most recent rules snapshot
+            # Find most recent rules snapshot (use system tenant for cross-tenant rules)
             snapshots = memory.recall(
                 "behavior_rules_snapshot",
+                tenant_id=SYSTEM_TENANT_ID,
                 limit=1
             )
 
