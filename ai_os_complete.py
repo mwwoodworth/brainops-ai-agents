@@ -378,30 +378,172 @@ class SchedulingAgent(IntelligentAgent):
             self.return_connection(conn)
 
     async def _check_weather(self, date: str) -> dict:
-        """Check weather suitability - returns default suitable weather if API not configured"""
-        api_key = os.getenv("WEATHER_API_KEY")
-        if not api_key:
-            # Return default "suitable" weather when API not configured
-            # This allows scheduling to proceed without weather integration
-            self.logger.info(f"Weather API not configured - assuming suitable conditions for {date}")
+        """Check weather suitability for roofing work using Open-Meteo API (free, no key required)
+
+        Roofing suitability criteria:
+        - Precipitation chance < 30% (rain/snow makes roofing dangerous)
+        - Temperature between 40-95°F (materials need proper temp to seal)
+        - Wind speed < 25 mph (high winds are dangerous on roofs)
+        """
+        import aiohttp
+        from datetime import datetime as dt
+
+        try:
+            # Parse the date from the input (could be ISO format or datetime string)
+            if isinstance(date, str):
+                # Try to parse various date formats
+                for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
+                    try:
+                        parsed_date = dt.strptime(date[:19], fmt)
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    parsed_date = dt.now()
+            else:
+                parsed_date = dt.now()
+
+            # Use default coordinates (central US) - in production, would use job location
+            # TODO: Accept latitude/longitude from job location
+            latitude = float(os.getenv("DEFAULT_WEATHER_LAT", "39.8283"))  # Denver, CO
+            longitude = float(os.getenv("DEFAULT_WEATHER_LON", "-98.5795"))  # Central US
+
+            # Format date for Open-Meteo API
+            date_str = parsed_date.strftime("%Y-%m-%d")
+
+            # Open-Meteo API - free, no key required
+            # Docs: https://open-meteo.com/en/docs
+            url = (
+                f"https://api.open-meteo.com/v1/forecast"
+                f"?latitude={latitude}&longitude={longitude}"
+                f"&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max,weather_code"
+                f"&temperature_unit=fahrenheit"
+                f"&wind_speed_unit=mph"
+                f"&start_date={date_str}&end_date={date_str}"
+                f"&timezone=America/Denver"
+            )
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status != 200:
+                        self.logger.warning(f"Weather API returned status {response.status}")
+                        return self._default_weather_response(date, "Weather API unavailable")
+
+                    data = await response.json()
+
+            # Extract daily forecast data
+            daily = data.get("daily", {})
+            if not daily or not daily.get("temperature_2m_max"):
+                return self._default_weather_response(date, "No forecast data available")
+
+            # Get the weather data for the requested date
+            temp_max = daily.get("temperature_2m_max", [None])[0]
+            temp_min = daily.get("temperature_2m_min", [None])[0]
+            precip_chance = daily.get("precipitation_probability_max", [0])[0] or 0
+            wind_max = daily.get("wind_speed_10m_max", [0])[0] or 0
+            weather_code = daily.get("weather_code", [0])[0] or 0
+
+            # Calculate average temperature
+            temp_avg = None
+            if temp_max is not None and temp_min is not None:
+                temp_avg = (temp_max + temp_min) / 2
+
+            # Determine weather conditions from WMO weather code
+            # https://open-meteo.com/en/docs (weather_code interpretation)
+            conditions = self._interpret_weather_code(weather_code)
+
+            # Roofing suitability criteria
+            suitable = True
+            reasons = []
+
+            # Check precipitation
+            if precip_chance >= 30:
+                suitable = False
+                reasons.append(f"High precipitation chance ({precip_chance}%)")
+
+            # Check temperature (roofing materials need proper temps)
+            if temp_avg is not None:
+                if temp_avg < 40:
+                    suitable = False
+                    reasons.append(f"Too cold ({temp_avg:.0f}°F) - shingles won't seal")
+                elif temp_avg > 95:
+                    suitable = False
+                    reasons.append(f"Too hot ({temp_avg:.0f}°F) - safety concern")
+
+            # Check wind speed
+            if wind_max >= 25:
+                suitable = False
+                reasons.append(f"High winds ({wind_max:.0f} mph)")
+
+            self.logger.info(f"Weather check for {date}: suitable={suitable}, conditions={conditions}")
+
             return {
                 "date": date,
-                "suitable": True,
-                "conditions": "unknown",
-                "temperature": None,
-                "precipitation_chance": None,
-                "note": "Weather API not configured - defaulting to suitable conditions"
+                "suitable": suitable,
+                "conditions": conditions,
+                "temperature": round(temp_avg) if temp_avg else None,
+                "temperature_high": round(temp_max) if temp_max else None,
+                "temperature_low": round(temp_min) if temp_min else None,
+                "precipitation_chance": precip_chance,
+                "wind_speed_max": round(wind_max) if wind_max else None,
+                "reasons": reasons if not suitable else [],
+                "note": "Real weather data from Open-Meteo API",
+                "api_source": "open-meteo.com"
             }
 
-        # TODO: Implement actual weather API call when WEATHER_API_KEY is provided
-        # For now, return suitable conditions
+        except aiohttp.ClientError as e:
+            self.logger.error(f"Weather API network error: {e}")
+            return self._default_weather_response(date, f"Network error: {str(e)}")
+        except Exception as e:
+            self.logger.error(f"Weather check error: {e}", exc_info=True)
+            return self._default_weather_response(date, f"Error: {str(e)}")
+
+    def _interpret_weather_code(self, code: int) -> str:
+        """Convert WMO weather codes to human-readable conditions"""
+        # WMO Weather interpretation codes (WMO Code 4677)
+        weather_codes = {
+            0: "clear",
+            1: "mostly_clear",
+            2: "partly_cloudy",
+            3: "overcast",
+            45: "foggy",
+            48: "foggy",
+            51: "light_drizzle",
+            53: "drizzle",
+            55: "heavy_drizzle",
+            56: "freezing_drizzle",
+            57: "freezing_drizzle",
+            61: "light_rain",
+            63: "rain",
+            65: "heavy_rain",
+            66: "freezing_rain",
+            67: "freezing_rain",
+            71: "light_snow",
+            73: "snow",
+            75: "heavy_snow",
+            77: "snow_grains",
+            80: "rain_showers",
+            81: "rain_showers",
+            82: "heavy_rain_showers",
+            85: "snow_showers",
+            86: "heavy_snow_showers",
+            95: "thunderstorm",
+            96: "thunderstorm_hail",
+            99: "thunderstorm_hail"
+        }
+        return weather_codes.get(code, "unknown")
+
+    def _default_weather_response(self, date: str, note: str) -> dict:
+        """Return a default weather response when API is unavailable"""
+        self.logger.info(f"Using default weather response for {date}: {note}")
         return {
             "date": date,
-            "suitable": True,
-            "conditions": "clear",
-            "temperature": 70,
-            "precipitation_chance": 0,
-            "note": "Weather check pending API implementation"
+            "suitable": True,  # Default to suitable to not block scheduling
+            "conditions": "unknown",
+            "temperature": None,
+            "precipitation_chance": None,
+            "note": note,
+            "api_source": "default_fallback"
         }
 
     async def _store_schedule(self, schedule: dict):
