@@ -487,6 +487,15 @@ except ImportError as e:
     LEARNING_ROUTER_AVAILABLE = False
     logger.warning(f"Learning Router not available: {e}")
 
+# Learning Visibility API - Exposes what AI has learned (2026-02-02)
+try:
+    from api.learning_visibility import router as learning_visibility_router
+    LEARNING_VISIBILITY_AVAILABLE = True
+    logger.info("👁️ Learning Visibility Router loaded - see what the AI has learned")
+except ImportError as e:
+    LEARNING_VISIBILITY_AVAILABLE = False
+    logger.warning(f"Learning Visibility Router not available: {e}")
+
 # ChatGPT-Agent-Level UI Tester - Human-like testing (2025-12-29)
 try:
     from chatgpt_agent_tester import run_chatgpt_agent_tests, run_quick_health_test
@@ -1930,6 +1939,14 @@ try:
 except ImportError as e:
     logger.warning(f"Circuit Breakers Router not available: {e}")
 
+# DAILY BRIEFING API - AI-powered daily summary of agent activity (2026-02-02)
+try:
+    from api.daily_briefing import router as daily_briefing_router
+    app.include_router(daily_briefing_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("📋 Mounted: Daily Briefing API at /briefing - AI-POWERED SUMMARIES")
+except ImportError as e:
+    logger.warning(f"Daily Briefing Router not available: {e}")
+
 # AI System Enhancements (2025-12-28) - Health scoring, alerting, correlation, WebSocket
 if AI_ENHANCEMENTS_AVAILABLE:
     app.include_router(ai_enhancements_router, dependencies=SECURED_DEPENDENCIES)
@@ -2000,6 +2017,11 @@ if TRUE_VALIDATION_AVAILABLE:
 if LEARNING_ROUTER_AVAILABLE:
     app.include_router(learning_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("Mounted: Learning Feedback Loop at /api/learning - 4,700+ insights now actionable")
+
+# Learning Visibility (2026-02-02) - See what the AI has learned
+if LEARNING_VISIBILITY_AVAILABLE:
+    app.include_router(learning_visibility_router, dependencies=SECURED_DEPENDENCIES)
+    logger.info("Mounted: Learning Visibility at /api/learning-visibility - behavior rules & insights exposed")
 
 # Import and include analytics router
 try:
@@ -2076,6 +2098,16 @@ try:
 except ImportError as e:
     AUTONOMOUS_RESOLVER_AVAILABLE = False
     logger.warning(f"Autonomous Issue Resolver not available: {e}")
+
+# Proactive Alerts API (2026-02-02) - AI-powered proactive recommendations
+try:
+    from api.proactive_alerts import router as proactive_alerts_router
+    app.include_router(proactive_alerts_router, dependencies=SECURED_DEPENDENCIES)
+    PROACTIVE_ALERTS_AVAILABLE = True
+    logger.info("🎯 Mounted: Proactive Alerts API at /proactive - agent patterns, revenue opportunities, anomaly detection")
+except ImportError as e:
+    PROACTIVE_ALERTS_AVAILABLE = False
+    logger.warning(f"Proactive Alerts API not available: {e}")
 
 
 def _collect_active_systems() -> list[str]:
