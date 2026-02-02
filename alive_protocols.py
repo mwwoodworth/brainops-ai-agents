@@ -202,7 +202,7 @@ async def run_revenue_drive_daemon(interval_seconds: int | None = None) -> None:
         await asyncio.sleep(poll_interval)
 
 
-def start_alive_protocols(tenant_id: str = "system") -> None:
+def start_alive_protocols(tenant_id: str = "00000000-0000-0000-0000-000000000001") -> None:
     """Fire-and-forget startup for alive protocol daemons."""
     if _env_flag("ENABLE_SELF_HEALTH_DAEMON", True):
         create_safe_task(run_self_health_daemon())

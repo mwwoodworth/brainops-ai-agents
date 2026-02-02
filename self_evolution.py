@@ -47,7 +47,7 @@ class SelfEvolution:
     The engine for continuous self-improvement of the AI OS.
     """
 
-    def __init__(self, tenant_id: str = "system"):
+    def __init__(self, tenant_id: str = "00000000-0000-0000-0000-000000000001"):
         self.tenant_id = tenant_id
         self.ai_core = RealAICore() if RealAICore else None
         self.db_config = config.database.to_dict() if config else {}
