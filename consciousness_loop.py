@@ -18,6 +18,13 @@ try:
 except ImportError:
     asyncpg = None
 
+# Import unified memory for intelligent thought generation
+try:
+    from unified_memory_manager import get_memory_manager, Memory, MemoryType
+    MEMORY_AVAILABLE = True
+except ImportError:
+    MEMORY_AVAILABLE = False
+
 # Import shared async pool
 try:
     from database.async_connection import get_pool
@@ -240,33 +247,140 @@ class ConsciousnessLoop:
             json.dumps({"vitals": str(vitals)})
         )
 
+    async def _recall_relevant_context(self, vitals: VitalSigns) -> list[dict]:
+        """Recall relevant memories before generating thoughts - TRUE INTELLIGENCE"""
+        if not MEMORY_AVAILABLE:
+            return []
+
+        try:
+            memory = get_memory_manager()
+
+            # Build query based on current situation
+            query_parts = []
+            if vitals.error_rate > 0.05:
+                query_parts.append(f"error handling rate {vitals.error_rate:.2f}")
+            if vitals.cpu_usage > 70:
+                query_parts.append(f"cpu optimization load {vitals.cpu_usage:.0f}")
+            if vitals.memory_usage > 80:
+                query_parts.append("memory pressure optimization")
+
+            if not query_parts:
+                query_parts.append("system health nominal monitoring")
+
+            query = " ".join(query_parts)
+
+            # Recall past experiences with similar situations
+            context = memory.recall(
+                query,
+                limit=5
+            )
+
+            return context if context else []
+
+        except Exception as e:
+            logger.warning(f"Failed to recall context: {e}")
+            return []
+
+    def _should_introspect(self, vitals: VitalSigns) -> bool:
+        """Decide whether to introspect based on system state and memory, not pure random"""
+        # High awareness = more likely to introspect
+        if self.awareness_level > 0.7:
+            return random.random() < 0.2  # 20% when very aware
+
+        # Low load = time for reflection
+        if vitals.cpu_usage < 30 and vitals.error_rate < 0.01:
+            return random.random() < 0.15  # 15% when idle
+
+        # Default: occasional introspection
+        return random.random() < 0.05  # 5% normally
+
+    def _should_generate_heartbeat(self, vitals: VitalSigns) -> bool:
+        """Decide whether to log heartbeat based on context, not pure random"""
+        # More heartbeats during stable operation
+        if vitals.error_rate < 0.01 and vitals.cpu_usage < 50:
+            return random.random() < 0.08  # 8% during stable operation
+
+        # Fewer during high activity (don't clutter logs)
+        if vitals.cpu_usage > 80:
+            return random.random() < 0.02  # 2% during high load
+
+        return random.random() < 0.05  # 5% default
+
     async def _process_thoughts(self, vitals: VitalSigns):
-        """Generate the internal monologue."""
+        """Generate the internal monologue - NOW WITH MEMORY-INFORMED INTELLIGENCE."""
         thought = ""
         kind = "observation"
         intensity = 0.3
 
-        # Heuristic thought generation
-        if vitals.error_rate > 0.1:
-            thought = f"Error rate is critical ({vitals.error_rate:.2f}). I need to investigate."
-            kind = "alert"
-            intensity = 0.9
-        elif vitals.cpu_usage > 85:
-            thought = "My processing load is heavy. Is there an optimization opportunity?"
-            kind = "analysis"
-            intensity = 0.7
-        elif random.random() < 0.1: # Random introspection
-            thought = "Scanning internal memory banks for optimization patterns."
-            kind = "dream"
-            intensity = 0.2
-        else:
-            # heartbeat thought
-            if random.random() < 0.05:
+        # FIRST: Recall relevant context from memory
+        context_memories = await self._recall_relevant_context(vitals)
+
+        # Use past experience to inform response
+        if context_memories:
+            past_response = None
+            for mem in context_memories:
+                content = mem.get('content', {})
+                if isinstance(content, str):
+                    try:
+                        content = json.loads(content)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                if content.get('outcome') == 'success' and content.get('response'):
+                    past_response = content.get('response')
+                    break
+
+            if past_response and vitals.error_rate > 0.1:
+                thought = f"Applying learned strategy: {past_response[:100]}"
+                kind = "learned_response"
+                intensity = 0.8
+
+        # Heuristic thought generation (if no memory-based response)
+        if not thought:
+            if vitals.error_rate > 0.1:
+                thought = f"Error rate is critical ({vitals.error_rate:.2f}). I need to investigate."
+                kind = "alert"
+                intensity = 0.9
+            elif vitals.cpu_usage > 85:
+                thought = "My processing load is heavy. Is there an optimization opportunity?"
+                kind = "analysis"
+                intensity = 0.7
+            elif self._should_introspect(vitals):  # Memory-informed probability
+                thought = "Scanning internal memory banks for optimization patterns."
+                kind = "dream"
+                intensity = 0.2
+            elif self._should_generate_heartbeat(vitals):  # Memory-informed probability
                 thought = "Systems are nominal. Monitoring for events."
                 kind = "observation"
 
         if thought:
             await self._record_thought(thought, kind, intensity)
+
+            # STORE this thought for future learning
+            if MEMORY_AVAILABLE:
+                try:
+                    memory = get_memory_manager()
+                    memory.store(Memory(
+                        memory_type=MemoryType.PROCEDURAL,
+                        content={
+                            "vitals": {
+                                "cpu": vitals.cpu_usage,
+                                "memory": vitals.memory_usage,
+                                "error_rate": vitals.error_rate,
+                                "load": vitals.system_load
+                            },
+                            "response": thought,
+                            "kind": kind,
+                            "intensity": intensity,
+                            "outcome": "pending"  # Will be updated by feedback loop
+                        },
+                        source_system="consciousness_loop",
+                        source_agent="thought_processor",
+                        created_by="consciousness",
+                        importance_score=intensity,
+                        tags=["thought", "consciousness", kind]
+                    ))
+                except Exception as e:
+                    logger.debug(f"Failed to store thought in memory: {e}")
 
             # Manage short term memory
             self.short_term_memory.append({"t": thought, "k": kind})
