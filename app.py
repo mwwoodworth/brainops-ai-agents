@@ -1414,6 +1414,33 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("⚠️ Neural Core not available - AI OS self-awareness limited")
 
+        # ── Phase 6: Meta-Intelligence & Learning-Action Bridge (TRUE LEARNING) ──
+        await asyncio.sleep(1)
+
+        # Initialize Learning-Action Bridge - bridges learning to behavior
+        try:
+            from learning_action_bridge import get_learning_bridge, run_bridge_sync_loop
+            bridge = await get_learning_bridge()
+            app.state.learning_bridge = bridge
+            logger.info("🔗 Learning-Action Bridge initialized")
+
+            # Start background sync loop (syncs learning to behavior every 5 minutes)
+            _run_on_bg_loop(run_bridge_sync_loop(interval_seconds=300), "learning_bridge_sync")
+            logger.info("   └── Bridge sync loop ACTIVE - learning converts to action")
+        except Exception as e:
+            logger.warning(f"⚠️ Learning-Action Bridge initialization failed: {e}")
+
+        # Initialize Meta-Intelligence Controller - TRUE AGI capabilities
+        try:
+            from meta_intelligence import get_meta_intelligence
+            meta_intel = await get_meta_intelligence()
+            app.state.meta_intelligence = meta_intel
+            state = meta_intel.get_intelligence_state()
+            logger.info(f"🧠 Meta-Intelligence AWAKENED - Level: {state['intelligence_level']:.1%}")
+            logger.info("   └── Self-improvement: ACTIVE | Emergent reasoning: ACTIVE")
+        except Exception as e:
+            logger.warning(f"⚠️ Meta-Intelligence initialization failed: {e}")
+
         logger.info("✅ Heavy component initialization complete - AI OS FULLY AWAKE!")
 
     create_safe_task(deferred_heavy_init(), "heavy_init")
@@ -1431,6 +1458,8 @@ async def lifespan(app: FastAPI):
     app.state.self_aware_ai = None
     app.state.langgraph_orchestrator = None
     app.state.integration_layer = None
+    app.state.learning_bridge = None
+    app.state.meta_intelligence = None
 
     # === YIELD IMMEDIATELY to allow server to bind to port ===
     logger.info("⚡ Server binding to port NOW - heavy init continues in background")
