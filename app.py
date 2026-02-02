@@ -4739,6 +4739,71 @@ async def get_consciousness_status():
 
 
 # ============================================================================
+# META-INTELLIGENCE STATUS ENDPOINT
+# ============================================================================
+
+@app.get("/meta-intelligence/status", dependencies=SECURED_DEPENDENCIES)
+async def get_meta_intelligence_status():
+    """
+    Get the status of the Meta-Intelligence and Learning-Action Bridge systems.
+    These are the TRUE AGI capabilities that enable genuine learning from experience.
+    """
+    result = {
+        "meta_intelligence": {
+            "initialized": False,
+            "intelligence_level": 0,
+            "components": {}
+        },
+        "learning_bridge": {
+            "initialized": False,
+            "rules_count": 0,
+            "status": {}
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+    # Check Meta-Intelligence Controller
+    meta_intel = getattr(app.state, "meta_intelligence", None)
+    if meta_intel:
+        try:
+            state = meta_intel.get_intelligence_state()
+            result["meta_intelligence"] = {
+                "initialized": state.get("initialized", False),
+                "intelligence_level": round(state.get("intelligence_level", 0) * 100, 1),
+                "integration_score": round(state.get("integration_score", 0) * 100, 1),
+                "synergy_events": state.get("synergy_events", 0),
+                "awakening_timestamp": state.get("awakening_timestamp"),
+                "components": {
+                    k: "active" if v else "inactive"
+                    for k, v in state.get("components", {}).items()
+                    if isinstance(v, dict) and v
+                }
+            }
+        except Exception as e:
+            result["meta_intelligence"]["error"] = str(e)
+
+    # Check Learning-Action Bridge
+    learning_bridge = getattr(app.state, "learning_bridge", None)
+    if learning_bridge:
+        try:
+            status = learning_bridge.get_status()
+            result["learning_bridge"] = {
+                "initialized": True,
+                "total_rules": status.get("total_rules", 0),
+                "rules_by_type": status.get("rules_by_type", {}),
+                "average_confidence": status.get("average_confidence", 0),
+                "rules_applied": status.get("rules_applied", 0),
+                "rules_created": status.get("rules_created", 0),
+                "last_sync": status.get("last_sync"),
+                "memory_available": status.get("memory_available", False)
+            }
+        except Exception as e:
+            result["learning_bridge"]["error"] = str(e)
+
+    return result
+
+
+# ============================================================================
 # WORKFLOW ENGINE STATUS ENDPOINTS
 # ============================================================================
 
