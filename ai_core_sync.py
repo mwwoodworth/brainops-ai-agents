@@ -18,6 +18,8 @@ try:
 except ImportError:
     OpenAI = None
 
+from utils.embedding_provider import generate_embedding_sync
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -140,16 +142,8 @@ class SyncAICore:
 
     def generate_embeddings(self, text: str):
         """Generate embeddings"""
-        if not self.openai_client:
-            return None
-
         try:
-            response = self.openai_client.embeddings.create(
-                model="text-embedding-3-small",
-                input=text,
-                timeout=10
-            )
-            return response.data[0].embedding
+            return generate_embedding_sync(text, log=logger)
         except Exception as e:
             logger.error(f"Embedding error: {e}")
             return None

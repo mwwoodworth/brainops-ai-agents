@@ -19,6 +19,7 @@ from typing import Any, ContextManager, Optional, Union
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import Json, RealDictCursor
+from utils.embedding_provider import generate_embedding_sync
 
 warnings.filterwarnings('ignore')
 
@@ -337,10 +338,10 @@ class UnifiedMemoryManager:
 
             query_embedding = self._generate_embedding(query_content)
 
-            # If embedding generation failed, return empty results
+            # If embedding generation failed, fall back to keyword search
             if query_embedding is None:
-                logger.warning("Cannot perform semantic search - embedding generation failed")
-                return []
+                logger.warning("Embedding generation failed - falling back to keyword search")
+                return self._keyword_search(query, tenant_id, context, limit, memory_type)
 
             with self._get_cursor() as cur:
                 # Build the query
@@ -406,6 +407,50 @@ class UnifiedMemoryManager:
                 logger.debug("Invalid memory_type %s: %s", memory_type, exc)
 
         return await asyncio.to_thread(self.recall, query, self.tenant_id, limit=limit, memory_type=mem_type)
+
+    def _keyword_search(self, query: Union[str, dict], tenant_id: str, context: Optional[str] = None,
+                       limit: int = 10, memory_type: Optional[MemoryType] = None) -> list[dict]:
+        """Fallback keyword search when embeddings are unavailable"""
+        try:
+            search_term = query if isinstance(query, str) else str(query)
+            # Basic sanitization
+            search_term = search_term.replace('%', '')
+            
+            with self._get_cursor() as cur:
+                base_query = """
+                SELECT
+                    id, memory_type, content, source_system, source_agent,
+                    importance_score, access_count, created_at, tags, metadata,
+                    0.5 as similarity
+                FROM unified_ai_memory
+                WHERE tenant_id = %s
+                AND (search_text ILIKE %s OR content::text ILIKE %s)
+                """
+                
+                params = [tenant_id, f"%{search_term}%", f"%{search_term}%"]
+                
+                if context:
+                    base_query += " AND context_id = %s"
+                    params.append(context)
+                    
+                if memory_type:
+                    base_query += " AND memory_type = %s"
+                    params.append(memory_type.value)
+                    
+                base_query += " ORDER BY importance_score DESC LIMIT %s"
+                params.append(limit)
+                
+                cur.execute(base_query, params)
+                memories = cur.fetchall()
+                
+                if memories:
+                    logger.info(f"🔎 Keyword recall found {len(memories)} results for '{search_term}'")
+                
+                return [dict(m) for m in memories]
+                
+        except Exception as e:
+            logger.error(f"❌ Keyword search failed: {e}")
+            return []
 
     def synthesize(self, tenant_id: str = None, time_window: timedelta = timedelta(hours=24)) -> list[dict]:
         """Synthesize insights from recent memories"""
@@ -696,78 +741,12 @@ class UnifiedMemoryManager:
             return cur.fetchall()
 
     def _generate_embedding(self, content: dict) -> Optional[list[float]]:
-        """Generate real embedding with intelligent provider fallback chain.
-
-        Fallback order:
-        1. OpenAI text-embedding-3-small (fastest, most accurate)
-        2. Google Gemini embedding-001 (good fallback)
-        3. Anthropic via voyage-3 (if available)
-        4. Local sentence-transformers (last resort, always available)
-        """
+        """Generate embedding using configured provider order (no silent mixing)."""
         text_content = json.dumps(content, sort_keys=True, cls=CustomJSONEncoder)
-
-        # Try OpenAI first
-        openai_key = os.getenv("OPENAI_API_KEY")
-        if openai_key:
-            try:
-                import openai
-                client = openai.OpenAI(api_key=openai_key)
-                response = client.embeddings.create(
-                    input=text_content,
-                    model="text-embedding-3-small"
-                )
-                return response.data[0].embedding
-            except Exception as e:
-                if "429" in str(e) or "quota" in str(e).lower():
-                    logger.warning("⚠️ OpenAI rate limited/quota exceeded, trying Gemini fallback")
-                else:
-                    logger.warning(f"⚠️ OpenAI embedding failed: {e}, trying fallback")
-
-        # Try Gemini as fallback - MUST zero-pad to match OpenAI 1536 dimensions
-        gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        if gemini_key:
-            try:
-                from google import genai
-                _client = genai.Client(api_key=gemini_key)
-                result = _client.models.embed_content(
-                    model="text-embedding-004",
-                    contents=text_content
-                )
-                embedding = list(result.embeddings[0].values)
-                # Truncate or pad to 1536 dimensions to match OpenAI embeddings in database
-                original_len = len(embedding)
-                if len(embedding) > 1536:
-                    embedding = embedding[:1536]
-                    logger.info(f"✅ Used Gemini embedding fallback (truncated from {original_len} to 1536d)")
-                elif len(embedding) < 1536:
-                    embedding = embedding + [0.0] * (1536 - len(embedding))
-                    logger.info(f"✅ Used Gemini embedding fallback (padded from {original_len} to 1536d)")
-                else:
-                    logger.info("✅ Used Gemini embedding fallback")
-                return embedding
-            except Exception as e:
-                logger.warning(f"⚠️ Gemini embedding failed: {e}, trying local fallback")
-
-        # Try local sentence-transformers as last resort - zero-pad to 1536d
-        try:
-            from sentence_transformers import SentenceTransformer
-            if not hasattr(self, '_local_embedder'):
-                self._local_embedder = SentenceTransformer('all-MiniLM-L6-v2')
-                logger.info("📦 Loaded local embedding model (all-MiniLM-L6-v2)")
-            embedding = self._local_embedder.encode(text_content).tolist()
-            # Zero-pad to 1536 dimensions to match OpenAI embeddings in database
-            if len(embedding) < 1536:
-                embedding = embedding + [0.0] * (1536 - len(embedding))
-            logger.info("✅ Used local sentence-transformers fallback (padded to 1536d)")
-            return embedding
-        except ImportError:
-            logger.warning("sentence-transformers not installed, cannot use local fallback")
-        except Exception as e:
-            logger.error(f"❌ Local embedding also failed: {e}")
-
-        # All fallbacks exhausted
-        logger.error("❌ All embedding providers failed")
-        return None
+        embedding = generate_embedding_sync(text_content, log=logger)
+        if embedding is None:
+            logger.error("❌ All embedding providers failed")
+        return embedding
 
     def _generate_search_text(self, memory: Memory) -> str:
         """Generate searchable text from memory"""

@@ -26,6 +26,16 @@ from typing import Any, Optional
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from utils.embedding_provider import (
+    allow_zero_fallback,
+    get_embedding_dimension,
+    get_gemini_model,
+    get_local_model_name,
+    get_openai_model,
+    get_provider_order,
+    iter_providers,
+    normalize_embedding,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +77,8 @@ DB_CONFIG = {
     "port": int(DB_PORT)
 }
 
-# Embedding dimension for OpenAI text-embedding-3-small
-EMBEDDING_DIMENSION = 1536
+# Embedding dimension for embeddings
+EMBEDDING_DIMENSION = get_embedding_dimension()
 
 # Default tenant for system operations
 DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457")
@@ -176,7 +186,7 @@ class EmbeddingService:
         if self._local_model is None:
             try:
                 from sentence_transformers import SentenceTransformer
-                self._local_model = SentenceTransformer('all-MiniLM-L6-v2')
+                self._local_model = SentenceTransformer(get_local_model_name())
                 logger.info("Local embedding model loaded (all-MiniLM-L6-v2)")
             except ImportError:
                 logger.warning("sentence-transformers package not installed")
@@ -202,23 +212,29 @@ class EmbeddingService:
         # Truncate very long text
         text = text[:30000] if len(text) > 30000 else text
 
-        # Try OpenAI first (fastest, most accurate)
-        embedding = self._try_openai(text)
-        if embedding:
-            self._stats["total_embeddings_generated"] += 1
-            return embedding
+        providers = iter_providers(get_provider_order())
+        for provider in providers:
+            embedding = None
+            if provider == "openai":
+                embedding = self._try_openai(text)
+            elif provider == "gemini":
+                embedding = self._try_gemini(text)
+            elif provider == "local":
+                embedding = self._try_local(text)
+            elif provider == "hash":
+                embedding = self._hash_embedding(text)
+            elif provider == "zero":
+                embedding = [0.0] * EMBEDDING_DIMENSION
+            else:
+                logger.warning("Unknown embedding provider %r", provider)
 
-        # Try Gemini as fallback
-        embedding = self._try_gemini(text)
-        if embedding:
-            self._stats["total_embeddings_generated"] += 1
-            return embedding
+            if embedding is not None:
+                self._stats["total_embeddings_generated"] += 1
+                return normalize_embedding(embedding, EMBEDDING_DIMENSION)
 
-        # Try local model as last resort
-        embedding = self._try_local(text)
-        if embedding:
-            self._stats["total_embeddings_generated"] += 1
-            return embedding
+        if allow_zero_fallback():
+            logger.warning("All embedding providers failed; using zero embedding (explicitly allowed)")
+            return [0.0] * EMBEDDING_DIMENSION
 
         logger.error("All embedding providers failed - NO random vectors will be used")
         return None
@@ -233,9 +249,9 @@ class EmbeddingService:
             self._stats["openai_calls"] += 1
             response = client.embeddings.create(
                 input=text,
-                model="text-embedding-3-small"
+                model=get_openai_model()
             )
-            return response.data[0].embedding
+            return normalize_embedding(response.data[0].embedding, EMBEDDING_DIMENSION)
         except Exception as e:
             self._stats["openai_errors"] += 1
             logger.warning(f"OpenAI embedding failed: {e}")
@@ -250,21 +266,13 @@ class EmbeddingService:
             self._stats["gemini_calls"] += 1
 
             result = self._gemini_client.models.embed_content(
-                model="text-embedding-004",
+                model=get_gemini_model(),
                 contents=text
             )
             embedding = list(result.embeddings[0].values)
 
-            # Truncate or pad to match OpenAI dimension (1536)
-            original_len = len(embedding)
-            if len(embedding) > EMBEDDING_DIMENSION:
-                embedding = embedding[:EMBEDDING_DIMENSION]
-                logger.debug(f"Used Gemini embedding (truncated from {original_len} to 1536d)")
-            elif len(embedding) < EMBEDDING_DIMENSION:
-                embedding = embedding + [0.0] * (EMBEDDING_DIMENSION - len(embedding))
-                logger.debug(f"Used Gemini embedding (padded from {original_len} to 1536d)")
-            else:
-                logger.debug("Used Gemini embedding")
+            embedding = normalize_embedding(embedding, EMBEDDING_DIMENSION)
+            logger.debug("Used Gemini embedding")
             return embedding
         except Exception as e:
             self._stats["gemini_errors"] += 1
@@ -281,16 +289,23 @@ class EmbeddingService:
             self._stats["local_calls"] += 1
             embedding = model.encode(text).tolist()
 
-            # Zero-pad to match OpenAI dimension (1536)
-            if len(embedding) < EMBEDDING_DIMENSION:
-                embedding = embedding + [0.0] * (EMBEDDING_DIMENSION - len(embedding))
-
-            logger.debug("Used local embedding model (padded to 1536d)")
+            embedding = normalize_embedding(embedding, EMBEDDING_DIMENSION)
+            logger.debug("Used local embedding model")
             return embedding
         except Exception as e:
             self._stats["local_errors"] += 1
             logger.warning(f"Local embedding failed: {e}")
             return None
+
+    def _hash_embedding(self, text: str) -> list[float]:
+        """Deterministic hash embedding (explicitly configured only)."""
+        text_lower = (text or "").lower()
+        embedding: list[float] = []
+        for i in range(EMBEDDING_DIMENSION):
+            h = hashlib.sha256(f"{text_lower}:{i}".encode()).digest()
+            val = (int.from_bytes(h[:4], "big") / (2**32)) * 2 - 1
+            embedding.append(val)
+        return embedding
 
     def get_stats(self) -> dict[str, int]:
         """Get embedding generation statistics"""

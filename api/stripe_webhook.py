@@ -96,6 +96,39 @@ async def process_stripe_event(event: dict, background_tasks: BackgroundTasks) -
 
     logger.info(f"Processing Stripe event: {event_type} ({event_id})")
 
+    # INJECT INTO BRAIN MEMORY
+    try:
+        from unified_memory_manager import get_memory_manager, Memory, MemoryType
+        
+        manager = get_memory_manager()
+        
+        # Try to find tenant_id in metadata, otherwise system default
+        tenant_id = data.get("metadata", {}).get("tenant_id") or "00000000-0000-0000-0000-000000000000"
+        
+        memory = Memory(
+            memory_type=MemoryType.EPISODIC,
+            content={
+                "event_type": event_type,
+                "stripe_id": event_id,
+                "amount": data.get("amount", data.get("amount_total", 0)),
+                "currency": data.get("currency", "usd"),
+                "customer": data.get("customer") or data.get("customer_email"),
+                "status": data.get("status")
+            },
+            source_system="stripe",
+            source_agent="webhook_handler",
+            created_by="system",
+            importance_score=0.9 if "succeeded" in event_type or "paid" in event_type else 0.5,
+            tags=["revenue", "stripe", event_type, "financial"],
+            tenant_id=tenant_id
+        )
+        
+        manager.store(memory)
+        logger.info(f"🧠 Injected Stripe event {event_id} into Brain Memory")
+        
+    except Exception as e:
+        logger.error(f"Failed to inject Stripe event into Brain Memory: {e}")
+
     try:
         # Handle different event types
         if event_type == "checkout.session.completed":
