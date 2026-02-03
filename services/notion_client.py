@@ -18,7 +18,7 @@ class NotionClient:
             "Content-Type": "application/json"
         }
 
-    async def search_pages(self, query: str = "") -> List[Dict[str, Any]]:
+    async def search_pages(self, query: str = "", page_size: int = 50) -> List[Dict[str, Any]]:
         """
         Search for pages in the workspace.
         """
@@ -30,7 +30,8 @@ class NotionClient:
             try:
                 payload = {
                     "filter": {"value": "page", "property": "object"},
-                    "sort": {"direction": "descending", "timestamp": "last_edited_time"}
+                    "sort": {"direction": "descending", "timestamp": "last_edited_time"},
+                    "page_size": max(1, min(int(page_size or 50), 100))
                 }
                 if query:
                     payload["query"] = query
@@ -86,11 +87,12 @@ class NotionClient:
         
         return "Untitled Page"
 
-    async def get_all_knowledge_docs(self) -> List[Dict[str, Any]]:
+    async def get_all_knowledge_docs(self, limit: int = 50) -> List[Dict[str, Any]]:
         """
         Fetch all pages and format them for the knowledge base.
         """
-        pages = await self.search_pages()
+        safe_limit = max(1, min(int(limit or 50), 100))
+        pages = await self.search_pages(page_size=safe_limit)
         docs = []
         
         for page in pages:
