@@ -4855,7 +4855,7 @@ class LeadScorerAgent(BaseAgent):
                     rl.source,
                     rl.stage,
                     rl.estimated_value,
-                    rl.probability,
+                    rl.score,
                     alm.composite_score,
                     alm.behavioral_score,
                     alm.intent_score,
@@ -4887,7 +4887,7 @@ class LeadScorerAgent(BaseAgent):
                 SELECT
                     stage,
                     COUNT(*) as count,
-                    AVG(probability) as avg_probability,
+                    AVG(score) as avg_score,
                     SUM(estimated_value) as total_value
                 FROM revenue_leads
                 WHERE stage NOT IN ('won', 'lost')
