@@ -14,6 +14,7 @@ from typing import Any
 import jwt
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
+from utils.embedding_provider import generate_embedding_sync
 from urllib.parse import urlparse
 
 # Optional OpenAI dependency
@@ -1035,10 +1036,6 @@ class AIContextAwareness:
     ) -> bool:
         """Update user embedding based on their activity"""
         try:
-            if openai_client is None:
-                logger.warning("OpenAI client unavailable - skipping embedding update for %s", user_id)
-                return False
-
             # Get user interactions and preferences
             conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -1058,13 +1055,13 @@ class AIContextAwareness:
                 text_data.append(f"{interaction['interaction_type']} {interaction['action']}")
 
             if text_data:
-                # Generate embedding
-                response = openai_client.embeddings.create(
-                    input=" ".join(text_data),
-                    model="text-embedding-ada-002"
-                )
-
-                embedding = response.data[0].embedding
+                # Generate embedding using configured provider
+                embedding = generate_embedding_sync(" ".join(text_data), log=logger)
+                if embedding is None:
+                    logger.warning("Embedding generation failed; skipping update for %s", user_id)
+                    cursor.close()
+                    conn.close()
+                    return False
 
                 # Store embedding
                 cursor.execute("""

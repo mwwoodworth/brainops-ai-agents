@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from utils.embedding_provider import generate_embedding_async
 
 # AI imports
 try:
@@ -90,21 +91,16 @@ class KnowledgeAgent:
             logger.error(f"Database connection failed: {e}")
             return None
 
-    async def generate_embedding(self, text: str) -> list[float]:
+    async def generate_embedding(self, text: str) -> Optional[list[float]]:
         """Generate vector embedding for text"""
-        if not self.openai_client:
-            logger.warning("OpenAI not available, returning zero vector")
-            return [0.0] * 1536
-
         try:
-            response = self.openai_client.embeddings.create(
-                model="text-embedding-3-small",
-                input=text
-            )
-            return response.data[0].embedding
+            embedding = await generate_embedding_async(text, log=logger)
+            if embedding is None:
+                logger.warning("Embedding generation failed")
+            return embedding
         except Exception as e:
             logger.error(f"Embedding generation failed: {e}")
-            return [0.0] * 1536
+            return None
 
     async def store_knowledge(self, entry: dict[str, Any]) -> dict[str, Any]:
         """Store knowledge entry with vector embedding"""
@@ -170,7 +166,7 @@ class KnowledgeAgent:
 
             # Build query with filters
             where_clauses = []
-            params = [query_embedding]
+            params = []
 
             if filters:
                 if filters.get('system'):
@@ -182,18 +178,31 @@ class KnowledgeAgent:
 
             where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
             limit = filters.get('limit', 10) if filters else 10
-            params.append(limit)
-
-            cursor.execute(f"""
-                SELECT
-                    id, type, system, title, content, metadata,
-                    embedding, version, created_at,
-                    1 - (embedding <=> %s::vector) as similarity
-                FROM brainops_knowledge
-                {where_sql}
-                ORDER BY embedding <=> %s::vector
-                LIMIT %s
-            """, params + [query_embedding])
+            if query_embedding is None:
+                params.append(f"%{query}%")
+                params.append(limit)
+                cursor.execute(f"""
+                    SELECT
+                        id, type, system, title, content, metadata,
+                        embedding, version, created_at,
+                        NULL as similarity
+                    FROM brainops_knowledge
+                    {where_sql} {"AND" if where_sql else "WHERE"} content ILIKE %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """, params)
+            else:
+                params = [query_embedding] + params + [query_embedding, limit]
+                cursor.execute(f"""
+                    SELECT
+                        id, type, system, title, content, metadata,
+                        embedding, version, created_at,
+                        1 - (embedding <=> %s::vector) as similarity
+                    FROM brainops_knowledge
+                    {where_sql}
+                    ORDER BY embedding <=> %s::vector
+                    LIMIT %s
+                """, params)
 
             results = cursor.fetchall()
             cursor.close()
