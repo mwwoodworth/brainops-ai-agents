@@ -33,6 +33,7 @@ from enum import Enum
 from typing import Any, Optional
 
 import aiohttp
+from utils.embedding_provider import generate_embedding_async
 
 logger = logging.getLogger(__name__)
 
@@ -220,26 +221,8 @@ class SemanticSimilarityEngine:
 
     async def get_embedding(self, text: str) -> Optional[list[float]]:
         """Get embedding vector for text"""
-        if not self.openai_key:
-            return None
-
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://api.openai.com/v1/embeddings",
-                    headers={
-                        "Authorization": f"Bearer {self.openai_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "input": text[:8000],  # Truncate if too long
-                        "model": "text-embedding-3-small"
-                    },
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data["data"][0]["embedding"]
+            return await generate_embedding_async(text, log=logger)
         except Exception as e:
             logger.error(f"Embedding generation failed: {e}")
 

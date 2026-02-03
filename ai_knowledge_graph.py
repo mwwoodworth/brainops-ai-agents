@@ -18,6 +18,7 @@ import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 from urllib.parse import urlparse
+from utils.embedding_provider import generate_embedding_sync
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -975,17 +976,12 @@ class KnowledgeQueryEngine:
 
     async def semantic_query(self, query_text: str, limit: int = 10) -> list[dict]:
         """Perform semantic search using vector embeddings"""
-        if not self.openai_client:
-            logger.warning("OpenAI not available, falling back to keyword search")
-            return await self.keyword_search(query_text, limit)
-
         try:
             # Generate query embedding
-            response = self.openai_client.embeddings.create(
-                model="text-embedding-3-small",
-                input=query_text
-            )
-            query_embedding = response.data[0].embedding
+            query_embedding = generate_embedding_sync(query_text, log=logger)
+            if query_embedding is None:
+                logger.warning("Embedding generation failed, falling back to keyword search")
+                return await self.keyword_search(query_text, limit)
 
             # Load graph with embeddings
             if not self.graph:

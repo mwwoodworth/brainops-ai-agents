@@ -25,6 +25,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from pydantic import BaseModel, Field
 
 from database.async_connection import get_pool
+from utils.embedding_provider import generate_embedding_async
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/memory/sync", tags=["memory-sync"])
@@ -98,66 +99,15 @@ async def get_tenant_id(
 
 async def generate_embedding(text: str) -> Optional[list[float]]:
     """
-    Generate REAL embedding using OpenAI with fallbacks.
-    NEVER returns random vectors.
+    Generate embedding using configured provider order.
+    NEVER returns random vectors unless explicitly configured.
     """
     if not text or not text.strip():
         return None
-
-    # Truncate if too long
-    text = text[:30000] if len(text) > 30000 else text
-
-    # Try OpenAI first
-    openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key:
-        try:
-            import openai
-            client = openai.OpenAI(api_key=openai_key)
-            response = client.embeddings.create(
-                input=text,
-                model="text-embedding-3-small"
-            )
-            return response.data[0].embedding
-        except Exception as e:
-            logger.warning(f"OpenAI embedding failed: {e}")
-
-    # Try Gemini as fallback
-    gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-    if gemini_key:
-        try:
-            from google import genai
-            _client = genai.Client(api_key=gemini_key)
-            result = _client.models.embed_content(
-                model="text-embedding-004",
-                contents=text
-            )
-            embedding = list(result.embeddings[0].values)
-            # Truncate or pad to 1536d
-            original_len = len(embedding)
-            if len(embedding) > EMBEDDING_DIMENSION:
-                embedding = embedding[:EMBEDDING_DIMENSION]
-                logger.info(f"Gemini embedding truncated from {original_len} to {EMBEDDING_DIMENSION}d")
-            elif len(embedding) < EMBEDDING_DIMENSION:
-                embedding = embedding + [0.0] * (EMBEDDING_DIMENSION - len(embedding))
-                logger.info(f"Gemini embedding padded from {original_len} to {EMBEDDING_DIMENSION}d")
-            return embedding
-        except Exception as e:
-            logger.warning(f"Gemini embedding failed: {e}")
-
-    # Try local sentence-transformers
-    try:
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer('all-MiniLM-L6-v2')
-        embedding = model.encode(text).tolist()
-        # Zero-pad to 1536d
-        if len(embedding) < EMBEDDING_DIMENSION:
-            embedding = embedding + [0.0] * (EMBEDDING_DIMENSION - len(embedding))
-        return embedding
-    except Exception as e:
-        logger.warning(f"Local embedding failed: {e}")
-
-    logger.error("All embedding providers failed")
-    return None
+    embedding = await generate_embedding_async(text, log=logger)
+    if embedding is None:
+        logger.error("All embedding providers failed")
+    return embedding
 
 
 # =============================================================================

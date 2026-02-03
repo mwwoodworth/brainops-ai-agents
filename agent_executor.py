@@ -571,11 +571,13 @@ class AgentExecutor:
             "proposal_agent",
             "contract_agent",
         )
-        high_stakes_actions = {"deploy", "spend_money", "delete"}
+        # Expanded keywords for substring matching
+        high_stakes_keywords = {"deploy", "spend", "delete", "destroy", "wipe", "remove", "transfer", "grant"}
 
         agent_matches = any(key.replace("_agent", "") in agent_label for key in high_stakes_agents)
         type_matches = agent_type in high_stakes_agents
-        action_matches = action in high_stakes_actions
+        # Check if any dangerous keyword is part of the action string
+        action_matches = any(keyword in action for keyword in high_stakes_keywords)
 
         return agent_matches or type_matches or action_matches
 
@@ -636,24 +638,35 @@ class AgentExecutor:
             f"Task: {json.dumps(task_context, default=str)[:2000]}"
         )
 
-        reasoning_result = await ai_core.reason(
-            problem=reasoning_prompt,
-            context={"agent": agent_name, "task_id": task_id},
-            max_tokens=800,
-            model="o3-mini",
-        )
-        reasoning_json = ai_core._safe_json(reasoning_result.get("reasoning", ""))
-
-        if not reasoning_json:
-            if REASONING_GUARD_FAIL_OPEN:
-                return {"block": None, "reasoning": None, "critique": None}
+        try:
+            reasoning_result = await ai_core.reason(
+                problem=reasoning_prompt,
+                context={"agent": agent_name, "task_id": task_id},
+                max_tokens=800,
+                model="o3-mini",
+            )
+            reasoning_json = ai_core._safe_json(reasoning_result.get("reasoning", ""))
+        except Exception as e:
+            logger.warning(f"Reasoning guard exception for {agent_name}: {e}. Blocking task {task_id} for safety.")
             block = {
                 "status": "manual_approval_required",
                 "agent": agent_name,
-                "reason": "Reasoning guard could not parse response",
+                "reason": f"Reasoning Guard unavailable ({type(e).__name__}) - Action blocked for safety",
                 "task_id": task_id,
             }
-            await self._store_reasoning_audit(agent_name, task_context, None, None, "blocked")
+            await self._store_reasoning_audit(agent_name, task_context, None, None, "blocked_system_failure")
+            return {"block": block, "reasoning": None, "critique": None}
+
+        if not reasoning_json:
+            # STRICT SAFETY: Fail CLOSED if reasoning fails (API error, empty response, etc)
+            logger.warning(f"Reasoning guard failed to generate valid response for {agent_name}. Blocking task {task_id} for safety.")
+            block = {
+                "status": "manual_approval_required",
+                "agent": agent_name,
+                "reason": "Reasoning Guard unavailable (AI error) - Action blocked for safety",
+                "task_id": task_id,
+            }
+            await self._store_reasoning_audit(agent_name, task_context, None, None, "blocked_system_failure")
             return {"block": block, "reasoning": None, "critique": None}
 
         critique_prompt = (

@@ -1,0 +1,44 @@
+{
+  "orphans": {
+    "invoices_without_jobs": 0
+  },
+  "math_errors": [
+    {
+      "invoice_id": "05072ec8-8846-45bd-a3b5-7044a7ed3dcf",
+      "stored_total": 133.0,
+      "calc_total": 133.32
+    },
+    {
+      "invoice_id": "4159d305-0a1c-432b-aa0d-6d864cd700a9",
+      "stored_total": 133.0,
+      "calc_total": 133.32
+    },
+    {
+      "invoice_id": "4e40927f-97c0-49dd-963c-e19ce7fd2f94",
+      "stored_total": 133.0,
+      "calc_total": 133.32
+    },
+    {
+      "invoice_id": "90664fa0-dd5f-4fb8-aeec-1ae3d02ace23",
+      "stored_total": 133.0,
+      "calc_total": 133.32
+    },
+    {
+      "invoice_id": "fcfcc667-1875-415d-81fc-bd087c945d08",
+      "stored_total": 133.0,
+      "calc_total": 133.32
+    },
+    {
+      "invoice_id": "fd4ffd30-905d-433f-99b1-d9e4b91af142",
+      "stored_total": 2501.0,
+      "calc_total": 2500.75
+    }
+  ],
+  "logic_gaps": [
+    {
+      "issue": "PAID_INVOICE_MISSING_LEDGER",
+      "count": 1,
+      "description": "Paid invoices found without corresponding Revenue Ledger entry."
+    }
+  ]
+}

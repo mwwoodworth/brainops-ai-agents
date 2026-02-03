@@ -26,6 +26,7 @@ from typing import Any, Optional
 
 # Use async database connection
 from database.async_connection import PoolConfig, get_pool, init_pool
+from utils.embedding_provider import generate_embedding_sync
 
 logger = logging.getLogger(__name__)
 
@@ -231,67 +232,10 @@ class UnifiedBrain:
         # Convert text to string if it's not
         if not isinstance(text, str):
             text = json.dumps(text)
-
-        # Truncate if too long (OpenAI limit is ~8k tokens, ~32k chars)
-        if len(text) > 30000:
-            text = text[:30000] + "..."
-
-        # 1. Try OpenAI first
-        if OPENAI_AVAILABLE and openai_client:
-            try:
-                response = openai_client.embeddings.create(
-                    model="text-embedding-3-small",
-                    input=text,
-                    encoding_format="float"
-                )
-                return response.data[0].embedding
-            except Exception as e:
-                logger.warning(f"⚠️ OpenAI embedding failed: {e}, trying fallback")
-
-        # 2. Try Gemini as fallback
-        gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        if gemini_key:
-            try:
-                from google import genai
-                _client = genai.Client(api_key=gemini_key)
-                result = _client.models.embed_content(
-                    model="text-embedding-004",
-                    contents=text
-                )
-                embedding = list(result.embeddings[0].values)
-                # Truncate or pad to 1536 dimensions to match OpenAI embeddings
-                original_len = len(embedding)
-                if len(embedding) > 1536:
-                    embedding = embedding[:1536]
-                    logger.info(f"✅ Used Gemini embedding fallback (truncated from {original_len} to 1536 dims)")
-                elif len(embedding) < 1536:
-                    embedding = embedding + [0.0] * (1536 - len(embedding))
-                    logger.info(f"✅ Used Gemini embedding fallback (padded from {original_len} to 1536 dims)")
-                else:
-                    logger.info("✅ Used Gemini embedding fallback")
-                return embedding
-            except Exception as e:
-                logger.warning(f"⚠️ Gemini embedding failed: {e}, trying local fallback")
-
-        # 3. Try Local fallback (sentence-transformers)
-        try:
-            from sentence_transformers import SentenceTransformer
-            # Cache model instance on the class or module level if possible, 
-            # but for now local import is safer for dependencies
-            model = SentenceTransformer('all-MiniLM-L6-v2')
-            embedding = model.encode(text).tolist()
-            # Zero-pad to 1536 dimensions
-            if len(embedding) < 1536:
-                embedding = embedding + [0.0] * (1536 - len(embedding))
-            logger.info("✅ Used local embedding fallback")
-            return embedding
-        except ImportError:
-            pass  # sentence_transformers not installed
-        except Exception as e:
-            logger.warning(f"⚠️ Local embedding failed: {e}")
-
-        logger.error("❌ All embedding providers failed")
-        return None
+        embedding = generate_embedding_sync(text, log=logger)
+        if embedding is None:
+            logger.error("❌ All embedding providers failed")
+        return embedding
 
     def _generate_summary(self, text: str, max_length: int = 200) -> str:
         """Generate automatic summary of content"""

@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 import psycopg2
+from utils.embedding_provider import generate_embedding_async
 # Optional AI providers
 try:
     from anthropic import Anthropic, AsyncAnthropic
@@ -704,11 +705,10 @@ class RealAICore:
     async def generate_embeddings(self, text: str) -> list[float]:
         """Generate REAL embeddings for vector search"""
         try:
-            response = await self.async_openai.embeddings.create(
-                model="text-embedding-3-small",
-                input=text
-            )
-            return response.data[0].embedding
+            embedding = await generate_embedding_async(text, log=logger)
+            if embedding is None:
+                raise RuntimeError("Embedding generation failed")
+            return embedding
         except Exception as e:
             logger.error(f"Embedding generation error: {e}")
             raise e from e

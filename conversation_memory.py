@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from utils.embedding_provider import generate_embedding_sync
 
 # Optional OpenAI dependency
 try:
@@ -413,38 +414,55 @@ class ConversationMemory:
         try:
             # Generate query embedding
             embedding = self._generate_embedding(query)
-            embedding_str = '[' + ','.join(map(str, embedding)) + ']'
 
             conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
-            # Search messages by similarity
-            cursor.execute("""
-                WITH relevant_messages AS (
-                    SELECT
-                        conversation_id,
-                        content,
-                        1 - (embedding <=> %s::vector) as similarity
-                    FROM conversation_messages
-                    WHERE embedding IS NOT NULL
-                        AND conversation_id IN (
-                            SELECT id FROM conversations WHERE user_id = %s
-                        )
-                    ORDER BY embedding <=> %s::vector
+            if embedding is None:
+                cursor.execute("""
+                    SELECT DISTINCT
+                        c.id,
+                        c.title,
+                        c.summary,
+                        c.last_message_at,
+                        c.message_count,
+                        NULL as relevance
+                    FROM conversations c
+                    JOIN conversation_messages m ON c.id = m.conversation_id
+                    WHERE c.user_id = %s
+                      AND m.content ILIKE %s
+                    ORDER BY c.last_message_at DESC
                     LIMIT %s
-                )
-                SELECT DISTINCT
-                    c.id,
-                    c.title,
-                    c.summary,
-                    c.last_message_at,
-                    c.message_count,
-                    MAX(rm.similarity) as relevance
-                FROM conversations c
-                JOIN relevant_messages rm ON c.id = rm.conversation_id
-                GROUP BY c.id, c.title, c.summary, c.last_message_at, c.message_count
-                ORDER BY relevance DESC
-            """, (embedding_str, user_id, embedding_str, limit * 3))
+                """, (user_id, f"%{query}%", limit))
+            else:
+                embedding_str = '[' + ','.join(map(str, embedding)) + ']'
+                # Search messages by similarity
+                cursor.execute("""
+                    WITH relevant_messages AS (
+                        SELECT
+                            conversation_id,
+                            content,
+                            1 - (embedding <=> %s::vector) as similarity
+                        FROM conversation_messages
+                        WHERE embedding IS NOT NULL
+                            AND conversation_id IN (
+                                SELECT id FROM conversations WHERE user_id = %s
+                            )
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                    )
+                    SELECT DISTINCT
+                        c.id,
+                        c.title,
+                        c.summary,
+                        c.last_message_at,
+                        c.message_count,
+                        MAX(rm.similarity) as relevance
+                    FROM conversations c
+                    JOIN relevant_messages rm ON c.id = rm.conversation_id
+                    GROUP BY c.id, c.title, c.summary, c.last_message_at, c.message_count
+                    ORDER BY relevance DESC
+                """, (embedding_str, user_id, embedding_str, limit * 3))
 
             results = cursor.fetchall()
 
@@ -571,21 +589,12 @@ class ConversationMemory:
 
         return key_points[:5]  # Limit to 5 key points
 
-    def _generate_embedding(self, text: str) -> list[float]:
+    def _generate_embedding(self, text: str) -> Optional[list[float]]:
         """Generate embedding for text"""
-        try:
-            client = get_openai_client()
-            if not client:
-                logger.warning("OpenAI client unavailable; returning zero embedding")
-                return [0.0] * 1536
-            response = client.embeddings.create(
-                model="text-embedding-ada-002",
-                input=text[:8000]  # Limit to avoid token limits
-            )
-            return response.data[0].embedding
-        except Exception as e:
-            logger.error(f"Failed to generate embedding: {e}")
-            return [0.0] * 1536
+        embedding = generate_embedding_sync(text, log=logger)
+        if embedding is None:
+            logger.error("Embedding generation failed; semantic search unavailable")
+        return embedding
 
     def end_conversation(self, conversation_id: str) -> bool:
         """Mark conversation as completed"""

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from database.async_connection import DatabaseUnavailableError, get_pool, using_fallback
+from utils.embedding_provider import generate_embedding_async
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -126,56 +127,13 @@ def _require_real_database(operation: str) -> None:
 
 async def generate_embedding(text: str) -> Optional[list[float]]:
     """
-    Generate embedding with OpenAI primary, Gemini fallback.
-    OpenAI: text-embedding-3-small (1536 dims)
-    Gemini: text-embedding-004 (configurable to 1536 dims for compatibility)
-    Returns None if both providers fail.
+    Generate embedding with configured provider order.
+    Uses EMBEDDING_PROVIDER / EMBEDDING_PROVIDER_ORDER and respects strict mode.
     """
-    # Truncate if too long
-    text_truncated = text[:30000] if len(text) > 30000 else text
-
-    # Try OpenAI first (primary)
-    openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key:
-        try:
-            import openai
-            client = openai.OpenAI(api_key=openai_key)
-            response = client.embeddings.create(
-                input=text_truncated,
-                model="text-embedding-3-small"
-            )
-            return response.data[0].embedding
-        except Exception as e:
-            logger.warning(f"OpenAI embedding failed, trying Gemini fallback: {e}")
-
-    # Fallback to Gemini
-    gemini_key = os.getenv("GOOGLE_AI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-    if gemini_key:
-        try:
-            from google import genai
-            _client = genai.Client(api_key=gemini_key)
-            result = _client.models.embed_content(
-                model="text-embedding-004",
-                contents=text_truncated
-            )
-            if result and result.embeddings:
-                embedding = list(result.embeddings[0].values)
-                # Gemini text-embedding-004 produces 3072 dims, but our DB has 1536 (OpenAI)
-                # Truncate or pad to match 1536 dimensions for compatibility
-                original_len = len(embedding)
-                if len(embedding) > 1536:
-                    embedding = embedding[:1536]  # Truncate to 1536
-                    logger.info(f"Gemini embedding truncated from {original_len} to 1536 dims")
-                elif len(embedding) < 1536:
-                    padding = [0.0] * (1536 - len(embedding))
-                    embedding = embedding + padding
-                    logger.info(f"Gemini embedding padded from {original_len} to 1536 dims")
-                return embedding
-        except Exception as e:
-            logger.error(f"Gemini embedding also failed: {e}")
-
-    logger.error("All embedding providers failed - semantic search unavailable")
-    return None
+    embedding = await generate_embedding_async(text, log=logger)
+    if embedding is None:
+        logger.error("All embedding providers failed - semantic search unavailable")
+    return embedding
 
 
 # =============================================================================
@@ -328,7 +286,7 @@ async def search_memories(
             if not query_embedding:
                 raise HTTPException(
                     status_code=503,
-                    detail="Semantic search unavailable. Configure OPENAI_API_KEY or set use_semantic=false."
+                    detail="Semantic search unavailable. Configure embedding provider keys or set use_semantic=false."
                 )
 
             # Semantic vector search

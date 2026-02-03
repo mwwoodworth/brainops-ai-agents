@@ -4,6 +4,7 @@ Vector-Based Persistent Memory System
 Implements semantic memory with embeddings for true AI memory persistence
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -16,6 +17,15 @@ import numpy as np
 import psycopg2
 from psycopg2.extensions import AsIs, register_adapter
 from psycopg2.extras import RealDictCursor
+from utils.embedding_provider import (
+    allow_hash_fallback,
+    allow_zero_fallback,
+    generate_embedding_sync,
+    get_embedding_dimension,
+    get_openai_model,
+    get_provider_order,
+    iter_providers,
+)
 
 # Optional OpenAI dependency
 try:
@@ -115,8 +125,8 @@ class VectorMemorySystem:
 
     def __init__(self):
         """Initialize the vector memory system"""
-        self.embedding_model = "text-embedding-3-small"
-        self.embedding_dimension = 1536
+        self.embedding_model = get_openai_model()
+        self.embedding_dimension = get_embedding_dimension()
         self.conn = None
         self._ensure_tables()
         logger.info("Vector Memory System initialized")
@@ -184,65 +194,31 @@ class VectorMemorySystem:
         Tries: OpenAI -> Gemini -> Local sentence-transformers -> Hash-based (last resort)
         NEVER returns zero vectors which break semantic search.
         """
-        # Tier 1: OpenAI embeddings (best quality)
-        if OPENAI_AVAILABLE:
-            try:
-                response = openai.embeddings.create(
-                    input=text,
-                    model=self.embedding_model
-                )
-                return response.data[0].embedding
-            except Exception as e:
-                logger.warning(f"OpenAI embedding failed, trying fallback: {e}")
-
-        # Tier 2: Google Gemini embeddings
-        if GEMINI_AVAILABLE and _gemini_embed_client is not None:
-            try:
-                result = _gemini_embed_client.models.embed_content(
-                    model="text-embedding-004",
-                    contents=text
-                )
-                embedding = list(result.embeddings[0].values)
-                # Pad or truncate to match expected dimension
-                if len(embedding) < self.embedding_dimension:
-                    embedding = embedding + [0.0] * (self.embedding_dimension - len(embedding))
-                elif len(embedding) > self.embedding_dimension:
-                    embedding = embedding[:self.embedding_dimension]
-                return embedding
-            except Exception as e:
-                logger.warning(f"Gemini embedding failed, trying local: {e}")
-
-        # Tier 3: Local sentence-transformers (works offline)
-        if LOCAL_EMBEDDINGS_AVAILABLE and SentenceTransformer is not None:
-            try:
-                if not hasattr(self, '_local_model'):
-                    self._local_model = SentenceTransformer('all-MiniLM-L6-v2')
-                embedding = self._local_model.encode(text).tolist()
-                # Pad to match expected dimension (MiniLM is 384d)
-                if len(embedding) < self.embedding_dimension:
-                    # Use hash-based padding to maintain some semantic meaning
-                    import hashlib
-                    text_hash = hashlib.sha256(text.encode()).digest()
-                    padding = []
-                    for i in range(self.embedding_dimension - len(embedding)):
-                        padding.append((text_hash[i % 32] - 128) / 256.0)
-                    embedding = embedding + padding
-                return embedding
-            except Exception as e:
-                logger.warning(f"Local embedding failed, using hash-based: {e}")
+        embedding = generate_embedding_sync(text, log=logger)
+        if embedding is not None:
+            return embedding
 
         # Tier 4: Hash-based pseudo-embedding (LAST RESORT - never zero vectors)
         # This ensures semantic search still works with some basic similarity
-        logger.warning("All embedding providers unavailable - using hash-based pseudo-embedding")
-        import hashlib
-        text_lower = text.lower().strip()
-        # Create deterministic pseudo-embedding from text content
-        embedding = []
+        providers = iter_providers(get_provider_order())
+        if allow_hash_fallback(providers):
+            logger.warning("All embedding providers unavailable - using hash-based pseudo-embedding")
+            return self._hash_embedding(text)
+
+        if allow_zero_fallback():
+            logger.warning("All embedding providers unavailable - using zero embedding (explicitly allowed)")
+            return [0.0] * self.embedding_dimension
+
+        logger.error("All embedding providers failed")
+        return None
+
+    def _hash_embedding(self, text: str) -> list[float]:
+        """Hash-based pseudo-embedding (explicitly configured only)."""
+        text_lower = (text or "").lower().strip()
+        embedding: list[float] = []
         for i in range(self.embedding_dimension):
-            # Hash text with position to create unique values per dimension
             h = hashlib.sha256(f"{text_lower}:{i}".encode()).digest()
-            # Convert to float between -1 and 1
-            val = (int.from_bytes(h[:4], 'big') / (2**32)) * 2 - 1
+            val = (int.from_bytes(h[:4], "big") / (2**32)) * 2 - 1
             embedding.append(val)
         return embedding
 
@@ -257,6 +233,8 @@ class VectorMemorySystem:
         try:
             # Generate embedding
             embedding = self._get_embedding(content)
+            if embedding is None:
+                logger.error("Embedding unavailable; storing memory without embedding")
 
             # Store in database
             conn = psycopg2.connect(**DB_CONFIG)
@@ -303,34 +281,59 @@ class VectorMemorySystem:
             conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
-            # Semantic search with cosine similarity
-            if memory_type:
-                cursor.execute("""
-                    SELECT
-                        id, memory_type, content, importance_score,
-                        confidence_score, metadata, created_at,
-                        1 - (embedding <=> %s::vector) as similarity
-                    FROM vector_memories
-                    WHERE memory_type = %s
-                        AND 1 - (embedding <=> %s::vector) > %s
-                    ORDER BY
-                        similarity DESC,
-                        importance_score DESC
-                    LIMIT %s
-                """, (query_embedding, memory_type, query_embedding, threshold, limit))
+            if query_embedding is None:
+                # Keyword fallback when embeddings are unavailable
+                if memory_type:
+                    cursor.execute("""
+                        SELECT
+                            id, memory_type, content, importance_score,
+                            confidence_score, metadata, created_at,
+                            NULL as similarity
+                        FROM vector_memories
+                        WHERE memory_type = %s AND content ILIKE %s
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, (memory_type, f"%{query}%", limit))
+                else:
+                    cursor.execute("""
+                        SELECT
+                            id, memory_type, content, importance_score,
+                            confidence_score, metadata, created_at,
+                            NULL as similarity
+                        FROM vector_memories
+                        WHERE content ILIKE %s
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, (f"%{query}%", limit))
             else:
-                cursor.execute("""
-                    SELECT
-                        id, memory_type, content, importance_score,
-                        confidence_score, metadata, created_at,
-                        1 - (embedding <=> %s::vector) as similarity
-                    FROM vector_memories
-                    WHERE 1 - (embedding <=> %s::vector) > %s
-                    ORDER BY
-                        similarity DESC,
-                        importance_score DESC
-                    LIMIT %s
-                """, (query_embedding, query_embedding, threshold, limit))
+                # Semantic search with cosine similarity
+                if memory_type:
+                    cursor.execute("""
+                        SELECT
+                            id, memory_type, content, importance_score,
+                            confidence_score, metadata, created_at,
+                            1 - (embedding <=> %s::vector) as similarity
+                        FROM vector_memories
+                        WHERE memory_type = %s
+                            AND 1 - (embedding <=> %s::vector) > %s
+                        ORDER BY
+                            similarity DESC,
+                            importance_score DESC
+                        LIMIT %s
+                    """, (query_embedding, memory_type, query_embedding, threshold, limit))
+                else:
+                    cursor.execute("""
+                        SELECT
+                            id, memory_type, content, importance_score,
+                            confidence_score, metadata, created_at,
+                            1 - (embedding <=> %s::vector) as similarity
+                        FROM vector_memories
+                        WHERE 1 - (embedding <=> %s::vector) > %s
+                        ORDER BY
+                            similarity DESC,
+                            importance_score DESC
+                        LIMIT %s
+                    """, (query_embedding, query_embedding, threshold, limit))
 
             memories = cursor.fetchall()
 

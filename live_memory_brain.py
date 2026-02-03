@@ -44,6 +44,7 @@ from enum import Enum
 from typing import Any, Callable, Optional
 
 from safe_task import create_safe_task
+from utils.embedding_provider import generate_embedding_async
 
 from psycopg2.pool import ThreadedConnectionPool
 
@@ -1477,38 +1478,11 @@ class LiveMemoryBrain:
 
     async def _generate_embedding(self, text: str) -> Optional[list[float]]:
         """Generate embedding using multi-model fallback chain"""
-        # Try OpenAI first (best quality)
         try:
-            import openai
-            if os.getenv("OPENAI_API_KEY"):
-                client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-                response = client.embeddings.create(
-                    input=text[:8000],  # Truncate for API limits
-                    model="text-embedding-3-small"
-                )
-                return response.data[0].embedding
+            return await generate_embedding_async(text, log=logger)
         except Exception as e:
-            logger.debug(f"OpenAI embedding failed: {e}")
-
-        # Try Google Gemini
-        try:
-            from google import genai
-            _gapi_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-            if _gapi_key:
-                _client = genai.Client(api_key=_gapi_key)
-                result = _client.models.embed_content(
-                    model="text-embedding-004",
-                    contents=text[:8000]
-                )
-                embedding = list(result.embeddings[0].values)
-                # Truncate to 1536d for DB compatibility (Gemini produces 3072d)
-                if len(embedding) > 1536:
-                    embedding = embedding[:1536]
-                return embedding
-        except Exception as e:
-            logger.debug(f"Gemini embedding failed: {e}")
-
-        return None
+            logger.debug(f"Embedding generation failed: {e}")
+            return None
 
     def _cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
         """Calculate cosine similarity between two vectors"""

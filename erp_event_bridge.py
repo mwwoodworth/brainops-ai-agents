@@ -685,7 +685,8 @@ async def verify_erp_webhook_signature(request: Request) -> bool:
     return True
 
 
-@router.post("/events/webhook", response_model=ERPEventResponse, summary="Receive events from ERP SystemEventBus")
+@router.post("/events/webhook/erp", response_model=ERPEventResponse, summary="Receive events from ERP SystemEventBus")
+@router.post("/events/webhook", response_model=ERPEventResponse, summary="Legacy webhook endpoint", include_in_schema=False)
 async def handle_erp_event(
     event: ERPSystemEvent,
     request: Request,
