@@ -4852,7 +4852,7 @@ class LeadScorerAgent(BaseAgent):
                     rl.id,
                     rl.company_name,
                     rl.email,
-                    rl.lead_source,
+                    rl.source,
                     rl.stage,
                     rl.estimated_value,
                     rl.probability,

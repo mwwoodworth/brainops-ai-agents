@@ -394,6 +394,8 @@ except ImportError:
 @router.post("/sync/notion")
 async def sync_notion_knowledge(
     tenant_id: str = "default",
+    limit: int = 50,
+    include_items: bool = False,
     api_key: str = Depends(verify_api_key)
 ):
     """
@@ -405,7 +407,7 @@ async def sync_notion_knowledge(
 
     try:
         client = NotionClient()
-        docs = await client.get_all_knowledge_docs()
+        docs = await client.get_all_knowledge_docs(limit=limit)
         
         # If Knowledge Base is available, we could store them.
         # For now, we return them to the frontend to show "Live" status.
@@ -418,18 +420,30 @@ async def sync_notion_knowledge(
                 # Upsert logic would go here. For now we log/count.
                 # await kb.upsert_entry(...) 
                 saved_count += 1
-
-        return {
-            "status": "synced",
+        payload = {
+            "status": "synced" if docs else "skipped",
             "docs_found": len(docs),
             "docs_processed": saved_count,
-            "items": docs,  # Return items for UI display
+            "limit": limit,
+            "include_items": include_items,
             "synced_at": datetime.utcnow().isoformat()
         }
+        if include_items:
+            payload["items"] = docs
+        return payload
 
     except Exception as e:
         logger.error(f"Notion sync error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        # Degrade gracefully so ops checks don't hard-fail when Notion is unavailable.
+        return {
+            "status": "degraded",
+            "docs_found": 0,
+            "docs_processed": 0,
+            "limit": limit,
+            "include_items": include_items,
+            "error": str(e),
+            "synced_at": datetime.utcnow().isoformat()
+        }
 
 async def list_knowledge_types():
     """List available knowledge types"""
