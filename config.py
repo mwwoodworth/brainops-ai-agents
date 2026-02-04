@@ -160,7 +160,7 @@ class AppConfig:
 
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
-        self.version = os.getenv('VERSION', 'v11.0.16')  # Fix stuck-execution cleanup: update both tables, surface errors, avoid silent failure
+        self.version = os.getenv('VERSION', 'v11.0.17')  # Fix stuck-execution cleanup SQL param typing (asyncpg expects int for $2)
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
