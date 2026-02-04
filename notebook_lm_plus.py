@@ -7,6 +7,7 @@ Implements continuous learning from all interactions with knowledge synthesis
 import json
 import logging
 import os
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -482,6 +483,17 @@ class NotebookLMPlus:
     def _attempt_synthesis(self, node_ids: list[str]):
         """Attempt to synthesize insights from multiple knowledge nodes"""
         try:
+            # Ensure UUID typing for Postgres (prevents "operator does not exist: uuid = text").
+            safe_node_ids: list[str] = []
+            for nid in node_ids or []:
+                try:
+                    safe_node_ids.append(str(uuid.UUID(str(nid))))
+                except Exception:
+                    continue
+
+            if len(safe_node_ids) < 3:
+                return  # Not enough valid UUID nodes for synthesis
+
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
@@ -489,8 +501,8 @@ class NotebookLMPlus:
             cursor.execute("""
                 SELECT content, knowledge_type, confidence, importance
                 FROM notebook_lm_knowledge
-                WHERE id = ANY(%s)
-            """, (node_ids,))
+                WHERE id = ANY(%s::uuid[])
+            """, (safe_node_ids,))
 
             nodes = cursor.fetchall()
 
@@ -531,8 +543,8 @@ class NotebookLMPlus:
             cursor.execute("""
                 UPDATE notebook_lm_knowledge
                 SET synthesis_count = synthesis_count + 1
-                WHERE id = ANY(%s)
-            """, (node_ids,))
+                WHERE id = ANY(%s::uuid[])
+            """, (safe_node_ids,))
 
             conn.commit()
             cursor.close()
@@ -648,7 +660,7 @@ class NotebookLMPlus:
                     UPDATE notebook_lm_knowledge
                     SET accessed_count = accessed_count + 1,
                         last_accessed = NOW()
-                    WHERE id = ANY(%s)
+                    WHERE id = ANY(%s::uuid[])
                 """, (result_ids,))
 
                 conn.commit()

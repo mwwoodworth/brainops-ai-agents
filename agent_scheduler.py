@@ -105,6 +105,15 @@ except ImportError:
     process_platform_cross_sells = None
     logging.warning("Platform Cross-Sell unavailable")
 
+# Intelligent Follow-up System (payment reminders, outreach sequences)
+try:
+    from intelligent_followup_system import get_intelligent_followup_system
+    FOLLOWUP_AVAILABLE = True
+except Exception as exc:
+    FOLLOWUP_AVAILABLE = False
+    get_intelligent_followup_system = None
+    logging.warning("Intelligent Follow-up System unavailable: %s", exc)
+
 # Safe-by-default: autonomous revenue drive is OFF unless explicitly enabled.
 _revenue_drive_env = os.getenv("ENABLE_REVENUE_DRIVE")
 ENABLE_REVENUE_DRIVE = bool(_revenue_drive_env and _revenue_drive_env.lower() in ("1", "true", "yes"))
@@ -1423,6 +1432,19 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("Platform Cross-Sell failed: %s", exc, exc_info=True)
 
+    def _run_followup_executor(self):
+        """Execute scheduled follow-ups (payment reminders, nurture sequences)."""
+        if not FOLLOWUP_AVAILABLE:
+            logger.info("Follow-up Executor skipped: not available")
+            return
+        try:
+            followup_system = get_intelligent_followup_system()
+            results = run_on_main_loop(followup_system.execute_scheduled_followups(), timeout=300)
+            count = len(results) if isinstance(results, list) else int(results or 0)
+            logger.info("📨 Follow-up Executor completed: %d followups executed", count)
+        except Exception as exc:
+            logger.error("Follow-up Executor failed: %s", exc, exc_info=True)
+
     def _register_internal_jobs(self):
         """Register internal recurring jobs (e.g., revenue drive)."""
         # Register OODA Loop (Consciousness)
@@ -1554,6 +1576,35 @@ class AgentScheduler:
                 logger.info("✅ Scheduled Platform Cross-Sell daily")
             except Exception as exc:
                 logger.error("Failed to schedule Platform Cross-Sell: %s", exc, exc_info=True)
+
+        # Register Follow-up Executor (payment reminders, outreach sequences)
+        followup_enabled_env = os.getenv("ENABLE_FOLLOWUP_EXECUTION")
+        enable_followups = (
+            followup_enabled_env.lower() in ("1", "true", "yes")
+            if followup_enabled_env is not None
+            else True
+        )
+        if FOLLOWUP_AVAILABLE and enable_followups:
+            try:
+                job_id = "followup_executor"
+                self.scheduler.add_job(
+                    func=self._run_followup_executor,
+                    trigger=IntervalTrigger(minutes=15),
+                    id=job_id,
+                    name="Follow-up Executor",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "followup_executor",
+                    "agent_name": "FollowupExecutor",
+                    "frequency_minutes": 15,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("✅ Scheduled Follow-up Executor every 15 minutes")
+            except Exception as exc:
+                logger.error("Failed to schedule Follow-up Executor: %s", exc, exc_info=True)
+        elif not enable_followups:
+            logger.info("Follow-up Executor not scheduled: ENABLE_FOLLOWUP_EXECUTION disabled")
 
         if not (REVENUE_DRIVE_AVAILABLE and ENABLE_REVENUE_DRIVE):
             return
