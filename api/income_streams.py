@@ -670,10 +670,18 @@ async def activate_all_streams(background_tasks: BackgroundTasks):
     # 3. Log activation
     try:
         pool = await _get_db_pool()
-        await pool.execute("""
-            INSERT INTO ai_agent_executions (agent_id, task, result, success, created_at)
-            VALUES ('income_stream_activator', 'activate_all_streams', $1, true, NOW())
-        """, json.dumps(results))
+        await pool.execute(
+            """
+            INSERT INTO ai_agent_executions (
+                agent_name, task_type, input_data, output_data, status, created_at
+            ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, NOW())
+            """,
+            "income_stream_activator",
+            "activate_all_streams",
+            json.dumps({"source": "income_streams.activate_all"}),
+            json.dumps(results, default=str),
+            "completed",
+        )
     except Exception as e:
         logger.warning(f"Could not log activation: {e}")
 

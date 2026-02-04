@@ -503,7 +503,7 @@ async def get_complete_awareness() -> dict[str, Any]:
         "schema_issues": schema_issues,
         "recommendations": recommendations,
         "quick_actions": {
-            "fix_stuck_agents": "/scheduler/restart-stuck",
+            "fix_stuck_agents": "/resolver/fix/stuck-agents",
             "trigger_health_check": "/execute/HealthMonitor",
             "search_brain": "POST /brain/search",
             "store_memory": "POST /memory/store",

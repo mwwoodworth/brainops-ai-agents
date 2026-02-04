@@ -260,7 +260,7 @@ curl -s "https://brainops-ai-agents.onrender.com/systems/usage" \
 }
 ```
 
-### Scheduled Agents (61 Total)
+### Scheduled Agents (Live Inventory)
 
 **Categories:**
 - Revenue Agents: CustomerIntelligence, RevenueOptimizer, PricingOptimizer
@@ -268,20 +268,25 @@ curl -s "https://brainops-ai-agents.onrender.com/systems/usage" \
 - Content: BlogAutomation, SEOOptimizer, SocialMediaAgent
 - Integration: APIManagementAgent, WebhookMonitor
 
-**Job Status:**
+**Job Status (prod):**
 ```bash
 curl -s "https://brainops-ai-agents.onrender.com/scheduler/status" \
-  -H "X-API-Key: ${BRAINOPS_API_KEY}" | jq '.next_jobs[0:5]'
+  -H "X-API-Key: ${BRAINOPS_API_KEY}" | jq '{enabled, running, registered_jobs_count, apscheduler_jobs_count, sample_jobs:(.apscheduler_jobs[0:5])}'
 ```
 
-### MCP Bridge (245 Tools)
+### MCP Bridge (Tool Inventory)
 
 **Servers:** openai, anthropic, gemini, vercel, render, supabase, playwright, github, docker, stripe, ai-cli
 
-**Tool Execution:**
+**Health (tool counts):**
+```bash
+curl -s "https://brainops-mcp-bridge.onrender.com/health" | jq '{status, mcpServers, totalTools, totalToolsConfigured, totalToolsLive}'
+```
+
+**Tool Execution (never hardcode keys in docs):**
 ```bash
 curl -X POST "https://brainops-mcp-bridge.onrender.com/mcp/execute" \
-  -H "X-API-Key: brainops_mcp_49209d1d3f19376706560e860a71d172728861dd4e2493f263c3cc0c6d9adc86" \
+  -H "X-API-Key: ${MCP_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"server": "supabase", "tool": "sql_query", "params": {"query": "SELECT COUNT(*) FROM customers"}}'
 ```
@@ -310,8 +315,8 @@ SELECT tenant_id, COUNT(*) FROM customers GROUP BY tenant_id ORDER BY 2 DESC LIM
 
 **Recent Agent Executions:**
 ```sql
-SELECT agent_name, status, execution_time_ms, created_at
-FROM agent_executions
+SELECT agent_name, task_type, status, execution_time_ms, created_at
+FROM ai_agent_executions
 ORDER BY created_at DESC
 LIMIT 20;
 ```

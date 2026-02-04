@@ -85,12 +85,17 @@ class AutonomousIssueResolver:
     async def _get_pool(self) -> asyncpg.Pool:
         """Get or create connection pool"""
         if self._pool is None or self._pool._closed:
+            host = os.getenv("DB_HOST")
+            port = int(os.getenv("DB_PORT", "5432"))
+            # Prefer Supabase transaction pooler when pointed at the session pooler.
+            if host and "pooler.supabase.com" in host and port == 5432:
+                port = 6543
             self._pool = await asyncpg.create_pool(
-                host=os.getenv("DB_HOST"),
+                host=host,
                 database=os.getenv("DB_NAME", "postgres"),
                 user=os.getenv("DB_USER"),
                 password=os.getenv("DB_PASSWORD"),
-                port=int(os.getenv("DB_PORT", "5432")),
+                port=port,
                 min_size=1,
                 max_size=2,
                 ssl="require" if os.getenv("DB_SSL", "true").lower() == "true" else None
@@ -111,20 +116,37 @@ class AutonomousIssueResolver:
             "total_issues": 0
         }
 
-        # Get stuck agents (pending for > threshold)
+        # Get stuck executions (pending/running for > threshold)
         stuck_threshold = datetime.utcnow() - timedelta(minutes=self.stuck_agent_threshold_minutes)
         try:
             stuck = await pool.fetch("""
-                SELECT id, agent_type, created_at
+                SELECT id, agent_type, status, created_at, started_at
                 FROM agent_executions
-                WHERE status = 'pending'
+                WHERE status IN ('pending', 'running')
+                  AND COALESCE(started_at, created_at) < $1
+                ORDER BY COALESCE(started_at, created_at)
+                LIMIT 20
+            """, stuck_threshold)
+            issues["stuck_agents"] = [{"table": "agent_executions", **dict(r)} for r in stuck]
+        except Exception as e:
+            logger.warning(f"Could not query stuck agents: {e}")
+
+        # Also check the newer `ai_agent_executions` log for stuck "running" rows.
+        try:
+            stuck_ai = await pool.fetch(
+                """
+                SELECT id, agent_name, task_type, status, created_at
+                FROM ai_agent_executions
+                WHERE status = 'running'
                   AND created_at < $1
                 ORDER BY created_at
                 LIMIT 20
-            """, stuck_threshold)
-            issues["stuck_agents"] = [dict(r) for r in stuck]
+                """,
+                stuck_threshold,
+            )
+            issues["stuck_agents"].extend([{"table": "ai_agent_executions", **dict(r)} for r in stuck_ai])
         except Exception as e:
-            logger.warning(f"Could not query stuck agents: {e}")
+            logger.warning(f"Could not query stuck ai_agent_executions: {e}")
 
         # Get failed agents in last hour
         try:
@@ -193,24 +215,57 @@ class AutonomousIssueResolver:
         return issues
 
     async def fix_stuck_agents(self) -> ResolutionResult:
-        """Fix stuck agents by marking them as timeout"""
+        """Fix stuck executions by marking them as timeout/failed"""
         pool = await self._get_pool()
 
         stuck_threshold = datetime.utcnow() - timedelta(minutes=self.stuck_agent_threshold_minutes)
         count = 0
 
         try:
-            # Update stuck agents to timeout status
-            result = await pool.execute("""
+            # Legacy table: update stuck executions to timeout status
+            result = await pool.execute(
+                """
                 UPDATE agent_executions
                 SET status = 'timeout',
                     completed_at = NOW(),
-                    error_message = 'Auto-timeout: Pending for over ' || $2::text || ' minutes'
-                WHERE status = 'pending'
-                  AND created_at < $1
-            """, stuck_threshold, self.stuck_agent_threshold_minutes)
+                    error_message = 'Auto-timeout: Pending/Running for over ' || $2::text || ' minutes'
+                WHERE status IN ('pending', 'running')
+                  AND COALESCE(started_at, created_at) < $1
+                """,
+                stuck_threshold,
+                self.stuck_agent_threshold_minutes,
+            )
 
             count = int(result.split()[-1]) if result and ' ' in result else 0
+
+            # Newer table: mark stuck `ai_agent_executions` rows as failed so dashboards count them.
+            try:
+                result2 = await pool.execute(
+                    """
+                    UPDATE ai_agent_executions
+                    SET status = 'failed',
+                        error_message = COALESCE(
+                            error_message,
+                            'Auto-timeout: running for over ' || $2::text || ' minutes'
+                        ),
+                        output_data = COALESCE(
+                            output_data,
+                            jsonb_build_object(
+                                'status','failed',
+                                'error','timeout',
+                                'auto_cleanup', true,
+                                'threshold_minutes', $2
+                            )
+                        )
+                    WHERE status = 'running'
+                      AND created_at < $1
+                    """,
+                    stuck_threshold,
+                    self.stuck_agent_threshold_minutes,
+                )
+                count += int(result2.split()[-1]) if result2 and ' ' in result2 else 0
+            except Exception as inner_e:
+                logger.warning(f"Could not update stuck ai_agent_executions: {inner_e}")
 
             # Log to brain
             if count > 0:
