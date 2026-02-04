@@ -160,7 +160,7 @@ class AppConfig:
 
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
-        self.version = os.getenv('VERSION', 'v11.0.14')  # Fix resolver DB pool fallback to prevent stuck-execution cleanup failures
+        self.version = os.getenv('VERSION', 'v11.0.15')  # Fix resolver DB config hydration (supports DATABASE_URL) + port fallback
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
