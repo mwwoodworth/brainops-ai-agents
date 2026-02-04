@@ -86,21 +86,24 @@ class AutonomousIssueResolver:
     async def _get_pool(self) -> asyncpg.Pool:
         """Get or create connection pool"""
         if self._pool is None or self._pool._closed:
-            host = (os.getenv("DB_HOST") or "").strip()
-            user = (os.getenv("DB_USER") or "").strip()
-            password = os.getenv("DB_PASSWORD") or ""
-            database = (os.getenv("DB_NAME") or "postgres").strip() or "postgres"
+            # Align DB settings with the rest of the service (supports DATABASE_URL fallback).
+            from config import config as app_config
 
-            if not host:
-                # In production, DB_HOST should always be set. If it isn't, fail loudly with
-                # a clear error instead of attempting localhost (which returns ECONNREFUSED).
-                raise RuntimeError("DB_HOST is not set for AutonomousIssueResolver")
+            db = app_config.database
+            host = (db.host or "").strip()
+            user = (db.user or "").strip()
+            password = db.password or ""
+            database = (db.database or "postgres").strip() or "postgres"
+
+            if not host or not user or not password:
+                # If config couldn't hydrate from DB_* and DATABASE_URL, we cannot proceed.
+                raise RuntimeError("Database configuration is incomplete for AutonomousIssueResolver")
 
             # Keep resolver connectivity aligned with the main DB pool:
             # - allow either 5432 (direct) or 6543 (tx pooler)
             # - prefer 6543 when pointed at the Supabase pooler host
             try:
-                base_port = int((os.getenv("DB_PORT") or "5432").strip() or "5432")
+                base_port = int(str(db.port or 5432).strip() or "5432")
             except Exception:
                 base_port = 5432
 
@@ -120,10 +123,9 @@ class AutonomousIssueResolver:
                 candidate_ports = sorted(candidate_ports, key=lambda p: 0 if p == 6543 else 1)
 
             ssl_ctx = None
-            if (os.getenv("DB_SSL", "true") or "").strip().lower() not in {"false", "0", "no"}:
+            if bool(getattr(db, "ssl", True)):
                 ssl_ctx = ssl.create_default_context()
-                verify = (os.getenv("DB_SSL_VERIFY", "false") or "").strip().lower() not in {"false", "0", "no"}
-                if not verify:
+                if not bool(getattr(db, "ssl_verify", False)):
                     ssl_ctx.check_hostname = False
                     ssl_ctx.verify_mode = ssl.CERT_NONE
 
