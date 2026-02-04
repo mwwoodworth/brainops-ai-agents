@@ -1310,6 +1310,7 @@ class AgentExecutor:
             or task.get("_skip_execution_log")
             or task.get("skip_execution_log")
         )
+        end_logged = False  # Prevent cancellation paths from overwriting a completed execution.
 
         # Log execution start (skip DB log for OODA fast-path tasks)
         if not skip_db_log:
@@ -1368,6 +1369,7 @@ class AgentExecutor:
                         total_duration_ms,
                         None
                     )
+                    end_logged = True
                 return precheck_block
             if assessment_context:
                 task["self_awareness"] = asdict(assessment_context)
@@ -1387,6 +1389,7 @@ class AgentExecutor:
                         total_duration_ms,
                         None,
                     )
+                    end_logged = True
                 return precheck_block
             if reasoning_result.get("reasoning") or reasoning_result.get("critique"):
                 task["reasoning_guard"] = {
@@ -1468,6 +1471,7 @@ class AgentExecutor:
                         total_duration_ms,
                         error_message if workflow_status == "failed" else None
                     )
+                    end_logged = True
 
                 return result
 
@@ -1504,37 +1508,64 @@ class AgentExecutor:
             # Environment variable to control enforcement (default: enforce)
             memory_enforcement_bypass = os.getenv("MEMORY_ENFORCEMENT_BYPASS", "false").lower() in ("true", "1", "yes")
             if AGENT_MEMORY_SDK_AVAILABLE and not task.get("_skip_memory_enforcement"):
-                try:
-                    memory_client = AgentMemoryClient(
-                        agent_id=resolved_agent_name,
-                        enforce_rba=True,
-                        enforce_wba=True,
-                        allow_bypass=memory_enforcement_bypass  # Default: enforce, can bypass via env var
-                    )
-                    await memory_client.__aenter__()
+                memory_client = AgentMemoryClient(
+                    agent_id=resolved_agent_name,
+                    enforce_rba=True,
+                    enforce_wba=True,
+                    allow_bypass=memory_enforcement_bypass,  # Default: enforce, can bypass via env var
+                )
 
-                    # RBA: Retrieve relevant context before acting
-                    task_description = str(
-                        task.get("description")
-                        or task.get("action")
-                        or task.get("prompt")
-                        or f"{resolved_agent_name} task"
+                enter_timeout_s = float(os.getenv("MEMORY_CLIENT_ENTER_TIMEOUT_SECONDS", "5"))
+                try:
+                    await asyncio.wait_for(memory_client.__aenter__(), timeout=enter_timeout_s)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[RBA] Memory client init timed out after %ss (continuing without enforcement)",
+                        enter_timeout_s,
                     )
-                    memory_context = await memory_client.retrieve_context(
-                        query=task_description,
-                        include_verified_only=False
-                    )
-                    memory_context = memory_context or []
-                    if memory_context:
-                        memory_context = memory_context[:5]
-                    task["_memory_context"] = memory_context
-                    task["_memory_correlation_id"] = memory_client.correlation_id
-                    logger.info(
-                        f"[RBA] Agent {resolved_agent_name} retrieved {len(memory_context)} memories | "
-                        f"correlation_id={memory_client.correlation_id}"
-                    )
+                    memory_client = None
                 except Exception as e:
-                    logger.warning(f"[RBA] Memory context retrieval failed (non-blocking): {e}")
+                    logger.warning(
+                        "[RBA] Memory client init failed (continuing without enforcement): %s",
+                        e,
+                    )
+                    memory_client = None
+
+                if memory_client:
+                    try:
+                        # RBA: Retrieve relevant context before acting
+                        task_description = str(
+                            task.get("description")
+                            or task.get("action")
+                            or task.get("prompt")
+                            or f"{resolved_agent_name} task"
+                        )
+                        # IMPORTANT: memory retrieval should never block execution long enough to trip
+                        # task-queue timeouts. Bound it and proceed without context on timeout.
+                        retrieval_timeout_s = float(os.getenv("MEMORY_RETRIEVAL_TIMEOUT_SECONDS", "10"))
+                        memory_context = await asyncio.wait_for(
+                            memory_client.retrieve_context(
+                                query=task_description,
+                                include_verified_only=False,
+                            ),
+                            timeout=retrieval_timeout_s,
+                        )
+                        memory_context = memory_context or []
+                        if memory_context:
+                            memory_context = memory_context[:5]
+                        task["_memory_context"] = memory_context
+                        task["_memory_correlation_id"] = memory_client.correlation_id
+                        logger.info(
+                            f"[RBA] Agent {resolved_agent_name} retrieved {len(memory_context)} memories | "
+                            f"correlation_id={memory_client.correlation_id}"
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[RBA] Memory context retrieval timed out after %ss (continuing without context)",
+                            os.getenv("MEMORY_RETRIEVAL_TIMEOUT_SECONDS", "10"),
+                        )
+                    except Exception as e:
+                        logger.warning(f"[RBA] Memory context retrieval failed (non-blocking): {e}")
 
             for attempt in range(RETRY_ATTEMPTS):
                 attempt_start = datetime.now(timezone.utc)
@@ -1599,26 +1630,30 @@ class AgentExecutor:
                     execution_success = result.get("status") not in ("failed", "error")
                     decision_title = f"Agent {resolved_agent_name} execution: {task_type}"
 
-                    memory_id = await memory_client.write_decision(
-                        title=decision_title,
-                        content={
-                            "agent": resolved_agent_name,
-                            "task_type": task_type,
-                            "task_description": task_description,
-                            "result_summary": str(result.get("result", result))[:500],
-                            "status": "success" if execution_success else "failed",
-                            "duration_ms": total_duration_ms,
-                            "memory_context_count": len(memory_context) if memory_context else 0
-                        },
-                        object_type=MemoryObjectType.DECISION,
-                        proof_type="execution_log",
-                        proof_content={
-                            "execution_id": execution_id,
-                            "correlation_id": memory_client.correlation_id,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        },
-                        tags=[f"agent:{resolved_agent_name}", f"task:{task_type}"],
-                        evidence_level=EvidenceLevel.E1_RECORDED
+                    write_timeout_s = float(os.getenv("MEMORY_WRITE_TIMEOUT_SECONDS", "10"))
+                    memory_id = await asyncio.wait_for(
+                        memory_client.write_decision(
+                            title=decision_title,
+                            content={
+                                "agent": resolved_agent_name,
+                                "task_type": task_type,
+                                "task_description": task_description,
+                                "result_summary": str(result.get("result", result))[:500],
+                                "status": "success" if execution_success else "failed",
+                                "duration_ms": total_duration_ms,
+                                "memory_context_count": len(memory_context) if memory_context else 0,
+                            },
+                            object_type=MemoryObjectType.DECISION,
+                            proof_type="execution_log",
+                            proof_content={
+                                "execution_id": execution_id,
+                                "correlation_id": memory_client.correlation_id,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            },
+                            tags=[f"agent:{resolved_agent_name}", f"task:{task_type}"],
+                            evidence_level=EvidenceLevel.E1_RECORDED,
+                        ),
+                        timeout=write_timeout_s,
                     )
 
                     result["_memory_decision_id"] = memory_id
@@ -1627,6 +1662,11 @@ class AgentExecutor:
                         f"memory_id={memory_id} | correlation_id={memory_client.correlation_id}"
                     )
 
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[WBA] Memory decision write timed out after %ss (continuing)",
+                        os.getenv("MEMORY_WRITE_TIMEOUT_SECONDS", "10"),
+                    )
                 except Exception as e:
                     logger.warning(f"[WBA] Memory decision write failed (non-blocking): {e}")
 
@@ -1702,8 +1742,69 @@ class AgentExecutor:
                     total_duration_ms,
                     error_message if execution_status == "failed" else None
                 )
+                end_logged = True
 
             return result
+
+        except asyncio.CancelledError:
+            # NOTE: asyncio.CancelledError inherits from BaseException in Python 3.12.
+            # If we don't handle it explicitly, timeouts/cancellations can leave
+            # ai_agent_executions stuck in "running" forever.
+            total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
+            timeout_seconds = task.get("execution_timeout_seconds")
+            parsed_timeout = None
+            if timeout_seconds is not None:
+                try:
+                    parsed_timeout = float(timeout_seconds)
+                except Exception:
+                    parsed_timeout = None
+
+            is_timeout = parsed_timeout is not None
+            # IMPORTANT: keep status semantics aligned with existing dashboards/queries
+            # that treat only `status='failed'` as a failure signal.
+            status = "failed" if is_timeout else "cancelled"
+            error_msg = f"Timeout after {parsed_timeout:.0f}s" if is_timeout else "Cancelled"
+
+            # Best-effort: record cancellation without being cancelled again.
+            if not skip_db_log and not end_logged:
+                try:
+                    await asyncio.shield(
+                        self._log_ai_agent_execution_end(
+                            execution_id,
+                            agent_name,
+                            task_type,
+                            task,
+                            {
+                                "status": "failed" if is_timeout else "cancelled",
+                                "error": error_msg,
+                                "timeout_seconds": parsed_timeout,
+                            },
+                            status,
+                            total_duration_ms,
+                            error_msg,
+                        )
+                    )
+                    end_logged = True
+                except Exception as log_exc:
+                    logger.warning(
+                        "Failed to log cancelled execution to ai_agent_executions: %r",
+                        log_exc,
+                    )
+
+            # Also log the phase failure (non-blocking; do not prevent cancellation).
+            if not skip_db_log:
+                try:
+                    await asyncio.shield(
+                        exec_logger.log_failed(
+                            error=error_msg,
+                            total_duration_ms=total_duration_ms,
+                            attempts=3,
+                        )
+                    )
+                except Exception:
+                    pass
+
+            raise
 
         except Exception as e:
             # Calculate total duration for failure
@@ -1726,6 +1827,7 @@ class AgentExecutor:
                     total_duration_ms,
                     str(e)
                 )
+                end_logged = True
 
             # UNIFIED INTEGRATION: Error handling hooks
             if UNIFIED_INTEGRATION_AVAILABLE and unified_ctx:
