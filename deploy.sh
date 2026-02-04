@@ -22,7 +22,7 @@ echo "Deploying BrainOps AI Agents v$VERSION"
 echo "=========================================="
 
 # Capture currently deployed build/version for a robust post-deploy verification.
-PRE_HEALTH="$(curl -s https://brainops-ai-agents.onrender.com/health 2>/dev/null || true)"
+PRE_HEALTH="$(curl -s "https://brainops-ai-agents.onrender.com/health?force_refresh=true" 2>/dev/null || true)"
 PRE_DEPLOYED_BUILD="$(echo "$PRE_HEALTH" | jq -r '.build // empty' 2>/dev/null | tr -d '[:space:]' || true)"
 PRE_DEPLOYED_VERSION_RAW="$(echo "$PRE_HEALTH" | jq -r '.version // empty' 2>/dev/null | tr -d '[:space:]' || true)"
 PRE_DEPLOYED_VERSION="${PRE_DEPLOYED_VERSION_RAW#v}"
@@ -98,6 +98,22 @@ for i in {1..30}; do
     break
   fi
   if [ "$LIVE_STATUS" = "failed" ] || [ "$LIVE_STATUS" = "canceled" ]; then
+    if [ "$LIVE_STATUS" = "canceled" ]; then
+      # Render sometimes cancels an API-triggered deploy when a newer deploy is queued
+      # (e.g., auto-deploy from image updates). Follow the newest deploy instead of failing.
+      echo "WARN: Render deploy $DEPLOY_ID was canceled; checking for a superseding deploy..."
+      NEWEST_RESPONSE=$(curl -s "https://api.render.com/v1/services/$SERVICE_ID/deploys?limit=2" \
+        -H "Authorization: Bearer $RENDER_API_KEY" \
+        -H "Content-Type: application/json" || true)
+      NEWEST_ID=$(echo "$NEWEST_RESPONSE" | jq -r '.[0].deploy.id // empty' 2>/dev/null || true)
+      NEWEST_STATUS=$(echo "$NEWEST_RESPONSE" | jq -r '.[0].deploy.status // empty' 2>/dev/null || true)
+      if [ -n "${NEWEST_ID:-}" ] && [ "$NEWEST_ID" != "$DEPLOY_ID" ] && [ "$NEWEST_STATUS" != "canceled" ] && [ "$NEWEST_STATUS" != "failed" ]; then
+        echo "  Following newer deploy: $NEWEST_ID ($NEWEST_STATUS)"
+        DEPLOY_ID="$NEWEST_ID"
+        continue
+      fi
+    fi
+
     echo "ERROR: Render deploy status: $LIVE_STATUS"
     echo "$STATUS_RESPONSE" | jq . || echo "$STATUS_RESPONSE"
     exit 1
@@ -108,7 +124,7 @@ done
 HEALTH=""
 # Render may report `live` before the app instance has fully recycled; wait briefly for /health to reflect the new build.
 for j in {1..12}; do
-  HEALTH="$(curl -s https://brainops-ai-agents.onrender.com/health 2>/dev/null || true)"
+  HEALTH="$(curl -s "https://brainops-ai-agents.onrender.com/health?force_refresh=true" 2>/dev/null || true)"
   DEPLOYED_BUILD_CANDIDATE="$(echo "$HEALTH" | jq -r '.build // empty' 2>/dev/null | tr -d '[:space:]' || true)"
   if [ -n "${DEPLOYED_BUILD_CANDIDATE:-}" ] && [ "${PRE_DEPLOYED_BUILD:-}" != "${DEPLOYED_BUILD_CANDIDATE:-}" ]; then
     break
@@ -152,7 +168,7 @@ else
       echo "   Expected:  v$VERSION"
       echo "   Current:   v$DEPLOYED_VERSION"
       echo ""
-      echo "Check status: curl -s https://brainops-ai-agents.onrender.com/health | jq '{version,build,status,database}'"
+      echo "Check status: curl -s \"https://brainops-ai-agents.onrender.com/health?force_refresh=true\" | jq '{version,build,status,database}'"
   fi
 fi
 echo "=========================================="
