@@ -4276,6 +4276,35 @@ async def get_scheduler_status():
         )
 
 
+@app.post("/scheduler/restart-stuck", dependencies=SECURED_DEPENDENCIES)
+async def restart_stuck_executions():
+    """
+    Cleanup stuck execution records across the AI OS.
+
+    Why this exists:
+    - Some execution logs can remain in `running` state (e.g., timeouts/cancellations).
+    - This endpoint normalizes those stale rows to a failure state so dashboards/metrics stay honest.
+
+    NOTE: The canonical resolver endpoint is `POST /resolver/fix/stuck-agents`.
+    This route is kept as a stable alias for callers that reference the old path.
+    """
+    try:
+        from autonomous_issue_resolver import get_resolver
+
+        resolver = get_resolver()
+        result = await resolver.fix_stuck_agents()
+        return {
+            "success": result.success,
+            "items_fixed": result.items_fixed,
+            "action": result.action.value,
+            "details": result.details,
+            "timestamp": result.timestamp.isoformat(),
+        }
+    except Exception as e:
+        logger.error("Failed to restart stuck executions: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.post("/agents/health/check", dependencies=SECURED_DEPENDENCIES)
 async def check_agents_health():
     """

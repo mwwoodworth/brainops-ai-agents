@@ -829,7 +829,7 @@ class DevOpsLoop:
                 elif action == "cleanup":
                     # Cleanup stuck agents
                     async with self.session.post(
-                        f"{BRAINOPS_API}/scheduler/restart-stuck"
+                        f"{BRAINOPS_API}/resolver/fix/stuck-agents"
                     ) as resp:
                         data = await resp.json()
                         result["success"] = resp.status == 200

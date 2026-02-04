@@ -333,6 +333,8 @@ class TaskQueueConsumer:
                                 "agent_id": str(agent_id) if agent_id else None,
                                 "action": task_type,
                                 "task_type": task_type,
+                                # Allows AgentExecutor to log cancellations as timeouts (vs generic cancel).
+                                "execution_timeout_seconds": timeout_seconds,
                                 "trigger_type": task.get("trigger_type"),
                                 "trigger_condition": trigger_condition,
                                 # Production performance: ERP/unified_event handlers should not
