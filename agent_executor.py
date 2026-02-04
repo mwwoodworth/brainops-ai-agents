@@ -3452,7 +3452,7 @@ class InvoicingAgent(BaseAgent):
 
         if action in ("scheduled_run", "scheduled"):
             # Scheduled health check - return status report
-            return await self.invoice_report()
+            return await self.invoice_report(include_ai_summary=False)
         elif action in ("invoice_overdue_handler", "handle_overdue_invoices", "collect_invoices", "collection"):
             return await self.handle_overdue_invoices(task)
         elif action in ('generate', 'generate_invoice'):
@@ -3460,9 +3460,9 @@ class InvoicingAgent(BaseAgent):
         elif action in ('send', 'send_invoice'):
             return await self.send_invoice(task)
         elif action in ('report', 'invoice_report'):
-            return await self.invoice_report()
+            return await self.invoice_report(include_ai_summary=True)
         else:
-            return {"status": "error", "message": f"Unknown action: {action}"}
+            return {"status": "error", "error": f"Unknown action: {action}"}
 
     def _is_live_outreach_enabled(self) -> bool:
         # Safe-by-default: only treat outreach as live when explicitly enabled.
@@ -4001,7 +4001,7 @@ class InvoicingAgent(BaseAgent):
             "generated_email": email_content
         }
 
-    async def invoice_report(self) -> dict:
+    async def invoice_report(self, *, include_ai_summary: bool = True) -> dict:
         """Generate invoice report with AI summary"""
         try:
             pool = get_pool()
@@ -4019,7 +4019,7 @@ class InvoicingAgent(BaseAgent):
             report_dict = dict(report) if report else {}
 
             summary = "Financial summary not available."
-            if USE_REAL_AI:
+            if include_ai_summary and USE_REAL_AI:
                 try:
                     prompt = f"""
                     Summarize this monthly financial report for a roofing company executive.
@@ -4845,6 +4845,14 @@ class ContractGeneratorAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Generate contract"""
+        action = task.get("action")
+        if action in ("scheduled_run", "scheduled"):
+            return {
+                "status": "completed",
+                "action": action,
+                "message": "Contract generator operational",
+            }
+
         contract_type = task.get('type', 'service')
         tenant_id = task.get('tenant_id') or task.get('tenantId')
         customer_id = task.get('customer_id')
@@ -5015,6 +5023,14 @@ class ProposalGeneratorAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Generate proposal using REAL AI"""
+        action = task.get("action")
+        if action in ("scheduled_run", "scheduled"):
+            return {
+                "status": "completed",
+                "action": action,
+                "message": "Proposal generator operational",
+            }
+
         proposal_type = task.get('type', 'roofing')
         customer_data = task.get('customer', {})
         job_data = task.get('job_data', {})
