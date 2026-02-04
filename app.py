@@ -4019,12 +4019,42 @@ async def execute_scheduled_agents(
             LIMIT 50
         """, current_hour)
 
+        # Cron can call /execute multiple times per hour; ensure each scheduled agent runs at most
+        # once per hour to prevent runaway execution spam.
+        hour_start = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+        already_ran_rows = await pool.fetch(
+            """
+            SELECT DISTINCT agent_name
+            FROM ai_agent_executions
+            WHERE task_type = 'scheduled_run'
+              AND created_at >= $1
+            """,
+            hour_start,
+        )
+        already_ran_names = {
+            (r.get("agent_name") if isinstance(r, dict) else dict(r).get("agent_name"))
+            for r in already_ran_rows
+        }
+        already_ran_names = {name for name in already_ran_names if isinstance(name, str) and name}
+
         results = []
         for agent in agents:
             try:
                 execution_id = str(uuid.uuid4())
                 datetime.utcnow()
                 agent_name = agent.get("name", "unknown")
+
+                if agent_name in already_ran_names:
+                    results.append(
+                        {
+                            "agent_id": str(agent.get("id")),
+                            "agent_name": agent_name,
+                            "execution_id": None,
+                            "status": "skipped",
+                            "reason": "already_ran_this_hour",
+                        }
+                    )
+                    continue
 
                 # Log execution start - task_execution_id is NULL for scheduled executions
                 await pool.execute("""
@@ -4041,7 +4071,8 @@ async def execute_scheduled_agents(
                             "agent_id": agent["id"],
                             "scheduled": True,
                             "execution_id": execution_id,
-                            "context": agent.get("config", {})
+                            # NOTE: column name is `configuration` (not `config`).
+                            "context": agent.get("configuration") or {},
                         }
                         result = await AGENT_EXECUTOR.execute(agent_name, task_data)
                         result["scheduled_execution"] = True
