@@ -276,10 +276,24 @@ class AutonomousIssueResolver:
         pool = await self._get_pool()
 
         stuck_threshold = datetime.utcnow() - timedelta(minutes=self.stuck_agent_threshold_minutes)
-        count = 0
+        total_fixed = 0
+        per_table_fixed: dict[str, int] = {}
+        errors: dict[str, str] = {}
 
+        def _parse_update_count(result: str | None) -> int:
+            # asyncpg returns strings like "UPDATE 3"
+            if not result:
+                return 0
+            parts = str(result).strip().split()
+            if not parts:
+                return 0
+            try:
+                return int(parts[-1])
+            except Exception:
+                return 0
+
+        # Legacy table: update stuck executions to timeout status
         try:
-            # Legacy table: update stuck executions to timeout status
             result = await pool.execute(
                 """
                 UPDATE agent_executions
@@ -292,57 +306,69 @@ class AutonomousIssueResolver:
                 stuck_threshold,
                 self.stuck_agent_threshold_minutes,
             )
+            fixed = _parse_update_count(result)
+            per_table_fixed["agent_executions"] = fixed
+            total_fixed += fixed
+        except Exception as exc:
+            errors["agent_executions"] = str(exc)
+            logger.warning("Could not fix stuck agent_executions: %s", exc, exc_info=True)
 
-            count = int(result.split()[-1]) if result and ' ' in result else 0
-
-            # Newer table: mark stuck `ai_agent_executions` rows as failed so dashboards count them.
-            try:
-                result2 = await pool.execute(
-                    """
-                    UPDATE ai_agent_executions
-                    SET status = 'failed',
-                        error_message = COALESCE(
-                            error_message,
-                            'Auto-timeout: running for over ' || $2::text || ' minutes'
-                        ),
-                        output_data = COALESCE(
-                            output_data,
-                            jsonb_build_object(
-                                'status','failed',
-                                'error','timeout',
-                                'auto_cleanup', true,
-                                'threshold_minutes', $2
-                            )
+        # Newer table: mark stuck `ai_agent_executions` rows as failed so dashboards count them.
+        try:
+            result2 = await pool.execute(
+                """
+                UPDATE ai_agent_executions
+                SET status = 'failed',
+                    error_message = COALESCE(
+                        error_message,
+                        'Auto-timeout: running for over ' || $2::text || ' minutes'
+                    ),
+                    output_data = COALESCE(
+                        output_data,
+                        jsonb_build_object(
+                            'status','failed',
+                            'error','timeout',
+                            'auto_cleanup', true,
+                            'threshold_minutes', $2
                         )
-                    WHERE status = 'running'
-                      AND created_at < $1
-                    """,
-                    stuck_threshold,
-                    self.stuck_agent_threshold_minutes,
-                )
-                count += int(result2.split()[-1]) if result2 and ' ' in result2 else 0
-            except Exception as inner_e:
-                logger.warning(f"Could not update stuck ai_agent_executions: {inner_e}")
+                    )
+                WHERE status = 'running'
+                  AND created_at < $1
+                """,
+                stuck_threshold,
+                self.stuck_agent_threshold_minutes,
+            )
+            fixed2 = _parse_update_count(result2)
+            per_table_fixed["ai_agent_executions"] = fixed2
+            total_fixed += fixed2
+        except Exception as exc:
+            errors["ai_agent_executions"] = str(exc)
+            logger.warning("Could not fix stuck ai_agent_executions: %s", exc, exc_info=True)
 
-            # Log to brain
-            if count > 0:
-                try:
-                    await pool.execute("""
-                        INSERT INTO unified_brain_logs
-                        (agent_name, action_type, details, timestamp)
-                        VALUES ('autonomous_resolver', 'fix_stuck_agents', $1, NOW())
-                    """, f"Timed out {count} stuck agents")
-                except Exception:
-                    pass  # Log table might not exist
-        except Exception as e:
-            logger.warning(f"Could not fix stuck agents: {e}")
+        # Log to brain (best-effort)
+        if total_fixed > 0:
+            try:
+                await pool.execute(
+                    """
+                    INSERT INTO unified_brain_logs
+                    (agent_name, action_type, details, timestamp)
+                    VALUES ('autonomous_resolver', 'fix_stuck_agents', $1, NOW())
+                    """,
+                    f"Timed out {total_fixed} stuck agents",
+                )
+            except Exception:
+                pass  # Log table might not exist
 
         return ResolutionResult(
             issue_type=IssueType.STUCK_AGENT,
             action=ResolutionAction.CANCEL_STUCK_AGENT,
-            success=True,
-            items_fixed=count,
-            details={"threshold_minutes": self.stuck_agent_threshold_minutes},
+            success=len(errors) == 0,
+            items_fixed=total_fixed,
+            details={
+                "threshold_minutes": self.stuck_agent_threshold_minutes,
+                "per_table_fixed": per_table_fixed,
+                **({"errors": errors} if errors else {}),
+            },
             timestamp=datetime.utcnow()
         )
 
