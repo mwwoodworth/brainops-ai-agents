@@ -271,11 +271,24 @@ class AutonomousIssueResolver:
 
         return issues
 
-    async def fix_stuck_agents(self) -> ResolutionResult:
-        """Fix stuck executions by marking them as timeout/failed"""
+    async def fix_stuck_agents(self, threshold_minutes: Optional[int] = None) -> ResolutionResult:
+        """Fix stuck executions by marking them as timeout/failed.
+
+        Args:
+            threshold_minutes: Override for the stuck threshold (minutes). If not provided,
+                defaults to `STUCK_AGENT_THRESHOLD_MINUTES`.
+        """
         pool = await self._get_pool()
 
-        stuck_threshold = datetime.utcnow() - timedelta(minutes=self.stuck_agent_threshold_minutes)
+        threshold = threshold_minutes if threshold_minutes is not None else self.stuck_agent_threshold_minutes
+        try:
+            threshold = int(threshold)
+        except Exception:
+            threshold = int(self.stuck_agent_threshold_minutes)
+        if threshold <= 0:
+            threshold = int(self.stuck_agent_threshold_minutes)
+
+        stuck_threshold = datetime.utcnow() - timedelta(minutes=threshold)
         total_fixed = 0
         per_table_fixed: dict[str, int] = {}
         errors: dict[str, str] = {}
@@ -304,7 +317,7 @@ class AutonomousIssueResolver:
                   AND COALESCE(started_at, created_at) < $1
                 """,
                 stuck_threshold,
-                self.stuck_agent_threshold_minutes,
+                threshold,
             )
             fixed = _parse_update_count(result)
             per_table_fixed["agent_executions"] = fixed
@@ -336,7 +349,7 @@ class AutonomousIssueResolver:
                   AND created_at < $1
                 """,
                 stuck_threshold,
-                self.stuck_agent_threshold_minutes,
+                threshold,
             )
             fixed2 = _parse_update_count(result2)
             per_table_fixed["ai_agent_executions"] = fixed2
@@ -365,7 +378,7 @@ class AutonomousIssueResolver:
             success=len(errors) == 0,
             items_fixed=total_fixed,
             details={
-                "threshold_minutes": self.stuck_agent_threshold_minutes,
+                "threshold_minutes": threshold,
                 "per_table_fixed": per_table_fixed,
                 **({"errors": errors} if errors else {}),
             },

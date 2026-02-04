@@ -1445,6 +1445,45 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("Follow-up Executor failed: %s", exc, exc_info=True)
 
+    def _run_stuck_execution_cleanup(self):
+        """Auto-clean stuck execution rows so dashboards/metrics stay honest."""
+        enabled_env = os.getenv("ENABLE_STUCK_EXECUTION_CLEANUP")
+        enable_cleanup = (
+            enabled_env.lower() in ("1", "true", "yes")
+            if enabled_env is not None
+            else True
+        )
+        if not enable_cleanup:
+            logger.info("Stuck execution cleanup skipped: ENABLE_STUCK_EXECUTION_CLEANUP disabled")
+            return
+
+        try:
+            threshold_minutes = int(os.getenv("STUCK_EXECUTION_CLEANUP_THRESHOLD_MINUTES", "60"))
+        except Exception:
+            threshold_minutes = 60
+
+        # Guardrails: avoid accidentally timing out long-running work too aggressively.
+        if threshold_minutes < 30:
+            threshold_minutes = 30
+
+        try:
+            from autonomous_issue_resolver import get_resolver
+
+            resolver = get_resolver()
+            result = run_on_main_loop(
+                resolver.fix_stuck_agents(threshold_minutes=threshold_minutes),
+                timeout=300,
+            )
+            fixed = getattr(result, "items_fixed", None)
+            logger.info(
+                "⏱️ Stuck execution cleanup: fixed=%s threshold_minutes=%s details=%s",
+                fixed,
+                threshold_minutes,
+                getattr(result, "details", None),
+            )
+        except Exception as exc:
+            logger.error("Stuck execution cleanup failed: %s", exc, exc_info=True)
+
     def _register_internal_jobs(self):
         """Register internal recurring jobs (e.g., revenue drive)."""
         # Register OODA Loop (Consciousness)
@@ -1605,6 +1644,40 @@ class AgentScheduler:
                 logger.error("Failed to schedule Follow-up Executor: %s", exc, exc_info=True)
         elif not enable_followups:
             logger.info("Follow-up Executor not scheduled: ENABLE_FOLLOWUP_EXECUTION disabled")
+
+        # Keep execution logs clean: auto-timeout stuck rows regularly so `brainops verify` stays green.
+        cleanup_enabled_env = os.getenv("ENABLE_STUCK_EXECUTION_CLEANUP")
+        enable_cleanup = (
+            cleanup_enabled_env.lower() in ("1", "true", "yes")
+            if cleanup_enabled_env is not None
+            else True
+        )
+        if enable_cleanup:
+            try:
+                job_id = "stuck_execution_cleanup"
+                try:
+                    interval_minutes = int(os.getenv("STUCK_EXECUTION_CLEANUP_INTERVAL_MINUTES", "10"))
+                except Exception:
+                    interval_minutes = 10
+                if interval_minutes < 5:
+                    interval_minutes = 5
+
+                self.scheduler.add_job(
+                    func=self._run_stuck_execution_cleanup,
+                    trigger=IntervalTrigger(minutes=interval_minutes),
+                    id=job_id,
+                    name="Stuck Execution Cleanup",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "stuck_execution_cleanup",
+                    "agent_name": "Stuck Execution Cleanup",
+                    "frequency_minutes": interval_minutes,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("✅ Scheduled stuck execution cleanup every %d minutes", interval_minutes)
+            except Exception as exc:
+                logger.error("Failed to schedule stuck execution cleanup: %s", exc, exc_info=True)
 
         if not (REVENUE_DRIVE_AVAILABLE and ENABLE_REVENUE_DRIVE):
             return
