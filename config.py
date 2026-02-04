@@ -159,7 +159,8 @@ class AppConfig:
     """Main application configuration"""
 
     def __init__(self):
-        self.version = os.getenv('VERSION', 'v11.0.11')  # Add Victoria scheduling endpoint for ERP compatibility
+        # Version is used by health endpoints + deploy.sh verification.
+        self.version = os.getenv('VERSION', 'v11.0.12')  # Fix timeout/cancellation logging + bound memory enforcement
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
