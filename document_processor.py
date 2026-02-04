@@ -33,6 +33,7 @@ except ImportError:
 
 # Import async database connection
 from database.async_connection import get_pool
+from utils.embedding_provider import generate_embedding_async
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -736,10 +737,6 @@ class DocumentProcessor:
     async def _create_embeddings(self, document_id: str, text: str):
         """Create embeddings for document chunks"""
         try:
-            if openai_client is None:
-                logger.warning("OpenAI client unavailable - skipping embeddings for %s", document_id)
-                return
-
             # Split text into chunks
             chunk_size = 1000
             chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
@@ -748,12 +745,9 @@ class DocumentProcessor:
 
             for idx, chunk in enumerate(chunks[:20]):  # Limit to 20 chunks
                 # Generate embedding
-                response = openai_client.embeddings.create(
-                    input=chunk,
-                    model="text-embedding-ada-002"
-                )
-
-                embedding = response.data[0].embedding
+                embedding = await generate_embedding_async(chunk, log=logger)
+                if embedding is None:
+                    continue
 
                 # Store embedding using async pool
                 await pool.execute("""
@@ -820,16 +814,11 @@ class DocumentProcessor:
     ) -> list[dict]:
         """Search documents using semantic search"""
         try:
-            if openai_client is None:
-                logger.warning("OpenAI client unavailable - semantic search disabled")
-                return []
-
             # Generate query embedding
-            response = openai_client.embeddings.create(
-                input=query,
-                model="text-embedding-ada-002"
-            )
-            query_embedding = response.data[0].embedding
+            query_embedding = await generate_embedding_async(query, log=logger)
+            if query_embedding is None:
+                logger.warning("Embedding generation failed - semantic search disabled")
+                return []
 
             pool = get_pool()
 

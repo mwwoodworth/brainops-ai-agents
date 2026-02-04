@@ -732,6 +732,25 @@ class RealAICore:
             logger.error(f"Image analysis error: {e}")
             raise e from e
 
+    async def generate_image(self, prompt: str, model: str = "dall-e-3", size: str = "1024x1024") -> Optional[str]:
+        """REAL image generation with DALL-E 3"""
+        if not self.async_openai:
+            logger.warning("OpenAI not available for image generation")
+            return None
+
+        try:
+            response = await self.async_openai.images.generate(
+                model=model,
+                prompt=prompt,
+                size=size,
+                quality="standard",
+                n=1,
+            )
+            return response.data[0].url
+        except Exception as e:
+            logger.error(f"Image generation error: {e}")
+            return None
+
     async def analyze_roofing_job(self, job_data: dict) -> dict:
         """REAL AI analysis for roofing jobs"""
         prompt = f"""
@@ -997,6 +1016,10 @@ ai_core = RealAICore()
 async def ai_generate(prompt: str, **kwargs) -> str:
     """Quick function for AI generation"""
     return await ai_core.generate(prompt, **kwargs)
+
+async def ai_generate_image(prompt: str, **kwargs) -> Optional[str]:
+    """Quick function for AI image generation"""
+    return await ai_core.generate_image(prompt, **kwargs)
 
 async def ai_analyze(data: dict, analysis_type: str = "general") -> dict:
     """Quick function for AI analysis"""
