@@ -154,7 +154,7 @@ class CodeQualityMonitor:
         self.detected_issues: List[DetectedIssue] = []
         self.issue_count = 0
         self.last_scan: Optional[datetime] = None
-        self.api_key = os.getenv("API_KEYS", "brainops_prod_key_2025").split(",")[0]
+        self.api_key = ((os.getenv("BRAINOPS_API_KEY") or os.getenv("API_KEYS") or "").split(",")[0]).strip()
         self.render_api_key = os.getenv("RENDER_API_KEY", "")
 
     async def full_scan(self) -> Dict[str, Any]:
@@ -194,7 +194,7 @@ class CodeQualityMonitor:
 
                     try:
                         url = f"{config['url']}{endpoint['path']}"
-                        headers = {"X-API-Key": self.api_key}
+                        headers = {"X-API-Key": self.api_key} if self.api_key else {}
 
                         response = await client.request(
                             endpoint["method"],
