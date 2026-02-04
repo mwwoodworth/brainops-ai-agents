@@ -3450,17 +3450,392 @@ class InvoicingAgent(BaseAgent):
         """Execute invoicing task"""
         action = task.get('action', 'generate')
 
-        if action == 'scheduled_run':
+        if action in ("scheduled_run", "scheduled"):
             # Scheduled health check - return status report
             return await self.invoice_report()
-        elif action == 'generate':
+        elif action in ("invoice_overdue_handler", "handle_overdue_invoices", "collect_invoices", "collection"):
+            return await self.handle_overdue_invoices(task)
+        elif action in ('generate', 'generate_invoice'):
             return await self.generate_invoice(task)
-        elif action == 'send':
+        elif action in ('send', 'send_invoice'):
             return await self.send_invoice(task)
-        elif action == 'report':
+        elif action in ('report', 'invoice_report'):
             return await self.invoice_report()
         else:
             return {"status": "error", "message": f"Unknown action: {action}"}
+
+    def _is_live_outreach_enabled(self) -> bool:
+        # Safe-by-default: only treat outreach as live when explicitly enabled.
+        return os.getenv("OUTBOUND_EMAIL_MODE", "disabled").strip().lower() == "live"
+
+    def _extract_invoice_id(self, task: dict[str, Any]) -> Optional[str]:
+        """Best-effort invoice id extraction across event payload styles."""
+        trigger_condition = task.get("trigger_condition") or {}
+        if isinstance(trigger_condition, str):
+            try:
+                trigger_condition = json.loads(trigger_condition)
+            except Exception:
+                trigger_condition = {"raw": trigger_condition}
+        if not isinstance(trigger_condition, dict):
+            trigger_condition = {"raw": str(trigger_condition)}
+
+        candidates: list[Optional[str]] = [
+            task.get("invoice_id"),
+            trigger_condition.get("invoice_id"),
+            trigger_condition.get("entity_id"),
+            (trigger_condition.get("invoice") or {}).get("entity_id") if isinstance(trigger_condition.get("invoice"), dict) else None,
+            (trigger_condition.get("invoice") or {}).get("id") if isinstance(trigger_condition.get("invoice"), dict) else None,
+            (trigger_condition.get("context") or {}).get("invoice_id") if isinstance(trigger_condition.get("context"), dict) else None,
+            (trigger_condition.get("context") or {}).get("invoiceId") if isinstance(trigger_condition.get("context"), dict) else None,
+        ]
+        for cand in candidates:
+            if cand:
+                return str(cand)
+        return None
+
+    async def _create_payment_reminder_followup(
+        self,
+        pool: Any,
+        *,
+        tenant_id: str,
+        invoice_id: str,
+        customer_name: str,
+        customer_email: str,
+        invoice_number: str,
+        amount_due: float,
+        days_overdue: int,
+        priority: str,
+    ) -> Optional[str]:
+        """Create a payment reminder follow-up sequence (asyncpg-native)."""
+        try:
+            # Avoid duplicate active sequences for the same invoice in a short window.
+            existing = await pool.fetchrow(
+                """
+                SELECT id
+                FROM ai_followup_sequences
+                WHERE tenant_id = $1::uuid
+                  AND followup_type = 'payment_reminder'
+                  AND entity_type = 'invoice'
+                  AND entity_id = $2::text
+                  AND status IN ('pending','scheduled','in_progress')
+                  AND created_at > NOW() - INTERVAL '7 days'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                tenant_id,
+                str(invoice_id),
+            )
+            if existing and existing.get("id"):
+                return str(existing["id"])
+
+            sequence_id = str(uuid.uuid4())
+
+            # Strategy/touchpoints are intentionally deterministic; "send" execution is handled elsewhere.
+            channels = ["email", "sms", "phone"]
+            templates = [
+                {"subject": "Payment reminder", "tone": "friendly"},
+                {"subject": "Payment due soon", "tone": "professional"},
+                {"subject": "Urgent: Payment overdue", "tone": "urgent"},
+                {"subject": "Action required: Payment", "tone": "firm"},
+                {"subject": "Final notice", "tone": "final"},
+            ]
+            touchpoints: list[dict[str, Any]] = []
+            for i, tpl in enumerate(templates):
+                delay_hours = 0 + (i * 24)
+                touchpoints.append(
+                    {
+                        "step": i + 1,
+                        "delay_hours": delay_hours,
+                        "channel": channels[min(i, len(channels) - 1)],
+                        "template": tpl,
+                        "personalization": {
+                            "use_ai": True,
+                            "context_aware": True,
+                            "tone": tpl.get("tone", "professional"),
+                        },
+                        "conditions": {
+                            "skip_if_responded": i > 0,
+                            "skip_if_converted": True,
+                        },
+                    }
+                )
+
+            context = {
+                "name": customer_name or "Customer",
+                "email": customer_email,
+                "topic": f"invoice {invoice_number} payment",
+                "invoice_id": str(invoice_id),
+                "invoice_number": invoice_number,
+                "amount_due": amount_due,
+                "days_overdue": days_overdue,
+                "tenant_id": tenant_id,
+            }
+            strategy = {
+                "approach": "multi_touch",
+                "urgency_level": priority,
+                "personalization_level": "high",
+                "channels": channels,
+                "timing": {"initial_delay": 0, "retry_interval": 24},
+                "escalation_rules": {
+                    "max_attempts": 5,
+                    "escalate_after": 3,
+                    "escalation_channels": ["phone", "in_app"],
+                    "final_action": "notify_manager",
+                },
+            }
+            custom_rules = {"source": "invoicing_agent", "purpose": "payment_reminder"}
+
+            await pool.execute(
+                """
+                INSERT INTO ai_followup_sequences (
+                    id, followup_type, entity_id, entity_type, priority,
+                    context, strategy, touchpoints, custom_rules, status, tenant_id
+                ) VALUES (
+                    $1::uuid, 'payment_reminder', $2::text, 'invoice', $3::text,
+                    $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, 'pending', $8::uuid
+                )
+                """,
+                sequence_id,
+                str(invoice_id),
+                priority,
+                json.dumps(context),
+                json.dumps(strategy),
+                json.dumps(touchpoints),
+                json.dumps(custom_rules),
+                tenant_id,
+            )
+
+            # Schedule first 3 touchpoints.
+            for tp in touchpoints[:3]:
+                await pool.execute(
+                    """
+                    INSERT INTO ai_followup_touchpoints (
+                        sequence_id, step_number, scheduled_at,
+                        channel, template, personalization, conditions, status
+                    ) VALUES (
+                        $1::uuid, $2::int, NOW() + ($3::text || ' hours')::interval,
+                        $4::text, $5::jsonb, $6::jsonb, $7::jsonb, 'scheduled'
+                    )
+                    """,
+                    sequence_id,
+                    int(tp["step"]),
+                    str(int(tp["delay_hours"])),
+                    str(tp["channel"]),
+                    json.dumps(tp["template"]),
+                    json.dumps(tp["personalization"]),
+                    json.dumps(tp["conditions"]),
+                )
+
+            return sequence_id
+        except Exception as e:
+            self.logger.warning("Failed to create payment reminder followup sequence: %s", e)
+            return None
+
+    async def handle_overdue_invoices(self, task: dict) -> dict:
+        """
+        Handle overdue invoices (AUREA/RevenueDrive task queue).
+
+        Notes:
+        - Safe-by-default: customer outreach is only considered "live" when OUTBOUND_EMAIL_MODE=live.
+        - Always updates AI strategy fields for observability, even in dry-run modes.
+        """
+        trigger_condition = task.get("trigger_condition") or {}
+        if isinstance(trigger_condition, str):
+            try:
+                trigger_condition = json.loads(trigger_condition)
+            except Exception:
+                trigger_condition = {"raw": trigger_condition}
+        if not isinstance(trigger_condition, dict):
+            trigger_condition = {"raw": str(trigger_condition)}
+
+        tenant_id = task.get("tenant_id") or trigger_condition.get("tenant_id")
+        invoice_id = self._extract_invoice_id(task)
+
+        outreach_live = self._is_live_outreach_enabled()
+        dry_run_flag = bool(
+            trigger_condition.get("dry_run")
+            or trigger_condition.get("verification_mode")
+            or trigger_condition.get("dry_run_outreach")
+        )
+        dry_run = dry_run_flag or (not outreach_live) or (not tenant_id)
+
+        max_items = int(os.getenv("INVOICE_OVERDUE_HANDLER_MAX_ITEMS", "25"))
+        max_reminders = int(os.getenv("INVOICE_OVERDUE_MAX_REMINDERS", "5"))
+        min_hours_between_reminders = int(os.getenv("INVOICE_OVERDUE_MIN_HOURS_BETWEEN_REMINDERS", "23"))
+
+        try:
+            pool = get_pool()
+
+            invoices: list[dict[str, Any]] = []
+            if invoice_id:
+                row = await pool.fetchrow(
+                    """
+                    SELECT
+                        id, invoice_number, customer_name, customer_email, due_date,
+                        COALESCE(amount_due, balance_due, 0) AS amount_due,
+                        COALESCE(reminder_sent_count, 0) AS reminder_sent_count,
+                        last_reminder_date,
+                        COALESCE(payment_status, status) AS payment_status
+                    FROM invoices
+                    WHERE id = $1::uuid
+                    """,
+                    invoice_id,
+                )
+                if row:
+                    invoices = [dict(row)]
+            else:
+                if tenant_id:
+                    rows = await pool.fetch(
+                        """
+                        SELECT
+                            id, invoice_number, customer_name, customer_email, due_date,
+                            COALESCE(amount_due, balance_due, 0) AS amount_due,
+                            COALESCE(reminder_sent_count, 0) AS reminder_sent_count,
+                            last_reminder_date,
+                            COALESCE(payment_status, status) AS payment_status
+                        FROM invoices
+                        WHERE tenant_id = $1::uuid
+                          AND due_date < CURRENT_DATE
+                          AND COALESCE(payment_status, status) NOT IN ('paid','void','canceled','cancelled')
+                          AND COALESCE(amount_due, balance_due, 0) > 0
+                        ORDER BY due_date ASC
+                        LIMIT $2
+                        """,
+                        tenant_id,
+                        max_items,
+                    )
+                else:
+                    rows = await pool.fetch(
+                        """
+                        SELECT
+                            id, invoice_number, customer_name, customer_email, due_date,
+                            COALESCE(amount_due, balance_due, 0) AS amount_due,
+                            COALESCE(reminder_sent_count, 0) AS reminder_sent_count,
+                            last_reminder_date,
+                            COALESCE(payment_status, status) AS payment_status
+                        FROM invoices
+                        WHERE due_date < CURRENT_DATE
+                          AND COALESCE(payment_status, status) NOT IN ('paid','void','canceled','cancelled')
+                          AND COALESCE(amount_due, balance_due, 0) > 0
+                        ORDER BY due_date ASC
+                        LIMIT $1
+                        """,
+                        max_items,
+                    )
+                invoices = [dict(r) for r in rows]
+
+            processed = 0
+            reminders_scheduled = 0
+            skipped = 0
+
+            for inv in invoices:
+                try:
+                    inv_id = str(inv.get("id") or "")
+                    if not inv_id:
+                        skipped += 1
+                        continue
+
+                    due_date = inv.get("due_date")
+                    if not due_date:
+                        skipped += 1
+                        continue
+
+                    days_overdue = (datetime.now(timezone.utc).date() - due_date).days
+                    amount_due = float(inv.get("amount_due") or 0)
+                    invoice_number = str(inv.get("invoice_number") or "") or inv_id[:8]
+                    customer_name = str(inv.get("customer_name") or "Customer")
+                    customer_email = str(inv.get("customer_email") or "")
+
+                    priority = "high" if days_overdue >= 30 else ("medium" if days_overdue >= 14 else "low")
+                    strategy = {
+                        "type": "invoice_overdue_handler",
+                        "days_overdue": days_overdue,
+                        "amount_due": amount_due,
+                        "dry_run": dry_run,
+                        "outreach_live": outreach_live,
+                        "max_reminders": max_reminders,
+                        "min_hours_between_reminders": min_hours_between_reminders,
+                        "generated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    followup = {
+                        "followup_type": "payment_reminder",
+                        "priority": priority,
+                        "suggested_next_action": "schedule_payment_reminder_sequence" if not dry_run else "review_collection_plan",
+                    }
+
+                    # Always update AI fields for observability.
+                    await pool.execute(
+                        """
+                        UPDATE invoices
+                        SET overdue_date = COALESCE(overdue_date, CURRENT_DATE),
+                            last_ai_analysis = NOW(),
+                            ai_collection_strategy = COALESCE(ai_collection_strategy, '{}'::jsonb) || $2::jsonb,
+                            ai_recommended_followup = COALESCE(ai_recommended_followup, '{}'::jsonb) || $3::jsonb,
+                            updated_at = NOW()
+                        WHERE id = $1::uuid
+                        """,
+                        inv_id,
+                        json.dumps(strategy),
+                        json.dumps(followup),
+                    )
+
+                    processed += 1
+
+                    if dry_run:
+                        continue
+
+                    # Rate-limit reminders at the DB layer to avoid spamming.
+                    updated = await pool.fetchrow(
+                        """
+                        UPDATE invoices
+                        SET reminder_sent_count = COALESCE(reminder_sent_count, 0) + 1,
+                            last_reminder_date = NOW(),
+                            updated_at = NOW()
+                        WHERE id = $1::uuid
+                          AND (last_reminder_date IS NULL OR last_reminder_date < NOW() - ($2::text || ' hours')::interval)
+                          AND COALESCE(reminder_sent_count, 0) < $3::int
+                        RETURNING reminder_sent_count, last_reminder_date
+                        """,
+                        inv_id,
+                        str(min_hours_between_reminders),
+                        max_reminders,
+                    )
+                    if not updated:
+                        skipped += 1
+                        continue
+
+                    # Create a follow-up sequence (stored; execution handled by follow-up subsystem).
+                    seq_id = await self._create_payment_reminder_followup(
+                        pool,
+                        tenant_id=str(tenant_id),
+                        invoice_id=inv_id,
+                        customer_name=customer_name,
+                        customer_email=customer_email,
+                        invoice_number=invoice_number,
+                        amount_due=amount_due,
+                        days_overdue=days_overdue,
+                        priority=priority,
+                    )
+                    if seq_id:
+                        reminders_scheduled += 1
+
+                except Exception as inv_exc:
+                    self.logger.warning("Invoice overdue handler failed for invoice row: %s", inv_exc)
+                    skipped += 1
+
+            return {
+                "status": "completed",
+                "action": "invoice_overdue_handler",
+                "tenant_id": str(tenant_id) if tenant_id else None,
+                "invoice_id": invoice_id,
+                "dry_run": dry_run,
+                "outreach_live": outreach_live,
+                "processed": processed,
+                "reminders_scheduled": reminders_scheduled,
+                "skipped": skipped,
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
     async def generate_invoice(self, task: dict) -> dict:
         """Generate invoice with AI-enhanced content"""
@@ -3502,11 +3877,77 @@ class InvoicingAgent(BaseAgent):
             invoice_number = f"INV-{datetime.now().strftime('%Y%m%d')}-{str(job_id)[:8]}"
             invoice_title = f"Invoice for {job.get('description', 'Roofing Services')[:180]}"
 
-            invoice_row = await pool.fetchrow("""
-                INSERT INTO invoices (invoice_number, title, job_id, customer_id, total_amount, status, notes, created_at)
-                VALUES ($1, $2, $3, $4, $5, 'pending', $6, NOW())
+            # Avoid duplicate invoices for the same job in a short window.
+            existing = await pool.fetchrow(
+                """
+                SELECT id, invoice_number
+                FROM invoices
+                WHERE job_id = $1::uuid
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                job_id,
+            )
+            if existing and existing.get("id"):
+                return {
+                    "status": "completed",
+                    "invoice_id": str(existing["id"]),
+                    "invoice_number": existing.get("invoice_number"),
+                    "customer": job['customer_name'],
+                    "ai_note": ai_note,
+                    "note": "Existing invoice found for job; returning latest invoice.",
+                }
+
+            # Determine amount in cents (safe defaults; prefer explicit input).
+            amount_cents = task.get("amount_cents")
+            if amount_cents is None:
+                amt = task.get("amount")
+                if amt is None:
+                    amt = job.get("actual_revenue") or job.get("estimated_revenue") or 1000
+                try:
+                    amount_cents = int(round(float(amt) * 100))
+                except Exception:
+                    amount_cents = 1000 * 100
+
+            # Invoice schema requires invoice_date/due_date and cents fields.
+            payment_terms_days = int(task.get("payment_terms_days") or 30)
+            line_items = task.get("line_items") or [
+                {"description": job.get("description") or "Roofing Services", "amount_cents": amount_cents}
+            ]
+
+            invoice_row = await pool.fetchrow(
+                """
+                INSERT INTO invoices (
+                    invoice_number, title, description,
+                    job_id, customer_id, tenant_id,
+                    invoice_date, due_date,
+                    subtotal_cents, tax_cents, discount_cents,
+                    total_cents, balance_cents,
+                    line_items, status, payment_status,
+                    notes, created_at, updated_at
+                )
+                VALUES (
+                    $1, $2, $3,
+                    $4::uuid, $5::uuid, $6::uuid,
+                    CURRENT_DATE, CURRENT_DATE + $7::int,
+                    $8::int, 0, 0,
+                    $8::int, $8::int,
+                    $9::json, 'pending', 'pending',
+                    $10, NOW(), NOW()
+                )
                 RETURNING id
-            """, invoice_number, invoice_title, job_id, job['customer_id'], task.get('amount', 1000), ai_note)
+                """,
+                invoice_number,
+                invoice_title,
+                job.get("description"),
+                job_id,
+                job["customer_id"],
+                job.get("tenant_id") or job.get("org_id") or os.getenv("DEFAULT_TENANT_ID"),
+                payment_terms_days,
+                amount_cents,
+                json.dumps(line_items),
+                ai_note,
+            )
 
             invoice_id = invoice_row['id'] if invoice_row else None
 

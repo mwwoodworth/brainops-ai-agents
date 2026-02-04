@@ -564,6 +564,57 @@ SCHEMA_BOOTSTRAP_SQL = [
     # Agents endpoint performance: avoid full-table scans when looking up execution stats.
     "CREATE INDEX IF NOT EXISTS idx_ai_agent_executions_agent_name ON ai_agent_executions(agent_name);",
     "CREATE INDEX IF NOT EXISTS idx_ai_agent_executions_agent_name_created_at ON ai_agent_executions(agent_name, created_at DESC);",
+    # Follow-up system tables (some environments drifted and only had sequences/touchpoints).
+    """
+    CREATE TABLE IF NOT EXISTS ai_followup_executions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        touchpoint_id UUID NOT NULL REFERENCES ai_followup_touchpoints(id) ON DELETE CASCADE,
+        sequence_id UUID NOT NULL REFERENCES ai_followup_sequences(id) ON DELETE CASCADE,
+        channel_used TEXT NOT NULL,
+        content_sent JSONB DEFAULT '{}'::jsonb,
+        delivery_result JSONB DEFAULT '{}'::jsonb,
+        status TEXT DEFAULT 'sent',
+        executed_at TIMESTAMPTZ DEFAULT NOW(),
+        response_received BOOLEAN DEFAULT false,
+        response_type TEXT,
+        response_analysis JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_ai_followup_executions_touchpoint_id_fk ON ai_followup_executions(touchpoint_id);",
+    "CREATE INDEX IF NOT EXISTS idx_ai_followup_executions_sequence_id_fk ON ai_followup_executions(sequence_id);",
+    "CREATE INDEX IF NOT EXISTS idx_ai_followup_executions_executed_at ON ai_followup_executions(executed_at DESC);",
+    """
+    CREATE TABLE IF NOT EXISTS ai_followup_responses (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        execution_id UUID NOT NULL REFERENCES ai_followup_executions(id) ON DELETE CASCADE,
+        response_type TEXT NOT NULL,
+        response_data JSONB DEFAULT '{}'::jsonb,
+        received_at TIMESTAMPTZ DEFAULT NOW(),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_ai_followup_responses_execution_id_fk ON ai_followup_responses(execution_id);",
+    """
+    CREATE TABLE IF NOT EXISTS ai_followup_metrics (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        sequence_id UUID NOT NULL REFERENCES ai_followup_sequences(id) ON DELETE CASCADE,
+        metric_date DATE NOT NULL,
+        sent_count INTEGER DEFAULT 0,
+        delivered_count INTEGER DEFAULT 0,
+        opened_count INTEGER DEFAULT 0,
+        responded_count INTEGER DEFAULT 0,
+        conversion_count INTEGER DEFAULT 0,
+        response_rate NUMERIC(10,4) DEFAULT 0,
+        conversion_rate NUMERIC(10,4) DEFAULT 0,
+        avg_response_time NUMERIC(10,2) DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_followup_metrics_sequence_date_uniq ON ai_followup_metrics(sequence_id, metric_date);",
+    "CREATE INDEX IF NOT EXISTS idx_ai_followup_metrics_sequence_id_fk ON ai_followup_metrics(sequence_id);",
 ]
 
 # Build info

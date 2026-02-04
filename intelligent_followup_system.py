@@ -125,10 +125,25 @@ class IntelligentFollowUpSystem:
         entity_type: str,
         context: dict[str, Any],
         priority: FollowUpPriority = FollowUpPriority.MEDIUM,
-        custom_rules: Optional[dict] = None
+        custom_rules: Optional[dict] = None,
+        tenant_id: Optional[str] = None,
     ) -> str:
         """Create an intelligent follow-up sequence"""
         try:
+            # ai_followup_sequences.tenant_id is NOT NULL in production; derive it safely.
+            effective_tenant_id = (
+                tenant_id
+                or (context.get("tenant_id") if isinstance(context, dict) else None)
+                or os.getenv("DEFAULT_TENANT_ID")
+                or os.getenv("TENANT_ID")
+            )
+            if not effective_tenant_id:
+                raise ValueError("tenant_id is required to create a follow-up sequence")
+            try:
+                effective_tenant_id = str(uuid.UUID(str(effective_tenant_id)))
+            except Exception as exc:
+                raise ValueError("tenant_id must be a UUID") from exc
+
             conn = self._get_connection()
             cursor = conn.cursor()
 
@@ -149,13 +164,14 @@ class IntelligentFollowUpSystem:
                 INSERT INTO ai_followup_sequences (
                     id, followup_type, entity_id, entity_type,
                     priority, context, strategy, touchpoints,
-                    custom_rules, status, created_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    custom_rules, status, created_at, tenant_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
             """, (
                 sequence_id, followup_type.value, entity_id, entity_type,
                 priority.value, json.dumps(context), json.dumps(strategy),
                 json.dumps(touchpoints), json.dumps(custom_rules or {}),
-                FollowUpStatus.PENDING.value
+                FollowUpStatus.PENDING.value,
+                effective_tenant_id,
             ))
 
             # Schedule initial touchpoints
