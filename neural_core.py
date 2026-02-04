@@ -154,7 +154,7 @@ class NeuralCore:
         self.current_focus: Optional[str] = None
 
         # Configuration
-        self.api_key = os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+        self.api_key = (os.getenv("BRAINOPS_API_KEY") or "").strip()
         self.render_api_key = os.getenv("RENDER_API_KEY", "")
 
         # Background tasks
@@ -318,7 +318,7 @@ class NeuralCore:
                 health_url = system.url  # Check root URL for frontends
             else:
                 health_url = f"{system.url}/health"  # Check /health for backends
-            headers = {"X-API-Key": self.api_key} if "render.com" in system.url or "onrender.com" in system.url else {}
+            headers = {"X-API-Key": self.api_key} if self.api_key and ("render.com" in system.url or "onrender.com" in system.url) else {}
 
             start = time.time()
             response = await client.get(health_url, headers=headers, timeout=10.0)
