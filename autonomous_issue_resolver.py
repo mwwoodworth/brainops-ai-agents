@@ -17,6 +17,7 @@ Created: 2026-01-27
 import asyncio
 import logging
 import os
+import ssl
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -85,21 +86,75 @@ class AutonomousIssueResolver:
     async def _get_pool(self) -> asyncpg.Pool:
         """Get or create connection pool"""
         if self._pool is None or self._pool._closed:
-            host = os.getenv("DB_HOST")
-            port = int(os.getenv("DB_PORT", "5432"))
-            # Prefer Supabase transaction pooler when pointed at the session pooler.
-            if host and "pooler.supabase.com" in host and port == 5432:
-                port = 6543
-            self._pool = await asyncpg.create_pool(
-                host=host,
-                database=os.getenv("DB_NAME", "postgres"),
-                user=os.getenv("DB_USER"),
-                password=os.getenv("DB_PASSWORD"),
-                port=port,
-                min_size=1,
-                max_size=2,
-                ssl="require" if os.getenv("DB_SSL", "true").lower() == "true" else None
-            )
+            host = (os.getenv("DB_HOST") or "").strip()
+            user = (os.getenv("DB_USER") or "").strip()
+            password = os.getenv("DB_PASSWORD") or ""
+            database = (os.getenv("DB_NAME") or "postgres").strip() or "postgres"
+
+            if not host:
+                # In production, DB_HOST should always be set. If it isn't, fail loudly with
+                # a clear error instead of attempting localhost (which returns ECONNREFUSED).
+                raise RuntimeError("DB_HOST is not set for AutonomousIssueResolver")
+
+            # Keep resolver connectivity aligned with the main DB pool:
+            # - allow either 5432 (direct) or 6543 (tx pooler)
+            # - prefer 6543 when pointed at the Supabase pooler host
+            try:
+                base_port = int((os.getenv("DB_PORT") or "5432").strip() or "5432")
+            except Exception:
+                base_port = 5432
+
+            candidate_ports: list[int] = [base_port]
+            if base_port == 5432:
+                candidate_ports.append(6543)
+            elif base_port == 6543:
+                candidate_ports.append(5432)
+            else:
+                # Defensive: if a weird port is provided, still try known-good ports.
+                for fallback_port in (5432, 6543):
+                    if fallback_port not in candidate_ports:
+                        candidate_ports.append(fallback_port)
+
+            if "pooler.supabase.com" in host:
+                # Supabase tx pooler listens on 6543; prefer it.
+                candidate_ports = sorted(candidate_ports, key=lambda p: 0 if p == 6543 else 1)
+
+            ssl_ctx = None
+            if (os.getenv("DB_SSL", "true") or "").strip().lower() not in {"false", "0", "no"}:
+                ssl_ctx = ssl.create_default_context()
+                verify = (os.getenv("DB_SSL_VERIFY", "false") or "").strip().lower() not in {"false", "0", "no"}
+                if not verify:
+                    ssl_ctx.check_hostname = False
+                    ssl_ctx.verify_mode = ssl.CERT_NONE
+
+            last_error: Exception | None = None
+            for port in candidate_ports:
+                try:
+                    self._pool = await asyncpg.create_pool(
+                        host=host,
+                        database=database,
+                        user=user,
+                        password=password,
+                        port=port,
+                        min_size=1,
+                        max_size=2,
+                        ssl=ssl_ctx,
+                        statement_cache_size=0,
+                    )
+                    last_error = None
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    logger.error("Resolver DB pool init failed on %s:%s (%s)", host, port, exc)
+                    try:
+                        if self._pool is not None:
+                            await self._pool.close()
+                    except Exception:
+                        pass
+                    self._pool = None
+
+            if self._pool is None:
+                raise last_error or RuntimeError("Failed to initialize resolver DB pool")
         return self._pool
 
     async def get_current_issues(self) -> dict[str, Any]:
