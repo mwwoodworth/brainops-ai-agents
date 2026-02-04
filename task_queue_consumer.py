@@ -263,6 +263,7 @@ class TaskQueueConsumer:
                             t.trigger_type,
                             t.trigger_condition,
                             t.agent_id,
+                            t.tenant_id,
                             a.name AS agent_name,
                             t.created_at
                         FROM ai_autonomous_tasks t
@@ -306,6 +307,7 @@ class TaskQueueConsumer:
         """Process a single task"""
         task_id = task['id']
         agent_id = task.get('agent_id')
+        tenant_id = task.get("tenant_id")
         agent_name = task.get('agent_name')
         task_type = task.get('task_type', 'unknown')
 
@@ -331,6 +333,7 @@ class TaskQueueConsumer:
                             task={
                                 "task_id": str(task_id),
                                 "agent_id": str(agent_id) if agent_id else None,
+                                "tenant_id": str(tenant_id) if tenant_id else None,
                                 "action": task_type,
                                 "task_type": task_type,
                                 # Allows AgentExecutor to log cancellations as timeouts (vs generic cancel).

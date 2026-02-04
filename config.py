@@ -160,7 +160,7 @@ class AppConfig:
 
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
-        self.version = os.getenv('VERSION', 'v11.0.12')  # Fix timeout/cancellation logging + bound memory enforcement
+        self.version = os.getenv('VERSION', 'v11.0.13')  # Fix invoice overdue handler + NotebookLM UUID casts + followup schema bootstrap
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
