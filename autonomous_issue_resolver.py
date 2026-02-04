@@ -299,7 +299,7 @@ class AutonomousIssueResolver:
                 UPDATE agent_executions
                 SET status = 'timeout',
                     completed_at = NOW(),
-                    error_message = 'Auto-timeout: Pending/Running for over ' || $2::text || ' minutes'
+                    error_message = 'Auto-timeout: Pending/Running for over ' || ($2::int)::text || ' minutes'
                 WHERE status IN ('pending', 'running')
                   AND COALESCE(started_at, created_at) < $1
                 """,
@@ -321,7 +321,7 @@ class AutonomousIssueResolver:
                 SET status = 'failed',
                     error_message = COALESCE(
                         error_message,
-                        'Auto-timeout: running for over ' || $2::text || ' minutes'
+                        'Auto-timeout: running for over ' || ($2::int)::text || ' minutes'
                     ),
                     output_data = COALESCE(
                         output_data,
