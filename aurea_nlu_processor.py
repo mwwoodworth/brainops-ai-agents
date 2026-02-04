@@ -10,6 +10,7 @@ from safe_task import create_safe_task
 import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
+from google.generativeai import GenerativeModel, configure
 
 # Import Power Layer for full operational capability
 try:
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Perplexity fallback for when OpenAI quota is exceeded
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 async def _perplexity_fallback(prompt: str, system_prompt: str = "") -> str:
     """Use Perplexity as fallback when OpenAI fails."""
@@ -53,6 +55,20 @@ async def _perplexity_fallback(prompt: str, system_prompt: str = "") -> str:
         data = response.json()
         return data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
+async def _gemini_fallback(prompt: str, system_prompt: str = "") -> str:
+    """Use Gemini as fallback when others fail."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY not configured for fallback")
+
+    configure(api_key=GEMINI_API_KEY)
+    model = GenerativeModel("gemini-2.0-flash")
+    
+    # Combine system and user prompt for Gemini (it supports system instructions but direct concat is safer for simple fallback)
+    full_prompt = f"{system_prompt}\n\n{prompt}"
+    
+    # Run in executor to avoid blocking async loop
+    response = await asyncio.to_thread(model.generate_content, full_prompt)
+    return response.text
 
 class AUREANLUProcessor:
     def __init__(self, llm_model: Any, integration_layer: Any, aurea_instance: Any, ai_board_instance: Any,
@@ -229,7 +245,7 @@ class AUREANLUProcessor:
         user_prompt = f"User command: \"{command_text}\""
         response_content = None
 
-        # Try OpenAI first, fallback to Perplexity on error
+        # Try OpenAI first, fallback to Perplexity then Gemini
         try:
             prompt_template = ChatPromptTemplate.from_messages([
                 SystemMessage(content=system_prompt),
@@ -243,8 +259,13 @@ class AUREANLUProcessor:
                 response_content = await _perplexity_fallback(user_prompt, system_prompt)
                 logger.info("Successfully used Perplexity fallback for AUREA NLU")
             except Exception as perplexity_error:
-                logger.error(f"Perplexity fallback also failed: {perplexity_error}")
-                return {"intent": "UNKNOWN", "parameters": {}, "confidence": 0.0, "requires_confirmation": False, "clarification_needed": f"AI providers unavailable: {openai_error}"}
+                logger.warning(f"Perplexity fallback failed, trying Gemini: {perplexity_error}")
+                try:
+                    response_content = await _gemini_fallback(user_prompt, system_prompt)
+                    logger.info("Successfully used Gemini fallback for AUREA NLU")
+                except Exception as gemini_error:
+                    logger.error(f"All AI providers failed: {gemini_error}")
+                    return {"intent": "UNKNOWN", "parameters": {}, "confidence": 0.0, "requires_confirmation": False, "clarification_needed": f"AI providers unavailable: {openai_error}"}
 
         try:
             # Clean response content - extract JSON from potential markdown code blocks

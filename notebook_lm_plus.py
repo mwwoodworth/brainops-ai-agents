@@ -15,6 +15,7 @@ from typing import Any, Optional
 import numpy as np
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from utils.embedding_provider import generate_embedding_sync
 
 # Optional OpenAI dependency
 try:
@@ -394,28 +395,25 @@ class NotebookLMPlus:
                 'entities': []
             }
 
-    def _generate_embedding(self, text: str) -> list[float]:
-        """Generate embedding for text using OpenAI"""
+    def _generate_embedding(self, text: str) -> Optional[list[float]]:
+        """Generate embedding for text using configured provider order"""
         try:
-            client = get_openai_client()
-            if not client:
-                logger.warning("OpenAI client unavailable; returning zero embedding")
-                return [0.0] * 1536
-            response = client.embeddings.create(
-                model="text-embedding-ada-002",
-                input=text
-            )
-            return response.data[0].embedding
+            embedding = generate_embedding_sync(text, log=logger)
+            if embedding is None:
+                logger.warning("Embedding generation failed")
+            return embedding
         except Exception as e:
             if '429' in str(e) or 'quota' in str(e).lower():
                 _trip_openai_breaker()
             else:
                 logger.error(f"Failed to generate embedding: {e!r}")
-            return [0.0] * 1536
+            return None
 
-    def _find_related_knowledge(self, embedding: list[float], limit: int = 5) -> list[dict]:
+    def _find_related_knowledge(self, embedding: Optional[list[float]], limit: int = 5) -> list[dict]:
         """Find related knowledge using vector similarity"""
         try:
+            if embedding is None:
+                return []
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 

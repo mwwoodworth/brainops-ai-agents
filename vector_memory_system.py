@@ -188,7 +188,7 @@ class VectorMemorySystem:
         cursor.close()
         conn.close()
 
-    def _get_embedding(self, text: str) -> list[float]:
+    def _get_embedding(self, text: str) -> Optional[list[float]]:
         """
         Generate embedding for text using multi-model fallback chain.
         Tries: OpenAI -> Gemini -> Local sentence-transformers -> Hash-based (last resort)

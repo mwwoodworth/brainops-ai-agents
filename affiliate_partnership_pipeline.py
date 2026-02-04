@@ -32,7 +32,7 @@ from typing import Any, Optional
 import stripe
 from loguru import logger
 
-from ai_core import ai_generate
+from ai_core import ai_generate, ai_generate_image
 from email_sender import send_email
 
 # =============================================================================
@@ -685,13 +685,18 @@ Make it sound authentic, not salesy."""
 
             content = await self._call_claude(prompt)
 
+            # Generate accompanying visual
+            image_prompt = f"Professional, high-quality social media image for {platform} regarding {product_name}. Key benefits: {', '.join(key_benefits)}. Minimal text, vibrant colors."
+            image_url = await ai_generate_image(image_prompt)
+
             contents.append(PartnerContent(
                 affiliate_id=affiliate.affiliate_id,
                 content_type=f"social_{platform}",
                 title=f"{platform.title()} Post: {product_name}",
                 content=content,
                 tracking_link="{TRACKING_LINK}",
-                ai_model_used="claude-3-opus",
+                images=[image_url] if image_url else [],
+                ai_model_used="claude-3-opus + dall-e-3",
                 generation_prompt=prompt[:500],
             ))
 
