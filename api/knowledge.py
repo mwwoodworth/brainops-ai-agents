@@ -92,6 +92,72 @@ async def knowledge_base_health():
     }
 
 
+@router.get("/entries")
+async def list_entries(
+    category: Optional[str] = None,
+    knowledge_type: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    api_key: str = Depends(verify_api_key),
+):
+    """List knowledge base entries with optional filtering"""
+    if not KNOWLEDGE_BASE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Knowledge base not available")
+
+    try:
+        kb = get_knowledge_base()
+
+        all_entries = list(kb.entries.values())
+
+        # Apply filters
+        if category:
+            entry_ids = kb.by_category.get(category, set())
+            all_entries = [e for e in all_entries if e.entry_id in entry_ids]
+
+        if knowledge_type:
+            try:
+                kt = KnowledgeType(knowledge_type)
+                entry_ids = kb.by_type.get(kt, set())
+                all_entries = [e for e in all_entries if e.entry_id in entry_ids]
+            except ValueError:
+                pass
+
+        # Sort by updated_at descending (most recent first)
+        all_entries.sort(
+            key=lambda e: e.updated_at or e.created_at or datetime.min,
+            reverse=True,
+        )
+
+        total = len(all_entries)
+        page = all_entries[offset : offset + limit]
+
+        formatted = []
+        for entry in page:
+            formatted.append({
+                "entry_id": entry.entry_id,
+                "title": entry.title,
+                "summary": entry.summary or (entry.content[:300] if entry.content else ""),
+                "knowledge_type": entry.knowledge_type.value if hasattr(entry.knowledge_type, "value") else str(entry.knowledge_type),
+                "category": entry.category,
+                "tags": entry.tags,
+                "access_level": entry.access_level.value if hasattr(entry.access_level, "value") else str(entry.access_level),
+                "created_at": entry.created_at.isoformat() if entry.created_at else None,
+                "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
+            })
+
+        return {
+            "entries": formatted,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "listed_at": datetime.utcnow().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"List entries error: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.post("/entries")
 async def create_entry(
     request: KnowledgeEntryRequest,

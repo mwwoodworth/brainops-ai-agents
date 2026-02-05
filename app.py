@@ -7259,7 +7259,7 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                     },
                     {
                         "code": "GR-PMCMD",
-                        "name": "AI Project Command Center (Notion)",
+                        "name": "AI Project Command Center (BrainOps)",
                         "price": 197,
                         "type": "template",
                         "url": "https://woodworthia.gumroad.com/l/gr-pmcmd",
