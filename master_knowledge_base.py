@@ -389,8 +389,8 @@ Format as JSON with these exact keys."""
             self.openai_api_key = os.getenv("OPENAI_API_KEY")
 
         if not self.openai_api_key:
-            logger.error("OpenAI API Key missing for embeddings")
-            raise ValueError("OPENAI_API_KEY is required for knowledge base embeddings")
+            logger.warning("OPENAI_API_KEY missing for embeddings; semantic search disabled for this request")
+            return []
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -409,9 +409,10 @@ Format as JSON with these exact keys."""
                 data = response.json()
                 return [item["embedding"] for item in data["data"]]
         except Exception as e:
-            logger.error(f"Embedding generation failed: {e}")
-            # If API fails, we cannot return mock data in production
-            raise
+            # Do not hard-fail callers (search/create/update) due to external rate limits.
+            # Falling back to keyword search and/or non-embedded entries is acceptable behavior.
+            logger.warning(f"Embedding generation failed; semantic search disabled for this request: {e}")
+            return []
 
     async def generate_summary(self, content: str, max_words: int = 100) -> str:
         """Generate a summary of content."""
@@ -803,31 +804,7 @@ class MasterKnowledgeBase:
 
         results = []
 
-        if semantic and query:
-            # Semantic search using vectors
-            query_embedding = await self.processor.generate_embeddings([query])
-            if query_embedding:
-                filters = {}
-                if knowledge_types:
-                    filters["type"] = [t.value for t in knowledge_types]
-                if categories:
-                    filters["category"] = categories
-                if access_levels:
-                    filters["access_level"] = [a.value for a in access_levels]
-
-                vector_results = self.vector_store.search(
-                    query_embedding[0],
-                    top_k=top_k * 2,  # Get more for filtering
-                    filters=filters
-                )
-
-                for entry_id, score, _ in vector_results:
-                    entry = self.entries.get(entry_id)
-                    if entry and self._check_access(entry, user_id, agent_id):
-                        results.append((entry, score))
-
-        else:
-            # Keyword search
+        def keyword_search() -> None:
             query_lower = query.lower()
             for entry in self.entries.values():
                 # Apply filters
@@ -853,6 +830,34 @@ class MasterKnowledgeBase:
 
                 if score > 0:
                     results.append((entry, score))
+
+        if semantic and query:
+            # Semantic search using vectors. If embeddings are unavailable (missing key, rate limit),
+            # fall back to keyword search instead of failing the request.
+            query_embedding = await self.processor.generate_embeddings([query])
+            if query_embedding:
+                filters = {}
+                if knowledge_types:
+                    filters["type"] = [t.value for t in knowledge_types]
+                if categories:
+                    filters["category"] = categories
+                if access_levels:
+                    filters["access_level"] = [a.value for a in access_levels]
+
+                vector_results = self.vector_store.search(
+                    query_embedding[0],
+                    top_k=top_k * 2,  # Get more for filtering
+                    filters=filters
+                )
+
+                for entry_id, score, _ in vector_results:
+                    entry = self.entries.get(entry_id)
+                    if entry and self._check_access(entry, user_id, agent_id):
+                        results.append((entry, score))
+            else:
+                keyword_search()
+        else:
+            keyword_search()
 
         # Sort by score and limit
         results.sort(key=lambda x: x[1], reverse=True)
