@@ -2479,7 +2479,7 @@ from langchain_core.messages import HumanMessage
 class ProductRequest(BaseModel):
     concept: str
 
-@app.post("/agents/product/run", tags=["Agents"])
+@app.post("/agents/product/run", tags=["Agents"], dependencies=SECURED_DEPENDENCIES)
 async def run_product_agent(request: ProductRequest):
     """
     Run the LangGraph Product Agent to generate product specs, code, and QA.
@@ -3068,9 +3068,9 @@ async def alive_status():
     return status
 
 
-@app.get("/alive/thoughts")
+@app.get("/alive/thoughts", dependencies=SECURED_DEPENDENCIES)
 async def get_recent_thoughts():
-    """Get recent thoughts from the AI consciousness stream"""
+    """Get recent thoughts from the AI consciousness stream (requires auth)"""
     if hasattr(app.state, 'nerve_center') and app.state.nerve_center:
         if app.state.nerve_center.alive_core:
             return {
@@ -3085,10 +3085,10 @@ async def get_recent_thoughts():
 # UNIFIED AI AWARENESS - Self-Reporting AI OS
 # ============================================================================
 
-@app.get("/awareness")
+@app.get("/awareness", dependencies=SECURED_DEPENDENCIES)
 async def get_awareness_status():
     """
-    Quick status check - AI OS reports its current state.
+    Quick status check - AI OS reports its current state (requires auth).
     This is the AI talking to you about how it's doing.
     """
     if not UNIFIED_AWARENESS_AVAILABLE:
@@ -3100,10 +3100,10 @@ async def get_awareness_status():
         return {"status": "error", "error": str(e)}
 
 
-@app.get("/awareness/report")
+@app.get("/awareness/report", dependencies=SECURED_DEPENDENCIES)
 async def get_full_awareness_report():
     """
-    Full self-reporting status - AI OS tells you everything it knows about itself.
+    Full self-reporting status - AI OS tells you everything it knows about itself (requires auth).
     This is the AI's comprehensive understanding of its own state.
     """
     if not UNIFIED_AWARENESS_AVAILABLE:
@@ -3115,10 +3115,10 @@ async def get_full_awareness_report():
         return {"available": False, "error": str(e)}
 
 
-@app.get("/awareness/pulse")
+@app.get("/awareness/pulse", dependencies=SECURED_DEPENDENCIES)
 async def get_system_pulse():
     """
-    Real-time system pulse - the AI's heartbeat and vital signs.
+    Real-time system pulse - the AI's heartbeat and vital signs (requires auth).
     """
     if not UNIFIED_AWARENESS_AVAILABLE:
         return {"available": False, "message": "Unified awareness system not loaded"}
@@ -3135,10 +3135,10 @@ async def get_system_pulse():
 # TRUE SELF-AWARENESS - Live System Truth (not static documentation)
 # ============================================================================
 
-@app.get("/truth")
+@app.get("/truth", dependencies=SECURED_DEPENDENCIES)
 async def get_truth():
     """
-    THE TRUTH - Complete live system truth from database.
+    THE TRUTH - Complete live system truth from database (requires auth).
     This is what the AI OS ACTUALLY knows about itself.
     No static docs, no outdated info - just live truth.
     """
@@ -3153,10 +3153,10 @@ async def get_truth():
         return {"available": False, "error": str(e)}
 
 
-@app.get("/truth/quick")
+@app.get("/truth/quick", dependencies=SECURED_DEPENDENCIES)
 async def get_truth_quick():
     """
-    Quick human-readable system truth.
+    Quick human-readable system truth (requires auth).
     Shows what's real vs demo, what's working vs broken.
     """
     if not TRUE_AWARENESS_AVAILABLE:
@@ -4309,9 +4309,9 @@ async def capture_interaction(interaction_data: dict[str, Any] = Body(...)):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.get("/training/stats")
+@app.get("/training/stats", dependencies=SECURED_DEPENDENCIES)
 async def get_training_stats():
-    """Get training pipeline statistics"""
+    """Get training pipeline statistics (requires auth)"""
     if not TRAINING_AVAILABLE or not hasattr(app.state, 'training') or not app.state.training:
         return {"available": False, "message": "Training pipeline not available"}
 
@@ -4335,9 +4335,9 @@ async def get_training_stats():
         return {"available": True, "error": str(e)}
 
 
-@app.get("/scheduler/status")
+@app.get("/scheduler/status", dependencies=SECURED_DEPENDENCIES)
 async def get_scheduler_status():
-    """Get detailed scheduler status and diagnostics"""
+    """Get detailed scheduler status and diagnostics (requires auth)"""
     try:
         if not SCHEDULER_AVAILABLE or not hasattr(app.state, 'scheduler') or not app.state.scheduler:
             return {
@@ -4972,11 +4972,11 @@ async def get_meta_intelligence_status():
 # WORKFLOW ENGINE STATUS ENDPOINTS
 # ============================================================================
 
-@app.post("/workflow-engine/status")
-@app.get("/workflow-engine/status")
+@app.post("/workflow-engine/status", dependencies=SECURED_DEPENDENCIES)
+@app.get("/workflow-engine/status", dependencies=SECURED_DEPENDENCIES)
 async def get_workflow_engine_status():
     """
-    Get workflow engine status.
+    Get workflow engine status (requires auth).
     Returns health status and statistics for the workflow execution system.
     """
     try:
@@ -5013,11 +5013,11 @@ async def get_workflow_engine_status():
         }
 
 
-@app.post("/workflow-automation/status")
-@app.get("/workflow-automation/status")
+@app.post("/workflow-automation/status", dependencies=SECURED_DEPENDENCIES)
+@app.get("/workflow-automation/status", dependencies=SECURED_DEPENDENCIES)
 async def get_workflow_automation_status():
     """
-    Get workflow automation status.
+    Get workflow automation status (requires auth).
     Returns status of automated workflow pipelines and scheduled executions.
     """
     pool = get_pool()
@@ -5196,14 +5196,14 @@ async def store_memory(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.get("/memory/search")
+@app.get("/memory/search", dependencies=SECURED_DEPENDENCIES)
 async def search_memory(
     query: str = Query(..., description="Search query"),
     limit: int = Query(10, description="Max results"),
     memory_type: str = Query(None, description="Filter by type")
 ):
     """
-    Search the AI memory system for relevant memories.
+    Search the AI memory system for relevant memories (requires auth).
     """
     if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory') or not app.state.memory:
         raise HTTPException(status_code=503, detail="Memory system not available")
@@ -5356,10 +5356,10 @@ async def force_sync_embedded_memory():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.get("/memory/stats")
+@app.get("/memory/stats", dependencies=SECURED_DEPENDENCIES)
 async def get_memory_stats():
     """
-    Get statistics about the embedded memory system.
+    Get statistics about the embedded memory system (requires auth).
     Shows local cache status and sync information.
     """
     embedded_memory = getattr(app.state, "embedded_memory", None)
@@ -5405,7 +5405,7 @@ async def get_memory_stats():
 
 # ==================== AI SELF-AWARENESS ENDPOINTS ====================
 
-@app.post("/ai/self-assess")
+@app.post("/ai/self-assess", dependencies=SECURED_DEPENDENCIES)
 async def ai_self_assess(
     request: Request,
     task_id: str,
@@ -5414,7 +5414,7 @@ async def ai_self_assess(
     task_context: dict[str, Any] = None
 ):
     """
-    AI assesses its own confidence in completing a task
+    AI assesses its own confidence in completing a task (requires auth)
 
     Revolutionary feature - AI knows what it doesn't know!
     """
@@ -5454,7 +5454,7 @@ async def ai_self_assess(
         raise HTTPException(status_code=500, detail=f"Self-assessment failed: {str(e)}") from e
 
 
-@app.post("/ai/explain-reasoning")
+@app.post("/ai/explain-reasoning", dependencies=SECURED_DEPENDENCIES)
 async def ai_explain_reasoning(
     request: Request,
     task_id: str,
@@ -5463,7 +5463,7 @@ async def ai_explain_reasoning(
     reasoning_process: dict[str, Any]
 ):
     """
-    AI explains its reasoning in human-understandable terms
+    AI explains its reasoning in human-understandable terms (requires auth)
 
     Transparency builds trust!
     """
@@ -5552,7 +5552,7 @@ async def ai_deep_reasoning(request: Request, body: ReasoningRequest):
         raise HTTPException(status_code=500, detail=f"Reasoning failed: {str(e)}") from e
 
 
-@app.post("/ai/learn-from-mistake")
+@app.post("/ai/learn-from-mistake", dependencies=SECURED_DEPENDENCIES)
 async def ai_learn_from_mistake(
     request: Request,
     task_id: str,
@@ -5562,7 +5562,7 @@ async def ai_learn_from_mistake(
     confidence_before: float
 ):
     """
-    AI analyzes its own mistakes and learns from them
+    AI analyzes its own mistakes and learns from them (requires auth)
 
     This is how AI gets smarter over time!
     """
@@ -5604,9 +5604,9 @@ async def ai_learn_from_mistake(
         raise HTTPException(status_code=500, detail=f"Learning from mistake failed: {str(e)}") from e
 
 
-@app.get("/ai/self-awareness/stats")
+@app.get("/ai/self-awareness/stats", dependencies=SECURED_DEPENDENCIES)
 async def get_self_awareness_stats():
-    """Get statistics about AI self-awareness system"""
+    """Get statistics about AI self-awareness system (requires auth)"""
     if not SELF_AWARENESS_AVAILABLE:
         raise HTTPException(status_code=503, detail="AI Self-Awareness not available")
 
@@ -5681,9 +5681,9 @@ async def get_self_awareness_stats():
 # ==================== END AI SELF-AWARENESS ENDPOINTS ====================
 
 
-@app.post("/ai/tasks/execute/{task_id}")
+@app.post("/ai/tasks/execute/{task_id}", dependencies=SECURED_DEPENDENCIES)
 async def execute_ai_task(task_id: str):
-    """Manually trigger execution of a specific task"""
+    """Manually trigger execution of a specific task (requires auth - CRITICAL)"""
     integration_layer = getattr(app.state, 'integration_layer', None)
     if not INTEGRATION_LAYER_AVAILABLE or integration_layer is None:
         raise HTTPException(status_code=503, detail="AI Integration Layer not available or not initialized")
@@ -5710,9 +5710,9 @@ async def execute_ai_task(task_id: str):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.get("/ai/tasks/stats")
+@app.get("/ai/tasks/stats", dependencies=SECURED_DEPENDENCIES)
 async def get_task_stats():
-    """Get AI task system statistics"""
+    """Get AI task system statistics (requires auth)"""
     integration_layer = getattr(app.state, 'integration_layer', None)
     if not INTEGRATION_LAYER_AVAILABLE or integration_layer is None:
         raise HTTPException(status_code=503, detail="AI Integration Layer not available or not initialized")
@@ -5936,10 +5936,10 @@ async def ai_analyze(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.get("/aurea/status")
+@app.get("/aurea/status", dependencies=SECURED_DEPENDENCIES)
 async def get_aurea_status():
     """
-    Get AUREA operational status - checks actual OODA loop activity.
+    Get AUREA operational status - checks actual OODA loop activity (requires auth).
     This endpoint verifies real AUREA activity in the database.
     """
     try:
@@ -6000,13 +6000,13 @@ async def get_aurea_status():
         )
 
 
-@app.post("/aurea/command/natural_language")
+@app.post("/aurea/command/natural_language", dependencies=SECURED_DEPENDENCIES)
 async def execute_aurea_nl_command(
     request: Request,
     payload: AureaCommandRequest = Body(...)
 ):
     """
-    Execute a natural language command through AUREA's NLU processor.
+    Execute a natural language command through AUREA's NLU processor (requires auth - CRITICAL).
     Founder-level authority for natural language system control.
 
     Examples:
@@ -7152,9 +7152,9 @@ async def generate_training_doc(
     return result
 
 
-@app.get("/content/types", tags=["Content"])
+@app.get("/content/types", tags=["Content"], dependencies=SECURED_DEPENDENCIES)
 async def get_content_types():
-    """Get available content generation types."""
+    """Get available content generation types (requires auth)."""
     return {
         "types": [
             {"id": "blog_post", "name": "Blog Post", "description": "SEO-optimized blog articles with research"},
