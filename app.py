@@ -4041,7 +4041,6 @@ async def execute_scheduled_agents(
         for agent in agents:
             try:
                 execution_id = str(uuid.uuid4())
-                datetime.utcnow()
                 agent_name = agent.get("name", "unknown")
 
                 if agent_name in already_ran_names:
@@ -4074,9 +4073,28 @@ async def execute_scheduled_agents(
                             # NOTE: column name is `configuration` (not `config`).
                             "context": agent.get("configuration") or {},
                         }
-                        result = await AGENT_EXECUTOR.execute(agent_name, task_data)
+                        timeout_env = os.getenv("SCHEDULED_AGENT_TIMEOUT_SECONDS", "180")
+                        try:
+                            timeout_s = int(timeout_env)
+                        except (TypeError, ValueError):
+                            timeout_s = 180
+                        result = await asyncio.wait_for(
+                            AGENT_EXECUTOR.execute(agent_name, task_data),
+                            timeout=timeout_s,
+                        )
                         result["scheduled_execution"] = True
                         logger.info(f"✅ Agent {agent_name} executed successfully")
+                    except asyncio.TimeoutError:
+                        logger.error(
+                            "Agent %s timed out after %ss (scheduled_run)",
+                            agent_name,
+                            timeout_s,
+                        )
+                        result = {
+                            "status": "timeout",
+                            "error": f"Timed out after {timeout_s}s",
+                            "scheduled_execution": True,
+                        }
                     except NotImplementedError:
                         # Agent doesn't have execute method - log as warning, NOT completed!
                         logger.warning(f"⚠️ Agent {agent_name} has no execute method (NotImplementedError)")
@@ -4101,7 +4119,8 @@ async def execute_scheduled_agents(
                     }
 
                 # Update execution record with actual result (use correct columns: response not output_data)
-                final_status = "completed" if result.get("status") != "error" else "failed"
+                result_status = (result.get("status") or "").lower()
+                final_status = "failed" if result_status in {"error", "failed", "timeout", "not_implemented"} else "completed"
                 await pool.execute("""
                     UPDATE agent_executions
                     SET completed_at = $1, status = $2, response = $3
@@ -4112,7 +4131,8 @@ async def execute_scheduled_agents(
                     "agent_id": str(agent["id"]),
                     "agent_name": agent["name"],
                     "execution_id": execution_id,
-                    "status": "completed"
+                    "status": final_status,
+                    "result_status": result.get("status"),
                 })
 
             except Exception as e:
