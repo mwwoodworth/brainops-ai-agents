@@ -583,71 +583,55 @@ class MasterKnowledgeBase:
 
         repo_root = Path(__file__).resolve().parent
 
-        seeds: list[dict[str, Any]] = [
-            {
-                "path": "RUNBOOK.md",
-                "title": "AI Agents Runbook",
-                "knowledge_type": KnowledgeType.RUNBOOK,
-                "category": "operations",
-                "tags": ["runbook", "operations"],
-            },
-            {
-                "path": "AUREA_QUICK_REFERENCE.md",
-                "title": "AUREA Quick Reference",
-                "knowledge_type": KnowledgeType.GUIDE,
-                "category": "ai-agents",
-                "tags": ["aurea", "assistant", "command-center"],
-            },
-            {
-                "path": "API_DOCUMENTATION.md",
-                "title": "BrainOps AI Agents API Documentation",
-                "knowledge_type": KnowledgeType.API_DOCUMENTATION,
-                "category": "documentation",
-                "tags": ["api", "docs"],
-            },
-            {
-                "path": "DEPLOY_TO_RENDER.md",
-                "title": "Deploy AI Agents to Render",
-                "knowledge_type": KnowledgeType.RUNBOOK,
-                "category": "operations",
-                "tags": ["deploy", "render", "runbook"],
-            },
-            {
-                "path": "SYSTEM_DOCUMENTATION.md",
-                "title": "AI Agents System Documentation",
-                "knowledge_type": KnowledgeType.ARCHITECTURE,
-                "category": "documentation",
-                "tags": ["architecture", "system"],
-            },
-        ]
+        # NOTE: The Docker image excludes markdown docs via .dockerignore, so production
+        # bootstrap reads from a small JSON seed pack that *is* shipped in the image.
+        seed_file = repo_root / "knowledge_seeds" / "seeds.json"
+        seeds: list[dict[str, Any]] = []
+        if seed_file.exists():
+            try:
+                raw = json.loads(seed_file.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    seeds = raw
+                elif isinstance(raw, dict) and isinstance(raw.get("seeds"), list):
+                    seeds = raw["seeds"]
+            except Exception as e:
+                logger.warning(f"Knowledge bootstrap: failed reading seeds.json: {e}")
 
         bootstrapped = 0
         for seed in seeds:
-            path = repo_root / seed["path"]
-            if not path.exists():
+            try:
+                title = str(seed.get("title") or "").strip()
+                content = str(seed.get("content") or "").strip()
+            except Exception as e:
+                logger.warning(f"Knowledge bootstrap: invalid seed payload: {e}")
+                continue
+
+            if not title or not content:
                 continue
 
             try:
-                content = path.read_text(encoding="utf-8", errors="replace")
-            except Exception as e:
-                logger.warning(f"Knowledge bootstrap: failed reading {path}: {e}")
-                continue
+                knowledge_type = KnowledgeType(str(seed.get("knowledge_type") or KnowledgeType.GUIDE.value))
+            except Exception:
+                knowledge_type = KnowledgeType.GUIDE
+
+            category = str(seed.get("category") or "general").strip() or "general"
+            tags = seed.get("tags") if isinstance(seed.get("tags"), list) else []
 
             entry = KnowledgeEntry(
-                title=seed["title"],
+                title=title,
                 content=content,
                 summary=(content[:600] + "…") if len(content) > 600 else content,
-                knowledge_type=seed["knowledge_type"],
-                category=seed["category"],
-                tags=list(seed.get("tags") or []),
+                knowledge_type=knowledge_type,
+                category=category,
+                tags=[str(tag) for tag in tags if str(tag).strip()],
                 access_level=AccessLevel.INTERNAL,
                 source_type="bootstrap",
-                source_file=str(path),
+                source_file=str(seed.get("source_file") or seed_file),
                 status=KnowledgeStatus.PUBLISHED,
                 published_at=datetime.utcnow(),
                 created_by="bootstrap",
                 updated_by="bootstrap",
-                metadata={"seed": True, "path": seed["path"]},
+                metadata={"seed": True},
             )
 
             entry.word_count = len(entry.content.split())
