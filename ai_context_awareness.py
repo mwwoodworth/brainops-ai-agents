@@ -53,11 +53,19 @@ def _get_db_config():
         "port": int(os.getenv("DB_PORT", "5432"))
     }
 
-# Auth configuration - SECURITY: No default for JWT_SECRET
+# Auth configuration - SECURITY: JWT_SECRET is REQUIRED
+# CRITICAL: Never use a fallback in production - attackers could forge tokens
 JWT_SECRET = os.getenv("JWT_SECRET")
 if not JWT_SECRET:
-    logger.warning("SECURITY: JWT_SECRET not set - using fallback for non-production")
-    JWT_SECRET = "dev-only-insecure-key-do-not-use-in-prod"
+    # In production, we MUST have a JWT_SECRET
+    env = os.getenv("ENVIRONMENT", "production")
+    if env == "production":
+        logger.critical("SECURITY: JWT_SECRET not set in production - this is a critical configuration error")
+        # Don't halt the service, but JWT features will be disabled
+        JWT_SECRET = None
+    else:
+        logger.warning("SECURITY: JWT_SECRET not set - JWT features disabled in non-production")
+        JWT_SECRET = None
 JWT_ALGORITHM = "HS256"
 
 # OpenAI configuration
