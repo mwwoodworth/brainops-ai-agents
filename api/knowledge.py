@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Security
+from fastapi.encoders import jsonable_encoder
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
@@ -47,8 +48,9 @@ class KnowledgeEntryRequest(BaseModel):
     subcategory: Optional[str] = Field(None, max_length=100)
     tags: list[str] = Field(default_factory=list, max_items=20)
     access_level: str = Field(default="internal")
-    department: Optional[str] = Field(None, max_length=100)
     author: str = Field(default="system", max_length=200)
+    # Deprecated: kept for backward compatibility with older clients.
+    # MasterKnowledgeBase is not tenant-scoped yet; this is stored in metadata only.
     tenant_id: str = Field(default="default")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -114,25 +116,29 @@ async def create_entry(
         except ValueError:
             access_level = AccessLevel.INTERNAL
 
+        metadata = dict(request.metadata or {})
+        if request.tenant_id:
+            metadata.setdefault("tenant_id", request.tenant_id)
+        if request.subcategory:
+            metadata.setdefault("subcategory", request.subcategory)
+
         entry = await kb.create_entry(
             title=request.title,
             content=request.content,
             knowledge_type=knowledge_type,
             category=request.category,
-            subcategory=request.subcategory,
             tags=request.tags,
             access_level=access_level,
-            department=request.department,
-            author=request.author,
-            tenant_id=request.tenant_id,
-            metadata=request.metadata
+            source_type="api",
+            created_by=request.author,
+            metadata=metadata,
         )
 
         return {
             "status": "created",
-            "entry_id": entry.get("id"),
-            "title": entry.get("title"),
-            "category": entry.get("category"),
+            "entry_id": entry.entry_id,
+            "title": entry.title,
+            "category": entry.category,
             "created_at": datetime.utcnow().isoformat()
         }
 
@@ -158,16 +164,15 @@ async def get_entry(
 
     try:
         kb = get_knowledge_base()
-        entry = await kb.get_entry(entry_id, tenant_id=tenant_id)
+        entry = await kb.get_entry(entry_id)
 
         if not entry:
             raise HTTPException(status_code=404, detail="Entry not found")
 
-        # Verify tenant isolation
-        if entry.get("tenant_id") != tenant_id:
-            raise HTTPException(status_code=403, detail="Access denied")
-
-        return entry
+        payload = jsonable_encoder(entry)
+        # Embeddings can be large and are rarely needed via the API.
+        payload.pop("embedding", None)
+        return payload
 
     except HTTPException:
         raise
@@ -189,22 +194,36 @@ async def update_entry(
     try:
         kb = get_knowledge_base()
 
-        # First verify the entry exists and tenant matches
-        existing = await kb.get_entry(entry_id, tenant_id=request.tenant_id)
+        existing = await kb.get_entry(entry_id, track_view=False)
         if not existing:
             raise HTTPException(status_code=404, detail="Entry not found")
 
-        if existing.get("tenant_id") != request.tenant_id:
-            raise HTTPException(status_code=403, detail="Access denied")
+        updates: dict[str, Any] = {
+            "title": request.title,
+            "content": request.content,
+            "category": request.category,
+            "tags": request.tags,
+            "metadata": dict(request.metadata or {}),
+        }
 
-        await kb.update_entry(
-            entry_id=entry_id,
-            title=request.title,
-            content=request.content,
-            category=request.category,
-            tags=request.tags,
-            metadata=request.metadata
-        )
+        # Optional fields supported by the data class.
+        if request.subcategory is not None:
+            updates["subcategory"] = request.subcategory
+
+        try:
+            updates["knowledge_type"] = KnowledgeType(request.knowledge_type)
+        except ValueError:
+            pass
+        try:
+            updates["access_level"] = AccessLevel(request.access_level)
+        except ValueError:
+            pass
+
+        # Preserve tenant_id for legacy clients (not enforced).
+        if request.tenant_id:
+            updates["metadata"].setdefault("tenant_id", request.tenant_id)
+
+        await kb.update_entry(entry_id=entry_id, updates=updates, updated_by=request.author)
 
         return {
             "status": "updated",
@@ -232,15 +251,9 @@ async def delete_entry(
     try:
         kb = get_knowledge_base()
 
-        # Verify tenant isolation
-        existing = await kb.get_entry(entry_id, tenant_id=tenant_id)
-        if not existing:
+        deleted = await kb.delete_entry(entry_id)
+        if not deleted:
             raise HTTPException(status_code=404, detail="Entry not found")
-
-        if existing.get("tenant_id") != tenant_id:
-            raise HTTPException(status_code=403, detail="Access denied")
-
-        await kb.delete_entry(entry_id)
 
         return {
             "status": "deleted",
@@ -283,14 +296,27 @@ async def search_knowledge(
             categories=request.categories,
             tags=request.tags,
             top_k=request.top_k,
-            semantic_search=request.semantic_search,
-            tenant_id=request.tenant_id
+            semantic=request.semantic_search,
         )
+
+        formatted = []
+        for entry, score in results:
+            formatted.append({
+                "entry_id": entry.entry_id,
+                "title": entry.title,
+                "summary": entry.summary or entry.content[:300],
+                "score": score,
+                "knowledge_type": entry.knowledge_type.value,
+                "category": entry.category,
+                "tags": entry.tags,
+                "access_level": entry.access_level.value,
+                "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
+            })
 
         return {
             "query": request.query,
-            "results": results,
-            "total": len(results),
+            "results": formatted,
+            "total": len(formatted),
             "semantic_search": request.semantic_search,
             "searched_at": datetime.utcnow().isoformat()
         }
@@ -317,13 +343,9 @@ async def agent_query(
     try:
         kb = get_knowledge_base()
 
-        response = await kb.query_for_agent(
-            agent_id=request.agent_id,
-            query=request.query,
-            context=request.context,
-            required_types=request.required_types,
-            tenant_id=request.tenant_id
-        )
+        # MasterKnowledgeBase does not currently support tenant scoping or required_types.
+        context = {"text": request.context} if request.context else None
+        response = await kb.query_for_agent(agent_id=request.agent_id, query=request.query, context=context)
 
         return {
             "agent_id": request.agent_id,
@@ -348,11 +370,21 @@ async def list_categories(
 
     try:
         kb = get_knowledge_base()
-        categories = await kb.get_categories(tenant_id)
+        categories = [
+            {
+                "id": c.category_id,
+                "name": c.name,
+                "slug": c.slug,
+                "description": c.description,
+                "entry_count": len(kb.by_category.get(c.slug, set())),
+            }
+            for c in kb.categories.values()
+        ]
 
         return {
             "categories": categories,
-            "total": len(categories)
+            "total": len(categories),
+            "generated_at": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -371,7 +403,7 @@ async def get_statistics(
 
     try:
         kb = get_knowledge_base()
-        stats = await kb.get_statistics(tenant_id)
+        stats = await kb.get_statistics()
 
         return {
             "statistics": stats,
@@ -383,92 +415,7 @@ async def get_statistics(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-# --- Notion Sync Integration ---
-try:
-    from services.notion_client import NotionClient
-    NOTION_AVAILABLE = True
-except ImportError:
-    NOTION_AVAILABLE = False
-    logger.warning("Notion Client not available")
-
-@router.post("/sync/notion")
-async def sync_notion_knowledge(
-    tenant_id: str = "default",
-    limit: int = 50,
-    include_items: bool = False,
-    api_key: str = Depends(verify_api_key)
-):
-    """
-    Sync knowledge from Notion.
-    Fetches pages from the configured Notion workspace and integrates them.
-    """
-    if not NOTION_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Notion integration not available")
-
-    try:
-        client = NotionClient()
-        docs = await client.get_all_knowledge_docs(limit=limit)
-        
-        # If Knowledge Base is available, we could store them.
-        # For now, we return them to the frontend to show "Live" status.
-        # In a full persistent implementation, we would kb.create_entry() for each.
-        
-        saved_count = 0
-        if KNOWLEDGE_BASE_AVAILABLE:
-            kb = get_knowledge_base()
-            for doc in docs:
-                # Upsert logic would go here. For now we log/count.
-                # await kb.upsert_entry(...) 
-                saved_count += 1
-        payload = {
-            "status": "synced" if docs else "skipped",
-            "docs_found": len(docs),
-            "docs_processed": saved_count,
-            "limit": limit,
-            "include_items": include_items,
-            "synced_at": datetime.utcnow().isoformat()
-        }
-        if include_items:
-            payload["items"] = docs
-        return payload
-
-    except Exception as e:
-        logger.error(f"Notion sync error: {e}")
-        # Degrade gracefully so ops checks don't hard-fail when Notion is unavailable.
-        return {
-            "status": "degraded",
-            "docs_found": 0,
-            "docs_processed": 0,
-            "limit": limit,
-            "include_items": include_items,
-            "error": str(e),
-            "synced_at": datetime.utcnow().isoformat()
-        }
-
-async def list_knowledge_types():
-    """List available knowledge types"""
-    return {
-        "knowledge_types": [
-            {"id": "sop", "name": "SOP", "description": "Standard Operating Procedures"},
-            {"id": "policy", "name": "Policy", "description": "Company policies"},
-            {"id": "process", "name": "Process", "description": "Process documentation"},
-            {"id": "guide", "name": "Guide", "description": "How-to guides"},
-            {"id": "faq", "name": "FAQ", "description": "Frequently asked questions"},
-            {"id": "api_doc", "name": "API Documentation", "description": "API reference docs"},
-            {"id": "code_reference", "name": "Code Reference", "description": "Code documentation"},
-            {"id": "product_info", "name": "Product Info", "description": "Product information"},
-            {"id": "troubleshooting", "name": "Troubleshooting", "description": "Troubleshooting guides"},
-            {"id": "template", "name": "Template", "description": "Document templates"},
-            {"id": "checklist", "name": "Checklist", "description": "Operational checklists"},
-            {"id": "runbook", "name": "Runbook", "description": "Operational runbooks"},
-            {"id": "incident_report", "name": "Incident Report", "description": "Incident documentation"},
-            {"id": "agent_config", "name": "Agent Config", "description": "AI agent configurations"},
-            {"id": "prompt_template", "name": "Prompt Template", "description": "AI prompt templates"}
-        ],
-        "access_levels": [
-            {"id": "public", "name": "Public", "description": "Accessible by anyone"},
-            {"id": "internal", "name": "Internal", "description": "Internal use only"},
-            {"id": "confidential", "name": "Confidential", "description": "Restricted access"},
-            {"id": "agent_only", "name": "Agent Only", "description": "AI agents only"}
-        ]
-    }
+#
+# Notion integration previously lived here as a sync endpoint.
+# Notion is deprecated in this AI OS for now; re-introduce only when it becomes
+# an actively used knowledge source again.
