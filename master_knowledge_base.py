@@ -543,6 +543,10 @@ class MasterKnowledgeBase:
         # Initialize default categories
         self._initialize_categories()
 
+        # Keep Command Center knowledge useful even when external LLM providers are rate-limited
+        # by bootstrapping a small set of internal runbooks/docs into memory on cold start.
+        self._bootstrap_local_docs()
+
         logger.info("MasterKnowledgeBase initialized")
 
     def _initialize_categories(self):
@@ -567,6 +571,101 @@ class MasterKnowledgeBase:
                 description=description,
             )
             self.categories[category.category_id] = category
+
+    def _bootstrap_local_docs(self) -> None:
+        """Seed the in-memory knowledge base with a minimal set of local docs.
+
+        This avoids an empty KB in production (the KB is currently in-memory) and keeps
+        keyword search useful even if semantic embeddings are unavailable.
+        """
+        if self.entries:
+            return
+
+        repo_root = Path(__file__).resolve().parent
+
+        seeds: list[dict[str, Any]] = [
+            {
+                "path": "RUNBOOK.md",
+                "title": "AI Agents Runbook",
+                "knowledge_type": KnowledgeType.RUNBOOK,
+                "category": "operations",
+                "tags": ["runbook", "operations"],
+            },
+            {
+                "path": "AUREA_QUICK_REFERENCE.md",
+                "title": "AUREA Quick Reference",
+                "knowledge_type": KnowledgeType.GUIDE,
+                "category": "ai-agents",
+                "tags": ["aurea", "assistant", "command-center"],
+            },
+            {
+                "path": "API_DOCUMENTATION.md",
+                "title": "BrainOps AI Agents API Documentation",
+                "knowledge_type": KnowledgeType.API_DOCUMENTATION,
+                "category": "documentation",
+                "tags": ["api", "docs"],
+            },
+            {
+                "path": "DEPLOY_TO_RENDER.md",
+                "title": "Deploy AI Agents to Render",
+                "knowledge_type": KnowledgeType.RUNBOOK,
+                "category": "operations",
+                "tags": ["deploy", "render", "runbook"],
+            },
+            {
+                "path": "SYSTEM_DOCUMENTATION.md",
+                "title": "AI Agents System Documentation",
+                "knowledge_type": KnowledgeType.ARCHITECTURE,
+                "category": "documentation",
+                "tags": ["architecture", "system"],
+            },
+        ]
+
+        bootstrapped = 0
+        for seed in seeds:
+            path = repo_root / seed["path"]
+            if not path.exists():
+                continue
+
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:
+                logger.warning(f"Knowledge bootstrap: failed reading {path}: {e}")
+                continue
+
+            entry = KnowledgeEntry(
+                title=seed["title"],
+                content=content,
+                summary=(content[:600] + "…") if len(content) > 600 else content,
+                knowledge_type=seed["knowledge_type"],
+                category=seed["category"],
+                tags=list(seed.get("tags") or []),
+                access_level=AccessLevel.INTERNAL,
+                source_type="bootstrap",
+                source_file=str(path),
+                status=KnowledgeStatus.PUBLISHED,
+                published_at=datetime.utcnow(),
+                created_by="bootstrap",
+                updated_by="bootstrap",
+                metadata={"seed": True, "path": seed["path"]},
+            )
+
+            entry.word_count = len(entry.content.split())
+            entry.reading_time_minutes = max(1, entry.word_count // 200)
+
+            self.entries[entry.entry_id] = entry
+            self.by_type[entry.knowledge_type].add(entry.entry_id)
+
+            if entry.category:
+                self.by_category.setdefault(entry.category, set()).add(entry.entry_id)
+
+            for tag in entry.tags:
+                self.by_tag.setdefault(tag, set()).add(entry.entry_id)
+
+            bootstrapped += 1
+
+        if bootstrapped:
+            logger.info(f"Knowledge bootstrap: seeded {bootstrapped} local docs")
 
     # =========================================================================
     # CRUD OPERATIONS
