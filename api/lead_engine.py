@@ -176,6 +176,25 @@ async def relay_lead(request: Request, payload: RelayRequest):
                 except Exception as e:
                     logger.warning(f"Lead qualification trigger failed: {e}")
 
+                # Enroll in commercial roof nurture sequence (non-blocking)
+                try:
+                    from commercial_roof_sequences import enroll_lead_in_commercial_sequence
+                    # Extract first name from full name
+                    first_name = lead.name.split()[0] if lead.name else "there"
+                    enroll_lead_in_commercial_sequence(
+                        lead_id=erp_lead_id,
+                        email=lead.email,
+                        first_name=first_name,
+                        roof_type=lead.roof_type,
+                        square_footage=lead.square_footage,
+                        roof_age_years=lead.roof_age_years,
+                        primary_concern=lead.primary_concern,
+                        preferred_contact_method=lead.preferred_contact_method,
+                    )
+                    logger.info(f"Lead {erp_lead_id} enrolled in commercial roof nurture sequence")
+                except Exception as e:
+                    logger.warning(f"Nurture enrollment failed (non-critical): {e}")
+
                 logger.info(
                     f"Lead handoff complete: MRG {lead.mrg_lead_id} -> ERP {erp_lead_id} "
                     f"(score={lead.ai_score}, concern={lead.primary_concern})"
@@ -334,3 +353,48 @@ def _build_metadata(lead: LeadData, timestamp: str) -> str:
         "preferred_time": lead.preferred_time,
         "ai_score_at_handoff": lead.ai_score,
     })
+
+
+class FeedbackRequest(BaseModel):
+    lead_id: str
+    event_type: str  # opened, clicked, responded, scheduled, converted, opted_out
+    event_data: Optional[dict] = None
+
+
+@router.post("/feedback")
+async def lead_feedback(request: Request, payload: FeedbackRequest):
+    """
+    Receive engagement feedback from ERP or email tracking.
+
+    Events:
+    - opened: Email opened
+    - clicked: Link clicked in email
+    - responded: Lead replied to email
+    - scheduled: Assessment scheduled
+    - converted: Lead converted to customer
+    - opted_out: Lead unsubscribed
+    """
+    valid_events = {"opened", "clicked", "responded", "scheduled", "converted", "opted_out"}
+    if payload.event_type not in valid_events:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid event_type. Must be one of: {', '.join(valid_events)}"
+        )
+
+    try:
+        from commercial_roof_sequences import update_lead_engagement
+        success = update_lead_engagement(
+            lead_id=payload.lead_id,
+            event_type=payload.event_type,
+            event_data=payload.event_data,
+        )
+
+        if success:
+            logger.info(f"Feedback recorded: {payload.lead_id} - {payload.event_type}")
+            return {"success": True, "message": f"Feedback recorded: {payload.event_type}"}
+        else:
+            return {"success": False, "message": "Failed to record feedback"}
+
+    except Exception as e:
+        logger.error(f"Feedback processing error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
