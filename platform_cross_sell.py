@@ -149,7 +149,7 @@ BSS_DEV_PRODUCTS_SEQUENCE = {
     <a href="https://woodworthia.gumroad.com/l/gr-onboard" style="color: #0ea5e9;">Intelligent Client Onboarding ($297)</a> handles intake, contracts, and kickoff automatically.</p>
 
     <p><strong>Managing complex projects?</strong><br>
-    The <a href="https://woodworthia.gumroad.com/l/gr-pmcmd" style="color: #f59e0b;">AI Project Command Center ($197)</a> is a complete Notion workspace with 8 linked databases and 30+ automations.</p>
+    The <a href="https://woodworthia.gumroad.com/l/gr-pmcmd" style="color: #f59e0b;">AI Project Command Center ($197)</a> is a complete BrainOps workspace with 8 linked databases and 30+ automations.</p>
 
     <p>Questions? Just reply - I read every email.</p>
 

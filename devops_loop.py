@@ -126,7 +126,7 @@ SUBSYSTEMS = {
     "a2ui": {"endpoint": "/a2ui/health", "critical": False},
 
     # Knowledge & Learning
-    "knowledge-base": {"endpoint": "/knowledge-base/health", "critical": False},
+    "knowledge-base": {"endpoint": "/api/v1/knowledge-base/health", "critical": False},
     "langgraph": {"endpoint": "/langgraph/status", "critical": False},
 
     # Email & Events

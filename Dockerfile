@@ -25,6 +25,10 @@ FROM python:3.11-slim
 # Build arg to control Playwright installation (set to 0 to skip)
 ARG INSTALL_PLAYWRIGHT=1
 
+# Create non-root user early so we can reference it throughout
+RUN groupadd --gid 1001 appuser && \
+    useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash appuser
+
 # Install runtime dependencies in one layer
 # Playwright deps are always installed (small overhead) but browser download is optional
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -55,18 +59,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
+# Copy installed packages from builder into a shared location (not /root)
+COPY --from=builder /root/.local /home/appuser/.local
 
-# Ensure Python can find the installed packages
-ENV PATH=/root/.local/bin:$PATH
-ENV PYTHONPATH=/root/.local/lib/python3.11/site-packages:$PYTHONPATH
+# Ensure Python can find the installed packages under the non-root user's home
+ENV PATH=/home/appuser/.local/bin:$PATH
+ENV PYTHONPATH=/home/appuser/.local/lib/python3.11/site-packages:$PYTHONPATH
 ENV PYTHONUNBUFFERED=1
 ENV PORT=10000
 
 # Install Playwright browser conditionally (skip with --build-arg INSTALL_PLAYWRIGHT=0)
+# Set PLAYWRIGHT_BROWSERS_PATH so browsers are stored in appuser's home
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/appuser/.cache/ms-playwright
 RUN if [ "$INSTALL_PLAYWRIGHT" = "1" ]; then \
-        /root/.local/bin/playwright install chromium 2>/dev/null || echo "Playwright browser install skipped"; \
+        /home/appuser/.local/bin/playwright install chromium 2>/dev/null || echo "Playwright browser install skipped"; \
     else \
         echo "Playwright browser install skipped (INSTALL_PLAYWRIGHT=0)"; \
     fi
@@ -80,7 +86,11 @@ RUN mkdir -p logs /var/lib/ai-memory /var/log
 # Setup cron for memory sync
 COPY crontab /etc/cron.d/memory-sync
 RUN chmod 0644 /etc/cron.d/memory-sync && \
-    crontab /etc/cron.d/memory-sync
+    crontab -u appuser /etc/cron.d/memory-sync
+
+# Set ownership of all application and data directories to appuser
+RUN chown -R appuser:appuser /app /home/appuser/.local /var/lib/ai-memory && \
+    chown -R appuser:appuser /home/appuser/.cache 2>/dev/null || true
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
@@ -89,7 +99,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Expose port
 EXPOSE 10000
 
-# Start cron and application
-# Python is at /usr/local/bin/python (from base image), packages are in /root/.local (from builder)
-# PATH includes /root/.local/bin for console_scripts installed by pip
-CMD service cron start && python -m uvicorn app:app --host 0.0.0.0 --port ${PORT}
+# Switch to non-root user
+USER appuser
+
+# Start application (cron requires root, so use a Python-based scheduler or skip cron)
+# Note: 'service cron start' requires root. If cron is essential, use supercronic or
+# an entrypoint script with gosu/su-exec. For now, run the app directly.
+CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "10000"]
