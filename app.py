@@ -1769,9 +1769,17 @@ async def verify_api_key(
         return True
 
     # Check Authorization header manually for master key
+    # SECURITY: Use exact match, not substring matching (fixes potential bypass)
     auth_header = request.headers.get("authorization", "")
-    if master_key and master_key in auth_header:
-        return True
+    if master_key and auth_header:
+        # Handle "Bearer <token>" format
+        if auth_header.lower().startswith("bearer "):
+            extracted_token = auth_header[7:].strip()
+            if extracted_token == master_key:
+                return True
+        # Handle raw token in Authorization header
+        elif auth_header.strip() == master_key:
+            return True
 
     if not config.security.auth_required:
         return True
