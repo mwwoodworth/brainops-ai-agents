@@ -160,7 +160,7 @@ class AppConfig:
 
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
-        self.version = os.getenv('VERSION', 'v11.3.1')  # Fix master key auth bypass vulnerability
+        self.version = os.getenv('VERSION', 'v11.3.2')  # Remove JWT fallback + restrict CORS headers
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
