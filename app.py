@@ -1644,12 +1644,22 @@ app = FastAPI(
 
 
 # Configure CORS - uses secure defaults from config (no wildcard fallback)
+# SECURITY: Restrict allowed headers to specific values (not wildcard "*")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.security.allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-API-Key",
+        "X-Tenant-ID",
+        "X-Request-ID",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+    ],
 )
 
 # Mount static files for landing pages (email capture, product pages)
