@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "generated_at": "2026-02-05",
+  "seeds": [
+    {
+      "title": "AUREA Healthcheck + Troubleshooting",
+      "knowledge_type": "runbook",
+      "category": "ai-agents",
+      "tags": ["aurea", "healthcheck", "command-center", "reliability"],
+      "content": "Purpose\n- Keep Command Center AUREA stable even when upstream LLM providers are rate-limited or temporarily down.\n\nKey Behavior\n- Endpoint: POST /aurea/chat/message (requires X-API-Key)\n- If message is exactly \"Reply with only: pong\" (case-insensitive, trimmed), the service returns \"pong\" deterministically.\n- This path does NOT require external LLM calls or database writes.\n\nProvider Ordering (non-stream)\n- Anthropic -> Gemini -> Perplexity -> OpenAI (last-resort)\n\nTroubleshooting Checklist\n1) Verify AI Agents health: GET /health returns HTTP 200.\n2) Verify AUREA health path:\n   - POST /aurea/chat/message with {\"message\":\"Reply with only: pong\",\"stream\":false} returns pong.\n3) If you see \"trouble connecting\" in the Command Center UI:\n   - Confirm BRAINOPS_API_KEY/AGENTS_API_KEY is set in the Command Center environment.\n   - Check Render deploy status for AI Agents and ensure it is live.\n4) If upstream providers are rate-limited:\n   - AUREA should still pass the deterministic healthcheck and keep the UI usable.\n"
+    },
+    {
+      "title": "Command Center Live Verification (Prod)",
+      "knowledge_type": "runbook",
+      "category": "operations",
+      "tags": ["command-center", "playwright", "prod", "verification"],
+      "content": "Goal\n- Prove production navigation and AUREA UX work end-to-end (no guessing).\n\nLive Nav Sweep\n- Run from brainops-command-center/\n- Requires: BASE_URL=https://brainops-command-center.vercel.app and BRAINOPS_API_KEY\n- Command:\n  BASE_URL=https://brainops-command-center.vercel.app RUN_LIVE_SWEEP=true npm run test:e2e -- e2e/live-nav.spec.ts\n\nWhat It Proves\n- Login succeeds\n- Sidebar navigation links actually navigate\n- Mobile bottom nav works\n- AUREA UI receives a response and does not show the \"core systems\" error string\n"
+    },
+    {
+      "title": "Weathercraft ERP Prod-Remote E2E Smoke",
+      "knowledge_type": "runbook",
+      "category": "operations",
+      "tags": ["erp", "playwright", "prod-remote", "verification"],
+      "content": "Goal\n- Validate ERP core workflows against real production (QA automation tenant) without destructive operations.\n\nCommand\n- Run from weathercraft-erp/\n  PLAYWRIGHT_ALLOW_PROD_E2E=1 PLAYWRIGHT_TENANT_ID=497509e7-b9f8-4766-922c-94ed19626547 npm run test:e2e:smoke:remote\n\nExpected Result\n- Full smoke suite passes (non-destructive) and confirms auth/session, core module navigation, and workflow integrity.\n"
+    },
+    {
+      "title": "Deploy AI Agents (Docker -> Render)",
+      "knowledge_type": "runbook",
+      "category": "operations",
+      "tags": ["deploy", "render", "docker", "ai-agents"],
+      "content": "Standard Deploy\n- Command:\n  brainops deploy ai-agents\n\nWhat It Does\n1) docker build\n2) docker push mwwoodworth/brainops-ai-agents:latest\n3) Trigger Render deploy for service srv-d413iu75r7bs738btc10\n4) Wait for live + run health check\n\nOperational Note\n- Render may cancel an API-triggered deploy if an auto-deploy starts immediately after a new image push.\n- Always confirm the *latest* deploy is live via Render deploy list and AI Agents /health.\n"
+    },
+    {
+      "title": "MCP Bridge (Prod) Overview",
+      "knowledge_type": "architecture",
+      "category": "documentation",
+      "tags": ["mcp", "bridge", "devops", "tools"],
+      "content": "Service\n- brainops-mcp-bridge (Render web service)\n\nPurpose\n- Provide a secured MCP interface for DevOps/automation tools.\n\nHealth\n- GET /health returns inventory counts (servers/tools) and cache status.\n\nConfig\n- Uses mcp-config.json at runtime; in Render, local-only servers are automatically disabled.\n"
+    }
+  ]
+}
+
