@@ -255,8 +255,8 @@ class RevenueIntelligenceSystem:
             product_type="template",
             url="https://woodworthia.gumroad.com/l/gr-pmcmd",
             status="active",
-            description="Notion workspace with 8 linked databases and 30+ automations",
-            features=["Notion", "Make/Zapier", "AI-Ready", "Executive dashboard"]
+            description="BrainOps Knowledge Base with linked databases and automations",
+            features=["Knowledge Base", "Make/Zapier", "AI-Ready", "Executive dashboard"]
         ),
     ]
 

@@ -591,7 +591,7 @@ class TrueOperationalValidator:
 
         try:
             # Get self-healing status
-            async with self._session.get(f"{BASE_URL}/self-healing/status") as resp:
+            async with self._session.get(f"{BASE_URL}/api/v1/self-healing/status") as resp:
                 if resp.status != 200:
                     return self._record_result(
                         "self_healing", False, time.time() - start,
