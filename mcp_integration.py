@@ -889,7 +889,32 @@ class MCPClient:
 
         sql = f'SELECT {columns} FROM "{table}"'
         if where:
-            # Where clause should use parameterized queries - caller must pass params
+            # SECURITY: Validate WHERE clause - must use parameterized placeholders ($1, $2, etc)
+            # Reject if it contains quotes, semicolons, or SQL keywords that suggest injection
+            dangerous_patterns = [
+                r"['\";]",  # Quotes and semicolons
+                r"\b(DROP|DELETE|UPDATE|INSERT|TRUNCATE|ALTER|EXEC|EXECUTE|UNION|--|/\*)\b",  # SQL keywords
+            ]
+            for pattern in dangerous_patterns:
+                if re.search(pattern, where, re.IGNORECASE):
+                    return MCPToolResult(
+                        success=False,
+                        server=MCPServer.SUPABASE.value,
+                        tool="supabase_select",
+                        result=None,
+                        duration_ms=0.0,
+                        error="WHERE clause contains potentially unsafe SQL patterns. Use parameterized queries ($1, $2, etc).",
+                    )
+            # Require params when using where clause to enforce parameterization
+            if params is None and re.search(r'\$\d+', where):
+                return MCPToolResult(
+                    success=False,
+                    server=MCPServer.SUPABASE.value,
+                    tool="supabase_select",
+                    result=None,
+                    duration_ms=0.0,
+                    error="WHERE clause has placeholders but no params provided",
+                )
             sql += f" WHERE {where}"
         return await self.supabase_query(sql, params)
 
