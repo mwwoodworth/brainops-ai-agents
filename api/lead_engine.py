@@ -68,9 +68,10 @@ class RelayResponse(BaseModel):
 def get_db_pool():
     """Get database connection pool."""
     try:
-        from app import db_pool
-        return db_pool
-    except ImportError:
+        from database.async_connection import get_pool
+        return get_pool()
+    except Exception as e:
+        logger.error(f"Failed to get database pool: {e}")
         return None
 
 
