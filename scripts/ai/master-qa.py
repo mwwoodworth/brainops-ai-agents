@@ -53,14 +53,14 @@ SYSTEMS = [
         "id": "myroofgenius-app",
         "name": "MyRoofGenius (PROD)",
         "path": "/home/matt-woodworth/dev/myroofgenius-app",
-        "command": "PLAYWRIGHT_BASE_URL=https://myroofgenius.com npx playwright test e2e/dashboard.spec.ts --reporter=json",
+        "command": "PLAYWRIGHT_BASE_URL=https://myroofgenius.com npx playwright test e2e/production-readiness.spec.ts --reporter=json",
         "url": "https://myroofgenius.com"
     },
     {
         "id": "brainops-command-center",
         "name": "Command Center (PROD)",
         "path": "/home/matt-woodworth/dev/brainops-command-center",
-        "command": "PLAYWRIGHT_TEST_BASE_URL=https://brainops-command-center.vercel.app npx playwright test tests/e2e/qa-agent/audit.spec.ts --reporter=json",
+        "command": "PLAYWRIGHT_TEST_BASE_URL=https://brainops-command-center.vercel.app RUN_LIVE_NAV=true npx playwright test e2e/live-nav.spec.ts --reporter=json",
         "url": "https://brainops-command-center.vercel.app"
     },
     {
