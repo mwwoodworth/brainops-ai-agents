@@ -98,28 +98,29 @@ async def relay_lead(request: Request, payload: RelayRequest):
 
             if payload.action == "handoff":
                 # Insert into ERP leads table (Weathercraft tenant)
+                # NOTE: 'city' and 'state' columns do not exist in 'leads' table; mapping to 'address' and 'metadata'
                 erp_lead_id = await conn.fetchval("""
                     INSERT INTO public.leads (
                         tenant_id, name, email, phone, address,
-                        city, state, roof_type, square_footage,
+                        roof_type, square_footage,
                         urgency, insurance_claim, budget_range,
                         source, status, score, ai_score,
                         description, notes, metadata,
                         created_at, updated_at, last_activity_at
                     ) VALUES (
                         $1, $2, $3, $4, $5,
-                        $6, $7, $8, $9,
-                        $10, $11, $12,
-                        $13, $14, $15, $16,
-                        $17, $18, $19::jsonb,
-                        $20, $20, $20
+                        $6, $7,
+                        $8, $9, $10,
+                        $11, $12, $13, $14,
+                        $15, $16, $17::jsonb,
+                        $18, $18, $18
                     )
                     ON CONFLICT (tenant_id, related_entity_type, related_entity_id)
                         WHERE related_entity_type IS NOT NULL AND related_entity_id IS NOT NULL
                     DO UPDATE SET
                         status = 'qualified',
-                        updated_at = $20,
-                        last_activity_at = $20
+                        updated_at = $18,
+                        last_activity_at = $18
                     RETURNING id::text
                 """,
                     WEATHERCRAFT_TENANT_ID,
@@ -127,8 +128,6 @@ async def relay_lead(request: Request, payload: RelayRequest):
                     lead.email.lower(),
                     lead.phone,
                     _build_address(lead),
-                    lead.city,
-                    lead.state,
                     lead.roof_type,
                     lead.square_footage,
                     _calc_urgency(lead),
@@ -367,6 +366,9 @@ def _build_metadata(lead: LeadData, timestamp: str) -> str:
         "source_platform": "myroofgenius",
         "funnel": "roof_health_advisory",
         "handoff_at": timestamp,
+        "city": lead.city,
+        "state": lead.state,
+        "zip": lead.zip,
         "roof_type": lead.roof_type,
         "roof_age_years": lead.roof_age_years,
         "square_footage": lead.square_footage,
