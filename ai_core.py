@@ -274,7 +274,8 @@ class RealAICore:
         intent: Optional[str] = None,
         use_model_routing: bool = False,
         prefer_anthropic: bool = False,
-        allow_expensive: bool = True
+        allow_expensive: bool = True,
+        json_mode: bool = False
     ) -> Any:
         """Generate REAL AI response with intelligent fallback chain.
 
@@ -293,6 +294,10 @@ class RealAICore:
         is_openai_model = selected_model.startswith("gpt") or selected_model == "openai" or self._is_reasoning_model(selected_model)
         is_anthropic_model = selected_model.startswith("claude") or selected_model == "anthropic"
 
+        # Append JSON instruction if needed
+        if json_mode and "json" not in prompt.lower() and (not system_prompt or "json" not in system_prompt.lower()):
+            prompt += "\n\nPlease respond in valid JSON format."
+
         try:
             if is_openai_model and self.async_openai:
                 # o1 models have different API requirements
@@ -305,6 +310,7 @@ class RealAICore:
 
                     # o1 uses max_completion_tokens, not max_tokens
                     # o1 doesn't support temperature or streaming
+                    # o1 doesn't support response_format="json_object" yet, rely on prompt
                     response = await self.async_openai.chat.completions.create(
                         model=selected_model,
                         messages=messages,
@@ -318,14 +324,20 @@ class RealAICore:
                         messages.append({"role": "system", "content": system_prompt})
                     messages.append({"role": "user", "content": prompt})
 
-                    response = await self.async_openai.chat.completions.create(
-                        model=selected_model,
-                        messages=messages,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        stream=stream,
-                        timeout=5  # Add timeout
-                    )
+                    kwargs = {
+                        "model": selected_model,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "stream": stream,
+                        "timeout": 30
+                    }
+                    
+                    if json_mode:
+                        kwargs["response_format"] = {"type": "json_object"}
+
+                    response = await self.async_openai.chat.completions.create(**kwargs)
+                    
                     if stream:
                         return response
                     return response.choices[0].message.content
@@ -333,6 +345,8 @@ class RealAICore:
             # Use Claude as alternative
             elif is_anthropic_model and self.async_anthropic:
                 system = system_prompt or "You are a helpful AI assistant for a roofing business."
+                if json_mode:
+                    system += " You must output valid JSON."
 
                 response = await self.async_anthropic.messages.create(
                     model=selected_model,

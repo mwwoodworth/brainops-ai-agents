@@ -176,22 +176,46 @@ async def relay_lead(request: Request, payload: RelayRequest):
                 except Exception as e:
                     logger.warning(f"Lead qualification trigger failed: {e}")
 
-                # Enroll in commercial roof nurture sequence (non-blocking)
+                # Enroll in nurture sequence (non-blocking)
                 try:
                     from commercial_roof_sequences import enroll_lead_in_commercial_sequence
+                    from services.lead_segmentation_sequences import enroll_lead_in_segment_sequence
+                    
                     # Extract first name from full name
                     first_name = lead.name.split()[0] if lead.name else "there"
-                    enroll_lead_in_commercial_sequence(
-                        lead_id=erp_lead_id,
-                        email=lead.email,
-                        first_name=first_name,
-                        roof_type=lead.roof_type,
-                        square_footage=lead.square_footage,
-                        roof_age_years=lead.roof_age_years,
-                        primary_concern=lead.primary_concern,
-                        preferred_contact_method=lead.preferred_contact_method,
-                    )
-                    logger.info(f"Lead {erp_lead_id} enrolled in commercial roof nurture sequence")
+                    lead_dict = lead.model_dump()
+                    
+                    # Determine segment
+                    segment = None
+                    concern_lower = (lead.primary_concern or "").lower()
+                    
+                    if "leak" in concern_lower or "repair" in concern_lower or "maintenance" in concern_lower:
+                        segment = "service"
+                    elif "replacement" in concern_lower or "age" in concern_lower or "insurance" in concern_lower or "storm" in concern_lower:
+                        segment = "reroof"
+                    
+                    if segment:
+                        enroll_lead_in_segment_sequence(
+                            lead_id=erp_lead_id,
+                            email=lead.email,
+                            first_name=first_name,
+                            segment=segment,
+                            lead_data=lead_dict
+                        )
+                        logger.info(f"Lead {erp_lead_id} enrolled in {segment} sequence")
+                    else:
+                        # Fallback to commercial sequence
+                        enroll_lead_in_commercial_sequence(
+                            lead_id=erp_lead_id,
+                            email=lead.email,
+                            first_name=first_name,
+                            roof_type=lead.roof_type,
+                            square_footage=lead.square_footage,
+                            roof_age_years=lead.roof_age_years,
+                            primary_concern=lead.primary_concern,
+                            preferred_contact_method=lead.preferred_contact_method,
+                        )
+                        logger.info(f"Lead {erp_lead_id} enrolled in commercial roof nurture sequence")
                 except Exception as e:
                     logger.warning(f"Nurture enrollment failed (non-critical): {e}")
 
