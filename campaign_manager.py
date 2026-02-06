@@ -4,8 +4,8 @@ Campaign Manager
 Pluggable campaign system for lead generation outreach.
 
 Campaign #1: Colorado Commercial Reroof (Front Range)
-- MRG-branded outreach to large commercial building owners
-- Weathercraft revealed only at handoff (email 5)
+- Direct Weathercraft-branded outreach to large commercial building owners
+- 3-email sequence over 5 days, no giveaways, straight to business
 - Reusable architecture for future campaigns (SaaS, digital products, AI tools)
 """
 
@@ -77,117 +77,55 @@ def _email_footer(brand: str, address: str, unsub_url: str, lead_id: str) -> str
 _CO_REROOF_TEMPLATES = [
     EmailTemplate(
         step=1, delay_days=0,
-        subject="Free AI Roof Assessment for Your {building_type} in {city}",
+        subject="Your {building_type} in {city} - Roof Season Is Coming",
         body_html="""<div style="font-family:Arial,sans-serif;max-width:600px;color:#333;">
 <p>Hi {contact_name},</p>
-<p>I'm reaching out because your {building_type} in {city} may be approaching the point where a professional roof evaluation makes sense.</p>
-<p>Colorado's Front Range climate is uniquely harsh on commercial roofs:</p>
+<p>I'm Matt Woodworth with <strong>Weathercraft Roofing</strong> in Colorado Springs. We specialize exclusively in large commercial reroofs along the Front Range.</p>
+<p>I'm reaching out because Colorado hail season is right around the corner, and buildings like your {building_type} in {city} take a beating every year:</p>
 <ul>
-  <li><strong>Hail season (April - September)</strong> causes more commercial roof damage here than almost anywhere in the country</li>
-  <li><strong>UV exposure at 6,000+ feet</strong> accelerates membrane degradation 20-30% faster than sea level</li>
-  <li><strong>Freeze-thaw cycling</strong> stresses seams and flashings through 300+ cycles per year</li>
+  <li><strong>Hail season (April - September)</strong> drives more commercial roof claims in Colorado than almost anywhere in the country</li>
+  <li><strong>UV at 6,000+ feet</strong> degrades membranes 20-30% faster than at sea level</li>
+  <li><strong>300+ freeze-thaw cycles per year</strong> stress every seam and flashing</li>
 </ul>
-<p>We built MyRoofGenius to give commercial building owners a fast, honest picture of their roof's condition using AI-powered analysis.</p>
-<p><strong>Here's what we offer at no cost:</strong></p>
+<p>If your roof is 10+ years old or you've noticed any leaks, ponding, or membrane wear, it's worth getting eyes on it before storm season hits.</p>
+<p><strong>What we do:</strong></p>
 <ul>
-  <li>AI analysis of your roof photos identifying damage, wear, and risk areas</li>
-  <li>Condition scoring with estimated remaining useful life</li>
-  <li>Repair vs. replacement cost comparison</li>
-  <li>PDF report you can share with your team or insurance carrier</li>
+  <li>Large commercial reroofs: 10,000 - 200,000+ sqft</li>
+  <li>All membrane systems: TPO, EPDM, PVC, BUR, modified bitumen</li>
+  <li>Standing seam metal roofing with in-house ES-1 certified metal shop</li>
+  <li>We fabricate our own coping, trim, and flashing - no middleman</li>
 </ul>
-<p><a href="{cta_url}" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;">Get Your Free Roof Assessment</a></p>
-<p>Or simply reply to this email with a few photos of your roof and we'll send back a detailed analysis.</p>
-<p>Best,<br>Matt Woodworth<br><em>MyRoofGenius AI</em></p>
+<p>If you'd like to discuss your roof situation, just reply to this email or give me a call.</p>
+<p>Best,<br>Matt Woodworth<br><em>Weathercraft Roofing</em><br>Colorado Springs, CO</p>
 </div>""",
-        call_to_action="Get free AI roof assessment",
+        call_to_action="Reply to discuss",
     ),
     EmailTemplate(
-        step=2, delay_days=2,
-        subject="What {roof_system} Owners in Colorado Should Know",
+        step=2, delay_days=3,
+        subject="Quick question about your {building_type} roof, {contact_name}",
         body_html="""<div style="font-family:Arial,sans-serif;max-width:600px;color:#333;">
 <p>Hi {contact_name},</p>
-<p>Quick follow-up with some information specific to your building.</p>
+<p>Following up on my earlier note. Just wanted to make sure it landed in your inbox.</p>
 <p>{roof_system_education}</p>
-<p><strong>Why Colorado is different for large commercial roofs:</strong></p>
-<ul>
-  <li>Buildings over 10,000 sqft face unique drainage challenges during Colorado's intense afternoon thunderstorms</li>
-  <li>Thermal expansion and contraction at altitude puts more stress on seams and penetrations</li>
-  <li>Hail impacts on large flat roofs often go unnoticed until interior leaks appear months later</li>
-</ul>
-<p>A proactive assessment now, before hail season, can save tens of thousands in emergency repairs later.</p>
-<p><a href="{cta_url}" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;">Upload Roof Photos for Free Analysis</a></p>
-<p>Best,<br>Matt Woodworth<br><em>MyRoofGenius AI</em></p>
+<p>We recently worked with a facility manager in Colorado Springs whose 42,000 sqft distribution center had hail damage. They were quoted $320K for a full tear-off by another contractor. After our inspection, the actual scope was far more targeted - we saved them over $230,000 by addressing only the damaged areas.</p>
+<p>Not every roof issue requires full replacement. Sometimes a targeted repair or coating system is the right call. We'll tell you straight either way.</p>
+<p>If you're thinking about your roof at all before hail season, I'd be happy to talk through your options. Just reply here.</p>
+<p>Best,<br>Matt Woodworth<br><em>Weathercraft Roofing</em><br>Colorado Springs, CO</p>
 </div>""",
-        call_to_action="Upload photos for analysis",
+        call_to_action="Reply to discuss",
     ),
     EmailTemplate(
         step=3, delay_days=5,
-        subject="How a {city} {building_type} Saved $230K on Their Reroof",
+        subject="Last note - {building_type} roof in {city}",
         body_html="""<div style="font-family:Arial,sans-serif;max-width:600px;color:#333;">
 <p>Hi {contact_name},</p>
-<p>I wanted to share a recent example that might be relevant to your situation.</p>
-<p><strong>Case: 42,000 sqft Distribution Center - Colorado Springs</strong></p>
-<p>The facility manager noticed a few small leaks after a summer hailstorm and assumed the entire membrane needed replacement. The initial estimate from another contractor was $320,000+.</p>
-<p>After an AI-assisted assessment combined with a professional on-site inspection, the actual scope was much more targeted:</p>
-<ul>
-  <li>Only 18% of the membrane showed hail damage requiring attention</li>
-  <li>The remaining 82% was in solid condition with 10+ years of useful life</li>
-  <li>Targeted repairs + a protective coating system brought total cost to $87,000</li>
-  <li><strong>Savings: over $230,000</strong></li>
-</ul>
-<p>The takeaway: not every roof issue requires full replacement, and an honest assessment is the first step.</p>
-<p><a href="{cta_url}" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;">See What We'd Recommend for Your Building</a></p>
-<p>Best,<br>Matt Woodworth<br><em>MyRoofGenius AI</em></p>
+<p>Last note from me on this. I know you're busy.</p>
+<p>If your {building_type} roof needs attention this year, we'd like the opportunity to earn your business. Weathercraft has been doing large commercial reroofs in Colorado for decades, and we're one of the few contractors on the Front Range with an in-house ES-1 certified metal shop.</p>
+<p>We're not the cheapest, but we're thorough, we're honest, and we stand behind our work.</p>
+<p>If the timing isn't right now, no worries at all. But if you'd like to talk before hail season fills up everyone's schedule, just reply or call anytime.</p>
+<p>Best regards,<br>Matt Woodworth<br><em>Weathercraft Roofing</em><br>Colorado Springs, CO</p>
 </div>""",
-        call_to_action="Get your assessment",
-    ),
-    EmailTemplate(
-        step=4, delay_days=9,
-        subject="Quick question about your {building_type} roof",
-        body_html="""<div style="font-family:Arial,sans-serif;max-width:600px;color:#333;">
-<p>Hi {contact_name},</p>
-<p>Just a brief follow-up.</p>
-<p>Colorado hail season starts in April, and scheduling professional inspections gets backed up quickly once storms begin. If you've been considering having your roof evaluated, now is an ideal time.</p>
-<p>Our assessment includes:</p>
-<ul>
-  <li>Complete membrane and seam condition analysis</li>
-  <li>Drainage pattern evaluation</li>
-  <li>Flashing and penetration seal inspection</li>
-  <li>Photo-documented findings report</li>
-  <li>Honest repair vs. replacement recommendations with cost ranges</li>
-</ul>
-<p>Would you prefer to upload photos for an AI analysis, or schedule a professional on-site evaluation?</p>
-<p>Just reply to this email and we'll take it from there.</p>
-<p>Best,<br>Matt<br><em>MyRoofGenius AI</em></p>
-</div>""",
-        call_to_action="Reply to schedule",
-    ),
-    EmailTemplate(
-        step=5, delay_days=14,
-        subject="Complimentary Professional Roof Inspection - Limited Availability",
-        body_html="""<div style="font-family:Arial,sans-serif;max-width:600px;color:#333;">
-<p>Hi {contact_name},</p>
-<p>This is my last note regarding your commercial roof assessment.</p>
-<p>I wanted to share something I think you'll find valuable: we've partnered with <strong>Weathercraft Roofing</strong>, a full-scope commercial roofing specialist based right here in Colorado Springs, to provide complimentary professional on-site inspections for buildings we identify through our AI assessment platform.</p>
-<p><strong>Why Weathercraft:</strong></p>
-<ul>
-  <li>Specialize exclusively in large commercial reroofs (10,000 - 200,000+ sqft)</li>
-  <li>All major membrane systems: TPO, EPDM, PVC, BUR, modified bitumen</li>
-  <li>ES-1 certified metal shop with in-house fabrication of coping, trim, and flashing</li>
-  <li>Standing seam metal roofing and single skin wall panel installation</li>
-  <li>Decades of commercial roofing experience in Colorado</li>
-</ul>
-<p><strong>For a limited time:</strong></p>
-<ul>
-  <li>Free comprehensive on-site inspection (normally $500+ value)</li>
-  <li>Priority scheduling this month</li>
-  <li>10% discount on any work if scheduled within 30 days</li>
-</ul>
-<p>Your {roof_system} system deserves a professional evaluation before storm season. If you're interested, just reply <strong>"SCHEDULE"</strong> and we'll coordinate a convenient time.</p>
-<p>If you're not interested, no problem at all. I'll close out your file.</p>
-<p>Best regards,<br>Matt Woodworth<br><em>MyRoofGenius AI + Weathercraft Roofing</em></p>
-</div>""",
-        call_to_action="Reply SCHEDULE",
+        call_to_action="Reply or call",
     ),
 ]
 
@@ -195,7 +133,7 @@ _CO_REROOF_CAMPAIGN = CampaignConfig(
     id="co_commercial_reroof",
     name="Colorado Commercial Reroof - Front Range",
     campaign_type="commercial_reroof",
-    brand="MyRoofGenius",
+    brand="Weathercraft Roofing",
     from_name="Matt Woodworth",
     target_audience="facility_managers",
     geography=GeographyConfig(
@@ -220,7 +158,7 @@ _CO_REROOF_CAMPAIGN = CampaignConfig(
     roof_systems=["TPO", "EPDM", "PVC", "BUR", "modified bitumen", "standing seam metal"],
     min_sqft=5000,
     templates=_CO_REROOF_TEMPLATES,
-    cta_url="https://myroofgenius.com/free-roof-analysis",
+    cta_url="https://www.weathercraftroofingco.com",
     handoff_partner=HandoffPartner(
         name="Weathercraft Roofing",
         location="Colorado Springs, CO",
