@@ -161,6 +161,14 @@ PRODUCT_MAPPING = {
         'convertkit_tag': 'business-toolkit-buyer',
         'gumroad_url': 'https://woodworthia.gumroad.com/l/cawvo'
     },
+    # === BRAINSTACK STORE PRODUCTS ===
+    'MMBQ': {
+        'name': 'BrainStack',
+        'price': 29.99,
+        'type': 'code_kit',
+        'convertkit_tag': 'brainstack-buyer',
+        'gumroad_url': 'https://brainstack.gumroad.com/l/mmbq'
+    },
     # === LEGACY/FUTURE PRODUCTS ===
     'GR-ROOFINT': {
         'name': 'Commercial Roofing Intelligence Bundle',
