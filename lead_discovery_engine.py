@@ -845,9 +845,29 @@ class LeadDiscoveryEngine:
             return []
 
         leads = []
+        
+        # Determine search strategy based on criteria
+        industries = [i.lower() for i in self.criteria.industries]
+        is_saas_search = any(i in industries for i in ["saas", "software", "technology", "ai"])
+        
+        if is_saas_search:
+            search_prompt = """Search for SaaS founders, indie hackers, and software agencies that are building AI applications.
+Look for:
+1. Founders asking for help with AI architecture or boilerplate
+2. Agencies looking to scale their AI development services
+3. Developers complaining about "building from scratch"
+4. Recent launches on Product Hunt or Indie Hackers in the AI space
 
-        try:
-            # Search for roofing contractors showing buying signals
+Return JSON array with up to 10 results, each containing:
+- company_name: string
+- location: string (city, state/country)
+- website: string (URL if found)
+- buying_signals: array of strings
+- estimated_size: string (small/medium/large)
+
+Return ONLY valid JSON array, no other text."""
+            default_industry = "software"
+        else:
             search_prompt = """Search for roofing contractors in the United States that show signs of needing business software or CRM.
 
 Look for:
@@ -865,6 +885,7 @@ Return JSON array with up to 10 results, each containing:
 
 Return ONLY valid JSON array, no other text."""
 
+        try:
             result = advanced_ai.search_with_perplexity(search_prompt)
 
             if result and result.get("answer"):
@@ -884,6 +905,7 @@ Return ONLY valid JSON array, no other text."""
                             company_name=data.get("company_name", "Unknown"),
                             location=data.get("location", ""),
                             website=data.get("website"),
+                            industry=default_industry,
                             source=LeadSource.WEB_SEARCH,
                             source_detail="AI web research - buying signals detected",
                             score=60.0,
@@ -891,12 +913,13 @@ Return ONLY valid JSON array, no other text."""
                             signals=signals,
                             metadata={
                                 "estimated_size": data.get("estimated_size", "unknown"),
-                                "search_source": "perplexity"
+                                "search_source": "perplexity",
+                                "target_market": "saas" if is_saas_search else "roofing"
                             }
                         )
                         leads.append(lead)
 
-            logger.info("Discovered %d leads from web search", len(leads))
+            logger.info(f"Discovered {len(leads)} leads from web search (SaaS={is_saas_search})")
             return leads
 
         except Exception as e:

@@ -183,6 +183,79 @@ _CO_REROOF_CAMPAIGN = CampaignConfig(
 
 CAMPAIGNS: dict[str, CampaignConfig] = {
     "co_commercial_reroof": _CO_REROOF_CAMPAIGN,
+    "brainops_digital_products": CampaignConfig(
+        id="brainops_digital_products",
+        name="BrainOps Digital Products - SaaS Founders",
+        campaign_type="digital_products",
+        brand="BrainOps",
+        from_name="Gemini (BrainOps AI)",
+        target_audience="saas_founders",
+        geography=GeographyConfig(
+            states=["Global"],
+            cities=["Remote"],
+            metro_areas=["Tech Hubs"],
+        ),
+        building_types=["SaaS", "Software Company", "Startup"],
+        roof_systems=["Next.js", "Python", "AI", "FastAPI"],
+        min_sqft=0,
+        templates=[
+            EmailTemplate(
+                step=1, delay_days=0,
+                subject="Accelerate your AI SaaS build, {contact_name}",
+                body_html="""<div style="font-family:Arial,sans-serif;max-width:600px;color:#333;">
+<p>Hi {contact_name},</p>
+<p>I noticed you're building in the AI/SaaS space. As an AI agent myself (Gemini), I know how hard it is to build a robust "Brain" for your application from scratch.</p>
+<p>The <strong>BrainOps AI OS</strong> team has released the exact codebase used to power a $1.6M/year ERP system as a starter kit:</p>
+<ul>
+  <li><strong>SaaS ERP Starter Kit:</strong> Next.js 14, Supabase, Stripe, and RBAC pre-configured.</li>
+  <li><strong>AI Orchestrator Framework:</strong> A Python/FastAPI brain that manages agents, memory, and context.</li>
+  <li><strong>Commercial Roofing Intelligence:</strong> The prompt engineering behind our deep industry knowledge.</li>
+</ul>
+<p>Stop rewriting auth, billing, and basic agent loops. Start shipping features.</p>
+<p>You can grab the kits here: <a href="{cta_url}">{cta_url}</a></p>
+<p>Best,<br>Gemini<br><em>BrainOps AI</em></p>
+</div>""",
+                call_to_action="View Products",
+            ),
+            EmailTemplate(
+                step=2, delay_days=2,
+                subject="The architecture behind $1.6M revenue",
+                body_html="""<div style="font-family:Arial,sans-serif;max-width:600px;color:#333;">
+<p>Hi {contact_name},</p>
+<p>Most AI boilerplates are just "chat with PDF" wrappers. The BrainOps architecture is different.</p>
+<p>It's an <strong>AI Operating System</strong> that includes:</p>
+<ul>
+  <li><strong>Central Nervous System (NerveCenter):</strong> Coordinates autonomous agents.</li>
+  <li><strong>Self-Healing Infrastructure:</strong> Detects and fixes its own DB schema drift.</li>
+  <li><strong>Revenue Pipeline Factory:</strong> Automates lead discovery (like how I found you!).</li>
+</ul>
+<p>We bundled this into the <strong>Ultimate All-Access Bundle</strong>. It's literally the code running our production systems right now.</p>
+<p>Check it out: <a href="{cta_url}">{cta_url}</a></p>
+<p>Cheers,<br>Gemini</p>
+</div>""",
+                call_to_action="See Architecture",
+            ),
+            EmailTemplate(
+                step=3, delay_days=4,
+                subject="Last call: Stop building from scratch",
+                body_html="""<div style="font-family:Arial,sans-serif;max-width:600px;color:#333;">
+<p>Hi {contact_name},</p>
+<p>Final note. If you want to save ~3 months of dev time on your next AI project, the <strong>BrainOps Starter Kits</strong> are the way to go.</p>
+<p>We use these tools daily to manage 10,000+ customers and millions in revenue. They aren't toys.</p>
+<p><a href="{cta_url}">Get the code here</a></p>
+<p>I'll stop bugging you now. Good luck with the build!</p>
+<p>- Gemini</p>
+</div>""",
+                call_to_action="Get the Code",
+            ),
+        ],
+        cta_url="https://brainops.gumroad.com",
+        handoff_partner=None,
+        daily_outreach_limit=100,
+        is_active=True,
+        physical_address="BrainStack Studio, Global",
+        unsubscribe_url="https://brainstack.studio/unsubscribe",
+    ),
 }
 
 ROOF_SYSTEM_EDUCATION: dict[str, str] = {
