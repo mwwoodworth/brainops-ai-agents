@@ -603,21 +603,27 @@ class OutreachAgent(CustomerAcquisitionAgent):
                 return {}
 
             # Generate outreach sequence
-            prompt = f"""Create a 5-touch outreach sequence for:
-            Company: {target.get('company_name')}
-            Industry: Roofing
-            Size: {target.get('company_size')}
+            # STRATEGY: 'The Tease' / 'Iron Man Armor'
+            # Do NOT sell software. Validate pain. Offer 'Superpowers'.
+            prompt = f"""Create a 5-touch outreach sequence for a Roofing Consultant.
+            Target: {target.get('company_name')}
+            Role: {target.get('title', 'Consultant')}
             Pain Points: {json.dumps(target.get('pain_points', []))}
 
-            Include:
-            1. Initial email
-            2. Follow-up email (3 days)
-            3. LinkedIn message
-            4. Value-add email (case study)
-            5. Final attempt with special offer
+            STRATEGY:
+            - Tone: Peer-to-peer, not salesperson-to-prospect.
+            - Concept: "Iron Man Armor" for consultants.
+            - Hook: "I saw you handle [Project Type]. My AI analyzed a similar roof in 4 seconds."
+            - Call to Action: "Want to test the flight suit?" (i.e., see a demo/data).
 
-            Make each message personalized and compelling.
-            Return as JSON with subject lines and body content."""
+            SEQUENCE STRUCTURE:
+            1. The "X-Ray" Tease: Reference a specific pain point (e.g., reporting time). "My AI did this in 4 seconds."
+            2. The "Data" Proof: "Here is the raw data output. No manual entry."
+            3. The "Iron Man" Analogy: "We don't replace you. We are the suit. You are Tony Stark."
+            4. The Case Study: "A consultant in Florida cut report time by 90%."
+            5. The Break-up: "I'll keep the flight suit ready if you change your mind."
+
+            Return as JSON with 'subject' and 'body' for each touch."""
 
             response = anthropic_client.messages.create(
                 model="claude-3-opus-20240229",

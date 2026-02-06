@@ -231,6 +231,14 @@ except Exception as exc:
     logger.error("Traceback: %s", traceback.format_exc())
     _handle_optional_import("Revenue pipeline agents", exc)
 
+# Market Analyzer Agent - REAL implementation
+try:
+    from market_analyzer import MarketAnalyzerAgent
+    MARKET_ANALYZER_AVAILABLE = True
+except Exception as exc:
+    MARKET_ANALYZER_AVAILABLE = False
+    _handle_optional_import("Market Analyzer agent", exc)
+
 # Hallucination Prevention - SAC3 validation for all AI outputs
 try:
     from hallucination_prevention import get_hallucination_controller
@@ -876,6 +884,14 @@ class AgentExecutor:
         self.agents['CustomerIntelligence'] = CustomerIntelligenceAgent()
         self.agents['PredictiveAnalyzer'] = PredictiveAnalyzerAgent()
         self.agents['RevenueOptimizer'] = RevenueOptimizerAgent()
+        
+        if MARKET_ANALYZER_AVAILABLE:
+            try:
+                self.agents['MarketAnalyzer'] = MarketAnalyzerAgent()
+                logger.info("Market Analyzer agent registered")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Market Analyzer agent: {e}")
+
 
         # Generator Agents
         self.agents['ContractGenerator'] = ContractGeneratorAgent()
@@ -1019,6 +1035,8 @@ class AgentExecutor:
         'InsightsAnalyzer': 'PredictiveAnalyzer',
         # NOTE: MetricsCalculator now has REAL implementation - removed from aliases
         'BudgetingAgent': 'RevenueOptimizer',
+        'market-analyzer': 'MarketAnalyzer',
+        'MarketAnalyzer': 'MarketAnalyzer',
 
         # Lead agents -> REAL revenue pipeline agents
         'LeadGenerationAgent': 'LeadDiscoveryAgentReal',
