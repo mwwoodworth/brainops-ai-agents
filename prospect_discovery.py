@@ -29,7 +29,7 @@ class ProspectDiscoveryEngine:
         if self._pool:
             return self._pool
         try:
-            from db import get_pool
+            from database.async_connection import get_pool
             return get_pool()
         except Exception:
             return None

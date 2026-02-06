@@ -477,7 +477,7 @@ async def notify_lead_to_partner(
 </div>"""
 
     try:
-        from db import get_pool
+        from database.async_connection import get_pool
         pool = get_pool()
         if pool:
             await pool.execute("""

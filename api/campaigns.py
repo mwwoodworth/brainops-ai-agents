@@ -230,7 +230,7 @@ async def enroll_lead_in_outreach(campaign_id: str, lead_id: str) -> dict[str, A
         raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
 
     try:
-        from db import get_pool
+        from database.async_connection import get_pool
         pool = get_pool()
     except Exception:
         raise HTTPException(status_code=503, detail="Database not available")
@@ -308,7 +308,7 @@ async def batch_enroll_outreach(
         raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
 
     try:
-        from db import get_pool
+        from database.async_connection import get_pool
         pool = get_pool()
     except Exception:
         raise HTTPException(status_code=503, detail="Database not available")
@@ -403,7 +403,7 @@ async def log_lead_reply(campaign_id: str, lead_id: str, payload: LeadReplyInput
         raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
 
     try:
-        from db import get_pool
+        from database.async_connection import get_pool
         pool = get_pool()
     except Exception:
         raise HTTPException(status_code=503, detail="Database not available")
