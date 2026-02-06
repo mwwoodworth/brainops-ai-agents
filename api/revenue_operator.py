@@ -11,13 +11,30 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
+from fastapi.security import APIKeyHeader
 
+from config import config
 from revenue_operator import get_revenue_operator
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/revenue-operator", tags=["Revenue Operator"])
+# API Key Security - centralized authentication
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+VALID_API_KEYS = config.security.valid_api_keys
+
+async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
+    """Verify API key for authentication"""
+    if not api_key or api_key not in VALID_API_KEYS:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return api_key
+
+# All endpoints require API key authentication
+router = APIRouter(
+    prefix="/revenue-operator",
+    tags=["Revenue Operator"],
+    dependencies=[Depends(verify_api_key)]
+)
 
 
 @router.get("/next-best-actions")
