@@ -160,7 +160,7 @@ class AppConfig:
 
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
-        self.version = os.getenv('VERSION', 'v11.3.4')  # Add MMBQ product from brainstack.gumroad.com
+        self.version = os.getenv('VERSION', 'v11.5.0')  # Campaign system + partner notifications + db pool fix
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
