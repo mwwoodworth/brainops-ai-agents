@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -29,7 +30,38 @@ logger = logging.getLogger(__name__)
 
 # Email provider configuration (Resend is primary in prod)
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
+
+def _sanitize_from_email(from_email: str) -> str:
+    """
+    Ensure the provider `from` value is valid.
+
+    Resend accepts:
+      - email@example.com
+      - Display Name <email@example.com>
+
+    Some historic configs used "Matt @ BrainStack <email>", which Resend rejects.
+    """
+    value = (from_email or "").strip()
+    if not value:
+        return "onboarding@resend.dev"
+
+    match = re.match(r"^(.+?)\\s*<([^>]+)>$", value)
+    if match:
+        display_name = match.group(1).strip()
+        email_addr = match.group(2).strip()
+        display_name = display_name.replace("@", " at ")
+        display_name = re.sub(r"[<>]", "", display_name)
+        return f"{display_name} <{email_addr}>"
+
+    # Plain email address.
+    if "@" in value and "<" not in value and ">" not in value:
+        return value
+
+    # Last resort: return raw (provider will reject, but we keep visibility via error_message).
+    return value
+
+
+RESEND_FROM_EMAIL = _sanitize_from_email(os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev"))
 
 # SendGrid fallback configuration (optional)
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY', '')
@@ -129,6 +161,8 @@ class EmailJob:
     status: str
     metadata: dict[str, Any]
     created_at: datetime
+    retry_count: int = 0
+    max_retries: int = 3
 
 
 class EmailSchedulerDaemon:
@@ -203,7 +237,7 @@ class EmailSchedulerDaemon:
                 # Lock and fetch due emails
                 rows = await conn.fetch("""
                     SELECT id, recipient, subject, body, scheduled_for,
-                           status, metadata, created_at
+                           status, metadata, created_at, retry_count, max_retries, error_message, last_attempt
                     FROM ai_email_queue
                     WHERE status = 'queued'
                       AND (scheduled_for IS NULL OR scheduled_for <= NOW())
@@ -217,7 +251,8 @@ class EmailSchedulerDaemon:
                     email_ids = [row['id'] for row in rows]
                     await conn.execute("""
                         UPDATE ai_email_queue
-                        SET status = 'processing'
+                        SET status = 'processing',
+                            last_attempt = NOW()
                         WHERE id = ANY($1)
                     """, email_ids)
 
@@ -241,7 +276,9 @@ class EmailSchedulerDaemon:
                         scheduled_for=row['scheduled_for'],
                         status=row['status'],
                         metadata=metadata,
-                        created_at=row['created_at']
+                        created_at=row['created_at'],
+                        retry_count=int(row['retry_count'] or 0),
+                        max_retries=int(row['max_retries'] or self.max_retries),
                     ))
                 return emails
 
@@ -406,9 +443,11 @@ class EmailSchedulerDaemon:
 
     async def _handle_send_failure(self, email: EmailJob, error: str):
         """Handle email send failure with retry logic"""
-        retry_count = email.metadata.get('retry_count', 0)
+        retry_count = int(email.metadata.get('retry_count') or email.retry_count or 0)
 
-        if retry_count < self.max_retries:
+        max_retries = int(email.metadata.get('max_retries') or email.max_retries or self.max_retries)
+
+        if retry_count < max_retries:
             # Schedule retry with exponential backoff
             retry_delay = (2 ** retry_count) * 60  # 1m, 2m, 4m
             next_retry = datetime.now(timezone.utc) + timedelta(seconds=retry_delay)
@@ -416,12 +455,13 @@ class EmailSchedulerDaemon:
             await self._update_email_status(email.id, 'queued', {
                 **email.metadata,
                 'retry_count': retry_count + 1,
+                'max_retries': max_retries,
                 'last_error': error,
                 'next_retry': next_retry.isoformat()
             }, next_retry)
 
             self._stats["emails_retried"] += 1
-            logger.warning(f"⚠️ Email {email.id} failed, retry {retry_count + 1}/{self.max_retries}: {error}")
+            logger.warning(f"⚠️ Email {email.id} failed, retry {retry_count + 1}/{max_retries}: {error}")
         else:
             # Max retries exceeded
             await self._update_email_status(email.id, 'failed', {
@@ -431,7 +471,7 @@ class EmailSchedulerDaemon:
             })
 
             self._stats["emails_failed"] += 1
-            logger.error(f"❌ Email {email.id} permanently failed after {self.max_retries} retries: {error}")
+            logger.error(f"❌ Email {email.id} permanently failed after {max_retries} retries: {error}")
 
     async def _update_email_status(
         self,
@@ -445,30 +485,54 @@ class EmailSchedulerDaemon:
             from database.async_connection import get_pool
             pool = get_pool()
 
+            skip_reason = metadata.get("skip_reason") if isinstance(metadata, dict) else None
+            final_error = metadata.get("final_error") if isinstance(metadata, dict) else None
+            last_error = metadata.get("last_error") if isinstance(metadata, dict) else None
+            error_message = (
+                str(final_error or last_error or skip_reason)
+                if (final_error or last_error or skip_reason)
+                else None
+            )
+            retry_count = None
+            if isinstance(metadata, dict) and metadata.get("retry_count") is not None:
+                try:
+                    retry_count = int(metadata.get("retry_count"))
+                except Exception:
+                    retry_count = None
+
             async with pool.acquire() as conn:
                 if status == 'sent':
                     await conn.execute("""
                         UPDATE ai_email_queue
                         SET status = $1,
                             sent_at = NOW(),
+                            last_attempt = NOW(),
+                            error_message = NULL,
+                            retry_count = COALESCE($4, retry_count),
                             metadata = $2
                         WHERE id = $3
-                    """, status, json.dumps(metadata), email_id)
+                    """, status, json.dumps(metadata), email_id, retry_count)
                 elif scheduled_for:
                     await conn.execute("""
                         UPDATE ai_email_queue
                         SET status = $1,
                             scheduled_for = $2,
+                            last_attempt = NOW(),
+                            error_message = COALESCE($5, error_message),
+                            retry_count = COALESCE($6, retry_count),
                             metadata = $3
                         WHERE id = $4
-                    """, status, scheduled_for, json.dumps(metadata), email_id)
+                    """, status, scheduled_for, json.dumps(metadata), email_id, error_message, retry_count)
                 else:
                     await conn.execute("""
                         UPDATE ai_email_queue
                         SET status = $1,
+                            last_attempt = NOW(),
+                            error_message = COALESCE($4, error_message),
+                            retry_count = COALESCE($5, retry_count),
                             metadata = $2
                         WHERE id = $3
-                    """, status, json.dumps(metadata), email_id)
+                    """, status, json.dumps(metadata), email_id, error_message, retry_count)
 
         except Exception as e:
             logger.error(f"Failed to update email status: {e}")

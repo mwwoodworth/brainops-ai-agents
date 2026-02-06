@@ -15,6 +15,8 @@ Part of BrainOps OS Total Completion Protocol.
 """
 
 import logging
+import os
+import re
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
@@ -61,6 +63,67 @@ TEST_EMAIL_PATTERNS = [
     '%+test@%', '%localhost%'
 ]
 
+_DOMAIN_RE = re.compile(r"^[a-z0-9.-]+$")
+
+# Default internal domains that should not count as "real" leads/revenue.
+# These are excluded in REAL_ONLY mode as a defensive backstop in addition to
+# explicit DB flags (is_test/is_demo) which should be set at write time.
+_DEFAULT_INTERNAL_LEAD_DOMAINS = {
+    "weathercraft.com",
+    "weathercraft.net",
+    "weathercraft.test",
+    "brainops.ai",
+    "brainstackstudio.com",
+    "myroofgenius.com",
+}
+
+
+def _parse_domain_list(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    out: set[str] = set()
+    for item in value.split(","):
+        domain = item.strip().lower()
+        if not domain:
+            continue
+        if _DOMAIN_RE.match(domain):
+            out.add(domain)
+    return out
+
+
+INTERNAL_LEAD_DOMAINS = _DEFAULT_INTERNAL_LEAD_DOMAINS | _parse_domain_list(
+    os.getenv("INTERNAL_LEAD_DOMAINS")
+)
+
+
+def _is_internal_domain(domain: str) -> bool:
+    if not domain:
+        return False
+    lowered = domain.lower().strip()
+    if lowered in INTERNAL_LEAD_DOMAINS:
+        return True
+    return any(lowered.endswith(f".{d}") for d in INTERNAL_LEAD_DOMAINS)
+
+
+def _sql_internal_domain_exclusion(column_name: str) -> str:
+    """
+    Build a conservative SQL clause that excludes internal domains for an email column.
+
+    NOTE: This is a backstop. Primary classification should be via DB flags.
+    """
+    if not INTERNAL_LEAD_DOMAINS:
+        return ""
+
+    domain_expr = f"LOWER(SPLIT_PART({column_name}, '@', 2))"
+
+    checks: list[str] = []
+    for domain in sorted(INTERNAL_LEAD_DOMAINS):
+        # Domains are sanitized via _DOMAIN_RE and constants above.
+        checks.append(f"{domain_expr} = '{domain}'")
+        checks.append(f"{domain_expr} LIKE '%.{domain}'")
+
+    return "AND NOT (" + " OR ".join(checks) + ")"
+
 
 def classify_email(email: str) -> DataClassification:
     """Classify an email as REAL, TEST, or SEED"""
@@ -68,6 +131,11 @@ def classify_email(email: str) -> DataClassification:
         return DataClassification.TEST
 
     email_lower = email.lower()
+
+    if "@" in email_lower:
+        domain = email_lower.split("@", 1)[1]
+        if _is_internal_domain(domain):
+            return DataClassification.INTERNAL
 
     # Check for test patterns
     test_patterns = ['test', 'example', 'demo', 'sample', 'fake', 'placeholder', 'localhost']
@@ -115,7 +183,10 @@ async def get_ground_truth(
         test_filter = (
             "AND COALESCE(is_test, FALSE) = FALSE "
             "AND COALESCE(is_demo, FALSE) = FALSE "
-            f"AND ({email_patterns})"
+            "AND COALESCE(email, '') <> '' "
+            "AND email LIKE '%@%' "
+            f"AND ({email_patterns}) "
+            f"{_sql_internal_domain_exclusion('email')}"
         )
 
     # Revenue Leads Analysis
@@ -148,7 +219,19 @@ async def get_ground_truth(
     # Email Queue Status
     # NOTE: `ai_email_queue` does not have `send_after` (older drafts did).
     # Use timestamps that actually exist so "ground truth" doesn't silently degrade.
-    email_query = """
+    email_filter = ""
+    if not include_test:
+        recipient_patterns = " AND ".join(
+            [f"COALESCE(recipient, '') NOT ILIKE '{p}'" for p in TEST_EMAIL_PATTERNS]
+        )
+        email_filter = (
+            "AND COALESCE(recipient, '') <> '' "
+            "AND recipient LIKE '%@%' "
+            f"AND ({recipient_patterns}) "
+            f"{_sql_internal_domain_exclusion('recipient')}"
+        )
+
+    email_query = f"""
         SELECT
             COUNT(*) FILTER (WHERE status = 'queued') as queued,
             COUNT(*) FILTER (
@@ -166,6 +249,7 @@ async def get_ground_truth(
             MAX(created_at) as last_created,
             MAX(sent_at) as last_sent_at
         FROM ai_email_queue
+        WHERE 1=1 {email_filter}
     """
 
     try:

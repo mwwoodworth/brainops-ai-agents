@@ -1,0 +1,359 @@
+"""
+Campaign API
+============
+REST endpoints for managing campaigns, prospects, and outreach enrollment.
+"""
+
+import json
+import logging
+import uuid
+from datetime import datetime, timezone, timedelta
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+
+from campaign_manager import (
+    get_campaign,
+    list_campaigns,
+    campaign_to_dict,
+    personalize_template,
+    CAMPAIGNS,
+)
+from prospect_discovery import get_discovery_engine
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/campaigns", tags=["Campaign Management"])
+
+
+# ---- Pydantic models ----
+
+class ProspectInput(BaseModel):
+    company_name: str
+    contact_name: Optional[str] = None
+    email: str
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    building_type: Optional[str] = None
+    city: Optional[str] = None
+    state: str = "CO"
+    estimated_sqft: Optional[int] = None
+    roof_system: Optional[str] = None
+
+
+class BatchProspectsInput(BaseModel):
+    prospects: list[ProspectInput]
+
+
+class WebsiteDiscoveryInput(BaseModel):
+    websites: list[str]
+    building_type: Optional[str] = None
+    city: Optional[str] = None
+
+
+# ---- Campaign info endpoints ----
+
+@router.get("/")
+async def list_all_campaigns(active_only: bool = True) -> dict[str, Any]:
+    """List all campaigns."""
+    campaigns = list_campaigns(active_only=active_only)
+    return {
+        "campaigns": [campaign_to_dict(c) for c in campaigns],
+        "total": len(campaigns),
+    }
+
+
+@router.get("/{campaign_id}")
+async def get_campaign_details(campaign_id: str) -> dict[str, Any]:
+    """Get campaign details including templates and partner info."""
+    campaign = get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
+
+    result = campaign_to_dict(campaign)
+    result["templates"] = [
+        {
+            "step": t.step,
+            "delay_days": t.delay_days,
+            "subject": t.subject,
+            "call_to_action": t.call_to_action,
+        }
+        for t in campaign.templates
+    ]
+    if campaign.handoff_partner:
+        result["handoff_partner_details"] = {
+            "name": campaign.handoff_partner.name,
+            "location": campaign.handoff_partner.location,
+            "capabilities": campaign.handoff_partner.capabilities,
+            "certifications": campaign.handoff_partner.certifications,
+            "experience": campaign.handoff_partner.experience,
+        }
+    return result
+
+
+@router.get("/{campaign_id}/stats")
+async def get_campaign_stats(campaign_id: str) -> dict[str, Any]:
+    """Get campaign performance metrics."""
+    campaign = get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
+
+    engine = get_discovery_engine()
+    stats = await engine.get_campaign_stats(campaign_id)
+    stats["campaign_name"] = campaign.name
+    stats["is_active"] = campaign.is_active
+    return stats
+
+
+# ---- Lead management endpoints ----
+
+@router.get("/{campaign_id}/leads")
+async def get_campaign_leads(
+    campaign_id: str,
+    stage: Optional[str] = None,
+    limit: int = Query(default=100, le=500),
+) -> dict[str, Any]:
+    """List leads for a campaign."""
+    campaign = get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
+
+    engine = get_discovery_engine()
+    leads = await engine.get_campaign_leads(campaign_id, stage=stage, limit=limit)
+
+    # Mask emails for API safety
+    for lead in leads:
+        if lead.get("email"):
+            parts = lead["email"].split("@")
+            if len(parts) == 2:
+                local = parts[0]
+                masked = local[:2] + "***" if len(local) > 2 else "***"
+                lead["email_masked"] = f"{masked}@{parts[1]}"
+
+    return {"campaign_id": campaign_id, "leads": leads, "total": len(leads)}
+
+
+@router.post("/{campaign_id}/prospects")
+async def add_prospect(campaign_id: str, prospect: ProspectInput) -> dict[str, Any]:
+    """Add a single prospect to a campaign."""
+    campaign = get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
+
+    engine = get_discovery_engine()
+    result = await engine.add_prospect(
+        campaign_id=campaign_id,
+        company_name=prospect.company_name,
+        contact_name=prospect.contact_name,
+        email=prospect.email,
+        phone=prospect.phone,
+        website=prospect.website,
+        building_type=prospect.building_type,
+        city=prospect.city,
+        state=prospect.state,
+        estimated_sqft=prospect.estimated_sqft,
+        roof_system=prospect.roof_system,
+        discovery_source="api",
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to add prospect"))
+    return result
+
+
+@router.post("/{campaign_id}/prospects/batch")
+async def add_prospects_batch(campaign_id: str, payload: BatchProspectsInput) -> dict[str, Any]:
+    """Add multiple prospects to a campaign."""
+    campaign = get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
+
+    engine = get_discovery_engine()
+    prospects_data = [p.model_dump() for p in payload.prospects]
+    for p in prospects_data:
+        p["discovery_source"] = "api_batch"
+
+    result = await engine.add_prospects_batch(campaign_id, prospects_data)
+    return result
+
+
+@router.post("/{campaign_id}/discover")
+async def discover_from_websites(campaign_id: str, payload: WebsiteDiscoveryInput) -> dict[str, Any]:
+    """Discover prospects by scraping emails from company websites."""
+    campaign = get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
+
+    engine = get_discovery_engine()
+    result = await engine.discover_from_website_list(
+        campaign_id=campaign_id,
+        websites=payload.websites,
+        building_type=payload.building_type,
+        city=payload.city,
+    )
+    return result
+
+
+# ---- Outreach enrollment ----
+
+@router.post("/{campaign_id}/outreach/enroll/{lead_id}")
+async def enroll_lead_in_outreach(campaign_id: str, lead_id: str) -> dict[str, Any]:
+    """Enroll a single lead in the campaign's outreach sequence."""
+    campaign = get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
+
+    try:
+        from db import get_pool
+        pool = get_pool()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    # Fetch lead
+    lead_row = await pool.fetchrow(
+        "SELECT * FROM revenue_leads WHERE id = $1", uuid.UUID(lead_id)
+    )
+    if not lead_row:
+        raise HTTPException(status_code=404, detail=f"Lead '{lead_id}' not found")
+
+    lead_data = dict(lead_row)
+    meta = lead_data.get("metadata")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = {}
+    lead_data["metadata"] = meta or {}
+    email = lead_data.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Lead has no email")
+
+    # Schedule all campaign emails
+    now = datetime.now(timezone.utc)
+    queued = 0
+    for template in campaign.templates:
+        subject, body_html = personalize_template(template, lead_data, campaign)
+        # Schedule at 9 AM Mountain Time (UTC-7)
+        send_date = now + timedelta(days=template.delay_days)
+        send_at = send_date.replace(hour=16, minute=0, second=0, microsecond=0)  # 16:00 UTC = 9 AM MT
+
+        email_metadata = json.dumps({
+            "campaign_id": campaign_id,
+            "template_step": template.step,
+            "lead_id": lead_id,
+            "source": "campaign_outreach",
+        })
+
+        await pool.execute("""
+            INSERT INTO ai_email_queue (
+                id, recipient, subject, body, scheduled_for, status, metadata
+            ) VALUES ($1, $2, $3, $4, $5, 'queued', $6)
+        """,
+            uuid.uuid4(), email, subject, body_html, send_at, email_metadata,
+        )
+        queued += 1
+
+    # Update lead stage
+    await pool.execute(
+        "UPDATE revenue_leads SET stage = 'contacted', status = 'outreach_enrolled', updated_at = $1 WHERE id = $2",
+        now, uuid.UUID(lead_id),
+    )
+
+    logger.info(f"Lead {lead_id[:8]} enrolled in {campaign_id} outreach ({queued} emails queued)")
+    return {
+        "ok": True,
+        "lead_id": lead_id,
+        "campaign_id": campaign_id,
+        "emails_queued": queued,
+    }
+
+
+@router.post("/{campaign_id}/outreach/batch")
+async def batch_enroll_outreach(
+    campaign_id: str,
+    limit: int = Query(default=50, le=200),
+) -> dict[str, Any]:
+    """Enroll all un-contacted leads in outreach (up to limit)."""
+    campaign = get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
+
+    try:
+        from db import get_pool
+        pool = get_pool()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    # Get leads that haven't been enrolled yet
+    leads = await pool.fetch("""
+        SELECT id FROM revenue_leads
+        WHERE metadata->>'campaign_id' = $1
+          AND stage = 'new'
+          AND is_test = FALSE AND is_demo = FALSE
+          AND email IS NOT NULL
+        ORDER BY score DESC
+        LIMIT $2
+    """, campaign_id, limit)
+
+    results = {"enrolled": 0, "errors": 0, "items": []}
+    for lead in leads:
+        try:
+            lead_id = str(lead["id"])
+            # Reuse the single enrollment logic inline
+            lead_row = await pool.fetchrow(
+                "SELECT * FROM revenue_leads WHERE id = $1", lead["id"]
+            )
+            if not lead_row:
+                results["errors"] += 1
+                continue
+
+            lead_data = dict(lead_row)
+            meta = lead_data.get("metadata")
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = {}
+            lead_data["metadata"] = meta or {}
+            email = lead_data.get("email")
+            if not email:
+                results["errors"] += 1
+                continue
+
+            now = datetime.now(timezone.utc)
+            for template in campaign.templates:
+                subject, body_html = personalize_template(template, lead_data, campaign)
+                send_date = now + timedelta(days=template.delay_days)
+                send_at = send_date.replace(hour=16, minute=0, second=0, microsecond=0)
+
+                email_metadata = json.dumps({
+                    "campaign_id": campaign_id,
+                    "template_step": template.step,
+                    "lead_id": lead_id,
+                    "source": "campaign_outreach",
+                })
+
+                await pool.execute("""
+                    INSERT INTO ai_email_queue (
+                        id, recipient, subject, body, scheduled_for, status, metadata
+                    ) VALUES ($1, $2, $3, $4, $5, 'queued', $6)
+                """,
+                    uuid.uuid4(), email, subject, body_html, send_at, email_metadata,
+                )
+
+            await pool.execute(
+                "UPDATE revenue_leads SET stage = 'contacted', status = 'outreach_enrolled', updated_at = $1 WHERE id = $2",
+                now, lead["id"],
+            )
+            results["enrolled"] += 1
+            results["items"].append({"lead_id": lead_id, "status": "enrolled"})
+
+        except Exception as e:
+            results["errors"] += 1
+            results["items"].append({"lead_id": str(lead["id"]), "status": f"error: {e}"})
+
+    return {
+        "campaign_id": campaign_id,
+        "total_eligible": len(leads),
+        **results,
+    }

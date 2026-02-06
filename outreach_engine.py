@@ -236,24 +236,34 @@ class OutreachEngine:
 
         return self._daily_enrichment_count, self._daily_outreach_count
 
-    async def get_real_leads(self, limit: int = 23) -> list[dict]:
-        """Get all REAL leads (not test/demo)."""
+    async def get_real_leads(self, limit: int = 100, campaign_id: str = None) -> list[dict]:
+        """Get REAL leads (not test/demo), optionally filtered by campaign."""
         pool = self._get_pool()
         if not pool:
             return []
 
-        rows = await pool.fetch("""
-            SELECT id, company_name, contact_name, email, stage, score,
-                   value_estimate, source, industry, metadata, created_at
-            FROM revenue_leads
-            WHERE email NOT ILIKE '%test%'
-            AND email NOT ILIKE '%example%'
-            AND email NOT ILIKE '%demo%'
-            AND email NOT ILIKE '%sample%'
-            AND email NOT ILIKE '%fake%'
-            ORDER BY score DESC, created_at DESC
-            LIMIT $1
-        """, limit)
+        if campaign_id:
+            rows = await pool.fetch("""
+                SELECT id, company_name, contact_name, email, stage, score,
+                       value_estimate, source, industry, metadata, created_at, location
+                FROM revenue_leads
+                WHERE is_test = false AND is_demo = false
+                AND metadata->>'campaign_id' = $1
+                ORDER BY score DESC, created_at DESC
+                LIMIT $2
+            """, campaign_id, limit)
+        else:
+            rows = await pool.fetch("""
+                SELECT id, company_name, contact_name, email, stage, score,
+                       value_estimate, source, industry, metadata, created_at, location
+                FROM revenue_leads
+                WHERE is_test = false AND is_demo = false
+                AND email NOT ILIKE '%test%'
+                AND email NOT ILIKE '%example%'
+                AND email NOT ILIKE '%demo%'
+                ORDER BY score DESC, created_at DESC
+                LIMIT $1
+            """, limit)
 
         return [dict(r) for r in rows]
 
@@ -402,6 +412,50 @@ class OutreachEngine:
                 enrichment = json.loads(enrichment)
             except (json.JSONDecodeError, TypeError):
                 enrichment = {}
+
+        # Check if this lead has a campaign_id - use campaign templates if so
+        campaign_id = metadata.get("campaign_id")
+        if campaign_id:
+            try:
+                from campaign_manager import get_campaign, personalize_template as cm_personalize
+                campaign = get_campaign(campaign_id)
+                if campaign and sequence_step <= len(campaign.templates):
+                    template = campaign.templates[sequence_step - 1]
+                    subject, body = cm_personalize(template, dict(lead), campaign)
+
+                    # Create draft
+                    draft_id = str(uuid.uuid4())
+                    draft = OutreachDraft(
+                        id=draft_id,
+                        lead_id=str(lead["id"]),
+                        sequence_step=sequence_step,
+                        subject=subject,
+                        body=body,
+                        status="draft",
+                        created_at=datetime.now(timezone.utc)
+                    )
+
+                    # Store draft
+                    await pool.execute("""
+                        INSERT INTO revenue_actions (id, lead_id, action_type, action_data, success, created_at, executed_by)
+                        VALUES ($1, $2, 'outreach_draft', $3, true, $4, 'system:outreach_engine')
+                    """,
+                        uuid.UUID(draft_id),
+                        lead["id"],
+                        json.dumps({
+                            "sequence_step": sequence_step,
+                            "subject": subject,
+                            "body": body,
+                            "status": "draft",
+                            "campaign_id": campaign_id,
+                        }),
+                        datetime.now(timezone.utc)
+                    )
+
+                    logger.info(f"Campaign outreach draft {draft_id[:8]}... created for lead {lead_id[:8]}...")
+                    return True, "Campaign outreach draft created", draft
+            except ImportError:
+                logger.warning("campaign_manager not available, falling back to standard templates")
 
         # Detect if roofing company (use roofing templates) or tech (use tech templates)
         company_name = (lead["company_name"] or "").lower()

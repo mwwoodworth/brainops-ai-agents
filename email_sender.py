@@ -557,6 +557,7 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                 cursor.execute("""
                     UPDATE ai_email_queue
                     SET status = 'processing',
+                        last_attempt = NOW(),
                         metadata = metadata || %s
                     WHERE id = %s
                 """, (json.dumps({'processing_started_at': datetime.now(timezone.utc).isoformat()}), email_id))
@@ -571,9 +572,15 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                     cursor.execute("""
                         UPDATE ai_email_queue
                         SET status = 'failed',
+                            last_attempt = NOW(),
+                            error_message = %s,
                             metadata = metadata || %s
                         WHERE id = %s
-                    """, (json.dumps({'error': 'Invalid recipient', 'failed_at': datetime.now(timezone.utc).isoformat()}), email_id))
+                    """, (
+                        "Invalid recipient",
+                        json.dumps({'error': 'Invalid recipient', 'failed_at': datetime.now(timezone.utc).isoformat()}),
+                        email_id,
+                    ))
                     conn.commit()
                 stats["failed"] += 1
                 stats["emails"].append({"id": email_id, "recipient": recipient, "status": "failed", "reason": "invalid_recipient"})
@@ -587,10 +594,13 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                         """
                         UPDATE ai_email_queue
                         SET status = 'skipped',
+                            last_attempt = NOW(),
+                            error_message = %s,
                             metadata = metadata || %s
                         WHERE id = %s
                         """,
                         (
+                            block_reason,
                             json.dumps(
                                 {
                                     "skip_reason": block_reason,
@@ -613,9 +623,15 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                     cursor.execute("""
                         UPDATE ai_email_queue
                         SET status = 'skipped',
+                            last_attempt = NOW(),
+                            error_message = %s,
                             metadata = metadata || %s
                         WHERE id = %s
-                    """, (json.dumps({'skip_reason': 'test_email', 'skipped_at': datetime.now(timezone.utc).isoformat()}), email_id))
+                    """, (
+                        "test_email",
+                        json.dumps({'skip_reason': 'test_email', 'skipped_at': datetime.now(timezone.utc).isoformat()}),
+                        email_id,
+                    ))
                     conn.commit()
                 stats["skipped"] += 1
                 stats["emails"].append({"id": email_id, "recipient": recipient, "status": "skipped", "reason": "test_email"})
@@ -636,6 +652,8 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                         UPDATE ai_email_queue
                         SET status = 'sent',
                             sent_at = NOW(),
+                            last_attempt = NOW(),
+                            error_message = NULL,
                             metadata = metadata || %s
                         WHERE id = %s
                     """, (json.dumps({'send_message': message, 'sent_at': datetime.now(timezone.utc).isoformat()}), email_id))
@@ -674,10 +692,13 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                                 UPDATE ai_email_queue
                                 SET status = 'queued',
                                     scheduled_for = %s,
+                                    last_attempt = NOW(),
+                                    error_message = %s,
                                     metadata = metadata || %s
                                 WHERE id = %s
                             """, (
                                 next_retry,
+                                message,
                                 json.dumps({
                                     'rate_limit_retry_count': rate_limit_retry_count + 1,
                                     'last_error': message,
@@ -713,10 +734,13 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                             UPDATE ai_email_queue
                             SET status = 'queued',
                                 scheduled_for = %s,
+                                last_attempt = NOW(),
+                                error_message = %s,
                                 metadata = metadata || %s
                             WHERE id = %s
                         """, (
                             next_retry,
+                            message,
                             json.dumps({
                                 'retry_count': retry_count + 1,
                                 'last_error': message,
@@ -735,9 +759,15 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                         cursor.execute("""
                             UPDATE ai_email_queue
                             SET status = 'failed',
+                                last_attempt = NOW(),
+                                error_message = %s,
                                 metadata = metadata || %s
                             WHERE id = %s
-                        """, (json.dumps({'final_error': message, 'failed_at': datetime.now(timezone.utc).isoformat(), 'retry_count': retry_count}), email_id))
+                        """, (
+                            message,
+                            json.dumps({'final_error': message, 'failed_at': datetime.now(timezone.utc).isoformat(), 'retry_count': retry_count}),
+                            email_id,
+                        ))
                         conn.commit()
 
                     stats["failed"] += 1

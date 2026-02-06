@@ -74,8 +74,8 @@ What's Next:
 If you have questions before then, simply reply to this email.
 
 Best regards,
-Weathercraft Roofing
-Certified Commercial Roofing Specialists
+MyRoofGenius Commercial
+AI-Powered Roof Assessment
 """,
             "call_to_action": "Reply with any questions",
         },
@@ -97,10 +97,10 @@ Common Issues We'll Inspect:
 • Flashing and penetration seals
 • Insulation R-value efficiency
 
-Our inspector has completed over 500 commercial roof assessments in your area. We'll give you an honest evaluation - even if your roof doesn't need immediate work.
+Our assessment network includes some of the most experienced commercial roofing professionals in Colorado. We'll give you an honest evaluation - even if your roof doesn't need immediate work.
 
 Talk soon,
-Weathercraft Roofing
+MyRoofGenius Commercial
 """,
             "call_to_action": "Learn more about commercial roofing",
         },
@@ -123,7 +123,7 @@ After our thorough assessment, we identified the root cause and provided options
 Have you had a chance to connect with our team yet? If not, just reply and we'll reach out at a time that works for you.
 
 Best,
-Weathercraft Roofing
+MyRoofGenius Commercial
 """,
             "call_to_action": "Schedule your assessment",
         },
@@ -150,7 +150,7 @@ No pressure, no obligation - just a clear picture of your roof's condition.
 Would you prefer we call, email, or text to schedule?
 
 Regards,
-Weathercraft Roofing
+MyRoofGenius Commercial
 """,
             "call_to_action": "Schedule now",
         },
@@ -164,20 +164,26 @@ Weathercraft Roofing
 
 This is my final follow-up regarding your commercial roof assessment request.
 
-I understand schedules get busy, but I don't want you to miss out on:
+I wanted to share something valuable: we've partnered with Weathercraft Roofing, a full-scope commercial roofing specialist based right here in Colorado Springs, to provide complimentary professional on-site inspections.
 
-• Free comprehensive inspection (normally $500+ value)
+Why Weathercraft:
+• Specialize in large commercial reroofs (10,000 - 200,000+ sqft)
+• All major systems: TPO, EPDM, PVC, BUR, modified bitumen, metal
+• ES-1 certified metal shop with in-house coping, trim, and flashing fabrication
+• Standing seam metal roofing and wall panel installation
+• 40+ years of commercial roofing experience in Colorado
+
+For a limited time:
+• Free comprehensive on-site inspection (normally $500+ value)
 • Priority scheduling this month
 • 10% discount on any work if scheduled within 30 days
 
-Your {roof_type} system is {roof_age_years} years old. Regular professional inspections can extend its lifespan significantly and catch small issues before they become expensive problems.
+Your {roof_type} system is {roof_age_years} years old. A professional evaluation before storm season can catch small issues before they become expensive problems.
 
-If you're no longer interested, no worries - just let me know and I'll close out your file.
-
-Otherwise, reply "SCHEDULE" and we'll get you on the calendar.
+If you're no longer interested, no worries at all. Otherwise, reply "SCHEDULE" and we'll coordinate a convenient time.
 
 Best regards,
-Weathercraft Roofing
+MyRoofGenius + Weathercraft Roofing
 """,
             "call_to_action": "Reply SCHEDULE",
         },
@@ -189,17 +195,17 @@ def get_roof_type_education(roof_type: str) -> str:
     """Get educational content based on roof type."""
     education = {
         "tpo": """**TPO (Thermoplastic Polyolefin)**
-TPO is one of the most popular commercial roofing membranes due to its energy efficiency and durability. Typical lifespan: 20-30 years with proper maintenance. Key vulnerabilities include seam failures, UV degradation, and punctures from foot traffic.""",
+TPO is one of the most popular commercial roofing membranes due to its energy efficiency and durability. Typical lifespan: 20-30 years with proper maintenance. In Colorado, UV degradation at altitude accelerates 20-30% faster than at sea level, and hail impacts can compromise heat-welded seams. Key watch items: seam integrity after thermal cycling, membrane brittleness from UV exposure, and puncture damage from hail.""",
         "epdm": """**EPDM (Rubber Roofing)**
-EPDM is a proven, cost-effective membrane that's been used for over 50 years. Typical lifespan: 20-25 years. Watch for shrinkage, seam separation, and surface crazing as the membrane ages.""",
+EPDM is a proven, cost-effective membrane that's been used for over 50 years. Typical lifespan: 20-25 years. In Colorado's climate, shrinkage from UV/ozone exposure at altitude and seam separation from 300+ freeze-thaw cycles per year are the primary concerns. Watch for surface crazing that leads to slow leaks as the membrane ages.""",
         "pvc": """**PVC Membrane**
-PVC roofing offers excellent chemical resistance and is ideal for restaurants, manufacturing, and facilities with chemical exposure. Typical lifespan: 25-30 years. Heat-welded seams provide superior waterproofing.""",
+PVC roofing offers excellent chemical resistance and heat-welded seams for superior waterproofing. Typical lifespan: 25-30 years. Colorado's intense UV can cause plasticizer migration over time, and the wide daily temperature swings on the Front Range (40-50 degree shifts are common) stress the membrane more than moderate climates.""",
         "ssmr": """**Standing Seam Metal Roofing**
-Standing seam metal is the premium choice for commercial buildings, offering 40-50+ year lifespans. Key maintenance items include fastener inspection, sealant replacement, and thermal expansion considerations.""",
+Standing seam metal is the premium choice for commercial buildings, offering 40-50+ year lifespans. In Colorado, thermal expansion and contraction are more extreme at altitude. Key maintenance includes fastener inspection, sealant replacement, and ensuring snow guards are rated for Colorado snow loads. Properly fabricated coping and trim are critical for long-term performance.""",
         "bur": """**Built-Up Roofing (BUR/Tar & Gravel)**
-BUR is a traditional multi-layer system that's been used for over 100 years. Typical lifespan: 15-20 years. Common issues include blistering, cracking, and ponding water.""",
+BUR is a traditional multi-layer system with 15-20 year lifespan. Colorado's freeze-thaw cycling causes blistering and cracking in asphalt layers. Hail can dislodge gravel ballast, exposing the membrane beneath to accelerated UV damage at altitude. Large commercial BUR roofs on the Front Range need regular inspection.""",
         "modified_bitumen": """**Modified Bitumen**
-Modified bitumen combines asphalt with rubber or plastic modifiers for improved flexibility. Typical lifespan: 15-20 years. Inspect for membrane splitting, seam failures, and granule loss.""",
+Modified bitumen combines asphalt with rubber or plastic modifiers for improved flexibility in temperature extremes. Typical lifespan: 15-20 years. Colorado's wide daily temperature swings (common 40-50 degree shifts on the Front Range) stress the membrane and seams more than moderate climates. Inspect for splitting, seam failures, and granule loss.""",
         "metal_retrofit": """**Metal Roof Retrofit**
 Metal retrofit systems are installed over existing roofing to extend building life. This approach often qualifies for tax incentives and can dramatically improve energy efficiency.""",
         "spray_foam": """**Spray Foam Roofing**
@@ -220,20 +226,27 @@ def get_primary_concern_insight(concern: str) -> str:
         "insurance_claim": "We work with insurance adjusters regularly and can help document damage to support your claim.",
         "selling_property": "A professional roof assessment adds credibility to property listings and can identify issues before buyer inspections.",
         "maintenance_plan": "Preventive maintenance can extend roof life by 5-10 years. We'll create a customized maintenance schedule for your building.",
+        "hail_damage": "Colorado's Front Range sees more hail events than almost anywhere in the country. Impact damage on commercial membranes often goes undetected until interior leaks appear months later. A professional assessment now can identify damage while insurance claims are still viable.",
+        "snow_load": "Heavy Colorado snowfall combined with freeze-thaw cycling can stress roof systems significantly. Large flat commercial roofs are particularly vulnerable to ponding from snowmelt that refreezes at night, compromising seam integrity over time.",
+        "altitude_uv": "At Colorado's elevation (5,000-7,000+ feet), UV radiation is 20-30% more intense than at sea level. This accelerates membrane degradation, especially on TPO and EPDM systems. Regular assessment helps catch UV damage before it leads to failures.",
     }
-    return insights.get(concern, "Our inspector will thoroughly evaluate your roof's condition and provide honest, actionable recommendations.")
+    return insights.get(concern, "Our inspector will thoroughly evaluate your roof's condition and provide honest, actionable recommendations tailored to Colorado's demanding climate.")
 
 
 def get_case_study(roof_type: str, concern: str) -> str:
-    """Get a relevant case study."""
-    # Generic commercial case study - can be customized per roof type
-    return f"""**Recent {roof_type.upper()} Project - Oklahoma City**
+    """Get a relevant case study - Colorado Front Range."""
+    return f"""**Recent {roof_type.upper()} Project - Colorado Springs**
 
-A 45,000 sq ft warehouse owner came to us with similar concerns about {concern.replace('_', ' ')}.
+A 42,000 sq ft distribution center owner on the Front Range came to us with similar concerns about {concern.replace('_', ' ')} after a summer hailstorm.
 
-After our assessment, we found that the issue was isolated to 15% of the roof area. Rather than recommending full replacement, we performed targeted repairs and added a maintenance coating system.
+After an AI-assisted assessment combined with a professional on-site inspection, the actual scope was much more targeted than expected:
 
-Result: The owner saved over $80,000 compared to full replacement, and the roof is now expected to last another 12+ years."""
+- Only 18% of the membrane showed hail damage requiring attention
+- The remaining 82% was in solid condition with 10+ years of useful life remaining
+- Colorado's altitude UV exposure had caused some surface degradation, but seam integrity was strong
+- Targeted repairs + a protective coating system brought total cost to $87,000
+
+Result: The owner saved over $230,000 compared to full replacement, and the roof is now expected to last another 12+ years with a maintenance plan designed for Front Range conditions."""
 
 
 def enroll_lead_in_commercial_sequence(
@@ -245,6 +258,7 @@ def enroll_lead_in_commercial_sequence(
     roof_age_years: int | None,
     primary_concern: str | None,
     preferred_contact_method: str = "phone",
+    campaign_id: str | None = None,
 ) -> bool:
     """
     Enroll a commercial roof lead in the nurture sequence.
@@ -393,7 +407,7 @@ def enroll_lead_in_commercial_sequence(
             cursor.execute(
                 """
                 INSERT INTO ai_email_queue
-                (id, to_email, subject, body, scheduled_for, status, metadata)
+                (id, recipient, subject, body, scheduled_for, status, metadata)
                 VALUES (%s, %s, %s, %s, %s, 'queued', %s)
                 """,
                 (
@@ -408,6 +422,8 @@ def enroll_lead_in_commercial_sequence(
                         "touchpoint_number": tp_num,
                         "sequence": "commercial_roof_advisory",
                         "lead_id": lead_id,
+                        "campaign_id": campaign_id or "co_commercial_reroof",
+                        "source": "campaign_outreach",
                     }),
                 ),
             )
