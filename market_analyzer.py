@@ -19,7 +19,8 @@ import logging
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
-from agent_executor import BaseAgent, ai_core
+from base_agent import BaseAgent
+from ai_core import ai_core
 
 logger = logging.getLogger(__name__)
 

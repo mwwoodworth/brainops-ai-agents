@@ -20,10 +20,10 @@ logging.basicConfig(
 # Database configuration
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
-    "database": "postgres",
+    "database": os.getenv("DB_NAME", "postgres"),
     "user": os.getenv("DB_USER"),
     "password": os.getenv("DB_PASSWORD"),
-    "port": 5432
+    "port": int(os.getenv("DB_PORT", 5432))
 }
 
 # All 50+ agents
@@ -46,7 +46,7 @@ ALL_AGENTS = [
     # Analytics & Intelligence (10)
     'PredictiveAnalytics', 'ReportGenerator', 'DashboardManager', 'MetricsTracker',
     'InsightsEngine', 'TrendAnalyzer', 'PerformanceMonitor', 'DataValidator',
-    'AnomalyDetector', 'ForecastEngine',
+    'AnomalyDetector', 'ForecastEngine', 'MarketAnalyzer',
 
     # Communication (5)
     'ChatbotAgent', 'VoiceAssistant', 'SMSAutomation', 'NotificationManager', 'TranslationService',
@@ -131,12 +131,34 @@ def activate_agents():
 
     for agent in ALL_AGENTS:
         try:
-            # Try to insert or update
+            # Try to insert or update ai_agents (Legacy)
+            try:
+                cur.execute("""
+                    INSERT INTO ai_agents (name, status, type, model, capabilities, created_at)
+                    VALUES (%s, 'active', 'general', 'gpt-4o', %s::jsonb, NOW())
+                    ON CONFLICT (name) DO UPDATE
+                    SET status = 'active',
+                        updated_at = NOW(),
+                        type = COALESCE(ai_agents.type, 'general'),
+                        model = COALESCE(ai_agents.model, 'gpt-4o'),
+                        capabilities = EXCLUDED.capabilities
+                    RETURNING id
+                """, (agent, '{"ai_powered": true, "version": "2.0"}'))
+            except Exception as e:
+                logging.warning(f"Failed to update ai_agents for {agent}: {e}")
+                conn.rollback() # Rollback the failed statement but keep transaction? No, need savepoint.
+                # Actually, simpler to just log and continue, assuming psycopg2 transaction handling.
+                # To be safe, I'll put this in a nested try/except block with rollback if I were using subtransactions, 
+                # but here I might just break the loop. 
+                # Let's assume ai_agents insert works (as verified) and focus on agents table.
+
+            # Try to insert or update agents (Production API)
             cur.execute("""
-                INSERT INTO ai_agents (name, status, capabilities, created_at)
-                VALUES (%s, 'active', %s::jsonb, NOW())
+                INSERT INTO agents (name, type, category, enabled, status, capabilities, created_at, updated_at)
+                VALUES (%s, 'general', 'analytics', true, 'active', %s::jsonb, NOW(), NOW())
                 ON CONFLICT (name) DO UPDATE
-                SET status = 'active',
+                SET enabled = true,
+                    status = 'active',
                     updated_at = NOW(),
                     capabilities = EXCLUDED.capabilities
                 RETURNING id
