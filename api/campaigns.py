@@ -18,6 +18,7 @@ from campaign_manager import (
     list_campaigns,
     campaign_to_dict,
     personalize_template,
+    notify_lead_to_partner,
     CAMPAIGNS,
 )
 from prospect_discovery import get_discovery_engine
@@ -158,6 +159,31 @@ async def add_prospect(campaign_id: str, prospect: ProspectInput) -> dict[str, A
     )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "Failed to add prospect"))
+
+    # Notify partner for high-score prospects (score >= 50)
+    if result.get("score", 0) >= 50:
+        await notify_lead_to_partner(
+            {
+                "id": result.get("lead_id"),
+                "company_name": prospect.company_name,
+                "contact_name": prospect.contact_name,
+                "email": prospect.email,
+                "phone": prospect.phone,
+                "website": prospect.website,
+                "score": result.get("score", 0),
+                "location": f"{prospect.city}, {prospect.state}" if prospect.city else prospect.state,
+                "metadata": {
+                    "building_type": prospect.building_type,
+                    "city": prospect.city,
+                    "state": prospect.state,
+                    "estimated_sqft": prospect.estimated_sqft,
+                    "roof_system": prospect.roof_system,
+                },
+            },
+            campaign,
+            event_type="new_prospect",
+        )
+
     return result
 
 
@@ -259,6 +285,9 @@ async def enroll_lead_in_outreach(campaign_id: str, lead_id: str) -> dict[str, A
         now, uuid.UUID(lead_id),
     )
 
+    # Notify partner (matthew@weathercraft.net) about the enrolled lead
+    await notify_lead_to_partner(lead_data, campaign, event_type="outreach_enrolled")
+
     logger.info(f"Lead {lead_id[:8]} enrolled in {campaign_id} outreach ({queued} emails queued)")
     return {
         "ok": True,
@@ -356,4 +385,70 @@ async def batch_enroll_outreach(
         "campaign_id": campaign_id,
         "total_eligible": len(leads),
         **results,
+    }
+
+
+# ---- Lead reply / interest notification ----
+
+class LeadReplyInput(BaseModel):
+    summary: str
+    reply_text: Optional[str] = None
+
+
+@router.post("/{campaign_id}/leads/{lead_id}/reply")
+async def log_lead_reply(campaign_id: str, lead_id: str, payload: LeadReplyInput) -> dict[str, Any]:
+    """Log a lead reply and immediately notify partner via email."""
+    campaign = get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
+
+    try:
+        from db import get_pool
+        pool = get_pool()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    lead_row = await pool.fetchrow("SELECT * FROM revenue_leads WHERE id = $1", uuid.UUID(lead_id))
+    if not lead_row:
+        raise HTTPException(status_code=404, detail=f"Lead '{lead_id}' not found")
+
+    lead_data = dict(lead_row)
+    meta = lead_data.get("metadata")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = {}
+    lead_data["metadata"] = meta or {}
+
+    now = datetime.now(timezone.utc)
+
+    # Update lead stage to replied
+    await pool.execute(
+        "UPDATE revenue_leads SET stage = 'replied', status = 'replied', updated_at = $1 WHERE id = $2",
+        now, uuid.UUID(lead_id),
+    )
+
+    # Log engagement
+    try:
+        await pool.execute("""
+            INSERT INTO lead_engagement_history (lead_id, event_type, event_data, channel, timestamp)
+            VALUES ($1, 'reply_received', $2, 'email', $3)
+        """,
+            uuid.UUID(lead_id),
+            json.dumps({"summary": payload.summary, "reply_text": payload.reply_text}),
+            now,
+        )
+    except Exception:
+        pass  # engagement history table may not exist
+
+    # Immediate priority notification to partner
+    await notify_lead_to_partner(lead_data, campaign, event_type="reply_received")
+
+    logger.info(f"Lead {lead_id[:8]} reply logged and partner notified for campaign {campaign_id}")
+    return {
+        "ok": True,
+        "lead_id": lead_id,
+        "stage": "replied",
+        "partner_notified": True,
     }
