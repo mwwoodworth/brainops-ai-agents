@@ -775,21 +775,23 @@ async def process_sale(sale_data: dict[str, Any], product_code: str, first_name:
     )
 
 @router.get("/analytics", dependencies=[Depends(_require_internal_api_key)])
-async def get_sales_analytics():
+async def get_sales_analytics(include_test: bool = False):
     """Get sales analytics from database"""
     try:
         from database.async_connection import get_pool
 
         pool = get_pool()
 
+        where_clause = "" if include_test else " AND COALESCE(is_test, FALSE) = FALSE"
+
         # Get total sales
         total_sales = await pool.fetchval(
-            "SELECT COUNT(*) FROM gumroad_sales WHERE created_at > NOW() - INTERVAL '30 days'"
+            "SELECT COUNT(*) FROM gumroad_sales WHERE created_at > NOW() - INTERVAL '30 days'" + where_clause
         )
 
         # Get total revenue
         total_revenue = await pool.fetchval(
-            "SELECT COALESCE(SUM(price), 0) FROM gumroad_sales WHERE created_at > NOW() - INTERVAL '30 days'"
+            "SELECT COALESCE(SUM(price), 0) FROM gumroad_sales WHERE created_at > NOW() - INTERVAL '30 days'" + where_clause
         )
 
         # Get product breakdown
@@ -800,18 +802,20 @@ async def get_sales_analytics():
                 SUM(price) as revenue
             FROM gumroad_sales
             WHERE created_at > NOW() - INTERVAL '30 days'
+              AND ($1::boolean OR COALESCE(is_test, FALSE) = FALSE)
             GROUP BY product_code
             ORDER BY revenue DESC
-        """)
+        """, include_test)
 
         # Get recent sales
         recent_sales = await pool.fetch("""
             SELECT
                 sale_id, email, product_name, price, created_at
             FROM gumroad_sales
+            WHERE ($1::boolean OR COALESCE(is_test, FALSE) = FALSE)
             ORDER BY created_at DESC
             LIMIT 10
-        """)
+        """, include_test)
 
         return {
             "total_sales": total_sales or 0,
