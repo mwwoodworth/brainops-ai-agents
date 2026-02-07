@@ -2762,29 +2762,70 @@ async def system_awareness():
     healthy = []
 
     try:
-        # Check Gumroad revenue
-        gumroad_sales = await pool.fetchval("SELECT COUNT(*) FROM gumroad_sales")
-        if gumroad_sales == 0:
+        # Check Gumroad revenue (truthful: exclude test rows)
+        gumroad_real = await pool.fetchval(
+            "SELECT COUNT(*) FROM gumroad_sales WHERE NOT COALESCE(is_test, FALSE)"
+        )
+        gumroad_test = await pool.fetchval(
+            "SELECT COUNT(*) FROM gumroad_sales WHERE COALESCE(is_test, FALSE)"
+        )
+        if gumroad_real == 0:
             issues.append({
                 "category": "REVENUE",
-                "problem": "Zero Gumroad sales recorded",
-                "impact": "No revenue tracking from digital products",
-                "fix": "Verify Gumroad webhook is receiving purchases at /gumroad/webhook"
+                "problem": "Zero REAL Gumroad sales recorded",
+                "impact": "No personal revenue from digital products (test rows do not count as revenue)",
+                "fix": "Verify Gumroad webhook is receiving real purchases at /gumroad/webhook"
             })
+            if gumroad_test and gumroad_test > 0:
+                warnings.append({
+                    "category": "REVENUE",
+                    "problem": "Gumroad test rows present",
+                    "impact": "Webhook wiring may be OK, but there is still zero real revenue recorded",
+                    "fix": "Ensure production Gumroad products are live and receiving real purchases"
+                })
         else:
-            healthy.append(f"Gumroad: {gumroad_sales} sales tracked")
+            healthy.append(f"Gumroad: {gumroad_real} real sales tracked")
+            if gumroad_test and gumroad_test > 0:
+                warnings.append({
+                    "category": "REVENUE",
+                    "problem": "Gumroad test rows present",
+                    "impact": "Test rows are excluded from revenue totals; ensure dashboards filter is_test=false",
+                    "fix": "Continue filtering COALESCE(is_test,false)=false in all revenue reporting"
+                })
 
-        # Check MRG subscriptions
-        mrg_subs = await pool.fetchval("SELECT COUNT(*) FROM mrg_subscriptions")
-        if mrg_subs == 0:
+        # Check MRG subscriptions (truthful: tenant-scoped default + global)
+        mrg_default_tenant = os.getenv("MRG_DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
+        mrg_active_default = await pool.fetchval(
+            "SELECT COUNT(*) FROM mrg_subscriptions WHERE status='active' AND tenant_id = $1",
+            mrg_default_tenant,
+        )
+        mrg_active_all = await pool.fetchval("SELECT COUNT(*) FROM mrg_subscriptions WHERE status='active'")
+
+        if mrg_active_default == 0:
             issues.append({
                 "category": "REVENUE",
-                "problem": "Zero MRG subscriptions",
+                "problem": "Zero active MRG subscriptions (default tenant)",
                 "impact": "No SaaS recurring revenue",
                 "fix": "Verify Stripe webhook integration for subscriptions"
             })
+            if mrg_active_all and mrg_active_all > 0:
+                warnings.append({
+                    "category": "REVENUE",
+                    "problem": "MRG subscriptions exist for other tenants",
+                    "impact": "Tenant attribution may be misconfigured (MRG_DEFAULT_TENANT_ID mismatch)",
+                    "fix": "Set MRG_DEFAULT_TENANT_ID consistently on MRG + backend + agents"
+                })
         else:
-            healthy.append(f"MRG Subscriptions: {mrg_subs} active")
+            healthy.append(
+                f"MRG Subscriptions: {mrg_active_default} active (default tenant)"
+            )
+            if mrg_active_all and mrg_active_all > mrg_active_default:
+                warnings.append({
+                    "category": "REVENUE",
+                    "problem": "MRG subscriptions exist outside default tenant",
+                    "impact": "Revenue reporting can be fragmented across tenants",
+                    "fix": "Confirm tenant_id assignment in checkout metadata and webhook handlers"
+                })
 
         # Check learning system (uses ai_learning_insights, not ai_learning_patterns)
         learning = await pool.fetchval("SELECT COUNT(*) FROM ai_learning_insights")
@@ -7341,12 +7382,77 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
             }
         },
         "revenue_summary": {
-            "gumroad_lifetime": 4985.00,
-            "mrg_mrr": 0,
-            "total_real_revenue": 4985.00,
-            "note": "All other data in ERP is demo/seed data"
+            "gumroad_lifetime": 0.0,
+            "gumroad_real_sales": 0,
+            "gumroad_test_sales": 0,
+            "gumroad_test_revenue": 0.0,
+            "mrg_mrr": 0.0,
+            "mrg_active_subscribers_default_tenant": 0,
+            "total_real_revenue": 0.0,
+            "note": "Owner revenue only (Gumroad + MRG). Excludes Weathercraft ERP client operations and ERP invoice ledger."
         }
     }
+
+    # Never hardcode revenue. Compute live, truthy numbers (exclude tests).
+    try:
+        from email_sender import get_db_connection
+        from psycopg2.extras import RealDictCursor
+
+        mrg_default_tenant = os.getenv("MRG_DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
+
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        cursor.execute(
+            """
+            SELECT
+              COUNT(*) FILTER (WHERE NOT COALESCE(is_test, FALSE)) AS real_count,
+              COALESCE(SUM(price::numeric) FILTER (WHERE NOT COALESCE(is_test, FALSE)), 0) AS real_revenue,
+              COUNT(*) FILTER (WHERE COALESCE(is_test, FALSE)) AS test_count,
+              COALESCE(SUM(price::numeric) FILTER (WHERE COALESCE(is_test, FALSE)), 0) AS test_revenue
+            FROM gumroad_sales
+            WHERE lower(coalesce(metadata->>'refunded', 'false')) NOT IN ('true', '1')
+            """
+        )
+        gumroad = cursor.fetchone() or {}
+
+        cursor.execute(
+            """
+            SELECT
+              COUNT(*) AS active_subscriptions,
+              COALESCE(SUM(
+                CASE
+                  WHEN billing_cycle IN ('monthly', 'month') THEN amount
+                  WHEN billing_cycle IN ('annual', 'yearly', 'year') THEN amount / 12
+                  ELSE 0
+                END
+              ), 0) AS mrr
+            FROM mrg_subscriptions
+            WHERE tenant_id = %s
+              AND status = 'active'
+            """,
+            (mrg_default_tenant,),
+        )
+        mrg = cursor.fetchone() or {}
+
+        cursor.close()
+        conn.close()
+
+        gumroad_lifetime = float(gumroad.get("real_revenue") or 0)
+        mrg_mrr = float(mrg.get("mrr") or 0)
+        inventory["revenue_summary"].update(
+            {
+                "gumroad_lifetime": gumroad_lifetime,
+                "gumroad_real_sales": int(gumroad.get("real_count") or 0),
+                "gumroad_test_sales": int(gumroad.get("test_count") or 0),
+                "gumroad_test_revenue": float(gumroad.get("test_revenue") or 0),
+                "mrg_mrr": mrg_mrr,
+                "mrg_active_subscribers_default_tenant": int(mrg.get("active_subscriptions") or 0),
+                "total_real_revenue": gumroad_lifetime,
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Failed computing live revenue summary for inventory/products: {e}")
 
     return inventory
 
@@ -7408,7 +7514,7 @@ async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
                 "total_lifetime_revenue": float(gumroad.get("total_revenue", 0)),
                 "total_mrr": float(mrg.get("mrr", 0))
             },
-            "warning": "ERP customer/job/invoice data is DEMO DATA - not real revenue"
+            "warning": "Weathercraft ERP customer/job/invoice data is client operations, not owner revenue."
         }
 
     except Exception as e:

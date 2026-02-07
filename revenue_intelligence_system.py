@@ -606,7 +606,7 @@ class RevenueIntelligenceSystem:
             "action_items": self._generate_action_items(revenue, automations),
 
             "warnings": [
-                "ERP customer/job/invoice data is DEMO - not real revenue",
+                "Weathercraft ERP customer/job/invoice data is client operations, not owner revenue",
                 "MRG has 0 active subscribers - needs customer acquisition"
             ]
         }

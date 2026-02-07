@@ -23,6 +23,11 @@ if os.path.exists(secure_env):
 from config import config
 from database.async_connection import init_pool, close_pool, get_pool, PoolConfig
 
+WEATHERCRAFT_TENANT_ID = os.getenv("WEATHERCRAFT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457")
+WEATHERCRAFT_QA_TENANT_ID = os.getenv("WEATHERCRAFT_QA_TENANT_ID", "497509e7-b9f8-4766-922c-94ed19626547")
+SYSTEM_TENANT_ID = os.getenv("SYSTEM_TENANT_ID", "00000000-0000-0000-0000-000000000001")
+MRG_DEFAULT_TENANT_ID = os.getenv("MRG_DEFAULT_TENANT_ID", SYSTEM_TENANT_ID)
+
 async def check_system_health():
     print("\n🖥️  SYSTEM HEALTH")
     print("-" * 20)
@@ -46,20 +51,21 @@ async def check_system_health():
         print(f"❌ Database: FAILED ({e})")
         return
 
-async def check_revenue_integrity():
-    print("\n💰 REVENUE INTEGRITY")
+async def check_erp_ledger_integrity():
+    print("\n💰 ERP INVOICE LEDGER INTEGRITY (WEATHERCRAFT TENANTS)")
     print("-" * 20)
     pool = get_pool()
-    
+
     # Ledger Gap
     gap = await pool.fetchval("""
         SELECT count(*) FROM invoices i 
         WHERE i.status = 'paid' 
+        AND i.tenant_id = ANY($1::uuid[])
         AND NOT EXISTS (
             SELECT 1 FROM real_revenue_tracking r 
             WHERE r.metadata->>'invoice_id' = i.id::text
         )
-    """)
+    """, [WEATHERCRAFT_TENANT_ID, WEATHERCRAFT_QA_TENANT_ID])
     if gap == 0:
         print("✅ Ledger: PERFECT (0 missing entries)")
     else:
@@ -68,6 +74,61 @@ async def check_revenue_integrity():
     # Dunning
     failed = await pool.fetchval("SELECT count(*) FROM failed_payments WHERE status = 'pending'")
     print(f"⚠️  Active Dunning Cases: {failed}")
+
+async def check_personal_revenue():
+    print("\n💵 PERSONAL REVENUE (OWNER ONLY; EXCLUDES ERP INVOICES)")
+    print("-" * 20)
+    pool = get_pool()
+
+    gumroad = await pool.fetchrow(
+        """
+        SELECT
+          COUNT(*) FILTER (WHERE NOT COALESCE(is_test, FALSE)) AS real_count,
+          COALESCE(SUM(price::numeric) FILTER (WHERE NOT COALESCE(is_test, FALSE)), 0) AS real_sum,
+          COUNT(*) FILTER (WHERE COALESCE(is_test, FALSE)) AS test_count,
+          COALESCE(SUM(price::numeric) FILTER (WHERE COALESCE(is_test, FALSE)), 0) AS test_sum
+        FROM gumroad_sales
+        """
+    )
+    gumroad_real = float(gumroad["real_sum"] or 0)
+    gumroad_test = float(gumroad["test_sum"] or 0)
+    print(
+        f"✅ Gumroad: real {int(gumroad['real_count'] or 0)} (${gumroad_real:,.2f})"
+        f" | test {int(gumroad['test_count'] or 0)} (${gumroad_test:,.2f})"
+    )
+
+    mrg_active_default = await pool.fetchval(
+        "SELECT COUNT(*) FROM mrg_subscriptions WHERE status='active' AND tenant_id = $1",
+        MRG_DEFAULT_TENANT_ID,
+    )
+    mrg_active_all = await pool.fetchval(
+        "SELECT COUNT(*) FROM mrg_subscriptions WHERE status='active'"
+    )
+    print(
+        f"✅ MRG Subscriptions: {int(mrg_active_default or 0)} active (default tenant)"
+        f" | {int(mrg_active_all or 0)} active (all tenants)"
+    )
+
+    stripe = await pool.fetchrow(
+        """
+        SELECT
+          COUNT(*) AS total_30d,
+          COUNT(*) FILTER (WHERE processed_at IS NOT NULL) AS processed_30d,
+          COUNT(*) FILTER (WHERE processed_at IS NULL) AS pending_30d,
+          COUNT(*) FILTER (WHERE tenant_id IS NULL) AS missing_tenant_30d,
+          MAX(created_at) AS last_event_at
+        FROM stripe_webhook_events
+        WHERE created_at > NOW() - INTERVAL '30 days'
+        """
+    )
+    print(
+        "✅ Stripe webhooks (30d):"
+        f" total={int(stripe['total_30d'] or 0)}"
+        f" processed={int(stripe['processed_30d'] or 0)}"
+        f" pending={int(stripe['pending_30d'] or 0)}"
+        f" missing_tenant={int(stripe['missing_tenant_30d'] or 0)}"
+        f" last={stripe['last_event_at']}"
+    )
 
 async def check_agent_status():
     print("\n🤖 AGENT STATUS")
@@ -155,7 +216,8 @@ async def main():
     
     try:
         await check_system_health()
-        await check_revenue_integrity()
+        await check_erp_ledger_integrity()
+        await check_personal_revenue()
         await check_agent_status()
     finally:
         await close_pool()

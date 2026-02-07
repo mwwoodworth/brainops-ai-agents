@@ -380,6 +380,8 @@ class ProactiveAnalyzer:
                         COUNT(DISTINCT email) as unique_customers
                     FROM gumroad_sales
                     WHERE created_at >= $1
+                      AND COALESCE(is_test, FALSE) = FALSE
+                      AND lower(coalesce(metadata->>'refunded', 'false')) NOT IN ('true', '1')
                 """
                 gumroad_row = await pool.fetchrow(gumroad_query, cutoff)
 

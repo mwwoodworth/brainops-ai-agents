@@ -75,7 +75,7 @@ class TableTruth:
 
 @dataclass
 class RevenueTruth:
-    """Truth about revenue - REAL vs DEMO"""
+    """Truth about revenue - owner revenue vs ERP client ops (non-owner)."""
     demo_customers: int = 0
     demo_jobs: int = 0
     demo_invoices: int = 0
@@ -152,12 +152,12 @@ class SystemTruth:
                 "real_data": self.real_tables
             },
             "revenue": {
-                "WARNING": "ERP data is DEMO - not real revenue!",
+                "WARNING": "ERP customers/jobs/invoices are client operations (Weathercraft), not owner revenue.",
                 "demo": {
                     "customers": self.revenue.demo_customers,
                     "jobs": self.revenue.demo_jobs,
                     "invoices": self.revenue.demo_invoices,
-                    "fake_value": self.revenue.demo_total_value
+                    "invoice_gmv": self.revenue.demo_total_value
                 },
                 "real": {
                     "gumroad_sales": self.revenue.real_gumroad_sales,
@@ -314,7 +314,32 @@ class TrueSelfAwareness:
             truth.revenue.real_won_deals = real_stats['won_real'] or 0
             truth.revenue.real_pipeline_value = float(real_stats['pipeline_value'] or 0)
             truth.revenue.real_won_revenue = float(real_stats['won_value'] or 0)
-            truth.revenue.real_mrg_subscribers = 0  # No MRG subscriptions table yet
+
+            # MRG subscriptions (owner tenant scoped)
+            try:
+                owner_tenant_id = os.getenv("MRG_DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
+                mrg_stats = await conn.fetchrow(
+                    """
+                    SELECT
+                      COUNT(*) AS active_subs,
+                      COALESCE(SUM(
+                        CASE
+                          WHEN billing_cycle IN ('monthly', 'month') THEN amount
+                          WHEN billing_cycle IN ('annual', 'yearly', 'year') THEN amount / 12
+                          ELSE 0
+                        END
+                      ), 0) AS mrr
+                    FROM mrg_subscriptions
+                    WHERE tenant_id = $1
+                      AND status = 'active'
+                    """,
+                    owner_tenant_id,
+                )
+                truth.revenue.real_mrg_subscribers = mrg_stats["active_subs"] or 0
+                truth.revenue.real_mrg_mrr = float(mrg_stats["mrr"] or 0)
+            except Exception:
+                truth.revenue.real_mrg_subscribers = 0
+                truth.revenue.real_mrg_mrr = 0.0
 
             # Track test data separately
             test_gumroad = real_stats['gumroad_test'] or 0
@@ -370,7 +395,7 @@ class TrueSelfAwareness:
             truth.total_tables = len(table_stats)
 
             # Add critical warnings
-            warnings.append("ERP data (customers/jobs/invoices) is DEMO DATA - not real revenue!")
+            warnings.append("ERP customers/jobs/invoices are client operations (Weathercraft), not owner revenue!")
             if truth.stub_agents > 0:
                 warnings.append(f"{truth.stub_agents} agents are stubs without real code")
 
@@ -397,10 +422,10 @@ class TrueSelfAwareness:
             f"HEALTH: {truth.stuck_executions} stuck, {truth.pending_tasks} pending, {truth.error_rate*100:.1f}% error rate",
             f"THOUGHTS: {truth.thought_count} total, {truth.thought_rate}/min",
             "",
-            "⚠️  DEMO DATA (NOT REAL):",
-            f"   - {truth.revenue.demo_customers:,} customers",
-            f"   - {truth.revenue.demo_jobs:,} jobs",
-            f"   - ${truth.revenue.demo_total_value:,.0f} fake invoice value",
+            "⚠️  ERP CLIENT OPS (NOT OWNER REVENUE):",
+            f"   - {truth.revenue.demo_customers:,} customers (Weathercraft ERP)",
+            f"   - {truth.revenue.demo_jobs:,} jobs (Weathercraft ERP)",
+            f"   - ${truth.revenue.demo_total_value:,.0f} invoice GMV (Weathercraft ERP)",
             "",
             "✅ REAL REVENUE:",
             f"   - {truth.revenue.real_gumroad_sales} Gumroad sales",
