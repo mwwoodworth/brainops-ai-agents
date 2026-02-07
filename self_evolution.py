@@ -477,11 +477,18 @@ class SelfEvolution:
         if metric_key not in {"error_rate", "avg_latency_ms", "total_requests"}:
             return {"error": f"Unsupported metric: {metric}"}
 
+        ALLOWED_CHANGE_TABLES = frozenset({"ai_code_changes", "code_changes", "claude_code_changes"})
         try:
             cur = conn.cursor(cursor_factory=RealDictCursor)
             change_time = None
-            for table in ("ai_code_changes", "code_changes", "claude_code_changes"):
-                cur.execute(f"SELECT created_at FROM {table} WHERE id = %s LIMIT 1", (change_id,))
+            for table in ALLOWED_CHANGE_TABLES:
+                from psycopg2 import sql as psql
+                cur.execute(
+                    psql.SQL("SELECT created_at FROM {} WHERE id = %s LIMIT 1").format(
+                        psql.Identifier(table)
+                    ),
+                    (change_id,),
+                )
                 row = cur.fetchone()
                 if row and row.get("created_at"):
                     change_time = row["created_at"]
