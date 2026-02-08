@@ -3215,14 +3215,17 @@ async def debug_truth_connection():
             result["pool_error"] = f"{type(e).__name__}: {e}"
             result["steps"].append("pool_failed")
 
-        # Step 3: Try acquire from pool
+        # Step 3: Try acquire from underlying raw pool
         try:
             pool = get_pool()
-            conn = await pool.acquire()
-            test = await conn.fetchval("SELECT 1")
-            result["pool_acquire_test"] = test
-            result["steps"].append("pool_acquire_ok")
-            await pool.release(conn)
+            raw_pool = getattr(pool, '_pool', None)
+            result["has_raw_pool"] = raw_pool is not None
+            if raw_pool:
+                conn = await raw_pool.acquire(timeout=10)
+                test = await conn.fetchval("SELECT 1")
+                result["pool_acquire_test"] = test
+                result["steps"].append("pool_acquire_ok")
+                await raw_pool.release(conn)
         except Exception as e:
             result["pool_acquire_error"] = f"{type(e).__name__}: {e}"
             result["steps"].append("pool_acquire_failed")

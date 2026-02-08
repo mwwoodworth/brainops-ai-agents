@@ -209,18 +209,18 @@ class TrueSelfAwareness:
     async def _get_db_connection(self):
         """Get database connection from the shared pool or direct"""
         try:
-            from database.async_connection import get_pool as _get_pool, _pool as _raw_pool
-            logger.info(f"TrueSelfAwareness: _raw_pool={_raw_pool}, type={type(_raw_pool)}")
+            from database.async_connection import get_pool as _get_pool
             pool = _get_pool()
-            logger.info(f"TrueSelfAwareness: got pool={pool}")
-            conn = await pool.acquire()
-            logger.info(f"TrueSelfAwareness: acquired conn={conn}")
-            # Mark as pool connection so we release instead of close
+            # Access the underlying asyncpg.Pool for acquire/release
+            raw_pool = getattr(pool, '_pool', None)
+            if raw_pool is None:
+                raise RuntimeError("Pool wrapper has no underlying _pool")
+            conn = await raw_pool.acquire(timeout=10)
             conn._from_pool = True
-            conn._pool_ref = pool
+            conn._raw_pool = raw_pool
             return conn
         except Exception as e:
-            logger.error(f"DB connection from pool failed: {type(e).__name__}: {e}", exc_info=True)
+            logger.error(f"DB connection from pool failed: {type(e).__name__}: {e}")
             # Fallback to direct connection using DATABASE_URL
             try:
                 import asyncpg
@@ -232,19 +232,18 @@ class TrueSelfAwareness:
                     password = os.getenv("DB_PASSWORD", "")
                     db_name = os.getenv("DB_NAME", "postgres")
                     db_url = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
-                logger.info(f"TrueSelfAwareness: trying direct connect, url_len={len(db_url)}")
                 conn = await asyncpg.connect(db_url, ssl="require")
                 conn._from_pool = False
                 return conn
             except Exception as e2:
-                logger.error(f"Direct DB connection also failed: {type(e2).__name__}: {e2}", exc_info=True)
+                logger.error(f"Direct DB connection also failed: {type(e2).__name__}: {e2}")
                 return None
 
     async def _release_db_connection(self, conn):
         """Release or close connection depending on source"""
         try:
-            if getattr(conn, '_from_pool', False) and hasattr(conn, '_pool_ref'):
-                await conn._pool_ref.release(conn)
+            if getattr(conn, '_from_pool', False) and hasattr(conn, '_raw_pool'):
+                await conn._raw_pool.release(conn)
             else:
                 await conn.close()
         except Exception as e:
