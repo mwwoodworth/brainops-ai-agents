@@ -515,6 +515,22 @@ if __name__ == "__main__":
         print("🔍 SYSTEM AWARENESS TEST")
         print("="*60 + "\n")
 
+        from database.async_connection import init_pool, PoolConfig
+        import os
+        
+        # Configure DB from env
+        db_config = PoolConfig(
+            host=os.getenv('DB_HOST'),
+            port=int(os.getenv('DB_PORT', 5432)),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD'),
+            database=os.getenv('DB_NAME'),
+            ssl=True,
+            ssl_verify=False  # Bypass for awareness test
+        )
+        
+        await init_pool(db_config)
+
         awareness = get_system_awareness()
         result = await awareness.run_full_scan()
 

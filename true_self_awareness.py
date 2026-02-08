@@ -207,26 +207,38 @@ class TrueSelfAwareness:
         return cls._instance
 
     async def _get_db_connection(self):
-        """Get database connection with validation"""
+        """Get database connection from the shared pool or direct"""
         try:
-            import asyncpg
-            # Validate required environment variables
-            required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD"]
-            missing = [var for var in required_vars if not os.getenv(var)]
-            if missing:
-                raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
-
-            return await asyncpg.connect(
-                host=os.getenv("DB_HOST"),
-                port=int(os.getenv("DB_PORT", "5432")),
-                user=os.getenv("DB_USER"),
-                password=os.getenv("DB_PASSWORD"),
-                database=os.getenv("DB_NAME", "postgres"),
-                ssl="require"
-            )
+            from database import get_pool
+            pool = get_pool()
+            conn = await pool.acquire()
+            # Mark as pool connection so we release instead of close
+            conn._from_pool = True
+            conn._pool_ref = pool
+            return conn
         except Exception as e:
-            logger.error(f"DB connection failed: {e}")
-            return None
+            logger.error(f"DB connection from pool failed: {e}")
+            # Fallback to direct connection
+            try:
+                import asyncpg
+                from config import DatabaseConfig
+                db_url = DatabaseConfig.get_url()
+                conn = await asyncpg.connect(db_url, ssl="require")
+                conn._from_pool = False
+                return conn
+            except Exception as e2:
+                logger.error(f"Direct DB connection also failed: {e2}")
+                return None
+
+    async def _release_db_connection(self, conn):
+        """Release or close connection depending on source"""
+        try:
+            if getattr(conn, '_from_pool', False) and hasattr(conn, '_pool_ref'):
+                await conn._pool_ref.release(conn)
+            else:
+                await conn.close()
+        except Exception as e:
+            logger.warning(f"Error releasing connection: {e}")
 
     async def get_truth(self, force_refresh: bool = False) -> SystemTruth:
         """Get the complete truth about the system"""
@@ -405,7 +417,7 @@ class TrueSelfAwareness:
             logger.error(f"Error getting truth: {e}")
             truth.warnings.append(f"Error querying system: {str(e)}")
         finally:
-            await conn.close()
+            await self._release_db_connection(conn)
 
         self._last_truth = truth
         self._last_update = now
