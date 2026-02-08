@@ -25,8 +25,28 @@ import json
 
 logger = logging.getLogger(__name__)
 
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY") or os.getenv("STRIPE_API_KEY_LIVE")
-STRIPE_AVAILABLE = bool(STRIPE_SECRET_KEY)
+def resolve_stripe_secret_key_with_source() -> tuple[str, str]:
+    """
+    Resolve the Stripe secret key from the environment.
+
+    We prefer a single canonical key name (`STRIPE_SECRET_KEY`) but support
+    legacy aliases to reduce production drift during migration.
+    """
+    for key_name in (
+        "STRIPE_SECRET_KEY",
+        "STRIPE_API_KEY_LIVE",
+        "STRIPE_API_KEY",
+        "STRIPE_SECRET_KEY_LIVE",
+    ):
+        value = (os.getenv(key_name) or "").strip()
+        if value:
+            return value, key_name
+    return "", "missing"
+
+
+def resolve_stripe_secret_key() -> str:
+    key, _ = resolve_stripe_secret_key_with_source()
+    return key
 
 
 @dataclass
@@ -54,6 +74,7 @@ class PaymentCapture:
     def __init__(self):
         self._pool = None
         self._stripe = None
+        self._stripe_key = None
 
     def _get_pool(self):
         """Get database pool."""
@@ -66,15 +87,20 @@ class PaymentCapture:
 
     def _get_stripe(self):
         """Get Stripe client."""
-        if not STRIPE_AVAILABLE:
+        key = resolve_stripe_secret_key()
+        if not key:
             return None
         if self._stripe is None:
             try:
                 import stripe
-                stripe.api_key = STRIPE_SECRET_KEY
                 self._stripe = stripe
             except ImportError:
                 logger.warning("Stripe SDK not installed")
+                return None
+        if self._stripe is not None and self._stripe_key != key:
+            # Allow key rotation / env fixes without requiring a full process restart.
+            self._stripe.api_key = key
+            self._stripe_key = key
         return self._stripe
 
     async def create_invoice(
