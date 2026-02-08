@@ -3230,10 +3230,25 @@ async def debug_truth_connection():
             result["pool_acquire_error"] = f"{type(e).__name__}: {e}"
             result["steps"].append("pool_acquire_failed")
 
-        # Step 4: Try TrueSelfAwareness._get_db_connection
+        # Step 4: Try TrueSelfAwareness._get_db_connection (with inline test)
         if TRUE_AWARENESS_AVAILABLE:
             try:
                 awareness = get_true_awareness()
+                result["truth_code_version"] = getattr(awareness, '_DB_CODE_VERSION', 'MISSING')
+                # Inline same logic to compare
+                try:
+                    from database.async_connection import get_pool as _gp2
+                    pool2 = _gp2()
+                    raw2 = getattr(pool2, '_pool', None)
+                    result["step4_raw_pool_ok"] = raw2 is not None
+                    if raw2:
+                        c = await raw2.acquire(timeout=10)
+                        t = await c.fetchval("SELECT COUNT(*) FROM ai_agents")
+                        result["step4_inline_count"] = t
+                        await raw2.release(c)
+                except Exception as ex:
+                    result["step4_inline_err"] = f"{type(ex).__name__}: {ex}"
+
                 conn = await awareness._get_db_connection()
                 if conn:
                     test = await conn.fetchval("SELECT COUNT(*) FROM ai_agents")
@@ -3245,6 +3260,8 @@ async def debug_truth_connection():
                     result["steps"].append("truth_conn_none")
             except Exception as e:
                 result["truth_conn_error"] = f"{type(e).__name__}: {e}"
+                import traceback
+                result["truth_conn_tb"] = traceback.format_exc()[-500:]
                 result["steps"].append("truth_conn_failed")
 
     except Exception as e:
