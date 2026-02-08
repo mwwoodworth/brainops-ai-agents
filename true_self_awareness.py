@@ -206,6 +206,8 @@ class TrueSelfAwareness:
             cls._instance = cls()
         return cls._instance
 
+    _DB_CODE_VERSION = "v4-raw-pool"  # Track which version is deployed
+
     async def _get_db_connection(self):
         """Get database connection from the shared pool or direct"""
         try:
@@ -214,7 +216,7 @@ class TrueSelfAwareness:
             # Access the underlying asyncpg.Pool for acquire/release
             raw_pool = getattr(pool, '_pool', None)
             if raw_pool is None:
-                raise RuntimeError("Pool wrapper has no underlying _pool")
+                raise RuntimeError(f"Pool wrapper has no underlying _pool. pool type={type(pool)}, code_version={self._DB_CODE_VERSION}")
             conn = await raw_pool.acquire(timeout=10)
             conn._from_pool = True
             conn._raw_pool = raw_pool
