@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from payment_capture import (
     get_payment_capture,
     ensure_invoices_table,
-    STRIPE_AVAILABLE,
+    resolve_stripe_secret_key_with_source,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,17 +52,28 @@ async def get_payment_status() -> dict[str, Any]:
     pc = get_payment_capture()
     summary = await pc.get_revenue_summary(real_only=True)
 
+    stripe_key, stripe_key_source = resolve_stripe_secret_key_with_source()
+    stripe_available = bool(stripe_key)
+
     stripe_client = pc._get_stripe()
     stripe_mode = "unavailable"
-    if stripe_client and STRIPE_AVAILABLE:
-        stripe_mode = "live" if "live" in str(STRIPE_AVAILABLE).lower() else "test"
+    if stripe_client and stripe_available:
+        # Detect mode from the configured secret key prefix (never return the key).
+        if stripe_key.startswith(("***REMOVED***_", "rk_live_")):
+            stripe_mode = "live"
+        elif stripe_key.startswith(("***REMOVED***_", "rk_test_")):
+            stripe_mode = "test"
+        else:
+            stripe_mode = "unknown"
 
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "stripe_available": STRIPE_AVAILABLE,
+        "stripe_available": stripe_available,
         "stripe_mode": stripe_mode,
-        "payment_methods": ["stripe", "manual"] if STRIPE_AVAILABLE else ["manual"],
-        "revenue_summary": summary
+        "stripe_key_source": stripe_key_source,
+        "stripe_key_prefix": stripe_key[:8] if stripe_key else None,
+        "payment_methods": ["stripe", "manual"] if stripe_available else ["manual"],
+        "revenue_summary": summary,
     }
 
 
