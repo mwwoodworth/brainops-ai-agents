@@ -206,8 +206,6 @@ class TrueSelfAwareness:
             cls._instance = cls()
         return cls._instance
 
-    _DB_CODE_VERSION = "v5-wrapper-methods"
-
     async def _get_db_connection(self):
         """Get database connection - uses the pool wrapper's own fetch methods"""
         try:
