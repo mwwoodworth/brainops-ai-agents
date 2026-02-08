@@ -224,36 +224,39 @@ class WebSearchAgent(CustomerAcquisitionAgent):
     async def search_for_leads(self, criteria: dict) -> list[AcquisitionTarget]:
         """Search web for potential customers matching criteria"""
         try:
-            if not _require_openai("lead search query generation"):
+            if not _require_anthropic("lead search query generation"):
                 return []
 
-            # Generate search queries using AI
-            prompt = f"""Generate 10 specific Google search queries to find roofing contractors that need:
+            # Generate search queries using AI (Claude)
+            prompt = f"""Generate 5 specific search queries to find roofing contractors who fit the Ideal Customer Profile for 'Weathercraft ERP' (roofing software).
+            
+            Criteria:
             {json.dumps(criteria)}
 
-            Focus on finding companies showing buying signals like:
-            - Outdated websites
-            - Poor online reviews management
-            - No online booking system
-            - Manual processes mentioned
-            - Growth indicators
+            Focus on finding companies that:
+            - Are actively growing but struggling with manual processes.
+            - Have 5-50 employees (sweet spot for SaaS adoption).
+            - Are located in storm-prone areas (high volume needs).
 
-            Return as JSON array of search queries."""
+            Return as JSON array of strings (the queries)."""
 
-            response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a lead generation expert."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7
+            response = anthropic_client.messages.create(
+                model="claude-3-opus-20240229",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500
             )
 
-            search_queries = json.loads(response.choices[0].message.content)
+            import re
+            json_match = re.search(r'\[[\s\S]*\]', response.content[0].text)
+            if not json_match:
+                logger.warning("Could not parse search queries from Claude")
+                return []
+                
+            search_queries = json.loads(json_match.group())
 
-            # Simulate web search (would integrate with real search APIs)
+            # Execute web search using DuckDuckGo
             targets = []
-            for query in search_queries[:5]:  # Limit for demo
+            for query in search_queries[:3]:  # Limit for rate safety
                 found_targets = await self._execute_search(query)
                 targets.extend(found_targets)
 
@@ -261,7 +264,7 @@ class WebSearchAgent(CustomerAcquisitionAgent):
             qualified_targets = []
             for target_data in targets:
                 target = await self._analyze_target(target_data)
-                if target.intent_score > 0.3:
+                if target and target.intent_score > 0.3:
                     stored_id = await self._store_target(target)
                     if stored_id:
                         qualified_targets.append(target)
@@ -274,132 +277,75 @@ class WebSearchAgent(CustomerAcquisitionAgent):
             return []
 
     async def _execute_search(self, query: str) -> list[dict]:
-        """Execute web search using Perplexity AI for real-time results"""
+        """Execute web search using DuckDuckGo"""
         try:
-            from ai_advanced_providers import advanced_ai
+            from duckduckgo_search import DDGS
+            
+            logger.info(f"Searching DuckDuckGo for: {query}")
+            results = []
+            
+            # Use synchronous DDGS in a way that doesn't block (simplification for this context)
+            # In production, run in executor
+            with DDGS() as ddgs:
+                ddg_results = list(ddgs.text(query, max_results=5))
+                
+                for r in ddg_results:
+                    results.append({
+                        "company_name": r.get('title', '').split('-')[0].strip(), # Simple heuristic
+                        "website": r.get('href'),
+                        "snippet": r.get('body'),
+                        "source": "duckduckgo"
+                    })
 
-            # Use Perplexity for real web search
-            search_prompt = f"""Search for roofing contractors matching this query: {query}
-
-Find companies that:
-1. Are roofing contractors or related businesses
-2. Show signs they need better software/automation
-3. Have contact information available
-
-Return JSON array with up to 5 results, each containing:
-- company_name: string
-- location: string (city, state)
-- website: string (URL if found)
-- contact_info: object with email/phone if available
-- buying_signals: array of strings (e.g., "outdated website", "manual processes mentioned")
-- estimated_size: string (small/medium/large)
-
-Return ONLY valid JSON array, no other text."""
-
-            result = advanced_ai.search_with_perplexity(search_prompt)
-
-            if result and result.get("answer"):
-                try:
-                    # Try to parse JSON from response
-                    answer = result["answer"]
-                    # Find JSON array in response
-                    import re
-                    json_match = re.search(r'\[[\s\S]*\]', answer)
-                    if json_match:
-                        leads = json.loads(json_match.group())
-                        logger.info(f"Found {len(leads)} leads from Perplexity search")
-                        return leads
-                except json.JSONDecodeError:
-                    logger.warning("Could not parse Perplexity response as JSON")
-
-                # Fallback: use AI to extract structured data
-                extraction_prompt = f"""Extract business leads from this search result:
-{result['answer']}
-
-Return JSON array with company_name, location, website, and buying_signals for each."""
-
-                if not _require_openai("search result extraction"):
-                    return []
-
-                extraction_response = openai.chat.completions.create(
-                    model="gpt-4-turbo-preview",
-                    messages=[
-                        {"role": "system", "content": "Extract structured lead data. Return only valid JSON array."},
-                        {"role": "user", "content": extraction_prompt}
-                    ],
-                    temperature=0.3
-                )
-
-                extracted = json.loads(extraction_response.choices[0].message.content)
-                if isinstance(extracted, list):
-                    logger.info(f"Extracted {len(extracted)} leads from search")
-                    return extracted
-
-            logger.warning(f"No results from search query: {query}")
-            return []
+            return results
 
         except Exception as e:
-            logger.error(f"Web search execution failed: {e}")
+            logger.error(f"DuckDuckGo search failed: {e}")
             return []
 
-    async def _analyze_target(self, target_data: dict) -> AcquisitionTarget:
-        """Analyze target company for fit and intent"""
+    async def _analyze_target(self, target_data: dict) -> Optional[AcquisitionTarget]:
+        """Analyze target company for fit and intent using Claude"""
         try:
-            if not _require_openai("target analysis"):
-                return AcquisitionTarget(
-                    id=str(uuid.uuid4()),
-                    company_name=target_data.get('company_name', 'Unknown'),
-                    industry="roofing",
-                    size=target_data.get('estimated_size', 'unknown'),
-                    location=target_data.get('location', ''),
-                    website=target_data.get('website'),
-                    social_profiles={},
-                    decision_makers=[],
-                    pain_points=target_data.get('buying_signals', []),
-                    budget_range=(0.0, 0.0),
-                    intent_score=0.0,
-                    acquisition_channel=AcquisitionChannel.WEB_SEARCH,
-                    metadata={"fallback": "openai_unavailable"}
-                )
+            if not _require_anthropic("target analysis"):
+                return None
 
             # Use AI to analyze company
-            prompt = f"""Analyze this company for roofing software potential:
+            prompt = f"""Analyze this search result for roofing software potential:
             {json.dumps(target_data)}
 
             Determine:
-            1. Company size (employees)
-            2. Likely revenue range
-            3. Technology adoption level
-            4. Pain points they might have
-            5. Budget capacity
-            6. Intent signals (0-1 score)
-            7. Best contact approach
+            1. Company size (guess based on snippet)
+            2. Tech adoption (does snippet mention software?)
+            3. Pain points (inferred)
+            4. Intent score (0.0 to 1.0)
 
             Return as JSON."""
 
-            response = openai.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a B2B sales intelligence expert."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.5
+            response = anthropic_client.messages.create(
+                model="claude-3-haiku-20240307", # Use Haiku for speed/cost
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500
             )
 
-            analysis = json.loads(response.choices[0].message.content)
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', response.content[0].text)
+            if not json_match:
+                return None
+                
+            analysis = json.loads(json_match.group())
 
             return AcquisitionTarget(
                 id=str(uuid.uuid4()),
                 company_name=target_data.get('company_name', 'Unknown'),
                 industry="roofing",
-                size=analysis.get('company_size', 'small'),
-                location=target_data.get('location', ''),
+                size=analysis.get('company_size', 'unknown'),
+                location=analysis.get('location', 'Unknown'), # AI might infer this
                 website=target_data.get('website'),
-                social_profiles=target_data.get('social', {}),
+                social_profiles={},
                 decision_makers=[],
                 pain_points=analysis.get('pain_points', []),
-                budget_range=(analysis.get('budget_min', 0), analysis.get('budget_max', 10000)),
-                intent_score=analysis.get('intent_signals', 0),
+                budget_range=(0.0, 10000.0), # Default
+                intent_score=float(analysis.get('intent_score', 0.0)),
                 acquisition_channel=AcquisitionChannel.WEB_SEARCH,
                 metadata=analysis
             )
@@ -603,25 +549,30 @@ class OutreachAgent(CustomerAcquisitionAgent):
                 return {}
 
             # Generate outreach sequence
-            # STRATEGY: 'The Tease' / 'Iron Man Armor'
-            # Do NOT sell software. Validate pain. Offer 'Superpowers'.
-            prompt = f"""Create a 5-touch outreach sequence for a Roofing Consultant.
+            # STRATEGY: Direct Value / Product-Led Growth
+            # Sell the specific solution that matches their pain.
+            prompt = f"""Create a 5-touch email outreach sequence for a Roofing Company Owner.
             Target: {target.get('company_name')}
-            Role: {target.get('title', 'Consultant')}
             Pain Points: {json.dumps(target.get('pain_points', []))}
 
+            PRODUCT TO PITCH (Choose best fit based on pain points):
+            1. 'Commercial Roofing Estimation Intelligence Bundle' (if pain is estimation time/accuracy)
+            2. 'AI-Enhanced Project Management Accelerator' (if pain is chaos/updates)
+            3. 'Intelligent Client Onboarding System' (if pain is admin/onboarding)
+            4. 'Weathercraft ERP' (if they need a full system replacement)
+
             STRATEGY:
-            - Tone: Peer-to-peer, not salesperson-to-prospect.
-            - Concept: "Iron Man Armor" for consultants.
-            - Hook: "I saw you handle [Project Type]. My AI analyzed a similar roof in 4 seconds."
-            - Call to Action: "Want to test the flight suit?" (i.e., see a demo/data).
+            - Tone: Helpful, expert, direct. Not salesy fluff.
+            - Approach: "I built this to fix exactly what you're struggling with."
+            - Proof: Mention specific time savings (e.g., "Cut estimation time by 5 hours/bid").
+            - Call to Action: Link to the specific Gumroad product page or demo.
 
             SEQUENCE STRUCTURE:
-            1. The "X-Ray" Tease: Reference a specific pain point (e.g., reporting time). "My AI did this in 4 seconds."
-            2. The "Data" Proof: "Here is the raw data output. No manual entry."
-            3. The "Iron Man" Analogy: "We don't replace you. We are the suit. You are Tony Stark."
-            4. The Case Study: "A consultant in Florida cut report time by 90%."
-            5. The Break-up: "I'll keep the flight suit ready if you change your mind."
+            1. The "Pattern Match": "I noticed [pain point]. I built [Product] to fix exactly that."
+            2. The "Value Drop": Share a free tip or insight related to the product.
+            3. The "Case Study": "How [Similar Company] saved [X hours] using this tool."
+            4. The "No-Brainer": Emphasize the low cost vs. high ROI (especially for the $97-$297 products).
+            5. The "Break-up": "Still here if you need to fix [pain point]."
 
             Return as JSON with 'subject' and 'body' for each touch."""
 

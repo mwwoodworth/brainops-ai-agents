@@ -3927,15 +3927,27 @@ async def get_all_agents_status(authenticated: bool = Depends(verify_api_key)):
         # Get detailed health summary
         detailed_summary = health_monitor.get_agent_health_summary()
 
+        # If health monitor reports 0 agents, supplement with DB data
+        total_agents = health_summary.get("total_agents", 0)
+        agents_list = health_summary.get("agents", [])
+        if total_agents == 0:
+            try:
+                pool = get_pool()
+                db_agents = await pool.fetch("SELECT id, name, type, status FROM ai_agents ORDER BY name")
+                total_agents = len(db_agents)
+                agents_list = [dict(row) for row in db_agents]
+            except Exception:
+                pass
+
         return {
-            "total_agents": health_summary.get("total_agents", 0),
+            "total_agents": total_agents,
             "health_summary": {
                 "healthy": health_summary.get("healthy", 0),
                 "degraded": health_summary.get("degraded", 0),
                 "critical": health_summary.get("critical", 0),
                 "unknown": health_summary.get("unknown", 0)
             },
-            "agents": health_summary.get("agents", []),
+            "agents": agents_list,
             "critical_agents": detailed_summary.get("critical_agents", []),
             "active_alerts": detailed_summary.get("active_alerts", []),
             "recent_restarts": detailed_summary.get("recent_restarts", []),
@@ -3984,22 +3996,23 @@ async def get_executions(
     try:
         pool = get_pool()
         query = """
-            SELECT e.*, a.name as agent_name
+            SELECT e.id, e.agent_type, e.status, e.started_at, e.completed_at,
+                   e.duration_ms, e.error_message, e.model_name,
+                   e.tokens_input, e.tokens_output
             FROM agent_executions e
-            JOIN ai_agents a ON e.agent_id = a.id
             WHERE 1=1
         """
         params = []
 
         if agent_id:
-            query += f" AND e.agent_id = ${len(params) + 1}"
+            query += f" AND e.agent_type = ${len(params) + 1}"
             params.append(agent_id)
 
         if status:
             query += f" AND e.status = ${len(params) + 1}"
             params.append(status)
 
-        query += f" ORDER BY e.started_at DESC LIMIT ${len(params) + 1}"
+        query += f" ORDER BY e.started_at DESC NULLS LAST LIMIT ${len(params) + 1}"
         params.append(limit)
 
         try:
@@ -4016,13 +4029,13 @@ async def get_executions(
             data = row if isinstance(row, dict) else dict(row)
             execution = {
                 "execution_id": str(data.get("id")),
-                "agent_id": str(data.get("agent_id")),
-                "agent_name": data.get("agent_name"),
+                "agent_id": data.get("agent_type"),
+                "agent_name": data.get("agent_type"),
                 "status": data.get("status"),
                 "started_at": data["started_at"].isoformat() if data.get("started_at") else None,
                 "completed_at": data["completed_at"].isoformat() if data.get("completed_at") else None,
                 "duration_ms": data.get("duration_ms"),
-                "error": data.get("error"),
+                "error": data.get("error_message"),
             }
             executions.append(execution)
 
