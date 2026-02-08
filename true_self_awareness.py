@@ -206,50 +206,25 @@ class TrueSelfAwareness:
             cls._instance = cls()
         return cls._instance
 
-    _DB_CODE_VERSION = "v4-raw-pool"  # Track which version is deployed
+    _DB_CODE_VERSION = "v5-wrapper-methods"
 
     async def _get_db_connection(self):
-        """Get database connection from the shared pool or direct"""
+        """Get database connection - uses the pool wrapper's own fetch methods"""
         try:
             from database.async_connection import get_pool as _get_pool
             pool = _get_pool()
-            # Access the underlying asyncpg.Pool for acquire/release
-            raw_pool = getattr(pool, '_pool', None)
-            if raw_pool is None:
-                raise RuntimeError(f"Pool wrapper has no underlying _pool. pool type={type(pool)}, code_version={self._DB_CODE_VERSION}")
-            conn = await raw_pool.acquire(timeout=10)
-            conn._from_pool = True
-            conn._raw_pool = raw_pool
-            return conn
+            # Return the pool wrapper itself - it has fetch/fetchval/execute methods
+            # This avoids the acquire/release mismatch with AsyncDatabasePool
+            return pool
         except Exception as e:
-            logger.error(f"DB connection from pool failed: {type(e).__name__}: {e}")
-            # Fallback to direct connection using DATABASE_URL
-            try:
-                import asyncpg
-                db_url = os.getenv("DATABASE_URL", "")
-                if not db_url:
-                    host = os.getenv("DB_HOST", "")
-                    port = os.getenv("DB_PORT", "6543")
-                    user = os.getenv("DB_USER", "")
-                    password = os.getenv("DB_PASSWORD", "")
-                    db_name = os.getenv("DB_NAME", "postgres")
-                    db_url = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
-                conn = await asyncpg.connect(db_url, ssl="require")
-                conn._from_pool = False
-                return conn
-            except Exception as e2:
-                logger.error(f"Direct DB connection also failed: {type(e2).__name__}: {e2}")
-                return None
+            logger.error(f"DB pool access failed: {type(e).__name__}: {e}")
+            return None
 
     async def _release_db_connection(self, conn):
-        """Release or close connection depending on source"""
-        try:
-            if getattr(conn, '_from_pool', False) and hasattr(conn, '_raw_pool'):
-                await conn._raw_pool.release(conn)
-            else:
-                await conn.close()
-        except Exception as e:
-            logger.warning(f"Error releasing connection: {e}")
+        """Release connection - no-op when using pool wrapper directly"""
+        # When using the pool wrapper, we don't need to release anything
+        # The wrapper manages connections internally for each query
+        pass
 
     async def get_truth(self, force_refresh: bool = False) -> SystemTruth:
         """Get the complete truth about the system"""
