@@ -209,32 +209,35 @@ class TrueSelfAwareness:
     async def _get_db_connection(self):
         """Get database connection from the shared pool or direct"""
         try:
-            from database.async_connection import get_pool
-            pool = get_pool()
+            from database.async_connection import get_pool as _get_pool, _pool as _raw_pool
+            logger.info(f"TrueSelfAwareness: _raw_pool={_raw_pool}, type={type(_raw_pool)}")
+            pool = _get_pool()
+            logger.info(f"TrueSelfAwareness: got pool={pool}")
             conn = await pool.acquire()
+            logger.info(f"TrueSelfAwareness: acquired conn={conn}")
             # Mark as pool connection so we release instead of close
             conn._from_pool = True
             conn._pool_ref = pool
             return conn
         except Exception as e:
-            logger.error(f"DB connection from pool failed: {e}")
+            logger.error(f"DB connection from pool failed: {type(e).__name__}: {e}", exc_info=True)
             # Fallback to direct connection using DATABASE_URL
             try:
                 import asyncpg
                 db_url = os.getenv("DATABASE_URL", "")
                 if not db_url:
-                    # Build URL from individual vars
                     host = os.getenv("DB_HOST", "")
                     port = os.getenv("DB_PORT", "6543")
                     user = os.getenv("DB_USER", "")
                     password = os.getenv("DB_PASSWORD", "")
                     db_name = os.getenv("DB_NAME", "postgres")
                     db_url = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+                logger.info(f"TrueSelfAwareness: trying direct connect, url_len={len(db_url)}")
                 conn = await asyncpg.connect(db_url, ssl="require")
                 conn._from_pool = False
                 return conn
             except Exception as e2:
-                logger.error(f"Direct DB connection also failed: {e2}")
+                logger.error(f"Direct DB connection also failed: {type(e2).__name__}: {e2}", exc_info=True)
                 return None
 
     async def _release_db_connection(self, conn):
