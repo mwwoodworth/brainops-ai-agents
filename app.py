@@ -3196,6 +3196,59 @@ async def get_system_pulse():
 # TRUE SELF-AWARENESS - Live System Truth (not static documentation)
 # ============================================================================
 
+@app.get("/truth/debug", dependencies=SECURED_DEPENDENCIES)
+async def debug_truth_connection():
+    """Debug endpoint to diagnose truth DB connection issues"""
+    result = {"steps": []}
+    try:
+        # Step 1: Check if module is available
+        result["true_awareness_available"] = TRUE_AWARENESS_AVAILABLE
+        result["steps"].append("module_loaded")
+
+        # Step 2: Check pool directly
+        try:
+            pool = get_pool()
+            result["pool_type"] = str(type(pool))
+            result["pool_str"] = str(pool)[:200]
+            result["steps"].append("pool_obtained")
+        except Exception as e:
+            result["pool_error"] = f"{type(e).__name__}: {e}"
+            result["steps"].append("pool_failed")
+
+        # Step 3: Try acquire from pool
+        try:
+            pool = get_pool()
+            conn = await pool.acquire()
+            test = await conn.fetchval("SELECT 1")
+            result["pool_acquire_test"] = test
+            result["steps"].append("pool_acquire_ok")
+            await pool.release(conn)
+        except Exception as e:
+            result["pool_acquire_error"] = f"{type(e).__name__}: {e}"
+            result["steps"].append("pool_acquire_failed")
+
+        # Step 4: Try TrueSelfAwareness._get_db_connection
+        if TRUE_AWARENESS_AVAILABLE:
+            try:
+                awareness = get_true_awareness()
+                conn = await awareness._get_db_connection()
+                if conn:
+                    test = await conn.fetchval("SELECT COUNT(*) FROM ai_agents")
+                    result["truth_conn_test"] = test
+                    result["steps"].append("truth_conn_ok")
+                    await awareness._release_db_connection(conn)
+                else:
+                    result["truth_conn"] = "returned None"
+                    result["steps"].append("truth_conn_none")
+            except Exception as e:
+                result["truth_conn_error"] = f"{type(e).__name__}: {e}"
+                result["steps"].append("truth_conn_failed")
+
+    except Exception as e:
+        result["error"] = f"{type(e).__name__}: {e}"
+    return result
+
+
 @app.get("/truth", dependencies=SECURED_DEPENDENCIES)
 async def get_truth():
     """
