@@ -209,7 +209,7 @@ class TrueSelfAwareness:
     async def _get_db_connection(self):
         """Get database connection from the shared pool or direct"""
         try:
-            from database import get_pool
+            from database.async_connection import get_pool
             pool = get_pool()
             conn = await pool.acquire()
             # Mark as pool connection so we release instead of close
@@ -218,11 +218,18 @@ class TrueSelfAwareness:
             return conn
         except Exception as e:
             logger.error(f"DB connection from pool failed: {e}")
-            # Fallback to direct connection
+            # Fallback to direct connection using DATABASE_URL
             try:
                 import asyncpg
-                from config import DatabaseConfig
-                db_url = DatabaseConfig.get_url()
+                db_url = os.getenv("DATABASE_URL", "")
+                if not db_url:
+                    # Build URL from individual vars
+                    host = os.getenv("DB_HOST", "")
+                    port = os.getenv("DB_PORT", "6543")
+                    user = os.getenv("DB_USER", "")
+                    password = os.getenv("DB_PASSWORD", "")
+                    db_name = os.getenv("DB_NAME", "postgres")
+                    db_url = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
                 conn = await asyncpg.connect(db_url, ssl="require")
                 conn._from_pool = False
                 return conn
