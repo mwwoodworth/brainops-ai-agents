@@ -336,22 +336,21 @@ async def get_buyer_sequence_status(email: str) -> dict:
         from database.async_connection import get_pool
         pool = get_pool()
 
-        async with pool.acquire() as conn:
-            rows = await conn.fetch("""
-                SELECT id, subject, scheduled_for, status, metadata, sent_at
-                FROM ai_email_queue
-                WHERE recipient = $1
-                  AND metadata->>'source' = 'gumroad_sequence'
-                ORDER BY scheduled_for ASC
-            """, email)
+        rows = await pool.fetch("""
+            SELECT id, subject, scheduled_for, status, metadata, sent_at
+            FROM ai_email_queue
+            WHERE recipient = $1
+              AND metadata->>'source' = 'gumroad_sequence'
+            ORDER BY scheduled_for ASC
+        """, email)
 
-            return {
-                "recipient": email,
-                "emails": [dict(row) for row in rows],
-                "total": len(rows),
-                "sent": len([r for r in rows if r["status"] == "sent"]),
-                "pending": len([r for r in rows if r["status"] in ("queued", "scheduled")])
-            }
+        return {
+            "recipient": email,
+            "emails": [dict(row) for row in rows],
+            "total": len(rows),
+            "sent": len([r for r in rows if r["status"] == "sent"]),
+            "pending": len([r for r in rows if r["status"] in ("queued", "scheduled")])
+        }
 
     except Exception as e:
         logger.error(f"Failed to get buyer sequence status: {e}")

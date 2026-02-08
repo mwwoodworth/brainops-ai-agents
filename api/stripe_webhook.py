@@ -3,6 +3,7 @@ Stripe Webhook Handler
 ======================
 Handles Stripe payment events with proper signature verification.
 This endpoint is NOT protected by API key - it uses Stripe's signature verification.
+Records all events to stripe_events table and updates revenue_leads pipeline.
 """
 
 import json
@@ -29,11 +30,62 @@ router = APIRouter(
 )
 
 
+def _get_db_pool():
+    """Get the async database pool for recording events."""
+    from database.async_connection import get_pool
+    return get_pool()
+
+
+async def _record_stripe_event(event_type: str, stripe_id: str, customer_email: str | None,
+                                amount_cents: int, currency: str, status: str,
+                                raw_data: dict) -> bool:
+    """Record a Stripe event to the database. Returns True on success."""
+    try:
+        pool = _get_db_pool()
+        # Check for duplicate first (no unique constraint on stripe_id)
+        existing = await pool.fetchval(
+            "SELECT id FROM stripe_events WHERE stripe_id = $1", stripe_id
+        )
+        if existing:
+            logger.info(f"Stripe event already recorded: {stripe_id}")
+            return True
+
+        await pool.execute("""
+            INSERT INTO stripe_events (event_type, stripe_id, customer_email, amount_cents,
+                                       currency, status, metadata, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
+        """, event_type, stripe_id, customer_email, amount_cents, currency, status,
+            json.dumps(raw_data, default=str))
+        logger.info(f"Recorded stripe event: {event_type} ({stripe_id})")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to record stripe event: {e}")
+        return False
+
+
+async def _update_lead_to_won(customer_email: str, amount: float) -> bool:
+    """Update a revenue lead to WON stage when payment succeeds."""
+    if not customer_email:
+        return False
+    try:
+        pool = _get_db_pool()
+        result = await pool.execute("""
+            UPDATE revenue_leads
+            SET stage = 'won', status = 'customer',
+                value_estimate = GREATEST(COALESCE(value_estimate, 0), $2),
+                converted_at = NOW(), last_interaction_at = NOW()
+            WHERE LOWER(email) = LOWER($1) AND stage != 'won'
+        """, customer_email, amount)
+        if result and "UPDATE" in str(result):
+            logger.info(f"Updated revenue lead {customer_email} to WON (${amount})")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update lead: {e}")
+        return False
+
+
 def verify_stripe_signature(payload: bytes, sig_header: str, webhook_secret: str) -> dict:
-    """
-    Verify Stripe webhook signature and return the event.
-    Uses Stripe's signature verification algorithm.
-    """
+    """Verify Stripe webhook signature and return the event."""
     import hashlib
     import hmac
     import time
@@ -45,8 +97,6 @@ def verify_stripe_signature(payload: bytes, sig_header: str, webhook_secret: str
     if not sig_header:
         raise HTTPException(status_code=400, detail="Missing Stripe-Signature header")
 
-    # Parse the signature header
-    # Format: t=timestamp,v1=signature
     elements = {}
     for element in sig_header.split(","):
         key, value = element.split("=", 1)
@@ -58,7 +108,6 @@ def verify_stripe_signature(payload: bytes, sig_header: str, webhook_secret: str
     if not timestamp or not signature:
         raise HTTPException(status_code=400, detail="Invalid signature format")
 
-    # Check timestamp tolerance (5 minutes)
     try:
         timestamp_int = int(timestamp)
         if abs(time.time() - timestamp_int) > 300:
@@ -66,7 +115,6 @@ def verify_stripe_signature(payload: bytes, sig_header: str, webhook_secret: str
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid timestamp")
 
-    # Compute expected signature
     signed_payload = f"{timestamp}.{payload.decode('utf-8')}"
     expected_sig = hmac.new(
         webhook_secret.encode("utf-8"),
@@ -74,12 +122,10 @@ def verify_stripe_signature(payload: bytes, sig_header: str, webhook_secret: str
         hashlib.sha256
     ).hexdigest()
 
-    # Constant-time comparison
     if not hmac.compare_digest(expected_sig, signature):
         logger.warning("Invalid Stripe signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # Parse and return the event
     try:
         return json.loads(payload)
     except json.JSONDecodeError:
@@ -96,41 +142,7 @@ async def process_stripe_event(event: dict, background_tasks: BackgroundTasks) -
 
     logger.info(f"Processing Stripe event: {event_type} ({event_id})")
 
-    # INJECT INTO BRAIN MEMORY
     try:
-        from unified_memory_manager import get_memory_manager, Memory, MemoryType
-        
-        manager = get_memory_manager()
-        
-        # Try to find tenant_id in metadata, otherwise system default
-        tenant_id = data.get("metadata", {}).get("tenant_id") or "00000000-0000-0000-0000-000000000000"
-        
-        memory = Memory(
-            memory_type=MemoryType.EPISODIC,
-            content={
-                "event_type": event_type,
-                "stripe_id": event_id,
-                "amount": data.get("amount", data.get("amount_total", 0)),
-                "currency": data.get("currency", "usd"),
-                "customer": data.get("customer") or data.get("customer_email"),
-                "status": data.get("status")
-            },
-            source_system="stripe",
-            source_agent="webhook_handler",
-            created_by="system",
-            importance_score=0.9 if "succeeded" in event_type or "paid" in event_type else 0.5,
-            tags=["revenue", "stripe", event_type, "financial"],
-            tenant_id=tenant_id
-        )
-        
-        manager.store(memory)
-        logger.info(f"🧠 Injected Stripe event {event_id} into Brain Memory")
-        
-    except Exception as e:
-        logger.error(f"Failed to inject Stripe event into Brain Memory: {e}")
-
-    try:
-        # Handle different event types
         if event_type == "checkout.session.completed":
             return await handle_checkout_completed(data, background_tasks)
         elif event_type == "customer.subscription.created":
@@ -155,50 +167,26 @@ async def process_stripe_event(event: dict, background_tasks: BackgroundTasks) -
 
     except Exception as e:
         logger.error(f"Error processing {event_type}: {e}")
-        # Don't raise - we want to return 200 to Stripe to prevent retries
         return {"status": "error", "event_type": event_type, "error": str(e)}
 
 
 async def handle_checkout_completed(data: dict, background_tasks: BackgroundTasks) -> dict:
-    """Handle checkout.session.completed event."""
+    """Handle checkout.session.completed - records event and updates lead to WON."""
     customer_email = data.get("customer_email") or data.get("customer_details", {}).get("email")
-    amount_total = data.get("amount_total", 0) / 100  # Convert from cents
+    amount_total = data.get("amount_total", 0) / 100
     currency = data.get("currency", "usd").upper()
     payment_status = data.get("payment_status")
     session_id = data.get("id")
 
     logger.info(f"Checkout completed: {customer_email}, ${amount_total} {currency}")
 
-    # Record in database
-    try:
-        from supabase_client import get_supabase_client
-        supabase = await get_supabase_client()
+    await _record_stripe_event(
+        "checkout.session.completed", session_id, customer_email,
+        int(amount_total * 100), currency, payment_status or "completed", data
+    )
 
-        # 1. Record event
-        await supabase.table("stripe_events").insert({
-            "event_type": "checkout.session.completed",
-            "stripe_id": session_id,
-            "customer_email": customer_email,
-            "amount_cents": int(amount_total * 100),
-            "currency": currency,
-            "status": payment_status,
-            "metadata": data,
-            "created_at": datetime.utcnow().isoformat()
-        }).execute()
-
-        # 2. Update Revenue Lead (The Synapse)
-        if customer_email and payment_status == "paid":
-            logger.info(f"Updating revenue lead for {customer_email} to WON")
-            await supabase.table("revenue_leads").update({
-                "stage": "won",
-                "status": "customer",
-                "value_estimate": amount_total,
-                "converted_at": datetime.utcnow().isoformat(),
-                "last_interaction_at": datetime.utcnow().isoformat()
-            }).eq("email", customer_email).execute()
-
-    except Exception as e:
-        logger.error(f"Failed to record checkout/update lead: {e}")
+    if customer_email and payment_status == "paid":
+        await _update_lead_to_won(customer_email, amount_total)
 
     return {
         "status": "processed",
@@ -207,46 +195,151 @@ async def handle_checkout_completed(data: dict, background_tasks: BackgroundTask
         "amount": amount_total
     }
 
-# ... (rest of file) ...
+
+async def handle_subscription_created(data: dict) -> dict:
+    """Handle customer.subscription.created - records new subscription."""
+    sub_id = data.get("id")
+    customer_id = data.get("customer")
+    status = data.get("status", "active")
+    plan = data.get("plan", {})
+    amount = plan.get("amount", 0) / 100
+    interval = plan.get("interval", "month")
+
+    logger.info(f"Subscription created: {sub_id}, ${amount}/{interval}")
+
+    await _record_stripe_event(
+        "customer.subscription.created", sub_id, None,
+        int(amount * 100), plan.get("currency", "usd").upper(), status, data
+    )
+
+    # Record in mrg_subscriptions for MRR tracking
+    try:
+        pool = _get_db_pool()
+        existing = await pool.fetchval(
+            "SELECT id FROM mrg_subscriptions WHERE stripe_subscription_id = $1", sub_id
+        )
+        if existing:
+            await pool.execute("""
+                UPDATE mrg_subscriptions SET status = $2, amount = $3, updated_at = NOW()
+                WHERE stripe_subscription_id = $1
+            """, sub_id, status, amount)
+        else:
+            await pool.execute("""
+                INSERT INTO mrg_subscriptions (stripe_subscription_id, status, amount,
+                                               billing_cycle, created_at)
+                VALUES ($1, $2, $3, $4, NOW())
+            """, sub_id, status, amount, interval)
+    except Exception as e:
+        logger.error(f"Failed to record subscription: {e}")
+
+    return {"status": "processed", "event_type": "customer.subscription.created",
+            "subscription_id": sub_id, "amount": amount}
+
+
+async def handle_subscription_updated(data: dict) -> dict:
+    """Handle customer.subscription.updated - updates subscription status."""
+    sub_id = data.get("id")
+    status = data.get("status", "active")
+    cancel_at = data.get("cancel_at")
+    plan = data.get("plan", {})
+    amount = plan.get("amount", 0) / 100
+
+    logger.info(f"Subscription updated: {sub_id}, status={status}")
+
+    await _record_stripe_event(
+        "customer.subscription.updated", sub_id, None,
+        int(amount * 100), plan.get("currency", "usd").upper(), status, data
+    )
+
+    try:
+        pool = _get_db_pool()
+        await pool.execute("""
+            UPDATE mrg_subscriptions SET status = $2, amount = $3, updated_at = NOW()
+            WHERE stripe_subscription_id = $1
+        """, sub_id, status, amount)
+    except Exception as e:
+        logger.error(f"Failed to update subscription: {e}")
+
+    return {"status": "processed", "event_type": "customer.subscription.updated",
+            "subscription_id": sub_id}
+
+
+async def handle_subscription_deleted(data: dict) -> dict:
+    """Handle customer.subscription.deleted - marks subscription as canceled."""
+    sub_id = data.get("id")
+    logger.info(f"Subscription deleted: {sub_id}")
+
+    await _record_stripe_event(
+        "customer.subscription.deleted", sub_id, None, 0, "USD", "canceled", data
+    )
+
+    try:
+        pool = _get_db_pool()
+        await pool.execute("""
+            UPDATE mrg_subscriptions SET status = 'canceled', canceled_at = NOW(), updated_at = NOW()
+            WHERE stripe_subscription_id = $1
+        """, sub_id)
+    except Exception as e:
+        logger.error(f"Failed to cancel subscription: {e}")
+
+    return {"status": "processed", "event_type": "customer.subscription.deleted",
+            "subscription_id": sub_id}
+
+
+async def handle_invoice_paid(data: dict) -> dict:
+    """Handle invoice.paid - records successful payment."""
+    invoice_id = data.get("id")
+    customer_email = data.get("customer_email")
+    amount = data.get("amount_paid", 0) / 100
+    sub_id = data.get("subscription")
+
+    logger.info(f"Invoice paid: {invoice_id}, ${amount}, customer={customer_email}")
+
+    await _record_stripe_event(
+        "invoice.paid", invoice_id, customer_email,
+        int(amount * 100), data.get("currency", "usd").upper(), "paid", data
+    )
+
+    if customer_email:
+        await _update_lead_to_won(customer_email, amount)
+
+    return {"status": "processed", "event_type": "invoice.paid",
+            "amount": amount, "customer_email": customer_email}
+
+
+async def handle_payment_failed(data: dict) -> dict:
+    """Handle invoice.payment_failed - records failed payment for dunning."""
+    invoice_id = data.get("id")
+    customer_email = data.get("customer_email")
+    amount = data.get("amount_due", 0) / 100
+    attempt_count = data.get("attempt_count", 0)
+
+    logger.warning(f"Payment failed: {invoice_id}, ${amount}, attempt={attempt_count}")
+
+    await _record_stripe_event(
+        "invoice.payment_failed", invoice_id, customer_email,
+        int(amount * 100), data.get("currency", "usd").upper(), "failed", data
+    )
+
+    return {"status": "processed", "event_type": "invoice.payment_failed",
+            "amount": amount, "attempt_count": attempt_count}
+
 
 async def handle_charge_succeeded(data: dict) -> dict:
-    """Handle charge.succeeded event."""
+    """Handle charge.succeeded - records successful charge."""
     charge_id = data.get("id")
     amount = data.get("amount", 0) / 100
     customer_email = data.get("billing_details", {}).get("email")
 
     logger.info(f"Charge succeeded: {charge_id}, ${amount}")
 
-    try:
-        from supabase_client import get_supabase_client
-        supabase = await get_supabase_client()
+    await _record_stripe_event(
+        "charge.succeeded", charge_id, customer_email,
+        int(amount * 100), data.get("currency", "usd").upper(), "succeeded", data
+    )
 
-        # 1. Record event
-        await supabase.table("stripe_events").insert({
-            "event_type": "charge.succeeded",
-            "stripe_id": charge_id,
-            "customer_email": customer_email,
-            "amount_cents": int(amount * 100),
-            "currency": data.get("currency", "usd").upper(),
-            "status": "succeeded",
-            "metadata": data,
-            "created_at": datetime.utcnow().isoformat()
-        }).execute()
-
-        # 2. Update Revenue Lead (The Synapse)
-        if customer_email:
-            logger.info(f"Updating revenue lead for {customer_email} to WON (Charge Succeeded)")
-            # Only update if not already won? Or update value?
-            # Let's simple update to WON to ensure conversion tracking.
-            await supabase.table("revenue_leads").update({
-                "stage": "won",
-                "status": "customer",
-                # Don't overwrite value if it's larger, but ensure it's tracked
-                "last_interaction_at": datetime.utcnow().isoformat()
-            }).eq("email", customer_email).execute()
-
-    except Exception as e:
-        logger.error(f"Failed to record charge: {e}")
+    if customer_email:
+        await _update_lead_to_won(customer_email, amount)
 
     return {"status": "processed", "event_type": "charge.succeeded", "amount": amount}
 
@@ -258,7 +351,13 @@ async def handle_charge_refunded(data: dict) -> dict:
 
     logger.info(f"Charge refunded: {charge_id}, ${amount_refunded}")
 
-    return {"status": "processed", "event_type": "charge.refunded", "amount_refunded": amount_refunded}
+    await _record_stripe_event(
+        "charge.refunded", charge_id, None,
+        int(amount_refunded * 100), data.get("currency", "usd").upper(), "refunded", data
+    )
+
+    return {"status": "processed", "event_type": "charge.refunded",
+            "amount_refunded": amount_refunded}
 
 
 async def handle_dispute_created(data: dict) -> dict:
@@ -269,25 +368,21 @@ async def handle_dispute_created(data: dict) -> dict:
 
     logger.warning(f"Dispute created: {dispute_id}, ${amount}, reason={reason}")
 
+    await _record_stripe_event(
+        "charge.dispute.created", dispute_id, None,
+        int(amount * 100), data.get("currency", "usd").upper(), "disputed", data
+    )
+
     return {"status": "processed", "event_type": "charge.dispute.created", "amount": amount}
 
 
 @router.post("/webhook")
 async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
-    """
-    Handle Stripe webhooks with signature verification.
-
-    This endpoint does NOT require API key authentication.
-    Security is provided via Stripe's webhook signature verification.
-    """
-    # Get raw body and signature
+    """Handle Stripe webhooks with signature verification."""
     payload = await request.body()
     sig_header = request.headers.get("Stripe-Signature", "")
 
-    # Verify signature and parse event
     event = verify_stripe_signature(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-
-    # Process the event
     result = await process_stripe_event(event, background_tasks)
 
     return {
@@ -301,7 +396,6 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
 @router.get("/health")
 async def stripe_health():
     """Check Stripe webhook configuration status."""
-    # Determine which env var is being used
     secret_source = None
     if os.getenv("STRIPE_WEBHOOK_SECRET_AIAGENTS"):
         secret_source = "STRIPE_WEBHOOK_SECRET_AIAGENTS"
@@ -310,8 +404,7 @@ async def stripe_health():
 
     return {
         "status": "healthy",
-        "webhook_secret_REDACTED": bool(STRIPE_WEBHOOK_SECRET),
+        "webhook_secret_configured": bool(STRIPE_WEBHOOK_SECRET),
         "secret_source": secret_source,
-        "secret_prefix": STRIPE_WEBHOOK_SECRET[:10] + "..." if STRIPE_WEBHOOK_SECRET else None,
         "environment": ENVIRONMENT
     }

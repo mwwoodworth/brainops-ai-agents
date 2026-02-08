@@ -997,6 +997,8 @@ def _row_to_agent(row: dict[str, Any]) -> Agent:
 async def lifespan(app: FastAPI):
     """Application lifespan manager - FAST STARTUP for Render port detection"""
     # Startup - log immediately so Render sees activity
+    import time as _time
+    app.state._start_time = _time.time()
     logger.info(f"🚀 Starting BrainOps AI Agents v{VERSION} - Build: {BUILD_TIME}")
     logger.info("⚡ Fast startup mode - deferring heavy init to background")
 
@@ -3092,39 +3094,47 @@ async def diagnostics(request: Request):
 
 @app.get("/alive")
 async def alive_status():
-    """Get the consciousness status of the AI OS - is it truly alive?"""
+    """Get the alive status of the AI OS based on core system health."""
+    import time as _time
+
+    # Base alive check: service is up, DB connected, systems running
+    active_systems = _collect_active_systems()
+    db_ok = False
+    try:
+        pool = get_pool()
+        row = await pool.fetchval("SELECT 1")
+        db_ok = row == 1
+    except Exception:
+        pass
+
+    uptime = _time.time() - getattr(app.state, '_start_time', _time.time())
+
+    # The service is "alive" if it's running, DB is connected, and systems are active
+    is_alive = db_ok and len(active_systems) > 0
+
     status = {
-        "alive": False,
+        "alive": is_alive,
+        "uptime_seconds": int(uptime),
+        "database": db_ok,
+        "active_systems": len(active_systems),
         "nerve_center": None,
         "consciousness": None,
         "thoughts": 0,
-        "uptime_seconds": 0
     }
 
-    # Debug: check what's in app.state
-    has_attr = hasattr(app.state, 'nerve_center')
-    nc_value = getattr(app.state, 'nerve_center', 'NOT_SET')
-    nc_type = type(nc_value).__name__ if nc_value != 'NOT_SET' else 'N/A'
-
-    status["_debug"] = {
-        "has_nerve_center_attr": has_attr,
-        "nerve_center_type": nc_type,
-        "nerve_center_truthy": bool(nc_value) if nc_value != 'NOT_SET' else False,
-        "init_error": getattr(app.state, 'nerve_center_error', None)
-    }
-
-    if has_attr and nc_value:
+    # If NerveCenter is available, add its status too
+    nc_value = getattr(app.state, 'nerve_center', None)
+    if nc_value:
         try:
-            nc_status = app.state.nerve_center.get_status()
-            status["alive"] = nc_status.get("is_online", False)
+            nc_status = nc_value.get_status()
             status["nerve_center"] = nc_status
-            status["uptime_seconds"] = nc_status.get("uptime_seconds", 0)
+            status["uptime_seconds"] = nc_status.get("uptime_seconds", uptime)
 
             if nc_status.get("components", {}).get("alive_core", {}).get("active"):
                 status["consciousness"] = nc_status["components"]["alive_core"].get("state")
                 status["thoughts"] = nc_status["components"]["alive_core"].get("thoughts", 0)
-        except Exception as e:
-            status["_debug"]["error"] = str(e)
+        except Exception:
+            pass
 
     return status
 
