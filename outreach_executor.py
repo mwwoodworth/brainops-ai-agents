@@ -142,23 +142,14 @@ async def process_scheduled_outreach(batch_size: int = 25) -> dict[str, Any]:
             stats["processed"] += 1
 
             try:
-                # Resolve email address - try customers table first, then revenue_leads
+                # Resolve email address from revenue_leads ONLY.
+                # CRITICAL: The ERP customers table is ALL demo/seed data.
+                # NEVER look up emails from the customers table for outreach.
                 email = None
                 resolved_name = personalization.get("customer_name", "")
 
-                # Try customers table
+                # Only use revenue_leads (real prospect data)
                 if target_id:
-                    customer = await pool.fetchrow("""
-                        SELECT name, email FROM customers
-                        WHERE id::text = $1
-                    """, target_id)
-                    if customer and customer["email"]:
-                        email = customer["email"]
-                        if not resolved_name:
-                            resolved_name = customer["name"] or ""
-
-                # Try revenue_leads table if no email from customers
-                if not email and target_id:
                     lead = await pool.fetchrow("""
                         SELECT company_name, contact_name, email
                         FROM revenue_leads
