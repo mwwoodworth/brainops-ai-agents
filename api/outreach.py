@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from outreach_engine import get_outreach_engine
+from outreach_executor import run_outreach_cycle
 
 
 def _parse_metadata(metadata: Any) -> dict:
@@ -356,3 +357,18 @@ async def enrich_ai_research_leads(
         raise HTTPException(status_code=503, detail=results.get("error", "enrichment_failed"))
 
     return results
+
+
+@router.post("/execute-cycle")
+async def execute_outreach_cycle() -> dict[str, Any]:
+    """
+    Trigger a full outreach cycle immediately.
+
+    Processes ai_scheduled_outreach entries and enrolls new leads in campaigns.
+    """
+    results = await run_outreach_cycle()
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "success": True,
+        **results,
+    }
