@@ -83,6 +83,15 @@ except ImportError:
     REPORTING_AVAILABLE = False
     logging.warning("Automated Reporting System unavailable")
 
+# Google Keep Sync (2026-02-09 - Gemini Live Bridge)
+try:
+    from google_keep_sync import run_keep_sync, get_keep_status
+    KEEP_SYNC_AVAILABLE = True
+except ImportError:
+    KEEP_SYNC_AVAILABLE = False
+    run_keep_sync = None
+    logging.warning("Google Keep Sync unavailable")
+
 # Learning Feedback Loop (2026-01-15 - Total Completion Protocol)
 # CRITICAL: This finally activates the 4,700+ insights that were sitting idle!
 try:
@@ -1420,6 +1429,17 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("GumroadRevenueAgent failed: %s", exc, exc_info=True)
 
+    def _run_google_keep_sync(self):
+        """Execute the Google Keep sync for Gemini Live bridge."""
+        if not KEEP_SYNC_AVAILABLE:
+            logger.info("Google Keep Sync skipped: not available")
+            return
+        try:
+            result = run_on_main_loop(run_keep_sync(), timeout=120)
+            logger.info("Google Keep Sync completed: %s", result)
+        except Exception as exc:
+            logger.error("Google Keep Sync failed: %s", exc, exc_info=True)
+
     def _run_ooda_loop(self):
         """Execute the Bleeding Edge OODA loop."""
         if not OODA_AVAILABLE:
@@ -1730,6 +1750,29 @@ class AgentScheduler:
                 logger.info("✅ Scheduled Daily Report Executor every 1 hour")
             except Exception as exc:
                 logger.error("Failed to schedule Daily Report Executor: %s", exc, exc_info=True)
+
+        # Register Google Keep Sync (2026-02-09 - Gemini Live Bridge)
+        # Writes live ops data to Google Keep note every 5 minutes
+        # Gemini reads this via @Keep during Live conversations
+        if KEEP_SYNC_AVAILABLE:
+            try:
+                job_id = "google_keep_sync"
+                self.scheduler.add_job(
+                    func=self._run_google_keep_sync,
+                    trigger=IntervalTrigger(minutes=5),
+                    id=job_id,
+                    name="Google Keep Sync",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "google_keep_sync",
+                    "agent_name": "GoogleKeepSync",
+                    "frequency_minutes": 5,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("Scheduled Google Keep Sync every 5 minutes")
+            except Exception as exc:
+                logger.error("Failed to schedule Google Keep Sync: %s", exc, exc_info=True)
 
         # Register Follow-up Executor (payment reminders, outreach sequences)
         followup_enabled_env = os.getenv("ENABLE_FOLLOWUP_EXECUTION")
