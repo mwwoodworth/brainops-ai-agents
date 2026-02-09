@@ -624,11 +624,14 @@ async def _get_memory_metrics() -> Dict[str, Any]:
         # Unified brain entries
         brain_count = await pool.fetchval("SELECT COUNT(*) FROM unified_brain") or 0
 
-        # Conversations
-        conversation_count = await pool.fetchval("""
-            SELECT COUNT(*) FROM ai_conversations
-            WHERE created_at > NOW() - INTERVAL '24 hours'
-        """) or 0
+        # Conversations (table was dropped during cleanup - gracefully default to 0)
+        try:
+            conversation_count = await pool.fetchval("""
+                SELECT COUNT(*) FROM ai_conversations
+                WHERE created_at > NOW() - INTERVAL '24 hours'
+            """) or 0
+        except Exception:
+            conversation_count = 0
 
         return {
             "status": "active",

@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 import networkx as nx
 import psycopg2
+import psycopg2.errors
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 from urllib.parse import urlparse
@@ -399,6 +400,10 @@ class KnowledgeExtractor:
 
             return knowledge_items
 
+        except psycopg2.errors.UndefinedTable:
+            # ai_conversations table was dropped during cleanup - gracefully return empty
+            logger.info("ai_conversations table not found (dropped during cleanup), skipping conversation extraction")
+            return []
         except Exception as e:
             logger.error(f"Error extracting from conversations: {e}")
             return []

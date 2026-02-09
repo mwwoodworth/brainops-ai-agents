@@ -593,9 +593,6 @@ class AutomatedReportingSystem:
             SELECT 'Knowledge Graph', COUNT(*), MAX(created_at)
             FROM ai_knowledge_graph
             UNION ALL
-            SELECT 'Conversations', COUNT(*), MAX(created_at)
-            FROM ai_conversations
-            UNION ALL
             SELECT 'Decision Trees', COUNT(*), MAX(created_at)
             FROM ai_decision_trees
             UNION ALL

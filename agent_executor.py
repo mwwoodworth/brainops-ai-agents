@@ -1359,13 +1359,37 @@ class AgentExecutor:
         if task.get("codebase_context"):
             context_enriched = True
 
+        # Phase 3: Inject AUREA decision context so executing agents know WHY they're running
+        if task.get("aurea_initiated") and task.get("decision"):
+            decision_data = task["decision"]
+            aurea_context_parts = []
+            if isinstance(decision_data, dict):
+                if decision_data.get("description"):
+                    aurea_context_parts.append(f"Decision: {decision_data['description']}")
+                if decision_data.get("impact_assessment"):
+                    aurea_context_parts.append(f"Impact: {decision_data['impact_assessment']}")
+                if decision_data.get("recommended_action"):
+                    aurea_context_parts.append(f"Action: {decision_data['recommended_action']}")
+                ctx = decision_data.get("context", {})
+                if isinstance(ctx, dict):
+                    priority = ctx.get("priority", {})
+                    if isinstance(priority, dict):
+                        if priority.get("urgency"):
+                            aurea_context_parts.append(f"Urgency: {priority['urgency']}")
+                        if priority.get("description"):
+                            aurea_context_parts.append(f"Priority: {priority['description']}")
+            if aurea_context_parts:
+                task["_aurea_decision_context"] = " | ".join(aurea_context_parts)
+                context_enriched = True
+
         # Log context enrichment (skip for OODA fast-path)
         if not skip_db_log:
             await exec_logger.log_context_enrichment(
                 enriched=context_enriched,
                 context_info={
                     "unified_integration": UNIFIED_INTEGRATION_AVAILABLE and unified_ctx is not None,
-                    "codebase_context": bool(task.get("codebase_context"))
+                    "codebase_context": bool(task.get("codebase_context")),
+                    "aurea_context": bool(task.get("_aurea_decision_context"))
                 }
             )
 
@@ -7037,17 +7061,8 @@ class ComplianceAgent(BaseAgent):
                 LIMIT 10
             """)
 
-            # Directive compliance
-            directives = await pool.fetch("""
-                SELECT
-                    directive_name,
-                    directive_type,
-                    enforcement_level,
-                    active
-                FROM brainops_directives
-                WHERE active = true
-                LIMIT 20
-            """)
+            # Directive compliance (table was dropped as unused - return empty list)
+            directives = []
 
             return {
                 "status": "completed",
