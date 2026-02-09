@@ -240,6 +240,7 @@ from api.state_sync import router as state_sync_router
 from api.sync import router as sync_router  # Memory migration & consolidation
 from api.system_orchestrator import router as system_orchestrator_router
 from api.victoria import router as victoria_router  # ERP scheduling agent compatibility (draft suggestions)
+from api.google_keep import router as google_keep_router  # Google Keep Sync - Gemini Live real-time bridge
 from database.async_connection import (
     DatabaseUnavailableError,
     PoolConfig,
@@ -1881,6 +1882,7 @@ if UNIFIED_EVENTS_AVAILABLE and unified_events_router:
     app.include_router(unified_events_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("Mounted: Unified Events API at /events - publish, webhook/erp, recent, stats, replay (SECURED)")
 
+app.include_router(google_keep_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(codebase_graph_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(state_sync_router, dependencies=SECURED_DEPENDENCIES)  # Real-time state synchronization
 app.include_router(revenue_router, dependencies=SECURED_DEPENDENCIES)  # Revenue generation system
