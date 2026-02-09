@@ -599,7 +599,18 @@ class AgentScheduler:
         }
 
     def _execute_lead_agent(self, agent: dict, cur, conn) -> dict:
-        """Execute lead generation/scoring agent - TAKES REAL ACTIONS"""
+        """Execute lead generation/scoring agent - TAKES REAL ACTIONS.
+        DISABLED by default: ERP customers table is ALL demo/seed data.
+        Enable with ENABLE_LEAD_AGENTS=true env var when real customer data exists.
+        """
+        enabled = os.getenv("ENABLE_LEAD_AGENTS", "").lower() in ("1", "true", "yes")
+        if not enabled:
+            logger.debug("Lead agents disabled (ERP data is demo). Set ENABLE_LEAD_AGENTS=true to enable.")
+            return {
+                "agent": agent['name'],
+                "status": "disabled",
+                "reason": "ERP customers table contains demo data. Set ENABLE_LEAD_AGENTS=true when real data exists.",
+            }
         logger.info(f"Running lead analysis for agent: {agent['name']}")
         actions_taken = []
 
@@ -779,10 +790,14 @@ class AgentScheduler:
             logger.error(f"Advanced lead scoring section failed: {e}")
 
         # === LEAD DISCOVERY ENGINE INTEGRATION ===
-        # Run automated lead discovery from ERP data
+        # DISABLED: ERP customers table is ALL demo/seed data.
+        # This was creating fabricated leads from demo data and presenting
+        # them as real business prospects. Must NOT run until real customer
+        # data exists. Re-enable with ENABLE_LEAD_DISCOVERY=true env var.
         leads_discovered = 0
         leads_synced = 0
-        if LEAD_DISCOVERY_AVAILABLE and agent.get('name') in ['LeadDiscoveryAgent', 'LeadGenerationAgent']:
+        enable_discovery = os.getenv("ENABLE_LEAD_DISCOVERY", "").lower() in ("1", "true", "yes")
+        if enable_discovery and LEAD_DISCOVERY_AVAILABLE and agent.get('name') in ['LeadDiscoveryAgent', 'LeadGenerationAgent']:
             try:
                 discovery_result = run_on_main_loop(
                     handle_lead_discovery_task({
@@ -1475,7 +1490,14 @@ class AgentScheduler:
             logger.error("Follow-up Executor failed: %s", exc, exc_info=True)
 
     def _run_outreach_executor(self):
-        """Execute outreach cycle: process ai_scheduled_outreach + run campaigns for new leads."""
+        """Execute outreach cycle: process ai_scheduled_outreach + run campaigns for new leads.
+        DISABLED: Requires ENABLE_OUTREACH_EXECUTOR=true env var.
+        Was sending emails to AI-fabricated leads and demo data addresses.
+        """
+        enabled = os.getenv("ENABLE_OUTREACH_EXECUTOR", "").lower() in ("1", "true", "yes")
+        if not enabled:
+            logger.debug("Outreach Executor disabled (set ENABLE_OUTREACH_EXECUTOR=true to enable)")
+            return
         if not OUTREACH_EXECUTOR_AVAILABLE:
             logger.info("Outreach Executor skipped: not available")
             return
@@ -1484,7 +1506,7 @@ class AgentScheduler:
             executor = results.get("outreach_executor", {})
             campaign = results.get("campaign_enrollment", {})
             logger.info(
-                "📧 Outreach Executor: queued=%s, enrolled=%s",
+                "Outreach Executor: queued=%s, enrolled=%s",
                 executor.get("queued", 0),
                 campaign.get("leads_enrolled", 0),
             )
