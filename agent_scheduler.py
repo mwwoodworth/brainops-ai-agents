@@ -122,6 +122,15 @@ except Exception as exc:
     get_intelligent_followup_system = None
     logging.warning("Intelligent Follow-up System unavailable: %s", exc)
 
+# Outreach Executor (bridges ai_scheduled_outreach → ai_email_queue + campaigns)
+try:
+    from outreach_executor import run_outreach_cycle
+    OUTREACH_EXECUTOR_AVAILABLE = True
+except ImportError:
+    OUTREACH_EXECUTOR_AVAILABLE = False
+    run_outreach_cycle = None
+    logging.warning("Outreach Executor unavailable")
+
 # Safe-by-default: autonomous revenue drive is OFF unless explicitly enabled.
 _revenue_drive_env = os.getenv("ENABLE_REVENUE_DRIVE")
 ENABLE_REVENUE_DRIVE = bool(_revenue_drive_env and _revenue_drive_env.lower() in ("1", "true", "yes"))
@@ -1465,6 +1474,23 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("Follow-up Executor failed: %s", exc, exc_info=True)
 
+    def _run_outreach_executor(self):
+        """Execute outreach cycle: process ai_scheduled_outreach + run campaigns for new leads."""
+        if not OUTREACH_EXECUTOR_AVAILABLE:
+            logger.info("Outreach Executor skipped: not available")
+            return
+        try:
+            results = run_on_main_loop(run_outreach_cycle(), timeout=300)
+            executor = results.get("outreach_executor", {})
+            campaign = results.get("campaign_enrollment", {})
+            logger.info(
+                "📧 Outreach Executor: queued=%s, enrolled=%s",
+                executor.get("queued", 0),
+                campaign.get("leads_enrolled", 0),
+            )
+        except Exception as exc:
+            logger.error("Outreach Executor failed: %s", exc, exc_info=True)
+
     def _run_stuck_execution_cleanup(self):
         """Auto-clean stuck execution rows so dashboards/metrics stay honest."""
         enabled_env = os.getenv("ENABLE_STUCK_EXECUTION_CLEANUP")
@@ -1685,6 +1711,27 @@ class AgentScheduler:
                 logger.error("Failed to schedule Follow-up Executor: %s", exc, exc_info=True)
         elif not enable_followups:
             logger.info("Follow-up Executor not scheduled: ENABLE_FOLLOWUP_EXECUTION disabled")
+
+        # Outreach Executor: process ai_scheduled_outreach + enroll new leads in campaigns
+        if OUTREACH_EXECUTOR_AVAILABLE:
+            try:
+                job_id = "outreach_executor"
+                self.scheduler.add_job(
+                    func=self._run_outreach_executor,
+                    trigger=IntervalTrigger(hours=4),
+                    id=job_id,
+                    name="Outreach Executor",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "outreach_executor",
+                    "agent_name": "OutreachExecutor",
+                    "frequency_minutes": 240,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("✅ Scheduled Outreach Executor every 4 hours")
+            except Exception as exc:
+                logger.error("Failed to schedule Outreach Executor: %s", exc, exc_info=True)
 
         # Keep execution logs clean: auto-timeout stuck rows regularly so `brainops verify` stays green.
         cleanup_enabled_env = os.getenv("ENABLE_STUCK_EXECUTION_CLEANUP")
