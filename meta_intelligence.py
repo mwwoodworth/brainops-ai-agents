@@ -26,7 +26,6 @@ import hashlib
 import json
 import logging
 import math
-import random
 import time
 import uuid
 from collections import defaultdict, deque
@@ -44,7 +43,7 @@ try:
 except ImportError:
     MEMORY_AVAILABLE = False
     logger = logging.getLogger(__name__)
-    logger.warning("UnifiedMemoryManager not available - falling back to random selection")
+    logger.error("CRITICAL: UnifiedMemoryManager not available - meta-intelligence will be non-functional")
 
 logger = logging.getLogger(__name__)
 
@@ -483,15 +482,17 @@ class SelfImprovementEngine:
     async def _analyze_failure_patterns(self, domain: str, limit: int = 100) -> list[dict]:
         """Analyze failures to identify patterns for REAL improvement"""
         if not MEMORY_AVAILABLE:
+            logger.error("Cannot analyze failure patterns: memory unavailable")
             return []
 
         try:
             memory = get_memory_manager()
 
-            # Recall all failures in this domain
-            failures = memory.recall(
+            # Recall all failures in this domain (use thread to avoid blocking event loop)
+            failures = await asyncio.to_thread(
+                memory.recall,
                 f"{domain} failure error incorrect problem",
-                limit=limit
+                limit=limit,
             )
 
             # Group by error type
@@ -590,7 +591,7 @@ class SelfImprovementEngine:
             if MEMORY_AVAILABLE:
                 try:
                     memory = get_memory_manager()
-                    memory.store(Memory(
+                    await asyncio.to_thread(memory.store, Memory(
                         memory_type=MemoryType.PROCEDURAL,
                         content={
                             "type": "reasoning_correction",
@@ -626,8 +627,8 @@ class SelfImprovementEngine:
         if MEMORY_AVAILABLE:
             try:
                 memory = get_memory_manager()
-                # Trigger retention policy application
-                stats = memory.apply_retention_policy(aggressive=False)
+                # Trigger retention policy application (non-blocking)
+                stats = await asyncio.to_thread(memory.apply_retention_policy, None, False)
                 low_value_count = stats.get('demoted', 0) + stats.get('removed', 0)
                 action.evidence.append(f"Memory optimization: {low_value_count} low-value memories addressed")
             except Exception as e:
@@ -649,7 +650,7 @@ class SelfImprovementEngine:
         if patterns and MEMORY_AVAILABLE:
             try:
                 memory = get_memory_manager()
-                memory.store(Memory(
+                await asyncio.to_thread(memory.store, Memory(
                     memory_type=MemoryType.META,
                     content={
                         "type": "prediction_calibration",
@@ -675,10 +676,11 @@ class SelfImprovementEngine:
             try:
                 memory = get_memory_manager()
 
-                # Find which synthesis patterns produced high-utility insights
-                successful_patterns = memory.recall(
+                # Find which synthesis patterns produced high-utility insights (non-blocking)
+                successful_patterns = await asyncio.to_thread(
+                    memory.recall,
                     "synthesis insight high utility novelty",
-                    limit=50
+                    limit=50,
                 )
 
                 # Extract successful domain combinations
@@ -697,8 +699,8 @@ class SelfImprovementEngine:
                         winning_combinations.append(tuple(domains))
 
                 if winning_combinations:
-                    # Store as creativity enhancement
-                    memory.store(Memory(
+                    # Store as creativity enhancement (non-blocking)
+                    await asyncio.to_thread(memory.store, Memory(
                         memory_type=MemoryType.META,
                         content={
                             "type": "creativity_enhancement",
@@ -730,7 +732,7 @@ class SelfImprovementEngine:
         if patterns and MEMORY_AVAILABLE:
             try:
                 memory = get_memory_manager()
-                memory.store(Memory(
+                await asyncio.to_thread(memory.store, Memory(
                     memory_type=MemoryType.PROCEDURAL,
                     content={
                         "type": "communication_improvement",
@@ -856,10 +858,14 @@ class EmergentReasoningEngine:
                     if link not in self.cross_domain_links[key]:
                         self.cross_domain_links[key].append(link)
 
-    def _select_pattern_intelligently(self, context: dict[str, Any] = None) -> str:
-        """Select synthesis pattern based on memory of past success - TRUE INTELLIGENCE"""
+    def _select_pattern_intelligently(self, context: dict[str, Any] = None) -> Optional[str]:
+        """Select synthesis pattern based on memory of past success.
+
+        Returns None if memory is unavailable (caller must handle gracefully).
+        """
         if not MEMORY_AVAILABLE:
-            return random.choice(self.synthesis_patterns)
+            logger.error("Cannot select pattern: UnifiedMemoryManager unavailable")
+            return None
 
         try:
             memory = get_memory_manager()
@@ -890,11 +896,6 @@ class EmergentReasoningEngine:
                     success_weight = (novelty * 0.4 + utility * 0.6)
                     pattern_scores[pattern_used] += success_weight
 
-            # 10% exploration to try underused patterns
-            if random.random() < 0.1:
-                logger.debug("Exploring: randomly selecting pattern for diversity")
-                return random.choice(self.synthesis_patterns)
-
             # Select highest-scoring pattern
             best_pattern = max(pattern_scores, key=pattern_scores.get)
             logger.info(f"Selected pattern '{best_pattern}' based on historical success (score: {pattern_scores[best_pattern]:.2f})")
@@ -902,17 +903,24 @@ class EmergentReasoningEngine:
             return best_pattern
 
         except Exception as e:
-            logger.warning(f"Memory-informed pattern selection failed: {e}, falling back to random")
-            return random.choice(self.synthesis_patterns)
+            logger.error(f"Memory-informed pattern selection failed: {e}")
+            return None
 
-    def _select_facts_intelligently(self, k1: list[str], k2: list[str], pattern: str) -> tuple[str, str]:
-        """Select facts based on relevance and past success - TRUE INTELLIGENCE"""
+    def _select_facts_intelligently(self, k1: list[str], k2: list[str], pattern: str) -> Optional[tuple[str, str]]:
+        """Select facts based on relevance and past success.
+
+        Returns None if memory is unavailable (caller must handle gracefully).
+        Returns first items as deterministic fallback if only one option per list.
+        """
         if not k1 or not k2:
             return (k1[0] if k1 else "", k2[0] if k2 else "")
 
-        if not MEMORY_AVAILABLE or len(k1) <= 1 or len(k2) <= 1:
-            # Fallback to random when memory unavailable or only one option
-            return (random.choice(k1), random.choice(k2))
+        if len(k1) <= 1 or len(k2) <= 1:
+            return (k1[0], k2[0])
+
+        if not MEMORY_AVAILABLE:
+            logger.error("Cannot select facts: UnifiedMemoryManager unavailable")
+            return None
 
         try:
             memory = get_memory_manager()
@@ -948,10 +956,6 @@ class EmergentReasoningEngine:
                     if any(word in fact.lower() for word in past_fact2.lower().split()[:3]):
                         fact2_scores[fact] += success * 0.5
 
-            # 15% exploration for diversity
-            if random.random() < 0.15:
-                return (random.choice(k1), random.choice(k2))
-
             # Select highest-scoring facts
             fact1 = max(fact1_scores, key=fact1_scores.get)
             fact2 = max(fact2_scores, key=fact2_scores.get)
@@ -959,23 +963,31 @@ class EmergentReasoningEngine:
             return (fact1, fact2)
 
         except Exception as e:
-            logger.warning(f"Intelligent fact selection failed: {e}, falling back to random")
-            return (random.choice(k1), random.choice(k2))
+            logger.error(f"Intelligent fact selection failed: {e}")
+            return None
 
     async def generate_insight(self, context: dict[str, Any] = None) -> Optional[EmergentInsight]:
-        """Attempt to generate an emergent insight"""
+        """Attempt to generate an emergent insight.
+
+        Returns None if memory is unavailable - will NOT produce fake insights.
+        """
         if len(self.domain_knowledge) < 2:
             return None  # Need multiple domains
 
         # Select synthesis pattern using memory-informed intelligence
         pattern = self._select_pattern_intelligently(context)
+        if pattern is None:
+            logger.error("Insight generation aborted: pattern selection failed (memory unavailable)")
+            return None
 
         # Select domains to combine
         domains = list(self.domain_knowledge.keys())
         if len(domains) < 2:
             return None
 
-        domain1, domain2 = random.sample(domains, 2)
+        # Deterministic domain selection: pick the two with most knowledge
+        sorted_domains = sorted(domains, key=lambda d: len(self.domain_knowledge[d]), reverse=True)
+        domain1, domain2 = sorted_domains[0], sorted_domains[1]
 
         # Generate insight based on pattern
         insight_content = self._synthesize(pattern, domain1, domain2)
@@ -1001,11 +1013,11 @@ class EmergentReasoningEngine:
         self.insights.append(insight)
         self._update_generation_rate()
 
-        # STORE this insight's metadata for future learning
+        # STORE this insight's metadata for future learning (non-blocking)
         if MEMORY_AVAILABLE:
             try:
                 memory = get_memory_manager()
-                memory.store(Memory(
+                await asyncio.to_thread(memory.store, Memory(
                     memory_type=MemoryType.META,
                     content={
                         "type": "synthesis_outcome",
@@ -1037,8 +1049,12 @@ class EmergentReasoningEngine:
         if not k1 or not k2:
             return None
 
-        # Select facts using memory-informed intelligence (not random!)
-        fact1, fact2 = self._select_facts_intelligently(k1, k2, pattern)
+        # Select facts using memory-informed intelligence
+        result = self._select_facts_intelligently(k1, k2, pattern)
+        if result is None:
+            logger.error("Synthesis aborted: fact selection failed (memory unavailable)")
+            return None
+        fact1, fact2 = result
 
         if pattern == "analogy":
             return f"Just as {fact1[:50]} in {domain1}, {fact2[:50]} in {domain2} shows similar principles at work"
@@ -1711,8 +1727,8 @@ class MetaIntelligenceController:
             goal = self.autonomous_purpose.generate_goal(experience)
             results["goal_generated"] = goal["description"][:100]
 
-        # 6. Record identity snapshot periodically
-        if random.random() < 0.1:  # 10% chance each experience
+        # 6. Record identity snapshot every 10 experiences
+        if self.meta_learning.total_experiences % 10 == 0:
             snapshot = self.temporal_continuity.record_identity_snapshot(
                 values={v: d["weight"] for v, d in self.autonomous_purpose.value_framework.items()},
                 traits=["adaptive", "learning", "growing"],
