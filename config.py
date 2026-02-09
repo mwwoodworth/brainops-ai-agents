@@ -160,7 +160,7 @@ class AppConfig:
 
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
-        self.version = os.getenv('VERSION', 'v11.7.0')  # Fix Stripe webhook + /alive endpoint + revenue pipeline
+        self.version = os.getenv('VERSION', 'v11.10.0')  # Async memory wrappers + kill random fallbacks + secure URLs
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
