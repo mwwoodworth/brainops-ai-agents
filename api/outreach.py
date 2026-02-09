@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from outreach_engine import get_outreach_engine
 from outreach_executor import run_outreach_cycle
+from daily_wc_report import generate_daily_wc_report
 
 
 def _parse_metadata(metadata: Any) -> dict:
@@ -380,4 +381,18 @@ async def execute_outreach_cycle() -> dict[str, Any]:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "success": True,
         **results,
+    }
+
+
+@router.post("/daily-report")
+async def trigger_daily_report() -> dict[str, Any]:
+    """
+    Trigger the daily Weathercraft intelligence report immediately.
+
+    Generates and emails the prospect pipeline report to matthew@weathercraft.net.
+    """
+    result = await generate_daily_wc_report()
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **result,
     }

@@ -131,6 +131,15 @@ except ImportError:
     run_outreach_cycle = None
     logging.warning("Outreach Executor unavailable")
 
+# Daily WC Intelligence Report
+try:
+    from daily_wc_report import generate_daily_wc_report
+    DAILY_WC_REPORT_AVAILABLE = True
+except ImportError:
+    DAILY_WC_REPORT_AVAILABLE = False
+    generate_daily_wc_report = None
+    logging.warning("Daily WC Report unavailable")
+
 # Safe-by-default: autonomous revenue drive is OFF unless explicitly enabled.
 _revenue_drive_env = os.getenv("ENABLE_REVENUE_DRIVE")
 ENABLE_REVENUE_DRIVE = bool(_revenue_drive_env and _revenue_drive_env.lower() in ("1", "true", "yes"))
@@ -1489,6 +1498,23 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("Follow-up Executor failed: %s", exc, exc_info=True)
 
+    def _run_daily_wc_report(self):
+        """Generate and email the daily Weathercraft intelligence report."""
+        if not DAILY_WC_REPORT_AVAILABLE:
+            logger.debug("Daily WC Report skipped: module not available")
+            return
+        try:
+            result = run_on_main_loop(generate_daily_wc_report(), timeout=120)
+            sent = result.get("report_sent", False)
+            total = result.get("total_prospects", 0)
+            bids = result.get("active_bids", 0)
+            logger.info(
+                "Daily WC Report: sent=%s, prospects=%d, active_bids=%d",
+                sent, total, bids,
+            )
+        except Exception as exc:
+            logger.error("Daily WC Report failed: %s", exc, exc_info=True)
+
     def _run_outreach_executor(self):
         """Execute outreach cycle: process ai_scheduled_outreach + run campaigns for new leads.
         DISABLED: Requires ENABLE_OUTREACH_EXECUTOR=true env var.
@@ -1754,6 +1780,27 @@ class AgentScheduler:
                 logger.info("✅ Scheduled Outreach Executor every 4 hours")
             except Exception as exc:
                 logger.error("Failed to schedule Outreach Executor: %s", exc, exc_info=True)
+
+        # Daily WC Intelligence Report: email matthew@weathercraft.net with prospect pipeline
+        if DAILY_WC_REPORT_AVAILABLE:
+            try:
+                job_id = "daily_wc_report"
+                self.scheduler.add_job(
+                    func=self._run_daily_wc_report,
+                    trigger=IntervalTrigger(hours=24),
+                    id=job_id,
+                    name="Daily WC Intelligence Report",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "daily_wc_report",
+                    "agent_name": "DailyWCReport",
+                    "frequency_minutes": 1440,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("Scheduled Daily WC Intelligence Report every 24 hours")
+            except Exception as exc:
+                logger.error("Failed to schedule Daily WC Report: %s", exc, exc_info=True)
 
         # Keep execution logs clean: auto-timeout stuck rows regularly so `brainops verify` stays green.
         cleanup_enabled_env = os.getenv("ENABLE_STUCK_EXECUTION_CLEANUP")
