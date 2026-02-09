@@ -75,6 +75,14 @@ except ImportError:
     get_factory = None
     logging.warning("RevenuePipelineFactory unavailable")
 
+# Automated Reporting System (2026-02-08 - Daily Reports Fix)
+try:
+    from automated_reporting_system import get_automated_reporting_system
+    REPORTING_AVAILABLE = True
+except ImportError:
+    REPORTING_AVAILABLE = False
+    logging.warning("Automated Reporting System unavailable")
+
 # Learning Feedback Loop (2026-01-15 - Total Completion Protocol)
 # CRITICAL: This finally activates the 4,700+ insights that were sitting idle!
 try:
@@ -1432,6 +1440,18 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("Platform Cross-Sell failed: %s", exc, exc_info=True)
 
+    def _run_daily_reports(self):
+        """Execute scheduled reports from automated_reporting_system."""
+        if not REPORTING_AVAILABLE:
+            logger.info("Daily Reports skipped: reporting system not available")
+            return
+        try:
+            reporting_system = get_automated_reporting_system()
+            report_ids = run_on_main_loop(reporting_system.execute_scheduled_reports(), timeout=300)
+            logger.info("📊 Daily Reports executed: %d reports generated", len(report_ids) if report_ids else 0)
+        except Exception as exc:
+            logger.error("Daily Reports failed: %s", exc, exc_info=True)
+
     def _run_followup_executor(self):
         """Execute scheduled follow-ups (payment reminders, nurture sequences)."""
         if not FOLLOWUP_AVAILABLE:
@@ -1615,6 +1635,27 @@ class AgentScheduler:
                 logger.info("✅ Scheduled Platform Cross-Sell daily")
             except Exception as exc:
                 logger.error("Failed to schedule Platform Cross-Sell: %s", exc, exc_info=True)
+
+        # Register Daily Report Executor (2026-02-08 - Automated Reporting Fix)
+        if REPORTING_AVAILABLE:
+            try:
+                job_id = "daily_report_executor"
+                self.scheduler.add_job(
+                    func=self._run_daily_reports,
+                    trigger=IntervalTrigger(hours=1),
+                    id=job_id,
+                    name="Daily Report Executor",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "daily_report_executor",
+                    "agent_name": "DailyReportExecutor",
+                    "frequency_minutes": 60,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("✅ Scheduled Daily Report Executor every 1 hour")
+            except Exception as exc:
+                logger.error("Failed to schedule Daily Report Executor: %s", exc, exc_info=True)
 
         # Register Follow-up Executor (payment reminders, outreach sequences)
         followup_enabled_env = os.getenv("ENABLE_FOLLOWUP_EXECUTION")
