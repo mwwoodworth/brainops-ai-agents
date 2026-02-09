@@ -408,6 +408,34 @@ class UnifiedMemoryManager:
 
         return await asyncio.to_thread(self.recall, query, self.tenant_id, limit=limit, memory_type=mem_type)
 
+    async def recall_async(self, query, tenant_id=None, context=None, limit=10, memory_type=None):
+        """Async wrapper for recall - use from async contexts to avoid blocking the event loop"""
+        return await asyncio.to_thread(self.recall, query, tenant_id, context, limit, memory_type)
+
+    async def synthesize_async(self, tenant_id=None, time_window=timedelta(hours=24)):
+        """Async wrapper for synthesize"""
+        return await asyncio.to_thread(self.synthesize, tenant_id, time_window)
+
+    async def consolidate_async(self, aggressive=False):
+        """Async wrapper for consolidate"""
+        return await asyncio.to_thread(self.consolidate, aggressive)
+
+    async def apply_retention_policy_async(self, tenant_id=None, aggressive=False):
+        """Async wrapper for apply_retention_policy"""
+        return await asyncio.to_thread(self.apply_retention_policy, tenant_id, aggressive)
+
+    async def auto_garbage_collect_async(self, tenant_id=None, dry_run=False):
+        """Async wrapper for auto_garbage_collect"""
+        return await asyncio.to_thread(self.auto_garbage_collect, tenant_id, dry_run)
+
+    async def get_stats_async(self, tenant_id=None):
+        """Async wrapper for get_stats"""
+        return await asyncio.to_thread(self.get_stats, tenant_id)
+
+    async def store_memory_async(self, memory):
+        """Async wrapper for store (Memory object) - use from async contexts"""
+        return await asyncio.to_thread(self.store, memory)
+
     def _keyword_search(self, query: Union[str, dict], tenant_id: str, context: Optional[str] = None,
                        limit: int = 10, memory_type: Optional[MemoryType] = None) -> list[dict]:
         """Fallback keyword search when embeddings are unavailable"""
