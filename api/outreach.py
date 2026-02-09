@@ -365,7 +365,16 @@ async def execute_outreach_cycle() -> dict[str, Any]:
     Trigger a full outreach cycle immediately.
 
     Processes ai_scheduled_outreach entries and enrolls new leads in campaigns.
+    Requires ENABLE_OUTREACH_EXECUTOR=true env var.
     """
+    import os
+    enabled = os.getenv("ENABLE_OUTREACH_EXECUTOR", "").lower() in ("1", "true", "yes")
+    if not enabled:
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "success": False,
+            "error": "Outreach executor disabled. Set ENABLE_OUTREACH_EXECUTOR=true to enable.",
+        }
     results = await run_outreach_cycle()
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
