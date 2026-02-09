@@ -327,10 +327,13 @@ async def _get_memory_stats() -> dict[str, Any]:
             SELECT COUNT(*) FROM ai_persistent_memory
         """) or 0
 
-        # Check for conversations
-        conversation_count = await pool.fetchval("""
-            SELECT COUNT(*) FROM ai_conversations
-        """) or 0
+        # Check for conversations (table was dropped during cleanup - gracefully default to 0)
+        try:
+            conversation_count = await pool.fetchval("""
+                SELECT COUNT(*) FROM ai_conversations
+            """) or 0
+        except Exception:
+            conversation_count = 0
 
         return {
             "status": "active",
