@@ -1235,6 +1235,81 @@ class UnifiedMemoryManager:
             return self.recall(query, tenant_id=tid, limit=limit)
 
 
+    def unified_retrieval(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        tenant_id: str = None,
+    ) -> list[dict]:
+        """Unified search across all memory tiers: Semantic, Episodic, and Documents.
+
+        Aggregates results from:
+        1. unified_ai_memory (via hybrid_search_unified_memory)
+        2. document_chunks (via search_document_chunks)
+        """
+        tid = tenant_id or self.tenant_id
+        embedding = self._generate_embedding({"text": query})
+        
+        results = []
+        
+        try:
+            with self._get_cursor() as cur:
+                if not cur:
+                    return []
+
+                # 1. Search Memory (Hybrid)
+                cur.execute(
+                    """
+                    SELECT id, content, 'memory' as source_type, score_fused as score
+                    FROM hybrid_search_unified_memory(%s, %s::vector, %s::uuid, %s)
+                    """,
+                    (query, embedding, tid, limit)
+                )
+                memory_rows = cur.fetchall()
+                for row in memory_rows:
+                    results.append({
+                        "id": str(row["id"]),
+                        "content": row["content"],
+                        "type": "memory",
+                        "score": row["score"]
+                    })
+
+                # 2. Search Documents (Knowledge Base)
+                # Check if function exists first to be safe, though we verified schema
+                try:
+                    cur.execute(
+                        """
+                        SELECT id, content, metadata, 1 - (embedding <=> %s::vector) as score
+                        FROM document_chunks
+                        WHERE embedding IS NOT NULL
+                          AND (tenant_id IS NULL OR tenant_id = %s::uuid)
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                        """,
+                        (embedding, tid, embedding, limit)
+                    )
+                    doc_rows = cur.fetchall()
+                    for row in doc_rows:
+                        results.append({
+                            "id": str(row["id"]),
+                            "content": row["content"],
+                            "metadata": row["metadata"],
+                            "type": "document",
+                            "score": row["score"]
+                        })
+                except Exception as doc_exc:
+                    logger.warning("Document search failed (table/func missing?): %s", doc_exc)
+
+        except Exception as e:
+            logger.error("Unified retrieval failed: %s", e, exc_info=True)
+            return []
+
+        # Sort combined results by score descending
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:limit]
+
+
 # Singleton instance
 memory_manager = None
 
