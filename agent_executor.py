@@ -1288,9 +1288,35 @@ class AgentExecutor:
         except Exception as e:
             logger.warning(f"Failed to log execution completion to ai_agent_executions: {e!r}")
 
+    async def _check_db_guardrails(self, agent_name: str, task: dict[str, Any]) -> None:
+        """Check against database-configured guardrails."""
+        try:
+            pool = get_pool()
+            # Find enabled guardrails for this agent
+            guardrails = await pool.fetch("""
+                SELECT guardrail_type, config, severity
+                FROM agent_guardrails
+                WHERE agent_name = $1 AND enabled = true
+            """, agent_name)
+
+            for g in guardrails:
+                if g['severity'] == 'block':
+                    # For now, any enabled blocking guardrail halts execution.
+                    # Future: evaluate 'config' logic (regex, etc.)
+                    logger.warning(f"Agent {agent_name} blocked by DB guardrail: {g['guardrail_type']}")
+                    raise RuntimeError(f"Execution blocked by guardrail: {g['guardrail_type']}")
+        except Exception as e:
+            # Don't fail open if DB is down, but log warning if it's just a query error
+            if isinstance(e, RuntimeError):
+                raise
+            logger.warning(f"Failed to check DB guardrails: {e}")
+
     async def execute(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
         """Execute task with specific agent - NOW WITH UNIFIED SYSTEM INTEGRATION"""
         await self._ensure_agents_loaded()
+        
+        # Check DB-configured guardrails first
+        await self._check_db_guardrails(agent_name, task)
 
         # Handle task being a string (e.g., "analyze customer trends") vs dict
         # Must be done before accessing task properties
