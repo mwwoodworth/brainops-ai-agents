@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 _OPENAI_CLIENT = None
 _GEMINI_CLIENT = None
 _LOCAL_MODEL = None
+_WARNED_MULTI_PROVIDER = False
 
 
 def get_embedding_dimension() -> int:
@@ -33,7 +34,9 @@ def get_openai_model() -> str:
 
 
 def get_gemini_model() -> str:
-    return os.getenv("EMBEDDING_GEMINI_MODEL", "text-embedding-004").strip() or "text-embedding-004"
+    # NOTE: google-generativeai embedContent does NOT support `text-embedding-004` in v1beta
+    # for many accounts/regions. `gemini-embedding-001` is the known-good embedContent model.
+    return os.getenv("EMBEDDING_GEMINI_MODEL", "gemini-embedding-001").strip() or "gemini-embedding-001"
 
 
 def get_local_model_name() -> str:
@@ -51,7 +54,9 @@ def get_provider_order() -> List[str]:
     providers = [p.strip().lower() for p in order.split(",") if p.strip()]
     if not providers:
         providers = ["gemini"]
-    if len(providers) > 1 and not is_strict_provider():
+    global _WARNED_MULTI_PROVIDER
+    if len(providers) > 1 and not is_strict_provider() and not _WARNED_MULTI_PROVIDER:
+        _WARNED_MULTI_PROVIDER = True
         logger.warning(
             "Multiple embedding providers configured (%s). "
             "Mixed vector spaces can degrade similarity. "
@@ -195,9 +200,14 @@ def _embed_gemini(text: str, log: Optional[logging.Logger] = None) -> Optional[l
     sdk_type, client = client_tuple
     primary_model = get_gemini_model()
     
-    # Models to try in order of preference
-    # Note: 'models/' prefix is often required by google-generativeai but not google-genai
-    models_to_try = [primary_model, "text-embedding-004", "embedding-001"]
+    # Models to try in order of preference.
+    # Note: google-generativeai (embedContent) commonly requires a `models/` prefix.
+    models_to_try = [
+        primary_model,
+        "gemini-embedding-001",
+        "text-embedding-004",
+        "embedding-001",
+    ]
 
     for model_name in models_to_try:
         try:
@@ -213,10 +223,27 @@ def _embed_gemini(text: str, log: Optional[logging.Logger] = None) -> Optional[l
                     return normalize_embedding(result["embedding"])
             
             elif sdk_type == "genai":
-                # google-genai SDK usually handles names directly
+                # google-genai SDK supports explicit embedding config (output_dimensionality),
+                # but keep it optional for compatibility across versions.
+                full_model = model_name if model_name.startswith("models/") else f"models/{model_name}"
+                config = None
+                try:
+                    from google.genai import types  # type: ignore
+                    config = types.EmbedContentConfig(
+                        task_type="RETRIEVAL_DOCUMENT",
+                        output_dimensionality=get_embedding_dimension(),
+                    )
+                except Exception:
+                    config = None
+
+                kwargs = {}
+                if config is not None:
+                    kwargs["config"] = config
+
                 result = client.models.embed_content(
-                    model=model_name,
+                    model=full_model,
                     contents=_truncate(text),
+                    **kwargs,
                 )
                 if result and result.embeddings:
                     embedding = list(result.embeddings[0].values)
