@@ -76,6 +76,7 @@ class EndpointTest:
     category: SystemCategory = SystemCategory.CORE_API
     critical: bool = True  # If True, failure means system is NOT 100% operational
     validation_func: Optional[str] = None  # Name of custom validation function
+    required_env_vars: list[str] = field(default_factory=list)  # If any are missing/empty, fail fast with a clear error
 
 
 @dataclass
@@ -588,6 +589,7 @@ class E2ESystemVerification:
                 expected_fields=["servers", "statistics"],
                 category=SystemCategory.MCP,
                 critical=True,
+                required_env_vars=["MCP_API_KEY"],
                 timeout_seconds=25.0,
             ),
             EndpointTest(
@@ -598,6 +600,7 @@ class E2ESystemVerification:
                 expected_fields=["totalServers", "totalTools", "servers"],
                 category=SystemCategory.MCP,
                 critical=True,
+                required_env_vars=["MCP_API_KEY"],
                 timeout_seconds=25.0,
             ),
             EndpointTest(
@@ -724,6 +727,18 @@ class E2ESystemVerification:
         """Execute a single endpoint test"""
         start_time = time.perf_counter()
 
+        # Fail-fast for missing required env vars so reports are actionable.
+        if test.required_env_vars:
+            missing = [k for k in test.required_env_vars if not (os.getenv(k) or "").strip()]
+            if missing:
+                return TestResult(
+                    test_name=test.name,
+                    endpoint=test.url,
+                    status=VerificationStatus.FAILED,
+                    response_time_ms=0.0,
+                    error_message=f"Missing required env var(s): {', '.join(missing)}",
+                )
+
         try:
             async with session.request(
                 method=test.method,
@@ -759,9 +774,21 @@ class E2ESystemVerification:
                         error_message=f"Expected status {test.expected_status}, got {response.status}"
                     )
 
-                # Check expected fields
-                missing_fields = []
-                if test.expected_fields and response_body:
+                # Check expected fields (treat empty objects as valid payloads, and fail if
+                # an endpoint that claims JSON fields does not return a JSON object).
+                missing_fields: list[str] = []
+                if test.expected_fields:
+                    if not isinstance(response_body, dict):
+                        return TestResult(
+                            test_name=test.name,
+                            endpoint=test.url,
+                            status=VerificationStatus.INVALID_RESPONSE,
+                            response_time_ms=response_time_ms,
+                            status_code=response.status,
+                            response_body=response_body if isinstance(response_body, dict) else None,
+                            error_message="Expected JSON object response",
+                        )
+
                     for field in test.expected_fields:
                         if field not in response_body:
                             missing_fields.append(field)
@@ -778,9 +805,10 @@ class E2ESystemVerification:
                         error_message=f"Missing required fields: {missing_fields}"
                     )
 
-                # Check for error in response body
-                if response_body and isinstance(response_body, dict):
-                    if response_body.get("status") == "error" or response_body.get("error"):
+                # Check for app-level error payloads, but only on tests expecting success.
+                # Negative auth tests intentionally return {error: "..."} with 401/403.
+                if isinstance(response_body, dict) and 200 <= test.expected_status < 300:
+                    if response_body.get("status") == "error":
                         return TestResult(
                             test_name=test.name,
                             endpoint=test.url,
@@ -788,7 +816,18 @@ class E2ESystemVerification:
                             response_time_ms=response_time_ms,
                             status_code=response.status,
                             response_body=response_body,
-                            error_message=response_body.get("error") or response_body.get("message") or "Error in response"
+                            error_message=response_body.get("message") or response_body.get("error") or "Error in response",
+                        )
+                    err_val = response_body.get("error")
+                    if err_val:
+                        return TestResult(
+                            test_name=test.name,
+                            endpoint=test.url,
+                            status=VerificationStatus.FAILED,
+                            response_time_ms=response_time_ms,
+                            status_code=response.status,
+                            response_body=response_body,
+                            error_message=str(err_val),
                         )
 
                 max_response_time_ms: Optional[float] = test.max_response_time_ms
