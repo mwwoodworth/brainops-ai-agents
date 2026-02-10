@@ -19,13 +19,24 @@ from datetime import datetime
 from typing import Any, Optional
 
 from safe_task import create_safe_task
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Security
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["erp-bridge"])
+
+# API Key Security
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def _verify_bridge_api_key(api_key: str = Security(_api_key_header)) -> str:
+    """Verify API key for ERP bridge diagnostics endpoints"""
+    from config import config
+    if not api_key or api_key not in config.security.valid_api_keys:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return api_key
 
 # =============================================================================
 # UNIFIED EVENT SYSTEM INTEGRATION
@@ -668,8 +679,8 @@ async def verify_erp_webhook_signature(request: Request) -> bool:
     secret = os.getenv("ERP_WEBHOOK_SECRET", "")
 
     if not secret:
-        logger.warning("ERP_WEBHOOK_SECRET not configured - webhook verification disabled")
-        return True  # Allow in dev if no secret set
+        logger.error("ERP_WEBHOOK_SECRET not configured - rejecting webhook")
+        return False
 
     if not signature:
         logger.error("Missing ERP webhook signature header")
@@ -789,7 +800,7 @@ async def handle_erp_event(
 # =============================================================================
 
 @router.get("/events/processors", summary="List registered event processors")
-async def list_processors():
+async def list_processors(api_key: str = Depends(_verify_bridge_api_key)):
     """List all registered event processors and their status"""
     return {
         "processors": list(EVENT_PROCESSORS.keys()),
