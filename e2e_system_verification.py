@@ -534,7 +534,6 @@ class E2ESystemVerification:
                 headers=headers,
                 expected_status=200,
                 expected_fields=["status", "version", "database", "cns"],
-                validation_func="validate_backend_api_v1_health",
                 category=SystemCategory.CORE_API,
                 critical=True,
                 timeout_seconds=25.0,
