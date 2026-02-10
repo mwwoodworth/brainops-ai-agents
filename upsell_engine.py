@@ -27,18 +27,26 @@ logger = logging.getLogger(__name__)
 
 class UpsellEngine:
     def __init__(self):
+        # Rules map Gumroad product permalink codes to upsell targets
+        # Live Gumroad products: HJHMSM($49), VJXCEW($37), XGFKP($29), GSAAVB($97), UPSYKR($149), CAWVO($29)
         self.rules = {
-            "starter_to_pro": {
-                "trigger_product": ["starter_monthly", "starter_yearly"],
-                "target_product": "pro_monthly",
-                "delay_days": 7,
-                "template": "upsell_pro_features"
-            },
-            "ebook_to_course": {
-                "trigger_product": ["roofing_ebook"],
-                "target_product": "roofing_masterclass",
+            "prompt_to_kit": {
+                "trigger_product": ["XGFKP", "CAWVO"],  # Prompt Pack ($29) / Automation Toolkit ($29)
+                "target_product": "HJHMSM",  # MCP Server Starter Kit ($49)
                 "delay_days": 3,
-                "template": "upsell_masterclass"
+                "template": "upsell_starter_kit"
+            },
+            "kit_to_framework": {
+                "trigger_product": ["HJHMSM", "VJXCEW"],  # Starter Kit ($49) / SaaS Scripts ($37)
+                "target_product": "GSAAVB",  # AI Orchestration Framework ($97)
+                "delay_days": 7,
+                "template": "upsell_framework"
+            },
+            "any_to_bundle": {
+                "trigger_product": ["HJHMSM", "VJXCEW", "XGFKP", "GSAAVB", "CAWVO"],
+                "target_product": "UPSYKR",  # Command Center UI Kit ($149)
+                "delay_days": 5,
+                "template": "upsell_premium_bundle"
             }
         }
 
@@ -196,3 +204,35 @@ def get_upsell_engine():
     if _upsell_engine is None:
         _upsell_engine = UpsellEngine()
     return _upsell_engine
+
+
+# Module-level convenience functions (used by gumroad_webhook.py and revenue_complete.py)
+async def process_purchase_for_upsell(email: str, product_permalink: str, sale_data: dict = None):
+    """Process a new purchase to trigger upsell opportunities."""
+    engine = get_upsell_engine()
+    try:
+        recommendations = await engine.get_recommended_upsells(email, product_permalink)
+        if recommendations:
+            logger.info(f"Found {len(recommendations)} upsell opportunities for {email}")
+        return {"email": email, "recommendations": recommendations}
+    except Exception as e:
+        logger.error(f"Error processing purchase for upsell: {e}")
+        return {"error": str(e)}
+
+
+async def process_missed_upsells(days_back: int = 7, limit: int = 50):
+    """Module-level wrapper for UpsellEngine.process_missed_upsells."""
+    engine = get_upsell_engine()
+    return await engine.process_missed_upsells(days_back=days_back, limit=limit)
+
+
+async def get_customer_purchase_history(email: str):
+    """Module-level wrapper for UpsellEngine.get_customer_purchase_history."""
+    engine = get_upsell_engine()
+    return await engine.get_customer_purchase_history(email)
+
+
+async def get_recommended_upsells(email: str, current_product: str):
+    """Module-level wrapper for UpsellEngine.get_recommended_upsells."""
+    engine = get_upsell_engine()
+    return await engine.get_recommended_upsells(email, current_product)
