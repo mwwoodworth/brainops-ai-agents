@@ -15,15 +15,16 @@ from typing import Any, Optional
 import numpy as np
 
 from safe_task import create_safe_task
-
-# Using OpenAI text-embedding-3-small for production-quality semantic embeddings
-# Includes circuit breaker pattern for quota/rate limit handling
+from utils.embedding_provider import (
+    generate_embedding_sync,
+    get_gemini_model,
+    get_local_model_name,
+    get_openai_model,
+    get_provider_order,
+    iter_providers,
+)
 
 logger = logging.getLogger(__name__)
-
-# Circuit breaker for OpenAI quota errors
-_openai_disabled_until = 0
-_OPENAI_BACKOFF_SECONDS = 3600  # 1 hour backoff on quota errors
 
 class EmbeddedMemorySystem:
     """
@@ -202,46 +203,31 @@ class EmbeddedMemorySystem:
             return False
 
     async def _load_embedding_model(self):
-        """Load embedding model configuration"""
-        # We are now using OpenAI API for embeddings
-        self.embedding_model = "openai-text-embedding-3-small"
-        logger.info("✅ Embedding model loaded (OpenAI text-embedding-3-small)")
+        """Load embedding model configuration (no heavy local deps)."""
+        providers = iter_providers(get_provider_order())
+        primary = providers[0] if providers else "gemini"
+
+        if primary in {"gemini", "google"}:
+            self.embedding_model = f"gemini:{get_gemini_model()}"
+        elif primary in {"openai", "oai"}:
+            self.embedding_model = f"openai:{get_openai_model()}"
+        elif primary == "local":
+            self.embedding_model = f"local:{get_local_model_name()}"
+        else:
+            self.embedding_model = primary
+
+        logger.info("✅ Embedding model configured (%s)", self.embedding_model)
 
     def _encode_embedding(self, text: str) -> Optional[bytes]:
-        """Convert text to embedding vector using OpenAI"""
-        global _openai_disabled_until
-        import time as time_module
-
-        # Circuit breaker check - skip OpenAI if quota exceeded recently
-        if _openai_disabled_until > time_module.time():
-            remaining = int(_openai_disabled_until - time_module.time())
-            logger.debug(f"OpenAI embeddings disabled for {remaining}s more (quota exceeded)")
-            return None
-
+        """Convert text to embedding vector using the shared embedding provider chain."""
         try:
-            import openai
-
-            # Call OpenAI Embedding API
-            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            response = client.embeddings.create(
-                input=text,
-                model="text-embedding-3-small"
-            )
-
-            embedding_list = response.data[0].embedding
-
-            # Convert to numpy array then bytes for SQLite
+            embedding_list = generate_embedding_sync(text, log=logger)
+            if not embedding_list:
+                return None
             embedding_np = np.array(embedding_list, dtype=np.float32)
             return embedding_np.tobytes()
-
         except Exception as e:
-            error_str = str(e).lower()
-            # Detect quota/rate limit errors and trigger circuit breaker
-            if 'insufficient_quota' in error_str or '429' in error_str or 'rate_limit' in error_str:
-                _openai_disabled_until = time_module.time() + _OPENAI_BACKOFF_SECONDS
-                logger.warning(f"⚠️ OpenAI quota/rate limit hit - disabling embeddings for {_OPENAI_BACKOFF_SECONDS}s")
-            else:
-                logger.error(f"Embedding encoding failed: {e}")
+            logger.error("Embedding encoding failed: %s", e)
             return None
 
     def _decode_embedding(self, embedding_bytes: bytes) -> Optional[np.ndarray]:
@@ -777,7 +763,7 @@ class EmbeddedMemorySystem:
             "pending_tasks": cursor.execute("SELECT COUNT(*) FROM ai_autonomous_tasks WHERE status = 'pending'").fetchone()[0],
             "total_learnings": cursor.execute("SELECT COUNT(*) FROM ai_learning_from_mistakes").fetchone()[0],
             "last_sync": self.last_sync.isoformat() if self.last_sync else None,
-            "embedding_model": "all-MiniLM-L6-v2" if self.embedding_model else None
+            "embedding_model": self.embedding_model
         }
 
         # Memory by type

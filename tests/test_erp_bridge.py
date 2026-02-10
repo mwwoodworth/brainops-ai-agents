@@ -1,5 +1,8 @@
 import os
 import sys
+import json
+import hmac
+import hashlib
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,6 +26,10 @@ transport = httpx.ASGITransport(app=app)
 @patch("erp_event_bridge.get_intelligent_followup_system")
 @pytest.mark.asyncio
 async def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
+    # Configure webhook signing for the test app.
+    secret = "test_erp_webhook_secret"
+    os.environ["ERP_WEBHOOK_SECRET"] = secret
+
     # Mock systems
     mock_csa_instance = MagicMock()
     mock_csa_instance.generate_onboarding_plan = AsyncMock()
@@ -45,7 +52,13 @@ async def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
     }
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.post("/events/webhook", json=payload)
+        body = json.dumps(payload).encode("utf-8")
+        sig = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        response = await client.post(
+            "/events/webhook",
+            content=body,
+            headers={"Content-Type": "application/json", "X-ERP-Signature": sig},
+        )
         assert response.status_code == 200
         data = response.json()
     assert data["status"] == "processed"
@@ -64,7 +77,13 @@ async def test_handle_erp_event(mock_followup, mock_revenue, mock_csa):
     }
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.post("/events/webhook", json=payload_job)
+        body = json.dumps(payload_job).encode("utf-8")
+        sig = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        response = await client.post(
+            "/events/webhook",
+            content=body,
+            headers={"Content-Type": "application/json", "X-ERP-Signature": sig},
+        )
         assert response.status_code == 200
 
     # Verify Followup System called
