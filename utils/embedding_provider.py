@@ -46,11 +46,11 @@ def is_strict_provider() -> bool:
 
 def get_provider_order() -> List[str]:
     explicit_provider = os.getenv("EMBEDDING_PROVIDER", "").strip()
-    order_env = os.getenv("EMBEDDING_PROVIDER_ORDER", "openai,gemini").strip()
+    order_env = os.getenv("EMBEDDING_PROVIDER_ORDER", "gemini,openai").strip()
     order = explicit_provider or order_env
     providers = [p.strip().lower() for p in order.split(",") if p.strip()]
     if not providers:
-        providers = ["openai"]
+        providers = ["gemini"]
     if len(providers) > 1 and not is_strict_provider():
         logger.warning(
             "Multiple embedding providers configured (%s). "
