@@ -523,8 +523,12 @@ class ChatGPTAgentTester:
         ]
         return await self.run_flow("Brainstack Studio Homepage", steps)
 
-    async def run_full_test_suite(self) -> dict[str, Any]:
-        """Run all test flows"""
+    async def run_full_test_suite(self, skip_erp: bool = False) -> dict[str, Any]:
+        """Run all test flows.
+
+        Args:
+            skip_erp: When True, exclude Weathercraft ERP flows (non-ERP verification scope).
+        """
         logger.info("Starting full ChatGPT-Agent test suite...")
         start_time = time.time()
 
@@ -537,8 +541,9 @@ class ChatGPTAgentTester:
         results.append(await self.test_mrg_pricing_page())
 
         # ERP Tests
-        results.append(await self.test_erp_homepage())
-        results.append(await self.test_erp_login_page())
+        if not skip_erp:
+            results.append(await self.test_erp_homepage())
+            results.append(await self.test_erp_login_page())
 
         # Command Center + Brainstack Studio (public surfaces)
         results.append(await self.test_command_center_dashboard())
@@ -581,17 +586,17 @@ class ChatGPTAgentTester:
 # API FUNCTIONS
 # =============================================================================
 
-async def run_chatgpt_agent_tests() -> dict[str, Any]:
-    """Run full ChatGPT-Agent test suite"""
+async def run_chatgpt_agent_tests(skip_erp: bool = False) -> dict[str, Any]:
+    """Run full ChatGPT-Agent test suite."""
     tester = ChatGPTAgentTester()
     try:
         await tester.initialize()
-        return await tester.run_full_test_suite()
+        return await tester.run_full_test_suite(skip_erp=skip_erp)
     finally:
         await tester.close()
 
 
-async def run_quick_health_test() -> dict[str, Any]:
+async def run_quick_health_test(skip_erp: bool = False) -> dict[str, Any]:
     """
     Run quick health test (homepage only).
 
@@ -606,19 +611,20 @@ async def run_quick_health_test() -> dict[str, Any]:
             await tester.initialize()
 
             mrg_result = await tester.test_mrg_homepage_quick()
-            erp_result = await tester.test_erp_homepage_quick()
+            erp_result = await tester.test_erp_homepage_quick() if not skip_erp else None
 
             return {
                 "mode": "playwright",
                 "mrg_healthy": mrg_result.status == TestFlowStatus.PASSED,
-                "erp_healthy": erp_result.status == TestFlowStatus.PASSED,
+                "erp_healthy": erp_result.status == TestFlowStatus.PASSED if erp_result else None,
+                "erp_skipped": bool(skip_erp),
                 "mrg_details": {
                     "status": mrg_result.status.value,
                     "duration": mrg_result.duration_seconds,
                 },
                 "erp_details": {
-                    "status": erp_result.status.value,
-                    "duration": erp_result.duration_seconds,
+                    "status": erp_result.status.value if erp_result else "skipped",
+                    "duration": erp_result.duration_seconds if erp_result else 0.0,
                 },
             }
         finally:
@@ -662,22 +668,27 @@ async def run_quick_health_test() -> dict[str, Any]:
     }
 
     async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-        (mrg_ok, mrg_duration, mrg_error), (erp_ok, erp_duration, erp_error) = await asyncio.gather(
-            _probe(session, "https://myroofgenius.com"),
-            _probe(session, "https://weathercraft-erp.vercel.app"),
-        )
+        if skip_erp:
+            (mrg_ok, mrg_duration, mrg_error) = await _probe(session, "https://myroofgenius.com")
+            erp_ok, erp_duration, erp_error = None, 0.0, None
+        else:
+            (mrg_ok, mrg_duration, mrg_error), (erp_ok, erp_duration, erp_error) = await asyncio.gather(
+                _probe(session, "https://myroofgenius.com"),
+                _probe(session, "https://weathercraft-erp.vercel.app"),
+            )
 
     return {
         "mode": "http",
         "mrg_healthy": mrg_ok,
         "erp_healthy": erp_ok,
+        "erp_skipped": bool(skip_erp),
         "mrg_details": {
             "status": "passed" if mrg_ok else "failed",
             "duration": mrg_duration,
             "error": mrg_error,
         },
         "erp_details": {
-            "status": "passed" if erp_ok else "failed",
+            "status": "passed" if erp_ok else ("skipped" if skip_erp else "failed"),
             "duration": erp_duration,
             "error": erp_error,
         },

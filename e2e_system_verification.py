@@ -29,6 +29,9 @@ BRAINOPS_BACKEND_URL = os.getenv("BRAINOPS_BACKEND_URL", "https://brainops-backe
 ERP_URL = os.getenv("ERP_URL", "https://weathercraft-erp.vercel.app")
 MRG_URL = os.getenv("MRG_URL", "https://myroofgenius.com")
 MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
+MCP_API_KEY = (os.getenv("MCP_API_KEY") or "").strip()
+# Guest checkout smoke tests create a Stripe session but do not charge.
+E2E_TEST_EMAIL = (os.getenv("E2E_TEST_EMAIL") or "ops-e2e-checkout@example.com").strip()
 # Use the same API key source as the server validates against
 _api_keys_str = os.getenv("API_KEYS", "")
 _api_keys_list = [k.strip() for k in _api_keys_str.split(",") if k.strip()] if _api_keys_str else []
@@ -108,6 +111,7 @@ class SystemVerificationReport:
     all_results: list[TestResult]
     recommendations: list[str]
     is_100_percent_operational: bool
+    skip_erp: bool = False
 
 
 class E2ESystemVerification:
@@ -143,13 +147,58 @@ class E2ESystemVerification:
         updated: list[EndpointTest] = []
         for test in tests:
             merged_headers = dict(test.headers or {})
-            merged_headers["X-API-Key"] = api_key_override
-            updated.append(replace(test, headers=merged_headers))
+            # Only override tests that already use the default BrainOps API key.
+            # Do not override MCP Bridge calls (MCP_API_KEY) or negative auth tests
+            # that intentionally omit headers.
+            existing = merged_headers.get("X-API-Key")
+            if existing is not None and (not existing or existing == API_KEY):
+                merged_headers["X-API-Key"] = api_key_override
+                merged_headers.pop("x-api-key", None)
+                updated.append(replace(test, headers=merged_headers))
+            else:
+                updated.append(test)
+        return updated
+
+    @staticmethod
+    def _apply_scope(tests: list[EndpointTest], skip_erp: bool) -> list[EndpointTest]:
+        """Filter/adjust tests based on verification scope."""
+        if not skip_erp:
+            return tests
+
+        updated: list[EndpointTest] = []
+        for test in tests:
+            is_erp = (
+                test.name.startswith("ERP -")
+                or test.url == ERP_URL
+                or test.url.startswith(ERP_URL + "/")
+                or "weathercraft-erp" in test.url
+            )
+            if is_erp:
+                continue
+
+            if test.name.startswith("ChatGPT Agent UI -"):
+                # Run the UI smoke in non-ERP mode so the payload does not require ERP.
+                url = test.url
+                if "skip_erp=" not in url:
+                    url = f"{url}{'&' if '?' in url else '?'}skip_erp=true"
+                updated.append(
+                    replace(
+                        test,
+                        url=url,
+                        expected_fields=["mrg_healthy", "erp_skipped"],
+                        validation_func="validate_chatgpt_agent_quick_non_erp",
+                    )
+                )
+                continue
+
+            updated.append(test)
+
         return updated
 
     def _initialize_tests(self):
         """Initialize all endpoint tests"""
         headers = {"X-API-Key": API_KEY}
+        mcp_headers = {"X-API-Key": MCP_API_KEY}
 
         # ============================================
         # CORE API ENDPOINTS
@@ -188,6 +237,14 @@ class E2ESystemVerification:
                 critical=True
             ),
             EndpointTest(
+                name="Observability Dashboard",
+                url=f"{BRAINOPS_API_URL}/api/v1/observability/dashboard",
+                headers=headers,
+                expected_fields=["overall_status", "agents", "database", "mcp", "memory"],
+                category=SystemCategory.CORE_API,
+                critical=True
+            ),
+            EndpointTest(
                 name="AI Providers Status",
                 url=f"{BRAINOPS_API_URL}/ai/providers/status",
                 headers=headers,
@@ -207,15 +264,15 @@ class E2ESystemVerification:
                 name="Brain Critical Keys",
                 url=f"{BRAINOPS_API_URL}/brain/critical",
                 headers=headers,
-                expected_fields=[],  # Returns array
+                expected_fields=["status", "critical_items"],
                 category=SystemCategory.CORE_API,
                 critical=True
             ),
             EndpointTest(
                 name="Brain Memory",
-                url=f"{BRAINOPS_API_URL}/brain/critical",
+                url=f"{BRAINOPS_API_URL}/brain/status",
                 headers=headers,
-                expected_fields=[],
+                expected_fields=["status", "timestamp"],
                 category=SystemCategory.CORE_API,
                 critical=False
             ),
@@ -431,8 +488,18 @@ class E2ESystemVerification:
             EndpointTest(
                 name="Command Center - Unified Health",
                 url="https://brainops-command-center.vercel.app/api/unified-health",
+                headers=headers,
                 expected_status=200,
                 expected_fields=["overall", "services"],
+                category=SystemCategory.FRONTEND,
+                critical=True,
+                timeout_seconds=20.0,
+            ),
+            EndpointTest(
+                name="Command Center - Unified Health (No Auth)",
+                url="https://brainops-command-center.vercel.app/api/unified-health",
+                expected_status=401,
+                expected_fields=[],
                 category=SystemCategory.FRONTEND,
                 critical=True,
                 timeout_seconds=20.0,
@@ -460,6 +527,45 @@ class E2ESystemVerification:
                 category=SystemCategory.CORE_API,
                 critical=True
             ),
+            EndpointTest(
+                name="Backend - API v1 Health",
+                url=f"{BRAINOPS_BACKEND_URL}/api/v1/health",
+                headers=headers,
+                expected_status=200,
+                expected_fields=["status", "version", "database", "cns"],
+                category=SystemCategory.CORE_API,
+                critical=True,
+                timeout_seconds=25.0,
+            ),
+            EndpointTest(
+                name="Backend - CNS Status",
+                url=f"{BRAINOPS_BACKEND_URL}/api/v1/cns/status",
+                headers=headers,
+                expected_status=200,
+                expected_fields=["status", "initialized", "memory_count", "task_count"],
+                category=SystemCategory.CORE_API,
+                critical=True,
+                timeout_seconds=25.0,
+            ),
+            EndpointTest(
+                name="Backend - CNS Status (No Auth)",
+                url=f"{BRAINOPS_BACKEND_URL}/api/v1/cns/status",
+                expected_status=401,
+                expected_fields=[],
+                category=SystemCategory.CORE_API,
+                critical=True,
+                timeout_seconds=25.0,
+            ),
+            EndpointTest(
+                name="Backend - Revenue Dashboard",
+                url=f"{BRAINOPS_BACKEND_URL}/api/v1/revenue/dashboard",
+                headers=headers,
+                expected_status=200,
+                expected_fields=["mrr", "arr", "total_revenue"],
+                category=SystemCategory.CORE_API,
+                critical=False,
+                timeout_seconds=25.0,
+            ),
         ])
 
         # ============================================
@@ -473,6 +579,77 @@ class E2ESystemVerification:
                 expected_fields=["status", "mcpServers", "totalTools"],
                 category=SystemCategory.MCP,
                 critical=True
+            ),
+            EndpointTest(
+                name="MCP Bridge - Servers (Auth)",
+                url=f"{MCP_BRIDGE_URL}/mcp/servers",
+                headers=mcp_headers,
+                expected_status=200,
+                expected_fields=["servers", "statistics"],
+                category=SystemCategory.MCP,
+                critical=True,
+                timeout_seconds=25.0,
+            ),
+            EndpointTest(
+                name="MCP Bridge - Tools Inventory (Auth)",
+                url=f"{MCP_BRIDGE_URL}/mcp/tools",
+                headers=mcp_headers,
+                expected_status=200,
+                expected_fields=["totalServers", "totalTools", "servers"],
+                category=SystemCategory.MCP,
+                critical=True,
+                timeout_seconds=25.0,
+            ),
+            EndpointTest(
+                name="MCP Bridge - Servers (No Auth)",
+                url=f"{MCP_BRIDGE_URL}/mcp/servers",
+                expected_status=401,
+                expected_fields=[],
+                category=SystemCategory.MCP,
+                critical=True,
+                timeout_seconds=25.0,
+            ),
+        ])
+
+        # ============================================
+        # REVENUE / STRIPE (MRG)
+        # ============================================
+        self.tests.extend([
+            EndpointTest(
+                name="MRG - Stripe Prices",
+                url=f"{MRG_URL}/api/stripe/prices",
+                expected_status=200,
+                expected_fields=["prices"],
+                category=SystemCategory.EXTERNAL,
+                critical=False,
+                timeout_seconds=25.0,
+            ),
+            EndpointTest(
+                name="MRG - Stripe Checkout Session (Guest)",
+                url=f"{MRG_URL}/api/stripe/checkout-session-v2",
+                method="POST",
+                expected_status=200,
+                expected_fields=["sessionId", "url"],
+                body={
+                    "productKey": "ai-roof-inspector-basic",
+                    "customerEmail": E2E_TEST_EMAIL,
+                },
+                category=SystemCategory.EXTERNAL,
+                critical=False,
+                timeout_seconds=35.0,
+            ),
+            EndpointTest(
+                name="MRG - Stripe Checkout Session (No Email)",
+                url=f"{MRG_URL}/api/stripe/checkout-session-v2",
+                method="POST",
+                expected_status=401,
+                expected_fields=["error"],
+                body={
+                    "productKey": "ai-roof-inspector-basic",
+                },
+                category=SystemCategory.EXTERNAL,
+                critical=False,
+                timeout_seconds=35.0,
             ),
         ])
 
@@ -524,6 +701,22 @@ class E2ESystemVerification:
             errors.append("MyRoofGenius UI quick test failed")
         if response_body.get("erp_healthy") is not True:
             errors.append("Weathercraft ERP UI quick test failed")
+
+        return errors
+
+    @staticmethod
+    def validate_chatgpt_agent_quick_non_erp(_test: EndpointTest, response_body: Any) -> list[str]:
+        """Validate the ChatGPT-Agent quick UI test result payload in non-ERP scope."""
+        if not isinstance(response_body, dict):
+            return ["Response body is not a JSON object"]
+
+        errors: list[str] = []
+        if response_body.get("mrg_healthy") is not True:
+            errors.append("MyRoofGenius UI quick test failed")
+
+        # If ERP is skipped, do not fail the system for ERP UI state.
+        if response_body.get("erp_skipped") is not True:
+            errors.append("Expected erp_skipped=true for non-ERP verification scope")
 
         return errors
 
@@ -670,12 +863,16 @@ class E2ESystemVerification:
                 error_message=f"Unexpected error: {str(e)}"
             )
 
-    async def run_full_verification(self, api_key_override: Optional[str] = None) -> SystemVerificationReport:
+    async def run_full_verification(
+        self,
+        api_key_override: Optional[str] = None,
+        skip_erp: bool = False,
+    ) -> SystemVerificationReport:
         """Run complete E2E verification of all systems"""
         started_at = datetime.utcnow()
         report_id = hashlib.md5(started_at.isoformat().encode()).hexdigest()[:12]
 
-        tests = self._apply_api_key_override(self.tests, api_key_override)
+        tests = self._apply_scope(self._apply_api_key_override(self.tests, api_key_override), skip_erp=skip_erp)
 
         logger.info(f"Starting E2E verification (ID: {report_id}) - {len(tests)} tests")
 
@@ -731,7 +928,6 @@ class E2ESystemVerification:
         degraded = sum(1 for r in self.results if r.status == VerificationStatus.DEGRADED)
 
         # Check critical tests
-        [t for t in tests if t.critical]
         critical_results = [r for r, t in zip(self.results, tests) if t.critical]
         critical_failures = [r for r in critical_results if r.status != VerificationStatus.PASSED]
 
@@ -786,7 +982,8 @@ class E2ESystemVerification:
             failed_tests=failed_tests,
             all_results=self.results,
             recommendations=recommendations,
-            is_100_percent_operational=is_100_percent
+            is_100_percent_operational=is_100_percent,
+            skip_erp=skip_erp,
         )
 
         self.last_report = report
@@ -833,11 +1030,18 @@ class E2ESystemVerification:
 
         return recommendations
 
-    async def run_quick_health_check(self, api_key_override: Optional[str] = None) -> dict[str, Any]:
+    async def run_quick_health_check(
+        self,
+        api_key_override: Optional[str] = None,
+        skip_erp: bool = False,
+    ) -> dict[str, Any]:
         """Quick health check of critical endpoints only"""
-        critical_tests = self._apply_api_key_override(
+        critical_tests = self._apply_scope(
+            self._apply_api_key_override(
             [t for t in self.tests if t.critical],
             api_key_override,
+            ),
+            skip_erp=skip_erp,
         )
 
         # Same safeguards as full verification: limit concurrency + run UI browser tests serially.
@@ -874,6 +1078,7 @@ class E2ESystemVerification:
             "passed": passed,
             "failed": len(failed),
             "failed_endpoints": [{"name": f.test_name, "error": f.error_message} for f in failed],
+            "skip_erp": skip_erp,
             "timestamp": datetime.utcnow().isoformat()
         }
 
@@ -892,7 +1097,8 @@ class E2ESystemVerification:
             "failed": self.last_report.failed,
             "degraded": self.last_report.degraded,
             "results_by_category": self.last_report.results_by_category,
-            "recommendations": self.last_report.recommendations
+            "recommendations": self.last_report.recommendations,
+            "skip_erp": getattr(self.last_report, "skip_erp", False),
         }
 
 
@@ -904,9 +1110,12 @@ e2e_verification = E2ESystemVerification()
 # API FUNCTIONS
 # ============================================
 
-async def run_full_e2e_verification(api_key_override: Optional[str] = None) -> dict[str, Any]:
+async def run_full_e2e_verification(
+    api_key_override: Optional[str] = None,
+    skip_erp: bool = False,
+) -> dict[str, Any]:
     """Run complete E2E verification and return report"""
-    report = await e2e_verification.run_full_verification(api_key_override=api_key_override)
+    report = await e2e_verification.run_full_verification(api_key_override=api_key_override, skip_erp=skip_erp)
 
     # Convert to dict, handling dataclass conversion
     failed_tests_dicts = []
@@ -923,6 +1132,7 @@ async def run_full_e2e_verification(api_key_override: Optional[str] = None) -> d
         "completed_at": report.completed_at,
         "duration_seconds": report.duration_seconds,
         "is_100_percent_operational": report.is_100_percent_operational,
+        "skip_erp": getattr(report, "skip_erp", False),
         "overall_status": report.overall_status.value,
         "pass_rate": report.pass_rate,
         "summary": {
@@ -937,9 +1147,12 @@ async def run_full_e2e_verification(api_key_override: Optional[str] = None) -> d
     }
 
 
-async def run_quick_health_check(api_key_override: Optional[str] = None) -> dict[str, Any]:
+async def run_quick_health_check(
+    api_key_override: Optional[str] = None,
+    skip_erp: bool = False,
+) -> dict[str, Any]:
     """Run quick health check of critical systems"""
-    return await e2e_verification.run_quick_health_check(api_key_override=api_key_override)
+    return await e2e_verification.run_quick_health_check(api_key_override=api_key_override, skip_erp=skip_erp)
 
 
 async def get_last_verification_report() -> Optional[dict[str, Any]]:
