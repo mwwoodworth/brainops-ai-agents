@@ -128,19 +128,35 @@ def _get_gemini_client():
     global _GEMINI_CLIENT
     if _GEMINI_CLIENT is not None:
         return _GEMINI_CLIENT
+    
     api_key = (
         os.getenv("GOOGLE_AI_API_KEY")
         or os.getenv("GOOGLE_API_KEY")
         or os.getenv("GEMINI_API_KEY")
     )
     if not api_key:
+        logger.warning("Gemini API key not found")
         return None
+
+    # Try standard google-generativeai SDK first (v0.8+)
     try:
-        from google import genai  # type: ignore
-    except Exception:
-        return None
-    _GEMINI_CLIENT = genai.Client(api_key=api_key)
-    return _GEMINI_CLIENT
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        _GEMINI_CLIENT = ("generativeai", genai)
+        return _GEMINI_CLIENT
+    except ImportError as e:
+        logger.warning(f"Failed to import google.generativeai: {e}")
+
+    # Fallback to google-genai SDK (v1.0+)
+    try:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        _GEMINI_CLIENT = ("genai", client)
+        return _GEMINI_CLIENT
+    except ImportError as e:
+        logger.warning(f"Failed to import google.genai: {e}")
+    
+    return None
 
 
 def _get_local_model():
@@ -172,20 +188,37 @@ def _embed_openai(text: str, log: Optional[logging.Logger] = None) -> Optional[l
 
 
 def _embed_gemini(text: str, log: Optional[logging.Logger] = None) -> Optional[list[float]]:
-    client = _get_gemini_client()
-    if not client:
+    client_tuple = _get_gemini_client()
+    if not client_tuple:
         return None
+    
+    sdk_type, client = client_tuple
+    model = get_gemini_model()
+
     try:
-        result = client.models.embed_content(
-            model=get_gemini_model(),
-            contents=_truncate(text),
-        )
-        if result and result.embeddings:
-            embedding = list(result.embeddings[0].values)
-            return normalize_embedding(embedding)
+        if sdk_type == "generativeai":
+            # google-generativeai SDK
+            result = client.embed_content(
+                model=f"models/{model}",
+                content=_truncate(text),
+                task_type="retrieval_document"
+            )
+            if result and "embedding" in result:
+                return normalize_embedding(result["embedding"])
+        
+        elif sdk_type == "genai":
+            # google-genai SDK
+            result = client.models.embed_content(
+                model=model,
+                contents=_truncate(text),
+            )
+            if result and result.embeddings:
+                embedding = list(result.embeddings[0].values)
+                return normalize_embedding(embedding)
+                
     except Exception as exc:
         if log:
-            log.warning("Gemini embedding failed: %s", exc)
+            log.warning(f"Gemini embedding failed ({sdk_type}): {exc}")
     return None
 
 
