@@ -152,9 +152,43 @@ class PaymentCapture:
             paid_at=None
         )
 
-        # Create Stripe checkout session if available
+        # GUARD: Check if the proposal is associated with a test/demo tenant.
+        # If so, skip Stripe session creation to avoid polluting live Stripe data.
+        _skip_stripe = False
+        _client_email = str(proposal.get("client_email") or "").strip().lower()
+        _test_email_domains = ("@example.com", "@test.com", "@demo.com", "@localhost", "@fake.com")
+        if _client_email and any(_client_email.endswith(d) for d in _test_email_domains):
+            _skip_stripe = True
+            logger.warning(
+                "Skipping Stripe checkout for proposal %s: test email domain (%s)",
+                proposal_id, _client_email,
+            )
+
+        # Also check if the lead belongs to a test tenant via the tenants table.
+        if not _skip_stripe:
+            try:
+                _is_test = await pool.fetchval(
+                    """
+                    SELECT COALESCE(t.is_test, false)
+                    FROM revenue_leads rl
+                    JOIN tenants t ON t.id = rl.tenant_id
+                    WHERE rl.id = $1
+                    """,
+                    uuid.UUID(str(proposal["lead_id"])),
+                )
+                if _is_test:
+                    _skip_stripe = True
+                    logger.warning(
+                        "Skipping Stripe checkout for proposal %s: lead %s belongs to a test tenant",
+                        proposal_id, proposal["lead_id"],
+                    )
+            except Exception:
+                # revenue_leads may not have tenant_id column; that's OK -- proceed cautiously.
+                pass
+
+        # Create Stripe checkout session if available and not a test context
         stripe = self._get_stripe()
-        if stripe:
+        if stripe and not _skip_stripe:
             try:
                 session = stripe.checkout.Session.create(
                     payment_method_types=['card'],
@@ -187,6 +221,8 @@ class PaymentCapture:
             except Exception as e:
                 logger.error(f"Stripe checkout creation failed: {e}")
                 # Continue with manual payment path
+        elif _skip_stripe:
+            logger.info("Using manual payment path for test/demo proposal %s", proposal_id)
 
         # If no Stripe, generate manual payment link
         if not invoice.payment_link:

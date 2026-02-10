@@ -1037,6 +1037,203 @@ class UnifiedMemoryManager:
             cur.execute(query, (tenant_id,))
             return dict(cur.fetchone())
 
+    # ──────────────────────────────────────────────────────────────
+    # EPISODIC MEMORY — Persist strategies, queries, and outcomes
+    # so agents learn what works over time.
+    # Based on production-grade agentic AI patterns (2026-02-10).
+    # ──────────────────────────────────────────────────────────────
+
+    def store_episode(
+        self,
+        session_id: str,
+        *,
+        episode_type: str = "research",
+        question: str = None,
+        objective: str = None,
+        plan: dict = None,
+        retrieval_queries: list[str] = None,
+        sources_used: list[str] = None,
+        sources_ranked: dict = None,
+        strategy_notes: str = None,
+        outcome: str = None,
+        outcome_score: float = 0.0,
+        duration_ms: int = None,
+        agent_id: str = None,
+        tenant_id: str = None,
+        metadata: dict = None,
+    ) -> Optional[str]:
+        """Store an episode capturing what strategy/queries/sources worked.
+
+        This enables agents to recall successful strategies for similar
+        future tasks (episodic memory pattern).
+        """
+        tid = tenant_id or self.tenant_id
+        # Build searchable text for embedding generation
+        search_parts = [question or "", objective or "", strategy_notes or ""]
+        if retrieval_queries:
+            search_parts.extend(retrieval_queries[:5])
+        search_text = " ".join(p for p in search_parts if p).strip()
+        embedding = self._generate_embedding({"text": search_text}) if search_text else None
+
+        try:
+            with self._get_cursor() as cur:
+                if not cur:
+                    logger.error("Failed to get cursor for episode storage")
+                    return None
+
+                cur.execute(
+                    """
+                    INSERT INTO episodic_memory (
+                        session_id, episode_type, question, objective,
+                        plan, retrieval_queries, sources_used, sources_ranked,
+                        strategy_notes, outcome, outcome_score, duration_ms,
+                        agent_id, tenant_id, metadata, embedding
+                    ) VALUES (
+                        %s, %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s, %s, %s
+                    ) RETURNING id
+                    """,
+                    (
+                        session_id, episode_type, question, objective,
+                        Json(plan) if plan else None,
+                        retrieval_queries,
+                        sources_used,
+                        Json(sources_ranked) if sources_ranked else None,
+                        strategy_notes, outcome, outcome_score, duration_ms,
+                        agent_id, tid,
+                        Json(metadata or {}),
+                        embedding,
+                    ),
+                )
+                row = cur.fetchone()
+                episode_id = str(row["id"]) if row else None
+
+                self.log_to_brain("episodic_memory", "episode_stored", {
+                    "episode_id": episode_id,
+                    "session_id": session_id,
+                    "episode_type": episode_type,
+                    "outcome": outcome,
+                    "outcome_score": outcome_score,
+                })
+                logger.info("Stored episode %s (type=%s, outcome=%s)", episode_id, episode_type, outcome)
+                return episode_id
+
+        except Exception as exc:
+            logger.error("Failed to store episode: %s", exc, exc_info=True)
+            return None
+
+    def recall_episodes(
+        self,
+        query: str,
+        *,
+        episode_type: str = None,
+        min_outcome_score: float = 0.0,
+        limit: int = 5,
+        tenant_id: str = None,
+    ) -> list[dict]:
+        """Recall past episodes similar to the current query.
+
+        Returns episodes ordered by semantic similarity so the agent
+        can reuse strategies that worked before.
+        """
+        tid = tenant_id or self.tenant_id
+        embedding = self._generate_embedding({"text": query})
+
+        try:
+            with self._get_cursor() as cur:
+                if not cur:
+                    return []
+
+                if embedding:
+                    cur.execute(
+                        """
+                        SELECT id, session_id, episode_type, question, objective,
+                               retrieval_queries, sources_used, strategy_notes,
+                               outcome, outcome_score, duration_ms, agent_id,
+                               created_at,
+                               1.0 - (embedding <=> %s::vector) as similarity
+                        FROM episodic_memory
+                        WHERE embedding IS NOT NULL
+                          AND (%s IS NULL OR episode_type = %s)
+                          AND outcome_score >= %s
+                          AND (%s IS NULL OR tenant_id = %s::uuid)
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                        """,
+                        (
+                            embedding, episode_type, episode_type,
+                            min_outcome_score,
+                            tid, tid,
+                            embedding, limit,
+                        ),
+                    )
+                else:
+                    # Fallback: keyword-based recall
+                    cur.execute(
+                        """
+                        SELECT id, session_id, episode_type, question, objective,
+                               retrieval_queries, sources_used, strategy_notes,
+                               outcome, outcome_score, duration_ms, agent_id,
+                               created_at,
+                               0.0 as similarity
+                        FROM episodic_memory
+                        WHERE (%s IS NULL OR episode_type = %s)
+                          AND outcome_score >= %s
+                          AND (%s IS NULL OR tenant_id = %s::uuid)
+                        ORDER BY outcome_score DESC, created_at DESC
+                        LIMIT %s
+                        """,
+                        (episode_type, episode_type, min_outcome_score, tid, tid, limit),
+                    )
+
+                rows = cur.fetchall()
+                return [dict(r) for r in rows] if rows else []
+
+        except Exception as exc:
+            logger.error("Failed to recall episodes: %s", exc, exc_info=True)
+            return []
+
+    def hybrid_search(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        tenant_id: str = None,
+    ) -> list[dict]:
+        """Hybrid search across unified_ai_memory using vector + FTS + RRF.
+
+        Calls the hybrid_search_unified_memory() SQL function which does
+        dense (vector) + sparse (FTS) retrieval with Reciprocal Rank Fusion.
+        """
+        tid = tenant_id or self.tenant_id
+        embedding = self._generate_embedding({"text": query})
+
+        try:
+            with self._get_cursor() as cur:
+                if not cur:
+                    return []
+
+                cur.execute(
+                    """
+                    SELECT * FROM hybrid_search_unified_memory(
+                        p_query_text := %s,
+                        p_query_embedding := %s::vector,
+                        p_tenant_id := %s::uuid,
+                        p_limit := %s
+                    )
+                    """,
+                    (query, embedding, tid, limit),
+                )
+                rows = cur.fetchall()
+                return [dict(r) for r in rows] if rows else []
+
+        except Exception as exc:
+            logger.error("Hybrid search failed: %s", exc, exc_info=True)
+            # Fallback to standard vector recall
+            return self.recall(query, tenant_id=tid, limit=limit)
+
 
 # Singleton instance
 memory_manager = None
