@@ -193,32 +193,43 @@ def _embed_gemini(text: str, log: Optional[logging.Logger] = None) -> Optional[l
         return None
     
     sdk_type, client = client_tuple
-    model = get_gemini_model()
+    primary_model = get_gemini_model()
+    
+    # Models to try in order of preference
+    # Note: 'models/' prefix is often required by google-generativeai but not google-genai
+    models_to_try = [primary_model, "text-embedding-004", "embedding-001"]
 
-    try:
-        if sdk_type == "generativeai":
-            # google-generativeai SDK
-            result = client.embed_content(
-                model=f"models/{model}",
-                content=_truncate(text),
-                task_type="retrieval_document"
-            )
-            if result and "embedding" in result:
-                return normalize_embedding(result["embedding"])
-        
-        elif sdk_type == "genai":
-            # google-genai SDK
-            result = client.models.embed_content(
-                model=model,
-                contents=_truncate(text),
-            )
-            if result and result.embeddings:
-                embedding = list(result.embeddings[0].values)
-                return normalize_embedding(embedding)
-                
-    except Exception as exc:
-        if log:
-            log.warning(f"Gemini embedding failed ({sdk_type}): {exc}")
+    for model_name in models_to_try:
+        try:
+            if sdk_type == "generativeai":
+                # google-generativeai SDK usually expects 'models/' prefix
+                full_model = model_name if model_name.startswith("models/") else f"models/{model_name}"
+                result = client.embed_content(
+                    model=full_model,
+                    content=_truncate(text),
+                    task_type="retrieval_document"
+                )
+                if result and "embedding" in result:
+                    return normalize_embedding(result["embedding"])
+            
+            elif sdk_type == "genai":
+                # google-genai SDK usually handles names directly
+                result = client.models.embed_content(
+                    model=model_name,
+                    contents=_truncate(text),
+                )
+                if result and result.embeddings:
+                    embedding = list(result.embeddings[0].values)
+                    return normalize_embedding(embedding)
+                    
+            # If we got here with a result, break loop (though return above handles it)
+            break
+
+        except Exception as exc:
+            if log:
+                log.warning(f"Gemini embedding failed ({sdk_type}) with model {model_name}: {exc}")
+            continue
+
     return None
 
 
