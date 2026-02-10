@@ -111,7 +111,8 @@ def _get_openai_client():
         return None
     try:
         from openai import OpenAI  # type: ignore
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to import openai: %s", e)
         try:
             import openai  # type: ignore
             OpenAI = getattr(openai, "OpenAI", None)
