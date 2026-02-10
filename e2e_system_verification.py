@@ -534,6 +534,7 @@ class E2ESystemVerification:
                 headers=headers,
                 expected_status=200,
                 expected_fields=["status", "version", "database", "cns"],
+                validation_func="validate_backend_api_v1_health",
                 category=SystemCategory.CORE_API,
                 critical=True,
                 timeout_seconds=25.0,
@@ -544,6 +545,7 @@ class E2ESystemVerification:
                 headers=headers,
                 expected_status=200,
                 expected_fields=["status", "initialized", "memory_count", "task_count"],
+                validation_func="validate_backend_cns_status",
                 category=SystemCategory.CORE_API,
                 critical=True,
                 timeout_seconds=25.0,
@@ -587,6 +589,7 @@ class E2ESystemVerification:
                 headers=mcp_headers,
                 expected_status=200,
                 expected_fields=["servers", "statistics"],
+                validation_func="validate_mcp_servers",
                 category=SystemCategory.MCP,
                 critical=True,
                 required_env_vars=["MCP_API_KEY"],
@@ -598,6 +601,7 @@ class E2ESystemVerification:
                 headers=mcp_headers,
                 expected_status=200,
                 expected_fields=["totalServers", "totalTools", "servers"],
+                validation_func="validate_mcp_tools_inventory",
                 category=SystemCategory.MCP,
                 critical=True,
                 required_env_vars=["MCP_API_KEY"],
@@ -720,6 +724,77 @@ class E2ESystemVerification:
         # If ERP is skipped, do not fail the system for ERP UI state.
         if response_body.get("erp_skipped") is not True:
             errors.append("Expected erp_skipped=true for non-ERP verification scope")
+
+        return errors
+
+    @staticmethod
+    def validate_backend_api_v1_health(_test: EndpointTest, response_body: Any) -> list[str]:
+        if not isinstance(response_body, dict):
+            return ["Response body is not a JSON object"]
+
+        errors: list[str] = []
+        cns = response_body.get("cns")
+        if cns != "operational":
+            errors.append(f"Backend /api/v1/health cns != operational (got {cns!r})")
+        return errors
+
+    @staticmethod
+    def validate_backend_cns_status(_test: EndpointTest, response_body: Any) -> list[str]:
+        if not isinstance(response_body, dict):
+            return ["Response body is not a JSON object"]
+
+        errors: list[str] = []
+        if response_body.get("status") != "operational":
+            errors.append(f"Backend CNS status != operational (got {response_body.get('status')!r})")
+        if response_body.get("initialized") is not True:
+            errors.append("Backend CNS initialized != true")
+        return errors
+
+    @staticmethod
+    def validate_mcp_tools_inventory(_test: EndpointTest, response_body: Any) -> list[str]:
+        if not isinstance(response_body, dict):
+            return ["Response body is not a JSON object"]
+
+        errors: list[str] = []
+        total_servers = response_body.get("totalServers")
+        total_tools = response_body.get("totalTools")
+        servers = response_body.get("servers")
+
+        if not isinstance(total_servers, int) or total_servers <= 0:
+            errors.append(f"Invalid totalServers: {total_servers!r}")
+        if not isinstance(total_tools, int) or total_tools <= 0:
+            errors.append(f"Invalid totalTools: {total_tools!r}")
+        if not isinstance(servers, dict) or len(servers.keys()) <= 0:
+            errors.append("Invalid servers map (empty or not an object)")
+        elif isinstance(total_servers, int) and total_servers > 0 and len(servers.keys()) != total_servers:
+            errors.append(f"servers map length != totalServers ({len(servers.keys())} != {total_servers})")
+
+        return errors
+
+    @staticmethod
+    def validate_mcp_servers(_test: EndpointTest, response_body: Any) -> list[str]:
+        if not isinstance(response_body, dict):
+            return ["Response body is not a JSON object"]
+
+        errors: list[str] = []
+        servers = response_body.get("servers")
+        stats = response_body.get("statistics")
+
+        if not isinstance(servers, dict) or len(servers.keys()) <= 0:
+            errors.append("Missing/empty 'servers' map")
+        if not isinstance(stats, dict):
+            errors.append("Missing/invalid 'statistics'")
+            return errors
+
+        total_servers = stats.get("total_servers")
+        total_tools = stats.get("total_tools")
+        if not isinstance(total_servers, int) or total_servers <= 0:
+            errors.append(f"Invalid statistics.total_servers: {total_servers!r}")
+        if not isinstance(total_tools, int) or total_tools <= 0:
+            errors.append(f"Invalid statistics.total_tools: {total_tools!r}")
+        if isinstance(servers, dict) and isinstance(total_servers, int) and total_servers > 0:
+            if len(servers.keys()) != total_servers:
+                errors.append(f"servers map length != statistics.total_servers ({len(servers.keys())} != {total_servers})")
 
         return errors
 
