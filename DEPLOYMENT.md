@@ -63,6 +63,12 @@ curl -X PUT "https://api.render.com/v1/services/srv-d413iu75r7bs738btc10/env-var
   -H "Content-Type: application/json" \
   -d '{"value": "6543"}'
 
+# Required for /e2e/verify (MCP inventory checks)
+curl -X PUT "https://api.render.com/v1/services/srv-d413iu75r7bs738btc10/env-vars/MCP_API_KEY" \
+  -H "Authorization: Bearer $RENDER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"value": "<YOUR_MCP_API_KEY>"}'
+
 # Restart service
 curl -X POST "https://api.render.com/v1/services/srv-d413iu75r7bs738btc10/restart" \
   -H "Authorization: Bearer $RENDER_API_KEY"
@@ -111,6 +117,10 @@ curl -s https://brainops-ai-agents.onrender.com/brain/critical -H "X-API-Key: <Y
 
 # Agents status
 curl -s https://brainops-ai-agents.onrender.com/agents -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq '.agents | length'
+
+# E2E verification (non-ERP scope)
+curl -s "https://brainops-ai-agents.onrender.com/e2e/verify?quick=true&skip_erp=true" -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq '{is_healthy, passed, failed}'
+curl -s "https://brainops-ai-agents.onrender.com/e2e/verify?skip_erp=true" -H "X-API-Key: <YOUR_BRAINOPS_API_KEY>" | jq '{is_100_percent_operational, overall_status, pass_rate}'
 ```
 
 ---
