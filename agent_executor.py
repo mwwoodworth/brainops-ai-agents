@@ -1664,6 +1664,30 @@ class AgentExecutor:
             if not skip_db_log:
                 await exec_logger.log_completed(result, total_duration_ms)
 
+            # REPAIR LOOP: Validate -> Repair -> Retry before persisting final result
+            # Runs default validators (not_empty, no_hallucinated_urls, tenant_scope).
+            # Skipped for OODA fast-path tasks and repair tasks (to avoid infinite recursion).
+            if not task.get("_is_repair") and not task.get("_skip_repair_loop"):
+                try:
+                    result = await self.repair_loop(
+                        agent_name=agent_name,
+                        task=task,
+                        result=result,
+                        max_repairs=int(task.get("_max_repairs", 2)),
+                    )
+                    if result.get("_repair_warning"):
+                        logger.warning(
+                            "[RepairLoop] Agent %s result returned with warning: %s",
+                            agent_name,
+                            result["_repair_warning"],
+                        )
+                except Exception as repair_exc:
+                    logger.warning(
+                        "[RepairLoop] repair_loop raised for agent %s (non-blocking): %s",
+                        agent_name,
+                        repair_exc,
+                    )
+
             # WBA ENFORCEMENT (Total Completion Protocol)
             # Write execution decision back to memory
             if AGENT_MEMORY_SDK_AVAILABLE and memory_client and not task.get("_skip_memory_enforcement"):
@@ -1894,6 +1918,248 @@ class AgentExecutor:
         raise RuntimeError(
             f"Agent '{agent_name}' is not implemented and no fallback is allowed."
         )
+
+    # ============== REPAIR LOOP (Synthesize -> Validate -> Repair -> Retry) ==============
+
+    # --- Default validators that run on every agent output ---
+
+    @staticmethod
+    def _validate_not_empty(result: dict[str, Any], task: dict[str, Any]) -> tuple[bool, str]:
+        """Validate that the result contains meaningful content, not just a status."""
+        if not result:
+            return False, "Result is empty/None"
+        # A result that only contains metadata keys but no substance is suspicious
+        substance_keys = {
+            k for k in result
+            if not k.startswith("_") and k not in ("status", "agent", "timestamp")
+        }
+        if not substance_keys:
+            return False, "Result contains only metadata keys with no substantive content"
+        # Check that at least one substance key has a truthy value
+        has_content = any(result.get(k) for k in substance_keys)
+        if not has_content:
+            return False, "All substantive result fields are empty or falsy"
+        return True, ""
+
+    @staticmethod
+    def _validate_no_hallucinated_urls(result: dict[str, Any], task: dict[str, Any]) -> tuple[bool, str]:
+        """If the result contains URLs, verify they reference known/expected domains."""
+        KNOWN_DOMAINS = {
+            "brainops-ai-agents.onrender.com",
+            "brainops-backend-prod.onrender.com",
+            "brainops-mcp-bridge.onrender.com",
+            "weathercraft-erp.vercel.app",
+            "myroofgenius.com",
+            "supabase.com",
+            "supabase.co",
+            "render.com",
+            "vercel.com",
+            "github.com",
+            "googleapis.com",
+            "openai.com",
+            "anthropic.com",
+            "stripe.com",
+            "gumroad.com",
+            "resend.com",
+            "localhost",
+        }
+        result_str = json.dumps(result, default=str)
+        # Simple URL extraction — intentionally broad
+        url_pattern = re.compile(r'https?://([a-zA-Z0-9._-]+)')
+        found_domains = set(url_pattern.findall(result_str))
+        hallucinated = []
+        for domain in found_domains:
+            # Allow if the domain (or a parent) is in KNOWN_DOMAINS
+            if not any(domain == kd or domain.endswith("." + kd) for kd in KNOWN_DOMAINS):
+                hallucinated.append(domain)
+        if hallucinated:
+            return False, f"Result contains URLs with unknown domains: {hallucinated}"
+        return True, ""
+
+    @staticmethod
+    def _validate_tenant_scope(result: dict[str, Any], task: dict[str, Any]) -> tuple[bool, str]:
+        """If the task specifies a tenant_id and the result references one, they must match."""
+        task_tenant = task.get("tenant_id")
+        if not task_tenant:
+            return True, ""  # No tenant scope to enforce
+        result_str = json.dumps(result, default=str)
+        # Look for tenant_id values in the result
+        tenant_pattern = re.compile(r'"tenant_id"\s*:\s*"?(\d+)"?')
+        result_tenants = set(tenant_pattern.findall(result_str))
+        if not result_tenants:
+            return True, ""  # Result doesn't reference tenants — fine
+        mismatches = {t for t in result_tenants if t != str(task_tenant)}
+        if mismatches:
+            return False, (
+                f"Tenant scope violation: task tenant_id={task_tenant} "
+                f"but result references tenant_id(s) {mismatches}"
+            )
+        return True, ""
+
+    async def repair_loop(
+        self,
+        agent_name: str,
+        task: dict[str, Any],
+        result: dict[str, Any],
+        max_repairs: int = 2,
+        validators: list | None = None,
+    ) -> dict[str, Any]:
+        """
+        Production-grade repair loop pattern:
+        1. Validate result against validators
+        2. If validation fails, create repair task with error context
+        3. Re-execute with repair instructions
+        4. Repeat up to max_repairs times
+        5. Log all repair attempts to unified_brain_logs
+
+        Based on: Parse -> Validate -> Repair -> Retry pattern from
+        production-grade agentic AI systems.
+
+        Each validator is a callable: (result, task) -> (is_valid: bool, error_message: str)
+
+        Returns the (possibly repaired) result dict.  Adds metadata:
+            _repair_attempts: int   — number of repair cycles executed
+            _repair_warning: str    — present only if all repairs failed
+            _repair_log: list       — per-attempt validation/error details
+        """
+        if validators is None:
+            validators = [
+                self._validate_not_empty,
+                self._validate_no_hallucinated_urls,
+                self._validate_tenant_scope,
+            ]
+
+        # Fast path: if no validators supplied (explicitly empty list), skip entirely
+        if not validators:
+            result["_repair_attempts"] = 0
+            return result
+
+        repair_log: list[dict[str, Any]] = []
+        best_result = result
+        resolved_agent_name = self._resolve_agent_name(agent_name)
+
+        for attempt in range(max_repairs + 1):  # attempt 0 = initial validation
+            # --- Validate ---
+            validation_errors: list[str] = []
+            for validator in validators:
+                try:
+                    is_valid, error_msg = validator(best_result, task)
+                    if not is_valid:
+                        validation_errors.append(error_msg)
+                except Exception as ve:
+                    validation_errors.append(f"Validator {validator.__name__} raised: {ve}")
+
+            if not validation_errors:
+                # All validators passed — result is good
+                best_result["_repair_attempts"] = attempt
+                best_result["_repair_log"] = repair_log
+                return best_result
+
+            # --- Log the validation failure ---
+            attempt_entry = {
+                "attempt": attempt,
+                "validation_errors": validation_errors,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            repair_log.append(attempt_entry)
+
+            logger.warning(
+                "[RepairLoop] Agent %s attempt %d/%d failed validation: %s",
+                agent_name,
+                attempt,
+                max_repairs,
+                validation_errors,
+            )
+
+            # Log to unified_brain_logs (best-effort, non-blocking)
+            try:
+                pool = get_pool()
+                await pool.execute(
+                    """
+                    INSERT INTO unified_brain_logs (system, action, data, created_at)
+                    VALUES ('repair_loop', $1, $2::jsonb, NOW())
+                    """,
+                    f"repair_attempt_{attempt}",
+                    json.dumps(
+                        {
+                            "agent": agent_name,
+                            "resolved_agent": resolved_agent_name,
+                            "attempt": attempt,
+                            "max_repairs": max_repairs,
+                            "validation_errors": validation_errors,
+                            "task_type": task.get("action", task.get("type", "generic")),
+                            "task_id": str(task.get("task_id", task.get("id", ""))),
+                        },
+                        default=str,
+                    ),
+                )
+            except Exception as log_exc:
+                logger.warning("[RepairLoop] Failed to log to unified_brain_logs: %s", log_exc)
+
+            # --- If we've exhausted repair attempts, return best result with warning ---
+            if attempt >= max_repairs:
+                best_result["_repair_attempts"] = attempt
+                best_result["_repair_log"] = repair_log
+                best_result["_repair_warning"] = (
+                    f"Result failed validation after {max_repairs} repair(s). "
+                    f"Last errors: {validation_errors}"
+                )
+                logger.error(
+                    "[RepairLoop] Agent %s exhausted %d repairs. Returning best result with warning.",
+                    agent_name,
+                    max_repairs,
+                )
+                return best_result
+
+            # --- Build repair task ---
+            repair_task = dict(task)
+            repair_task["_is_repair"] = True
+            repair_task["_repair_attempt"] = attempt + 1
+            repair_task["_previous_result"] = {
+                k: v
+                for k, v in best_result.items()
+                if not k.startswith("_")  # strip internal metadata to keep prompt clean
+            }
+            repair_task["_validation_errors"] = validation_errors
+            repair_task["_repair_instructions"] = (
+                "Your previous response failed validation. Fix the following issues "
+                "and return a corrected result:\n"
+                + "\n".join(f"  - {err}" for err in validation_errors)
+            )
+
+            # --- Re-execute the agent with repair context ---
+            try:
+                if resolved_agent_name in self.agents:
+                    best_result = await self.agents[resolved_agent_name].execute(repair_task)
+                    best_result["_original_agent"] = agent_name
+                    best_result["_resolved_agent"] = resolved_agent_name
+                else:
+                    logger.error(
+                        "[RepairLoop] Agent %s not found in registry during repair.",
+                        resolved_agent_name,
+                    )
+                    break
+            except Exception as repair_exc:
+                logger.error(
+                    "[RepairLoop] Agent %s repair execution raised: %s",
+                    agent_name,
+                    repair_exc,
+                )
+                repair_log.append(
+                    {
+                        "attempt": attempt + 1,
+                        "execution_error": str(repair_exc),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                # Keep the previous best_result; the loop will exit on next iteration
+                # if we've hit max_repairs
+                continue
+
+        # Fallback (should not be reached due to loop logic, but defensive)
+        best_result["_repair_attempts"] = max_repairs
+        best_result["_repair_log"] = repair_log
+        return best_result
 
 
 from base_agent import BaseAgent
@@ -3461,18 +3727,18 @@ class InvoicingAgent(BaseAgent):
     def _select_stripe_api_key(self, *, is_test_tenant: bool) -> Optional[str]:
         """Pick the Stripe API key for the tenant context.
 
-        - Test tenants should use the test key to avoid polluting live Stripe data.
+        - Test tenants should NEVER reach Stripe session creation (guarded upstream).
+          If called anyway, return None to hard-fail rather than pollute live Stripe.
         - Live tenants should use the live key.
         """
         if is_test_tenant:
+            # Defense-in-depth: test tenants must not create Stripe sessions at all.
+            # The upstream guard in send_payment_links() should have already returned.
+            # Return only a dedicated test key; NEVER fall back to the live key.
             return (
                 os.getenv("STRIPE_API_KEY_TEST")
                 or os.getenv("STRIPE_SECRET_KEY_TEST")
-                # Fallback: prefer functioning automation over hard-failing test tenants.
-                # This still will not mark revenue as verified for is_test tenants.
-                or os.getenv("STRIPE_API_KEY_LIVE")
-                or os.getenv("STRIPE_SECRET_KEY")
-                or os.getenv("STRIPE_SECRET_KEY_LIVE")
+                # No fallback to live keys -- returning None will cause a safe error.
             )
         return (
             os.getenv("STRIPE_API_KEY_LIVE")
@@ -3739,7 +4005,30 @@ class InvoicingAgent(BaseAgent):
                     )
                 )
             except Exception as e:
-                self.logger.warning("Failed to determine tenant is_test; defaulting to live key: %s", e)
+                self.logger.warning("Failed to determine tenant is_test; defaulting to safe skip: %s", e)
+                # Safe-by-default: if we can't determine tenant status, treat as test
+                # to avoid polluting live Stripe with demo data.
+                is_test_tenant = True
+
+            # GUARD: Never create real Stripe checkout sessions for test/demo tenants.
+            # This prevents demo data from polluting live Stripe with expired sessions.
+            if is_test_tenant:
+                self.logger.warning(
+                    "Skipping Stripe checkout session for test tenant %s (invoice %s). "
+                    "Test/demo tenants must not create real Stripe sessions.",
+                    tenant_id,
+                    invoice_number,
+                )
+                return {
+                    "status": "completed",
+                    "action": "send_payment_links",
+                    "invoice_id": str(invoice_id),
+                    "tenant_id": tenant_id,
+                    "invoice_number": invoice_number,
+                    "skipped": True,
+                    "reason": "test_tenant_no_stripe",
+                    "is_test_tenant": True,
+                }
 
             stripe_key = self._select_stripe_api_key(is_test_tenant=is_test_tenant)
             if not stripe_key:
