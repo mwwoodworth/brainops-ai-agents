@@ -218,21 +218,22 @@ async def get_state_history(limit: int = 100) -> list[dict[str, Any]]:
 
 
 @router.post("/chatgpt-agent-test")
-async def run_chatgpt_agent_test(full: bool = False) -> dict[str, Any]:
+async def run_chatgpt_agent_test(full: bool = False, skip_erp: bool = False) -> dict[str, Any]:
     """
     Run ChatGPT-Agent-Level UI tests.
     These are real human-like tests that login, navigate, fill forms, etc.
 
     Args:
         full: If True, runs full test suite. If False, runs quick health check.
+        skip_erp: If True, excludes Weathercraft ERP flows (non-ERP verification scope).
     """
     try:
         from chatgpt_agent_tester import run_chatgpt_agent_tests, run_quick_health_test
 
         if full:
-            return await run_chatgpt_agent_tests()
+            return await run_chatgpt_agent_tests(skip_erp=skip_erp)
         else:
-            return await run_quick_health_test()
+            return await run_quick_health_test(skip_erp=skip_erp)
     except ImportError:
         raise HTTPException(status_code=503, detail="ChatGPT Agent Tester not available (Playwright not installed)") from None
     except Exception as e:

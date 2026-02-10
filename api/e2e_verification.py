@@ -39,7 +39,8 @@ def _extract_api_key(request: Request) -> str | None:
 @router.get("/verify")
 async def run_verification(
     request: Request,
-    quick: bool = Query(False, description="Run quick health check only (critical endpoints)")
+    quick: bool = Query(False, description="Run quick health check only (critical endpoints)"),
+    skip_erp: bool = Query(False, description="Exclude ERP checks (non-ERP verification scope)"),
 ):
     """
     Run E2E verification of ALL systems.
@@ -55,14 +56,15 @@ async def run_verification(
         api_key_override = _extract_api_key(request)
 
         if quick:
-            result = await run_quick_health_check(api_key_override=api_key_override)
+            result = await run_quick_health_check(api_key_override=api_key_override, skip_erp=skip_erp)
             return {
                 "verification_type": "quick",
                 "is_100_percent_operational": result["is_healthy"],
+                "skip_erp": skip_erp,
                 **result
             }
         else:
-            result = await run_full_e2e_verification(api_key_override=api_key_override)
+            result = await run_full_e2e_verification(api_key_override=api_key_override, skip_erp=skip_erp)
             return {
                 "verification_type": "full",
                 **result
@@ -75,9 +77,10 @@ async def run_verification(
 @router.post("/verify")
 async def run_verification_post(
     request: Request,
-    quick: bool = Query(False, description="Run quick health check only (critical endpoints)")
+    quick: bool = Query(False, description="Run quick health check only (critical endpoints)"),
+    skip_erp: bool = Query(False, description="Exclude ERP checks (non-ERP verification scope)"),
 ):
-    return await run_verification(request, quick)
+    return await run_verification(request, quick=quick, skip_erp=skip_erp)
 
 
 @router.get("/status")
@@ -178,7 +181,11 @@ async def get_health_matrix():
 
 
 @router.post("/verify/background")
-async def start_background_verification(request: Request, background_tasks: BackgroundTasks):
+async def start_background_verification(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    skip_erp: bool = Query(False, description="Exclude ERP checks (non-ERP verification scope)"),
+):
     """Start E2E verification in the background"""
     global _background_verification_running, _last_background_result
 
@@ -195,7 +202,10 @@ async def start_background_verification(request: Request, background_tasks: Back
         try:
             from e2e_system_verification import run_full_e2e_verification
             _background_verification_running = True
-            _last_background_result = await run_full_e2e_verification(api_key_override=api_key_override)
+            _last_background_result = await run_full_e2e_verification(
+                api_key_override=api_key_override,
+                skip_erp=skip_erp,
+            )
         finally:
             _background_verification_running = False
 
@@ -525,7 +535,7 @@ async def run_all_visual_ai_analysis():
 
 
 @router.get("/complete-verification")
-async def complete_verification():
+async def complete_verification(skip_erp: bool = Query(False, description="Exclude ERP checks (non-ERP verification scope)")):
     """
     Run COMPLETE verification: API + UI tests combined.
 
@@ -543,7 +553,7 @@ async def complete_verification():
     # Run API verification
     try:
         from e2e_system_verification import run_full_e2e_verification
-        results["api_verification"] = await run_full_e2e_verification()
+        results["api_verification"] = await run_full_e2e_verification(skip_erp=skip_erp)
     except Exception as e:
         results["api_verification"] = {"error": str(e), "is_100_percent_operational": False}
 
@@ -557,6 +567,8 @@ async def complete_verification():
             ui_pass = True
 
             for app_name in tester.test_urls.keys():
+                if skip_erp and app_name == "weathercraft-erp":
+                    continue
                 try:
                     app_results = await tester.run_full_test_suite(app_name)
                     ui_results[app_name] = app_results["summary"]
