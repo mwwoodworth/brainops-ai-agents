@@ -275,7 +275,8 @@ async def enroll_buyer_in_sequence(
     product_name: str,
     product_type: str,
     product_code: str,
-    download_url: str
+    download_url: str,
+    sale_id: Optional[str] = None,
 ) -> list[str]:
     """
     Enroll a Gumroad buyer in the appropriate post-purchase email sequence.
@@ -289,38 +290,76 @@ async def enroll_buyer_in_sequence(
 
         email_ids = []
 
-        for email_template in sequence_config["emails"]:
-            # Personalize email content
-            subject = email_template["subject"].format(
-                first_name=first_name or "there",
-                product_name=product_name
-            )
+        # Idempotency: Gumroad can deliver duplicate webhook events (retries, multiple subscriptions).
+        # Deduplicate scheduled emails per sale/product/delay so we don't spam buyers.
+        from database.async_connection import get_pool
+        pool = get_pool()
+        sale_id_value = (sale_id or "").strip()
+        async with pool.acquire() as conn:
+            for email_template in sequence_config["emails"]:
+                delay_minutes = int(email_template.get("delay_minutes", 0) or 0)
 
-            body = email_template["body"].format(
-                first_name=first_name or "there",
-                product_name=product_name,
-                download_url=download_url or "https://gumroad.com/library"
-            )
+                # Personalize email content
+                subject = email_template["subject"].format(
+                    first_name=first_name or "there",
+                    product_name=product_name
+                )
 
-            # Schedule the email
-            email_id = await schedule_nurture_email(
-                recipient=email,
-                subject=subject,
-                body=body,
-                delay_minutes=email_template["delay_minutes"],
-                metadata={
-                    "source": "gumroad_sequence",
-                    "product_code": product_code,
-                    "product_name": product_name,
-                    "product_type": product_type,
-                    "sequence_name": sequence_config["name"],
-                    "delay_minutes": email_template["delay_minutes"]
-                }
-            )
+                body = email_template["body"].format(
+                    first_name=first_name or "there",
+                    product_name=product_name,
+                    download_url=download_url or "https://gumroad.com/library"
+                )
 
-            if email_id:
-                email_ids.append(email_id)
-                logger.info(f"Scheduled sequence email for {email}: delay={email_template['delay_minutes']}min")
+                exists = await conn.fetchval(
+                    """
+                    SELECT 1
+                    FROM ai_email_queue
+                    WHERE recipient = $1
+                      AND subject = $2
+                      AND COALESCE(metadata->>'source', '') = 'gumroad_sequence'
+                      AND COALESCE(metadata->>'product_code', '') = $3
+                      AND COALESCE((metadata->>'delay_minutes')::int, -1) = $4
+                      AND ($5 = '' OR COALESCE(metadata->>'sale_id', '') = $5)
+                    LIMIT 1
+                    """,
+                    email,
+                    subject,
+                    product_code,
+                    delay_minutes,
+                    sale_id_value,
+                )
+
+                if exists:
+                    logger.info(
+                        "Skipping duplicate nurture email (sale_id=%s product_code=%s delay=%s recipient=%s)",
+                        sale_id_value or "<missing>",
+                        product_code,
+                        delay_minutes,
+                        email,
+                    )
+                    continue
+
+                # Schedule the email
+                email_id = await schedule_nurture_email(
+                    recipient=email,
+                    subject=subject,
+                    body=body,
+                    delay_minutes=delay_minutes,
+                    metadata={
+                        "source": "gumroad_sequence",
+                        "sale_id": sale_id_value or None,
+                        "product_code": product_code,
+                        "product_name": product_name,
+                        "product_type": product_type,
+                        "sequence_name": sequence_config["name"],
+                        "delay_minutes": delay_minutes
+                    }
+                )
+
+                if email_id:
+                    email_ids.append(email_id)
+                    logger.info(f"Scheduled sequence email for {email}: delay={delay_minutes}min")
 
         logger.info(f"Enrolled {email} in {sequence_config['name']} sequence: {len(email_ids)} emails scheduled")
         return email_ids

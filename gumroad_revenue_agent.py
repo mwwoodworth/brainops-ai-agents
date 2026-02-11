@@ -113,11 +113,29 @@ class GumroadRevenueAgent:
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
 
-            if response.status_code == 200:
-                return response.json()
+            if 200 <= response.status_code < 300:
+                # Some Gumroad endpoints (e.g., DELETE) may return empty bodies.
+                try:
+                    return response.json()
+                except Exception:
+                    return {"success": True, "status_code": response.status_code}
             else:
                 logger.error(f"Gumroad API error: {response.status_code} - {response.text}")
                 return {"success": False, "error": response.text, "status_code": response.status_code}
+
+    async def _list_resource_subscriptions(self, resource_name: str) -> list[dict[str, Any]]:
+        result = await self._api_request(
+            "GET",
+            "/resource_subscriptions",
+            params={"resource_name": resource_name},
+        )
+        if result.get("success"):
+            subs = result.get("resource_subscriptions") or []
+            return list(subs) if isinstance(subs, list) else []
+        return []
+
+    async def _delete_resource_subscription(self, subscription_id: str) -> dict[str, Any]:
+        return await self._api_request("DELETE", f"/resource_subscriptions/{subscription_id}")
 
     async def health_check(self) -> dict:
         """Verify Gumroad API connectivity."""
@@ -147,20 +165,58 @@ class GumroadRevenueAgent:
 
         for event in webhook_events:
             try:
-                result = await self._api_request(
-                    "PUT",
-                    "/resource_subscriptions",
-                    data={
-                        "resource_name": event,
-                        "post_url": BRAINOPS_WEBHOOK_URL
-                    }
-                )
+                existing = await self._list_resource_subscriptions(event)
+                matching = [
+                    sub for sub in existing
+                    if (sub.get("post_url") or "").strip() == BRAINOPS_WEBHOOK_URL
+                ]
+
+                created: dict[str, Any] | None = None
+                kept: dict[str, Any] | None = None
+                deleted_duplicates: list[dict[str, Any]] = []
+
+                if not matching:
+                    create_result = await self._api_request(
+                        "PUT",
+                        "/resource_subscriptions",
+                        data={
+                            "resource_name": event,
+                            "post_url": BRAINOPS_WEBHOOK_URL,
+                        },
+                    )
+                    created = create_result.get("resource_subscription") if create_result.get("success") else None
+                    kept = created
+                else:
+                    kept = matching[0]
+
+                # Cleanup duplicates pointing to the same URL (Gumroad can accumulate these over time).
+                for sub in matching[1:]:
+                    sub_id = str(sub.get("id") or "").strip()
+                    if not sub_id:
+                        continue
+                    delete_result = await self._delete_resource_subscription(sub_id)
+                    deleted_duplicates.append({
+                        "id": sub_id,
+                        "success": bool(delete_result.get("success")),
+                        "status_code": delete_result.get("status_code"),
+                    })
+
                 results[event] = {
-                    "success": result.get("success", False),
-                    "subscription": result.get("resource_subscription", {}),
-                    "webhook_url": BRAINOPS_WEBHOOK_URL
+                    "success": kept is not None,
+                    "webhook_url": BRAINOPS_WEBHOOK_URL,
+                    "existing_total": len(existing),
+                    "kept": kept or {},
+                    "created": created or {},
+                    "deleted_duplicates": deleted_duplicates,
                 }
-                logger.info(f"Registered webhook for {event}: {result.get('success')}")
+
+                logger.info(
+                    "Webhook ensured for %s: kept=%s created=%s deleted=%s",
+                    event,
+                    bool(kept),
+                    bool(created),
+                    len(deleted_duplicates),
+                )
             except Exception as e:
                 results[event] = {"success": False, "error": str(e)}
                 logger.error(f"Failed to register webhook for {event}: {e}")
