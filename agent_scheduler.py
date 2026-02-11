@@ -1600,6 +1600,31 @@ class AgentScheduler:
 
     def _register_internal_jobs(self):
         """Register internal recurring jobs (e.g., revenue drive)."""
+        # Register Invariant Monitor (Sentinel)
+        try:
+            from invariant_monitor import check_invariants
+            
+            async def run_invariant_monitor():
+                await check_invariants()
+
+            job_id = "invariant_monitor"
+            self.scheduler.add_job(
+                func=lambda: run_on_main_loop(run_invariant_monitor(), timeout=60),
+                trigger=IntervalTrigger(minutes=5),
+                id=job_id,
+                name="Invariant Monitor (Sentinel)",
+                replace_existing=True,
+            )
+            self.registered_jobs[job_id] = {
+                "agent_id": "invariant_monitor",
+                "agent_name": "Invariant Monitor",
+                "frequency_minutes": 5,
+                "added_at": datetime.utcnow().isoformat(),
+            }
+            logger.info("✅ Scheduled Invariant Monitor every 5 minutes")
+        except Exception as exc:
+            logger.error("Failed to schedule Invariant Monitor: %s", exc, exc_info=True)
+
         # Register OODA Loop (Consciousness)
         if OODA_AVAILABLE:
             try:
