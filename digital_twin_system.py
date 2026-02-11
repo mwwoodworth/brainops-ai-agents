@@ -198,53 +198,10 @@ class DigitalTwinEngine:
             conn = await asyncpg.connect(self.db_url)
             try:
                 # Create table if not exists
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS digital_twins (
-                        twin_id TEXT PRIMARY KEY,
-                        source_system TEXT NOT NULL,
-                        system_type TEXT NOT NULL,
-                        maturity_level TEXT NOT NULL,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        last_sync TIMESTAMPTZ DEFAULT NOW(),
-                        sync_frequency_seconds INTEGER DEFAULT 60,
-                        state_snapshot JSONB DEFAULT '{}',
-                        metrics_history JSONB DEFAULT '[]',
-                        failure_predictions JSONB DEFAULT '[]',
-                        simulation_results JSONB DEFAULT '[]',
-                        health_score FLOAT DEFAULT 100.0,
-                        drift_detected BOOLEAN DEFAULT FALSE,
-                        drift_details TEXT
-                    )
-                """)
 
                 # Create metrics history table for time-series data
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS twin_metrics_history (
-                        id SERIAL PRIMARY KEY,
-                        twin_id TEXT REFERENCES digital_twins(twin_id),
-                        metrics JSONB NOT NULL,
-                        recorded_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Create failure predictions table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS twin_failure_predictions (
-                        id SERIAL PRIMARY KEY,
-                        twin_id TEXT REFERENCES digital_twins(twin_id),
-                        component TEXT NOT NULL,
-                        failure_type TEXT NOT NULL,
-                        probability FLOAT NOT NULL,
-                        predicted_time TIMESTAMPTZ,
-                        impact_severity TEXT,
-                        recommended_action TEXT,
-                        confidence FLOAT,
-                        contributing_factors JSONB DEFAULT '[]',
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        resolved_at TIMESTAMPTZ,
-                        was_accurate BOOLEAN
-                    )
-                """)
 
                 # Load existing twins
                 rows = await conn.fetch("SELECT * FROM digital_twins")
@@ -672,19 +629,6 @@ class DigitalTwinEngine:
                 import asyncpg
                 conn = await asyncpg.connect(self.db_url)
                 try:
-                    await conn.execute("""
-                        CREATE TABLE IF NOT EXISTS twin_state_history (
-                            id SERIAL PRIMARY KEY,
-                            twin_id TEXT NOT NULL,
-                            snapshot_id TEXT UNIQUE NOT NULL,
-                            timestamp TIMESTAMPTZ DEFAULT NOW(),
-                            state_snapshot JSONB NOT NULL,
-                            metrics JSONB NOT NULL,
-                            health_score FLOAT,
-                            change_reason TEXT,
-                            can_rollback_to BOOLEAN DEFAULT TRUE
-                        )
-                    """)
 
                     await conn.execute("""
                         INSERT INTO twin_state_history

@@ -795,140 +795,27 @@ class AIAuditComplianceSystem:
         return self.conn
 
     def _init_database(self):
-        """Initialize database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_audit_events",
+                "ai_compliance_rules",
+                "ai_compliance_checks",
+                "ai_audit_reports",
+                "ai_risk_register",
+                "ai_remediation_tasks",
+        ]
         try:
-            conn = self._get_connection()
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-
-            # Audit events table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_audit_events (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    event_type VARCHAR(50) NOT NULL,
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    actor VARCHAR(255) NOT NULL,
-                    action TEXT NOT NULL,
-                    resource VARCHAR(255),
-                    resource_id VARCHAR(255),
-                    details JSONB DEFAULT '{}',
-                    risk_level VARCHAR(50) DEFAULT 'info',
-                    outcome VARCHAR(50) DEFAULT 'success',
-                    ip_address VARCHAR(50),
-                    session_id VARCHAR(255),
-                    compliance_tags JSONB DEFAULT '[]'
-                )
-            """)
-
-            # Compliance rules table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_compliance_rules (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    rule_id VARCHAR(100) UNIQUE NOT NULL,
-                    name VARCHAR(255) NOT NULL,
-                    description TEXT,
-                    standard VARCHAR(50),
-                    check_type VARCHAR(50),
-                    severity VARCHAR(50),
-                    conditions JSONB DEFAULT '{}',
-                    remediation TEXT,
-                    enabled BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Compliance checks table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_compliance_checks (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    rule_id VARCHAR(100),
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    status VARCHAR(50),
-                    findings JSONB DEFAULT '[]',
-                    evidence JSONB DEFAULT '{}',
-                    remediation_required BOOLEAN DEFAULT FALSE,
-                    remediation_deadline TIMESTAMPTZ,
-                    remediated_at TIMESTAMPTZ,
-                    remediated_by VARCHAR(255)
-                )
-            """)
-
-            # Audit reports table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_audit_reports (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    report_type VARCHAR(100),
-                    period_start TIMESTAMPTZ,
-                    period_end TIMESTAMPTZ,
-                    generated_at TIMESTAMPTZ DEFAULT NOW(),
-                    summary JSONB DEFAULT '{}',
-                    findings JSONB DEFAULT '[]',
-                    recommendations JSONB DEFAULT '[]',
-                    compliance_score FLOAT,
-                    risk_summary JSONB DEFAULT '{}'
-                )
-            """)
-
-            # Risk register table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_risk_register (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    risk_id VARCHAR(100) UNIQUE,
-                    title VARCHAR(255),
-                    description TEXT,
-                    category VARCHAR(100),
-                    risk_level VARCHAR(50),
-                    likelihood VARCHAR(50),
-                    impact VARCHAR(50),
-                    status VARCHAR(50) DEFAULT 'open',
-                    mitigation_plan TEXT,
-                    owner VARCHAR(255),
-                    identified_at TIMESTAMPTZ DEFAULT NOW(),
-                    reviewed_at TIMESTAMPTZ,
-                    resolved_at TIMESTAMPTZ
-                )
-            """)
-
-            # Remediation tasks table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_remediation_tasks (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    check_id UUID REFERENCES ai_compliance_checks(id),
-                    title VARCHAR(255),
-                    description TEXT,
-                    priority VARCHAR(50),
-                    status VARCHAR(50) DEFAULT 'pending',
-                    assigned_to VARCHAR(255),
-                    due_date TIMESTAMPTZ,
-                    completed_at TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create indexes
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_audit_events_type
-                ON ai_audit_events(event_type)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp
-                ON ai_audit_events(timestamp)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_audit_events_risk
-                ON ai_audit_events(risk_level)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_compliance_checks_status
-                ON ai_compliance_checks(status)
-            """)
-
-            conn.commit()
+            ok = verify_tables_sync(required_tables, cursor, module_name="ai_audit_compliance")
             cursor.close()
-
-        except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
-
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def log_ai_decision(
         self,
         decision_type: str,

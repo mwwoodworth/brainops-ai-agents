@@ -580,111 +580,26 @@ class PredictiveSchedulingSystem:
         return self.conn
 
     def _init_database(self):
-        """Initialize database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_scheduled_tasks",
+                "ai_schedule_slots",
+                "ai_schedule_predictions",
+                "ai_load_patterns",
+                "ai_schedule_metrics",
+        ]
         try:
-            conn = self._get_connection()
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-
-            # Scheduled tasks table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_scheduled_tasks (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    name VARCHAR(255) NOT NULL,
-                    task_type VARCHAR(50),
-                    priority VARCHAR(50),
-                    estimated_duration_minutes FLOAT,
-                    resource_requirements JSONB DEFAULT '{}',
-                    dependencies JSONB DEFAULT '[]',
-                    deadline TIMESTAMPTZ,
-                    preferred_windows JSONB DEFAULT '[]',
-                    constraints JSONB DEFAULT '{}',
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Schedule slots table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_schedule_slots (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    task_id UUID REFERENCES ai_scheduled_tasks(id),
-                    start_time TIMESTAMPTZ NOT NULL,
-                    end_time TIMESTAMPTZ NOT NULL,
-                    status VARCHAR(50) DEFAULT 'pending',
-                    predicted_load FLOAT DEFAULT 0.0,
-                    actual_load FLOAT,
-                    success_probability FLOAT,
-                    confidence VARCHAR(50),
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    executed_at TIMESTAMPTZ,
-                    completed_at TIMESTAMPTZ
-                )
-            """)
-
-            # Schedule predictions table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_schedule_predictions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    task_id UUID REFERENCES ai_scheduled_tasks(id),
-                    slot_id UUID REFERENCES ai_schedule_slots(id),
-                    success_probability FLOAT,
-                    completion_estimate TIMESTAMPTZ,
-                    resource_utilization JSONB DEFAULT '{}',
-                    confidence VARCHAR(50),
-                    alternative_slots JSONB DEFAULT '[]',
-                    risk_factors JSONB DEFAULT '[]',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Load patterns table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_load_patterns (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    pattern_type VARCHAR(50),
-                    hour INT,
-                    day_of_week INT,
-                    avg_load FLOAT,
-                    sample_count INT DEFAULT 0,
-                    updated_at TIMESTAMPTZ DEFAULT NOW(),
-                    UNIQUE(pattern_type, hour, day_of_week)
-                )
-            """)
-
-            # Schedule metrics table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_schedule_metrics (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    slot_id UUID REFERENCES ai_schedule_slots(id),
-                    predicted_duration FLOAT,
-                    actual_duration FLOAT,
-                    predicted_success FLOAT,
-                    actual_success BOOLEAN,
-                    deviation_percentage FLOAT,
-                    recorded_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create indexes
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_schedule_slots_time
-                ON ai_schedule_slots(start_time)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_schedule_slots_status
-                ON ai_schedule_slots(status)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_priority
-                ON ai_scheduled_tasks(priority)
-            """)
-
-            conn.commit()
+            ok = verify_tables_sync(required_tables, cursor, module_name="predictive_scheduling")
             cursor.close()
-
-        except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
-
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def initialize(self):
         """Initialize the scheduling system"""
         await self.load_predictor.learn_from_history()

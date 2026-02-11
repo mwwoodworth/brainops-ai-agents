@@ -161,166 +161,29 @@ class LeadNurturingSystem:
         self._init_database()
 
     def _init_database(self):
-        """Initialize database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_nurture_sequences",
+                "ai_sequence_touchpoints",
+                "ai_lead_enrollments",
+                "ai_touchpoint_executions",
+                "ai_nurture_engagement",
+                "ai_nurture_ab_tests",
+                "ai_nurture_metrics",
+                "ai_nurture_content",
+        ]
         try:
-            conn = _get_db_connection()
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-
-            # Create nurture sequences table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_nurture_sequences (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    sequence_name VARCHAR(255),
-                    sequence_type VARCHAR(50),
-                    target_segment VARCHAR(50),
-                    touchpoint_count INT DEFAULT 0,
-                    days_duration INT,
-                    success_criteria JSONB DEFAULT '{}',
-                    configuration JSONB DEFAULT '{}',
-                    effectiveness_score FLOAT DEFAULT 0.5,
-                    active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create sequence touchpoints table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_sequence_touchpoints (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    sequence_id UUID REFERENCES ai_nurture_sequences(id),
-                    touchpoint_number INT,
-                    touchpoint_type VARCHAR(50),
-                    days_after_trigger INT,
-                    time_of_day TIME,
-                    subject_line TEXT,
-                    content_template TEXT,
-                    personalization_tokens JSONB DEFAULT '[]',
-                    call_to_action VARCHAR(255),
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create lead enrollments table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_lead_enrollments (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    lead_id VARCHAR(255),
-                    sequence_id UUID REFERENCES ai_nurture_sequences(id),
-                    enrollment_date TIMESTAMPTZ DEFAULT NOW(),
-                    current_touchpoint INT DEFAULT 0,
-                    status VARCHAR(50) DEFAULT 'active',
-                    completion_date TIMESTAMPTZ,
-                    opt_out_date TIMESTAMPTZ,
-                    engagement_score FLOAT DEFAULT 0.0,
-                    metadata JSONB DEFAULT '{}'
-                )
-            """)
-
-            # Create touchpoint executions table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_touchpoint_executions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    enrollment_id UUID REFERENCES ai_lead_enrollments(id),
-                    touchpoint_id UUID REFERENCES ai_sequence_touchpoints(id),
-                    scheduled_for TIMESTAMPTZ,
-                    executed_at TIMESTAMPTZ,
-                    status VARCHAR(50) DEFAULT 'scheduled',
-                    delivery_channel VARCHAR(50),
-                    personalized_content TEXT,
-                    response_data JSONB DEFAULT '{}',
-                    engagement_metrics JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create engagement tracking table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_nurture_engagement (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    execution_id UUID REFERENCES ai_touchpoint_executions(id),
-                    engagement_type VARCHAR(50),
-                    engagement_timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    engagement_data JSONB DEFAULT '{}',
-                    lead_score_impact FLOAT DEFAULT 0.0
-                )
-            """)
-
-            # Create A/B testing table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_nurture_ab_tests (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    sequence_id UUID REFERENCES ai_nurture_sequences(id),
-                    test_name VARCHAR(255),
-                    variant_a JSONB,
-                    variant_b JSONB,
-                    test_metric VARCHAR(50),
-                    sample_size INT,
-                    variant_a_results JSONB DEFAULT '{}',
-                    variant_b_results JSONB DEFAULT '{}',
-                    winner VARCHAR(1),
-                    confidence_level FLOAT,
-                    started_at TIMESTAMPTZ DEFAULT NOW(),
-                    completed_at TIMESTAMPTZ
-                )
-            """)
-
-            # Create performance metrics table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_nurture_metrics (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    sequence_id UUID REFERENCES ai_nurture_sequences(id),
-                    metric_date DATE,
-                    enrollments INT DEFAULT 0,
-                    completions INT DEFAULT 0,
-                    opt_outs INT DEFAULT 0,
-                    total_touches INT DEFAULT 0,
-                    opens INT DEFAULT 0,
-                    clicks INT DEFAULT 0,
-                    responses INT DEFAULT 0,
-                    conversions INT DEFAULT 0,
-                    revenue_generated DECIMAL(10,2) DEFAULT 0,
-                    avg_engagement_score FLOAT DEFAULT 0.0,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    UNIQUE(sequence_id, metric_date)
-                )
-            """)
-
-            # Create content library table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_nurture_content (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    content_name VARCHAR(255),
-                    content_type VARCHAR(50),
-                    category VARCHAR(100),
-                    subject_line TEXT,
-                    body_content TEXT,
-                    html_content TEXT,
-                    personalization_fields JSONB DEFAULT '[]',
-                    performance_score FLOAT DEFAULT 0.5,
-                    tags JSONB DEFAULT '[]',
-                    active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create indexes
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sequences_type ON ai_nurture_sequences(sequence_type)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_enrollments_lead ON ai_lead_enrollments(lead_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_enrollments_status ON ai_lead_enrollments(status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_executions_scheduled ON ai_touchpoint_executions(scheduled_for)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_executions_status ON ai_touchpoint_executions(status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_metrics_date ON ai_nurture_metrics(metric_date)")
-
-            conn.commit()
+            ok = verify_tables_sync(required_tables, cursor, module_name="lead_nurturing_system")
             cursor.close()
             conn.close()
-
-        except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
-
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     def _load_default_templates(self) -> dict:
         """Load default sequence templates"""
         return {

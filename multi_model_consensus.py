@@ -1216,58 +1216,23 @@ class MultiModelConsensusSystem:
         return self.conn
 
     def _init_database(self):
-        """Initialize database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_consensus_requests",
+                "ai_model_performance",
+        ]
         try:
-            conn = self._get_connection()
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_consensus_requests (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    prompt TEXT NOT NULL,
-                    strategy VARCHAR(50),
-                    models_requested JSONB DEFAULT '[]',
-                    final_response TEXT,
-                    confidence FLOAT,
-                    agreement_score FLOAT,
-                    status VARCHAR(50),
-                    model_responses JSONB DEFAULT '[]',
-                    dissenting_opinions JSONB DEFAULT '[]',
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    completed_at TIMESTAMPTZ
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_model_performance (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    model_type VARCHAR(50),
-                    total_queries INT DEFAULT 0,
-                    successful_queries INT DEFAULT 0,
-                    avg_confidence FLOAT DEFAULT 0.0,
-                    avg_latency_ms FLOAT DEFAULT 0.0,
-                    consensus_contributions INT DEFAULT 0,
-                    dissent_count INT DEFAULT 0,
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_consensus_status
-                ON ai_consensus_requests(status)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_consensus_created
-                ON ai_consensus_requests(created_at)
-            """)
-
-            conn.commit()
+            ok = verify_tables_sync(required_tables, cursor, module_name="multi_model_consensus")
             cursor.close()
-
-        except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
-
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def get_consensus(
         self,
         prompt: str,

@@ -139,56 +139,6 @@ class NerveCenter:
             pool = self._get_pool()
             if using_fallback():
                 return
-
-            await pool.execute("""
-                -- Nerve center signals log
-                CREATE TABLE IF NOT EXISTS ai_nerve_signals (
-                    id SERIAL PRIMARY KEY,
-                    signal_type VARCHAR(50),
-                    source VARCHAR(100),
-                    target VARCHAR(100),
-                    payload JSONB,
-                    priority INTEGER,
-                    processed BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-                CREATE INDEX IF NOT EXISTS idx_nerve_signals_type
-                    ON ai_nerve_signals(signal_type);
-                CREATE INDEX IF NOT EXISTS idx_nerve_signals_unprocessed
-                    ON ai_nerve_signals(created_at)
-                    WHERE NOT processed;
-
-                -- System state snapshot
-                CREATE TABLE IF NOT EXISTS ai_system_snapshot (
-                    id SERIAL PRIMARY KEY,
-                    components JSONB,
-                    consciousness_state VARCHAR(50),
-                    health_status VARCHAR(50),
-                    active_predictions INTEGER,
-                    thought_count INTEGER,
-                    uptime_seconds FLOAT,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-                CREATE INDEX IF NOT EXISTS idx_snapshot_time
-                    ON ai_system_snapshot(created_at DESC);
-
-                -- Emergency events
-                CREATE TABLE IF NOT EXISTS ai_emergency_events (
-                    id SERIAL PRIMARY KEY,
-                    event_type VARCHAR(100),
-                    severity VARCHAR(20),
-                    description TEXT,
-                    source VARCHAR(100),
-                    data JSONB,
-                    resolved BOOLEAN DEFAULT FALSE,
-                    resolved_at TIMESTAMPTZ,
-                    resolution TEXT,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-                CREATE INDEX IF NOT EXISTS idx_emergency_unresolved
-                    ON ai_emergency_events(created_at)
-                    WHERE NOT resolved;
-            """)
             logger.info("✅ NerveCenter schema initialized")
         except Exception as e:
             logger.error(f"Schema init failed: {e}")

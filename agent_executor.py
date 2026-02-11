@@ -788,19 +788,6 @@ class AgentExecutor:
             pool = get_pool()
 
             # Ensure table exists
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS agent_action_audits (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    agent_name TEXT NOT NULL,
-                    action TEXT,
-                    task JSONB,
-                    confidence_score DOUBLE PRECISION,
-                    confidence_level TEXT,
-                    requires_human BOOLEAN,
-                    assessment JSONB,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
 
             await pool.execute("""
                 INSERT INTO agent_action_audits (
@@ -837,18 +824,6 @@ class AgentExecutor:
         """Persist reasoning guard output for auditability."""
         try:
             pool = get_pool()
-
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS agent_reasoning_audits (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    agent_name TEXT NOT NULL,
-                    task JSONB,
-                    reasoning JSONB,
-                    critique JSONB,
-                    decision TEXT,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
 
             await pool.execute(
                 """

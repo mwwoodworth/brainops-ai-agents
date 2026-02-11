@@ -785,43 +785,10 @@ async def setup_database():
         cursor = conn.cursor()
 
         # Regional deployments table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS regional_deployments (
-                deployment_id VARCHAR(100) PRIMARY KEY,
-                service_name VARCHAR(100) NOT NULL,
-                version VARCHAR(50),
-                region VARCHAR(50),
-                strategy VARCHAR(50),
-                status VARCHAR(50),
-                endpoints TEXT[],
-                deployed_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
 
         # Traffic routing table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS traffic_routes (
-                id SERIAL PRIMARY KEY,
-                client_ip VARCHAR(50),
-                client_location POINT,
-                target_region VARCHAR(50),
-                target_endpoint VARCHAR(255),
-                latency_estimate FLOAT,
-                routed_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
 
         # Data sync table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS data_sync_log (
-                id SERIAL PRIMARY KEY,
-                source_region VARCHAR(50),
-                target_region VARCHAR(50),
-                records_synced INTEGER,
-                sync_time_ms FLOAT,
-                synced_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
 
         conn.commit()
         cursor.close()

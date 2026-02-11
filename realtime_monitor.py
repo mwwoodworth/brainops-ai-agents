@@ -134,98 +134,25 @@ class RealtimeMonitor:
             return fallback()
 
     def _initialize_database(self):
-        """Initialize database tables for real-time monitoring"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_realtime_events",
+                "ai_realtime_subscriptions",
+                "ai_event_broadcasts",
+                "ai_activity_feed",
+        ]
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
-
-            # Create real-time events table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_realtime_events (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    event_id VARCHAR(255) UNIQUE NOT NULL,
-                    event_type VARCHAR(50) NOT NULL,
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    source VARCHAR(255) NOT NULL,
-                    data JSONB NOT NULL,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    priority INT DEFAULT 5,
-                    processed BOOLEAN DEFAULT false,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create subscriptions table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_realtime_subscriptions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    subscription_id VARCHAR(255) UNIQUE NOT NULL,
-                    client_id VARCHAR(255) NOT NULL,
-                    subscription_type VARCHAR(50) NOT NULL,
-                    filters JSONB DEFAULT '{}'::jsonb,
-                    is_active BOOLEAN DEFAULT true,
-                    last_event_id VARCHAR(255),
-                    events_received INT DEFAULT 0,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create event broadcasts table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_event_broadcasts (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    event_id VARCHAR(255) REFERENCES ai_realtime_events(event_id),
-                    subscription_id VARCHAR(255) REFERENCES ai_realtime_subscriptions(subscription_id),
-                    delivered BOOLEAN DEFAULT false,
-                    delivered_at TIMESTAMPTZ,
-                    retry_count INT DEFAULT 0,
-                    error_message TEXT,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create activity feed table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_activity_feed (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    activity_type VARCHAR(50) NOT NULL,
-                    title VARCHAR(255) NOT NULL,
-                    description TEXT,
-                    source VARCHAR(255),
-                    severity VARCHAR(20) DEFAULT 'info',
-                    data JSONB DEFAULT '{}'::jsonb,
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    is_read BOOLEAN DEFAULT false
-                )
-            """)
-
-            # Create index for performance
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_events_timestamp
-                ON ai_realtime_events(timestamp DESC);
-
-                CREATE INDEX IF NOT EXISTS idx_events_type
-                ON ai_realtime_events(event_type);
-
-                CREATE INDEX IF NOT EXISTS idx_events_processed
-                ON ai_realtime_events(processed);
-
-                CREATE INDEX IF NOT EXISTS idx_activity_timestamp
-                ON ai_activity_feed(timestamp DESC);
-            """)
-
-            conn.commit()
-            logger.info("Realtime monitoring tables initialized successfully")
-
-        except Exception as e:
-            logger.error(f"Error initializing realtime tables: {e}")
-            if conn:
-                conn.rollback()
-        finally:
-            if conn:
-                conn.close()
-
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            ok = verify_tables_sync(required_tables, cursor, module_name="realtime_monitor")
+            cursor.close()
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     def _setup_triggers(self):
         """Setup database triggers for real-time events"""
         try:

@@ -132,62 +132,24 @@ class VectorMemorySystem:
         logger.info("Vector Memory System initialized")
 
     def _ensure_tables(self):
-        """Ensure all required tables exist"""
-        conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-
-        # Create comprehensive memory tables
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS vector_memories (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                memory_type VARCHAR(50) NOT NULL,
-                content TEXT NOT NULL,
-                embedding vector(1536),
-                importance_score FLOAT DEFAULT 0.5,
-                confidence_score FLOAT DEFAULT 1.0,
-                decay_rate FLOAT DEFAULT 0.01,
-                last_accessed TIMESTAMPTZ DEFAULT NOW(),
-                access_count INT DEFAULT 0,
-                metadata JSONB DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                expires_at TIMESTAMPTZ
-            );
-
-            CREATE TABLE IF NOT EXISTS memory_associations (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                memory_id_1 UUID REFERENCES vector_memories(id) ON DELETE CASCADE,
-                memory_id_2 UUID REFERENCES vector_memories(id) ON DELETE CASCADE,
-                association_strength FLOAT DEFAULT 0.5,
-                association_type VARCHAR(50),
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                UNIQUE(memory_id_1, memory_id_2)
-            );
-
-            CREATE TABLE IF NOT EXISTS memory_consolidation (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                source_memories UUID[],
-                consolidated_content TEXT,
-                consolidation_type VARCHAR(50),
-                quality_score FLOAT,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            -- Create indexes
-            CREATE INDEX IF NOT EXISTS idx_vector_memories_embedding
-                ON vector_memories USING ivfflat (embedding vector_cosine_ops);
-            CREATE INDEX IF NOT EXISTS idx_vector_memories_importance
-                ON vector_memories(importance_score DESC);
-            CREATE INDEX IF NOT EXISTS idx_vector_memories_type
-                ON vector_memories(memory_type);
-            CREATE INDEX IF NOT EXISTS idx_memory_associations_strength
-                ON memory_associations(association_strength DESC);
-        """)
-
-        conn.commit()
-        cursor.close()
-        conn.close()
-
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "vector_memories",
+                "memory_associations",
+                "memory_consolidation",
+        ]
+        try:
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            ok = verify_tables_sync(required_tables, cursor, module_name="vector_memory_system")
+            cursor.close()
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     def _get_embedding(self, text: str) -> Optional[list[float]]:
         """
         Generate embedding for text using multi-model fallback chain.

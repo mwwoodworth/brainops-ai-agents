@@ -97,25 +97,19 @@ def fix_database_issues():
         for col in columns:
             print(f"  - {col['column_name']}: {col['data_type']}({col['character_maximum_length']})")
 
-        # Fix 3: Create indexes for better performance
-        print("\n🚀 Creating performance indexes...")
-
-        # Index for amount_due queries
-        cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_invoices_amount_due
-            ON invoices(amount_due)
-            WHERE amount_due > 0
-        """)
-
-        # Index for memory queries with text comparison
-        cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_unified_ai_memory_context_text
-            ON unified_ai_memory(context_id)
-            WHERE context_id IS NOT NULL
-        """)
-
-        conn.commit()
-        print("✅ Indexes created")
+        # Fix 3: Verify indexes exist (DDL removed — agent_worker has no DDL permissions)
+        print("\n🚀 Verifying performance indexes...")
+        cur.execute(
+            "SELECT indexname FROM pg_indexes WHERE indexname IN "
+            "('idx_invoices_amount_due', 'idx_unified_ai_memory_context_text')"
+        )
+        found_indexes = {row[0] for row in cur.fetchall()}
+        expected = {'idx_invoices_amount_due', 'idx_unified_ai_memory_context_text'}
+        missing = expected - found_indexes
+        if missing:
+            print(f"⚠️ Missing indexes (run migrations): {', '.join(missing)}")
+        else:
+            print("✅ Indexes verified")
 
         # Fix 4: Add missing columns to memory stats view
         print("\n📊 Checking memory stats...")

@@ -338,47 +338,23 @@ class RevenueIntelligenceSystem:
         logger.info("Revenue Intelligence System initialized")
 
     def _ensure_tables(self):
-        """Ensure revenue tracking tables exist."""
-        if RevenueIntelligenceSystem._tables_ensured:
-            return
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_business_state",
+                "ai_revenue_events",
+        ]
         try:
-            conn = _get_db_connection()
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_business_state (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    snapshot_type VARCHAR(50) NOT NULL,
-                    state_data JSONB NOT NULL,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_business_state_type ON ai_business_state(snapshot_type);
-                CREATE INDEX IF NOT EXISTS idx_business_state_created ON ai_business_state(created_at DESC);
-
-                CREATE TABLE IF NOT EXISTS ai_revenue_events (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    event_type VARCHAR(50) NOT NULL,
-                    platform VARCHAR(50) NOT NULL,
-                    amount DECIMAL(10,2),
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_revenue_events_type ON ai_revenue_events(event_type);
-                CREATE INDEX IF NOT EXISTS idx_revenue_events_platform ON ai_revenue_events(platform);
-            """)
-
-            conn.commit()
+            ok = verify_tables_sync(required_tables, cursor, module_name="revenue_intelligence_system")
             cursor.close()
             conn.close()
-            RevenueIntelligenceSystem._tables_ensured = True
-            logger.info("Revenue tracking tables ensured")
-        except Exception as e:
-            logger.warning(f"Could not ensure tables: {e}")
-
-    # ==================== CORE INTELLIGENCE METHODS ====================
-
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     def get_all_products(self) -> Dict[str, List[Dict]]:
         """Get complete product inventory across all platforms."""
         return {

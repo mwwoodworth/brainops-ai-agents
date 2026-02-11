@@ -225,90 +225,23 @@ class MonitoringDashboard:
                 logger.error(f"Failed to initialize monitoring dashboard: {e}")
 
     async def _initialize_database(self):
-        """Initialize database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_dashboard_metrics",
+                "ai_dashboard_services",
+                "ai_dashboard_alerts",
+                "ai_dashboard_panels",
+        ]
         try:
-            with _get_pooled_connection(self._get_db_config()) as conn:
-                cur = conn.cursor()
-
-                # Metrics table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_dashboard_metrics (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        metric_name VARCHAR(255) NOT NULL,
-                        metric_value FLOAT NOT NULL,
-                        metric_type VARCHAR(50) DEFAULT 'gauge',
-                        labels JSONB DEFAULT '{}'::jsonb,
-                        timestamp TIMESTAMPTZ DEFAULT NOW(),
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Service status table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_dashboard_services (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        service_name VARCHAR(255) NOT NULL,
-                        health VARCHAR(50) NOT NULL,
-                        uptime_seconds FLOAT DEFAULT 0,
-                        last_check TIMESTAMPTZ DEFAULT NOW(),
-                        response_time_ms FLOAT DEFAULT 0,
-                        error_rate FLOAT DEFAULT 0,
-                        request_count INT DEFAULT 0,
-                        metadata JSONB DEFAULT '{}'::jsonb,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Alerts table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_dashboard_alerts (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        alert_id VARCHAR(255) UNIQUE NOT NULL,
-                        severity VARCHAR(50) NOT NULL,
-                        title VARCHAR(500) NOT NULL,
-                        message TEXT NOT NULL,
-                        source VARCHAR(255),
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        acknowledged BOOLEAN DEFAULT false,
-                        acknowledged_at TIMESTAMPTZ,
-                        resolved BOOLEAN DEFAULT false,
-                        resolved_at TIMESTAMPTZ,
-                        metadata JSONB DEFAULT '{}'::jsonb
-                    )
-                """)
-
-                # Dashboard panels table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_dashboard_panels (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        panel_id VARCHAR(255) UNIQUE NOT NULL,
-                        title VARCHAR(255) NOT NULL,
-                        panel_type VARCHAR(50) NOT NULL,
-                        metrics JSONB DEFAULT '[]'::jsonb,
-                        query TEXT,
-                        refresh_interval INT DEFAULT 60,
-                        options JSONB DEFAULT '{}'::jsonb,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create indexes
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_dashboard_metrics_name_time
-                    ON ai_dashboard_metrics(metric_name, timestamp DESC)
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_dashboard_alerts_severity
-                    ON ai_dashboard_alerts(severity, created_at DESC)
-                """)
-
-                conn.commit()
-                logger.info("Monitoring dashboard tables initialized")
-
-        except Exception as e:
-            logger.error(f"Database initialization error: {e}")
-
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="monitoring_dashboard")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def _setup_default_panels(self):
         """Set up default dashboard panels"""
         default_panels = [

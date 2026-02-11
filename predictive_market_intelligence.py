@@ -159,99 +159,25 @@ class PredictiveMarketIntelligence:
         logger.info("Market Intelligence Engine initialized")
 
     async def _create_tables(self):
-        """Create database tables for market intelligence"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "market_signals",
+                "market_predictions",
+                "content_optimizations",
+                "competitor_intelligence",
+                "market_insights",
+                "market_opportunity_scores",
+        ]
         try:
-            import asyncpg
-            if not self.db_url:
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="predictive_market_intelligence")
+            if not ok:
                 return
-
-            conn = await asyncpg.connect(self.db_url)
-            try:
-                # Market signals table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS market_signals (
-                        signal_id TEXT PRIMARY KEY,
-                        signal_type TEXT NOT NULL,
-                        source TEXT NOT NULL,
-                        data JSONB NOT NULL,
-                        strength FLOAT NOT NULL,
-                        confidence FLOAT NOT NULL,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        expires_at TIMESTAMPTZ,
-                        tags JSONB DEFAULT '[]'
-                    )
-                """)
-
-                # Market predictions table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS market_predictions (
-                        prediction_id TEXT PRIMARY KEY,
-                        prediction_type TEXT NOT NULL,
-                        target_metric TEXT NOT NULL,
-                        predicted_value FLOAT NOT NULL,
-                        confidence_lower FLOAT NOT NULL,
-                        confidence_upper FLOAT NOT NULL,
-                        confidence FLOAT NOT NULL,
-                        time_horizon TEXT NOT NULL,
-                        contributing_signals JSONB DEFAULT '[]',
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        expires_at TIMESTAMPTZ,
-                        actual_value FLOAT,
-                        was_accurate BOOLEAN
-                    )
-                """)
-
-                # Content optimizations table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS content_optimizations (
-                        optimization_id TEXT PRIMARY KEY,
-                        action TEXT NOT NULL,
-                        target TEXT NOT NULL,
-                        old_value JSONB,
-                        new_value JSONB,
-                        expected_impact JSONB,
-                        confidence FLOAT,
-                        executed_at TIMESTAMPTZ,
-                        result JSONB,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Competitor intelligence table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS competitor_intelligence (
-                        competitor_id TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        recent_actions JSONB DEFAULT '[]',
-                        pricing_changes JSONB DEFAULT '[]',
-                        product_launches JSONB DEFAULT '[]',
-                        market_share_estimate FLOAT,
-                        threat_level TEXT,
-                        last_updated TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Market insights table for aggregated insights
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS market_insights (
-                        id SERIAL PRIMARY KEY,
-                        insight_type TEXT NOT NULL,
-                        title TEXT NOT NULL,
-                        description TEXT,
-                        data JSONB,
-                        priority TEXT,
-                        actionable BOOLEAN DEFAULT TRUE,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        expires_at TIMESTAMPTZ,
-                        acted_upon BOOLEAN DEFAULT FALSE
-                    )
-                """)
-
-            finally:
-                await conn.close()
-        except Exception as e:
-            logger.error(f"Error creating market intelligence tables: {e}")
-
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def _load_from_db(self):
         """Load existing data from database"""
         try:
@@ -1079,21 +1005,6 @@ class PredictiveMarketIntelligence:
 
             conn = await asyncpg.connect(self.db_url)
             try:
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS market_opportunity_scores (
-                        id SERIAL PRIMARY KEY,
-                        opportunity_name TEXT,
-                        opportunity_data JSONB,
-                        overall_score FLOAT,
-                        recommendation TEXT,
-                        priority TEXT,
-                        component_scores JSONB,
-                        strengths JSONB,
-                        weaknesses JSONB,
-                        next_steps JSONB,
-                        scored_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 await conn.execute("""
                     INSERT INTO market_opportunity_scores

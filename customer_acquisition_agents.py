@@ -149,72 +149,24 @@ class CustomerAcquisitionAgent:
         logger.info(f"Initialized {agent_type} acquisition agent")
 
     def _ensure_tables(self):
-        """Ensure acquisition tables exist - lazy initialization"""
-        if CustomerAcquisitionAgent._tables_ensured:
-            return
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "acquisition_targets",
+                "acquisition_campaigns",
+                "acquisition_activities",
+        ]
         try:
-            conn = _get_db_connection()
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS acquisition_targets (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    company_name VARCHAR(255) NOT NULL,
-                    industry VARCHAR(100),
-                    company_size VARCHAR(50),
-                    location VARCHAR(255),
-                    website VARCHAR(255),
-                    social_profiles JSONB DEFAULT '{}'::jsonb,
-                    decision_makers JSONB DEFAULT '[]'::jsonb,
-                    pain_points TEXT[],
-                    budget_min FLOAT,
-                    budget_max FLOAT,
-                    intent_score FLOAT DEFAULT 0.0,
-                    acquisition_channel VARCHAR(50),
-                    status VARCHAR(50) DEFAULT 'identified',
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW(),
-                    contacted_at TIMESTAMPTZ,
-                    converted_at TIMESTAMPTZ
-                );
-
-                CREATE TABLE IF NOT EXISTS acquisition_campaigns (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    campaign_name VARCHAR(255),
-                    campaign_type VARCHAR(50),
-                    target_criteria JSONB,
-                    budget FLOAT,
-                    start_date DATE,
-                    end_date DATE,
-                    status VARCHAR(50) DEFAULT 'active',
-                    metrics JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-
-                CREATE TABLE IF NOT EXISTS acquisition_activities (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    target_id UUID REFERENCES acquisition_targets(id),
-                    activity_type VARCHAR(50),
-                    activity_data JSONB,
-                    outcome VARCHAR(50),
-                    engagement_score FLOAT,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    agent_id UUID
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_acquisition_targets_intent ON acquisition_targets(intent_score DESC);
-                CREATE INDEX IF NOT EXISTS idx_acquisition_targets_status ON acquisition_targets(status);
-                CREATE INDEX IF NOT EXISTS idx_acquisition_activities_target ON acquisition_activities(target_id);
-            """)
-
-            conn.commit()
+            ok = verify_tables_sync(required_tables, cursor, module_name="customer_acquisition_agents")
             cursor.close()
             conn.close()
-            CustomerAcquisitionAgent._tables_ensured = True
-        except Exception as e:
-            logger.warning(f"Could not ensure acquisition tables: {e}")
-
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
 class WebSearchAgent(CustomerAcquisitionAgent):
     """Agent that searches the web for potential customers"""
 

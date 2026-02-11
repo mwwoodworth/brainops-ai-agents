@@ -133,102 +133,25 @@ class ConversationMemory:
         self.context_window = 10  # Number of recent messages to maintain in context
 
     def _ensure_tables(self):
-        """Create necessary database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "conversations",
+                "conversation_messages",
+                "conversation_snapshots",
+                "conversation_links",
+        ]
         try:
+            from database.verify_tables import verify_tables_sync
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-
-            # Conversations table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS conversations (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    user_id VARCHAR(255) NOT NULL,
-                    title VARCHAR(500),
-                    status VARCHAR(20) DEFAULT 'active',
-                    started_at TIMESTAMPTZ DEFAULT NOW(),
-                    last_message_at TIMESTAMPTZ DEFAULT NOW(),
-                    message_count INT DEFAULT 0,
-                    total_tokens INT DEFAULT 0,
-                    context JSONB DEFAULT '{}'::jsonb,
-                    summary TEXT,
-                    topics JSONB DEFAULT '[]'::jsonb,
-                    sentiment FLOAT DEFAULT 0.0,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Messages table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS conversation_messages (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
-                    role VARCHAR(20) NOT NULL,
-                    content TEXT NOT NULL,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    token_count INT DEFAULT 0,
-                    embedding vector(1536),
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Conversation snapshots for long-term memory
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS conversation_snapshots (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
-                    snapshot_data JSONB NOT NULL,
-                    message_range_start INT,
-                    message_range_end INT,
-                    summary TEXT,
-                    key_points JSONB DEFAULT '[]'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Conversation links for cross-referencing
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS conversation_links (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    source_conversation_id UUID REFERENCES conversations(id),
-                    target_conversation_id UUID REFERENCES conversations(id),
-                    link_type VARCHAR(50),
-                    strength FLOAT DEFAULT 0.5,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create indexes
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_conv_user_id
-                ON conversations(user_id);
-
-                CREATE INDEX IF NOT EXISTS idx_conv_status
-                ON conversations(status);
-
-                CREATE INDEX IF NOT EXISTS idx_conv_last_message
-                ON conversations(last_message_at DESC);
-
-                CREATE INDEX IF NOT EXISTS idx_msg_conversation
-                ON conversation_messages(conversation_id);
-
-                CREATE INDEX IF NOT EXISTS idx_msg_timestamp
-                ON conversation_messages(timestamp DESC);
-            """)
-
-            conn.commit()
+            ok = verify_tables_sync(required_tables, cursor, module_name="conversation_memory")
             cursor.close()
             conn.close()
-
-            logger.info("Conversation memory tables initialized")
-
-        except Exception as e:
-            logger.error(f"Failed to create tables: {e}")
-            raise
-
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     def start_conversation(self, user_id: str, title: str = None, context: dict[str, Any] = None) -> str:
         """Start a new conversation"""
         try:

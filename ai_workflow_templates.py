@@ -397,89 +397,22 @@ class WorkflowEngine:
                 logger.error(f"Failed to initialize workflow engine: {e}")
 
     async def _initialize_database(self):
-        """Initialize database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_workflow_templates",
+                "ai_workflow_executions",
+                "ai_workflow_step_executions",
+        ]
         try:
-            import psycopg2
-
-            conn = psycopg2.connect(**self._get_db_config())
-            cur = conn.cursor()
-
-            # Workflow templates table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_workflow_templates (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    template_id VARCHAR(255) UNIQUE NOT NULL,
-                    name VARCHAR(255) NOT NULL,
-                    description TEXT,
-                    category VARCHAR(100) NOT NULL,
-                    version VARCHAR(50) DEFAULT '1.0.0',
-                    steps JSONB NOT NULL,
-                    input_schema JSONB DEFAULT '{}'::jsonb,
-                    output_schema JSONB DEFAULT '{}'::jsonb,
-                    variables JSONB DEFAULT '{}'::jsonb,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Workflow executions table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_workflow_executions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    execution_id VARCHAR(255) UNIQUE NOT NULL,
-                    template_id VARCHAR(255) NOT NULL,
-                    status VARCHAR(50) NOT NULL,
-                    inputs JSONB DEFAULT '{}'::jsonb,
-                    outputs JSONB DEFAULT '{}'::jsonb,
-                    context JSONB DEFAULT '{}'::jsonb,
-                    current_step VARCHAR(255),
-                    step_results JSONB DEFAULT '{}'::jsonb,
-                    started_at TIMESTAMPTZ,
-                    completed_at TIMESTAMPTZ,
-                    error TEXT,
-                    correlation_id VARCHAR(255),
-                    tenant_id VARCHAR(255),
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Step executions table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_workflow_step_executions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    step_id VARCHAR(255) NOT NULL,
-                    execution_id VARCHAR(255) NOT NULL,
-                    status VARCHAR(50) NOT NULL,
-                    started_at TIMESTAMPTZ,
-                    completed_at TIMESTAMPTZ,
-                    inputs JSONB DEFAULT '{}'::jsonb,
-                    outputs JSONB DEFAULT '{}'::jsonb,
-                    error TEXT,
-                    retry_count INT DEFAULT 0,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    UNIQUE(step_id, execution_id)
-                )
-            """)
-
-            # Create indexes
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_workflow_executions_status
-                ON ai_workflow_executions(status)
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_workflow_templates_category
-                ON ai_workflow_templates(category)
-            """)
-
-            conn.commit()
-            conn.close()
-            logger.info("Workflow database tables initialized")
-
-        except Exception as e:
-            logger.error(f"Database initialization error: {e}")
-
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="ai_workflow_templates")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     def _setup_handlers(self):
         """Set up step handlers"""
         self._handlers[StepType.PARALLEL] = ParallelHandler(self)

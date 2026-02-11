@@ -824,91 +824,25 @@ class DataPipelineAutomation:
         return self.conn
 
     def _init_database(self):
-        """Initialize database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_data_pipelines",
+                "ai_pipeline_runs",
+                "ai_pipeline_schedules",
+                "ai_pipeline_metrics",
+        ]
         try:
-            conn = self._get_connection()
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-
-            # Pipelines table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_data_pipelines (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    name VARCHAR(255) NOT NULL,
-                    pipeline_type VARCHAR(50),
-                    sources JSONB DEFAULT '[]',
-                    transformations JSONB DEFAULT '[]',
-                    destination JSONB DEFAULT '{}',
-                    schedule JSONB DEFAULT '{}',
-                    retry_config JSONB DEFAULT '{}',
-                    alerts JSONB DEFAULT '{}',
-                    status VARCHAR(50) DEFAULT 'active',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Pipeline runs table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_pipeline_runs (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    pipeline_id UUID REFERENCES ai_data_pipelines(id),
-                    status VARCHAR(50),
-                    started_at TIMESTAMPTZ DEFAULT NOW(),
-                    completed_at TIMESTAMPTZ,
-                    records_processed INT DEFAULT 0,
-                    records_failed INT DEFAULT 0,
-                    error_message TEXT,
-                    step_results JSONB DEFAULT '[]',
-                    metrics JSONB DEFAULT '{}'
-                )
-            """)
-
-            # Pipeline schedules table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_pipeline_schedules (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    pipeline_id UUID REFERENCES ai_data_pipelines(id),
-                    frequency VARCHAR(50),
-                    config JSONB DEFAULT '{}',
-                    next_run TIMESTAMPTZ,
-                    last_run TIMESTAMPTZ,
-                    enabled BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Pipeline metrics table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_pipeline_metrics (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    pipeline_id UUID REFERENCES ai_data_pipelines(id),
-                    run_id UUID REFERENCES ai_pipeline_runs(id),
-                    metric_name VARCHAR(100),
-                    metric_value FLOAT,
-                    recorded_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create indexes
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_pipeline_runs_status
-                ON ai_pipeline_runs(status)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_pipeline_runs_pipeline
-                ON ai_pipeline_runs(pipeline_id)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_pipeline_schedules_next
-                ON ai_pipeline_schedules(next_run)
-            """)
-
-            conn.commit()
+            ok = verify_tables_sync(required_tables, cursor, module_name="data_pipeline_automation")
             cursor.close()
-
-        except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
-
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def create_pipeline(
         self,
         name: str,

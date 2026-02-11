@@ -279,42 +279,23 @@ class AutonomicManager:
         self._init_db()
 
     def _init_db(self):
-        """Initialize autonomic controller database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "autonomic_decisions",
+                "autonomic_predictions",
+        ]
         try:
-            with _get_pooled_connection() as conn:
-                if not conn:
-                    logger.error("Failed to get connection for autonomic DB init")
-                    return
-                cur = conn.cursor()
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS autonomic_decisions (
-                        id SERIAL PRIMARY KEY,
-                        loop_id INTEGER,
-                        phase VARCHAR(20),
-                        decision TEXT,
-                        action_taken TEXT,
-                        result JSONB,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    );
-
-                    CREATE TABLE IF NOT EXISTS autonomic_predictions (
-                        id SERIAL PRIMARY KEY,
-                        metric_name VARCHAR(100),
-                        prediction_type VARCHAR(50),
-                        predicted_value FLOAT,
-                        confidence FLOAT,
-                        time_horizon_hours INTEGER,
-                        actual_value FLOAT,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    );
-
-                    CREATE INDEX IF NOT EXISTS idx_autonomic_loop ON autonomic_decisions(loop_id);
-                """)
-                conn.commit()
-                cur.close()
-        except Exception as e:
-            logger.error(f"Failed to init autonomic DB: {e}")
-
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            ok = verify_tables_sync(required_tables, cursor, module_name="autonomic_controller")
+            cursor.close()
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def start_loop(self, interval: float = 10.0):
         """Start the MAPE-K autonomic control loop"""
         self.active = True

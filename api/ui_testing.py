@@ -53,62 +53,21 @@ class ScheduledTestConfig(BaseModel):
 
 
 async def _ensure_tables():
-    """Ensure UI testing tables exist (lazy initialization)"""
+    """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+    required_tables = [
+            "ui_test_results",
+            "ui_test_schedules",
+    ]
     try:
-        import psycopg2
-        conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS ui_test_results (
-                id SERIAL PRIMARY KEY,
-                test_id VARCHAR(64) UNIQUE NOT NULL,
-                application VARCHAR(128),
-                url TEXT,
-                status VARCHAR(32) NOT NULL,
-                severity VARCHAR(32),
-                message TEXT,
-                ai_analysis JSONB,
-                performance_metrics JSONB,
-                accessibility_issues JSONB,
-                suggestions JSONB,
-                routes_tested INTEGER DEFAULT 0,
-                issues_found INTEGER DEFAULT 0,
-                started_at TIMESTAMP WITH TIME ZONE,
-                completed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_ui_test_app ON ui_test_results(application);
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_ui_test_completed ON ui_test_results(completed_at DESC);
-        """)
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS ui_test_schedules (
-                id SERIAL PRIMARY KEY,
-                app_name VARCHAR(128) UNIQUE NOT NULL,
-                interval_minutes INTEGER DEFAULT 60,
-                enabled BOOLEAN DEFAULT true,
-                last_run_at TIMESTAMP WITH TIME ZONE,
-                next_run_at TIMESTAMP WITH TIME ZONE,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-        """)
-
-        conn.commit()
-        cursor.close()
-        conn.close()
-        logger.info("UI testing tables ensured")
-    except Exception as e:
-        logger.warning(f"Could not ensure UI testing tables: {e}")
-
-
+        from database import get_pool
+        from database.verify_tables import verify_tables_async
+        pool = get_pool()
+        ok = await verify_tables_async(required_tables, pool, module_name="ui_testing")
+        if not ok:
+            return
+        self._tables_initialized = True
+    except Exception as exc:
+        logger.error("Table verification failed: %s", exc)
 async def _persist_result(test_id: str, result: dict[str, Any]):
     """Persist test result to database"""
     try:

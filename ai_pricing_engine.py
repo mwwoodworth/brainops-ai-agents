@@ -124,75 +124,25 @@ class AIPricingEngine:
         logger.info("AI Pricing Engine initialized")
 
     def _ensure_tables(self):
-        """Ensure pricing tables exist"""
-        conn = psycopg2.connect(**_get_db_config())
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS pricing_quotes (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                lead_id UUID,
-                customer_segment VARCHAR(50),
-                base_price FLOAT,
-                final_price FLOAT,
-                discount_amount FLOAT,
-                discount_percentage FLOAT,
-                pricing_strategy VARCHAR(50),
-                confidence_score FLOAT,
-                margin_percentage FLOAT,
-                win_probability FLOAT,
-                components JSONB,
-                terms JSONB,
-                factors JSONB,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                expires_at TIMESTAMPTZ,
-                accepted BOOLEAN,
-                accepted_at TIMESTAMPTZ
-            );
-
-            CREATE TABLE IF NOT EXISTS pricing_history (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                quote_id UUID REFERENCES pricing_quotes(id),
-                outcome VARCHAR(50),
-                feedback TEXT,
-                actual_value FLOAT,
-                competitor_price FLOAT,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS pricing_rules (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                rule_name VARCHAR(255),
-                rule_type VARCHAR(50),
-                conditions JSONB,
-                actions JSONB,
-                priority INT DEFAULT 0,
-                active BOOLEAN DEFAULT true,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS pricing_ab_tests (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                test_name VARCHAR(255),
-                variant_a JSONB,
-                variant_b JSONB,
-                metrics JSONB,
-                winner VARCHAR(10),
-                confidence_level FLOAT,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                completed_at TIMESTAMPTZ
-            );
-
-            -- Create indexes
-            CREATE INDEX IF NOT EXISTS idx_pricing_quotes_lead ON pricing_quotes(lead_id);
-            CREATE INDEX IF NOT EXISTS idx_pricing_quotes_created ON pricing_quotes(created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_pricing_history_quote ON pricing_history(quote_id);
-        """)
-
-        conn.commit()
-        cursor.close()
-        conn.close()
-
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "pricing_quotes",
+                "pricing_history",
+                "pricing_rules",
+                "pricing_ab_tests",
+        ]
+        try:
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            ok = verify_tables_sync(required_tables, cursor, module_name="ai_pricing_engine")
+            cursor.close()
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     def _load_base_costs(self) -> dict:
         """Load base costs for pricing calculations"""
         return {

@@ -676,45 +676,21 @@ class AIOperatingSystem:
         return boot_sequence
 
     async def _setup_database(self):
-        """Setup database for AI OS"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_os_metadata",
+                "workflow_executions",
+        ]
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
-
-            # AI OS metadata table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_os_metadata (
-                    id SERIAL PRIMARY KEY,
-                    boot_time TIMESTAMPTZ,
-                    version VARCHAR(20),
-                    components_loaded INTEGER,
-                    status VARCHAR(50),
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """
-            )
-
-            # Workflow execution log
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS workflow_executions (
-                    id SERIAL PRIMARY KEY,
-                    workflow_type VARCHAR(100),
-                    params JSONB,
-                    result JSONB,
-                    duration_ms FLOAT,
-                    executed_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """
-            )
-
-            conn.commit()
-            cursor.close()
-            conn.close()
-
-        except Exception as e:
-            logger.error(f"Database setup error: {e}")
-            raise
-
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="ai_operating_system")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def execute(
         self,
         command: str,

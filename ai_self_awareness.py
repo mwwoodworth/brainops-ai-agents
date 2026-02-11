@@ -193,84 +193,22 @@ class SelfAwareAI:
                 return
 
     async def _create_tables(self):
-        """Create required database tables"""
-        async with self.db_pool.acquire() as conn:
-            # Self-assessments table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS ai_self_assessments (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    task_id TEXT NOT NULL,
-                    agent_id TEXT NOT NULL,
-                    confidence_score DECIMAL NOT NULL,
-                    confidence_level TEXT NOT NULL,
-                    reasoning_type TEXT NOT NULL,
-                    can_complete_alone BOOLEAN NOT NULL,
-                    estimated_accuracy DECIMAL NOT NULL,
-                    estimated_time_seconds INT NOT NULL,
-                    limitations JSONB NOT NULL,
-                    strengths_applied JSONB NOT NULL,
-                    weaknesses_identified JSONB NOT NULL,
-                    requires_human_review BOOLEAN NOT NULL,
-                    human_help_reason TEXT,
-                    similar_past_tasks INT NOT NULL,
-                    past_success_rate DECIMAL NOT NULL,
-                    risk_level TEXT NOT NULL,
-                    mitigation_strategies JSONB NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_self_assess_agent ON ai_self_assessments(agent_id);
-                CREATE INDEX IF NOT EXISTS idx_self_assess_confidence ON ai_self_assessments(confidence_score);
-            """)
-
-            # Reasoning explanations table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS ai_reasoning_explanations (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    task_id TEXT NOT NULL,
-                    agent_id TEXT NOT NULL,
-                    decision_made TEXT NOT NULL,
-                    reasoning_steps JSONB NOT NULL,
-                    evidence_used JSONB NOT NULL,
-                    assumptions_made JSONB NOT NULL,
-                    alternatives_considered JSONB NOT NULL,
-                    why_chosen TEXT NOT NULL,
-                    confidence_in_decision DECIMAL NOT NULL,
-                    potential_errors JSONB NOT NULL,
-                    verification_methods JSONB NOT NULL,
-                    human_review_recommended BOOLEAN NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_reasoning_agent ON ai_reasoning_explanations(agent_id);
-            """)
-
-            # Learning from mistakes table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS ai_learning_from_mistakes (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    mistake_id TEXT NOT NULL,
-                    task_id TEXT NOT NULL,
-                    agent_id TEXT NOT NULL,
-                    what_went_wrong TEXT NOT NULL,
-                    root_cause TEXT NOT NULL,
-                    how_detected TEXT NOT NULL,
-                    impact_level TEXT NOT NULL,
-                    should_have_known BOOLEAN NOT NULL,
-                    warning_signs_missed JSONB NOT NULL,
-                    what_learned TEXT NOT NULL,
-                    how_to_prevent JSONB NOT NULL,
-                    confidence_before DECIMAL NOT NULL,
-                    confidence_after DECIMAL NOT NULL,
-                    similar_mistakes_count INT NOT NULL,
-                    applied_to_agents JSONB NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_mistakes_agent ON ai_learning_from_mistakes(agent_id);
-                CREATE INDEX IF NOT EXISTS idx_mistakes_impact ON ai_learning_from_mistakes(impact_level);
-            """)
-
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_self_assessments",
+                "ai_reasoning_explanations",
+                "ai_learning_from_mistakes",
+        ]
+        try:
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="ai_self_awareness")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def assess_confidence(
         self,
         task_id: str,

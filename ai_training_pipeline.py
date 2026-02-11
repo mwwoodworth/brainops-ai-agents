@@ -103,149 +103,27 @@ class AITrainingPipeline:
         self._initialized = False
 
     async def _init_database(self):
-        """Initialize database tables asynchronously"""
-        if self._initialized:
-            return
-
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_customer_interactions",
+                "ai_training_data",
+                "ai_trained_models",
+                "ai_learning_insights",
+                "ai_training_jobs",
+                "ai_feedback_loop",
+                "ai_outcome_patterns",
+                "ai_learning_history",
+        ]
         try:
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
             pool = get_pool()
-
-            # Create tables if they don't exist
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_customer_interactions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    customer_id VARCHAR(255),
-                    interaction_type VARCHAR(50),
-                    channel VARCHAR(50),
-                    content TEXT,
-                    context JSONB DEFAULT '{}',
-                    sentiment_score FLOAT,
-                    intent VARCHAR(100),
-                    outcome VARCHAR(50),
-                    value DECIMAL(10,2),
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_training_data (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    interaction_id UUID,
-                    feature_vector JSONB,
-                    label VARCHAR(255),
-                    category VARCHAR(50),
-                    confidence FLOAT,
-                    validated BOOLEAN DEFAULT FALSE,
-                    used_for_training BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_trained_models (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    model_type VARCHAR(50),
-                    model_version VARCHAR(50),
-                    training_data_count INT,
-                    accuracy FLOAT,
-                    precision_score FLOAT,
-                    recall_score FLOAT,
-                    f1_score FLOAT,
-                    parameters JSONB DEFAULT '{}',
-                    model_data BYTEA,
-                    status VARCHAR(50),
-                    deployed BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    deployed_at TIMESTAMPTZ
-                )
-            """)
-
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_learning_insights (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    insight_type VARCHAR(50),
-                    category VARCHAR(50),
-                    insight TEXT,
-                    confidence FLOAT,
-                    impact_score FLOAT,
-                    recommendations JSONB DEFAULT '[]',
-                    applied BOOLEAN DEFAULT FALSE,
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_training_jobs (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    job_type VARCHAR(50),
-                    model_type VARCHAR(50),
-                    status VARCHAR(50) DEFAULT 'queued',
-                    parameters JSONB DEFAULT '{}',
-                    results JSONB DEFAULT '{}',
-                    started_at TIMESTAMPTZ,
-                    completed_at TIMESTAMPTZ,
-                    error_message TEXT,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_feedback_loop (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    model_id UUID,
-                    prediction TEXT,
-                    actual_outcome TEXT,
-                    accuracy_delta FLOAT,
-                    feedback_type VARCHAR(50),
-                    adjustments JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Outcome patterns table
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_outcome_patterns (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    pattern_type VARCHAR(50),
-                    pattern_signature TEXT,
-                    success_rate FLOAT,
-                    occurrence_count INT DEFAULT 1,
-                    last_seen TIMESTAMPTZ DEFAULT NOW(),
-                    context JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Learning history table
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_learning_history (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    model_type VARCHAR(50),
-                    lesson_learned TEXT,
-                    evidence JSONB,
-                    impact_score FLOAT,
-                    applied BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create indexes
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_interactions_customer ON ai_customer_interactions(customer_id)")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_interactions_type ON ai_customer_interactions(interaction_type)")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_training_category ON ai_training_data(category)")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_models_type ON ai_trained_models(model_type)")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_insights_type ON ai_learning_insights(insight_type)")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_outcome_patterns ON ai_outcome_patterns(pattern_type)")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_learning_history ON ai_learning_history(model_type)")
-
-            self._initialized = True
-            logger.info("AI Training Pipeline database tables initialized")
-
-        except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
-
+            ok = await verify_tables_async(required_tables, pool, module_name="ai_training_pipeline")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def capture_interaction(
         self,
         customer_id: str,

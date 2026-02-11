@@ -202,160 +202,26 @@ class UnifiedMemoryCoordinator:
         return self.conn, self.cursor
 
     def _ensure_tables(self):
-        """Create coordination tables"""
-        conn, cursor = self._get_connection()
-
-        cursor.execute("""
-            -- Master context registry
-            CREATE TABLE IF NOT EXISTS memory_context_registry (
-                id SERIAL PRIMARY KEY,
-                key TEXT NOT NULL,
-                layer TEXT NOT NULL,
-                scope TEXT NOT NULL,
-                priority TEXT NOT NULL,
-                category TEXT NOT NULL,
-                source TEXT NOT NULL,
-                tenant_id TEXT,
-                user_id TEXT,
-                session_id TEXT,
-                agent_id TEXT,
-                value JSONB NOT NULL,
-                metadata JSONB DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                expires_at TIMESTAMPTZ,
-                access_count INT DEFAULT 0,
-                sync_version INT DEFAULT 1,
-                dedupe_key TEXT GENERATED ALWAYS AS (
-                    scope || ':' ||
-                    COALESCE(tenant_id, '') || ':' ||
-                    COALESCE(user_id, '') || ':' ||
-                    COALESCE(session_id, '') || ':' ||
-                    COALESCE(agent_id, '') || ':' ||
-                    key
-                ) STORED,
-                CONSTRAINT memory_context_registry_dedupe_key UNIQUE (dedupe_key)
-            );
-
-            -- Session context tracking
-            CREATE TABLE IF NOT EXISTS memory_session_context (
-                id SERIAL PRIMARY KEY,
-                session_id TEXT UNIQUE NOT NULL,
-                tenant_id TEXT,
-                user_id TEXT,
-                context_snapshot JSONB NOT NULL,
-                active_agents TEXT[] DEFAULT '{}',
-                start_time TIMESTAMPTZ DEFAULT NOW(),
-                last_activity TIMESTAMPTZ DEFAULT NOW(),
-                status TEXT DEFAULT 'active',
-                metadata JSONB DEFAULT '{}'::jsonb
-            );
-
-            -- Cross-system sync events
-            CREATE TABLE IF NOT EXISTS memory_sync_events (
-                id SERIAL PRIMARY KEY,
-                event_id TEXT UNIQUE NOT NULL,
-                event_type TEXT NOT NULL,
-                context_key TEXT NOT NULL,
-                source_system TEXT NOT NULL,
-                target_systems TEXT[] NOT NULL,
-                priority TEXT NOT NULL,
-                payload JSONB NOT NULL,
-                timestamp TIMESTAMPTZ DEFAULT NOW(),
-                processed BOOLEAN DEFAULT FALSE,
-                processed_at TIMESTAMPTZ,
-                error TEXT
-            );
-
-            -- Context access log for analytics
-            CREATE TABLE IF NOT EXISTS memory_context_access_log (
-                id SERIAL PRIMARY KEY,
-                context_key TEXT NOT NULL,
-                accessed_by TEXT NOT NULL,
-                access_type TEXT NOT NULL,
-                session_id TEXT,
-                timestamp TIMESTAMPTZ DEFAULT NOW(),
-                latency_ms INT,
-                hit_cache BOOLEAN DEFAULT FALSE
-            );
-
-            -- Sync conflict resolution
-            CREATE TABLE IF NOT EXISTS memory_sync_conflicts (
-                id SERIAL PRIMARY KEY,
-                context_key TEXT NOT NULL,
-                conflict_type TEXT NOT NULL,
-                system_a TEXT NOT NULL,
-                value_a JSONB,
-                version_a INT,
-                system_b TEXT NOT NULL,
-                value_b JSONB,
-                version_b INT,
-                resolution TEXT,
-                resolved_value JSONB,
-                resolved_at TIMESTAMPTZ,
-                resolved_by TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_context_key ON memory_context_registry(key);
-            CREATE INDEX IF NOT EXISTS idx_context_layer ON memory_context_registry(layer);
-            CREATE INDEX IF NOT EXISTS idx_context_scope ON memory_context_registry(scope, tenant_id, user_id);
-            CREATE INDEX IF NOT EXISTS idx_context_session ON memory_context_registry(session_id);
-            CREATE INDEX IF NOT EXISTS idx_context_expires ON memory_context_registry(expires_at) WHERE expires_at IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS idx_sync_events_pending ON memory_sync_events(processed, priority, timestamp);
-            CREATE INDEX IF NOT EXISTS idx_session_active ON memory_session_context(status, last_activity);
-        """)
-
-        # Legacy >5.0 migrations: remove obsolete unique constraint and enforce scoped uniqueness
-        cursor.execute("""
-            ALTER TABLE memory_context_registry
-            DROP CONSTRAINT IF EXISTS memory_context_unique_key;
-        """)
-
-        cursor.execute("""
-            DELETE FROM memory_context_registry mc
-            USING memory_context_registry dup
-            WHERE mc.ctid < dup.ctid
-              AND mc.key = dup.key
-              AND mc.scope = dup.scope
-              AND COALESCE(mc.tenant_id, '') = COALESCE(dup.tenant_id, '')
-              AND COALESCE(mc.user_id, '') = COALESCE(dup.user_id, '')
-              AND COALESCE(mc.session_id, '') = COALESCE(dup.session_id, '')
-              AND COALESCE(mc.agent_id, '') = COALESCE(dup.agent_id, '');
-        """)
-
-        cursor.execute("""
-            ALTER TABLE memory_context_registry
-            ADD COLUMN IF NOT EXISTS dedupe_key TEXT GENERATED ALWAYS AS (
-                scope || ':' ||
-                COALESCE(tenant_id, '') || ':' ||
-                COALESCE(user_id, '') || ':' ||
-                COALESCE(session_id, '') || ':' ||
-                COALESCE(agent_id, '') || ':' ||
-                key
-            ) STORED;
-        """)
-
-        cursor.execute("""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1
-                    FROM information_schema.table_constraints
-                    WHERE table_name = 'memory_context_registry'
-                      AND constraint_type = 'UNIQUE'
-                      AND constraint_name = 'memory_context_registry_dedupe_key'
-                ) THEN
-                    ALTER TABLE memory_context_registry
-                    ADD CONSTRAINT memory_context_registry_dedupe_key
-                    UNIQUE (dedupe_key);
-                END IF;
-            END $$;
-        """)
-
-        conn.commit()
-        logger.info("✅ Memory coordination tables ready")
-
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "memory_context_registry",
+                "memory_session_context",
+                "memory_sync_events",
+                "memory_context_access_log",
+                "memory_sync_conflicts",
+        ]
+        try:
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            ok = verify_tables_sync(required_tables, cursor, module_name="memory_coordination_system")
+            cursor.close()
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     def _init_memory_systems(self):
         """Initialize connections to all memory systems"""
         try:

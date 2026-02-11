@@ -2011,15 +2011,16 @@ def create_execution_table(db_config: dict):
         with _get_pooled_connection(db_config) as conn:
             cur = conn.cursor()
             try:
-                # Table already exists with different schema - just ensure indexes
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_agent_executions_agent ON ai_agent_executions(agent_name);
-                    CREATE INDEX IF NOT EXISTS idx_agent_executions_created ON ai_agent_executions(created_at DESC);
-                    CREATE INDEX IF NOT EXISTS idx_agent_executions_status ON ai_agent_executions(status);
-                """)
-
-                conn.commit()
-                logger.info("Execution tracking table verified/created")
+                # DDL removed — agent_worker has no DDL permissions (P0-LOCK).
+                # Indexes are created by migrations, not at runtime.
+                cur.execute(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = 'ai_agent_executions'"
+                )
+                if cur.fetchone()[0] == 0:
+                    logger.error("ai_agent_executions table missing. Run migrations.")
+                else:
+                    logger.info("Execution tracking table verified")
             finally:
                 cur.close()
 

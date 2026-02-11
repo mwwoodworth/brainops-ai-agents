@@ -128,75 +128,25 @@ class MetaCriticScorer:
         self._init_database()
 
     def _init_database(self):
-        """Initialize meta-critic tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "meta_critic_scores",
+                "meta_critic_evaluations",
+                "meta_critic_outcome_tracking",
+                "meta_critic_learning_log",
+        ]
         try:
-            conn = psycopg2.connect(**_get_db_config())
-            cur = conn.cursor()
-
-            cur.execute("""
-            CREATE TABLE IF NOT EXISTS meta_critic_scores (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                evaluation_id UUID NOT NULL,
-                candidate_id TEXT NOT NULL,
-                model TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                dimension_scores JSONB NOT NULL,
-                weighted_total FLOAT NOT NULL,
-                was_winner BOOLEAN DEFAULT FALSE,
-                human_feedback JSONB,
-                created_at TIMESTAMP DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS meta_critic_evaluations (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                task_type TEXT NOT NULL,
-                winner_id TEXT NOT NULL,
-                winner_score FLOAT NOT NULL,
-                consensus_method TEXT NOT NULL,
-                adjudication_reason TEXT,
-                requires_human_review BOOLEAN DEFAULT FALSE,
-                human_override BOOLEAN DEFAULT FALSE,
-                final_outcome TEXT,
-                created_at TIMESTAMP DEFAULT NOW()
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_meta_scores_eval ON meta_critic_scores(evaluation_id);
-            CREATE INDEX IF NOT EXISTS idx_meta_evals_type ON meta_critic_evaluations(task_type);
-
-            -- Enhanced tracking tables
-            ALTER TABLE meta_critic_evaluations
-            ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0;
-
-            ALTER TABLE meta_critic_evaluations
-            ADD COLUMN IF NOT EXISTS risk_assessment JSONB;
-
-            CREATE TABLE IF NOT EXISTS meta_critic_outcome_tracking (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                evaluation_id UUID REFERENCES meta_critic_evaluations(id),
-                actual_outcome JSONB,
-                expected_outcome JSONB,
-                success_score FLOAT,
-                lessons_learned TEXT[],
-                recorded_at TIMESTAMP DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS meta_critic_learning_log (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                dimension VARCHAR(50),
-                weight_adjustment FLOAT,
-                performance_delta FLOAT,
-                reason TEXT,
-                applied_at TIMESTAMP DEFAULT NOW()
-            );
-            """)
-
-            conn.commit()
-            cur.close()
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            ok = verify_tables_sync(required_tables, cursor, module_name="meta_critic_scoring")
+            cursor.close()
             conn.close()
-            logger.info("✅ Meta-critic database initialized")
-        except Exception as e:
-            logger.warning(f"Meta-critic database init failed: {e}")
-
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def score_candidates(
         self,
         candidates: list[dict[str, Any]],

@@ -198,149 +198,20 @@ class RevenuePipelineOrchestrator:
         try:
             with conn.cursor() as cur:
                 # Revenue streams configuration
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS revenue_streams (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        stream_type VARCHAR(50) NOT NULL UNIQUE,
-                        name VARCHAR(255) NOT NULL,
-                        description TEXT,
-                        pricing_strategy VARCHAR(50),
-                        base_price FLOAT DEFAULT 0,
-                        commission_rate FLOAT DEFAULT 0,
-                        revenue_share FLOAT DEFAULT 0,
-                        target_segments JSONB DEFAULT '[]',
-                        active BOOLEAN DEFAULT true,
-                        automation_enabled BOOLEAN DEFAULT true,
-                        config JSONB DEFAULT '{}',
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Revenue transactions
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS revenue_transactions (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        stream_type VARCHAR(50) NOT NULL,
-                        product_id UUID,
-                        customer_id UUID,
-                        amount FLOAT NOT NULL,
-                        currency VARCHAR(10) DEFAULT 'USD',
-                        transaction_type VARCHAR(50),
-                        payment_method VARCHAR(50),
-                        status VARCHAR(50) DEFAULT 'completed',
-                        attribution JSONB DEFAULT '{}',
-                        metadata JSONB DEFAULT '{}',
-                        transaction_date TIMESTAMPTZ DEFAULT NOW(),
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Pricing rules
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS pricing_rules (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        stream_type VARCHAR(50),
-                        product_id UUID,
-                        rule_name VARCHAR(255),
-                        rule_type VARCHAR(50),
-                        conditions JSONB DEFAULT '{}',
-                        price_adjustment FLOAT,
-                        adjustment_type VARCHAR(50),
-                        priority INT DEFAULT 5,
-                        active BOOLEAN DEFAULT true,
-                        valid_from TIMESTAMPTZ,
-                        valid_until TIMESTAMPTZ,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Subscription management
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS subscriptions (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        customer_id UUID NOT NULL,
-                        plan_id VARCHAR(100) NOT NULL,
-                        stream_type VARCHAR(50),
-                        status VARCHAR(50) DEFAULT 'active',
-                        price FLOAT NOT NULL,
-                        billing_period VARCHAR(20),
-                        current_period_start TIMESTAMPTZ,
-                        current_period_end TIMESTAMPTZ,
-                        cancel_at_period_end BOOLEAN DEFAULT false,
-                        canceled_at TIMESTAMPTZ,
-                        trial_end TIMESTAMPTZ,
-                        metadata JSONB DEFAULT '{}',
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Affiliate tracking
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS affiliate_tracking (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        affiliate_id UUID NOT NULL,
-                        referred_customer_id UUID,
-                        referral_code VARCHAR(50),
-                        click_date TIMESTAMPTZ,
-                        conversion_date TIMESTAMPTZ,
-                        commission_amount FLOAT DEFAULT 0,
-                        commission_status VARCHAR(50) DEFAULT 'pending',
-                        transaction_id UUID,
-                        lifetime_value FLOAT DEFAULT 0,
-                        metadata JSONB DEFAULT '{}',
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Upsell/cross-sell opportunities
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS upsell_opportunities (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        customer_id UUID NOT NULL,
-                        current_product_id UUID,
-                        recommended_product_id UUID,
-                        opportunity_type VARCHAR(50),
-                        score FLOAT DEFAULT 0,
-                        potential_value FLOAT DEFAULT 0,
-                        status VARCHAR(50) DEFAULT 'identified',
-                        triggered_at TIMESTAMPTZ,
-                        converted_at TIMESTAMPTZ,
-                        declined_at TIMESTAMPTZ,
-                        notes TEXT,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Revenue metrics snapshots
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS revenue_metrics_snapshots (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        snapshot_date DATE NOT NULL,
-                        total_revenue FLOAT DEFAULT 0,
-                        mrr FLOAT DEFAULT 0,
-                        arr FLOAT DEFAULT 0,
-                        arpu FLOAT DEFAULT 0,
-                        ltv FLOAT DEFAULT 0,
-                        cac FLOAT DEFAULT 0,
-                        churn_rate FLOAT DEFAULT 0,
-                        growth_rate FLOAT DEFAULT 0,
-                        by_stream JSONB DEFAULT '{}',
-                        by_product JSONB DEFAULT '{}',
-                        by_segment JSONB DEFAULT '{}',
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        UNIQUE(snapshot_date)
-                    )
-                """)
 
                 # Create indexes
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_transactions_stream ON revenue_transactions(stream_type)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_transactions_date ON revenue_transactions(transaction_date DESC)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_customer ON subscriptions(customer_id)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_affiliate_code ON affiliate_tracking(referral_code)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_upsell_customer ON upsell_opportunities(customer_id)")
 
                 conn.commit()
 
@@ -898,55 +769,6 @@ class ProductCatalogGenerator:
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS product_catalog (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        product_type VARCHAR(50) NOT NULL,
-                        name VARCHAR(500) NOT NULL,
-                        slug VARCHAR(500) UNIQUE,
-                        description TEXT,
-                        short_description TEXT,
-                        price FLOAT NOT NULL,
-                        compare_at_price FLOAT,
-                        currency VARCHAR(10) DEFAULT 'USD',
-                        stream_type VARCHAR(50),
-                        category VARCHAR(100),
-                        tags JSONB DEFAULT '[]',
-                        features JSONB DEFAULT '[]',
-                        images JSONB DEFAULT '[]',
-                        files JSONB DEFAULT '[]',
-                        generated_product_id UUID,
-                        active BOOLEAN DEFAULT true,
-                        featured BOOLEAN DEFAULT false,
-                        sort_order INT DEFAULT 0,
-                        sales_count INT DEFAULT 0,
-                        rating FLOAT DEFAULT 0,
-                        review_count INT DEFAULT 0,
-                        metadata JSONB DEFAULT '{}',
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS product_bundles (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        name VARCHAR(500) NOT NULL,
-                        description TEXT,
-                        products JSONB DEFAULT '[]',
-                        bundle_price FLOAT NOT NULL,
-                        savings_amount FLOAT,
-                        savings_percentage FLOAT,
-                        active BOOLEAN DEFAULT true,
-                        valid_from TIMESTAMPTZ,
-                        valid_until TIMESTAMPTZ,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_catalog_type ON product_catalog(product_type)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_catalog_category ON product_catalog(category)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_catalog_active ON product_catalog(active)")
 
                 conn.commit()
         except Exception as e:

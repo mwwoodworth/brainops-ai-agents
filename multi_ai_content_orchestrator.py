@@ -171,94 +171,25 @@ class MultiAIContentOrchestrator:
         logger.info("Initialized MultiAIContentOrchestrator")
 
     def _ensure_tables(self):
-        """Ensure content tables exist."""
-        if MultiAIContentOrchestrator._tables_ensured:
-            return
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_content_library",
+                "ai_newsletters",
+                "ai_ebooks",
+                "ai_training_docs",
+        ]
         try:
-            conn = _get_db_connection()
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_content_library (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    content_type VARCHAR(50) NOT NULL,
-                    title TEXT NOT NULL,
-                    slug TEXT,
-                    content TEXT,
-                    excerpt TEXT,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    models_used TEXT[],
-                    quality_score INT DEFAULT 0,
-                    status VARCHAR(50) DEFAULT 'draft',
-                    tenant_id UUID,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW(),
-                    published_at TIMESTAMPTZ
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_content_library_type ON ai_content_library(content_type);
-                CREATE INDEX IF NOT EXISTS idx_content_library_status ON ai_content_library(status);
-
-                CREATE TABLE IF NOT EXISTS ai_newsletters (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    subject TEXT NOT NULL,
-                    preview_text TEXT,
-                    content JSONB NOT NULL,
-                    html_template TEXT,
-                    plain_text TEXT,
-                    target_audience TEXT,
-                    status VARCHAR(50) DEFAULT 'draft',
-                    scheduled_for TIMESTAMPTZ,
-                    sent_at TIMESTAMPTZ,
-                    metrics JSONB DEFAULT '{}'::jsonb,
-                    tenant_id UUID,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-
-                CREATE TABLE IF NOT EXISTS ai_ebooks (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    title TEXT NOT NULL,
-                    subtitle TEXT,
-                    author TEXT DEFAULT 'BrainOps AI',
-                    chapters JSONB NOT NULL,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    word_count INT DEFAULT 0,
-                    status VARCHAR(50) DEFAULT 'draft',
-                    cover_image_url TEXT,
-                    download_url TEXT,
-                    tenant_id UUID,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-
-                CREATE TABLE IF NOT EXISTS ai_training_docs (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    title TEXT NOT NULL,
-                    module_number INT,
-                    course_id UUID,
-                    objectives TEXT[],
-                    prerequisites TEXT[],
-                    content TEXT,
-                    exercises JSONB DEFAULT '[]'::jsonb,
-                    quiz_questions JSONB DEFAULT '[]'::jsonb,
-                    key_takeaways TEXT[],
-                    resources JSONB DEFAULT '[]'::jsonb,
-                    estimated_time VARCHAR(50),
-                    status VARCHAR(50) DEFAULT 'draft',
-                    tenant_id UUID,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-            """)
-
-            conn.commit()
+            ok = verify_tables_sync(required_tables, cursor, module_name="multi_ai_content_orchestrator")
             cursor.close()
             conn.close()
-            MultiAIContentOrchestrator._tables_ensured = True
-            logger.info("Content tables ensured")
-        except Exception as e:
-            logger.warning(f"Could not ensure tables: {e}")
-
-    # ==================== NEWSLETTER GENERATION ====================
-
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def generate_newsletter(self, task: dict) -> dict:
         """
         Generate a complete newsletter using multi-AI pipeline.

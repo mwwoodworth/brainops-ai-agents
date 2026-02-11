@@ -71,46 +71,10 @@ def ensure_tables():
 
     try:
         # Create ai_agents table if not exists
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS ai_agents (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                name VARCHAR(100) UNIQUE NOT NULL,
-                status VARCHAR(50) DEFAULT 'active',
-                capabilities JSONB DEFAULT '{}',
-                last_active TIMESTAMP WITH TIME ZONE,
-                total_executions INTEGER DEFAULT 0,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-        """)
 
         # Create workflows table if not exists
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS workflows (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                name VARCHAR(255) NOT NULL,
-                type VARCHAR(100),
-                status VARCHAR(50) DEFAULT 'active',
-                context JSONB DEFAULT '{}',
-                results JSONB DEFAULT '{}',
-                created_at TIMESTAMP DEFAULT NOW(),
-                updated_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
 
         # Create agent_executions table if not exists
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS agent_executions (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                agent_name VARCHAR(100),
-                workflow_id UUID,
-                input_data JSONB,
-                output_data JSONB,
-                execution_time_ms INTEGER,
-                status VARCHAR(50),
-                created_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
 
         conn.commit()
         logging.info("✅ All tables verified/created")

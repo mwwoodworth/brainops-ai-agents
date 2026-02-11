@@ -186,7 +186,7 @@ class PostgresCheckpointSaver:
         self._initialized = False
 
     async def initialize(self) -> bool:
-        """Create checkpoint tables if needed."""
+        """Verify checkpoint tables exist (no DDL - agent_worker has no DDL perms)."""
         if self._initialized:
             return True
 
@@ -196,47 +196,19 @@ class PostgresCheckpointSaver:
                 logger.warning("No database pool available for checkpoints")
                 return False
 
-            async with pool.acquire() as conn:
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS workflow_checkpoints (
-                        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-                        workflow_id VARCHAR(100) NOT NULL,
-                        workflow_type VARCHAR(100) NOT NULL,
-                        state_data JSONB NOT NULL,
-                        current_node VARCHAR(100),
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        metadata JSONB DEFAULT '{}'::jsonb,
-                        UNIQUE(workflow_id)
-                    );
-
-                    CREATE INDEX IF NOT EXISTS idx_workflow_checkpoints_workflow
-                        ON workflow_checkpoints(workflow_id);
-
-                    CREATE INDEX IF NOT EXISTS idx_workflow_checkpoints_type
-                        ON workflow_checkpoints(workflow_type);
-
-                    CREATE TABLE IF NOT EXISTS workflow_approval_requests (
-                        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-                        workflow_id VARCHAR(100) NOT NULL,
-                        node_name VARCHAR(100) NOT NULL,
-                        description TEXT,
-                        context JSONB DEFAULT '{}'::jsonb,
-                        options JSONB DEFAULT '[]'::jsonb,
-                        timeout_minutes INTEGER DEFAULT 60,
-                        status VARCHAR(50) DEFAULT 'pending',
-                        response TEXT,
-                        responded_by VARCHAR(255),
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        responded_at TIMESTAMP WITH TIME ZONE,
-                        metadata JSONB DEFAULT '{}'::jsonb
-                    );
-
-                    CREATE INDEX IF NOT EXISTS idx_workflow_approvals_workflow
-                        ON workflow_approval_requests(workflow_id);
-
-                    CREATE INDEX IF NOT EXISTS idx_workflow_approvals_status
-                        ON workflow_approval_requests(status) WHERE status = 'pending';
-                """)
+            # Verify required tables exist instead of creating them
+            from database.verify_tables import verify_tables_async
+            tables_ok = await verify_tables_async(
+                ["workflow_checkpoints", "workflow_approval_requests"],
+                pool,
+                module_name="langgraph_workflow_engine",
+            )
+            if not tables_ok:
+                logger.error(
+                    "Workflow tables missing - run migrations to create "
+                    "workflow_checkpoints and workflow_approval_requests"
+                )
+                return False
 
             self._initialized = True
             logger.info("PostgresCheckpointSaver initialized")

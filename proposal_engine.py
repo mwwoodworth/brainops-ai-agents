@@ -540,43 +540,6 @@ async def ensure_proposals_table():
         if not pool:
             return False
 
-        await pool.execute("""
-            CREATE TABLE IF NOT EXISTS ai_proposals (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                lead_id UUID REFERENCES revenue_leads(id),
-                offer_id VARCHAR(100) NOT NULL,
-                status VARCHAR(50) DEFAULT 'draft',
-                client_name VARCHAR(255),
-                client_email VARCHAR(255),
-                client_company VARCHAR(255),
-                offer_name VARCHAR(255),
-                deliverables JSONB DEFAULT '[]',
-                price DECIMAL(12,2),
-                price_unit VARCHAR(50),
-                term_days INTEGER,
-                guarantees JSONB DEFAULT '[]',
-                limitations JSONB DEFAULT '[]',
-                custom_notes TEXT,
-                discount_percent DECIMAL(5,2),
-                final_price DECIMAL(12,2),
-                approved_by VARCHAR(255),
-                approved_at TIMESTAMPTZ,
-                sent_at TIMESTAMPTZ,
-                expires_at TIMESTAMPTZ,
-                viewed_at TIMESTAMPTZ,
-                responded_at TIMESTAMPTZ,
-                public_link TEXT,
-                pdf_url TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-
-        await pool.execute("""
-            CREATE INDEX IF NOT EXISTS idx_ai_proposals_lead_id ON ai_proposals(lead_id);
-            CREATE INDEX IF NOT EXISTS idx_ai_proposals_status ON ai_proposals(status);
-        """)
-
         logger.info("ai_proposals table ensured")
         return True
 
