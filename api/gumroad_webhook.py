@@ -676,7 +676,8 @@ async def enroll_in_nurture_sequence(
     product_name: str,
     product_type: str,
     product_code: str,
-    download_url: str
+    download_url: str,
+    sale_id: Optional[str] = None,
 ) -> bool:
     """Enroll buyer in post-purchase nurture sequence"""
     try:
@@ -688,7 +689,8 @@ async def enroll_in_nurture_sequence(
             product_name=product_name,
             product_type=product_type,
             product_code=product_code,
-            download_url=download_url
+            download_url=download_url,
+            sale_id=sale_id,
         )
 
         if email_ids:
@@ -755,7 +757,8 @@ async def process_sale(sale_data: dict[str, Any], product_code: str, first_name:
             product_name=product_name,
             product_type=product_type,
             product_code=product_code,
-            download_url=download_url
+            download_url=download_url,
+            sale_id=str(sale_data.get("sale_id") or "").strip() or None,
         ),
         upsell_task,
         return_exceptions=True

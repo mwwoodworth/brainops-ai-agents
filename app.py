@@ -1506,6 +1506,91 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️ Meta-Intelligence initialization failed: {e}")
 
+        # ── Phase 7: Periodic embedding backfill ──
+        async def _embedding_backfill_loop():
+            """Periodically backfill missing embeddings for unified_ai_memory and live_brain_memories."""
+            INTERVAL_SECONDS = 4 * 3600  # every 4 hours
+            BATCH_PER_TABLE = 200
+            SLEEP_BETWEEN_ROWS = 0.05  # 50ms between rows to avoid rate limits
+
+            # Wait 5 minutes after startup to let everything stabilize
+            await asyncio.sleep(300)
+
+            while True:
+                try:
+                    pool = get_pool()
+                    if pool is None or using_fallback():
+                        logger.debug("Embedding backfill skipped: no DB pool")
+                        await asyncio.sleep(INTERVAL_SECONDS)
+                        continue
+
+                    try:
+                        from utils.embedding_provider import generate_embedding_async
+                    except ImportError:
+                        logger.warning("Embedding backfill skipped: embedding_provider unavailable")
+                        await asyncio.sleep(INTERVAL_SECONDS)
+                        continue
+
+                    total_updated = 0
+
+                    # Table 1: unified_ai_memory
+                    try:
+                        rows = await pool.fetch(
+                            "SELECT id, content FROM unified_ai_memory "
+                            "WHERE embedding IS NULL AND content IS NOT NULL "
+                            "ORDER BY created_at ASC LIMIT $1",
+                            BATCH_PER_TABLE,
+                        )
+                        for row in rows:
+                            text = row["content"] if isinstance(row["content"], str) else str(row["content"])
+                            if not text:
+                                continue
+                            emb = await generate_embedding_async(text[:30000])
+                            if emb:
+                                import json as _json
+                                await pool.execute(
+                                    "UPDATE unified_ai_memory SET embedding = $1::vector WHERE id = $2",
+                                    _json.dumps(emb), row["id"],
+                                )
+                                total_updated += 1
+                            await asyncio.sleep(SLEEP_BETWEEN_ROWS)
+                    except Exception as e:
+                        logger.warning("Embedding backfill (unified_ai_memory) error: %s", e)
+
+                    # Table 2: live_brain_memories
+                    try:
+                        rows = await pool.fetch(
+                            "SELECT id, content FROM live_brain_memories "
+                            "WHERE embedding IS NULL AND content IS NOT NULL "
+                            "ORDER BY created_at ASC LIMIT $1",
+                            BATCH_PER_TABLE,
+                        )
+                        for row in rows:
+                            text = row["content"] if isinstance(row["content"], str) else str(row["content"])
+                            if not text:
+                                continue
+                            emb = await generate_embedding_async(text[:30000])
+                            if emb:
+                                import json as _json
+                                await pool.execute(
+                                    "UPDATE live_brain_memories SET embedding = $1::vector WHERE id = $2",
+                                    _json.dumps(emb), row["id"],
+                                )
+                                total_updated += 1
+                            await asyncio.sleep(SLEEP_BETWEEN_ROWS)
+                    except Exception as e:
+                        logger.warning("Embedding backfill (live_brain_memories) error: %s", e)
+
+                    if total_updated > 0:
+                        logger.info("Embedding backfill cycle: %d rows updated", total_updated)
+                except Exception as e:
+                    logger.error("Embedding backfill loop error: %s", e)
+
+                await asyncio.sleep(INTERVAL_SECONDS)
+
+        create_safe_task(_embedding_backfill_loop(), "embedding_backfill")
+        logger.info("📊 Embedding backfill loop STARTED (every 4h, 200 rows/table/cycle)")
+
         logger.info("✅ Heavy component initialization complete - AI OS FULLY AWAKE!")
 
     create_safe_task(deferred_heavy_init(), "heavy_init")
