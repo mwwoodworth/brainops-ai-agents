@@ -2008,17 +2008,45 @@ class AgentExecutor:
         task_tenant = task.get("tenant_id")
         if not task_tenant:
             return True, ""  # No tenant scope to enforce
-        result_str = json.dumps(result, default=str)
-        # Look for tenant_id values in the result
-        tenant_pattern = re.compile(r'"tenant_id"\s*:\s*"?(\d+)"?')
-        result_tenants = set(tenant_pattern.findall(result_str))
-        if not result_tenants:
+        # Tenant IDs are UUIDs in BrainOps. The previous regex-based extraction only
+        # matched digits and would incorrectly flag valid UUIDs and/or partial IDs.
+        #
+        # We only consider explicit tenant_id fields, not arbitrary UUID-looking strings,
+        # to avoid false positives from unrelated IDs in output payloads.
+        try:
+            task_tenant_norm = str(uuid.UUID(str(task_tenant)))
+        except Exception:
+            task_tenant_norm = str(task_tenant)
+
+        referenced: set[str] = set()
+
+        def _walk(value: Any) -> None:
+            if isinstance(value, dict):
+                for k, v in value.items():
+                    if k in ("tenant_id", "tenantId"):
+                        if isinstance(v, str):
+                            try:
+                                referenced.add(str(uuid.UUID(v)))
+                            except Exception:
+                                # Not a UUID; ignore (avoid partial matches like "00000000")
+                                pass
+                        continue
+                    _walk(v)
+                return
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    _walk(item)
+
+        _walk(result)
+
+        if not referenced:
             return True, ""  # Result doesn't reference tenants — fine
-        mismatches = {t for t in result_tenants if t != str(task_tenant)}
+
+        mismatches = {t for t in referenced if t != task_tenant_norm}
         if mismatches:
             return False, (
-                f"Tenant scope violation: task tenant_id={task_tenant} "
-                f"but result references tenant_id(s) {mismatches}"
+                f"Tenant scope violation: task tenant_id={task_tenant_norm} "
+                f"but result references tenant_id(s) {sorted(mismatches)}"
             )
         return True, ""
 
@@ -2079,6 +2107,33 @@ class AgentExecutor:
                 # All validators passed — result is good
                 best_result["_repair_attempts"] = attempt
                 best_result["_repair_log"] = repair_log
+                # Distinguish "attempted" vs "fixed": only log success when we actually repaired.
+                if attempt > 0:
+                    try:
+                        pool = get_pool()
+                        await pool.execute(
+                            """
+                            INSERT INTO unified_brain_logs (system, action, data, created_at)
+                            VALUES ('repair_loop', $1, $2::jsonb, NOW())
+                            """,
+                            "repair_success",
+                            json.dumps(
+                                {
+                                    "agent": agent_name,
+                                    "resolved_agent": resolved_agent_name,
+                                    "attempts": attempt,
+                                    "max_repairs": max_repairs,
+                                    "task_type": task.get("action", task.get("type", "generic")),
+                                    "task_id": str(task.get("task_id", task.get("id", ""))),
+                                },
+                                default=str,
+                            ),
+                        )
+                    except Exception as log_exc:
+                        logger.warning(
+                            "[RepairLoop] Failed to log repair_success to unified_brain_logs: %s",
+                            log_exc,
+                        )
                 return best_result
 
             # --- Log the validation failure ---
@@ -2135,6 +2190,32 @@ class AgentExecutor:
                     agent_name,
                     max_repairs,
                 )
+                try:
+                    pool = get_pool()
+                    await pool.execute(
+                        """
+                        INSERT INTO unified_brain_logs (system, action, data, created_at)
+                        VALUES ('repair_loop', $1, $2::jsonb, NOW())
+                        """,
+                        "repair_exhausted",
+                        json.dumps(
+                            {
+                                "agent": agent_name,
+                                "resolved_agent": resolved_agent_name,
+                                "attempts": attempt,
+                                "max_repairs": max_repairs,
+                                "validation_errors": validation_errors,
+                                "task_type": task.get("action", task.get("type", "generic")),
+                                "task_id": str(task.get("task_id", task.get("id", ""))),
+                            },
+                            default=str,
+                        ),
+                    )
+                except Exception as log_exc:
+                    logger.warning(
+                        "[RepairLoop] Failed to log repair_exhausted to unified_brain_logs: %s",
+                        log_exc,
+                    )
                 return best_result
 
             # --- Build repair task ---
