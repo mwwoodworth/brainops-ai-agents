@@ -544,80 +544,18 @@ except ImportError:
     HEALTH_MONITOR_AVAILABLE = False
     logger.warning("Agent Health Monitor not available")
 
-# Minimal schema bootstrap - all tables pre-created in database
-# This just ensures pgcrypto extension exists (fast, single query)
-# Also ensures ai_email_deliveries table exists for email tracking
-SCHEMA_BOOTSTRAP_SQL = [
-    "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
-    # Backfill common missing columns on legacy tables used by task/orchestration subsystems.
-    "ALTER TABLE ai_autonomous_tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();",
-    """
-    CREATE TABLE IF NOT EXISTS ai_email_deliveries (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        email_id TEXT NOT NULL,
-        recipient TEXT NOT NULL,
-        status TEXT DEFAULT 'delivered',
-        delivered_at TIMESTAMPTZ DEFAULT NOW(),
-        metadata JSONB DEFAULT '{}',
-        created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-    """,
-    "CREATE INDEX IF NOT EXISTS idx_email_deliveries_email_id ON ai_email_deliveries(email_id);",
-    "CREATE INDEX IF NOT EXISTS idx_email_deliveries_recipient ON ai_email_deliveries(recipient);",
-    # Agents endpoint performance: avoid full-table scans when looking up execution stats.
-    "CREATE INDEX IF NOT EXISTS idx_ai_agent_executions_agent_name ON ai_agent_executions(agent_name);",
-    "CREATE INDEX IF NOT EXISTS idx_ai_agent_executions_agent_name_created_at ON ai_agent_executions(agent_name, created_at DESC);",
-    # Follow-up system tables (some environments drifted and only had sequences/touchpoints).
-    """
-    CREATE TABLE IF NOT EXISTS ai_followup_executions (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        touchpoint_id UUID NOT NULL REFERENCES ai_followup_touchpoints(id) ON DELETE CASCADE,
-        sequence_id UUID NOT NULL REFERENCES ai_followup_sequences(id) ON DELETE CASCADE,
-        channel_used TEXT NOT NULL,
-        content_sent JSONB DEFAULT '{}'::jsonb,
-        delivery_result JSONB DEFAULT '{}'::jsonb,
-        status TEXT DEFAULT 'sent',
-        executed_at TIMESTAMPTZ DEFAULT NOW(),
-        response_received BOOLEAN DEFAULT false,
-        response_type TEXT,
-        response_analysis JSONB DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-    """,
-    "CREATE INDEX IF NOT EXISTS idx_ai_followup_executions_touchpoint_id_fk ON ai_followup_executions(touchpoint_id);",
-    "CREATE INDEX IF NOT EXISTS idx_ai_followup_executions_sequence_id_fk ON ai_followup_executions(sequence_id);",
-    "CREATE INDEX IF NOT EXISTS idx_ai_followup_executions_executed_at ON ai_followup_executions(executed_at DESC);",
-    """
-    CREATE TABLE IF NOT EXISTS ai_followup_responses (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        execution_id UUID NOT NULL REFERENCES ai_followup_executions(id) ON DELETE CASCADE,
-        response_type TEXT NOT NULL,
-        response_data JSONB DEFAULT '{}'::jsonb,
-        received_at TIMESTAMPTZ DEFAULT NOW(),
-        created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-    """,
-    "CREATE INDEX IF NOT EXISTS idx_ai_followup_responses_execution_id_fk ON ai_followup_responses(execution_id);",
-    """
-    CREATE TABLE IF NOT EXISTS ai_followup_metrics (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        sequence_id UUID NOT NULL REFERENCES ai_followup_sequences(id) ON DELETE CASCADE,
-        metric_date DATE NOT NULL,
-        sent_count INTEGER DEFAULT 0,
-        delivered_count INTEGER DEFAULT 0,
-        opened_count INTEGER DEFAULT 0,
-        responded_count INTEGER DEFAULT 0,
-        conversion_count INTEGER DEFAULT 0,
-        response_rate NUMERIC(10,4) DEFAULT 0,
-        conversion_rate NUMERIC(10,4) DEFAULT 0,
-        avg_response_time NUMERIC(10,2) DEFAULT 0,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-    """,
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_followup_metrics_sequence_date_uniq ON ai_followup_metrics(sequence_id, metric_date);",
-    "CREATE INDEX IF NOT EXISTS idx_ai_followup_metrics_sequence_id_fk ON ai_followup_metrics(sequence_id);",
+# Schema verification - NO DDL at runtime (agent_worker has no DDL permissions by P0-LOCK).
+# All tables/indexes/extensions must be pre-created via migration scripts run as postgres.
+# This list is checked at startup; missing tables are logged as errors but don't crash the app.
+REQUIRED_TABLES = [
+    "ai_email_deliveries",
+    "ai_agent_executions",
+    "ai_autonomous_tasks",
+    "ai_followup_executions",
+    "ai_followup_responses",
+    "ai_followup_metrics",
+    "ai_followup_sequences",
+    "ai_followup_touchpoints",
 ]
 
 # Build info
@@ -1115,20 +1053,28 @@ async def lifespan(app: FastAPI):
             except asyncio.TimeoutError:
                 logger.warning("⚠️ Database connection test timed out (will retry)")
 
-            # Schema bootstrap
-            async def run_schema_bootstrap():
+            # Schema verification (read-only) - no DDL, agent_worker has no DDL perms
+            async def verify_schema():
                 try:
                     await asyncio.sleep(2)
-                    for statement in SCHEMA_BOOTSTRAP_SQL:
-                        try:
-                            await pool.execute(statement)
-                        except Exception as e:
-                            logger.warning(f"⚠️ Schema bootstrap statement failed: {e}")
-                    logger.info("✅ Schema bootstrap completed")
+                    result = await pool.fetch(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema = 'public' AND table_name = ANY($1::text[])",
+                        REQUIRED_TABLES,
+                    )
+                    found = {row["table_name"] for row in result}
+                    missing = [t for t in REQUIRED_TABLES if t not in found]
+                    if missing:
+                        logger.error(
+                            f"Schema verification: {len(missing)} required table(s) "
+                            f"missing: {missing}. Run migrations as postgres to create them."
+                        )
+                    else:
+                        logger.info("Schema verification passed: all required tables present")
                 except Exception as e:
-                    logger.error(f"❌ Background schema bootstrap failed: {e}")
+                    logger.error(f"Schema verification failed: {e}")
 
-            create_safe_task(run_schema_bootstrap(), "schema_bootstrap")
+            create_safe_task(verify_schema(), "schema_verify")
         except Exception as e:
             logger.error(f"❌ Deferred database init failed: {e}")
 

@@ -190,141 +190,61 @@ class SelfHealingRecovery:
         """Get database connection context from SHARED pool - use with 'with' statement"""
         return _get_pooled_connection()
 
+    # Required tables for this module (must exist via migrations, NOT created at runtime).
+    # NOTE: DDL (CREATE TABLE/INDEX) was removed because the agent_worker role
+    # (app_agent_role) intentionally has NO DDL permissions (P0-LOCK security).
+    # Tables must be provisioned via migration scripts run by a privileged role.
+    REQUIRED_TABLES = [
+        'ai_error_logs',
+        'ai_recovery_actions_log',
+        'ai_component_health',
+        'ai_error_patterns',
+        'ai_healing_rules',
+        'ai_proactive_health',
+        'ai_rollback_history',
+    ]
+
     def _initialize_database(self):
-        """Initialize database tables for error recovery"""
+        """Verify that required database tables exist.
+
+        NOTE: This method previously issued CREATE TABLE IF NOT EXISTS / CREATE INDEX
+        statements at startup. Those have been removed because the agent_worker role
+        (app_agent_role) has NO DDL permissions by design (P0-LOCK security policy).
+        All tables must be created via migration scripts executed by a privileged role.
+        If any required table is missing the module will degrade gracefully — DB-backed
+        features (error logging, pattern matching, health tracking, etc.) will log
+        warnings instead of crashing.
+        """
         try:
             with self._get_connection() as conn:
                 cur = conn.cursor()
 
-                # Create error log table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_error_logs (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        error_id VARCHAR(255) UNIQUE NOT NULL,
-                        error_type VARCHAR(255) NOT NULL,
-                        error_message TEXT,
-                        stack_trace TEXT,
-                        component VARCHAR(255),
-                        function_name VARCHAR(255),
-                        severity VARCHAR(20),
-                        retry_count INT DEFAULT 0,
-                        metadata JSONB DEFAULT '{}'::jsonb,
-                        timestamp TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create recovery actions table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_recovery_actions_log (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        error_id VARCHAR(255) REFERENCES ai_error_logs(error_id),
-                        action_id VARCHAR(255) NOT NULL,
-                        strategy VARCHAR(50),
-                        success BOOLEAN,
-                        recovery_time_ms FLOAT,
-                        action_taken TEXT,
-                        result_data JSONB,
-                        executed_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create component health table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_component_health (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        component_name VARCHAR(255) UNIQUE NOT NULL,
-                        current_state VARCHAR(50),
-                        health_score FLOAT DEFAULT 100.0,
-                        error_count INT DEFAULT 0,
-                        success_count INT DEFAULT 0,
-                        last_error_id VARCHAR(255),
-                        last_recovery_at TIMESTAMPTZ,
-                        metadata JSONB DEFAULT '{}'::jsonb,
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create error patterns table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_error_patterns (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        pattern_name VARCHAR(255) UNIQUE NOT NULL,
-                        error_signature TEXT NOT NULL,
-                        occurrence_count INT DEFAULT 1,
-                        recovery_strategy VARCHAR(50),
-                        auto_heal_enabled BOOLEAN DEFAULT false,
-                        healing_script TEXT,
-                        success_rate FLOAT DEFAULT 0.0,
-                        metadata JSONB DEFAULT '{}'::jsonb,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        last_seen TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create healing rules table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_healing_rules (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        rule_name VARCHAR(255) UNIQUE NOT NULL,
-                        condition TEXT NOT NULL,
-                        action TEXT NOT NULL,
-                        priority INT DEFAULT 50,
-                        enabled BOOLEAN DEFAULT true,
-                        success_count INT DEFAULT 0,
-                        failure_count INT DEFAULT 0,
-                        metadata JSONB DEFAULT '{}'::jsonb,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create proactive health monitoring table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_proactive_health (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        component VARCHAR(255) NOT NULL,
-                        health_score FLOAT DEFAULT 100.0,
-                        trend VARCHAR(20) DEFAULT 'stable',
-                        predicted_failure_time TIMESTAMPTZ,
-                        failure_probability FLOAT DEFAULT 0.0,
-                        metrics JSONB DEFAULT '{}'::jsonb,
-                        warnings JSONB DEFAULT '[]'::jsonb,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create rollback history table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_rollback_history (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        component VARCHAR(255) NOT NULL,
-                        rollback_type VARCHAR(50) NOT NULL,
-                        from_state JSONB,
-                        to_state JSONB,
-                        success BOOLEAN DEFAULT false,
-                        error_message TEXT,
-                        executed_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create indexes
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_error_logs_component
-                    ON ai_error_logs(component);
-
-                    CREATE INDEX IF NOT EXISTS idx_error_logs_timestamp
-                    ON ai_error_logs(timestamp DESC);
-
-                    CREATE INDEX IF NOT EXISTS idx_error_logs_severity
-                    ON ai_error_logs(severity);
-                """)
-
-                conn.commit()
+                cur.execute(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = ANY(%s)",
+                    (self.REQUIRED_TABLES,)
+                )
+                found = cur.fetchone()[0]
                 cur.close()
-                logger.info("Self-healing recovery tables initialized successfully")
+
+                expected = len(self.REQUIRED_TABLES)
+                if found < expected:
+                    logger.error(
+                        "Required self-healing tables missing (found %s/%s). "
+                        "Run migrations to create them. DB-backed features will be degraded.",
+                        found, expected,
+                    )
+                    self._tables_verified = False
+                else:
+                    logger.info(
+                        "Self-healing recovery tables verified (%s/%s present)",
+                        found, expected,
+                    )
+                    self._tables_verified = True
 
         except Exception as e:
-            logger.error(f"Error initializing recovery tables: {e}")
+            logger.error(f"Error verifying recovery tables: {e}")
+            self._tables_verified = False
 
     def _load_recovery_strategies(self):
         """Load predefined recovery strategies"""

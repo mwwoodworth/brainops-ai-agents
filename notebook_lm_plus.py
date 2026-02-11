@@ -140,10 +140,20 @@ class LearningSession:
 class NotebookLMPlus:
     """Advanced learning system inspired by Notebook LM with enhanced capabilities"""
 
+    # Tables required by this module (must be created via migrations, not at runtime)
+    REQUIRED_TABLES = [
+        'notebook_lm_knowledge',
+        'notebook_lm_sessions',
+        'notebook_lm_insights',
+        'notebook_lm_patterns',
+        'notebook_lm_outcomes',
+    ]
+
     def __init__(self):
         """Initialize the learning system"""
         self.conn = None
-        self._ensure_tables()
+        self._tables_verified = False
+        self._verify_tables()
         self.active_session = None
         self.knowledge_graph = {}
         self.synthesis_threshold = 5  # Min nodes for synthesis
@@ -151,130 +161,50 @@ class NotebookLMPlus:
         self.continuous_learning_enabled = True
         self.outcome_tracker = {}
 
-    def _ensure_tables(self):
-        """Create necessary database tables"""
+    def _verify_tables(self):
+        """Verify that required database tables exist.
+
+        NOTE: DDL (CREATE TABLE / CREATE INDEX) was removed because the
+        agent_worker role (app_agent_role) has no DDL permissions by design
+        (P0-LOCK security policy). Tables must be created via migrations or
+        by a privileged role. This method only checks existence and degrades
+        gracefully if tables are missing.
+        """
         try:
             conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
 
-            # Knowledge nodes table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS notebook_lm_knowledge (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    content TEXT NOT NULL,
-                    knowledge_type VARCHAR(50) NOT NULL,
-                    source VARCHAR(50) NOT NULL,
-                    confidence FLOAT DEFAULT 0.5,
-                    importance FLOAT DEFAULT 0.5,
-                    connections JSONB DEFAULT '[]'::jsonb,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    embedding vector(1536),
-                    accessed_count INT DEFAULT 0,
-                    last_accessed TIMESTAMPTZ DEFAULT NOW(),
-                    synthesis_count INT DEFAULT 0,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+            cursor.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = ANY(%s)",
+                (self.REQUIRED_TABLES,)
+            )
+            found = cursor.fetchone()[0]
+            expected = len(self.REQUIRED_TABLES)
 
-            # Learning sessions table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS notebook_lm_sessions (
-                    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    start_time TIMESTAMPTZ DEFAULT NOW(),
-                    end_time TIMESTAMPTZ,
-                    topics JSONB DEFAULT '[]'::jsonb,
-                    nodes_created INT DEFAULT 0,
-                    connections_made INT DEFAULT 0,
-                    insights_generated INT DEFAULT 0,
-                    confidence_avg FLOAT DEFAULT 0.0,
-                    status VARCHAR(20) DEFAULT 'active',
-                    summary TEXT
-                )
-            """)
-
-            # Synthesized insights table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS notebook_lm_insights (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    insight TEXT NOT NULL,
-                    source_nodes JSONB NOT NULL,
-                    confidence FLOAT DEFAULT 0.5,
-                    impact_score FLOAT DEFAULT 0.5,
-                    category VARCHAR(100),
-                    applied_count INT DEFAULT 0,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    validated BOOLEAN DEFAULT FALSE
-                )
-            """)
-
-            # Pattern recognition table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS notebook_lm_patterns (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    pattern_type VARCHAR(50) NOT NULL,
-                    pattern_name VARCHAR(255) NOT NULL,
-                    description TEXT,
-                    occurrences INT DEFAULT 1,
-                    confidence FLOAT DEFAULT 0.5,
-                    supporting_nodes JSONB DEFAULT '[]'::jsonb,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    last_seen TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Outcome tracking table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS notebook_lm_outcomes (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    knowledge_id UUID REFERENCES notebook_lm_knowledge(id),
-                    action_taken TEXT,
-                    expected_result TEXT,
-                    actual_result TEXT,
-                    success BOOLEAN,
-                    feedback_score FLOAT,
-                    learned_improvement TEXT,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create indexes
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_knowledge_type
-                ON notebook_lm_knowledge(knowledge_type);
-
-                CREATE INDEX IF NOT EXISTS idx_knowledge_importance
-                ON notebook_lm_knowledge(importance DESC);
-
-                CREATE INDEX IF NOT EXISTS idx_knowledge_confidence
-                ON notebook_lm_knowledge(confidence DESC);
-
-                CREATE INDEX IF NOT EXISTS idx_insights_impact
-                ON notebook_lm_insights(impact_score DESC);
-
-                CREATE INDEX IF NOT EXISTS idx_patterns_type
-                ON notebook_lm_patterns(pattern_type);
-
-                CREATE INDEX IF NOT EXISTS idx_patterns_confidence
-                ON notebook_lm_patterns(confidence DESC);
-
-                CREATE INDEX IF NOT EXISTS idx_outcomes_success
-                ON notebook_lm_outcomes(success);
-            """)
-
-            conn.commit()
             cursor.close()
             conn.close()
 
-            logger.info("Notebook LM+ tables initialized")
+            if found < expected:
+                logger.error(
+                    "Required Notebook LM+ tables missing (found %s/%s). "
+                    "Run migrations to create them. Module will operate in degraded mode.",
+                    found, expected
+                )
+                self._tables_verified = False
+            else:
+                logger.info("Notebook LM+ tables verified (%s/%s present)", found, expected)
+                self._tables_verified = True
 
         except Exception as e:
-            logger.error(f"Failed to create tables: {e}")
-            raise
+            logger.error(f"Failed to verify tables: {e}")
+            self._tables_verified = False
 
     def start_learning_session(self, topics: list[str] = None) -> str:
         """Start a new learning session"""
+        if not self._tables_verified:
+            logger.warning("start_learning_session skipped: required tables not verified")
+            return None
         try:
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
@@ -305,6 +235,9 @@ class NotebookLMPlus:
                               context: dict[str, Any],
                               source: LearningSource = LearningSource.USER_INTERACTION) -> Optional[str]:
         """Learn from an interaction and store knowledge"""
+        if not self._tables_verified:
+            logger.warning("learn_from_interaction skipped: required tables not verified")
+            return None
         try:
             # Analyze the content
             analysis = self._analyze_content(content, context)
@@ -631,6 +564,9 @@ class NotebookLMPlus:
 
     def query_knowledge(self, query: str, limit: int = 10) -> list[dict]:
         """Query the knowledge base"""
+        if not self._tables_verified:
+            logger.warning("query_knowledge skipped: required tables not verified")
+            return []
         try:
             # Generate query embedding
             embedding = self._generate_embedding(query)
@@ -676,6 +612,9 @@ class NotebookLMPlus:
 
     def get_insights(self, category: str = None, min_impact: float = 0.5) -> list[dict]:
         """Get synthesized insights"""
+        if not self._tables_verified:
+            logger.warning("get_insights skipped: required tables not verified")
+            return []
         try:
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
@@ -707,6 +646,9 @@ class NotebookLMPlus:
 
     def recognize_patterns(self, timeframe_days: int = 7) -> list[dict]:
         """Recognize patterns across historical data"""
+        if not self._tables_verified:
+            logger.warning("recognize_patterns skipped: required tables not verified")
+            return []
         try:
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
@@ -798,6 +740,9 @@ class NotebookLMPlus:
 
     def track_outcome(self, knowledge_id: str, action: str, expected: str, actual: str, success: bool) -> None:
         """Track outcome of applied knowledge for continuous learning"""
+        if not self._tables_verified:
+            logger.warning("track_outcome skipped: required tables not verified")
+            return
         try:
             conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
@@ -842,6 +787,9 @@ class NotebookLMPlus:
 
     def generate_recommendations(self) -> list[dict]:
         """Generate actionable recommendations from learned knowledge"""
+        if not self._tables_verified:
+            logger.warning("generate_recommendations skipped: required tables not verified")
+            return []
         try:
             conn = psycopg2.connect(**_get_db_config(), cursor_factory=RealDictCursor)
             cursor = conn.cursor()
@@ -924,6 +872,9 @@ class NotebookLMPlus:
 
     def end_learning_session(self) -> dict[str, Any]:
         """End the current learning session and generate summary with patterns"""
+        if not self._tables_verified:
+            logger.warning("end_learning_session skipped: required tables not verified")
+            return {"error": "Required tables not verified"}
         if not self.active_session:
             return {"error": "No active session"}
 

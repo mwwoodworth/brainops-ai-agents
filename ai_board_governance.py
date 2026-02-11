@@ -330,88 +330,39 @@ class AIBoardOfDirectors:
         }
 
     def _init_database(self):
-        """Initialize database tables for board governance"""
+        """Verify that required database tables exist for board governance.
+
+        NOTE: DDL (CREATE TABLE, CREATE INDEX, ALTER TABLE) was removed because
+        the agent_worker role (app_agent_role) has no DDL permissions by design
+        (P0-LOCK security). Tables must be created via migrations, not at runtime.
+        This method now only verifies the tables exist and logs an error if any
+        are missing, allowing the module to degrade gracefully.
+        """
+        required_tables = ['ai_board_proposals', 'ai_board_decisions', 'ai_board_meetings']
+        expected_count = len(required_tables)
         try:
             with self._get_db_context() as conn:
                 cur = conn.cursor()
-
-                # Create board proposals table
-                cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_board_proposals (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    proposal_type TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    description TEXT,
-                    proposed_by TEXT NOT NULL,
-                    impact_analysis JSONB,
-                    required_resources JSONB,
-                    timeline TEXT,
-                    alternatives JSONB,
-                    supporting_data JSONB,
-                    urgency INTEGER CHECK (urgency >= 1 AND urgency <= 10),
-                    status TEXT CHECK (status IN ('pending', 'deliberating', 'decided', 'deferred')),
-                    created_at TIMESTAMP DEFAULT NOW()
-                );
-
-                -- Create board decisions table
-                CREATE TABLE IF NOT EXISTS ai_board_decisions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    proposal_id TEXT NOT NULL,
-                    decision TEXT NOT NULL,
-                    vote_results JSONB NOT NULL,
-                    consensus_level FLOAT,
-                    dissenting_opinions JSONB,
-                    conditions JSONB,
-                    implementation_plan JSONB,
-                    debate_transcript JSONB,
-                    follow_up_date TIMESTAMP,
-                    decided_at TIMESTAMP DEFAULT NOW()
-                );
-
-                -- Create board meeting minutes
-                CREATE TABLE IF NOT EXISTS ai_board_meetings (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    meeting_type TEXT NOT NULL,
-                    attendees JSONB NOT NULL,
-                    agenda JSONB,
-                    discussions JSONB,
-                    decisions_made JSONB,
-                    action_items JSONB,
-                    duration_minutes INTEGER,
-                    meeting_date TIMESTAMP DEFAULT NOW()
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_proposals_status ON ai_board_proposals(status);
-                CREATE INDEX IF NOT EXISTS idx_proposals_urgency ON ai_board_proposals(urgency DESC);
-                CREATE INDEX IF NOT EXISTS idx_decisions_date ON ai_board_decisions(decided_at DESC);
-
-                -- Schema migrations (safe to run repeatedly)
-                ALTER TABLE ai_board_decisions
-                ADD COLUMN IF NOT EXISTS debate_transcript JSONB;
-
-                ALTER TABLE ai_board_decisions
-                ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0;
-
-                ALTER TABLE ai_board_decisions
-                ADD COLUMN IF NOT EXISTS risk_assessment JSONB;
-
-                ALTER TABLE ai_board_decisions
-                ADD COLUMN IF NOT EXISTS human_escalation_required BOOLEAN DEFAULT FALSE;
-
-                ALTER TABLE ai_board_decisions
-                ADD COLUMN IF NOT EXISTS escalation_reason TEXT;
-
-                ALTER TABLE ai_board_decisions
-                ADD COLUMN IF NOT EXISTS decision_criteria_scores JSONB;
-                """)
-
-                conn.commit()
+                cur.execute(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = ANY(%s)",
+                    (required_tables,)
+                )
+                found = cur.fetchone()[0]
                 cur.close()
 
-            logger.info("✅ Board governance database initialized")
+            if found < expected_count:
+                logger.error(
+                    "Required board governance tables missing (found %s/%s). "
+                    "Run migrations to create: %s",
+                    found, expected_count, required_tables
+                )
+                return
+
+            logger.info("Board governance tables verified (%s/%s present)", found, expected_count)
 
         except Exception as e:
-            logger.error(f"❌ Failed to initialize board database: {e}")
+            logger.error("Failed to verify board governance tables: %s", e)
 
     async def convene_meeting(self, meeting_type: str = "regular",
                             agenda_items: list[Proposal] = None) -> dict[str, Any]:
