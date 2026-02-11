@@ -27,7 +27,7 @@ from ai_self_awareness import SelfAwareAI as SelfAwareness
 from ai_self_awareness import get_self_aware_ai
 
 # CRITICAL: Use async connection pool - NO psycopg2
-from database.async_connection import get_pool
+from database.async_connection import get_pool, get_tenant_pool
 from unified_brain import UnifiedBrain
 from optimization.prompt_compiler import RevenuePromptCompiler
 from utils.outbound import sms_block_reason
@@ -1234,21 +1234,62 @@ class AgentExecutor:
         task: dict[str, Any],
     ) -> None:
         """Persist execution start to ai_agent_executions for tracking."""
+        correlation_id = task.get("correlation_id") or str(uuid.uuid4())
+        task["correlation_id"] = correlation_id
         try:
             pool = get_pool()
             await pool.execute("""
-                INSERT INTO ai_agent_executions (id, agent_name, task_type, input_data, status)
-                VALUES ($1, $2, $3, $4::jsonb, $5)
+                INSERT INTO ai_agent_executions
+                    (id, agent_name, task_type, input_data, status, correlation_id)
+                VALUES ($1, $2, $3, $4::jsonb, $5, $6)
                 ON CONFLICT (id) DO NOTHING
             """,
                 execution_id,
                 agent_name,
                 task_type,
                 json.dumps(task, default=str),
-                "running"
+                "running",
+                correlation_id,
+            )
+            # Emit context event: agent_started
+            await self._emit_context_event(
+                pool, correlation_id, "agent", execution_id,
+                agent_name, "agent_started",
+                {"task_type": task_type, "execution_id": execution_id},
+                task.get("tenant_id"),
             )
         except Exception as e:
             logger.warning(f"Failed to log execution start to ai_agent_executions: {e!r}")
+
+    async def _emit_context_event(
+        self,
+        pool,
+        correlation_id: str,
+        actor_type: str,
+        actor_id: str,
+        agent_name: str,
+        event_type: str,
+        event_data: dict,
+        tenant_id: str | None = None,
+    ) -> None:
+        """Emit a context event to the context_events table."""
+        try:
+            await pool.execute("""
+                INSERT INTO context_events
+                    (correlation_id, actor_type, actor_id, agent_name,
+                     event_type, event_data, tenant_id)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid)
+            """,
+                correlation_id,
+                actor_type,
+                actor_id,
+                agent_name,
+                event_type,
+                json.dumps(event_data, default=str),
+                tenant_id,
+            )
+        except Exception as e:
+            logger.debug("Context event emission failed (non-fatal): %s", e)
 
     async def _log_ai_agent_execution_end(
         self,
@@ -1262,19 +1303,21 @@ class AgentExecutor:
         error_message: Optional[str] = None,
     ) -> None:
         """Persist execution completion to ai_agent_executions."""
+        correlation_id = task.get("correlation_id", "")
         try:
             pool = get_pool()
             await pool.execute("""
                 INSERT INTO ai_agent_executions (
                     id, agent_name, task_type, input_data, status,
-                    output_data, execution_time_ms, error_message
+                    output_data, execution_time_ms, error_message, correlation_id
                 )
-                VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8)
+                VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8, $9)
                 ON CONFLICT (id) DO UPDATE SET
                     status = EXCLUDED.status,
                     output_data = EXCLUDED.output_data,
                     execution_time_ms = EXCLUDED.execution_time_ms,
-                    error_message = EXCLUDED.error_message
+                    error_message = EXCLUDED.error_message,
+                    correlation_id = EXCLUDED.correlation_id
             """,
                 execution_id,
                 agent_name,
@@ -1283,7 +1326,17 @@ class AgentExecutor:
                 status,
                 json.dumps(result, default=str),
                 int(duration_ms) if duration_ms is not None else None,
-                error_message
+                error_message,
+                correlation_id,
+            )
+            # Emit context event: agent_completed or agent_failed
+            event_type = "agent_completed" if status == "completed" else "agent_failed"
+            await self._emit_context_event(
+                pool, correlation_id, "agent", execution_id,
+                agent_name, event_type,
+                {"status": status, "duration_ms": int(duration_ms) if duration_ms else 0,
+                 "error": error_message},
+                task.get("tenant_id"),
             )
         except Exception as e:
             logger.warning(f"Failed to log execution completion to ai_agent_executions: {e!r}")
@@ -4071,8 +4124,11 @@ class InvoicingAgent(BaseAgent):
 
             priority = "high" if days_overdue >= 30 else ("medium" if days_overdue >= 14 else "low")
 
+            # Use tenant-scoped pool for safety
+            tenant_pool = get_tenant_pool(tenant_id)
+
             seq_id = await self._create_payment_reminder_followup(
-                pool,
+                pool, # Pass original pool to helper if it doesn't support wrapper yet, but MAIN update below must use wrapper
                 tenant_id=tenant_id,
                 invoice_id=str(invoice_id),
                 customer_name=customer_name,
@@ -4084,13 +4140,14 @@ class InvoicingAgent(BaseAgent):
             )
             if seq_id:
                 try:
-                    await pool.execute(
+                    # SECURE: Use tenant_pool and explicit tenant_id check
+                    await tenant_pool.execute(
                         """
                         UPDATE invoices
                         SET last_ai_analysis = NOW(),
                             ai_recommended_followup = COALESCE(ai_recommended_followup, '{}'::jsonb) || $2::jsonb,
                             updated_at = NOW()
-                        WHERE id = $1::uuid
+                        WHERE id = $1::uuid AND tenant_id = $3::uuid
                         """,
                         invoice_id,
                         json.dumps(
@@ -4102,6 +4159,7 @@ class InvoicingAgent(BaseAgent):
                                 "source": "invoicing_agent.schedule_follow_up",
                             }
                         ),
+                        tenant_id
                     )
                 except Exception as e:
                     self.logger.warning("Failed to update invoice followup metadata: %s", e)
@@ -4301,15 +4359,18 @@ class InvoicingAgent(BaseAgent):
                 return {"status": "error", "error": "Stripe session created without URL"}
 
             try:
-                await pool.execute(
+                # SECURE: Use tenant-scoped pool and explicit tenant check
+                tenant_pool = get_tenant_pool(tenant_id)
+                await tenant_pool.execute(
                     """
                     UPDATE invoices
                     SET stripe_payment_link = $2::text,
                         updated_at = NOW()
-                    WHERE id = $1::uuid
+                    WHERE id = $1::uuid AND tenant_id = $3::uuid
                     """,
                     invoice_id,
                     str(payment_link),
+                    tenant_id
                 )
             except Exception as e:
                 self.logger.warning("Failed to persist stripe_payment_link on invoice %s: %s", invoice_id, e)

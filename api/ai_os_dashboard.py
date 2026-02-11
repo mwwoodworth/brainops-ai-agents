@@ -1158,3 +1158,53 @@ async def get_observability_summary() -> Dict[str, Any]:
         summary["error"] = str(e)[:100]
 
     return summary
+
+
+@router.get("/invariant-engine")
+async def get_invariant_engine_status() -> Dict[str, Any]:
+    """
+    Invariant Engine daemon status and last run results.
+
+    Returns the singleton engine's run history, violation state,
+    and check configuration for the OS Status dashboard.
+    """
+    try:
+        from invariant_monitor import get_invariant_engine
+        engine = get_invariant_engine()
+        status = engine.get_status()
+
+        # Also fetch recent violations from DB for dashboard
+        from database.async_connection import get_pool, using_fallback
+        if not using_fallback():
+            pool = get_pool()
+            recent = await pool.fetch("""
+                SELECT check_name, severity, message,
+                       created_at::text, resolved
+                FROM invariant_violations
+                WHERE resolved = false
+                ORDER BY created_at DESC
+                LIMIT 20
+            """)
+            status["open_violations"] = [dict(r) for r in recent]
+
+            # RLS coverage snapshot
+            rls_stats = await pool.fetchrow("""
+                SELECT
+                    count(*) FILTER (WHERE c.relrowsecurity = true) as rls_enabled,
+                    count(*) FILTER (WHERE c.relrowsecurity = false) as rls_disabled,
+                    count(*) as total
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relkind = 'r'
+            """)
+            status["rls_coverage"] = {
+                "enabled": rls_stats["rls_enabled"],
+                "disabled": rls_stats["rls_disabled"],
+                "total": rls_stats["total"],
+                "percent": round(rls_stats["rls_enabled"] / max(rls_stats["total"], 1) * 100, 1),
+            }
+
+        return {"status": "ok", "engine": status}
+    except Exception as e:
+        logger.error("Invariant engine status error: %s", e)
+        return {"status": "error", "error": str(e)[:200]}
