@@ -621,7 +621,13 @@ class AlwaysKnowBrain:
             logger.error(f"Failed to send PagerDuty alert: {e}")
 
     async def _persist_state(self):
-        """Persist current state to database"""
+        """Persist current state to database.
+
+        NOTE: DDL (CREATE TABLE/INDEX) removed because agent_worker role
+        (app_agent_role) has no DDL permissions by design (P0-LOCK security).
+        Tables must be created via migrations. This method verifies tables
+        exist and degrades gracefully if they are missing.
+        """
         try:
             if not self._db_pool:
                 return
@@ -632,25 +638,21 @@ class AlwaysKnowBrain:
 
                 cur = conn.cursor()
 
-                # Create table if not exists
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS always_know_state (
-                        id SERIAL PRIMARY KEY,
-                        timestamp TIMESTAMPTZ DEFAULT NOW(),
-                        state_json JSONB NOT NULL,
-                        ai_agents_healthy BOOLEAN,
-                        backend_healthy BOOLEAN,
-                        database_connected BOOLEAN,
-                        aurea_operational BOOLEAN,
-                        errors_last_hour INTEGER,
-                        response_time_ms FLOAT
+                # Verify required table exists (no DDL - agent_worker has no CREATE permissions)
+                cur.execute(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = ANY(%s)",
+                    (['always_know_state'],)
+                )
+                row = cur.fetchone()
+                table_count = row[0] if row else 0
+                if table_count < 1:
+                    logger.error(
+                        "Required table always_know_state missing (found %s/1). "
+                        "Run migrations to create it.", table_count
                     )
-                """)
-
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_always_know_state_timestamp
-                    ON always_know_state(timestamp DESC)
-                """)
+                    cur.close()
+                    return
 
                 # Insert current state
                 state_dict = asdict(self.current_state)
@@ -798,7 +800,13 @@ class AlwaysKnowBrain:
             logger.error(f"UI tests failed: {e}\n{traceback.format_exc()}")
 
     async def _persist_ui_test_results(self, app_results: list[tuple[str, dict]]):
-        """Persist UI test results to database"""
+        """Persist UI test results to database.
+
+        NOTE: DDL (CREATE TABLE) removed because agent_worker role
+        (app_agent_role) has no DDL permissions by design (P0-LOCK security).
+        Tables must be created via migrations. This method verifies tables
+        exist and degrades gracefully if they are missing.
+        """
         try:
             if not self._db_pool:
                 return
@@ -809,19 +817,21 @@ class AlwaysKnowBrain:
 
                 cur = conn.cursor()
 
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ui_test_history (
-                        id SERIAL PRIMARY KEY,
-                        timestamp TIMESTAMPTZ DEFAULT NOW(),
-                        application TEXT NOT NULL,
-                        total_tests INTEGER,
-                        passed INTEGER,
-                        failed INTEGER,
-                        warnings INTEGER,
-                        duration_seconds FLOAT,
-                        results_json JSONB
+                # Verify required table exists (no DDL - agent_worker has no CREATE permissions)
+                cur.execute(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = ANY(%s)",
+                    (['ui_test_history'],)
+                )
+                row = cur.fetchone()
+                table_count = row[0] if row else 0
+                if table_count < 1:
+                    logger.error(
+                        "Required table ui_test_history missing (found %s/1). "
+                        "Run migrations to create it.", table_count
                     )
-                """)
+                    cur.close()
+                    return
 
                 for app_name, results in app_results:
                     cur.execute("""

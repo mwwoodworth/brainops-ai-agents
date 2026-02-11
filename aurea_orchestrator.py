@@ -657,131 +657,43 @@ class AUREA:
             logger.error(f"Error storing AUREA state snapshot {state_type}: {e}")
 
     def _init_database(self):
-        """Initialize AUREA's database tables - uses shared pool"""
+        """Verify AUREA's required database tables exist at startup.
+
+        NOTE: DDL (CREATE TABLE/INDEX) removed to comply with P0-LOCK security.
+        The agent_worker role (app_agent_role) has no DDL permissions by design.
+        Tables must be created via migrations, not at runtime.
+        If tables are missing, AUREA logs an error and degrades gracefully.
+        """
+        required_tables = [
+            'aurea_decisions',
+            'aurea_state',
+            'aurea_learning',
+            'aurea_cycle_metrics',
+            'aurea_autonomous_goals',
+            'aurea_patterns',
+        ]
         try:
             with _get_pooled_connection() as conn:
                 cur = conn.cursor()
-
-                # Create AUREA decision log
-                cur.execute("""
-                CREATE TABLE IF NOT EXISTS aurea_decisions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    decision_type TEXT NOT NULL,
-                    description TEXT NOT NULL,
-                    confidence FLOAT NOT NULL,
-                    impact_assessment TEXT,
-                    recommended_action TEXT,
-                    alternatives JSONB,
-                    requires_human_approval BOOLEAN DEFAULT FALSE,
-                    human_approved BOOLEAN,
-                    human_feedback TEXT,
-                    execution_status TEXT CHECK (execution_status IN (
-                        'pending', 'approved', 'rejected', 'executing', 'completed', 'failed'
-                    )),
-                    execution_result JSONB,
-                    context JSONB,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    executed_at TIMESTAMP,
-                    tenant_id UUID
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_aurea_decisions_type ON aurea_decisions(decision_type);
-                CREATE INDEX IF NOT EXISTS idx_aurea_decisions_status ON aurea_decisions(execution_status);
-                CREATE INDEX IF NOT EXISTS idx_aurea_decisions_created ON aurea_decisions(created_at DESC);
-                CREATE INDEX IF NOT EXISTS idx_aurea_decisions_tenant ON aurea_decisions(tenant_id);
-
-                -- Create AUREA system state
-                CREATE TABLE IF NOT EXISTS aurea_state (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    state_type TEXT NOT NULL,
-                    state_data JSONB NOT NULL,
-                    cycle_number INTEGER,
-                    timestamp TIMESTAMP DEFAULT NOW(),
-                    tenant_id UUID
-                );
-
-                -- Create AUREA learning log
-                CREATE TABLE IF NOT EXISTS aurea_learning (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    insight_type TEXT NOT NULL,
-                    insight TEXT NOT NULL,
-                    confidence FLOAT,
-                    source_data JSONB,
-                    applied BOOLEAN DEFAULT FALSE,
-                    impact_measured FLOAT,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    tenant_id UUID
-                );
-
-                -- Create AUREA cycle metrics
-                CREATE TABLE IF NOT EXISTS aurea_cycle_metrics (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    cycle_number INTEGER NOT NULL,
-                    timestamp TIMESTAMP DEFAULT NOW(),
-                    observations_count INTEGER,
-                    decisions_count INTEGER,
-                    actions_executed INTEGER,
-                    actions_successful INTEGER,
-                    actions_failed INTEGER,
-                    cycle_duration_seconds FLOAT,
-                    learning_insights_generated INTEGER,
-                    health_score FLOAT,
-                    autonomy_level INTEGER,
-                    patterns_detected JSONB,
-                    goals_achieved INTEGER,
-                    goals_set INTEGER,
-                    tenant_id UUID
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_aurea_cycle_metrics_cycle ON aurea_cycle_metrics(cycle_number);
-                CREATE INDEX IF NOT EXISTS idx_aurea_cycle_metrics_timestamp ON aurea_cycle_metrics(timestamp DESC);
-
-                -- Create AUREA autonomous goals
-                CREATE TABLE IF NOT EXISTS aurea_autonomous_goals (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    goal_type TEXT NOT NULL,
-                    description TEXT NOT NULL,
-                    target_metric TEXT NOT NULL,
-                    current_value FLOAT,
-                    target_value FLOAT,
-                    deadline TIMESTAMP,
-                    priority INTEGER,
-                    status TEXT CHECK (status IN ('active', 'achieved', 'failed', 'abandoned')),
-                    progress FLOAT,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    updated_at TIMESTAMP DEFAULT NOW(),
-                    achieved_at TIMESTAMP,
-                    tenant_id UUID
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_aurea_goals_status ON aurea_autonomous_goals(status);
-                CREATE INDEX IF NOT EXISTS idx_aurea_goals_priority ON aurea_autonomous_goals(priority DESC);
-
-                -- Create AUREA pattern detection log
-                CREATE TABLE IF NOT EXISTS aurea_patterns (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    pattern_type TEXT NOT NULL,
-                    pattern_description TEXT NOT NULL,
-                    confidence FLOAT,
-                    frequency INTEGER,
-                    impact_score FLOAT,
-                    pattern_data JSONB,
-                    first_detected TIMESTAMP DEFAULT NOW(),
-                    last_detected TIMESTAMP DEFAULT NOW(),
-                    tenant_id UUID
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_aurea_patterns_type ON aurea_patterns(pattern_type);
-                CREATE INDEX IF NOT EXISTS idx_aurea_patterns_confidence ON aurea_patterns(confidence DESC);
-                """)
-
-                conn.commit()
+                cur.execute(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = ANY(%s)",
+                    (required_tables,)
+                )
+                found = cur.fetchone()[0]
                 cur.close()
 
-            logger.info("✅ AUREA database initialized")
+            if found < len(required_tables):
+                logger.error(
+                    "Required AUREA tables missing (found %s/%s). "
+                    "Run migrations to create them. AUREA will operate in degraded mode.",
+                    found, len(required_tables)
+                )
+            else:
+                logger.info("AUREA database tables verified (%s/%s present)", found, len(required_tables))
 
         except Exception as e:
-            logger.error(f"❌ Failed to initialize AUREA database: {e}")
+            logger.error("Failed to verify AUREA database tables: %s", e)
 
     async def orchestrate(self):
         """Main orchestration loop - the heartbeat of AUREA"""
@@ -2059,29 +1971,25 @@ class AUREA:
                     WHERE id = %s
                     """, (decision.id,))
 
-                    # Create notification if table exists
+                    # Insert notification if task_notifications table exists
+                    # NOTE: DDL removed — agent_worker has no CREATE TABLE permission (P0-LOCK).
                     try:
-                        cur.execute("""
-                            CREATE TABLE IF NOT EXISTS task_notifications (
-                                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                title TEXT NOT NULL,
-                                message TEXT NOT NULL,
-                                type TEXT NOT NULL,
-                                status TEXT DEFAULT 'unread',
-                                created_at TIMESTAMP DEFAULT NOW(),
-                                tenant_id UUID
-                            )
-                        """)
-
-                        cur.execute("""
-                            INSERT INTO task_notifications (title, message, type, tenant_id)
-                            VALUES (%s, %s, %s, %s)
-                        """, (
-                            f"Approval Required: {decision.type.value}",
-                            f"Decision requires approval: {decision.description}",
-                            "approval_request",
-                            self.tenant_id
-                        ))
+                        cur.execute(
+                            "SELECT 1 FROM information_schema.tables "
+                            "WHERE table_schema = 'public' AND table_name = 'task_notifications'"
+                        )
+                        if cur.fetchone():
+                            cur.execute("""
+                                INSERT INTO task_notifications (title, message, type, tenant_id)
+                                VALUES (%s, %s, %s, %s)
+                            """, (
+                                f"Approval Required: {decision.type.value}",
+                                f"Decision requires approval: {decision.description}",
+                                "approval_request",
+                                self.tenant_id
+                            ))
+                        else:
+                            logger.warning("task_notifications table missing — skipping notification")
                     except Exception as notify_err:
                         logger.warning(f"Could not create notification: {notify_err}")
 

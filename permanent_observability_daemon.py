@@ -446,7 +446,13 @@ class PermanentObservabilityDaemon:
             logger.warning(f"[{severity.value.upper()}] {service}: {message}")
 
     async def _flush_events(self) -> None:
-        """Persist queued events to the brain"""
+        """Persist queued events to the brain.
+
+        NOTE: DDL (CREATE TABLE/INDEX) removed because agent_worker role
+        (app_agent_role) has no DDL permissions by design (P0-LOCK security).
+        Tables must be created via migrations. This method verifies tables
+        exist and degrades gracefully if they are missing.
+        """
         if not self._event_queue:
             return
 
@@ -463,28 +469,18 @@ class PermanentObservabilityDaemon:
 
             pool = get_pool()
 
-            # Ensure table exists
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_observability_events (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    event_id TEXT UNIQUE NOT NULL,
-                    event_type TEXT NOT NULL,
-                    service TEXT NOT NULL,
-                    severity TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    details JSONB DEFAULT '{}',
-                    timestamp TIMESTAMPTZ NOT NULL,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
+            # Verify required table exists (no DDL - agent_worker has no CREATE permissions)
+            row = await pool.fetchval(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = ANY($1)",
+                ['ai_observability_events']
+            )
+            if row < 1:
+                logger.error(
+                    "Required table ai_observability_events missing (found %s/1). "
+                    "Run migrations to create it.", row
                 )
-            """)
-
-            # Create indexes if not exist
-            await pool.execute("""
-                CREATE INDEX IF NOT EXISTS idx_obs_events_service ON ai_observability_events(service);
-                CREATE INDEX IF NOT EXISTS idx_obs_events_severity ON ai_observability_events(severity);
-                CREATE INDEX IF NOT EXISTS idx_obs_events_timestamp ON ai_observability_events(timestamp DESC);
-                CREATE INDEX IF NOT EXISTS idx_obs_events_type ON ai_observability_events(event_type);
-            """)
+                return
 
             # Batch insert events
             for event in events_to_persist:
