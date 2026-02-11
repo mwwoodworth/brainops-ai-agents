@@ -282,172 +282,42 @@ class AutonomousRevenueSystem:
         logger.info("Autonomous Revenue System initialized")
 
     def _ensure_tables(self):
-        """Ensure revenue tables exist"""
+        """Verify revenue tables exist in the database.
+
+        NOTE: DDL (CREATE TABLE / CREATE INDEX / CREATE EXTENSION / ALTER TABLE)
+        was removed because the agent_worker role (app_agent_role) correctly does
+        not have DDL permissions. Tables and indexes are created by migrations,
+        not at runtime. This method now verifies existence only.
+        """
+        required_tables = [
+            'revenue_leads', 'revenue_opportunities', 'revenue_actions',
+            'email_templates', 'revenue_metrics', 'ai_email_sequences',
+            'ai_competitor_analysis', 'ai_churn_predictions',
+            'ai_upsell_recommendations', 'ai_revenue_forecasts',
+            'unified_brain_logs',
+        ]
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
-
-        # Ensure gen_random_uuid() is available for DEFAULTs (Supabase typically provides pgcrypto).
         try:
-            cursor.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+            cursor.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = ANY(%s)",
+                (required_tables,),
+            )
+            found = {row[0] for row in cursor.fetchall()}
+            missing = set(required_tables) - found
+            if missing:
+                logger.error(
+                    "Revenue tables missing (run migrations): %s",
+                    ", ".join(sorted(missing)),
+                )
+            else:
+                logger.info("All %d revenue tables verified", len(required_tables))
         except Exception as exc:
-            conn.rollback()
-            logger.debug("Skipping pgcrypto extension ensure: %s", exc)
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS revenue_leads (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                company_name VARCHAR(255) NOT NULL,
-                contact_name VARCHAR(255),
-                email VARCHAR(255),
-                phone VARCHAR(50),
-                website VARCHAR(255),
-                location VARCHAR(255),
-                stage VARCHAR(50) DEFAULT 'new',
-                score FLOAT DEFAULT 0.0,
-                value_estimate FLOAT DEFAULT 0.0,
-                source VARCHAR(100),
-                metadata JSONB DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                last_contact TIMESTAMPTZ,
-                next_action VARCHAR(50),
-                next_action_date TIMESTAMPTZ,
-                assigned_agent_id UUID
-            );
-
-            CREATE TABLE IF NOT EXISTS revenue_opportunities (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                lead_id UUID REFERENCES revenue_leads(id),
-                title VARCHAR(255),
-                value FLOAT,
-                probability FLOAT DEFAULT 0.5,
-                expected_close_date DATE,
-                stage VARCHAR(50),
-                notes TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                closed_at TIMESTAMPTZ,
-                won BOOLEAN
-            );
-
-            CREATE TABLE IF NOT EXISTS revenue_actions (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                lead_id UUID REFERENCES revenue_leads(id),
-                action_type VARCHAR(50),
-                action_data JSONB,
-                result JSONB,
-                success BOOLEAN,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                executed_by VARCHAR(100)
-            );
-
-            CREATE TABLE IF NOT EXISTS email_templates (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                template_type VARCHAR(50),
-                subject VARCHAR(255),
-                body TEXT,
-                variables JSONB,
-                performance_score FLOAT DEFAULT 0.5,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS revenue_metrics (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                metric_date DATE DEFAULT CURRENT_DATE,
-                leads_generated INT DEFAULT 0,
-                leads_qualified INT DEFAULT 0,
-                proposals_sent INT DEFAULT 0,
-                deals_closed INT DEFAULT 0,
-                revenue_generated FLOAT DEFAULT 0.0,
-                conversion_rate FLOAT DEFAULT 0.0,
-                avg_deal_size FLOAT DEFAULT 0.0,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            -- Create indexes
-            CREATE INDEX IF NOT EXISTS idx_revenue_leads_stage ON revenue_leads(stage);
-            CREATE INDEX IF NOT EXISTS idx_revenue_leads_score ON revenue_leads(score DESC);
-            CREATE INDEX IF NOT EXISTS idx_revenue_opportunities_value ON revenue_opportunities(value DESC);
-            CREATE INDEX IF NOT EXISTS idx_revenue_actions_lead ON revenue_actions(lead_id);
-
-            -- New enhancement tables
-            CREATE TABLE IF NOT EXISTS ai_email_sequences (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                lead_id UUID REFERENCES revenue_leads(id),
-                sequence_type VARCHAR(50),
-                emails JSONB DEFAULT '[]'::jsonb,
-                status VARCHAR(50) DEFAULT 'draft',
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                executed_at TIMESTAMPTZ
-            );
-
-            CREATE TABLE IF NOT EXISTS ai_competitor_analysis (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                lead_id UUID REFERENCES revenue_leads(id),
-                competitors JSONB DEFAULT '[]'::jsonb,
-                analysis JSONB DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS ai_churn_predictions (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                lead_id UUID REFERENCES revenue_leads(id),
-                churn_probability FLOAT DEFAULT 0.0,
-                risk_level VARCHAR(20),
-                prediction_data JSONB DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS ai_upsell_recommendations (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                lead_id UUID REFERENCES revenue_leads(id),
-                recommendations JSONB DEFAULT '[]'::jsonb,
-                total_potential FLOAT DEFAULT 0.0,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS ai_revenue_forecasts (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                months_ahead INT,
-                forecast_data JSONB DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS unified_brain_logs (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                system VARCHAR(100),
-                action VARCHAR(100),
-                data JSONB DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            -- Create indexes for new tables
-            CREATE INDEX IF NOT EXISTS idx_email_sequences_lead ON ai_email_sequences(lead_id);
-            CREATE INDEX IF NOT EXISTS idx_competitor_analysis_lead ON ai_competitor_analysis(lead_id);
-            CREATE INDEX IF NOT EXISTS idx_churn_predictions_lead ON ai_churn_predictions(lead_id);
-            CREATE INDEX IF NOT EXISTS idx_upsell_recommendations_lead ON ai_upsell_recommendations(lead_id);
-            CREATE INDEX IF NOT EXISTS idx_unified_brain_logs_system ON unified_brain_logs(system);
-            CREATE INDEX IF NOT EXISTS idx_unified_brain_logs_action ON unified_brain_logs(action);
-            CREATE INDEX IF NOT EXISTS idx_unified_brain_logs_created ON unified_brain_logs(created_at DESC);
-        """)
-
-        # Post-create migrations / safety indexes
-        cursor.execute("ALTER TABLE IF EXISTS revenue_leads ADD COLUMN IF NOT EXISTS location VARCHAR(255);")
-        cursor.execute(
-            """
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND table_name = 'revenue_metrics'
-              AND column_name = 'metric_date'
-            """
-        )
-        if cursor.fetchone():
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_revenue_metrics_metric_date ON revenue_metrics(metric_date);")
-
-        conn.commit()
-        cursor.close()
-        conn.close()
+            logger.warning("Revenue table verification failed: %s", exc)
+        finally:
+            cursor.close()
+            conn.close()
 
     async def identify_new_leads(self, criteria: dict[str, Any]) -> list[str]:
         """Autonomously identify new leads based on criteria"""
