@@ -5312,6 +5312,38 @@ async def search_memory(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/memory/unified-search", dependencies=SECURED_DEPENDENCIES)
+async def unified_search(
+    query: str = Query(..., description="Search query across all memory tiers"),
+    limit: int = Query(20, description="Max results"),
+    tenant_id: str = Query(None, description="Optional tenant filter"),
+):
+    """
+    Unified cross-table search across memory, documents, and episodic memory.
+    Returns ranked results using RRF hybrid search.
+    """
+    if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory') or not app.state.memory:
+        raise HTTPException(status_code=503, detail="Memory system not available")
+
+    try:
+        memory_manager = app.state.memory
+        results = memory_manager.unified_retrieval(
+            query=query,
+            limit=limit,
+            tenant_id=tenant_id,
+        )
+        return {
+            "success": True,
+            "query": query,
+            "count": len(results),
+            "results": results,
+            "sources": list({r.get("type") for r in results}),
+        }
+    except Exception as e:
+        logger.error(f"Unified search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.post("/memory/backfill-embeddings", dependencies=SECURED_DEPENDENCIES)
 async def backfill_embeddings(
     batch_size: int = Query(100, description="Batch size per run"),
