@@ -200,10 +200,11 @@ class SelfAwareAI:
                 "ai_learning_from_mistakes",
         ]
         try:
-            from database import get_pool
             from database.verify_tables import verify_tables_async
-            pool = get_pool()
-            ok = await verify_tables_async(required_tables, pool, module_name="ai_self_awareness")
+            if not self.db_pool:
+                logger.warning("[ai_self_awareness] No db_pool available, skipping table verification")
+                return
+            ok = await verify_tables_async(required_tables, self.db_pool, module_name="ai_self_awareness")
             if not ok:
                 return
             self._tables_initialized = True

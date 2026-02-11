@@ -174,7 +174,7 @@ class LeadNurturingSystem:
         ]
         try:
             from database.verify_tables import verify_tables_sync
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**_get_db_config())
             cursor = conn.cursor()
             ok = verify_tables_sync(required_tables, cursor, module_name="lead_nurturing_system")
             cursor.close()

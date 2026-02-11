@@ -52,8 +52,13 @@ class ScheduledTestConfig(BaseModel):
     enabled: bool = True
 
 
+_tables_verified = False
+
 async def _ensure_tables():
     """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+    global _tables_verified
+    if _tables_verified:
+        return
     required_tables = [
             "ui_test_results",
             "ui_test_schedules",
@@ -65,7 +70,7 @@ async def _ensure_tables():
         ok = await verify_tables_async(required_tables, pool, module_name="ui_testing")
         if not ok:
             return
-        self._tables_initialized = True
+        _tables_verified = True
     except Exception as exc:
         logger.error("Table verification failed: %s", exc)
 async def _persist_result(test_id: str, result: dict[str, Any]):
