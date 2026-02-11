@@ -168,26 +168,19 @@ class UnifiedMemoryManager:
                 return None
 
     def log_to_brain(self, system: str, action: str, data: dict[str, Any]) -> None:
-        """Log significant events to the unified brain logs"""
+        """Log significant events to the unified brain logs.
+
+        NOTE: The unified_brain_logs table MUST already exist in the database.
+        DDL (CREATE TABLE) was removed because the agent_worker role (app_agent_role)
+        correctly does not have DDL permissions. The table is created by migrations,
+        not at runtime.
+        """
         try:
             import uuid
 
-            # Use shared pool if available, otherwise direct connection
             with self._get_cursor() as cur:
                 if not cur:
                     return
-
-                # Ensure table exists (idempotent)
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS unified_brain_logs (
-                        id UUID PRIMARY KEY,
-                        system TEXT NOT NULL,
-                        action TEXT NOT NULL,
-                        data JSONB,
-                        created_at TIMESTAMP DEFAULT NOW()
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_unified_brain_logs_created ON unified_brain_logs(created_at DESC);
-                """)
 
                 cur.execute("""
                     INSERT INTO unified_brain_logs (id, system, action, data, created_at)
@@ -198,11 +191,6 @@ class UnifiedMemoryManager:
                     action,
                     json.dumps(data, cls=CustomJSONEncoder),
                 ))
-
-                # Commit if we own the connection (in shared pool context manager handles commit usually,
-                # but explicit commit ensures persistence if auto-commit isn't on)
-                if self.conn:
-                    self.conn.commit()
 
         except Exception as exc:
             logger.warning("Failed to log to unified brain: %s", exc, exc_info=True)

@@ -127,7 +127,13 @@ class UnifiedBrain:
                 raise
 
     async def _ensure_table(self):
-        """Ensure the unified_brain table exists"""
+        """Verify the unified_brain and brain_references tables exist.
+
+        NOTE: DDL (CREATE TABLE / CREATE INDEX / CREATE EXTENSION) was removed
+        because the agent_worker role (app_agent_role) correctly does not have DDL
+        permissions. Tables and indexes are created by migrations, not at runtime.
+        This method now simply verifies existence and sets the checked flag.
+        """
         if self._table_checked:
             return
 
@@ -135,78 +141,22 @@ class UnifiedBrain:
         pool = get_pool()
 
         try:
-            # First ensure vector extension exists
-            await pool.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-
-            # Create main table with enhanced columns
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS unified_brain (
-                    id SERIAL PRIMARY KEY,
-                    key TEXT UNIQUE NOT NULL,
-                    value JSONB NOT NULL,
-                    category TEXT NOT NULL,
-                    priority TEXT NOT NULL,
-                    last_updated TIMESTAMPTZ DEFAULT NOW(),
-                    source TEXT,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    access_count INT DEFAULT 0,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-
-                    -- NEW ENHANCED FEATURES
-                    embedding vector(1536),  -- OpenAI embedding dimension
-                    summary TEXT,  -- Auto-generated summary
-                    importance_score FLOAT DEFAULT 0.5,  -- Calculated importance
-                    expires_at TIMESTAMPTZ,  -- Optional TTL
-                    last_accessed TIMESTAMPTZ DEFAULT NOW(),
-                    access_frequency FLOAT DEFAULT 0.0,  -- Access per day
-                    related_keys TEXT[],  -- Cross-references
-                    tags TEXT[]  -- Searchable tags
-                );
-            """)
-
-            # Create indexes
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_unified_brain_key ON unified_brain(key);")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_unified_brain_category ON unified_brain(category);")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_unified_brain_priority ON unified_brain(priority);")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_unified_brain_updated ON unified_brain(last_updated DESC);")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_unified_brain_importance ON unified_brain(importance_score DESC);")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_unified_brain_expires ON unified_brain(expires_at) WHERE expires_at IS NOT NULL;")
-
-            # Vector similarity index (IVFFlat for fast approximate search)
-            try:
-                await pool.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_unified_brain_embedding ON unified_brain
-                    USING ivfflat (embedding vector_cosine_ops)
-                    WITH (lists = 100);
-                """)
-            except Exception as e:
-                logger.warning(f"⚠️ Could not create vector index (may need more data): {e}")
-
-            # GIN indexes for array searching
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_unified_brain_tags ON unified_brain USING GIN(tags);")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_unified_brain_related ON unified_brain USING GIN(related_keys);")
-
-            # Create cross-reference tracking table
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS brain_references (
-                    id SERIAL PRIMARY KEY,
-                    from_key TEXT NOT NULL,
-                    to_key TEXT NOT NULL,
-                    reference_type TEXT NOT NULL,  -- 'related', 'superseded', 'depends_on', 'derived_from'
-                    strength FLOAT DEFAULT 1.0,  -- How strong is this relationship
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    UNIQUE(from_key, to_key, reference_type)
-                );
-            """)
-
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_brain_ref_from ON brain_references(from_key);")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_brain_ref_to ON brain_references(to_key);")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_brain_ref_type ON brain_references(reference_type);")
+            # Verify tables exist (SELECT only, no DDL)
+            row = await pool.fetchval(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name IN ('unified_brain', 'brain_references')"
+            )
+            if row < 2:
+                logger.error(
+                    "unified_brain or brain_references table missing "
+                    "(found %s/2). Run migrations to create them.", row
+                )
+                return
 
             self._table_checked = True
-            logger.info("✅ UnifiedBrain enhanced table ensured with vector search")
+            logger.info("✅ UnifiedBrain tables verified (unified_brain + brain_references)")
         except Exception as e:
-            logger.warning(f"⚠️ Table creation (may already exist): {e}")
+            logger.warning(f"⚠️ Table verification failed: {e}")
 
     async def _init_embedded_memory(self):
         """Initialize embedded memory system for RAG search - LAZY"""
