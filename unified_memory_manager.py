@@ -1301,12 +1301,45 @@ class UnifiedMemoryManager:
                 except Exception as doc_exc:
                     logger.warning("Document search failed (table/func missing?): %s", doc_exc)
 
+                # 3. Search Episodic Memory
+                try:
+                    cur.execute(
+                        """
+                        SELECT id, session_id, episode_type, question, objective,
+                               outcome, outcome_score, created_at,
+                               CASE WHEN %s::vector IS NOT NULL
+                                    THEN 1 - (embedding <=> %s::vector)
+                                    ELSE 0.5 END as score
+                        FROM episodic_memory
+                        WHERE embedding IS NOT NULL
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                        """,
+                        (embedding, embedding, embedding, limit)
+                    )
+                    epi_rows = cur.fetchall()
+                    for row in epi_rows:
+                        results.append({
+                            "id": str(row["id"]),
+                            "content": {
+                                "question": row.get("question"),
+                                "objective": row.get("objective"),
+                                "outcome": row.get("outcome"),
+                            },
+                            "type": "episode",
+                            "episode_type": row.get("episode_type"),
+                            "session_id": row.get("session_id"),
+                            "score": row["score"]
+                        })
+                except Exception as epi_exc:
+                    logger.warning("Episodic recall in unified_retrieval failed: %s", epi_exc)
+
         except Exception as e:
             logger.error("Unified retrieval failed: %s", e, exc_info=True)
             return []
 
         # Sort combined results by score descending
-        results.sort(key=lambda x: x["score"], reverse=True)
+        results.sort(key=lambda x: x.get("score", 0), reverse=True)
         return results[:limit]
 
 
