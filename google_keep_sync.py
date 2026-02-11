@@ -188,11 +188,11 @@ class KeepSyncAgent:
             "consciousness": "/consciousness/status",
             "self_heal": "/self-heal/check",
             "awareness": "/system/awareness",
-            "scheduler": "/agents/schedules",
-            "system_events": "/system/events?limit=5",
-            "brain_recent": "/brain/recent?limit=5",
+            "scheduler": "/agents/status",
+            "system_events": "/system/alerts?limit=5",
+            "brain_recent": "/brain/context",
             "deployments": "/devops/deployments?limit=3",
-            "brainstorm": "/brain/query?category=brainstorm&limit=10",
+            "brainstorm": "/brain/category/brainstorm",
         }
         agents_data, agents_ok, agents_total = self._fetch_batch(
             API_SELF, agents_endpoints, h, timeout=8
@@ -382,12 +382,12 @@ class KeepSyncAgent:
                 lines.append(f"  {jname[:50]}")
             lines.append("")
 
-        # RECENT EVENTS
-        event_list = events.get("events", []) if isinstance(events, dict) else (events if isinstance(events, list) else [])
+        # RECENT EVENTS / ALERTS
+        event_list = (events.get("events") or events.get("alerts") or []) if isinstance(events, dict) else (events if isinstance(events, list) else [])
         if event_list:
             lines.append(f"=== RECENT EVENTS ===")
             for ev in event_list[:5]:
-                etype = ev.get("type", "?")
+                etype = ev.get("type") or ev.get("alert_type") or ev.get("severity") or "?"
                 emsg = (ev.get("message") or ev.get("description") or "")[:60]
                 lines.append(f"  [{etype}] {emsg}")
             lines.append("")
@@ -431,7 +431,12 @@ class KeepSyncAgent:
         ts = now.strftime("%Y-%m-%d %H:%M UTC")
 
         brainstorm = data.get("brainstorm", {})
-        entries = brainstorm.get("entries", brainstorm.get("results", []))
+        if isinstance(brainstorm, list):
+            entries = brainstorm
+        elif isinstance(brainstorm, dict):
+            entries = brainstorm.get("entries", brainstorm.get("results", []))
+        else:
+            entries = []
         if not isinstance(entries, list):
             entries = []
 
