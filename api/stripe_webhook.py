@@ -397,6 +397,41 @@ def verify_stripe_signature(payload: bytes, sig_header: str, webhook_secret: str
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
 
+async def _dedup_event(event_id: str, event_type: str) -> bool:
+    """Top-level dedup using the Stripe event ID (evt_...).
+    Returns True if the event was already processed (skip it)."""
+    try:
+        pool = _get_db_pool()
+        # Atomic insert-or-skip using the top-level event.id
+        result = await pool.fetchval("""
+            INSERT INTO stripe_webhook_events
+                (event_id, event_type, status, attempt_count, expires_at, created_at, updated_at)
+            VALUES ($1, $2, 'processing', 1, NOW() + INTERVAL '5 minutes', NOW(), NOW())
+            ON CONFLICT (event_id) DO NOTHING
+            RETURNING event_id
+        """, event_id, event_type)
+        if result is None:
+            # Row already existed — duplicate event
+            logger.info("Duplicate Stripe event skipped: %s (%s)", event_id, event_type)
+            return True
+        return False
+    except Exception as exc:
+        # If dedup check fails (e.g., table missing), process anyway to avoid data loss
+        logger.warning("Dedup check failed, processing event anyway: %s", exc)
+        return False
+
+
+async def _mark_event_status(event_id: str, status: str):
+    """Update the stripe_webhook_events row after processing."""
+    try:
+        pool = _get_db_pool()
+        await pool.execute("""
+            UPDATE stripe_webhook_events SET status = $1 WHERE event_id = $2
+        """, status, event_id)
+    except Exception as exc:
+        logger.warning("Failed to mark event %s as %s: %s", event_id, status, exc)
+
+
 async def process_stripe_event(event: dict, background_tasks: BackgroundTasks) -> dict:
     """Process a verified Stripe event."""
     event_type = event.get("type", "unknown")
@@ -408,31 +443,39 @@ async def process_stripe_event(event: dict, background_tasks: BackgroundTasks) -
 
     logger.info(f"Processing Stripe event: {event_type} ({event_id})")
 
+    # ── Top-level dedup: skip if event.id already processed ───────────
+    if await _dedup_event(event_id, event_type):
+        return {"status": "duplicate", "event_type": event_type, "event_id": event_id}
+
     try:
         if event_type == "checkout.session.completed":
-            return await handle_checkout_completed(data, background_tasks, livemode=livemode)
+            result = await handle_checkout_completed(data, background_tasks, livemode=livemode)
         elif event_type == "customer.subscription.created":
-            return await handle_subscription_created(data, livemode=livemode)
+            result = await handle_subscription_created(data, livemode=livemode)
         elif event_type == "customer.subscription.updated":
-            return await handle_subscription_updated(data, livemode=livemode)
+            result = await handle_subscription_updated(data, livemode=livemode)
         elif event_type == "customer.subscription.deleted":
-            return await handle_subscription_deleted(data, livemode=livemode)
+            result = await handle_subscription_deleted(data, livemode=livemode)
         elif event_type in {"invoice.paid", "invoice.payment_succeeded"}:
-            return await handle_invoice_paid(data, livemode=livemode)
+            result = await handle_invoice_paid(data, livemode=livemode)
         elif event_type == "invoice.payment_failed":
-            return await handle_payment_failed(data, livemode=livemode)
+            result = await handle_payment_failed(data, livemode=livemode)
         elif event_type == "charge.succeeded":
-            return await handle_charge_succeeded(data, livemode=livemode)
+            result = await handle_charge_succeeded(data, livemode=livemode)
         elif event_type == "charge.refunded":
-            return await handle_charge_refunded(data, livemode=livemode)
+            result = await handle_charge_refunded(data, livemode=livemode)
         elif event_type == "charge.dispute.created":
-            return await handle_dispute_created(data, livemode=livemode)
+            result = await handle_dispute_created(data, livemode=livemode)
         else:
             logger.info(f"Unhandled event type: {event_type}")
-            return {"status": "ignored", "event_type": event_type}
+            result = {"status": "ignored", "event_type": event_type}
+
+        await _mark_event_status(event_id, "succeeded")
+        return result
 
     except Exception as e:
         logger.error(f"Error processing {event_type}: {e}")
+        await _mark_event_status(event_id, "failed")
         return {"status": "error", "event_type": event_type, "error": str(e)}
 
 
