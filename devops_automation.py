@@ -349,19 +349,19 @@ class DevOpsAutomation:
 
             pool = get_pool()
 
-            # Ensure table exists
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_devops_knowledge (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    key TEXT UNIQUE NOT NULL,
-                    value JSONB NOT NULL,
-                    category TEXT NOT NULL,
-                    source TEXT DEFAULT 'devops_automation',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    expires_at TIMESTAMPTZ,
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
+            # Verify required table exists (no DDL - agent_worker has no DDL perms)
+            from database.verify_tables import verify_tables_async
+            if not await verify_tables_async(["ai_devops_knowledge"], pool, module_name="devops_automation"):
+                logger.error("ai_devops_knowledge table missing - falling back to in-memory cache")
+                self._knowledge_cache[key] = KnowledgeEntry(
+                    key=key,
+                    value=value,
+                    category=category,
+                    source="devops_automation",
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                    expires_at=expires_at
                 )
-            """)
+                return True
 
             await pool.execute("""
                 INSERT INTO ai_devops_knowledge (key, value, category, source, expires_at)

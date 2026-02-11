@@ -247,67 +247,6 @@ class UIPlaywrightTestStore:
 
     async def _ensure_schema(self) -> None:
         pool = get_pool()
-        await pool.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ui_test_results (
-                id SERIAL PRIMARY KEY,
-                test_id VARCHAR(64) UNIQUE NOT NULL,
-                application VARCHAR(128),
-                url TEXT,
-                status VARCHAR(32) NOT NULL,
-                severity VARCHAR(32),
-                message TEXT,
-                ai_analysis JSONB,
-                performance_metrics JSONB,
-                accessibility_issues JSONB,
-                suggestions JSONB,
-                routes_tested INTEGER DEFAULT 0,
-                issues_found INTEGER DEFAULT 0,
-                started_at TIMESTAMPTZ,
-                completed_at TIMESTAMPTZ DEFAULT NOW(),
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            )
-            """
-        )
-        await pool.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_ui_test_app
-            ON ui_test_results(application);
-            """
-        )
-        await pool.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_ui_test_completed
-            ON ui_test_results(completed_at DESC);
-            """
-        )
-        await pool.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ui_test_issues (
-                id SERIAL PRIMARY KEY,
-                test_id VARCHAR(64) NOT NULL,
-                application VARCHAR(128),
-                url TEXT,
-                severity VARCHAR(32),
-                category VARCHAR(64),
-                description TEXT,
-                location TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            )
-            """
-        )
-        await pool.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_ui_test_issues_test
-            ON ui_test_issues(test_id);
-            """
-        )
-        await pool.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_ui_test_issues_severity
-            ON ui_test_issues(severity);
-            """
-        )
 
 
 class UIPlaywrightTestRunner:

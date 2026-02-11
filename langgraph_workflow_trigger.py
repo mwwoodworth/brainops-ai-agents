@@ -82,25 +82,6 @@ class LangGraphWorkflowTrigger:
             return
 
         async with self._pool.acquire() as conn:
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS workflow_event_triggers (
-                    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-                    event_type VARCHAR(100) NOT NULL,
-                    workflow_id UUID NOT NULL,
-                    workflow_name VARCHAR(255),
-                    priority INTEGER DEFAULT 50,
-                    conditions JSONB DEFAULT '{}',
-                    enabled BOOLEAN DEFAULT true,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_workflow_event_triggers_event_type
-                    ON workflow_event_triggers(event_type) WHERE enabled = true;
-
-                CREATE INDEX IF NOT EXISTS idx_workflow_event_triggers_workflow
-                    ON workflow_event_triggers(workflow_id);
-            """)
             logger.info("workflow_event_triggers table ready")
 
     async def trigger_for_event(self, event_type: str, event_payload: dict,

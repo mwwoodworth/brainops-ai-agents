@@ -276,60 +276,24 @@ class SelfHealingReconciler:
         self._init_database()
 
     def _init_database(self):
-        """Initialize self-healing tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "healing_incidents",
+                "healing_reconciliations",
+                "healing_metrics_history",
+        ]
         try:
-            with _get_pooled_connection() as conn:
-                if not conn:
-                    logger.warning("Self-healing database init skipped - no connection available")
-                    return
-                cur = conn.cursor()
-
-                cur.execute("""
-            CREATE TABLE IF NOT EXISTS healing_incidents (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                component_id TEXT NOT NULL,
-                severity TEXT NOT NULL,
-                incident_type TEXT NOT NULL,
-                description TEXT,
-                metrics JSONB,
-                remediation_actions JSONB,
-                human_escalated BOOLEAN DEFAULT FALSE,
-                detected_at TIMESTAMP DEFAULT NOW(),
-                resolved_at TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS healing_reconciliations (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                cycle_id TEXT NOT NULL,
-                components_checked INT,
-                incidents_detected INT,
-                remediations_executed INT,
-                success BOOLEAN,
-                details JSONB,
-                started_at TIMESTAMP,
-                ended_at TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS healing_metrics_history (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                component_id TEXT NOT NULL,
-                component_type TEXT,
-                metrics JSONB NOT NULL,
-                recorded_at TIMESTAMP DEFAULT NOW()
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_healing_incidents_component ON healing_incidents(component_id);
-            CREATE INDEX IF NOT EXISTS idx_healing_incidents_time ON healing_incidents(detected_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_healing_metrics_component ON healing_metrics_history(component_id);
-            CREATE INDEX IF NOT EXISTS idx_healing_metrics_time ON healing_metrics_history(recorded_at DESC);
-                """)
-
-                conn.commit()
-                cur.close()
-                logger.info("✅ Self-healing database initialized")
-        except Exception as e:
-            logger.warning(f"Self-healing database init failed: {e}")
-
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            ok = verify_tables_sync(required_tables, cursor, module_name="self_healing_reconciler")
+            cursor.close()
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def start_reconciliation_loop(self):
         """Start the continuous reconciliation loop"""
         self.running = True

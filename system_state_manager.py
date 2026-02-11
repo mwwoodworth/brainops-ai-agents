@@ -118,98 +118,26 @@ class SystemStateManager:
         return psycopg2.connect(**self.db_config)
 
     def _initialize_database(self):
-        """Initialize database tables for state management"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_system_state",
+                "ai_component_state",
+                "ai_state_transitions",
+                "ai_system_alerts",
+                "ai_recovery_actions",
+        ]
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
-
-            # Create system state table (aligns with production schema)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_system_state (
-                    id SERIAL PRIMARY KEY,
-                    state JSONB NOT NULL DEFAULT '{}'::jsonb,
-                    last_updated TIMESTAMPTZ DEFAULT NOW(),
-                    snapshot_id UUID DEFAULT gen_random_uuid()
-                )
-            """)
-
-            # Create component state table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_component_state (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    component VARCHAR(100) NOT NULL,
-                    status VARCHAR(50) NOT NULL,
-                    last_check TIMESTAMPTZ DEFAULT NOW(),
-                    uptime_seconds INT DEFAULT 0,
-                    error_count INT DEFAULT 0,
-                    success_rate FLOAT DEFAULT 100.0,
-                    latency_ms FLOAT DEFAULT 0.0,
-                    health_score FLOAT DEFAULT 100.0,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    dependencies TEXT[] DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW(),
-                    UNIQUE(component)
-                )
-            """)
-
-            # Create state transitions table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_state_transitions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    component VARCHAR(100) NOT NULL,
-                    from_state VARCHAR(50),
-                    to_state VARCHAR(50) NOT NULL,
-                    trigger VARCHAR(255),
-                    reason TEXT,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    transition_time TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create alerts table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_system_alerts (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    alert_type VARCHAR(50) NOT NULL,
-                    severity VARCHAR(20) NOT NULL,
-                    component VARCHAR(100),
-                    message TEXT NOT NULL,
-                    details JSONB DEFAULT '{}'::jsonb,
-                    status VARCHAR(50) DEFAULT 'active',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    acknowledged_at TIMESTAMPTZ,
-                    resolved_at TIMESTAMPTZ,
-                    resolution_notes TEXT
-                )
-            """)
-
-            # Create recovery actions table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_recovery_actions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    component VARCHAR(100) NOT NULL,
-                    error_type VARCHAR(255) NOT NULL,
-                    action_taken TEXT NOT NULL,
-                    success BOOLEAN DEFAULT false,
-                    execution_time_ms INT,
-                    error_message TEXT,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    executed_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            conn.commit()
-            logger.info("System state tables initialized successfully")
-
-        except Exception as e:
-            logger.error(f"Error initializing state tables: {e}")
-            if conn:
-                conn.rollback()
-        finally:
-            if conn:
-                conn.close()
-
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            ok = verify_tables_sync(required_tables, cursor, module_name="system_state_manager")
+            cursor.close()
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     def _load_recovery_procedures(self):
         """Load automated recovery procedures"""
         self.recovery_procedures = {

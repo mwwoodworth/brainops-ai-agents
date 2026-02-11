@@ -124,113 +124,16 @@ class ConversionAnalyticsEngine:
         try:
             with conn.cursor() as cur:
                 # Funnel snapshots
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS conversion_funnel_snapshots (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        snapshot_date DATE NOT NULL,
-                        stage VARCHAR(50) NOT NULL,
-                        leads_in_stage INT DEFAULT 0,
-                        leads_entered INT DEFAULT 0,
-                        leads_converted INT DEFAULT 0,
-                        leads_lost INT DEFAULT 0,
-                        conversion_rate FLOAT,
-                        avg_days_in_stage FLOAT,
-                        total_value FLOAT DEFAULT 0,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        UNIQUE(snapshot_date, stage)
-                    )
-                """)
 
                 # Stage transitions
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS stage_transitions (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        lead_id UUID NOT NULL,
-                        from_stage VARCHAR(50),
-                        to_stage VARCHAR(50) NOT NULL,
-                        transition_reason VARCHAR(255),
-                        days_in_previous_stage FLOAT,
-                        deal_value FLOAT,
-                        transitioned_at TIMESTAMPTZ DEFAULT NOW(),
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Win/loss records
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS win_loss_records (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        lead_id UUID NOT NULL UNIQUE,
-                        outcome VARCHAR(10) NOT NULL,
-                        deal_value FLOAT,
-                        primary_reason VARCHAR(255),
-                        secondary_reasons JSONB DEFAULT '[]',
-                        competitor_involved VARCHAR(255),
-                        sales_cycle_days INT,
-                        touchpoints INT,
-                        decision_makers_engaged INT,
-                        closed_at TIMESTAMPTZ DEFAULT NOW(),
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Conversion predictions
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS conversion_predictions (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        lead_id UUID NOT NULL,
-                        current_stage VARCHAR(50),
-                        predicted_outcome VARCHAR(10),
-                        probability_won FLOAT,
-                        probability_lost FLOAT,
-                        predicted_close_date DATE,
-                        predicted_value FLOAT,
-                        confidence FLOAT,
-                        factors JSONB DEFAULT '{}',
-                        predicted_at TIMESTAMPTZ DEFAULT NOW(),
-                        actual_outcome VARCHAR(10),
-                        outcome_date DATE,
-                        prediction_accuracy FLOAT,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Revenue forecasts
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS revenue_forecasts (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        forecast_date DATE NOT NULL,
-                        forecast_period VARCHAR(20),
-                        pipeline_value FLOAT DEFAULT 0,
-                        weighted_pipeline FLOAT DEFAULT 0,
-                        committed_value FLOAT DEFAULT 0,
-                        best_case_value FLOAT DEFAULT 0,
-                        forecast_value FLOAT DEFAULT 0,
-                        actual_value FLOAT,
-                        accuracy FLOAT,
-                        methodology VARCHAR(50),
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        UNIQUE(forecast_date, forecast_period)
-                    )
-                """)
 
                 # Create indexes
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_transitions_lead
-                    ON stage_transitions(lead_id)
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_transitions_date
-                    ON stage_transitions(transitioned_at DESC)
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_winloss_outcome
-                    ON win_loss_records(outcome)
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_predictions_lead
-                    ON conversion_predictions(lead_id)
-                """)
 
                 conn.commit()
                 self._initialized = True

@@ -250,15 +250,6 @@ class SelfEvolution:
         try:
             cur = conn.cursor()
             # Ensure table exists (idempotent)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_ab_exposures (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    test_name VARCHAR(255) NOT NULL,
-                    distinct_id VARCHAR(255) NOT NULL,
-                    variant VARCHAR(255) NOT NULL,
-                    exposed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                )
-            """)
             cur.execute(
                 "INSERT INTO ai_ab_exposures (test_name, distinct_id, variant) VALUES (%s, %s, %s)",
                 (test_name, distinct_id, variant)
@@ -278,15 +269,6 @@ class SelfEvolution:
         if not conn: return
         try:
             cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_config_history (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    config_key VARCHAR(255) NOT NULL,
-                    config_value JSONB NOT NULL,
-                    author VARCHAR(255),
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                )
-            """)
             cur.execute(
                 "INSERT INTO ai_config_history (config_key, config_value, author) VALUES (%s, %s, %s)",
                 (key, json.dumps(value), author)

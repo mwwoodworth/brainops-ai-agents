@@ -77,13 +77,15 @@ async def fix_database_schema():
         except Exception as e:
             print(f"⚠️  Column may already exist: {e}")
 
-        # Fix 2: Create index on last_job_date for performance
+        # Fix 2: Verify index exists (DDL removed — agent_worker has no DDL permissions)
         try:
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_customers_last_job_date
-                ON customers(last_job_date)
-            """)
-            print("✅ Created index on last_job_date")
+            row = await conn.fetchval(
+                "SELECT COUNT(*) FROM pg_indexes WHERE indexname = 'idx_customers_last_job_date'"
+            )
+            if row > 0:
+                print("✅ Index on last_job_date verified")
+            else:
+                print("⚠️ Index idx_customers_last_job_date missing — run migrations")
         except Exception as e:
             print(f"⚠️  Index may already exist: {e}")
 

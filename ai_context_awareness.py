@@ -129,151 +129,29 @@ class AIContextAwareness:
         self._init_database()
 
     def _init_database(self):
-        """Initialize database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_user_profiles",
+                "ai_user_context",
+                "ai_personalizations",
+                "ai_user_sessions",
+                "ai_user_interactions",
+                "ai_user_preferences",
+                "ai_permission_policies",
+                "ai_user_embeddings",
+        ]
         try:
-            conn = psycopg2.connect(**_get_db_config())
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-
-            # Create user profile table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_user_profiles (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    user_id VARCHAR(255) UNIQUE NOT NULL,
-                    email VARCHAR(255),
-                    role VARCHAR(50),
-                    organization VARCHAR(255),
-                    department VARCHAR(255),
-                    preferences JSONB DEFAULT '{}',
-                    permissions JSONB DEFAULT '{}',
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create user context table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_user_context (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    user_id VARCHAR(255) REFERENCES ai_user_profiles(user_id),
-                    context_type VARCHAR(50),
-                    context_data JSONB,
-                    privacy_level VARCHAR(50) DEFAULT 'internal',
-                    confidence FLOAT DEFAULT 1.0,
-                    expires_at TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create personalization table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_personalizations (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    user_id VARCHAR(255) REFERENCES ai_user_profiles(user_id),
-                    personalization_type VARCHAR(50),
-                    configuration JSONB,
-                    effectiveness_score FLOAT DEFAULT 0.5,
-                    active BOOLEAN DEFAULT TRUE,
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create user sessions table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_user_sessions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    user_id VARCHAR(255) REFERENCES ai_user_profiles(user_id),
-                    session_token VARCHAR(500) UNIQUE,
-                    context_snapshot JSONB,
-                    started_at TIMESTAMPTZ DEFAULT NOW(),
-                    last_activity TIMESTAMPTZ DEFAULT NOW(),
-                    expires_at TIMESTAMPTZ,
-                    metadata JSONB DEFAULT '{}'
-                )
-            """)
-
-            # Create user interactions table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_user_interactions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    user_id VARCHAR(255) REFERENCES ai_user_profiles(user_id),
-                    interaction_type VARCHAR(50),
-                    action VARCHAR(100),
-                    entity_type VARCHAR(50),
-                    entity_id VARCHAR(255),
-                    context JSONB DEFAULT '{}',
-                    result JSONB DEFAULT '{}',
-                    duration_ms INT,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create user preferences table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_user_preferences (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    user_id VARCHAR(255) REFERENCES ai_user_profiles(user_id),
-                    category VARCHAR(50),
-                    preference_key VARCHAR(100),
-                    preference_value JSONB,
-                    learned BOOLEAN DEFAULT FALSE,
-                    confidence FLOAT DEFAULT 1.0,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW(),
-                    UNIQUE(user_id, category, preference_key)
-                )
-            """)
-
-            # Create permission policies table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_permission_policies (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    policy_name VARCHAR(255) UNIQUE,
-                    resource_type VARCHAR(50),
-                    resource_pattern VARCHAR(255),
-                    allowed_roles JSONB DEFAULT '[]',
-                    allowed_users JSONB DEFAULT '[]',
-                    conditions JSONB DEFAULT '{}',
-                    actions JSONB DEFAULT '[]',
-                    effect VARCHAR(20) DEFAULT 'allow',
-                    priority INT DEFAULT 100,
-                    active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create user embeddings table for similarity matching
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ai_user_embeddings (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    user_id VARCHAR(255) REFERENCES ai_user_profiles(user_id),
-                    embedding_type VARCHAR(50),
-                    embedding vector(1536),
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create indexes
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_profiles_user ON ai_user_profiles(user_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_context_user ON ai_user_context(user_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_personalizations_user ON ai_personalizations(user_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON ai_user_sessions(user_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_token ON ai_user_sessions(session_token)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_interactions_user ON ai_user_interactions(user_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_preferences_user ON ai_user_preferences(user_id)")
-
-            conn.commit()
+            ok = verify_tables_sync(required_tables, cursor, module_name="ai_context_awareness")
             cursor.close()
             conn.close()
-
-        except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
-
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def create_user_profile(
         self,
         user_id: str,

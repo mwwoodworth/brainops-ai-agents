@@ -273,113 +273,23 @@ class DistributedAgentCoordinator:
                 logger.error(f"Failed to initialize coordination system: {e}")
 
     async def _initialize_database(self):
-        """Initialize database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_agent_registry",
+                "ai_distributed_tasks",
+                "ai_task_groups",
+                "ai_coordination_messages",
+        ]
         try:
-            with _get_pooled_connection(self._get_db_config()) as conn:
-                cur = conn.cursor()
-
-                # Agent registry table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_agent_registry (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        agent_id VARCHAR(255) UNIQUE NOT NULL,
-                        agent_name VARCHAR(255) NOT NULL,
-                        agent_type VARCHAR(100) NOT NULL,
-                        capabilities JSONB DEFAULT '[]'::jsonb,
-                        state VARCHAR(50) DEFAULT 'idle',
-                        registered_at TIMESTAMPTZ DEFAULT NOW(),
-                        last_heartbeat TIMESTAMPTZ DEFAULT NOW(),
-                        current_task_id VARCHAR(255),
-                        max_concurrent_tasks INT DEFAULT 1,
-                        current_task_count INT DEFAULT 0,
-                        metadata JSONB DEFAULT '{}'::jsonb,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Distributed tasks table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_distributed_tasks (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        task_id VARCHAR(255) UNIQUE NOT NULL,
-                        task_type VARCHAR(100) NOT NULL,
-                        payload JSONB NOT NULL,
-                        priority INT DEFAULT 2,
-                        status VARCHAR(50) DEFAULT 'pending',
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        assigned_at TIMESTAMPTZ,
-                        started_at TIMESTAMPTZ,
-                        completed_at TIMESTAMPTZ,
-                        assigned_agent_id VARCHAR(255),
-                        required_capabilities JSONB DEFAULT '[]'::jsonb,
-                        dependencies JSONB DEFAULT '[]'::jsonb,
-                        timeout_seconds INT DEFAULT 300,
-                        retry_count INT DEFAULT 0,
-                        max_retries INT DEFAULT 3,
-                        result JSONB,
-                        error TEXT,
-                        correlation_id VARCHAR(255),
-                        tenant_id VARCHAR(255),
-                        metadata JSONB DEFAULT '{}'::jsonb
-                    )
-                """)
-
-                # Task groups table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_task_groups (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        group_id VARCHAR(255) UNIQUE NOT NULL,
-                        name VARCHAR(255) NOT NULL,
-                        mode VARCHAR(50) NOT NULL,
-                        tasks JSONB DEFAULT '[]'::jsonb,
-                        status VARCHAR(50) DEFAULT 'pending',
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        completed_at TIMESTAMPTZ,
-                        leader_agent_id VARCHAR(255),
-                        participating_agents JSONB DEFAULT '[]'::jsonb,
-                        results JSONB DEFAULT '{}'::jsonb,
-                        metadata JSONB DEFAULT '{}'::jsonb
-                    )
-                """)
-
-                # Coordination messages table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_coordination_messages (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        message_id VARCHAR(255) UNIQUE NOT NULL,
-                        from_agent_id VARCHAR(255) NOT NULL,
-                        to_agent_id VARCHAR(255),
-                        message_type VARCHAR(100) NOT NULL,
-                        payload JSONB NOT NULL,
-                        timestamp TIMESTAMPTZ DEFAULT NOW(),
-                        correlation_id VARCHAR(255),
-                        requires_ack BOOLEAN DEFAULT false,
-                        acked BOOLEAN DEFAULT false,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create indexes
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_distributed_tasks_status
-                    ON ai_distributed_tasks(status)
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_distributed_tasks_priority
-                    ON ai_distributed_tasks(priority DESC)
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_agent_registry_state
-                    ON ai_agent_registry(state)
-                """)
-
-                conn.commit()
-                logger.info("Coordination database tables initialized")
-
-        except Exception as e:
-            logger.error(f"Database initialization error: {e}")
-
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="distributed_agent_coordination")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def _load_persisted_state(self):
         """Load persisted state from database"""
         try:

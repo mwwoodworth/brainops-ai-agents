@@ -436,27 +436,6 @@ class SystemAwareness:
                 logger.warning("Skipping insight persistence (database fallback active).")
                 return
 
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_system_insights (
-                    id SERIAL PRIMARY KEY,
-                    category VARCHAR(50),
-                    title VARCHAR(255),
-                    description TEXT,
-                    severity VARCHAR(20),
-                    data JSONB,
-                    action_recommended TEXT,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-            await pool.execute("""
-                CREATE INDEX IF NOT EXISTS idx_insights_severity
-                    ON ai_system_insights(severity)
-            """)
-            await pool.execute("""
-                CREATE INDEX IF NOT EXISTS idx_insights_time
-                    ON ai_system_insights(created_at DESC)
-            """)
-
             for insight in insights:
                 await pool.execute("""
                     INSERT INTO ai_system_insights

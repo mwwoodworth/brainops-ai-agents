@@ -346,79 +346,25 @@ class IntelligentTaskOrchestrator:
         self._init_database()
 
     def _init_database(self):
-        """Initialize task orchestrator tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "task_notifications",
+                "task_execution_history",
+                "ai_priority_adjustments",
+                "revenue_audit_log",
+        ]
         try:
-            with get_db_connection() as conn:
-                if not conn:
-                    logger.warning("No database connection available for init")
-                    return
-                cur = conn.cursor()
-
-                cur.execute("""
-                -- Task notifications table
-                CREATE TABLE IF NOT EXISTS task_notifications (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    task_id TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    severity TEXT NOT NULL,
-                    message TEXT,
-                    details JSONB,
-                    channels JSONB,
-                    sent_at TIMESTAMP DEFAULT NOW(),
-                    acknowledged BOOLEAN DEFAULT FALSE,
-                    acknowledged_at TIMESTAMP,
-                    acknowledged_by TEXT
-                );
-
-                -- Task execution history
-                CREATE TABLE IF NOT EXISTS task_execution_history (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    task_id TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    assigned_agent TEXT,
-                    started_at TIMESTAMP,
-                    completed_at TIMESTAMP,
-                    duration_ms INT,
-                    result JSONB,
-                    error_message TEXT,
-                    retry_count INT DEFAULT 0
-                );
-
-                -- AI priority adjustments
-                CREATE TABLE IF NOT EXISTS ai_priority_adjustments (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    task_id TEXT NOT NULL,
-                    original_priority INT,
-                    adjusted_priority FLOAT,
-                    adjustment_reason TEXT,
-                    adjusted_at TIMESTAMP DEFAULT NOW()
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_notifications_task ON task_notifications(task_id);
-                CREATE INDEX IF NOT EXISTS idx_notifications_severity ON task_notifications(severity);
-                CREATE INDEX IF NOT EXISTS idx_notifications_time ON task_notifications(sent_at DESC);
-                CREATE INDEX IF NOT EXISTS idx_exec_history_task ON task_execution_history(task_id);
-
-                -- Enhanced decision tracking
-                ALTER TABLE task_execution_history
-                ADD COLUMN IF NOT EXISTS risk_assessment JSONB;
-
-                ALTER TABLE task_execution_history
-                ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0;
-
-                ALTER TABLE task_execution_history
-                ADD COLUMN IF NOT EXISTS human_escalation_required BOOLEAN DEFAULT FALSE;
-
-                ALTER TABLE task_execution_history
-                ADD COLUMN IF NOT EXISTS escalation_reason TEXT;
-                """)
-
-                conn.commit()
-                cur.close()
-            logger.info("✅ Intelligent task orchestrator database initialized")
-        except Exception as e:
-            logger.warning(f"Task orchestrator database init failed: {e}")
-
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            ok = verify_tables_sync(required_tables, cursor, module_name="intelligent_task_orchestrator")
+            cursor.close()
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def start(self):
         """Start the intelligent task orchestrator"""
         self.running = True
@@ -711,15 +657,6 @@ class IntelligentTaskOrchestrator:
                 if not conn:
                     return {"action": action, "status": "processed", "audit_logged": False}
                 cur = conn.cursor()
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS revenue_audit_log (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        action TEXT,
-                        amount NUMERIC,
-                        task_id TEXT,
-                        created_at TIMESTAMP DEFAULT NOW()
-                    )
-                """)
                 cur.execute(
                     "INSERT INTO revenue_audit_log (action, amount, task_id) VALUES (%s, %s, %s)",
                     (action, amount, task.id)

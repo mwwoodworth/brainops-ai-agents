@@ -746,112 +746,25 @@ class AutonomousSystemOrchestrator:
                 self.load_balancer.register_instance(instance)
 
     async def _create_tables(self):
-        """Create database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "managed_systems",
+                "orchestrator_deployments",
+                "resource_allocations",
+                "maintenance_windows",
+                "system_groups",
+                "orchestrator_commands",
+        ]
         try:
-            import asyncpg
-            if not self.db_url:
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="autonomous_system_orchestrator")
+            if not ok:
                 return
-
-            conn = await asyncpg.connect(self.db_url)
-            try:
-                # Managed systems table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS managed_systems (
-                        system_id TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        type TEXT NOT NULL,
-                        url TEXT,
-                        region TEXT,
-                        provider TEXT,
-                        status TEXT DEFAULT 'unknown',
-                        health_score FLOAT DEFAULT 100.0,
-                        last_health_check TIMESTAMPTZ,
-                        metadata JSONB DEFAULT '{}',
-                        resources JSONB DEFAULT '{}',
-                        dependencies JSONB DEFAULT '[]',
-                        tags JSONB DEFAULT '[]',
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Deployments table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS orchestrator_deployments (
-                        deployment_id TEXT PRIMARY KEY,
-                        system_id TEXT REFERENCES managed_systems(system_id),
-                        version TEXT NOT NULL,
-                        status TEXT DEFAULT 'pending',
-                        started_at TIMESTAMPTZ DEFAULT NOW(),
-                        completed_at TIMESTAMPTZ,
-                        triggered_by TEXT,
-                        commit_sha TEXT,
-                        changes JSONB DEFAULT '[]',
-                        test_results JSONB DEFAULT '{}',
-                        rollback_available BOOLEAN DEFAULT TRUE
-                    )
-                """)
-
-                # Resource allocations table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS resource_allocations (
-                        allocation_id TEXT PRIMARY KEY,
-                        system_id TEXT REFERENCES managed_systems(system_id),
-                        resource_type TEXT NOT NULL,
-                        current_value FLOAT NOT NULL,
-                        new_value FLOAT NOT NULL,
-                        reason TEXT,
-                        confidence FLOAT,
-                        auto_approved BOOLEAN DEFAULT FALSE,
-                        executed_at TIMESTAMPTZ,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Maintenance windows table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS maintenance_windows (
-                        window_id TEXT PRIMARY KEY,
-                        system_ids JSONB DEFAULT '[]',
-                        scheduled_start TIMESTAMPTZ NOT NULL,
-                        scheduled_end TIMESTAMPTZ NOT NULL,
-                        maintenance_type TEXT,
-                        tasks JSONB DEFAULT '[]',
-                        status TEXT DEFAULT 'scheduled',
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # System groups table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS system_groups (
-                        group_name TEXT PRIMARY KEY,
-                        system_ids JSONB DEFAULT '[]',
-                        description TEXT,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Command history table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS orchestrator_commands (
-                        id SERIAL PRIMARY KEY,
-                        command_type TEXT NOT NULL,
-                        target_systems JSONB,
-                        parameters JSONB,
-                        status TEXT DEFAULT 'pending',
-                        result JSONB,
-                        executed_by TEXT,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        completed_at TIMESTAMPTZ
-                    )
-                """)
-
-            finally:
-                await conn.close()
-        except Exception as e:
-            logger.error(f"Error creating orchestrator tables: {e}")
-
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def _load_systems(self):
         """Load managed systems from database"""
         try:

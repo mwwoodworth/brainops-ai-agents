@@ -184,166 +184,31 @@ class AIDecisionTree:
         return psycopg2.connect(**self.db_config)
 
     def _initialize_database(self):
-        """Initialize database tables for decision tree"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_decision_trees",
+                "ai_decision_nodes",
+                "ai_decision_history",
+                "ai_decision_audit_trail",
+                "ai_decision_outcomes",
+                "ai_decision_optimizations",
+                "ai_decision_metrics",
+                "ai_decision_rules",
+                "ai_learning_records",
+                "ai_agent_performance",
+        ]
         try:
-            conn = self._get_connection()
-            cur = conn.cursor()
-
-            # Create decision trees table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_decision_trees (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    tree_name VARCHAR(255) UNIQUE NOT NULL,
-                    tree_type VARCHAR(50) NOT NULL,
-                    root_node_id VARCHAR(255),
-                    description TEXT,
-                    version INT DEFAULT 1,
-                    is_active BOOLEAN DEFAULT true,
-                    performance_score FLOAT DEFAULT 0.0,
-                    usage_count INT DEFAULT 0,
-                    success_rate FLOAT DEFAULT 0.0,
-                    tree_structure JSONB NOT NULL,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create decision nodes table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_decision_nodes (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    node_id VARCHAR(255) UNIQUE NOT NULL,
-                    tree_id UUID REFERENCES ai_decision_trees(id),
-                    node_type VARCHAR(50) NOT NULL,
-                    parent_id VARCHAR(255),
-                    question TEXT NOT NULL,
-                    evaluation_function TEXT,
-                    threshold FLOAT DEFAULT 0.5,
-                    options JSONB DEFAULT '[]'::jsonb,
-                    children TEXT[] DEFAULT '{}',
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create decision history table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_decision_history (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    decision_id VARCHAR(255) UNIQUE NOT NULL,
-                    tree_id UUID REFERENCES ai_decision_trees(id),
-                    node_path TEXT[] NOT NULL,
-                    context JSONB NOT NULL,
-                    selected_option JSONB NOT NULL,
-                    confidence_level VARCHAR(20),
-                    reasoning TEXT,
-                    execution_plan JSONB DEFAULT '[]'::jsonb,
-                    outcome JSONB,
-                    success BOOLEAN,
-                    execution_time_ms INT,
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    multi_criteria_analysis JSONB,
-                    risk_assessment JSONB,
-                    human_escalation_triggered BOOLEAN DEFAULT FALSE,
-                    escalation_reason TEXT
-                )
-            """)
-
-            # Create decision audit trail table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_decision_audit_trail (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    entry_id VARCHAR(255) UNIQUE NOT NULL,
-                    decision_id VARCHAR(255) NOT NULL,
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    event_type VARCHAR(50) NOT NULL,
-                    actor VARCHAR(100) NOT NULL,
-                    action TEXT NOT NULL,
-                    context JSONB DEFAULT '{}'::jsonb,
-                    changes JSONB DEFAULT '{}'::jsonb,
-                    FOREIGN KEY (decision_id) REFERENCES ai_decision_history(decision_id)
-                )
-            """)
-
-            # Create decision outcome tracking table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_decision_outcomes (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    decision_id VARCHAR(255) NOT NULL,
-                    actual_outcome JSONB NOT NULL,
-                    expected_outcome JSONB NOT NULL,
-                    variance_analysis JSONB,
-                    success_score FLOAT,
-                    lessons_learned TEXT[],
-                    improvement_suggestions TEXT[],
-                    recorded_at TIMESTAMPTZ DEFAULT NOW(),
-                    FOREIGN KEY (decision_id) REFERENCES ai_decision_history(decision_id)
-                )
-            """)
-
-            # Create decision optimization table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_decision_optimizations (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    decision_type VARCHAR(50) NOT NULL,
-                    optimization_type VARCHAR(50),
-                    parameter_adjustments JSONB NOT NULL,
-                    performance_improvement FLOAT,
-                    applied_at TIMESTAMPTZ DEFAULT NOW(),
-                    applied_by VARCHAR(100),
-                    validation_results JSONB
-                )
-            """)
-
-            # Create decision metrics table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_decision_metrics (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    tree_id UUID REFERENCES ai_decision_trees(id),
-                    decision_type VARCHAR(50),
-                    total_decisions INT DEFAULT 0,
-                    successful_decisions INT DEFAULT 0,
-                    failed_decisions INT DEFAULT 0,
-                    avg_confidence FLOAT DEFAULT 0.0,
-                    avg_execution_time_ms FLOAT DEFAULT 0.0,
-                    total_value_generated FLOAT DEFAULT 0.0,
-                    total_cost_saved FLOAT DEFAULT 0.0,
-                    period_start TIMESTAMPTZ DEFAULT NOW(),
-                    period_end TIMESTAMPTZ,
-                    metadata JSONB DEFAULT '{}'::jsonb
-                )
-            """)
-
-            # Create decision rules table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_decision_rules (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    rule_name VARCHAR(255) UNIQUE NOT NULL,
-                    rule_type VARCHAR(50),
-                    condition TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    priority INT DEFAULT 50,
-                    is_active BOOLEAN DEFAULT true,
-                    applies_to_types TEXT[] DEFAULT '{}',
-                    success_count INT DEFAULT 0,
-                    failure_count INT DEFAULT 0,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            conn.commit()
-            logger.info("Decision tree tables initialized successfully")
-
-        except Exception as e:
-            logger.error(f"Error initializing decision tables: {e}")
-            if conn:
-                conn.rollback()
-        finally:
-            if conn:
-                conn.close()
-
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            ok = verify_tables_sync(required_tables, cursor, module_name="ai_decision_tree")
+            cursor.close()
+            conn.close()
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     def _load_decision_trees(self):
         """Load pre-configured decision trees"""
         # Revenue decision tree
@@ -1994,33 +1859,6 @@ class AIDecisionTree:
 
     def _ensure_learning_tables(self, cur):
         """Ensure learning-related tables exist before writes"""
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS ai_learning_records (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                agent_name TEXT,
-                learning_type TEXT NOT NULL,
-                description TEXT NOT NULL,
-                context JSONB NOT NULL,
-                confidence NUMERIC,
-                applied BOOLEAN,
-                applied_at TIMESTAMPTZ,
-                impact_score NUMERIC,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS ai_agent_performance (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                project TEXT,
-                agent_name TEXT,
-                success_rate DOUBLE PRECISION,
-                avg_response_time_ms DOUBLE PRECISION,
-                total_interactions INT,
-                performance_data JSONB,
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
 
     def _summarize_failure_patterns(self, buffer: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Summarize recurring failure reasons for prompt improvements"""

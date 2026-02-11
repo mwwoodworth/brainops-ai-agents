@@ -147,82 +147,22 @@ class LeadDiscoveryEngine:
         logger.info("LeadDiscoveryEngine initialized (tenant_id=%s)", tenant_id)
 
     async def _ensure_tables(self) -> None:
-        """Ensure required tables exist"""
-        if self._initialized:
-            return
-
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "lead_discovery_sources",
+                "lead_discovery_runs",
+                "lead_qualification_history",
+        ]
         try:
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
             pool = get_pool()
-
-            # Create lead_discovery_sources table for source tracking
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS lead_discovery_sources (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    source_type VARCHAR(50) NOT NULL,
-                    source_name VARCHAR(255) NOT NULL,
-                    config JSONB DEFAULT '{}'::jsonb,
-                    enabled BOOLEAN DEFAULT true,
-                    last_run_at TIMESTAMPTZ,
-                    leads_discovered INT DEFAULT 0,
-                    leads_qualified INT DEFAULT 0,
-                    conversion_rate FLOAT DEFAULT 0.0,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW(),
-                    UNIQUE(source_type, source_name)
-                )
-            """)
-
-            # Create lead_discovery_runs table for tracking discovery batches
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS lead_discovery_runs (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    source_type VARCHAR(50),
-                    started_at TIMESTAMPTZ DEFAULT NOW(),
-                    completed_at TIMESTAMPTZ,
-                    status VARCHAR(20) DEFAULT 'running',
-                    leads_found INT DEFAULT 0,
-                    leads_qualified INT DEFAULT 0,
-                    leads_synced INT DEFAULT 0,
-                    errors JSONB DEFAULT '[]'::jsonb,
-                    metadata JSONB DEFAULT '{}'::jsonb
-                )
-            """)
-
-            # Create lead_qualification_history for audit trail
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS lead_qualification_history (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    lead_id UUID NOT NULL,
-                    previous_status VARCHAR(50),
-                    new_status VARCHAR(50),
-                    previous_score FLOAT,
-                    new_score FLOAT,
-                    reason TEXT,
-                    qualified_by VARCHAR(100) DEFAULT 'ai_discovery_engine',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create indexes
-            await pool.execute("""
-                CREATE INDEX IF NOT EXISTS idx_lead_discovery_sources_type
-                ON lead_discovery_sources(source_type)
-            """)
-            await pool.execute("""
-                CREATE INDEX IF NOT EXISTS idx_lead_discovery_runs_status
-                ON lead_discovery_runs(status)
-            """)
-            await pool.execute("""
-                CREATE INDEX IF NOT EXISTS idx_lead_qualification_history_lead
-                ON lead_qualification_history(lead_id)
-            """)
-
-            self._initialized = True
-            logger.info("LeadDiscoveryEngine tables initialized")
-
-        except Exception as e:
-            logger.warning("Could not initialize lead discovery tables: %s", e)
-
+            ok = await verify_tables_async(required_tables, pool, module_name="lead_discovery_engine")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def discover_leads(
         self,
         sources: Optional[list[str]] = None,

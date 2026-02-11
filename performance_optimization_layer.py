@@ -949,31 +949,8 @@ async def setup_database():
         cursor = conn.cursor()
 
         # Performance metrics table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS performance_metrics (
-                id SERIAL PRIMARY KEY,
-                metric_type VARCHAR(50) NOT NULL,
-                value FLOAT NOT NULL,
-                component VARCHAR(100) NOT NULL,
-                timestamp TIMESTAMPTZ NOT NULL,
-                metadata JSONB DEFAULT '{}',
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                INDEX idx_metrics_timestamp (timestamp DESC),
-                INDEX idx_metrics_type (metric_type)
-            )
-        """)
 
         # Optimization history
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS optimization_history (
-                id SERIAL PRIMARY KEY,
-                strategy VARCHAR(50) NOT NULL,
-                metrics_before JSONB,
-                metrics_after JSONB,
-                result JSONB,
-                applied_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
 
         conn.commit()
         cursor.close()

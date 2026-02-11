@@ -160,37 +160,6 @@ class BoardActionPipeline:
         cur = conn.cursor()
 
         try:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS board_action_queue (
-                    id SERIAL PRIMARY KEY,
-                    action_id UUID UNIQUE DEFAULT gen_random_uuid(),
-                    decision_id VARCHAR(255) NOT NULL,
-                    category VARCHAR(50) NOT NULL,
-                    title VARCHAR(500) NOT NULL,
-                    description TEXT,
-                    workflow_type VARCHAR(100) NOT NULL,
-                    workflow_params JSONB DEFAULT '{}'::jsonb,
-                    priority INT DEFAULT 5,
-                    status VARCHAR(50) DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    queued_at TIMESTAMP,
-                    executed_at TIMESTAMP,
-                    completed_at TIMESTAMP,
-                    result JSONB,
-                    error_message TEXT,
-                    retry_count INT DEFAULT 0,
-                    max_retries INT DEFAULT 3
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_board_actions_status
-                ON board_action_queue(status);
-
-                CREATE INDEX IF NOT EXISTS idx_board_actions_priority
-                ON board_action_queue(priority DESC, created_at ASC);
-
-                CREATE INDEX IF NOT EXISTS idx_board_actions_decision
-                ON board_action_queue(decision_id);
-            """)
 
             conn.commit()
             logger.info("Board Action Pipeline initialized successfully")

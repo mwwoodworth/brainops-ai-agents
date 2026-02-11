@@ -87,39 +87,6 @@ class BrainOpsTracer:
             conn = self._get_connection()
             cur = conn.cursor()
 
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ai_traces (
-                    trace_id UUID PRIMARY KEY,
-                    session_id VARCHAR(255),
-                    agent_id VARCHAR(255),
-                    start_time TIMESTAMPTZ DEFAULT NOW(),
-                    end_time TIMESTAMPTZ,
-                    status VARCHAR(50),
-                    summary TEXT,
-                    metadata JSONB DEFAULT '{}'::jsonb
-                );
-
-                CREATE TABLE IF NOT EXISTS ai_trace_spans (
-                    span_id UUID PRIMARY KEY,
-                    trace_id UUID REFERENCES ai_traces(trace_id),
-                    parent_id UUID,
-                    span_type VARCHAR(50),
-                    name VARCHAR(255),
-                    content TEXT,
-                    input_data JSONB,
-                    output_data JSONB,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    start_time TIMESTAMPTZ DEFAULT NOW(),
-                    end_time TIMESTAMPTZ,
-                    duration_ms FLOAT,
-                    status VARCHAR(50),
-                    error_message TEXT
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_spans_trace_id ON ai_trace_spans(trace_id);
-                CREATE INDEX IF NOT EXISTS idx_spans_type ON ai_trace_spans(span_type);
-            """)
-
             conn.commit()
             conn.close()
         except Exception as e:

@@ -121,35 +121,8 @@ class SecureRevenueSystem:
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
                     # Revenue tracking table
-                    cur.execute("""
-                        CREATE TABLE IF NOT EXISTS revenue_automation (
-                            id SERIAL PRIMARY KEY,
-                            customer_email VARCHAR(255),
-                            customer_name VARCHAR(255),
-                            stage VARCHAR(50),
-                            payment_link VARCHAR(500),
-                            amount DECIMAL(10,2),
-                            status VARCHAR(50),
-                            last_contact TIMESTAMP,
-                            next_followup TIMESTAMP,
-                            converted BOOLEAN DEFAULT FALSE,
-                            stripe_customer_id VARCHAR(255),
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        )
-                    """)
 
                     # Email log table
-                    cur.execute("""
-                        CREATE TABLE IF NOT EXISTS email_automation_log (
-                            id SERIAL PRIMARY KEY,
-                            customer_email VARCHAR(255),
-                            email_type VARCHAR(100),
-                            subject VARCHAR(500),
-                            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            success BOOLEAN
-                        )
-                    """)
 
                     conn.commit()
                     logger.info("Database tables ready")

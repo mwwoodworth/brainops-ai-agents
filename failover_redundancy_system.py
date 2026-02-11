@@ -953,45 +953,10 @@ async def setup_database():
         cursor = conn.cursor()
 
         # Service health table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS service_health (
-                id SERIAL PRIMARY KEY,
-                service_name VARCHAR(100) NOT NULL,
-                status VARCHAR(50) NOT NULL,
-                response_time FLOAT,
-                error_count INTEGER DEFAULT 0,
-                success_rate FLOAT,
-                metadata JSONB DEFAULT '{}',
-                checked_at TIMESTAMPTZ NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
 
         # Failover events table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS failover_events (
-                event_id VARCHAR(100) PRIMARY KEY,
-                service_name VARCHAR(100) NOT NULL,
-                from_instance VARCHAR(255),
-                to_instance VARCHAR(255),
-                strategy VARCHAR(50),
-                reason TEXT,
-                success BOOLEAN,
-                duration FLOAT,
-                occurred_at TIMESTAMPTZ NOT NULL
-            )
-        """)
 
         # Create indexes
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_health_service
-            ON service_health(service_name, checked_at DESC)
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_failover_service
-            ON failover_events(service_name, occurred_at DESC)
-        """)
 
         conn.commit()
         cursor.close()

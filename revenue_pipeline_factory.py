@@ -163,68 +163,23 @@ class RevenuePipelineFactory:
         }
 
     async def _ensure_tables(self):
-        """Ensure revenue tracking tables exist."""
-        pool = self._get_pool()
-        if not pool:
-            return
-
-        await pool.execute("""
-            -- Pipeline execution tracking
-            CREATE TABLE IF NOT EXISTS revenue_pipeline_runs (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                pipeline_name VARCHAR(100) NOT NULL,
-                stream_type VARCHAR(50) NOT NULL,
-                status VARCHAR(20) DEFAULT 'running',
-                started_at TIMESTAMPTZ DEFAULT NOW(),
-                completed_at TIMESTAMPTZ,
-                revenue_generated DECIMAL(10,2) DEFAULT 0,
-                leads_generated INT DEFAULT 0,
-                errors JSONB DEFAULT '[]',
-                metadata JSONB DEFAULT '{}'
-            );
-
-            -- Revenue tracking by source
-            CREATE TABLE IF NOT EXISTS revenue_by_source (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                source VARCHAR(100) NOT NULL,
-                stream_type VARCHAR(50) NOT NULL,
-                amount_cents BIGINT NOT NULL,
-                currency VARCHAR(3) DEFAULT 'usd',
-                customer_email VARCHAR(255),
-                product_id VARCHAR(255),
-                recorded_at TIMESTAMPTZ DEFAULT NOW(),
-                metadata JSONB DEFAULT '{}'
-            );
-
-            -- Daily revenue summary by pipeline stream
-            CREATE TABLE IF NOT EXISTS revenue_pipeline_daily (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                date DATE NOT NULL,
-                stream_type VARCHAR(50) NOT NULL,
-                total_cents BIGINT DEFAULT 0,
-                transaction_count INT DEFAULT 0,
-                new_customers INT DEFAULT 0,
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                UNIQUE(date, stream_type)
-            );
-
-            -- Pipeline health metrics
-            CREATE TABLE IF NOT EXISTS pipeline_health (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                pipeline_name VARCHAR(100) NOT NULL,
-                metric_name VARCHAR(100) NOT NULL,
-                metric_value DECIMAL(15,4),
-                recorded_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            -- Indexes
-            CREATE INDEX IF NOT EXISTS idx_pipeline_runs_stream ON revenue_pipeline_runs(stream_type, started_at);
-            CREATE INDEX IF NOT EXISTS idx_revenue_source_stream ON revenue_by_source(stream_type, recorded_at);
-            CREATE INDEX IF NOT EXISTS idx_revenue_daily_date ON revenue_pipeline_daily(date, stream_type);
-        """)
-
-        logger.info("Revenue tracking tables ensured")
-
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "revenue_pipeline_runs",
+                "revenue_by_source",
+                "revenue_pipeline_daily",
+                "pipeline_health",
+        ]
+        try:
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="revenue_pipeline_factory")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def execute(self, task: dict) -> dict:
         """Execute factory task."""
         action = task.get("action", "status")

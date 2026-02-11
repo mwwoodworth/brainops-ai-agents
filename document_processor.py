@@ -128,116 +128,25 @@ class DocumentProcessor:
             self._initialized = True
 
     async def _init_database(self):
-        """Initialize database tables using async pool"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_documents",
+                "ai_document_content",
+                "ai_document_analysis",
+                "ai_document_embeddings",
+                "ai_document_relationships",
+                "ai_document_actions",
+        ]
         try:
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
             pool = get_pool()
-
-            # Create tables
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_documents (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    filename VARCHAR(255),
-                    document_type VARCHAR(50),
-                    mime_type VARCHAR(100),
-                    file_size BIGINT,
-                    storage_path TEXT,
-                    storage_url TEXT,
-                    hash_value VARCHAR(64),
-                    status VARCHAR(50) DEFAULT 'uploaded',
-                    upload_source VARCHAR(100),
-                    user_id VARCHAR(255),
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    processed_at TIMESTAMPTZ
-                )
-            """)
-
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_document_content (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    document_id UUID REFERENCES ai_documents(id),
-                    content_type VARCHAR(50),
-                    raw_text TEXT,
-                    structured_data JSONB,
-                    extraction_method VARCHAR(50),
-                    language VARCHAR(10),
-                    word_count INT,
-                    page_count INT,
-                    confidence_score FLOAT,
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_document_analysis (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    document_id UUID REFERENCES ai_documents(id),
-                    analysis_type VARCHAR(50),
-                    category VARCHAR(50),
-                    summary TEXT,
-                    key_entities JSONB,
-                    key_terms JSONB,
-                    sentiment_score FLOAT,
-                    topics JSONB,
-                    classifications JSONB,
-                    insights JSONB,
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_document_embeddings (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    document_id UUID REFERENCES ai_documents(id),
-                    chunk_index INT,
-                    chunk_text TEXT,
-                    embedding vector(1536),
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_document_relationships (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    source_document_id UUID REFERENCES ai_documents(id),
-                    target_document_id UUID REFERENCES ai_documents(id),
-                    relationship_type VARCHAR(50),
-                    confidence FLOAT,
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_document_actions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    document_id UUID REFERENCES ai_documents(id),
-                    action_type VARCHAR(50),
-                    action_status VARCHAR(50),
-                    action_data JSONB,
-                    triggered_by VARCHAR(100),
-                    executed_at TIMESTAMPTZ,
-                    result JSONB,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-
-            # Create indexes
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON ai_documents(status)")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_documents_type ON ai_documents(document_type)")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_documents_user ON ai_documents(user_id)")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_content_document ON ai_document_content(document_id)")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_analysis_document ON ai_document_analysis(document_id)")
-            await pool.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_document ON ai_document_embeddings(document_id)")
-
-            logger.info("Database tables initialized successfully")
-
-        except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
-
+            ok = await verify_tables_async(required_tables, pool, module_name="document_processor")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     def _init_storage(self):
         """Initialize Supabase storage client"""
         try:

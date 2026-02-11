@@ -207,84 +207,23 @@ class AutonomousCICDManagement:
         logger.info(f"CI/CD Management initialized with {len(self.services)} services")
 
     async def _create_tables(self):
-        """Create database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "cicd_services",
+                "cicd_deployments",
+                "cicd_test_runs",
+                "cicd_schedules",
+        ]
         try:
-            import asyncpg
-            if not self.db_url:
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="autonomous_cicd_management")
+            if not ok:
                 return
-
-            conn = await asyncpg.connect(self.db_url)
-            try:
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS cicd_services (
-                        service_id TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        platform TEXT NOT NULL,
-                        repository TEXT NOT NULL,
-                        branch TEXT DEFAULT 'main',
-                        environment TEXT DEFAULT 'production',
-                        current_version TEXT,
-                        health_endpoint TEXT DEFAULT '/health',
-                        deployment_url TEXT,
-                        platform_config JSONB DEFAULT '{}',
-                        dependencies JSONB DEFAULT '[]',
-                        last_deployed TIMESTAMPTZ,
-                        last_health_check TIMESTAMPTZ,
-                        health_status TEXT DEFAULT 'unknown',
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    );
-
-                    CREATE TABLE IF NOT EXISTS cicd_deployments (
-                        deployment_id TEXT PRIMARY KEY,
-                        service_id TEXT NOT NULL,
-                        version TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        started_at TIMESTAMPTZ DEFAULT NOW(),
-                        completed_at TIMESTAMPTZ,
-                        triggered_by TEXT DEFAULT 'autonomous',
-                        commit_sha TEXT,
-                        build_logs TEXT,
-                        test_results JSONB DEFAULT '{}',
-                        rollback_version TEXT,
-                        duration_seconds FLOAT,
-                        error TEXT,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    );
-
-                    CREATE TABLE IF NOT EXISTS cicd_test_runs (
-                        test_id TEXT PRIMARY KEY,
-                        deployment_id TEXT NOT NULL,
-                        test_type TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        started_at TIMESTAMPTZ DEFAULT NOW(),
-                        completed_at TIMESTAMPTZ,
-                        results JSONB DEFAULT '{}',
-                        coverage FLOAT
-                    );
-
-                    CREATE TABLE IF NOT EXISTS cicd_schedules (
-                        schedule_id TEXT PRIMARY KEY,
-                        service_id TEXT NOT NULL,
-                        cron_expression TEXT NOT NULL,
-                        deployment_window JSONB DEFAULT '{}',
-                        conditions JSONB DEFAULT '{}',
-                        enabled BOOLEAN DEFAULT TRUE,
-                        last_executed TIMESTAMPTZ
-                    );
-
-                    CREATE INDEX IF NOT EXISTS idx_cicd_deployments_service
-                        ON cicd_deployments(service_id, started_at DESC);
-                    CREATE INDEX IF NOT EXISTS idx_cicd_deployments_status
-                        ON cicd_deployments(status);
-                """)
-            finally:
-                await conn.close()
-
-            logger.info("CI/CD tables created/verified")
-        except Exception as e:
-            logger.error(f"Failed to create CI/CD tables: {e}")
-
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def _load_services(self):
         """Load services from database"""
         try:

@@ -278,66 +278,6 @@ class PredictiveExecutor:
             conn = self._get_connection()
             cur = conn.cursor()
 
-            cur.execute("""
-                -- Predictive executions log
-                CREATE TABLE IF NOT EXISTS ai_predictive_executions (
-                    id SERIAL PRIMARY KEY,
-                    execution_id VARCHAR(100) UNIQUE NOT NULL,
-                    prediction_id VARCHAR(100) NOT NULL,
-                    prediction_source VARCHAR(50),
-                    task_type VARCHAR(100) NOT NULL,
-                    description TEXT,
-                    parameters JSONB,
-                    confidence FLOAT,
-                    risk_level VARCHAR(20),
-                    risk_score FLOAT,
-                    decision VARCHAR(50),
-                    decision_reason TEXT,
-                    safety_checks TEXT[],
-                    status VARCHAR(30) DEFAULT 'pending',
-                    result JSONB,
-                    error TEXT,
-                    was_accurate BOOLEAN,
-                    accuracy_feedback TEXT,
-                    started_at TIMESTAMPTZ,
-                    completed_at TIMESTAMPTZ,
-                    execution_time_ms INTEGER,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-
-                -- Indexes for efficient queries
-                CREATE INDEX IF NOT EXISTS idx_pred_exec_status
-                    ON ai_predictive_executions(status);
-                CREATE INDEX IF NOT EXISTS idx_pred_exec_task_type
-                    ON ai_predictive_executions(task_type);
-                CREATE INDEX IF NOT EXISTS idx_pred_exec_created
-                    ON ai_predictive_executions(created_at);
-                CREATE INDEX IF NOT EXISTS idx_pred_exec_accuracy
-                    ON ai_predictive_executions(was_accurate)
-                    WHERE was_accurate IS NOT NULL;
-
-                -- Predictive execution accuracy metrics
-                CREATE TABLE IF NOT EXISTS ai_prediction_accuracy_metrics (
-                    id SERIAL PRIMARY KEY,
-                    task_type VARCHAR(100) NOT NULL,
-                    prediction_source VARCHAR(50),
-                    period_start TIMESTAMPTZ NOT NULL,
-                    period_end TIMESTAMPTZ NOT NULL,
-                    total_predictions INTEGER DEFAULT 0,
-                    executed_count INTEGER DEFAULT 0,
-                    accurate_count INTEGER DEFAULT 0,
-                    inaccurate_count INTEGER DEFAULT 0,
-                    skipped_count INTEGER DEFAULT 0,
-                    accuracy_rate FLOAT,
-                    avg_confidence FLOAT,
-                    avg_risk_score FLOAT,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_accuracy_metrics_unique
-                    ON ai_prediction_accuracy_metrics(task_type, prediction_source, period_start);
-            """)
-
             conn.commit()
             conn.close()
             logger.info("PredictiveExecutor schema initialized")

@@ -104,86 +104,20 @@ class LearningFeedbackLoop:
         ]
 
     async def _init_database(self):
-        """Ensure required tables exist"""
-        if self._initialized:
-            return
-
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_learning_patterns",
+        ]
         try:
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
             pool = get_pool()
-
-            # Create ai_learning_patterns table if it doesn't exist
-            await pool.execute("""
-                CREATE TABLE IF NOT EXISTS ai_learning_patterns (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    pattern_name VARCHAR(255) NOT NULL,
-                    pattern_type VARCHAR(50) NOT NULL,
-                    discovered_by_agent_id UUID,
-                    pattern_data JSONB NOT NULL,
-                    occurrence_count INT DEFAULT 1,
-                    success_rate NUMERIC(3,2),
-                    applicability_score NUMERIC(3,2) DEFAULT 0.5,
-                    shared_with_agents UUID[] DEFAULT '{}',
-                    implementation_status VARCHAR(20) DEFAULT 'discovered',
-                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                    validated_at TIMESTAMPTZ,
-                    deployed_at TIMESTAMPTZ
-                )
-            """)
-
-            # Add columns to ai_improvement_proposals if they don't exist
-            # The table already exists, we just ensure we have what we need
-            await pool.execute("""
-                DO $$
-                BEGIN
-                    -- Add auto_approved column if not exists
-                    IF NOT EXISTS (
-                        SELECT 1 FROM information_schema.columns
-                        WHERE table_name = 'ai_improvement_proposals'
-                        AND column_name = 'auto_approved'
-                    ) THEN
-                        ALTER TABLE ai_improvement_proposals
-                        ADD COLUMN auto_approved BOOLEAN DEFAULT FALSE;
-                    END IF;
-
-                    -- Add risk_level column if not exists
-                    IF NOT EXISTS (
-                        SELECT 1 FROM information_schema.columns
-                        WHERE table_name = 'ai_improvement_proposals'
-                        AND column_name = 'risk_level'
-                    ) THEN
-                        ALTER TABLE ai_improvement_proposals
-                        ADD COLUMN risk_level VARCHAR(20) DEFAULT 'medium';
-                    END IF;
-
-                    -- Add pattern_id column if not exists
-                    IF NOT EXISTS (
-                        SELECT 1 FROM information_schema.columns
-                        WHERE table_name = 'ai_improvement_proposals'
-                        AND column_name = 'pattern_id'
-                    ) THEN
-                        ALTER TABLE ai_improvement_proposals
-                        ADD COLUMN pattern_id UUID;
-                    END IF;
-
-                    -- Add source_insight_ids column if not exists
-                    IF NOT EXISTS (
-                        SELECT 1 FROM information_schema.columns
-                        WHERE table_name = 'ai_improvement_proposals'
-                        AND column_name = 'source_insight_ids'
-                    ) THEN
-                        ALTER TABLE ai_improvement_proposals
-                        ADD COLUMN source_insight_ids UUID[] DEFAULT '{}';
-                    END IF;
-                END $$;
-            """)
-
-            self._initialized = True
-            logger.info("Learning Feedback Loop database tables initialized")
-
-        except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
-            raise
-
+            ok = await verify_tables_async(required_tables, pool, module_name="learning_feedback_loop")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def analyze_insights(self, hours: int = 24) -> list[Pattern]:
         """
         Analyze recent insights to identify actionable patterns.

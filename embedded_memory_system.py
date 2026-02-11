@@ -83,71 +83,14 @@ class EmbeddedMemorySystem:
         cursor = self.sqlite_conn.cursor()
 
         # Unified AI Memory table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS unified_ai_memory (
-                id TEXT PRIMARY KEY,
-                memory_type TEXT,
-                source_agent TEXT,
-                content TEXT,
-                embedding BLOB,
-                metadata TEXT,
-                importance_score REAL,
-                access_count INTEGER DEFAULT 0,
-                created_at TIMESTAMP,
-                last_accessed TIMESTAMP,
-                synced_at TIMESTAMP
-            )
-        """)
 
         # Task queue
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS ai_autonomous_tasks (
-                id TEXT PRIMARY KEY,
-                task_type TEXT,
-                status TEXT,
-                priority TEXT,
-                trigger_condition TEXT,
-                result TEXT,
-                error_log TEXT,
-                created_at TIMESTAMP,
-                started_at TIMESTAMP,
-                completed_at TIMESTAMP,
-                synced_at TIMESTAMP
-            )
-        """)
 
         # Learning from mistakes
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS ai_learning_from_mistakes (
-                id TEXT PRIMARY KEY,
-                agent_id TEXT,
-                task_id TEXT,
-                mistake_description TEXT,
-                root_cause TEXT,
-                lesson_learned TEXT,
-                impact_level TEXT,
-                created_at TIMESTAMP,
-                synced_at TIMESTAMP
-            )
-        """)
 
         # Sync metadata (tracks last sync time per table)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS sync_metadata (
-                table_name TEXT PRIMARY KEY,
-                last_sync_time TIMESTAMP,
-                last_sync_count INTEGER,
-                total_records INTEGER
-            )
-        """)
 
         # Indices for fast queries
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_memory_type ON unified_ai_memory(memory_type)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_memory_agent ON unified_ai_memory(source_agent)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_memory_importance ON unified_ai_memory(importance_score DESC)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON ai_autonomous_tasks(status)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_priority ON ai_autonomous_tasks(priority, created_at)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_learning_agent ON ai_learning_from_mistakes(agent_id)")
 
         self.sqlite_conn.commit()
         logger.info("✅ Local SQLite database initialized")

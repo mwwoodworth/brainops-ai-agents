@@ -147,50 +147,6 @@ async def ensure_unified_events_table():
 
     try:
         pool = get_pool()
-        await pool.execute("""
-            CREATE TABLE IF NOT EXISTS unified_events (
-                id SERIAL PRIMARY KEY,
-                event_id VARCHAR(64) UNIQUE NOT NULL,
-                version INTEGER DEFAULT 1,
-                event_type VARCHAR(100) NOT NULL,
-                category VARCHAR(50) DEFAULT 'business',
-                priority VARCHAR(20) DEFAULT 'normal',
-                source VARCHAR(50) NOT NULL,
-                source_instance VARCHAR(100),
-                tenant_id VARCHAR(100) NOT NULL,
-                timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                occurred_at TIMESTAMPTZ,
-                payload JSONB NOT NULL DEFAULT '{}',
-                metadata JSONB DEFAULT '{}',
-                correlation_id VARCHAR(64),
-                causation_id VARCHAR(64),
-                actor_type VARCHAR(50),
-                actor_id VARCHAR(100),
-                processed BOOLEAN DEFAULT FALSE,
-                processed_at TIMESTAMPTZ,
-                processing_result JSONB,
-                retry_count INTEGER DEFAULT 0,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-
-                -- Indexes
-                CONSTRAINT valid_category CHECK (category IN ('business', 'system', 'ai', 'user', 'integration')),
-                CONSTRAINT valid_priority CHECK (priority IN ('critical', 'high', 'normal', 'low', 'batch'))
-            );
-
-            -- Performance indexes
-            CREATE INDEX IF NOT EXISTS idx_unified_events_tenant_ts
-                ON unified_events(tenant_id, timestamp DESC);
-            CREATE INDEX IF NOT EXISTS idx_unified_events_type
-                ON unified_events(event_type);
-            CREATE INDEX IF NOT EXISTS idx_unified_events_unprocessed
-                ON unified_events(created_at)
-                WHERE NOT processed;
-            CREATE INDEX IF NOT EXISTS idx_unified_events_correlation
-                ON unified_events(correlation_id)
-                WHERE correlation_id IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS idx_unified_events_source
-                ON unified_events(source, timestamp DESC);
-        """)
         logger.info("Unified events table ensured")
         return True
     except Exception as e:

@@ -221,101 +221,23 @@ class SelfHealingErrorRecovery:
                 logger.error(f"Failed to initialize self-healing system: {e}")
 
     async def _initialize_database(self):
-        """Initialize database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "ai_error_logs",
+                "ai_recovery_actions",
+                "ai_recovery_patterns",
+                "ai_circuit_breakers",
+        ]
         try:
-            with _get_pooled_connection(self._get_db_config()) as conn:
-                cur = conn.cursor()
-
-                # Create error events table (using ai_error_logs to match system standard)
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_error_logs (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        error_id VARCHAR(255) UNIQUE NOT NULL,
-                        error_type VARCHAR(255) NOT NULL,
-                        error_message TEXT,
-                        stack_trace TEXT,
-                        component VARCHAR(255),
-                        function_name VARCHAR(255),
-                        severity VARCHAR(20),
-                        retry_count INT DEFAULT 0,
-                        metadata JSONB DEFAULT '{}'::jsonb,
-                        timestamp TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create recovery actions table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_recovery_actions (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        action_id VARCHAR(255) UNIQUE NOT NULL,
-                        error_id VARCHAR(255) NOT NULL,
-                        strategy VARCHAR(50) NOT NULL,
-                        status VARCHAR(50) NOT NULL,
-                        started_at TIMESTAMPTZ,
-                        completed_at TIMESTAMPTZ,
-                        attempt_count INT DEFAULT 0,
-                        max_attempts INT DEFAULT 3,
-                        result JSONB,
-                        error_message TEXT,
-                        metadata JSONB DEFAULT '{}'::jsonb,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create recovery patterns table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_recovery_patterns (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        pattern_id VARCHAR(255) UNIQUE NOT NULL,
-                        name VARCHAR(255) NOT NULL,
-                        category VARCHAR(50) NOT NULL,
-                        error_pattern TEXT NOT NULL,
-                        strategy VARCHAR(50) NOT NULL,
-                        priority INT DEFAULT 0,
-                        enabled BOOLEAN DEFAULT true,
-                        success_count INT DEFAULT 0,
-                        failure_count INT DEFAULT 0,
-                        metadata JSONB DEFAULT '{}'::jsonb,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create circuit breaker state table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ai_circuit_breakers (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        component VARCHAR(255) UNIQUE NOT NULL,
-                        state VARCHAR(20) NOT NULL DEFAULT 'closed',
-                        failure_count INT DEFAULT 0,
-                        success_count INT DEFAULT 0,
-                        last_failure TIMESTAMPTZ,
-                        opened_at TIMESTAMPTZ,
-                        half_open_at TIMESTAMPTZ,
-                        threshold INT DEFAULT 5,
-                        reset_timeout INT DEFAULT 60,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Create indexes
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_error_logs_timestamp
-                    ON ai_error_logs(timestamp)
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_error_logs_component
-                    ON ai_error_logs(component)
-                """)
-
-                conn.commit()
-                # Connection is automatically returned to pool or closed by context manager
-                logger.info("Self-healing database tables initialized")
-
-        except Exception as e:
-            logger.error(f"Database initialization error: {e}")
-
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="self_healing_error_recovery")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def _load_recovery_patterns(self):
         """Load recovery patterns from database and defaults"""
         # Load default patterns

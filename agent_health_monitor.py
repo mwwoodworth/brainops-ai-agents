@@ -60,68 +60,12 @@ class AgentHealthMonitor:
                 should_close_cur = True
 
             # Agent health status table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS agent_health_status (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    agent_id UUID REFERENCES ai_agents(id) ON DELETE CASCADE,
-                    agent_name TEXT NOT NULL,
-                    health_status TEXT DEFAULT 'unknown',
-                    last_execution TIMESTAMPTZ,
-                    last_success TIMESTAMPTZ,
-                    last_failure TIMESTAMPTZ,
-                    consecutive_failures INT DEFAULT 0,
-                    total_executions INT DEFAULT 0,
-                    total_successes INT DEFAULT 0,
-                    total_failures INT DEFAULT 0,
-                    average_execution_time_ms FLOAT,
-                    error_rate FLOAT DEFAULT 0.0,
-                    uptime_percentage FLOAT DEFAULT 100.0,
-                    last_check TIMESTAMPTZ DEFAULT NOW(),
-                    checked_at TIMESTAMPTZ DEFAULT NOW(),
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW(),
-                    UNIQUE(agent_id)
-                )
-            """)
-            cur.execute("ALTER TABLE agent_health_status ADD COLUMN IF NOT EXISTS checked_at TIMESTAMPTZ DEFAULT NOW()")
 
             # Agent restart log
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS agent_restart_log (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    agent_id UUID REFERENCES ai_agents(id) ON DELETE CASCADE,
-                    agent_name TEXT NOT NULL,
-                    restart_reason TEXT,
-                    previous_status TEXT,
-                    new_status TEXT,
-                    success BOOLEAN DEFAULT TRUE,
-                    error_message TEXT,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
 
             # Agent health alerts
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS agent_health_alerts (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    agent_id UUID REFERENCES ai_agents(id) ON DELETE CASCADE,
-                    agent_name TEXT NOT NULL,
-                    alert_type TEXT NOT NULL,
-                    severity TEXT DEFAULT 'warning',
-                    message TEXT,
-                    resolved BOOLEAN DEFAULT FALSE,
-                    resolved_at TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
 
             # Create indexes
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_health_status_agent ON agent_health_status(agent_id)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_health_status_name ON agent_health_status(agent_name)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_health_status_status ON agent_health_status(health_status)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_restart_log_agent ON agent_restart_log(agent_id, created_at DESC)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_health_alerts_agent ON agent_health_alerts(agent_id, resolved)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_health_alerts_severity ON agent_health_alerts(severity, created_at DESC)")
 
             conn.commit()
             logger.info("Agent health monitoring tables initialized")

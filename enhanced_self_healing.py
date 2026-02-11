@@ -239,73 +239,23 @@ class EnhancedSelfHealing:
         logger.info("Enhanced Self-Healing System initialized")
 
     async def _create_tables(self):
-        """Create database tables using connection pool"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "self_healing_incidents",
+                "remediation_plans",
+                "health_patterns",
+                "remediation_history",
+        ]
         try:
-            async with _get_db_connection(self.db_url) as conn:
-                if conn is None:
-                    return
-
-                # Incidents table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS self_healing_incidents (
-                        incident_id TEXT PRIMARY KEY,
-                        component TEXT NOT NULL,
-                        description TEXT,
-                        severity TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        detected_at TIMESTAMPTZ NOT NULL,
-                        resolved_at TIMESTAMPTZ,
-                        metrics JSONB DEFAULT '{}',
-                        root_cause TEXT,
-                        remediation_steps JSONB DEFAULT '[]',
-                        escalation_history JSONB DEFAULT '[]',
-                        recovery_time_seconds FLOAT,
-                        auto_resolved BOOLEAN DEFAULT FALSE
-                    )
-                """)
-
-                # Remediation plans table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS remediation_plans (
-                        plan_id TEXT PRIMARY KEY,
-                        incident_id TEXT REFERENCES self_healing_incidents(incident_id),
-                        actions JSONB NOT NULL,
-                        confidence FLOAT NOT NULL,
-                        estimated_recovery_seconds INTEGER,
-                        requires_approval BOOLEAN DEFAULT FALSE,
-                        approved BOOLEAN DEFAULT FALSE,
-                        executed BOOLEAN DEFAULT FALSE,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Health patterns table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS health_patterns (
-                        pattern_id TEXT PRIMARY KEY,
-                        component TEXT NOT NULL,
-                        normal_ranges JSONB NOT NULL,
-                        anomaly_signatures JSONB DEFAULT '[]',
-                        learned_from INTEGER DEFAULT 0,
-                        last_updated TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-
-                # Remediation history for learning
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS remediation_history (
-                        id SERIAL PRIMARY KEY,
-                        incident_type TEXT NOT NULL,
-                        component TEXT NOT NULL,
-                        action_taken TEXT NOT NULL,
-                        success BOOLEAN NOT NULL,
-                        recovery_time_seconds FLOAT,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-        except Exception as e:
-            logger.error(f"Error creating self-healing tables: {e}")
-
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="enhanced_self_healing")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def _load_patterns(self):
         """Load learned health patterns from database using connection pool"""
         try:

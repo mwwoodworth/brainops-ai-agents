@@ -24,18 +24,6 @@ def fix_schema():
         cur = conn.cursor()
 
         # First ensure ai_agents table exists
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS ai_agents (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                name VARCHAR(100) UNIQUE NOT NULL,
-                status VARCHAR(50) DEFAULT 'active',
-                capabilities JSONB DEFAULT '{}',
-                last_active TIMESTAMP WITH TIME ZONE,
-                total_executions INTEGER DEFAULT 0,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-        """)
         conn.commit()
         print("✅ ai_agents table ready")
 
@@ -43,7 +31,6 @@ def fix_schema():
 
         # 1. Add metadata columns
         try:
-            cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'")
             conn.commit()
             fixes_applied.append("✅ customers.metadata added")
         except Exception as e:
@@ -51,7 +38,6 @@ def fix_schema():
             fixes_applied.append(f"⚠️ customers.metadata: {str(e)[:50]}")
 
         try:
-            cur.execute("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'")
             conn.commit()
             fixes_applied.append("✅ invoices.metadata added")
         except Exception as e:
@@ -85,18 +71,6 @@ def fix_schema():
 
         # 3. Create workflow tables
         try:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS workflows (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    name VARCHAR(255) NOT NULL,
-                    type VARCHAR(100),
-                    status VARCHAR(50) DEFAULT 'active',
-                    context JSONB DEFAULT '{}',
-                    results JSONB DEFAULT '{}',
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    updated_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
             conn.commit()
             fixes_applied.append("✅ workflows table created")
         except Exception as e:

@@ -472,90 +472,14 @@ class ProductGenerator:
         try:
             with conn.cursor() as cur:
                 # Products table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS generated_products (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        product_type VARCHAR(50) NOT NULL,
-                        title VARCHAR(500) NOT NULL,
-                        description TEXT,
-                        spec JSONB DEFAULT '{}',
-                        content JSONB DEFAULT '{}',
-                        assets JSONB DEFAULT '[]',
-                        status VARCHAR(50) DEFAULT 'queued',
-                        quality_score FLOAT,
-                        word_count INT,
-                        models_used JSONB DEFAULT '[]',
-                        tokens_used INT DEFAULT 0,
-                        cost_estimate FLOAT DEFAULT 0,
-                        generation_time_seconds FLOAT,
-                        errors JSONB DEFAULT '[]',
-                        published BOOLEAN DEFAULT false,
-                        publish_url TEXT,
-                        revenue_generated FLOAT DEFAULT 0,
-                        downloads INT DEFAULT 0,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        completed_at TIMESTAMPTZ,
-                        published_at TIMESTAMPTZ
-                    )
-                """)
 
                 # Generation queue
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS product_generation_queue (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        product_id UUID REFERENCES generated_products(id),
-                        priority INT DEFAULT 5,
-                        scheduled_at TIMESTAMPTZ DEFAULT NOW(),
-                        started_at TIMESTAMPTZ,
-                        completed_at TIMESTAMPTZ,
-                        status VARCHAR(50) DEFAULT 'pending',
-                        worker_id VARCHAR(100),
-                        retry_count INT DEFAULT 0,
-                        max_retries INT DEFAULT 3,
-                        error_message TEXT,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Product templates
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS product_templates (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        product_type VARCHAR(50) NOT NULL,
-                        name VARCHAR(255) NOT NULL,
-                        description TEXT,
-                        template_content JSONB DEFAULT '{}',
-                        variables JSONB DEFAULT '[]',
-                        industry VARCHAR(100),
-                        quality_tier VARCHAR(50) DEFAULT 'premium',
-                        usage_count INT DEFAULT 0,
-                        avg_quality_score FLOAT,
-                        active BOOLEAN DEFAULT true,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Revenue tracking
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS product_revenue (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        product_id UUID REFERENCES generated_products(id),
-                        revenue_type VARCHAR(50),
-                        amount FLOAT NOT NULL,
-                        currency VARCHAR(10) DEFAULT 'USD',
-                        source VARCHAR(100),
-                        customer_id UUID,
-                        transaction_date TIMESTAMPTZ DEFAULT NOW(),
-                        metadata JSONB DEFAULT '{}',
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Create indexes
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_products_type ON generated_products(product_type)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_products_status ON generated_products(status)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_queue_status ON product_generation_queue(status)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_revenue_product ON product_revenue(product_id)")
 
                 conn.commit()
                 self._initialized = True

@@ -1298,88 +1298,22 @@ class LiveMemoryBrain:
                     logger.info(f"Consolidated {len(low_importance)} memories into 1")
 
     async def _ensure_tables(self):
-        """Ensure all required tables exist"""
-        if not self._shared_sync_pool:
-            logger.warning("Shared sync pool not available, skipping table creation")
-            return
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "live_brain_memories",
+                "live_brain_wisdom",
+                "live_brain_events",
+        ]
         try:
-            with self._shared_sync_pool.get_connection() as conn:
-                cursor = conn.cursor()
-
-                # Execute schema bootstrap statements one-by-one so older schemas can be
-                # upgraded in-place without aborting the full initialization.
-                statements = [
-                    # Optional pgvector (if enabled in the DB). Failure is non-fatal.
-                    "CREATE EXTENSION IF NOT EXISTS vector",
-
-                    # Base tables (kept vector-free; added via ALTER when available).
-                    """
-                    CREATE TABLE IF NOT EXISTS live_brain_memories (
-                        id TEXT PRIMARY KEY,
-                        content JSONB NOT NULL,
-                        memory_type TEXT NOT NULL,
-                        importance FLOAT DEFAULT 0.5,
-                        confidence FLOAT DEFAULT 1.0,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        last_accessed TIMESTAMPTZ DEFAULT NOW(),
-                        access_count INT DEFAULT 0,
-                        provenance JSONB DEFAULT '{}'::jsonb,
-                        connections TEXT[],
-                        temporal_context JSONB DEFAULT '{}'::jsonb,
-                        predictions JSONB DEFAULT '[]'::jsonb,
-                        contradictions TEXT[],
-                        crystallization_count INT DEFAULT 0
-                    )
-                    """,
-                    """
-                    CREATE TABLE IF NOT EXISTS live_brain_wisdom (
-                        id TEXT PRIMARY KEY,
-                        wisdom_type TEXT NOT NULL,
-                        content JSONB NOT NULL,
-                        source_memories TEXT[],
-                        occurrence_count INT DEFAULT 1,
-                        confidence FLOAT DEFAULT 0.5,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        last_accessed TIMESTAMPTZ DEFAULT NOW()
-                    )
-                    """,
-                    """
-                    CREATE TABLE IF NOT EXISTS live_brain_events (
-                        id SERIAL PRIMARY KEY,
-                        event_type TEXT NOT NULL,
-                        context JSONB NOT NULL,
-                        caused_by TEXT,
-                        timestamp TIMESTAMPTZ DEFAULT NOW()
-                    )
-                    """,
-
-                    # Backfill missing columns on older schemas (safe no-ops when present).
-                    "ALTER TABLE live_brain_memories ADD COLUMN IF NOT EXISTS confidence FLOAT DEFAULT 1.0",
-                    "ALTER TABLE live_brain_memories ADD COLUMN IF NOT EXISTS last_accessed TIMESTAMPTZ DEFAULT NOW()",
-                    "ALTER TABLE live_brain_memories ADD COLUMN IF NOT EXISTS access_count INT DEFAULT 0",
-                    # Optional embedding column (requires pgvector).
-                    "ALTER TABLE live_brain_memories ADD COLUMN IF NOT EXISTS embedding vector(1536)",
-
-                    "ALTER TABLE live_brain_wisdom ADD COLUMN IF NOT EXISTS last_accessed TIMESTAMPTZ DEFAULT NOW()",
-
-                    # Indexes (after columns are ensured).
-                    "CREATE INDEX IF NOT EXISTS idx_live_brain_memories_type ON live_brain_memories(memory_type)",
-                    "CREATE INDEX IF NOT EXISTS idx_live_brain_memories_importance ON live_brain_memories(importance DESC)",
-                    "CREATE INDEX IF NOT EXISTS idx_live_brain_memories_accessed ON live_brain_memories(last_accessed DESC)",
-                ]
-
-                for statement in statements:
-                    try:
-                        cursor.execute(statement)
-                    except Exception as exc:
-                        logger.warning("LiveMemoryBrain schema statement failed: %s", exc)
-
-                conn.commit()
-                cursor.close()
-                logger.info("LiveMemoryBrain tables ensured")
-        except Exception as e:
-            logger.error(f"Failed to ensure tables: {e}")
-
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="live_memory_brain")
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     def _register_known_systems(self):
         """Register known systems for omniscience"""
         systems = [

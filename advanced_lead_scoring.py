@@ -253,76 +253,12 @@ class AdvancedLeadScoringEngine:
         try:
             with conn.cursor() as cur:
                 # Advanced lead metrics table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS advanced_lead_metrics (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        lead_id UUID NOT NULL,
-                        behavioral_score FLOAT DEFAULT 0,
-                        firmographic_score FLOAT DEFAULT 0,
-                        intent_score FLOAT DEFAULT 0,
-                        velocity_score FLOAT DEFAULT 0,
-                        financial_score FLOAT DEFAULT 0,
-                        composite_score FLOAT DEFAULT 0,
-                        tier VARCHAR(20),
-                        probability_conversion_30d FLOAT,
-                        expected_deal_size FLOAT,
-                        next_best_action VARCHAR(100),
-                        recommended_touch_frequency INT,
-                        scoring_factors JSONB DEFAULT '{}',
-                        last_calculated TIMESTAMPTZ DEFAULT NOW(),
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        UNIQUE(lead_id)
-                    )
-                """)
 
                 # Lead engagement history
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS lead_engagement_history (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        lead_id UUID NOT NULL,
-                        event_type VARCHAR(50) NOT NULL,
-                        event_data JSONB DEFAULT '{}',
-                        engagement_value FLOAT DEFAULT 0,
-                        channel VARCHAR(50),
-                        timestamp TIMESTAMPTZ DEFAULT NOW(),
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Scoring model performance
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS scoring_model_performance (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        model_version VARCHAR(50),
-                        predictions_made INT DEFAULT 0,
-                        conversions_predicted INT DEFAULT 0,
-                        actual_conversions INT DEFAULT 0,
-                        accuracy FLOAT,
-                        precision_score FLOAT,
-                        recall_score FLOAT,
-                        period_start TIMESTAMPTZ,
-                        period_end TIMESTAMPTZ,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
 
                 # Create indexes
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_lead_metrics_composite
-                    ON advanced_lead_metrics(composite_score DESC)
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_lead_metrics_tier
-                    ON advanced_lead_metrics(tier)
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_engagement_lead_id
-                    ON lead_engagement_history(lead_id)
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_engagement_timestamp
-                    ON lead_engagement_history(timestamp DESC)
-                """)
 
                 conn.commit()
                 self._initialized = True

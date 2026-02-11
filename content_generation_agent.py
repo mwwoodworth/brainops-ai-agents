@@ -532,41 +532,22 @@ class ContentGeneratorAgent:
             return None
 
     def _ensure_tables(self):
-        """Ensure content tables exist - lazy initialization"""
-        if ContentGeneratorAgent._tables_ensured:
-            return
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "content_posts",
+        ]
         try:
-            conn = _get_db_connection()
+            from database.verify_tables import verify_tables_sync
+            conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS content_posts (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    title TEXT NOT NULL,
-                    slug TEXT UNIQUE NOT NULL,
-                    content TEXT,
-                    excerpt TEXT,
-                    status VARCHAR(50) DEFAULT 'draft',
-                    author_id UUID,
-                    seo_metadata JSONB DEFAULT '{}'::jsonb,
-                    metrics JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW(),
-                    published_at TIMESTAMPTZ
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_content_posts_slug ON content_posts(slug);
-                CREATE INDEX IF NOT EXISTS idx_content_posts_status ON content_posts(status);
-            """)
-
-            conn.commit()
+            ok = verify_tables_sync(required_tables, cursor, module_name="content_generation_agent")
             cursor.close()
             conn.close()
-            ContentGeneratorAgent._tables_ensured = True
-            logger.info("Content tables ensured")
-        except Exception as e:
-            logger.warning(f"Could not ensure content tables: {e}")
-
+            if not ok:
+                return
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute content generation task"""
         self._ensure_tables()

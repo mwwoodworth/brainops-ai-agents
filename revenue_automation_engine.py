@@ -396,130 +396,23 @@ class RevenueAutomationEngine:
         logger.info(f"Revenue Engine initialized: {len(self.leads)} leads, ${self.total_revenue} total revenue")
 
     async def _create_tables(self):
-        """Create required database tables"""
+        """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
+        required_tables = [
+                "revenue_leads",
+                "revenue_transactions",
+                "automation_sequences",
+                "revenue_metrics",
+        ]
         try:
-            import asyncpg
-            if not self._db_url:
-                logger.warning("No DATABASE_URL configured")
+            from database import get_pool
+            from database.verify_tables import verify_tables_async
+            pool = get_pool()
+            ok = await verify_tables_async(required_tables, pool, module_name="revenue_automation_engine")
+            if not ok:
                 return
-
-            conn = await asyncpg.connect(self._db_url)
-            try:
-                # Leads table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS revenue_leads (
-                        lead_id TEXT PRIMARY KEY,
-                        email TEXT NOT NULL,
-                        phone TEXT,
-                        name TEXT NOT NULL,
-                        company TEXT,
-                        industry TEXT NOT NULL,
-                        source TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        score INTEGER DEFAULT 0,
-                        estimated_value DECIMAL(12,2) DEFAULT 0,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW(),
-                        contacted_at TIMESTAMPTZ,
-                        converted_at TIMESTAMPTZ,
-                        tags JSONB DEFAULT '[]',
-                        custom_fields JSONB DEFAULT '{}',
-                        automation_history JSONB DEFAULT '[]',
-                        notes JSONB DEFAULT '[]'
-                    );
-                """)
-
-                # Transactions table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS revenue_transactions (
-                        transaction_id TEXT PRIMARY KEY,
-                        lead_id TEXT REFERENCES revenue_leads(lead_id),
-                        amount DECIMAL(12,2) NOT NULL,
-                        currency TEXT DEFAULT 'USD',
-                        status TEXT NOT NULL,
-                        payment_method TEXT,
-                        processor_id TEXT,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        completed_at TIMESTAMPTZ,
-                        industry TEXT,
-                        product_service TEXT,
-                        metadata JSONB DEFAULT '{}'
-                    );
-                """)
-
-                # Automation sequences table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS automation_sequences (
-                        sequence_id TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        industry TEXT NOT NULL,
-                        trigger TEXT NOT NULL,
-                        steps JSONB DEFAULT '[]',
-                        active BOOLEAN DEFAULT TRUE,
-                        success_rate REAL DEFAULT 0,
-                        total_sent INTEGER DEFAULT 0,
-                        conversions INTEGER DEFAULT 0,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    );
-                """)
-
-                # Revenue metrics table
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS revenue_metrics (
-                        id SERIAL PRIMARY KEY,
-                        period TEXT NOT NULL,
-                        period_start TIMESTAMPTZ NOT NULL,
-                        period_end TIMESTAMPTZ NOT NULL,
-                        total_revenue DECIMAL(12,2) DEFAULT 0,
-                        transaction_count INTEGER DEFAULT 0,
-                        leads_generated INTEGER DEFAULT 0,
-                        leads_qualified INTEGER DEFAULT 0,
-                        leads_converted INTEGER DEFAULT 0,
-                        metrics_data JSONB DEFAULT '{}',
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    );
-                """)
-
-                # Create indexes for revenue optimization
-                # Lead indexes for fast filtering and pipeline queries
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_status ON revenue_leads(status);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_industry ON revenue_leads(industry);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_email ON revenue_leads(email);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_score ON revenue_leads(score DESC);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_created ON revenue_leads(created_at DESC);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_updated ON revenue_leads(updated_at DESC);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_source ON revenue_leads(source);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_estimated_value ON revenue_leads(estimated_value DESC);")
-                # Composite index for pipeline queries (status + value)
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_status_value ON revenue_leads(status, estimated_value DESC);")
-                # Index for lead qualification queries
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_score_status ON revenue_leads(score DESC, status);")
-
-                # Transaction indexes for revenue analytics
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_status ON revenue_transactions(status);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_created ON revenue_transactions(created_at DESC);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_completed ON revenue_transactions(completed_at DESC);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_lead ON revenue_transactions(lead_id);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_amount ON revenue_transactions(amount DESC);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_industry ON revenue_transactions(industry);")
-                # Composite index for revenue reporting
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_status_created ON revenue_transactions(status, created_at DESC);")
-
-                # Automation sequence indexes
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_sequences_trigger ON automation_sequences(trigger);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_sequences_industry ON automation_sequences(industry);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_sequences_active ON automation_sequences(active);")
-
-                # Revenue metrics indexes for time-series queries
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_period ON revenue_metrics(period_start DESC, period_end DESC);")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_period_type ON revenue_metrics(period);")
-
-                logger.info("Revenue tables created/verified")
-            finally:
-                await conn.close()
-        except Exception as e:
-            logger.error(f"Failed to create tables: {e}")
-
+            self._tables_initialized = True
+        except Exception as exc:
+            logger.error("Table verification failed: %s", exc)
     async def _load_from_db(self):
         """Load existing data from database"""
         try:

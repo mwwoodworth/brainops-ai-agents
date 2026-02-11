@@ -517,9 +517,9 @@ BrainOps Team""",
         }
 
 
-# Ensure ai_invoices table exists
+# Verify ai_invoices table exists (no DDL - agent_worker has no DDL perms)
 async def ensure_invoices_table():
-    """Ensure the ai_invoices table exists."""
+    """Verify the ai_invoices table exists. Returns False if missing."""
     try:
         from database.async_connection import get_pool, DatabaseUnavailableError
         try:
@@ -531,35 +531,23 @@ async def ensure_invoices_table():
         if not pool:
             return False
 
-        await pool.execute("""
-            CREATE TABLE IF NOT EXISTS ai_invoices (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                proposal_id UUID REFERENCES ai_proposals(id),
-                lead_id UUID REFERENCES revenue_leads(id),
-                amount DECIMAL(12,2) NOT NULL,
-                currency VARCHAR(10) DEFAULT 'USD',
-                status VARCHAR(50) DEFAULT 'pending',
-                stripe_checkout_id TEXT,
-                stripe_payment_intent TEXT,
-                payment_link TEXT,
-                due_date TIMESTAMPTZ,
-                paid_at TIMESTAMPTZ,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
+        from database.verify_tables import verify_tables_async
+        tables_ok = await verify_tables_async(
+            ["ai_invoices"],
+            pool,
+            module_name="payment_capture",
+        )
+        if not tables_ok:
+            logger.error(
+                "ai_invoices table missing - run migrations to create it"
             )
-        """)
+            return False
 
-        await pool.execute("""
-            CREATE INDEX IF NOT EXISTS idx_ai_invoices_proposal_id ON ai_invoices(proposal_id);
-            CREATE INDEX IF NOT EXISTS idx_ai_invoices_lead_id ON ai_invoices(lead_id);
-            CREATE INDEX IF NOT EXISTS idx_ai_invoices_status ON ai_invoices(status);
-        """)
-
-        logger.info("ai_invoices table ensured")
+        logger.info("ai_invoices table verified")
         return True
 
     except Exception as e:
-        logger.error(f"Failed to ensure ai_invoices table: {e}")
+        logger.error(f"Failed to verify ai_invoices table: {e}")
         return False
 
 

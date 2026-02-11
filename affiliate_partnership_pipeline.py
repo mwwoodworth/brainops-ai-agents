@@ -854,269 +854,15 @@ Mention affiliate link: "Link in description" at strategic points."""
 # DATABASE SCHEMA
 # =============================================================================
 
-AFFILIATE_TABLES_SQL = """
--- Affiliates table
-CREATE TABLE IF NOT EXISTS affiliates (
-    affiliate_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID,
-    partner_type VARCHAR(50) NOT NULL DEFAULT 'affiliate',
-    tier VARCHAR(20) NOT NULL DEFAULT 'bronze',
-    status VARCHAR(30) NOT NULL DEFAULT 'pending_approval',
-
-    -- Contact Info
-    company_name VARCHAR(255),
-    contact_name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    phone VARCHAR(50),
-    website VARCHAR(500),
-
-    -- Tracking
-    affiliate_code VARCHAR(50) NOT NULL UNIQUE,
-    tracking_links JSONB DEFAULT '{}',
-    referral_source VARCHAR(255),
-
-    -- Commission Settings
-    commission_structure_id VARCHAR(50),
-    custom_commission_rate DECIMAL(10, 4),
-    payout_method VARCHAR(50) DEFAULT 'stripe',
-    payout_details JSONB DEFAULT '{}',
-
-    -- Multi-tier tracking
-    parent_affiliate_id UUID REFERENCES affiliates(affiliate_id),
-    tier_level INTEGER DEFAULT 1,
-
-    -- Performance
-    total_referrals INTEGER DEFAULT 0,
-    total_conversions INTEGER DEFAULT 0,
-    total_revenue_generated DECIMAL(15, 2) DEFAULT 0,
-    total_commissions_earned DECIMAL(15, 2) DEFAULT 0,
-    total_commissions_paid DECIMAL(15, 2) DEFAULT 0,
-    pending_commission DECIMAL(15, 2) DEFAULT 0,
-
-    -- Dates
-    joined_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    last_activity_date TIMESTAMP WITH TIME ZONE,
-    next_payout_date TIMESTAMP WITH TIME ZONE,
-
-    -- Metadata
-    tags TEXT[],
-    notes TEXT,
-    custom_data JSONB DEFAULT '{}',
-
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Referrals table
-CREATE TABLE IF NOT EXISTS affiliate_referrals (
-    referral_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    affiliate_id UUID NOT NULL REFERENCES affiliates(affiliate_id),
-
-    -- Visitor info
-    visitor_id VARCHAR(255) NOT NULL,
-    customer_id VARCHAR(255),
-    ip_address VARCHAR(45),
-    user_agent TEXT,
-
-    -- Tracking
-    tracking_code VARCHAR(50) NOT NULL,
-    landing_page TEXT,
-    referrer_url TEXT,
-    utm_source VARCHAR(255),
-    utm_medium VARCHAR(255),
-    utm_campaign VARCHAR(255),
-    utm_content VARCHAR(255),
-
-    -- Conversion
-    converted BOOLEAN DEFAULT FALSE,
-    conversion_date TIMESTAMP WITH TIME ZONE,
-    product_id VARCHAR(255),
-    product_name VARCHAR(255),
-    order_id VARCHAR(255),
-    order_value DECIMAL(15, 2) DEFAULT 0,
-
-    -- Commission
-    commission_amount DECIMAL(15, 2) DEFAULT 0,
-    commission_status VARCHAR(30) DEFAULT 'pending',
-
-    -- Multi-tier
-    tier_level INTEGER DEFAULT 1,
-    parent_referral_id UUID REFERENCES affiliate_referrals(referral_id),
-
-    -- Attribution
-    attribution_model VARCHAR(30) DEFAULT 'last_click',
-    attribution_weight DECIMAL(5, 4) DEFAULT 1.0,
-    touchpoints JSONB DEFAULT '[]',
-
-    -- Dates
-    click_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    cookie_expires TIMESTAMP WITH TIME ZONE,
-
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Commissions table
-CREATE TABLE IF NOT EXISTS affiliate_commissions (
-    commission_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    affiliate_id UUID NOT NULL REFERENCES affiliates(affiliate_id),
-    referral_id UUID REFERENCES affiliate_referrals(referral_id),
-
-    -- Amounts
-    gross_amount DECIMAL(15, 2) NOT NULL DEFAULT 0,
-    adjustments DECIMAL(15, 2) DEFAULT 0,
-    net_amount DECIMAL(15, 2) NOT NULL DEFAULT 0,
-
-    -- Details
-    commission_type VARCHAR(30) NOT NULL DEFAULT 'percentage',
-    rate_applied DECIMAL(10, 4) NOT NULL,
-    tier_level INTEGER DEFAULT 1,
-    tier_rate_modifier DECIMAL(5, 4) DEFAULT 1.0,
-
-    -- Status
-    status VARCHAR(30) NOT NULL DEFAULT 'pending',
-    payout_id UUID,
-
-    -- Dates
-    earned_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    available_date TIMESTAMP WITH TIME ZONE,
-    paid_date TIMESTAMP WITH TIME ZONE,
-
-    -- Metadata
-    description TEXT,
-    metadata JSONB DEFAULT '{}',
-
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Payouts table
-CREATE TABLE IF NOT EXISTS affiliate_payouts (
-    payout_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    affiliate_id UUID NOT NULL REFERENCES affiliates(affiliate_id),
-
-    -- Amounts
-    gross_amount DECIMAL(15, 2) NOT NULL DEFAULT 0,
-    fees DECIMAL(15, 2) DEFAULT 0,
-    net_amount DECIMAL(15, 2) NOT NULL DEFAULT 0,
-
-    -- Commissions included
-    commission_ids UUID[],
-    commission_count INTEGER DEFAULT 0,
-
-    -- Payment
-    payment_method VARCHAR(50) NOT NULL,
-    payment_reference VARCHAR(255),
-    currency VARCHAR(3) DEFAULT 'USD',
-
-    -- Status
-    status VARCHAR(30) NOT NULL DEFAULT 'pending',
-    failure_reason TEXT,
-    retry_count INTEGER DEFAULT 0,
-
-    -- Dates
-    created_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    processed_date TIMESTAMP WITH TIME ZONE,
-    completed_date TIMESTAMP WITH TIME ZONE
-);
-
--- Payout Queue table
-CREATE TABLE IF NOT EXISTS affiliate_payout_queue (
-    queue_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    payout_id UUID,
-    affiliate_id UUID NOT NULL REFERENCES affiliates(affiliate_id),
-
-    -- Queue status
-    status VARCHAR(30) NOT NULL DEFAULT 'queued',
-    priority INTEGER DEFAULT 0,
-
-    -- Amounts
-    amount DECIMAL(15, 2) NOT NULL DEFAULT 0,
-    currency VARCHAR(3) DEFAULT 'USD',
-    payment_method VARCHAR(50),
-
-    -- Processing
-    attempts INTEGER DEFAULT 0,
-    max_attempts INTEGER DEFAULT 3,
-    last_attempt_at TIMESTAMP WITH TIME ZONE,
-    next_retry_at TIMESTAMP WITH TIME ZONE,
-    error_message TEXT,
-
-    -- Timing
-    queued_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    started_at TIMESTAMP WITH TIME ZONE,
-    completed_at TIMESTAMP WITH TIME ZONE,
-
-    -- Metadata
-    metadata JSONB DEFAULT '{}'
-);
-
--- Partner Content table
-CREATE TABLE IF NOT EXISTS affiliate_content (
-    content_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    affiliate_id UUID NOT NULL REFERENCES affiliates(affiliate_id),
-
-    -- Content details
-    content_type VARCHAR(50) NOT NULL,
-    title VARCHAR(500),
-    content TEXT,
-
-    -- Assets
-    images TEXT[],
-    tracking_link TEXT,
-
-    -- Performance
-    times_used INTEGER DEFAULT 0,
-    clicks_generated INTEGER DEFAULT 0,
-    conversions_generated INTEGER DEFAULT 0,
-
-    -- Metadata
-    created_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    ai_model_used VARCHAR(100),
-    generation_prompt TEXT
-);
-
--- Indexes for performance
-CREATE INDEX IF NOT EXISTS idx_affiliates_email ON affiliates(email);
-CREATE INDEX IF NOT EXISTS idx_affiliates_code ON affiliates(affiliate_code);
-CREATE INDEX IF NOT EXISTS idx_affiliates_status ON affiliates(status);
-CREATE INDEX IF NOT EXISTS idx_affiliates_parent ON affiliates(parent_affiliate_id);
-
-CREATE INDEX IF NOT EXISTS idx_referrals_affiliate ON affiliate_referrals(affiliate_id);
-CREATE INDEX IF NOT EXISTS idx_referrals_visitor ON affiliate_referrals(visitor_id);
-CREATE INDEX IF NOT EXISTS idx_referrals_converted ON affiliate_referrals(converted);
-CREATE INDEX IF NOT EXISTS idx_referrals_click_date ON affiliate_referrals(click_date);
-
-CREATE INDEX IF NOT EXISTS idx_commissions_affiliate ON affiliate_commissions(affiliate_id);
-CREATE INDEX IF NOT EXISTS idx_commissions_status ON affiliate_commissions(status);
-CREATE INDEX IF NOT EXISTS idx_commissions_payout ON affiliate_commissions(payout_id);
-
-CREATE INDEX IF NOT EXISTS idx_payouts_affiliate ON affiliate_payouts(affiliate_id);
-CREATE INDEX IF NOT EXISTS idx_payouts_status ON affiliate_payouts(status);
-
-CREATE INDEX IF NOT EXISTS idx_queue_status ON affiliate_payout_queue(status);
-CREATE INDEX IF NOT EXISTS idx_queue_priority ON affiliate_payout_queue(priority DESC, queued_at ASC);
-
--- Update timestamp trigger
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-DROP TRIGGER IF EXISTS update_affiliates_updated_at ON affiliates;
-CREATE TRIGGER update_affiliates_updated_at
-    BEFORE UPDATE ON affiliates
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS update_commissions_updated_at ON affiliate_commissions;
-CREATE TRIGGER update_commissions_updated_at
-    BEFORE UPDATE ON affiliate_commissions
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-"""
+# Tables required by the affiliate system (verified at runtime, created via migrations)
+AFFILIATE_REQUIRED_TABLES = [
+    "affiliates",
+    "affiliate_referrals",
+    "affiliate_commissions",
+    "affiliate_payouts",
+    "affiliate_payout_queue",
+    "affiliate_content",
+]
 
 
 # =============================================================================
@@ -1201,10 +947,12 @@ class AffiliatePartnershipPipeline:
 
     async def initialize_database(self) -> bool:
         """
-        Initialize database tables for the affiliate system.
+        Verify database tables for the affiliate system exist.
+        No DDL is executed - agent_worker has no DDL permissions (P0-LOCK).
+        Tables must be created via migrations run as postgres.
 
         Returns:
-            True if successful, False otherwise
+            True if all tables present, False otherwise
         """
         pool = await self._get_db_pool()
         if not pool:
@@ -1212,12 +960,23 @@ class AffiliatePartnershipPipeline:
             return False
 
         try:
-            async with pool.acquire() as conn:
-                await conn.execute(AFFILIATE_TABLES_SQL)
-                logger.info("Affiliate database tables created/verified")
-                return True
+            from database.verify_tables import verify_tables_async
+            tables_ok = await verify_tables_async(
+                AFFILIATE_REQUIRED_TABLES,
+                pool,
+                module_name="affiliate_partnership_pipeline",
+            )
+            if not tables_ok:
+                logger.error(
+                    "Affiliate tables missing - run migrations to create them. "
+                    "Required: %s",
+                    ", ".join(AFFILIATE_REQUIRED_TABLES),
+                )
+                return False
+            logger.info("Affiliate database tables verified")
+            return True
         except Exception as e:
-            logger.error(f"Failed to initialize affiliate tables: {e!r}")
+            logger.error(f"Failed to verify affiliate tables: {e!r}")
             return False
 
     async def sync_to_database(self) -> dict[str, int]:
