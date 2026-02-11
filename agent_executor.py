@@ -1289,27 +1289,136 @@ class AgentExecutor:
             logger.warning(f"Failed to log execution completion to ai_agent_executions: {e!r}")
 
     async def _check_db_guardrails(self, agent_name: str, task: dict[str, Any]) -> None:
-        """Check against database-configured guardrails."""
+        """Check pre-execution guardrails from the agent_guardrails table.
+
+        Guardrail types:
+          - scope: Evaluate conditions in ``config`` against the task context
+            BEFORE execution.  If a condition matches and severity is 'block',
+            the execution is halted with a RuntimeError.
+          - output: Evaluated AFTER execution (handled separately by
+            ``_check_output_guardrails``).
+
+        Config shapes understood:
+          - ``blocked_conditions``: list of ``"key=value"`` strings.  If every
+            condition in the list evaluates to true against the task dict, the
+            guardrail fires.  Values ``"true"``/``"false"`` are treated as
+            booleans.
+          - ``required_field`` + ``must_be``: A single field assertion.
+          - ``action``: ``"skip_with_log"`` returns a skip result instead of
+            raising, ``"block"`` (default) raises RuntimeError.
+        """
         try:
             pool = get_pool()
-            # Find enabled guardrails for this agent
             guardrails = await pool.fetch("""
-                SELECT guardrail_type, config, severity
+                SELECT name, guardrail_type, config, severity
                 FROM agent_guardrails
                 WHERE agent_name = $1 AND enabled = true
+                  AND guardrail_type = 'scope'
             """, agent_name)
 
             for g in guardrails:
-                if g['severity'] == 'block':
-                    # For now, any enabled blocking guardrail halts execution.
-                    # Future: evaluate 'config' logic (regex, etc.)
-                    logger.warning(f"Agent {agent_name} blocked by DB guardrail: {g['guardrail_type']}")
-                    raise RuntimeError(f"Execution blocked by guardrail: {g['guardrail_type']}")
+                config = g["config"] if isinstance(g["config"], dict) else json.loads(g["config"] or "{}")
+                triggered = self._evaluate_guardrail_config(config, task)
+                if not triggered:
+                    continue
+
+                action = config.get("action", "block")
+                guard_name = g["name"]
+
+                if g["severity"] == "block":
+                    if action == "skip_with_log":
+                        logger.warning(
+                            "Guardrail [%s] triggered for agent %s — skipping with log (scope pre-check)",
+                            guard_name, agent_name,
+                        )
+                        task["_guardrail_skip"] = {
+                            "guardrail": guard_name,
+                            "action": "skip_with_log",
+                        }
+                    else:
+                        logger.warning(
+                            "Guardrail [%s] BLOCKED agent %s execution",
+                            guard_name, agent_name,
+                        )
+                        raise RuntimeError(f"Execution blocked by guardrail: {guard_name}")
+                else:
+                    logger.info("Guardrail [%s] triggered (severity=%s) for agent %s — logged only",
+                                guard_name, g["severity"], agent_name)
         except Exception as e:
-            # Don't fail open if DB is down, but log warning if it's just a query error
             if isinstance(e, RuntimeError):
                 raise
-            logger.warning(f"Failed to check DB guardrails: {e}")
+            logger.warning("Failed to check DB guardrails: %s", e)
+
+    @staticmethod
+    def _evaluate_guardrail_config(config: dict[str, Any], context: dict[str, Any]) -> bool:
+        """Return True if the guardrail conditions are met (i.e. the guard fires)."""
+
+        # Style 1: blocked_conditions — list of "key=value" pairs; ALL must match.
+        blocked_conditions = config.get("blocked_conditions")
+        if isinstance(blocked_conditions, list) and blocked_conditions:
+            all_match = True
+            for cond in blocked_conditions:
+                if "=" not in cond:
+                    all_match = False
+                    break
+                key, expected = cond.split("=", 1)
+                actual = context.get(key)
+                # Coerce booleans for comparison
+                if expected.lower() in ("true", "false"):
+                    all_match = all_match and (bool(actual) == (expected.lower() == "true"))
+                else:
+                    all_match = all_match and (str(actual) == expected)
+            return all_match
+
+        # Style 2: required_field + must_be — single field assertion.
+        required_field = config.get("required_field")
+        if required_field is not None:
+            must_be = config.get("must_be")
+            actual = context.get(required_field)
+            if must_be is not None:
+                return bool(actual) == bool(must_be)
+
+        return False
+
+    async def _check_output_guardrails(self, agent_name: str, result: dict[str, Any]) -> dict[str, Any]:
+        """Validate execution results against 'output' guardrails.
+
+        Returns the (possibly modified) result.  If a blocking output guardrail
+        fires, the result is replaced with a guardrail-skip payload.
+        """
+        try:
+            pool = get_pool()
+            guardrails = await pool.fetch("""
+                SELECT name, config, severity
+                FROM agent_guardrails
+                WHERE agent_name = $1 AND enabled = true
+                  AND guardrail_type = 'output'
+            """, agent_name)
+
+            for g in guardrails:
+                config = g["config"] if isinstance(g["config"], dict) else json.loads(g["config"] or "{}")
+                triggered = self._evaluate_guardrail_config(config, result)
+                if not triggered:
+                    continue
+
+                guard_name = g["name"]
+                if g["severity"] == "block":
+                    logger.warning(
+                        "Output guardrail [%s] BLOCKED result for agent %s",
+                        guard_name, agent_name,
+                    )
+                    return {
+                        "status": "blocked",
+                        "guardrail": guard_name,
+                        "reason": f"Output guardrail '{guard_name}' blocked the result",
+                        "original_status": result.get("status"),
+                    }
+                else:
+                    logger.info("Output guardrail [%s] triggered (severity=%s) for agent %s — logged only",
+                                guard_name, g["severity"], agent_name)
+        except Exception as e:
+            logger.warning("Failed to check output guardrails: %s", e)
+        return result
 
     async def execute(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
         """Execute task with specific agent - NOW WITH UNIFIED SYSTEM INTEGRATION"""
@@ -1713,6 +1822,13 @@ class AgentExecutor:
                         agent_name,
                         repair_exc,
                     )
+
+            # OUTPUT GUARDRAILS: Validate results against DB-configured output guardrails
+            if not task.get("_is_repair"):
+                try:
+                    result = await self._check_output_guardrails(agent_name, result)
+                except Exception as og_exc:
+                    logger.warning("Output guardrail check failed (non-blocking): %s", og_exc)
 
             # WBA ENFORCEMENT (Total Completion Protocol)
             # Write execution decision back to memory
