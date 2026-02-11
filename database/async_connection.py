@@ -201,6 +201,29 @@ class AsyncDatabasePool(BasePool):
                 self.config.min_size,
                 self.config.max_size,
             )
+            
+            # RUNTIME SELF-CHECK: Fail-closed identity enforcement (P0-LOCK)
+            try:
+                async with self._pool.acquire() as conn:
+                    current_user = await conn.fetchval("SELECT current_user")
+                    logger.info("Runtime DB User: %s", current_user)
+
+                    if current_user != "agent_worker":
+                        logger.critical(
+                            "SECURITY FAILURE: DB user is '%s', expected 'agent_worker'. "
+                            "No fallback. Shutting down.", current_user
+                        )
+                        raise RuntimeError(
+                            f"Security Policy Violation: DB user '{current_user}' is not 'agent_worker'. "
+                            "Rotate credentials to agent_worker and redeploy."
+                        )
+                    logger.info("Verified: Agents running as restricted role 'agent_worker'.")
+            except RuntimeError:
+                raise  # Re-raise security violations
+            except Exception as e:
+                logger.critical("Failed to verify runtime DB user: %s", e)
+                raise RuntimeError("Failed to verify runtime DB user security.") from e
+
         except asyncio.TimeoutError:
             logger.error("❌ Database connection timed out after %.1fs", self.config.connect_timeout)
             raise
@@ -890,6 +913,17 @@ def get_pool() -> BasePool:
     if _pool is None:
         raise DatabaseUnavailableError("Database pool not initialized. Call init_pool() first.")
     return _pool
+
+from database.tenant_guard import TenantScopedPool
+
+def get_tenant_pool(tenant_id: str) -> TenantScopedPool:
+    """
+    Returns a database pool wrapper that enforces tenant isolation checks.
+    Use this for ALL agent operations.
+    """
+    pool = get_pool()
+    return TenantScopedPool(pool, tenant_id)
+
 
 
 async def close_pool() -> None:
