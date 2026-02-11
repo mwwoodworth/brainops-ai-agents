@@ -173,7 +173,7 @@ def transform_file(filepath: Path, tables: list[str]) -> tuple[bool, str]:
 {indent}]
 {indent}try:
 {indent2}from database.verify_tables import verify_tables_sync
-{indent2}conn = psycopg2.connect(**DB_CONFIG)
+{indent2}conn = psycopg2.connect(**_get_db_config())
 {indent2}cursor = conn.cursor()
 {indent2}ok = verify_tables_sync(required_tables, cursor, module_name="{module_name}")
 {indent2}cursor.close()
