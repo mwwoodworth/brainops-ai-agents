@@ -455,11 +455,48 @@ class InvariantEngine:
     #  MAIN RUN METHOD
     # ════════════════════════════════════════════════════════════════════
 
+    async def _resolve_stale_violations(self, pool) -> int:
+        """Resolve all open violations before re-running checks.
+
+        Each run creates fresh violations for currently-failing checks.
+        Previously-open violations are auto-resolved so they don't accumulate.
+        """
+        try:
+            resolved = await pool.fetchval("""
+                UPDATE invariant_violations
+                SET resolved = true, resolved_at = NOW()
+                WHERE resolved = false
+                  AND check_name != 'synthetic_canary'
+                RETURNING count(*)
+            """)
+            # fetchval on UPDATE RETURNING count(*) may not work; use execute + status
+            return 0  # placeholder
+        except Exception:
+            pass
+
+        try:
+            result = await pool.execute("""
+                UPDATE invariant_violations
+                SET resolved = true, resolved_at = NOW()
+                WHERE resolved = false
+                  AND check_name != 'synthetic_canary'
+            """)
+            # asyncpg returns 'UPDATE N' string
+            if result and result.startswith("UPDATE "):
+                return int(result.split()[-1])
+            return 0
+        except Exception as exc:
+            logger.warning("Failed to resolve stale violations: %s", exc)
+            return 0
+
     async def run(self) -> dict:
         """Execute all invariant checks. Returns structured summary."""
         pool = self._get_pool()
         violations: list[dict] = []
         checks_run = 0
+
+        # Auto-resolve previous violations; fresh ones are created below
+        stale_resolved = await self._resolve_stale_violations(pool)
 
         checks = [
             self._check_runtime_identity,
@@ -499,6 +536,7 @@ class InvariantEngine:
             "timestamp": self.last_run,
             "checks_run": checks_run,
             "violations_found": len(violations),
+            "stale_resolved": stale_resolved,
             "violations": violations,
             "canary_ok": canary_ok,
             "status": "clean" if not violations else "violations_detected",
