@@ -35,6 +35,9 @@ psutil>=5.9.0
 # Logging (Required for affiliate pipeline and other modules)
 loguru>=0.7.0
 
+# Rate Limiting
+slowapi>=0.1.9
+
 # Utilities
 python-dotenv==1.0.0
 python-multipart==0.0.22

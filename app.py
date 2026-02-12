@@ -8,6 +8,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import time
 import uuid
 import threading
@@ -32,6 +33,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
 # Import our production-ready components
 from config import config
@@ -105,56 +110,54 @@ class BackgroundLoopRunner:
 
 
 # ---------------------------------------------------------------------------
-# Simple In-Memory Rate Limiter (Token Bucket Algorithm)
+# slowapi Rate Limiting
 # ---------------------------------------------------------------------------
-class RateLimiter:
-    """IP-based rate limiter using token bucket algorithm."""
-
-    def __init__(self, requests_per_minute: int = 60, burst_size: int = 10):
-        self.rate = requests_per_minute / 60.0  # tokens per second
-        self.burst_size = burst_size
-        self._buckets: dict[str, tuple[float, float]] = {}  # ip -> (tokens, last_update)
-        self._lock = asyncio.Lock()
-
-    async def is_allowed(self, identifier: str) -> bool:
-        """Check if request is allowed and consume a token."""
-        async with self._lock:
-            now = time.time()
-            tokens, last_update = self._buckets.get(identifier, (self.burst_size, now))
-
-            # Replenish tokens based on time elapsed
-            elapsed = now - last_update
-            tokens = min(self.burst_size, tokens + elapsed * self.rate)
-
-            if tokens >= 1:
-                self._buckets[identifier] = (tokens - 1, now)
-                return True
-            else:
-                self._buckets[identifier] = (tokens, now)
-                return False
-
-    async def cleanup(self) -> None:
-        """Remove stale entries to prevent memory growth."""
-        async with self._lock:
-            now = time.time()
-            stale_threshold = 300  # 5 minutes
-            stale_keys = [
-                k for k, (_, last) in self._buckets.items()
-                if now - last > stale_threshold
-            ]
-            for k in stale_keys:
-                del self._buckets[k]
+# Key function: uses X-API-Key header when present, falls back to client IP.
+# This ensures authenticated callers are rate-limited per key (not shared IP),
+# while unauthenticated traffic is limited per IP.
 
 
-# Global rate limiters
-#
-# NOTE: We intentionally rate-limit *unauthenticated* traffic much more aggressively than
-# authenticated (API-key) traffic. Many internal loops (E2E verification, orchestrator,
-# self-healing dashboards) can burst across many endpoints in a short window and should not
-# self-DOS the service via the IP-based limiter.
-_rate_limiter = RateLimiter(requests_per_minute=120, burst_size=20)  # General (unauthenticated)
-_auth_rate_limiter = RateLimiter(requests_per_minute=10, burst_size=5)  # Auth/sensitive endpoints
-_trusted_rate_limiter = RateLimiter(requests_per_minute=1200, burst_size=200)  # Valid API key traffic
+def _rate_limit_key(request: Request) -> str:
+    """Extract rate-limit identity: API key hash if valid, else client IP."""
+    api_key = (
+        request.headers.get("X-API-Key")
+        or request.headers.get("x-api-key")
+        or request.headers.get("X-Api-Key")
+    )
+    if api_key:
+        api_key = api_key.strip()
+    if not api_key:
+        auth = request.headers.get("Authorization") or request.headers.get("authorization") or ""
+        if auth.startswith("ApiKey "):
+            api_key = auth[len("ApiKey "):].strip()
+        elif auth.startswith("Bearer "):
+            api_key = auth[len("Bearer "):].strip()
+    if api_key and api_key in config.security.valid_api_keys:
+        return "key:" + hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:12]
+    # Fall back to client IP (handle reverse-proxy forwarding)
+    forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if forwarded:
+        return "ip:" + forwarded
+    return "ip:" + (request.client.host if request.client else "unknown")
+
+
+# Instantiate slowapi Limiter with our custom key function.
+# default_limits apply to any endpoint that does NOT have its own @limiter.limit() decorator.
+limiter = Limiter(
+    key_func=_rate_limit_key,
+    default_limits=["30/minute"],
+    storage_uri="memory://",
+)
+
+
+def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    """Custom 429 handler with Retry-After header."""
+    logger.warning("Rate limit exceeded for %s on %s: %s", _rate_limit_key(request), request.url.path, exc.detail)
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Too many requests. Please slow down.", "limit": str(exc.detail)},
+        headers={"Retry-After": "60"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1557,6 +1560,17 @@ async def lifespan(app: FastAPI):
     app.state.learning_bridge = None
     app.state.meta_intelligence = None
 
+    # Rate-limit bucket cleanup (every 5 minutes, prevents memory growth)
+    async def _rate_limit_cleanup_loop():
+        while True:
+            await asyncio.sleep(300)
+            try:
+                await _category_cleanup()
+            except Exception as exc:
+                logger.debug("Rate limit cleanup error (non-fatal): %s", exc)
+
+    create_safe_task(_rate_limit_cleanup_loop(), "rate_limit_cleanup")
+
     # === YIELD IMMEDIATELY to allow server to bind to port ===
     logger.info("⚡ Server binding to port NOW - heavy init continues in background")
     yield
@@ -1677,6 +1691,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Attach slowapi rate limiter to app.
+# SlowAPIMiddleware enables @limiter.limit() decorators on individual routes.
+# Our custom rate_limit_middleware (below) provides category-based limits.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 
 # Configure CORS - uses secure defaults from config (no wildcard fallback)
 # SECURITY: Restrict allowed headers to specific values (not wildcard "*")
@@ -1704,57 +1725,116 @@ if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 
-# Rate limiting middleware
+# ---------------------------------------------------------------------------
+# slowapi Rate Limiting Middleware
+# ---------------------------------------------------------------------------
+# Category-based rate limits applied via middleware. slowapi also supports
+# per-route @limiter.limit() decorators which we apply below for specific
+# endpoint categories. The middleware handles the general case.
+#
+# Rate Limit Categories:
+#   - Health/status (/health, /healthz, /ready, /alive, /): 60/minute
+#   - Agent execution (/agents/*/execute, /execute):        10/minute per key
+#   - Email (/email/send, /email/process, /email/test):     5/minute per key
+#   - Memory (/memory/*):                                   30/minute per key
+#   - Default (all other endpoints):                        30/minute per key
+# ---------------------------------------------------------------------------
+
+# Pre-compiled patterns for endpoint categories
+_HEALTH_PATHS = frozenset({"/health", "/healthz", "/ready", "/alive", "/"})
+_AGENT_EXEC_PATTERN = re.compile(r"^/agents/[^/]+/execute$|^/execute$|^/agents/execute$|^/api/v1/agents/execute$")
+_EMAIL_SEND_PATHS = frozenset({"/email/send", "/email/process", "/email/test"})
+_MEMORY_PREFIX = "/memory/"
+
+# In-memory token bucket for category-based rate limiting (supplements slowapi).
+# slowapi handles per-route decorator limits; this middleware handles category routing.
+_category_buckets: dict[str, dict[str, tuple[float, float]]] = {}
+_category_lock = asyncio.Lock()
+
+# Category configs: (requests_per_minute, burst_size)
+_CATEGORY_LIMITS = {
+    "health": (60, 15),
+    "agent_exec": (10, 3),
+    "email": (5, 2),
+    "memory": (30, 8),
+    "default": (30, 8),
+}
+
+
+async def _category_is_allowed(category: str, identity: str) -> bool:
+    """Token bucket check for a given category + identity."""
+    rpm, burst = _CATEGORY_LIMITS[category]
+    rate = rpm / 60.0  # tokens per second
+    async with _category_lock:
+        bucket = _category_buckets.setdefault(category, {})
+        now = time.time()
+        tokens, last_update = bucket.get(identity, (float(burst), now))
+        elapsed = now - last_update
+        tokens = min(float(burst), tokens + elapsed * rate)
+        if tokens >= 1.0:
+            bucket[identity] = (tokens - 1.0, now)
+            return True
+        else:
+            bucket[identity] = (tokens, now)
+            return False
+
+
+async def _category_cleanup() -> None:
+    """Remove stale bucket entries to prevent memory growth."""
+    async with _category_lock:
+        now = time.time()
+        for category in list(_category_buckets.keys()):
+            bucket = _category_buckets[category]
+            stale = [k for k, (_, ts) in bucket.items() if now - ts > 300]
+            for k in stale:
+                del bucket[k]
+
+
+def _classify_path(path: str) -> str:
+    """Determine rate-limit category for a request path."""
+    if path in _HEALTH_PATHS:
+        return "health"
+    if _AGENT_EXEC_PATTERN.match(path):
+        return "agent_exec"
+    if path in _EMAIL_SEND_PATHS:
+        return "email"
+    if path.startswith(_MEMORY_PREFIX) or path == "/memory/store" or path == "/memory/search" or path == "/memory/stats":
+        return "memory"
+    return "default"
+
+
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    """Apply rate limiting based on client IP."""
-    # Skip rate limiting for health checks
-    if request.url.path in ("/health", "/healthz", "/", "/docs", "/openapi.json"):
+    """Apply category-based rate limiting using slowapi key function."""
+    path = request.url.path
+
+    # Skip rate limiting for docs and webhook endpoints with their own auth
+    if path in ("/docs", "/openapi.json", "/redoc"):
+        return await call_next(request)
+    # Authenticated internal webhooks have HMAC/signature verification; don't rate limit.
+    if path == "/events/webhook/erp":
+        return await call_next(request)
+    # Stripe/Gumroad webhooks use their own signature verification
+    if path.startswith("/stripe/") or path.startswith("/gumroad/"):
         return await call_next(request)
 
-    # Skip rate limiting for authenticated internal webhooks.
-    # These endpoints have their own HMAC/signature verification + API key auth and may burst (e.g. ERP event drain).
-    if request.url.path == "/events/webhook/erp":
-        return await call_next(request)
+    identity = _rate_limit_key(request)
+    category = _classify_path(path)
 
-    def _extract_api_key(req: Request) -> str | None:
-        key = req.headers.get("X-API-Key") or req.headers.get("x-api-key") or req.headers.get("X-Api-Key")
-        if key:
-            return key.strip()
-        auth = req.headers.get("Authorization") or req.headers.get("authorization") or ""
-        if auth.startswith("ApiKey "):
-            return auth[len("ApiKey ") :].strip()
-        if auth.startswith("Bearer "):
-            return auth[len("Bearer ") :].strip()
-        return None
-
-    # Identify the caller for rate limiting. Prefer API key identity when valid so internal/admin
-    # workflows don't get bucketed together behind a shared proxy egress IP.
-    api_key = _extract_api_key(request)
-    identity = None
-    if api_key and api_key in config.security.valid_api_keys:
-        # Never log raw secrets; use a short stable fingerprint for troubleshooting.
-        identity = "key:" + hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:12]
-        limiter = _trusted_rate_limiter
-    else:
-        # Get client IP (handle proxies)
-        client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        if not client_ip:
-            client_ip = request.client.host if request.client else "unknown"
-        identity = "ip:" + client_ip
-
-        # Use stricter rate limit for auth-related paths
-        if any(p in request.url.path for p in ["/auth", "/login", "/api-key"]):
-            limiter = _auth_rate_limiter
-        else:
-            limiter = _rate_limiter
-
-    if not await limiter.is_allowed(identity):
-        logger.warning("Rate limit exceeded for %s on %s", identity, request.url.path)
+    if not await _category_is_allowed(category, identity):
+        rpm, _ = _CATEGORY_LIMITS[category]
+        logger.warning(
+            "Rate limit exceeded: category=%s identity=%s path=%s limit=%d/min",
+            category, identity, path, rpm,
+        )
         return JSONResponse(
             status_code=429,
-            content={"detail": "Too many requests. Please slow down."},
-            headers={"Retry-After": "60"}
+            content={
+                "detail": "Too many requests. Please slow down.",
+                "category": category,
+                "limit": f"{rpm}/minute",
+            },
+            headers={"Retry-After": "60"},
         )
 
     return await call_next(request)
@@ -2515,7 +2595,8 @@ if LANGGRAPH_AVAILABLE:
 
 
 @app.get("/")
-async def root():
+@limiter.limit("60/minute")
+async def root(request: Request):
     """Root endpoint"""
     return {
         "service": config.service_name,
@@ -2587,7 +2668,8 @@ class SendEmailPayload(BaseModel):
 
 
 @app.post("/email/send")
-async def send_email_endpoint(payload: SendEmailPayload, authenticated: bool = Depends(verify_api_key)):
+@limiter.limit("5/minute")
+async def send_email_endpoint(request: Request, payload: SendEmailPayload, authenticated: bool = Depends(verify_api_key)):
     """Send a one-off email (admin-only, API-key protected).
 
     Safety rail: unless OUTBOUND_EMAIL_MODE=live, the recipient must be allowlisted
@@ -2614,8 +2696,30 @@ async def send_email_endpoint(payload: SendEmailPayload, authenticated: bool = D
     return {"success": success, "message": message}
 
 @app.get("/health")
-async def health_check(force_refresh: bool = Query(False, description="Bypass cache and force live health checks")):
-    """Health check endpoint with full system status and light caching."""
+@limiter.limit("60/minute")
+async def health_check(request: Request, force_refresh: bool = Query(False, description="Bypass cache and force live health checks")):
+    """Health check endpoint.
+
+    Unauthenticated requests receive a minimal {"status": "ok", "version": "..."} response.
+    Authenticated requests (valid X-API-Key) receive the full diagnostic payload.
+    """
+    # --- Unauthenticated callers get a minimal response ---
+    _api_key = (
+        request.headers.get("X-API-Key")
+        or request.headers.get("x-api-key")
+        or request.headers.get("X-Api-Key")
+    )
+    _master = getattr(config.security, "master_api_key", None) or os.getenv("MASTER_API_KEY")
+    _is_authenticated = False
+    if _api_key and _api_key.strip() in config.security.valid_api_keys:
+        _is_authenticated = True
+    elif _master and _api_key and _api_key.strip() == _master:
+        _is_authenticated = True
+
+    if not _is_authenticated:
+        return {"status": "ok", "version": VERSION}
+
+    # --- Authenticated callers get full diagnostics ---
 
     async def _build_health_payload() -> dict[str, Any]:
         # Handle case where pool isn't initialized yet (during startup)
@@ -2776,7 +2880,8 @@ async def health_check(force_refresh: bool = Query(False, description="Bypass ca
 
 
 @app.get("/healthz")
-async def healthz() -> dict[str, Any]:
+@limiter.limit("60/minute")
+async def healthz(request: Request) -> dict[str, Any]:
     """Lightweight health endpoint for container checks (no DB calls)."""
     return {
         "status": "ok",
@@ -3023,7 +3128,8 @@ def _require_diagnostics_key(request: Request) -> None:
 
 
 @app.get("/ready")
-async def readiness_check():
+@limiter.limit("60/minute")
+async def readiness_check(request: Request):
     """Dependency-aware readiness check."""
     try:
         pool = get_pool()
@@ -3126,7 +3232,8 @@ async def diagnostics(request: Request):
 
 
 @app.get("/alive")
-async def alive_status():
+@limiter.limit("60/minute")
+async def alive_status(request: Request):
     """Get the alive status of the AI OS based on core system health."""
     import time as _time
 
@@ -3510,7 +3617,9 @@ async def email_queue_status(authenticated: bool = Depends(verify_api_key)):
 
 
 @app.post("/email/process")
+@limiter.limit("5/minute")
 async def process_email_queue_endpoint(
+    request: Request,
     batch_size: int = Query(default=10, ge=1, le=50),
     dry_run: bool = Query(default=False),
     authenticated: bool = Depends(verify_api_key)
@@ -3532,7 +3641,9 @@ async def process_email_queue_endpoint(
 
 
 @app.post("/email/test")
+@limiter.limit("5/minute")
 async def test_email_sending(
+    request: Request,
     recipient: str = Query(..., description="Email address to send test to"),
     authenticated: bool = Depends(verify_api_key)
 ):
@@ -3770,6 +3881,7 @@ async def get_agents(
 
 
 @app.post("/agents/{agent_id}/execute")
+@limiter.limit("10/minute")
 async def execute_agent(
     agent_id: str,
     request: Request,
@@ -4114,6 +4226,7 @@ async def get_executions(
 
 
 @app.post("/execute")
+@limiter.limit("10/minute")
 async def execute_scheduled_agents(
     request: Request,
     authenticated: bool = Depends(verify_api_key)
@@ -4666,6 +4779,7 @@ async def activate_all_agents_scheduler():
 # These endpoints were returning 404 - now properly implemented
 
 @app.post("/agents/execute", dependencies=SECURED_DEPENDENCIES)
+@limiter.limit("10/minute")
 async def execute_agent_generic(
     request: Request,
     agent_type: str = Body("general", embed=True),
@@ -5282,7 +5396,9 @@ async def check_self_healing():
 
 
 @app.post("/memory/store", dependencies=SECURED_DEPENDENCIES)
+@limiter.limit("30/minute")
 async def store_memory(
+    request: Request,
     content: str = Body(...),
     memory_type: str = Body("operational"),
     category: str = Body(default=None),
@@ -5314,7 +5430,9 @@ async def store_memory(
 
 
 @app.get("/memory/search", dependencies=SECURED_DEPENDENCIES)
+@limiter.limit("30/minute")
 async def search_memory(
+    request: Request,
     query: str = Query(..., description="Search query"),
     limit: int = Query(10, description="Max results"),
     memory_type: str = Query(None, description="Filter by type")
@@ -5344,7 +5462,9 @@ async def search_memory(
 
 
 @app.get("/memory/unified-search", dependencies=SECURED_DEPENDENCIES)
+@limiter.limit("30/minute")
 async def unified_search(
+    request: Request,
     query: str = Query(..., description="Search query across all memory tiers"),
     limit: int = Query(20, description="Max results"),
     tenant_id: str = Query(None, description="Optional tenant filter"),
@@ -5376,7 +5496,9 @@ async def unified_search(
 
 
 @app.post("/memory/backfill-embeddings", dependencies=SECURED_DEPENDENCIES)
+@limiter.limit("30/minute")
 async def backfill_embeddings(
+    request: Request,
     batch_size: int = Query(100, description="Batch size per run"),
     background_tasks: BackgroundTasks = None
 ):
@@ -5467,7 +5589,8 @@ async def backfill_embeddings(
 
 
 @app.post("/memory/force-sync", dependencies=SECURED_DEPENDENCIES)
-async def force_sync_embedded_memory():
+@limiter.limit("30/minute")
+async def force_sync_embedded_memory(request: Request):
     """
     Force sync embedded memory system from master Postgres.
     Useful when local SQLite cache is empty or out of sync.
@@ -5506,7 +5629,8 @@ async def force_sync_embedded_memory():
 
 
 @app.get("/memory/stats", dependencies=SECURED_DEPENDENCIES)
-async def get_memory_stats():
+@limiter.limit("30/minute")
+async def get_memory_stats(request: Request):
     """
     Get statistics about the embedded memory system (requires auth).
     Shows local cache status and sync information.
@@ -6770,7 +6894,9 @@ async def api_v1_erp_analyze(
 
 
 @app.post("/api/v1/agents/execute")
+@limiter.limit("10/minute")
 async def api_v1_agents_execute(
+    request: Request,
     payload: AgentExecuteRequest,
     authenticated: bool = Depends(verify_api_key)
 ):
