@@ -32,11 +32,21 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+# ── Alert configuration ──────────────────────────────────────────────
+RESEND_API_KEY = (os.getenv("RESEND_API_KEY") or "").strip()
+RESEND_FROM_EMAIL = (os.getenv("RESEND_FROM_EMAIL") or "BrainOps Alerts <matt@myroofgenius.com>").strip()
+ALERT_EMAIL = (os.getenv("ALERT_EMAIL") or os.getenv("OWNER_EMAIL") or "matt@weathercraft.com").strip()
+TWILIO_ACCOUNT_SID = (os.getenv("TWILIO_ACCOUNT_SID") or "").strip()
+TWILIO_AUTH_TOKEN = (os.getenv("TWILIO_AUTH_TOKEN") or "").strip()
+TWILIO_FROM_NUMBER = (os.getenv("TWILIO_FROM_NUMBER") or "").strip()
+ALERT_PHONE = (os.getenv("ALERT_PHONE") or "").strip()
 
 
 class InvariantEngine:
@@ -104,20 +114,91 @@ class InvariantEngine:
         except Exception as exc:
             logger.warning("Slack alert failed (non-fatal): %s", exc)
 
+    async def _send_email_alert(self, severity: str, title: str,
+                                message: str, fields: dict | None = None) -> None:
+        """Send email alert via Resend for critical/high violations."""
+        if not RESEND_API_KEY or not ALERT_EMAIL:
+            return
+        try:
+            import httpx
+            color = "#dc2626" if severity == "critical" else "#f59e0b"
+            fields_html = ""
+            if fields:
+                fields_html = "<br>".join(f"<b>{k}:</b> {v}" for k, v in fields.items())
+            html = (
+                f'<div style="border-left:4px solid {color};padding:12px;margin:8px 0">'
+                f'<h2 style="color:{color};margin:0">[{severity.upper()}] {title}</h2>'
+                f'<p style="margin:8px 0">{message}</p>'
+                f'{fields_html}'
+                f'<hr><small>BrainOps Invariant Engine | {datetime.now(timezone.utc).isoformat()}</small>'
+                f'</div>'
+            )
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    "https://api.resend.com/emails",
+                    headers={
+                        "Authorization": f"Bearer {RESEND_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "from": RESEND_FROM_EMAIL,
+                        "to": [ALERT_EMAIL],
+                        "subject": f"[BrainOps {severity.upper()}] {title}",
+                        "html": html,
+                    },
+                )
+                if resp.status_code in (200, 201):
+                    logger.info("Email alert sent to %s (severity=%s)", ALERT_EMAIL, severity)
+                else:
+                    logger.warning("Resend returned %d: %s", resp.status_code, resp.text[:200])
+        except Exception as exc:
+            logger.warning("Email alert failed (non-fatal): %s", exc)
+
+    async def _send_sms_alert(self, severity: str, message: str) -> None:
+        """Send SMS via Twilio for CRITICAL violations only."""
+        if severity != "critical":
+            return
+        if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, ALERT_PHONE]):
+            return
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
+                    auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+                    data={
+                        "From": TWILIO_FROM_NUMBER,
+                        "To": ALERT_PHONE,
+                        "Body": f"[BrainOps CRITICAL] {message[:140]}",
+                    },
+                )
+                if resp.status_code in (200, 201):
+                    logger.info("SMS alert sent to %s", ALERT_PHONE[-4:])
+                else:
+                    logger.warning("Twilio returned %d: %s", resp.status_code, resp.text[:200])
+        except Exception as exc:
+            logger.warning("SMS alert failed (non-fatal): %s", exc)
+
     async def _record(self, violations: list, check_name: str,
                       severity: str, msg: str, details: dict | None = None) -> None:
-        """Record a violation: persist + alert + append to run list."""
+        """Record a violation: persist + alert (Slack, email, SMS) + append to run list."""
         violations.append({
             "check": check_name, "severity": severity, "message": msg,
         })
         vid = await self._persist_violation(check_name, severity, msg, details)
         if severity in ("critical", "high"):
+            fields = {"severity": severity, "violation_id": vid or "unknown"}
             await self._send_slack_alert(
                 severity=severity,
                 title=f"Invariant Violation: {check_name}",
-                message=msg,
-                fields={"severity": severity, "violation_id": vid or "unknown"},
+                message=msg, fields=fields,
             )
+            await self._send_email_alert(
+                severity=severity,
+                title=f"Invariant Violation: {check_name}",
+                message=msg, fields=fields,
+            )
+            await self._send_sms_alert(severity=severity, message=f"{check_name}: {msg}")
 
     # ════════════════════════════════════════════════════════════════════
     #  INDIVIDUAL CHECKS
@@ -489,8 +570,46 @@ class InvariantEngine:
             logger.warning("Failed to resolve stale violations: %s", exc)
             return 0
 
+    async def _record_validation_run(self, pool, checks_run: int,
+                                     violations: list[dict], duration_ms: int,
+                                     canary_ok: bool) -> None:
+        """Record this monitor cycle in the invariant_validations table."""
+        run_id = f"run_{self.run_count}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
+        passed = len(violations) == 0
+        try:
+            await pool.execute("""
+                INSERT INTO invariant_validations
+                    (invariant_id, invariant_name, entity_type, passed,
+                     violation_count, sample_violations, validation_query,
+                     checked_records, run_id, environment, executed_at,
+                     duration_ms, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, NOW(), $11, $12::jsonb)
+            """,
+                f"invariant_engine_{self.run_count}",
+                "invariant_engine_cycle",
+                "system",
+                passed,
+                str(len(violations)),
+                json.dumps(violations[:10]),  # sample up to 10
+                f"{checks_run} checks executed",
+                str(checks_run),
+                run_id,
+                os.getenv("ENVIRONMENT", "production"),
+                str(duration_ms),
+                json.dumps({
+                    "canary_ok": canary_ok,
+                    "consecutive_clean": self.consecutive_clean,
+                    "total_violations_detected": self.total_violations_detected,
+                }),
+            )
+            logger.info("Recorded validation run %s (passed=%s, duration=%dms)",
+                        run_id, passed, duration_ms)
+        except Exception as exc:
+            logger.warning("Failed to record validation run: %s", exc)
+
     async def run(self) -> dict:
         """Execute all invariant checks. Returns structured summary."""
+        t0 = time.monotonic()
         pool = self._get_pool()
         violations: list[dict] = []
         checks_run = 0
@@ -522,6 +641,8 @@ class InvariantEngine:
         checks_run += 1
         canary_ok = await self._check_synthetic_canary(pool, violations)
 
+        duration_ms = int((time.monotonic() - t0) * 1000)
+
         # Update daemon state
         self.run_count += 1
         self.last_run = datetime.now(timezone.utc).isoformat()
@@ -531,6 +652,9 @@ class InvariantEngine:
             self.consecutive_clean += 1
         else:
             self.consecutive_clean = 0
+
+        # Record this cycle in invariant_validations (Phase B)
+        await self._record_validation_run(pool, checks_run, violations, duration_ms, canary_ok)
 
         summary = {
             "timestamp": self.last_run,
@@ -542,6 +666,7 @@ class InvariantEngine:
             "status": "clean" if not violations else "violations_detected",
             "run_count": self.run_count,
             "consecutive_clean": self.consecutive_clean,
+            "duration_ms": duration_ms,
         }
 
         if violations:
@@ -549,10 +674,40 @@ class InvariantEngine:
                 logger.error("VIOLATION [%s] %s: %s",
                              v["severity"], v["check"], v["message"])
         else:
-            logger.info("All %d invariant checks passed (run #%d, %d consecutive clean).",
-                        checks_run, self.run_count, self.consecutive_clean)
+            logger.info("All %d invariant checks passed (run #%d, %d consecutive clean, %dms).",
+                        checks_run, self.run_count, self.consecutive_clean, duration_ms)
 
         return summary
+
+    async def drill_alert(self, channel: str = "email") -> dict:
+        """
+        Send a synthetic test alert through the specified channel.
+        Used to verify the alerting pipeline works end-to-end.
+        """
+        title = "DRILL: Synthetic Alert Test"
+        message = f"This is a synthetic drill from the BrainOps Invariant Engine at {datetime.now(timezone.utc).isoformat()}. If you received this, alerting is working."
+        fields = {"type": "drill", "channel": channel, "run_count": str(self.run_count)}
+        result = {"channel": channel, "timestamp": datetime.now(timezone.utc).isoformat()}
+
+        if channel == "email":
+            await self._send_email_alert("high", title, message, fields)
+            result["status"] = "sent" if RESEND_API_KEY else "skipped_no_api_key"
+        elif channel == "sms":
+            await self._send_sms_alert("critical", f"DRILL: {message[:100]}")
+            result["status"] = "sent" if TWILIO_ACCOUNT_SID else "skipped_no_twilio"
+        elif channel == "slack":
+            await self._send_slack_alert("high", title, message, fields)
+            result["status"] = "sent"
+        elif channel == "all":
+            await self._send_email_alert("high", title, message, fields)
+            await self._send_sms_alert("critical", f"DRILL: {message[:100]}")
+            await self._send_slack_alert("high", title, message, fields)
+            result["status"] = "sent_all"
+        else:
+            result["status"] = f"unknown_channel_{channel}"
+
+        logger.info("Alert drill executed: channel=%s, status=%s", channel, result["status"])
+        return result
 
     def get_status(self) -> dict:
         """Return daemon status for API/dashboard consumption."""
@@ -563,6 +718,11 @@ class InvariantEngine:
             "consecutive_clean": self.consecutive_clean,
             "total_violations_detected": self.total_violations_detected,
             "checks_registered": 14,
+            "alerting": {
+                "email": bool(RESEND_API_KEY),
+                "sms": bool(TWILIO_ACCOUNT_SID and ALERT_PHONE),
+                "alert_email": ALERT_EMAIL,
+            },
         }
 
 
