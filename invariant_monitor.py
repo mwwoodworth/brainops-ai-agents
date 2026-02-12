@@ -314,19 +314,10 @@ class InvariantEngine:
         Maintains a baseline of known-unprotected tables. Alerts only when
         a NEW table appears without RLS that is not on the known-safe list.
         """
-        # Known tables without RLS (ERP feature tables, PostGIS system table)
+        # Known tables without RLS — only PostGIS system table (owned by supabase_admin)
+        # All other tables now have RLS enabled as of 2026-02-12.
         known_no_rls = {
             "spatial_ref_sys",
-            "analytics_events", "api_metrics", "automation_sequences",
-            "communication_preferences", "custom_field_values", "equipment_usage",
-            "estimate_versions", "failed_payments", "follow_ups",
-            "installability_windows", "insurance_tracking", "inventory_usage",
-            "maintenance_predictions", "maintenance_records", "pdf_templates",
-            "pipeline_health", "quality_inspections", "quickbooks_entity_mappings",
-            "refunds", "safety_checklist_templates", "safety_incidents",
-            "schedule_plans", "sms_messages", "takeoff_features", "tax_settings",
-            "thread_participants", "usage_alerts", "usage_records",
-            "vendor_bill_payments", "vendor_evaluations", "weather_forecast_cache",
         }
         try:
             no_rls = await pool.fetch("""
