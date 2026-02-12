@@ -1208,3 +1208,19 @@ async def get_invariant_engine_status() -> Dict[str, Any]:
     except Exception as e:
         logger.error("Invariant engine status error: %s", e)
         return {"status": "error", "error": str(e)[:200]}
+
+
+@router.post("/invariant-engine/drill")
+async def invariant_engine_drill(channel: str = "email") -> Dict[str, Any]:
+    """
+    Send a synthetic alert drill through the specified channel.
+    Channels: email, sms, slack, all.
+    """
+    try:
+        from invariant_monitor import get_invariant_engine
+        engine = get_invariant_engine()
+        result = await engine.drill_alert(channel=channel)
+        return {"status": "ok", "drill": result}
+    except Exception as e:
+        logger.error("Alert drill error: %s", e)
+        return {"status": "error", "error": str(e)[:200]}
