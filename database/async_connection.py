@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import ssl
 from dataclasses import dataclass
 from datetime import datetime
@@ -839,9 +840,9 @@ async def init_pool(config: PoolConfig) -> BasePool:
         return _pool
     last_error: Optional[Exception] = None
 
-    def _with_port(port: int) -> PoolConfig:
+    def _with_endpoint(host: str, port: int) -> PoolConfig:
         return PoolConfig(
-            host=config.host,
+            host=host,
             port=port,
             user=config.user,
             password=config.password,
@@ -856,23 +857,46 @@ async def init_pool(config: PoolConfig) -> BasePool:
             ssl_verify=config.ssl_verify,
         )
 
-    # Try primary configuration, then alternate port if Supabase pooler port fails
-    candidate_ports = [config.port]
-    if config.port == 6543:
-        candidate_ports.append(5432)
-    elif config.port == 5432:
-        candidate_ports.append(6543)
+    def _project_ref_from_user(user: str) -> Optional[str]:
+        # Supabase pooled usernames are typically "<role>.<project_ref>".
+        if "." not in user:
+            return None
+        candidate = user.rsplit(".", 1)[-1].strip().lower()
+        if re.fullmatch(r"[a-z0-9]{6,32}", candidate):
+            return candidate
+        return None
 
-    for port in candidate_ports:
+    # Try primary endpoint, alternate port, then direct Supabase host as fallback.
+    candidate_endpoints: list[tuple[str, int]] = [(config.host, config.port)]
+    if config.port == 6543:
+        candidate_endpoints.append((config.host, 5432))
+    elif config.port == 5432:
+        candidate_endpoints.append((config.host, 6543))
+
+    # If Supabase pooler is unhealthy, try direct DB host.
+    if "pooler.supabase.com" in config.host:
+        project_ref = _project_ref_from_user(config.user)
+        if project_ref:
+            candidate_endpoints.append((f"db.{project_ref}.supabase.co", 5432))
+
+    # Preserve order while removing duplicates.
+    seen_endpoints: set[tuple[str, int]] = set()
+    deduped_endpoints: list[tuple[str, int]] = []
+    for endpoint in candidate_endpoints:
+        if endpoint not in seen_endpoints:
+            deduped_endpoints.append(endpoint)
+            seen_endpoints.add(endpoint)
+
+    for host, port in deduped_endpoints:
         try:
-            pool = AsyncDatabasePool(_with_port(port))
+            pool = AsyncDatabasePool(_with_endpoint(host, port))
             await pool.initialize()
             _pool = pool
             USING_FALLBACK = False
             return _pool
         except Exception as exc:  # pragma: no cover - defensive logging for prod
             last_error = exc
-            logger.error("❌ Failed to initialize database pool on port %s: %s", port, exc)
+            logger.error("❌ Failed to initialize database pool on %s:%s: %s", host, port, exc)
 
     env = os.getenv("ENVIRONMENT", "production").strip().lower()
     is_production = env in {"production", "prod"}

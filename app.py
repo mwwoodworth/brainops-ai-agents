@@ -16,13 +16,50 @@ from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Optional
+from urllib.parse import unquote, urlparse
+
+# Normalize DB_* env vars from DATABASE_URL before importing any modules that
+# read credentials during import-time initialization.
+def _hydrate_db_env_from_database_url() -> None:
+    db_url = os.getenv("DATABASE_URL", "").strip()
+    if not db_url:
+        return
+    try:
+        parsed = urlparse(db_url)
+    except Exception:
+        return
+
+    host = parsed.hostname or ""
+    database = unquote(parsed.path.lstrip("/")) if parsed.path else ""
+    user = unquote(parsed.username) if parsed.username else ""
+    password = unquote(parsed.password) if parsed.password else ""
+    port = str(parsed.port) if parsed.port else ""
+
+    if host and not os.getenv("DB_HOST"):
+        os.environ["DB_HOST"] = host
+    if database and not os.getenv("DB_NAME"):
+        os.environ["DB_NAME"] = database
+
+    current_user = os.getenv("DB_USER", "")
+    if user and (not current_user or "%" in current_user):
+        os.environ["DB_USER"] = user
+
+    current_password = os.getenv("DB_PASSWORD", "")
+    if password and (not current_password or "%" in current_password):
+        os.environ["DB_PASSWORD"] = password
+
+    if port and not os.getenv("DB_PORT"):
+        os.environ["DB_PORT"] = port
+
+
+_hydrate_db_env_from_database_url()
 
 # CRITICAL: Auto-switch Supabase pooler to transaction mode BEFORE any module
 # imports trigger database config. Session mode (port 5432) has a low connection
 # limit that causes MaxClientsInSessionMode under load. Transaction mode (port
 # 6543) shares connections across transactions, supporting far more concurrency.
-_db_host = os.getenv('DB_HOST', '')
-_db_url = os.getenv('DATABASE_URL', '')
+_db_host = os.getenv("DB_HOST", "")
+_db_url = os.getenv("DATABASE_URL", "")
 if ('pooler.supabase.com' in _db_host or 'pooler.supabase.com' in _db_url) \
         and os.getenv('DB_PORT', '5432') == '5432':
     os.environ['DB_PORT'] = '6543'
@@ -5441,7 +5478,14 @@ async def search_memory(
     Search the AI memory system for relevant memories (requires auth).
     """
     if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory') or not app.state.memory:
-        raise HTTPException(status_code=503, detail="Memory system not available")
+        return {
+            "success": False,
+            "status": "degraded",
+            "query": query,
+            "count": 0,
+            "memories": [],
+            "message": "Memory system not available (database initializing or unavailable)"
+        }
 
     try:
         memory_manager = app.state.memory
@@ -5458,7 +5502,14 @@ async def search_memory(
         }
     except Exception as e:
         logger.error(f"Failed to search memory: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        return {
+            "success": False,
+            "status": "degraded",
+            "query": query,
+            "count": 0,
+            "memories": [],
+            "message": f"Memory search degraded: {type(e).__name__}"
+        }
 
 
 @app.get("/memory/unified-search", dependencies=SECURED_DEPENDENCIES)
@@ -5474,7 +5525,15 @@ async def unified_search(
     Returns ranked results using RRF hybrid search.
     """
     if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory') or not app.state.memory:
-        raise HTTPException(status_code=503, detail="Memory system not available")
+        return {
+            "success": False,
+            "status": "degraded",
+            "query": query,
+            "count": 0,
+            "results": [],
+            "sources": [],
+            "message": "Memory system not available (database initializing or unavailable)"
+        }
 
     try:
         memory_manager = app.state.memory
@@ -5492,7 +5551,15 @@ async def unified_search(
         }
     except Exception as e:
         logger.error(f"Unified search failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        return {
+            "success": False,
+            "status": "degraded",
+            "query": query,
+            "count": 0,
+            "results": [],
+            "sources": [],
+            "message": f"Unified search degraded: {type(e).__name__}"
+        }
 
 
 @app.post("/memory/backfill-embeddings", dependencies=SECURED_DEPENDENCIES)
