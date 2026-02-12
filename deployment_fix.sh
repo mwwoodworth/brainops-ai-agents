@@ -48,14 +48,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Database configuration
+# Database configuration - fail-closed: require env vars
+import sys as _sys
 DB_CONFIG = {
-    'host': 'aws-0-us-east-2.pooler.supabase.com',
-    'database': 'postgres',
-    'user': 'postgres.yomagoqdmxszqtdwuhab',
-    'password': '<DB_PASSWORD_REDACTED>',
+    'host': os.environ.get('DB_HOST'),
+    'database': os.environ.get('DB_NAME', 'postgres'),
+    'user': os.environ.get('DB_USER'),
+    'password': os.environ.get('DB_PASSWORD'),
     'port': 5432
 }
+for _k in ('host', 'user', 'password'):
+    if not DB_CONFIG[_k]:
+        logger.error(f'FATAL: {_k.upper()} env var is required for DB_CONFIG')
+        _sys.exit(1)
 
 def get_db_connection():
     """Get database connection with error handling"""

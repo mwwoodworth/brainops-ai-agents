@@ -24,6 +24,9 @@ class TenantScopedPool:
 
     def _validate_query(self, query: str) -> None:
         """Parse query to enforce mutation safety (tenant_id in WHERE/INSERT)."""
+        if ";" in query:
+            raise ValueError("Tenant guardrail blocks multi-statement SQL (semicolon detected).")
+
         parser = SimpleSQLParser(query)
         parser.validate_mutation_safety("TENANT_ID")
 

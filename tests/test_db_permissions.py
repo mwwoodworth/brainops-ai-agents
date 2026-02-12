@@ -1,14 +1,17 @@
 
 import pytest
 import asyncpg
-from database.async_connection import get_pool
+from database.async_connection import DatabaseUnavailableError, get_pool
 
 # This test assumes the env vars are set to the RESTRICTED user.
 # If run with superuser env vars, it will FAIL (which is good, it proves we are not hardened yet).
 
 @pytest.mark.asyncio
 async def test_agent_cannot_delete_users():
-    pool = get_pool()
+    try:
+        pool = get_pool()
+    except DatabaseUnavailableError:
+        pytest.skip("Database pool is not initialized in this environment.")
     try:
         # Attempt forbidden action
         await pool.execute("DELETE FROM users WHERE id = 'some-uuid'")
@@ -24,7 +27,10 @@ async def test_agent_cannot_delete_users():
 
 @pytest.mark.asyncio
 async def test_agent_cannot_update_tenants():
-    pool = get_pool()
+    try:
+        pool = get_pool()
+    except DatabaseUnavailableError:
+        pytest.skip("Database pool is not initialized in this environment.")
     try:
         await pool.execute("UPDATE tenants SET name = 'Hacked' WHERE id = 'some-uuid'")
         pytest.fail("SECURITY FAILURE: Agent was able to UPDATE tenants table!")

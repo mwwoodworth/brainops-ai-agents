@@ -39,8 +39,11 @@ from utils.embedding_provider import generate_embedding_async
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Supabase configuration
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://yomagoqdmxszqtdwuhab.supabase.co")
+# Supabase configuration - fail-closed if missing
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+if not SUPABASE_URL:
+    logger.error("FATAL: SUPABASE_URL environment variable is required")
+    raise RuntimeError("SUPABASE_URL environment variable is required")
 SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 STORAGE_BUCKET = "documents"
 

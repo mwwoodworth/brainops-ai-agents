@@ -3,10 +3,14 @@ import json
 import psycopg2
 from psycopg2 import sql
 
-# Use env vars from context
-DB_HOST = os.getenv("DB_HOST", "aws-0-us-east-2.pooler.supabase.com")
+# Use env vars from context - fail-closed if missing
+DB_HOST = os.getenv("DB_HOST")
+if not DB_HOST:
+    raise RuntimeError("DB_HOST environment variable is required")
 DB_NAME = os.getenv("DB_NAME", "postgres")
-DB_USER = os.getenv("DB_USER", "postgres.yomagoqdmxszqtdwuhab")
+DB_USER = os.getenv("DB_USER")
+if not DB_USER:
+    raise RuntimeError("DB_USER environment variable is required")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 if not DB_PASSWORD:
     raise RuntimeError("DB_PASSWORD environment variable is required")

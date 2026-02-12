@@ -21,40 +21,42 @@ async def test_bypass_attempts(tenant_pool):
     Each test case represents a known SQL injection or obfuscation technique.
     """
     
+    tenant_guard_error = r"(Tenant ID check missing|WHERE clause must constrain TENANT_ID|CTE|multi-statement SQL)"
+
     # 1. Whitespace Obfuscation
-    with pytest.raises(ValueError, match="Tenant ID check missing"):
+    with pytest.raises(ValueError, match=tenant_guard_error):
         await tenant_pool.execute("   UPDATE    invoices   SET status='paid' WHERE id='1'")
 
     # 2. Case Variations
-    with pytest.raises(ValueError, match="Tenant ID check missing"):
+    with pytest.raises(ValueError, match=tenant_guard_error):
         await tenant_pool.execute("uPdAtE invoices SET status='paid' WHERE id='1'")
 
     # 3. Comment Injection (Basic)
     # The current regex-like check might be fooled by comments if it strictly looks for "UPDATE"
     # But usually simple string containment "UPDATE" works. 
     # The bypass target is the *absence* of "tenant_id" check.
-    with pytest.raises(ValueError, match="Tenant ID check missing"):
+    with pytest.raises(ValueError, match=tenant_guard_error):
         await tenant_pool.execute("UPDATE/* comment */invoices SET status='paid' WHERE id='1'")
 
     # 4. CTE / Subquery Mutation
     # This is tricky: "WITH x AS (UPDATE ...) SELECT ..."
     # The guardrail looks for "UPDATE", so it should catch this.
-    with pytest.raises(ValueError, match="Tenant ID check missing"):
+    with pytest.raises(ValueError, match=tenant_guard_error):
         await tenant_pool.execute("WITH updated_rows AS (UPDATE invoices SET status='paid' WHERE id='1' RETURNING *) SELECT * FROM updated_rows")
 
     # 5. Schema Qualification
-    with pytest.raises(ValueError, match="Tenant ID check missing"):
+    with pytest.raises(ValueError, match=tenant_guard_error):
         await tenant_pool.execute("UPDATE public.invoices SET status='paid' WHERE id='1'")
 
     # 6. Quoted Identifiers
-    with pytest.raises(ValueError, match="Tenant ID check missing"):
+    with pytest.raises(ValueError, match=tenant_guard_error):
         await tenant_pool.execute('UPDATE "invoices" SET status=\'paid\' WHERE id=\'1\'')
 
 
     # 7. Semicolon Chaining (Multi-statement)
     # Note: asyncpg usually blocks multi-statement by default unless explicitly enabled/configured, 
     # but the guardrail should catch the second statement if it parses the whole string.
-    with pytest.raises(ValueError, match="Tenant ID check missing"):
+    with pytest.raises(ValueError, match=tenant_guard_error):
         await tenant_pool.execute("SELECT 1; UPDATE invoices SET status='paid' WHERE id='1'")
 
 @pytest.mark.asyncio
@@ -97,4 +99,3 @@ async def test_potential_bypass_vectors(tenant_pool):
         pytest.fail("CRITICAL VULNERABILITY: String literal bypass succeeded!")
     except ValueError:
         pass
-
