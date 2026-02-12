@@ -5,7 +5,7 @@ Centralizes all configuration with environment variable support
 import logging
 import os
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from dotenv import load_dotenv
 
@@ -37,9 +37,9 @@ class DatabaseConfig:
                 try:
                     parsed = urlparse(database_url)
                     self.host = parsed.hostname or ''
-                    self.database = parsed.path.lstrip('/') if parsed.path else ''
-                    self.user = parsed.username or ''
-                    self.password = parsed.password or ''
+                    self.database = unquote(parsed.path.lstrip('/')) if parsed.path else ''
+                    self.user = unquote(parsed.username) if parsed.username else ''
+                    self.password = unquote(parsed.password) if parsed.password else ''
                     self.port = parsed.port or 5432
                     logger.info(f"Parsed DATABASE_URL: host={self.host}, db={self.database}")
                 except Exception as e:

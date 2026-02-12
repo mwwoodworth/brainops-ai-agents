@@ -420,7 +420,21 @@ async def search_memories(
 
     except DatabaseUnavailableError as exc:
         logger.error("Memory search unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {
+            "results": [],
+            "total": 0,
+            "query": query,
+            "search_method": "degraded",
+            "table": CANONICAL_TABLE,
+            "tenant_id": tenant_id,
+            "status": "degraded",
+            "message": str(exc),
+            "filters": {
+                "memory_type": memory_type,
+                "category": category,
+                "importance_threshold": importance_threshold
+            }
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -688,10 +702,32 @@ async def memory_health(
 
     except DatabaseUnavailableError as exc:
         logger.error("Memory health unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {
+            "status": "degraded",
+            "operational": False,
+            "table": CANONICAL_TABLE,
+            "total_memories": 0,
+            "memories_with_embeddings": 0,
+            "memories_last_hour": 0,
+            "last_memory_at": None,
+            "tenant_id": tenant_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "message": str(exc)
+        }
     except Exception as e:
         logger.error("Memory health check failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=503, detail="Memory health check failed") from e
+        return {
+            "status": "degraded",
+            "operational": False,
+            "table": CANONICAL_TABLE,
+            "total_memories": 0,
+            "memories_with_embeddings": 0,
+            "memories_last_hour": 0,
+            "last_memory_at": None,
+            "tenant_id": tenant_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "message": "Memory health check failed"
+        }
 
 
 @router.get("/stats/by-system")
