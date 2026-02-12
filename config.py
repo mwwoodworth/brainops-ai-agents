@@ -160,7 +160,7 @@ class AppConfig:
 
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
-        self.version = os.getenv('VERSION', 'v11.11.0')  # Google Keep bridge for Gemini Live real-time operations
+        self.version = os.getenv('VERSION', 'v11.15.0')  # RLS 100% + invariant drift detection tightened
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv('HOST', '0.0.0.0')
         self.port = int(os.getenv('PORT', '10000'))
