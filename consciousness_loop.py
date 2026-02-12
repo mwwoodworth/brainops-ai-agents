@@ -11,6 +11,7 @@ import random
 import time
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import quote
 
 # Attempt to import asyncpg for async DB
 try:
@@ -51,6 +52,40 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ConsciousnessLoop")
 
+EXPECTED_RUNTIME_DB_USER = "agent_worker"
+
+
+def _is_production_environment() -> bool:
+    env = (os.getenv("ENVIRONMENT") or os.getenv("NODE_ENV") or "production").strip().lower()
+    return env in {"production", "prod"}
+
+
+def _resolve_database_url(explicit_db_url: Optional[str]) -> Optional[str]:
+    if explicit_db_url and explicit_db_url.strip():
+        return explicit_db_url.strip()
+
+    db_url = (os.getenv("DATABASE_URL") or "").strip()
+    if db_url:
+        return db_url
+
+    db_host = (os.getenv("DB_HOST") or "").strip()
+    db_name = (os.getenv("DB_NAME") or "").strip()
+    db_user = (os.getenv("DB_USER") or "").strip()
+    db_pass = (os.getenv("DB_PASSWORD") or "").strip()
+    db_port = (os.getenv("DB_PORT") or "5432").strip() or "5432"
+
+    if all([db_host, db_name, db_user, db_pass]):
+        safe_user = quote(db_user, safe="")
+        safe_pass = quote(db_pass, safe="")
+        return f"postgresql://{safe_user}:{safe_pass}@{db_host}:{db_port}/{db_name}"
+
+    if _is_production_environment():
+        raise RuntimeError(
+            "ConsciousnessLoop requires DATABASE_URL or DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD in production."
+        )
+
+    return None
+
 @dataclass
 class VitalSigns:
     cpu_usage: float
@@ -73,17 +108,11 @@ class ConsciousnessLoop:
         self.awareness_level = 0.1  # Starts low, builds up
         self.loop_interval = 30.0  # Seconds - increased to reduce connection pressure
         self.pool = None
+        self._using_local_fallback_pool = False
+        self._is_production = _is_production_environment()
 
         # Configuration
-        self.db_url = db_url or os.getenv("DATABASE_URL")
-        if not self.db_url:
-             # Construct from env vars if URL not direct
-            db_user = os.getenv("DB_USER", "postgres")
-            db_pass = os.getenv("DB_PASSWORD", "postgres")
-            db_host = os.getenv("DB_HOST", "localhost")
-            db_port = os.getenv("DB_PORT", "5432")
-            db_name = os.getenv("DB_NAME", "postgres")
-            self.db_url = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+        self.db_url = _resolve_database_url(db_url)
 
         # State
         self.current_focus: Optional[str] = None
@@ -103,23 +132,42 @@ class ConsciousnessLoop:
             try:
                 self.pool = get_pool()
                 logger.info("Connected to consciousness database via shared pool.")
-            except RuntimeError:
-                # Pool not initialized yet - this is OK, we'll retry later
-                logger.warning("Shared async pool not yet initialized, will retry...")
+            except RuntimeError as exc:
+                if self._is_production:
+                    raise RuntimeError(
+                        "ConsciousnessLoop requires initialized shared async pool in production."
+                    ) from exc
+                logger.warning("Shared async pool not yet initialized; running without DB persistence.")
                 self.pool = None
             except Exception as e:
+                if self._is_production:
+                    raise RuntimeError("ConsciousnessLoop failed to access shared async pool.") from e
                 logger.error(f"Failed to get shared pool: {e}")
                 self.pool = None
-        elif asyncpg:
+        elif asyncpg and self.db_url:
+            if self._is_production:
+                raise RuntimeError(
+                    "ConsciousnessLoop refuses to create direct asyncpg fallback pool in production."
+                )
             try:
                 # Fallback to creating minimal pool (only if shared pool unavailable)
                 self.pool = await asyncpg.create_pool(self.db_url, min_size=1, max_size=2)
+                self._using_local_fallback_pool = True
                 logger.info("Connected to consciousness database (fallback pool).")
             except Exception as e:
+                if self._is_production:
+                    raise RuntimeError("ConsciousnessLoop database initialization failed in production.") from e
                 logger.error(f"Failed to connect to database: {e}")
                 self.pool = None
         else:
+            if self._is_production:
+                raise RuntimeError("ConsciousnessLoop requires asyncpg/shared pool in production.")
             logger.warning("asyncpg not installed. Consciousness will run without DB persistence.")
+
+        if self.pool:
+            await self._verify_runtime_db_identity()
+        elif self._is_production:
+            raise RuntimeError("ConsciousnessLoop requires database connectivity in production.")
 
         # Boot sequence thought
         await self._record_thought("I am waking up. Systems coming online.", "observation", intensity=0.8)
@@ -210,6 +258,9 @@ class ConsciousnessLoop:
 
     async def _update_awareness_state(self, vitals: VitalSigns):
         """Update internal state based on inputs."""
+        if not self.pool:
+            return
+
         # Simple logic: If errors high, awareness peaks (anxiety).
         # If stable, awareness normalizes.
 
@@ -390,6 +441,8 @@ class ConsciousnessLoop:
     async def _record_thought(self, content: str, kind: str, intensity: float):
         """Save a thought to the stream."""
         logger.info(f"Thought [{kind}]: {content}")
+        if not self.pool:
+            return
         query = """
         INSERT INTO ai_thought_stream
         (thought_content, thought_type, intensity)
@@ -402,6 +455,9 @@ class ConsciousnessLoop:
 
     async def _manage_attention(self, vitals: VitalSigns):
         """Focus on what matters."""
+        if not self.pool:
+            return
+
         new_focus = None
         reason = ""
         priority = 1
@@ -431,6 +487,9 @@ class ConsciousnessLoop:
 
     async def _save_vitals(self, vitals: VitalSigns):
         """Persist vital signs."""
+        if not self.pool:
+            return
+
         query = """
         INSERT INTO ai_vital_signs
         (cpu_usage, memory_usage, request_rate, error_rate, active_connections, system_load, component_health_score)
@@ -452,13 +511,37 @@ class ConsciousnessLoop:
         self.running = False
         if self.pool:
             await self._record_thought("Shutting down consciousness.", "observation", 1.0)
-            # DON'T close shared pool - it's managed globally
-            if not _ASYNC_POOL_AVAILABLE:
-                # Only close if we created our own pool
+            # Only close pools created by this module.
+            if self._using_local_fallback_pool:
                 await self.pool.close()
                 logger.info("Local database pool closed.")
             else:
                 logger.info("Using shared pool - not closing.")
+
+    async def _verify_runtime_db_identity(self) -> None:
+        if not self.pool:
+            return
+
+        current_user = None
+        try:
+            async with self.pool.acquire() as conn:
+                current_user = await conn.fetchval("SELECT current_user")
+        except Exception as exc:
+            if self._is_production:
+                raise RuntimeError(
+                    "ConsciousnessLoop failed to verify runtime DB identity in production."
+                ) from exc
+            logger.warning("ConsciousnessLoop could not verify runtime DB identity: %s", exc)
+            return
+
+        if current_user != EXPECTED_RUNTIME_DB_USER:
+            message = (
+                f"ConsciousnessLoop DB identity mismatch: got '{current_user}', "
+                f"expected '{EXPECTED_RUNTIME_DB_USER}'."
+            )
+            if self._is_production:
+                raise RuntimeError(message)
+            logger.warning(message)
 
 # Entry point for standalone execution
 if __name__ == "__main__":

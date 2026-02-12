@@ -34,6 +34,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -553,16 +554,52 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
 
-    async def run():
-        config = PoolConfig(
-            host=os.getenv("DB_HOST", "localhost"),
-            port=int(os.getenv("DB_PORT", "5432")),
-            user=os.getenv("DB_USER", "postgres"),
-            password=os.getenv("DB_PASSWORD", "postgres"),
-            database=os.getenv("DB_NAME", "postgres"),
-            ssl=False,
+    def _as_bool(value: str | None) -> bool:
+        return (value or "").strip().lower() in {"1", "true", "yes"}
+
+    def _pool_config_from_env() -> PoolConfig:
+        database_url = (os.getenv("DATABASE_URL") or "").strip()
+        if database_url:
+            parsed = urlparse(database_url)
+            db_name = parsed.path.lstrip("/")
+            if not parsed.hostname or not parsed.username or parsed.password is None or not db_name:
+                raise RuntimeError(
+                    "DATABASE_URL must include host, database, username, and password for invariant_monitor."
+                )
+            return PoolConfig(
+                host=parsed.hostname,
+                port=parsed.port or 5432,
+                user=parsed.username,
+                password=parsed.password,
+                database=db_name,
+                ssl=not _as_bool(os.getenv("DB_SSL_DISABLE")),
+            )
+
+        required = ("DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD")
+        missing = [key for key in required if not (os.getenv(key) or "").strip()]
+        if missing:
+            raise RuntimeError(
+                "Missing required DB env vars for invariant_monitor: "
+                + ", ".join(missing)
+                + ". Set DATABASE_URL or explicit DB_HOST/DB_NAME/DB_USER/DB_PASSWORD."
+            )
+
+        return PoolConfig(
+            host=(os.getenv("DB_HOST") or "").strip(),
+            port=int((os.getenv("DB_PORT") or "5432").strip()),
+            user=(os.getenv("DB_USER") or "").strip(),
+            password=(os.getenv("DB_PASSWORD") or "").strip(),
+            database=(os.getenv("DB_NAME") or "").strip(),
+            ssl=not _as_bool(os.getenv("DB_SSL_DISABLE")),
         )
-        os.environ["ALLOW_INMEMORY_FALLBACK"] = "1"
+
+    async def run():
+        env = (os.getenv("ENVIRONMENT") or os.getenv("NODE_ENV") or "production").strip().lower()
+        if env in {"production", "prod"} and _as_bool(os.getenv("ALLOW_INMEMORY_FALLBACK")):
+            raise RuntimeError("ALLOW_INMEMORY_FALLBACK is forbidden for production invariant checks.")
+
+        config = _pool_config_from_env()
+
         try:
             await init_pool(config)
             result = await check_invariants()
