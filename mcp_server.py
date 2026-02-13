@@ -56,24 +56,46 @@ ADMIN_API_KEY = os.getenv("MCP_ADMIN_API_KEY", "")
 # SECURITY: Removed python, python3, pip, node, npm, curl to prevent RCE
 # These interpreters allow arbitrary code execution even with shell operator filtering
 ALLOWED_BASH_COMMANDS = {
-    "ls", "pwd", "whoami", "date", "cat", "head", "tail", "grep", "wc",
-    "ps", "df", "du", "uptime", "free", "git", "echo", "find", "sort",
-    "uniq", "less", "more", "file", "stat", "env", "printenv"
+    "ls",
+    "pwd",
+    "whoami",
+    "date",
+    "cat",
+    "head",
+    "tail",
+    "grep",
+    "wc",
+    "ps",
+    "df",
+    "du",
+    "uptime",
+    "free",
+    "git",
+    "echo",
+    "find",
+    "sort",
+    "uniq",
+    "less",
+    "more",
+    "file",
+    "stat",
+    "env",
+    "printenv",
 }
 
 # Dangerous shell operators and characters that indicate command chaining/injection
 DANGEROUS_SHELL_PATTERNS = [
-    r';',           # Command separator
-    r'\|',          # Pipe (can chain to dangerous commands)
-    r'&&',          # AND operator
-    r'\|\|',        # OR operator
-    r'`',           # Backtick command substitution
-    r'\$\(',        # $() command substitution
-    r'>',           # Output redirection
-    r'<',           # Input redirection
-    r'\n',          # Newline (command separator)
-    r'\r',          # Carriage return
-    r'\x00',        # Null byte
+    r";",  # Command separator
+    r"\|",  # Pipe (can chain to dangerous commands)
+    r"&&",  # AND operator
+    r"\|\|",  # OR operator
+    r"`",  # Backtick command substitution
+    r"\$\(",  # $() command substitution
+    r">",  # Output redirection
+    r"<",  # Input redirection
+    r"\n",  # Newline (command separator)
+    r"\r",  # Carriage return
+    r"\x00",  # Null byte
 ]
 
 # Allowed read paths (for read_file tool)
@@ -87,7 +109,7 @@ ALLOWED_READ_PATHS = {
 ALLOWED_WRITE_PATHS = {
     "/tmp/",
     "/home/matt-woodworth/dev/brainops-ai-agents/logs/",
-    "/home/matt-woodworth/dev/analysis/"
+    "/home/matt-woodworth/dev/analysis/",
 }
 
 # SQL: Only SELECT queries are allowed (read-only)
@@ -144,7 +166,7 @@ def sanitize_input(value: str, max_length: int = 10000) -> str:
     if not isinstance(value, str):
         value = str(value)
     # Remove null bytes
-    value = value.replace('\x00', '')
+    value = value.replace("\x00", "")
     # Limit length to prevent DoS
     return value[:max_length]
 
@@ -190,23 +212,48 @@ def is_safe_bash_command(cmd: str) -> tuple:
 
     # Check if base command is in allowlist
     if base_command not in ALLOWED_BASH_COMMANDS:
-        return False, f"Command '{base_command}' not in allowlist. Allowed: {', '.join(sorted(ALLOWED_BASH_COMMANDS))}"
+        return (
+            False,
+            f"Command '{base_command}' not in allowlist. Allowed: {', '.join(sorted(ALLOWED_BASH_COMMANDS))}",
+        )
 
     # Additional validation for specific commands
     if base_command == "curl":
         # Only allow curl for safe operations (no -X POST, no -d data, etc.)
-        dangerous_curl_flags = ['-X', '--request', '-d', '--data', '-F', '--form', '-T', '--upload-file']
+        dangerous_curl_flags = [
+            "-X",
+            "--request",
+            "-d",
+            "--data",
+            "-F",
+            "--form",
+            "-T",
+            "--upload-file",
+        ]
         for flag in dangerous_curl_flags:
             if flag in tokens:
                 return False, f"Curl flag '{flag}' not allowed"
 
     if base_command == "git":
         # Only allow read-only git operations
-        allowed_git_subcommands = ['status', 'log', 'diff', 'show', 'branch', 'remote', 'tag', 'ls-files', 'ls-tree']
+        allowed_git_subcommands = [
+            "status",
+            "log",
+            "diff",
+            "show",
+            "branch",
+            "remote",
+            "tag",
+            "ls-files",
+            "ls-tree",
+        ]
         if len(tokens) > 1:
             git_subcommand = tokens[1].lower()
             if git_subcommand not in allowed_git_subcommands:
-                return False, f"Git subcommand '{git_subcommand}' not allowed. Allowed: {', '.join(allowed_git_subcommands)}"
+                return (
+                    False,
+                    f"Git subcommand '{git_subcommand}' not allowed. Allowed: {', '.join(allowed_git_subcommands)}",
+                )
 
     return True, "Command is safe"
 
@@ -232,7 +279,7 @@ def is_safe_path(path: str, allowed_prefixes: set) -> tuple:
 
         # Additional check: ensure no '..' remains after normalization
         # This catches edge cases
-        if '..' in abs_path:
+        if ".." in abs_path:
             return False, "Path traversal detected"
 
         # Check if path starts with any allowed prefix
@@ -242,7 +289,10 @@ def is_safe_path(path: str, allowed_prefixes: set) -> tuple:
             if abs_path.startswith(normalized_prefix):
                 return True, f"Path is within allowed directory: {normalized_prefix}"
 
-        return False, f"Path not in allowed directories. Allowed: {', '.join(sorted(allowed_prefixes))}"
+        return (
+            False,
+            f"Path not in allowed directories. Allowed: {', '.join(sorted(allowed_prefixes))}",
+        )
 
     except Exception as e:
         return False, f"Path validation error: {e}"
@@ -259,7 +309,7 @@ def is_safe_write_path(path: str) -> tuple:
 
 
 def _count_placeholders(query: str) -> int:
-    return len(re.findall(r'(?<!%)%s', query))
+    return len(re.findall(r"(?<!%)%s", query))
 
 
 def _extract_table_identifiers(token_list: TokenList) -> list[Identifier]:
@@ -293,8 +343,7 @@ def _contains_subquery(token_list: TokenList) -> bool:
     for token in token_list.tokens:
         if isinstance(token, Parenthesis):
             if any(
-                inner.ttype is T.DML and inner.normalized == "SELECT"
-                for inner in token.flatten()
+                inner.ttype is T.DML and inner.normalized == "SELECT" for inner in token.flatten()
             ):
                 return True
         if token.is_group and _contains_subquery(token):
@@ -322,7 +371,7 @@ def is_safe_sql_query(query: str, params: list[Any]) -> tuple:
     if not query_stripped:
         return False, "Empty query after sanitization"
 
-    if re.search(r'\$\d+', query_stripped):
+    if re.search(r"\$\d+", query_stripped):
         return False, "Use %s placeholders only (positional $1 not allowed)"
 
     placeholder_count = _count_placeholders(query_stripped)
@@ -386,8 +435,10 @@ def is_safe_sql_query(query: str, params: list[Any]) -> tuple:
 
     return True, "Query is safe (SELECT only)"
 
+
 # API Key authentication
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
 
 async def verify_api_key(
     request: Request,
@@ -422,11 +473,12 @@ async def verify_api_key(
 
     return True
 
+
 # Initialize FastAPI app
 app = FastAPI(
     title="BrainOps MCP Server",
     description="Model Context Protocol server for complete AI system transparency with enhanced features",
-    version="2.0.0"
+    version="2.0.0",
 )
 
 # Add CORS middleware - uses secure defaults from config (no wildcard fallback)
@@ -439,7 +491,16 @@ app.add_middleware(
 )
 
 # Database configuration (MCP must use read-only credentials in production)
-DISALLOWED_DB_USERS = {"postgres", "supabase_admin", "service_role"}
+# SECURITY: Use prefix matching to catch Supabase pooler usernames like "postgres.<suffix>"
+DISALLOWED_DB_USER_PREFIXES = ("postgres", "supabase_admin", "service_role")
+
+
+def _is_privileged_db_user(username: str) -> bool:
+    """Return True if username matches a privileged DB user prefix (case-insensitive)."""
+    if not username:
+        return False
+    lower = username.lower()
+    return any(lower.startswith(prefix) for prefix in DISALLOWED_DB_USER_PREFIXES)
 
 
 def _build_db_config(prefix: str, default_db: str) -> dict[str, Any] | None:
@@ -489,12 +550,14 @@ def get_mcp_db_connection_target() -> tuple[dict[str, Any] | str | None, str]:
 
     return None, "mcp_config_missing"
 
+
 # Service endpoints
 SERVICES = {
-    'ai_agents': 'https://brainops-ai-agents.onrender.com',
-    'erp_backend': 'https://myroofgenius.com/api',
-    'erp_frontend': 'https://myroofgenius.com'
+    "ai_agents": "https://brainops-ai-agents.onrender.com",
+    "erp_backend": "https://myroofgenius.com/api",
+    "erp_frontend": "https://myroofgenius.com",
 }
+
 
 class MCPServer:
     """Enhanced MCP Server for AI system control and monitoring"""
@@ -507,30 +570,28 @@ class MCPServer:
 
         # Enhanced features
         self._registered_tools: dict[str, dict] = {}
-        self._tool_metrics: dict[str, dict] = defaultdict(lambda: {
-            "total_calls": 0,
-            "successful_calls": 0,
-            "failed_calls": 0,
-            "total_duration_ms": 0.0,
-            "avg_duration_ms": 0.0,
-            "last_execution": None
-        })
+        self._tool_metrics: dict[str, dict] = defaultdict(
+            lambda: {
+                "total_calls": 0,
+                "successful_calls": 0,
+                "failed_calls": 0,
+                "total_duration_ms": 0.0,
+                "avg_duration_ms": 0.0,
+                "last_execution": None,
+            }
+        )
         self._chain_executions: list[dict] = []
-        self._cache_stats = {
-            "hits": 0,
-            "misses": 0,
-            "evictions": 0
-        }
+        self._cache_stats = {"hits": 0, "misses": 0, "evictions": 0}
 
     async def get_system_status(self) -> dict[str, Any]:
         """Get comprehensive system status"""
         status = {
-            'timestamp': datetime.utcnow().isoformat(),
-            'services': {},
-            'database': {},
-            'ai_agents': {},
-            'errors': [],
-            'metrics': {}
+            "timestamp": datetime.utcnow().isoformat(),
+            "services": {},
+            "database": {},
+            "ai_agents": {},
+            "errors": [],
+            "metrics": {},
         }
 
         # Check services
@@ -538,16 +599,13 @@ class MCPServer:
             for name, url in SERVICES.items():
                 try:
                     response = await client.get(f"{url}/health")
-                    status['services'][name] = {
-                        'status': 'online',
-                        'code': response.status_code,
-                        'version': response.json().get('version', 'unknown')
+                    status["services"][name] = {
+                        "status": "online",
+                        "code": response.status_code,
+                        "version": response.json().get("version", "unknown"),
                     }
                 except Exception as e:
-                    status['services'][name] = {
-                        'status': 'offline',
-                        'error': str(e)
-                    }
+                    status["services"][name] = {"status": "offline", "error": str(e)}
 
         # Check database
         try:
@@ -563,7 +621,7 @@ class MCPServer:
 
             if (
                 db_user
-                and db_user.lower() in DISALLOWED_DB_USERS
+                and _is_privileged_db_user(db_user)
                 and ENVIRONMENT in ("production", "staging")
             ):
                 raise RuntimeError("MCP database user must be read-only for system status checks")
@@ -582,26 +640,22 @@ class MCPServer:
             cursor.execute("SET search_path TO public")
 
             # Get database metrics
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT
                     (SELECT COUNT(*) FROM ai_agents WHERE status = 'active') as active_agents,
                     (SELECT COUNT(*) FROM agent_executions WHERE created_at > NOW() - INTERVAL '1 hour') as recent_executions,
                     (SELECT COUNT(*) FROM ai_master_context) as memory_entries,
                     (SELECT pg_database_size('postgres')) as db_size
-            """)
+            """
+            )
             metrics = cursor.fetchone()
-            status['database'] = {
-                'connected': True,
-                'metrics': metrics
-            }
+            status["database"] = {"connected": True, "metrics": metrics}
 
             cursor.close()
             conn.close()
         except Exception as e:
-            status['database'] = {
-                'connected': False,
-                'error': str(e)
-            }
+            status["database"] = {"connected": False, "error": str(e)}
 
         return status
 
@@ -610,36 +664,38 @@ class MCPServer:
         execution_id = datetime.utcnow().isoformat()
 
         result = {
-            'tool': tool,
-            'params': params,
-            'execution_id': execution_id,
-            'timestamp': datetime.utcnow().isoformat(),
-            'status': 'pending',
-            'result': None,
-            'error': None
+            "tool": tool,
+            "params": params,
+            "execution_id": execution_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "status": "pending",
+            "result": None,
+            "error": None,
         }
 
         try:
-            if tool == 'bash':
+            if tool == "bash":
                 # Execute bash command - WITH SECURITY CONTROLS
-                cmd = params.get('command', '')
-                timeout = min(params.get('timeout', 30), 60)  # Cap timeout at 60s
+                cmd = params.get("command", "")
+                timeout = min(params.get("timeout", 30), 60)  # Cap timeout at 60s
 
                 # SECURITY: Sanitize input
                 cmd = sanitize_input(cmd, max_length=1000)
 
                 # SECURITY: Check if dangerous tools are enabled
                 if not DANGEROUS_TOOLS_ENABLED:
-                    result['error'] = "Bash execution disabled in production. Set ENVIRONMENT=development to enable."
-                    result['status'] = 'blocked'
+                    result[
+                        "error"
+                    ] = "Bash execution disabled in production. Set ENVIRONMENT=development to enable."
+                    result["status"] = "blocked"
                     logger.warning(f"SECURITY: Blocked bash command in production: {cmd[:100]}")
                     return result
 
                 # SECURITY: Check allowlist with detailed validation
                 is_safe, reason = is_safe_bash_command(cmd)
                 if not is_safe:
-                    result['error'] = f"Command blocked: {reason}"
-                    result['status'] = 'blocked'
+                    result["error"] = f"Command blocked: {reason}"
+                    result["status"] = "blocked"
                     logger.warning(f"SECURITY: Blocked bash command - {reason}: {cmd[:100]}")
                     return result
 
@@ -650,34 +706,29 @@ class MCPServer:
                 try:
                     tokens = shlex.split(cmd)
                     proc = await asyncio.create_subprocess_exec(
-                        *tokens,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
+                        *tokens, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                     )
                 except (ValueError, OSError) as exc:
-                    logger.warning("Failed to execute parsed command, using shell: %s", exc, exc_info=True)
+                    logger.warning(
+                        "Failed to execute parsed command, using shell: %s", exc, exc_info=True
+                    )
                     # Fallback to shell only if parsing fails (shouldn't happen after validation)
                     proc = await asyncio.create_subprocess_shell(
-                        cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
+                        cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                     )
 
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout=timeout
-                )
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
 
-                result['result'] = {
-                    'stdout': stdout.decode() if stdout else '',
-                    'stderr': stderr.decode() if stderr else '',
-                    'returncode': proc.returncode
+                result["result"] = {
+                    "stdout": stdout.decode() if stdout else "",
+                    "stderr": stderr.decode() if stderr else "",
+                    "returncode": proc.returncode,
                 }
-                result['status'] = 'success' if proc.returncode == 0 else 'failed'
+                result["status"] = "success" if proc.returncode == 0 else "failed"
 
-            elif tool == 'read_file':
+            elif tool == "read_file":
                 # Read file contents - WITH SECURITY CONTROLS
-                file_path = params.get('path', '')
+                file_path = params.get("path", "")
 
                 # SECURITY: Sanitize input
                 file_path = sanitize_input(file_path, max_length=500)
@@ -685,8 +736,8 @@ class MCPServer:
                 # SECURITY: Check path allowlist
                 is_safe, reason = is_safe_read_path(file_path)
                 if not is_safe:
-                    result['error'] = f"Read blocked: {reason}"
-                    result['status'] = 'blocked'
+                    result["error"] = f"Read blocked: {reason}"
+                    result["status"] = "blocked"
                     logger.warning(f"SECURITY: Blocked file read - {reason}: {file_path}")
                     return result
 
@@ -695,22 +746,22 @@ class MCPServer:
                     file_size = os.path.getsize(file_path)
                     max_size = 10 * 1024 * 1024  # 10MB limit
                     if file_size > max_size:
-                        result['error'] = f"File too large: {file_size} bytes (max: {max_size})"
-                        result['status'] = 'blocked'
+                        result["error"] = f"File too large: {file_size} bytes (max: {max_size})"
+                        result["status"] = "blocked"
                         return result
 
                     with open(file_path) as f:
                         content = f.read()
-                    result['result'] = {'content': content, 'size': len(content)}
-                    result['status'] = 'success'
+                    result["result"] = {"content": content, "size": len(content)}
+                    result["status"] = "success"
                 else:
-                    result['error'] = f"File not found: {file_path}"
-                    result['status'] = 'failed'
+                    result["error"] = f"File not found: {file_path}"
+                    result["status"] = "failed"
 
-            elif tool == 'write_file':
+            elif tool == "write_file":
                 # Write file contents - WITH SECURITY CONTROLS
-                file_path = params.get('path', '')
-                content = params.get('content', '')
+                file_path = params.get("path", "")
+                content = params.get("content", "")
 
                 # SECURITY: Sanitize inputs
                 file_path = sanitize_input(file_path, max_length=500)
@@ -718,37 +769,39 @@ class MCPServer:
 
                 # SECURITY: Check if dangerous tools are enabled
                 if not DANGEROUS_TOOLS_ENABLED:
-                    result['error'] = "File write disabled in production. Set ENVIRONMENT=development to enable."
-                    result['status'] = 'blocked'
+                    result[
+                        "error"
+                    ] = "File write disabled in production. Set ENVIRONMENT=development to enable."
+                    result["status"] = "blocked"
                     logger.warning(f"SECURITY: Blocked file write in production: {file_path}")
                     return result
 
                 # SECURITY: Check path allowlist with detailed validation
                 is_safe, reason = is_safe_write_path(file_path)
                 if not is_safe:
-                    result['error'] = f"Write blocked: {reason}"
-                    result['status'] = 'blocked'
+                    result["error"] = f"Write blocked: {reason}"
+                    result["status"] = "blocked"
                     logger.warning(f"SECURITY: Blocked file write - {reason}: {file_path}")
                     return result
 
                 logger.info(f"Writing to allowed path: {file_path}")
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                with open(file_path, 'w') as f:
+                with open(file_path, "w") as f:
                     f.write(content)
 
-                result['result'] = {'written': len(content)}
-                result['status'] = 'success'
+                result["result"] = {"written": len(content)}
+                result["status"] = "success"
 
-            elif tool == 'database_query':
+            elif tool == "database_query":
                 # Execute database query - WITH SECURITY CONTROLS (READ-ONLY)
-                query = params.get('query', '')
-                raw_params = params.get('params', [])
+                query = params.get("query", "")
+                raw_params = params.get("params", [])
 
                 if raw_params is None:
                     raw_params = []
                 if not isinstance(raw_params, list):
-                    result['error'] = "params must be an array"
-                    result['status'] = 'failed'
+                    result["error"] = "params must be an array"
+                    result["status"] = "failed"
                     return result
 
                 normalized_params: list[Any] = []
@@ -758,8 +811,8 @@ class MCPServer:
                     elif isinstance(value, (int, float, bool, type(None), datetime, date)):
                         normalized_params.append(value)
                     else:
-                        result['error'] = f"Unsupported parameter type: {type(value).__name__}"
-                        result['status'] = 'failed'
+                        result["error"] = f"Unsupported parameter type: {type(value).__name__}"
+                        result["status"] = "failed"
                         return result
 
                 # SECURITY: Sanitize input
@@ -768,15 +821,15 @@ class MCPServer:
                 # SECURITY: Validate query with comprehensive checks
                 is_safe, reason = is_safe_sql_query(query, normalized_params)
                 if not is_safe:
-                    result['error'] = f"Query blocked: {reason}"
-                    result['status'] = 'blocked'
+                    result["error"] = f"Query blocked: {reason}"
+                    result["status"] = "blocked"
                     logger.warning(f"SECURITY: Blocked SQL query - {reason}: {query[:100]}")
                     return result
 
                 conn_target, conn_source = get_mcp_db_connection_target()
                 if not conn_target:
-                    result['error'] = "MCP database credentials not configured (read-only required)"
-                    result['status'] = 'blocked'
+                    result["error"] = "MCP database credentials not configured (read-only required)"
+                    result["status"] = "blocked"
                     logger.error("SECURITY: MCP database credentials missing (%s)", conn_source)
                     return result
 
@@ -788,16 +841,20 @@ class MCPServer:
 
                 if (
                     db_user
-                    and db_user.lower() in DISALLOWED_DB_USERS
+                    and _is_privileged_db_user(db_user)
                     and ENVIRONMENT in ("production", "staging")
                 ):
-                    result['error'] = "Read-only database user required for MCP queries"
-                    result['status'] = 'blocked'
-                    logger.error("SECURITY: Blocked MCP query using privileged DB user: %s", db_user)
+                    result["error"] = "Read-only database user required for MCP queries"
+                    result["status"] = "blocked"
+                    logger.error(
+                        "SECURITY: Blocked MCP query using privileged DB user: %s", db_user
+                    )
                     return result
 
                 if conn_source == "fallback_db_config":
-                    logger.warning("SECURITY: MCP using fallback DB credentials (non-production only)")
+                    logger.warning(
+                        "SECURITY: MCP using fallback DB credentials (non-production only)"
+                    )
 
                 logger.info("Executing allowed SQL query (SELECT only)")
                 if isinstance(conn_target, str):
@@ -816,18 +873,18 @@ class MCPServer:
 
                 # Only SELECT is allowed, so always fetch results
                 rows = cursor.fetchall()
-                result['result'] = {'rows': rows, 'count': len(rows)}
+                result["result"] = {"rows": rows, "count": len(rows)}
 
                 cursor.close()
                 conn.close()
-                result['status'] = 'success'
+                result["status"] = "success"
 
-            elif tool == 'http_request':
+            elif tool == "http_request":
                 # Make HTTP request with SSRF protection
-                method = params.get('method', 'GET')
-                url = params.get('url', '')
-                headers = params.get('headers', {})
-                body = params.get('body', None)
+                method = params.get("method", "GET")
+                url = params.get("url", "")
+                headers = params.get("headers", {})
+                body = params.get("body", None)
 
                 # SSRF Protection: Validate URL
                 import ipaddress
@@ -835,16 +892,21 @@ class MCPServer:
                 from urllib.parse import urlparse
 
                 parsed = urlparse(url)
-                if not parsed.scheme or parsed.scheme not in ('http', 'https'):
+                if not parsed.scheme or parsed.scheme not in ("http", "https"):
                     raise ValueError(f"Invalid URL scheme: {parsed.scheme}")
                 if not parsed.hostname:
                     raise ValueError("URL must have a hostname")
 
                 # Block internal/private IP ranges and metadata endpoints
                 BLOCKED_HOSTS = {
-                    'localhost', '127.0.0.1', '0.0.0.0', '::1',
-                    'metadata.google.internal', '169.254.169.254',  # Cloud metadata
-                    'metadata.google.com', 'kubernetes.default'
+                    "localhost",
+                    "127.0.0.1",
+                    "0.0.0.0",
+                    "::1",
+                    "metadata.google.internal",
+                    "169.254.169.254",  # Cloud metadata
+                    "metadata.google.com",
+                    "kubernetes.default",
                 }
                 hostname_lower = parsed.hostname.lower()
                 if hostname_lower in BLOCKED_HOSTS:
@@ -852,7 +914,9 @@ class MCPServer:
 
                 # Resolve hostname and check for private IPs
                 try:
-                    resolved_ips = socket.getaddrinfo(parsed.hostname, parsed.port or 443, socket.AF_UNSPEC)
+                    resolved_ips = socket.getaddrinfo(
+                        parsed.hostname, parsed.port or 443, socket.AF_UNSPEC
+                    )
                     for family, socktype, proto, canonname, sockaddr in resolved_ips:
                         ip_str = sockaddr[0]
                         ip = ipaddress.ip_address(ip_str)
@@ -863,26 +927,23 @@ class MCPServer:
 
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.request(
-                        method=method,
-                        url=url,
-                        headers=headers,
-                        json=body if body else None
+                        method=method, url=url, headers=headers, json=body if body else None
                     )
 
-                    result['result'] = {
-                        'status_code': response.status_code,
-                        'headers': dict(response.headers),
-                        'body': response.text[:10000]  # Limit response size
+                    result["result"] = {
+                        "status_code": response.status_code,
+                        "headers": dict(response.headers),
+                        "body": response.text[:10000],  # Limit response size
                     }
-                    result['status'] = 'success'
+                    result["status"] = "success"
 
             else:
-                result['error'] = f"Unknown tool: {tool}"
-                result['status'] = 'failed'
+                result["error"] = f"Unknown tool: {tool}"
+                result["status"] = "failed"
 
         except Exception as e:
-            result['error'] = str(e)
-            result['status'] = 'failed'
+            result["error"] = str(e)
+            result["status"] = "failed"
 
         # Store execution history
         self.execution_history.append(result)
@@ -893,12 +954,13 @@ class MCPServer:
 
     async def get_file_tree(self, path: str, max_depth: int = 3) -> dict[str, Any]:
         """Get file tree structure for transparency"""
+
         def build_tree(dir_path: Path, current_depth: int = 0):
             tree = {
-                'name': dir_path.name,
-                'path': str(dir_path),
-                'type': 'directory',
-                'children': []
+                "name": dir_path.name,
+                "path": str(dir_path),
+                "type": "directory",
+                "children": [],
             }
 
             if current_depth >= max_depth:
@@ -906,17 +968,17 @@ class MCPServer:
 
             try:
                 for item in dir_path.iterdir():
-                    if item.is_dir() and not item.name.startswith('.'):
-                        tree['children'].append(
-                            build_tree(item, current_depth + 1)
-                        )
+                    if item.is_dir() and not item.name.startswith("."):
+                        tree["children"].append(build_tree(item, current_depth + 1))
                     elif item.is_file():
-                        tree['children'].append({
-                            'name': item.name,
-                            'path': str(item),
-                            'type': 'file',
-                            'size': item.stat().st_size
-                        })
+                        tree["children"].append(
+                            {
+                                "name": item.name,
+                                "path": str(item),
+                                "type": "file",
+                                "size": item.stat().st_size,
+                            }
+                        )
             except PermissionError as exc:
                 logger.debug("Permission denied while reading %s: %s", dir_path, exc)
 
@@ -924,30 +986,29 @@ class MCPServer:
 
         root_path = Path(path)
         if not root_path.exists():
-            return {'error': f"Path not found: {path}"}
+            return {"error": f"Path not found: {path}"}
 
         return build_tree(root_path)
 
     async def monitor_logs(self, service: str, lines: int = 100) -> list[str]:
         """Monitor service logs in real-time"""
-        if service == 'ai_agents':
+        if service == "ai_agents":
             # Get Render logs via API
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.get(
-                        f"{SERVICES['ai_agents']}/logs",
-                        params={'lines': lines}
+                        f"{SERVICES['ai_agents']}/logs", params={"lines": lines}
                     )
                     if response.status_code == 200:
-                        return response.json().get('logs', [])
+                        return response.json().get("logs", [])
             except httpx.RequestError as exc:
                 logger.warning("Failed to fetch remote logs: %s", exc, exc_info=True)
 
         # Fallback to local logs if available
         log_files = {
-            'ai_agents': '/var/log/ai_agents.log',
-            'erp_frontend': '/var/log/erp_frontend.log',
-            'database': '/var/log/postgresql/postgresql.log'
+            "ai_agents": "/var/log/ai_agents.log",
+            "erp_frontend": "/var/log/erp_frontend.log",
+            "database": "/var/log/postgresql/postgresql.log",
         }
 
         log_file = log_files.get(service)
@@ -957,19 +1018,24 @@ class MCPServer:
                 safe_lines = max(1, min(int(lines), 10000))  # Clamp to reasonable range
                 # Use subprocess with args list instead of shell=True to prevent injection
                 proc = await asyncio.create_subprocess_exec(
-                    'tail', '-n', str(safe_lines), log_file,
+                    "tail",
+                    "-n",
+                    str(safe_lines),
+                    log_file,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    stderr=asyncio.subprocess.PIPE,
                 )
                 stdout, _ = await proc.communicate()
-                return stdout.decode().split('\n')
+                return stdout.decode().split("\n")
             except Exception as e:
                 logger.warning(f"Failed to read log file {log_file}: {e}")
                 return []
 
         return []
 
+
 mcp_server = MCPServer()
+
 
 @app.get("/")
 async def root():
@@ -985,27 +1051,23 @@ async def root():
             "database_access",
             "http_requests",
             "log_monitoring",
-            "real_time_updates"
+            "real_time_updates",
         ],
-        "tools": [
-            "bash",
-            "read_file",
-            "write_file",
-            "database_query",
-            "http_request"
-        ]
+        "tools": ["bash", "read_file", "write_file", "database_query", "http_request"],
     }
+
 
 @app.get("/status")
 async def get_status():
     """Get comprehensive system status"""
     return await mcp_server.get_system_status()
 
+
 @app.post("/execute", dependencies=[Depends(verify_api_key)])
 async def execute_tool(request: dict[str, Any]):
     """Execute an MCP tool"""
-    tool = request.get('tool')
-    params = request.get('params', {})
+    tool = request.get("tool")
+    params = request.get("params", {})
 
     if not tool:
         raise HTTPException(status_code=400, detail="Tool name required")
@@ -1013,10 +1075,12 @@ async def execute_tool(request: dict[str, Any]):
     result = await mcp_server.execute_tool(tool, params)
     return result
 
+
 @app.get("/files", dependencies=[Depends(verify_api_key)])
 async def get_files(path: str = "/home/matt-woodworth", depth: int = 2):
     """Get file tree structure"""
     return await mcp_server.get_file_tree(path, depth)
+
 
 @app.get("/logs/{service}", dependencies=[Depends(verify_api_key)])
 async def get_logs(service: str, lines: int = 100):
@@ -1024,13 +1088,15 @@ async def get_logs(service: str, lines: int = 100):
     logs = await mcp_server.monitor_logs(service, lines)
     return {"service": service, "logs": logs}
 
+
 @app.get("/history", dependencies=[Depends(verify_api_key)])
 async def get_history(limit: int = 100):
     """Get execution history"""
     return {
         "history": mcp_server.execution_history[-limit:],
-        "total": len(mcp_server.execution_history)
+        "total": len(mcp_server.execution_history),
     }
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -1040,7 +1106,9 @@ async def websocket_endpoint(websocket: WebSocket):
     if config.security.auth_required:
         if not api_key or api_key not in config.security.valid_api_keys:
             await websocket.close(code=4003, reason="Invalid or missing API key")
-            logger.warning(f"WebSocket connection rejected - invalid API key from {websocket.client}")
+            logger.warning(
+                f"WebSocket connection rejected - invalid API key from {websocket.client}"
+            )
             return
 
     await websocket.accept()
@@ -1051,15 +1119,13 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             # Send system status every 5 seconds
             status = await mcp_server.get_system_status()
-            await websocket.send_json({
-                'type': 'status',
-                'data': status
-            })
+            await websocket.send_json({"type": "status", "data": status})
             await asyncio.sleep(5)
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
         mcp_server.connections.remove(websocket)
+
 
 @app.get("/health")
 async def health():
@@ -1067,8 +1133,9 @@ async def health():
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
-        "connections": len(mcp_server.connections)
+        "connections": len(mcp_server.connections),
     }
+
 
 # Vercel MCP adapter endpoints
 @app.get("/mcp/tools")
@@ -1079,33 +1146,22 @@ async def get_mcp_tools():
             {
                 "name": "bash",
                 "description": "Execute bash commands",
-                "parameters": {
-                    "command": "string",
-                    "timeout": "number"
-                }
+                "parameters": {"command": "string", "timeout": "number"},
             },
             {
                 "name": "read_file",
                 "description": "Read file contents",
-                "parameters": {
-                    "path": "string"
-                }
+                "parameters": {"path": "string"},
             },
             {
                 "name": "write_file",
                 "description": "Write file contents",
-                "parameters": {
-                    "path": "string",
-                    "content": "string"
-                }
+                "parameters": {"path": "string", "content": "string"},
             },
             {
                 "name": "database_query",
                 "description": "Execute database query",
-                "parameters": {
-                    "query": "string",
-                    "params": "array"
-                }
+                "parameters": {"query": "string", "params": "array"},
             },
             {
                 "name": "http_request",
@@ -1114,20 +1170,23 @@ async def get_mcp_tools():
                     "method": "string",
                     "url": "string",
                     "headers": "object",
-                    "body": "object"
-                }
-            }
+                    "body": "object",
+                },
+            },
         ]
     }
+
 
 @app.post("/mcp/execute", dependencies=[Depends(verify_api_key)])
 async def mcp_execute(request: dict[str, Any]):
     """Execute MCP tool via Vercel adapter"""
     return await execute_tool(request)
 
+
 # =============================================================================
 # ENHANCED ENDPOINTS - Tool Discovery, Metrics, and Chaining
 # =============================================================================
+
 
 @app.get("/mcp/discover")
 async def mcp_discover_tools():
@@ -1156,10 +1215,10 @@ async def mcp_discover_tools():
                         "description": tool.description,
                         "parameters": tool.parameters,
                         "use_count": tool.use_count,
-                        "enabled": tool.enabled
+                        "enabled": tool.enabled,
                     }
                     for tool in tools
-                ]
+                ],
             }
             total_tools += len(tools)
 
@@ -1167,7 +1226,7 @@ async def mcp_discover_tools():
             "total_tools": total_tools,
             "total_servers": len(discovered),
             "servers": tools_by_server,
-            "discovery_timestamp": datetime.utcnow().isoformat()
+            "discovery_timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Tool discovery error: {e}")
@@ -1195,10 +1254,7 @@ async def mcp_get_metrics(server: str = None, tool: str = None):
         client = get_mcp_client()
         metrics = client.get_metrics(server=server, tool=tool)
 
-        return {
-            "metrics": metrics,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"metrics": metrics, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Metrics retrieval error: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -1227,7 +1283,7 @@ async def mcp_get_execution_history(limit: int = 100):
         return {
             "history": history,
             "count": len(history),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"History retrieval error: {e}")
@@ -1299,7 +1355,7 @@ async def mcp_execute_chain(request: dict[str, Any]):
                     "cached": r.cached,
                     "retry_count": r.retry_count,
                     "fallback_used": r.fallback_used,
-                    "error": r.error
+                    "error": r.error,
                 }
                 for r in result["results"]
             ]
@@ -1327,11 +1383,7 @@ async def mcp_get_chain_history(limit: int = 10):
         client = get_mcp_client()
         chains = client.get_chain_history(limit=limit)
 
-        return {
-            "chains": chains,
-            "count": len(chains),
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"chains": chains, "count": len(chains), "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Chain history retrieval error: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -1350,7 +1402,7 @@ async def mcp_clear_cache():
         return {
             "cleared": cache_size,
             "message": f"Cleared {cache_size} cache entries",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Cache clear error: {e}")
@@ -1374,7 +1426,7 @@ async def mcp_toggle_cache(enabled: bool):
         return {
             "cache_enabled": enabled,
             "message": f"Caching {'enabled' if enabled else 'disabled'}",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Cache toggle error: {e}")
@@ -1398,7 +1450,7 @@ async def mcp_get_workflows():
         return {
             "workflows": workflows,
             "count": len(workflows),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Workflows retrieval error: {e}")
@@ -1446,7 +1498,7 @@ async def mcp_execute_workflow(request: dict[str, Any]):
                     "cached": r.cached,
                     "retry_count": r.retry_count,
                     "fallback_used": r.fallback_used,
-                    "error": r.error
+                    "error": r.error,
                 }
                 for r in result["results"]
             ]
@@ -1477,10 +1529,7 @@ async def mcp_get_performance():
         executor = get_aurea_executor()
         metrics = await executor.get_performance_metrics()
 
-        return {
-            "performance": metrics,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"performance": metrics, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Performance metrics error: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -1488,5 +1537,6 @@ async def mcp_get_performance():
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.environ.get("MCP_PORT", 8100))
     uvicorn.run(app, host="0.0.0.0", port=port)

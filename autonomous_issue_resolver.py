@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 class IssueType(Enum):
     """Types of issues the resolver can fix"""
+
     STUCK_AGENT = "stuck_agent"
     MEMORY_CONFLICT = "memory_conflict"
     UNVERIFIED_MEMORY = "unverified_memory"
@@ -42,6 +43,7 @@ class IssueType(Enum):
 
 class ResolutionAction(Enum):
     """Actions taken to resolve issues"""
+
     RESTART_AGENT = "restart_agent"
     CANCEL_STUCK_AGENT = "cancel_stuck_agent"
     MERGE_MEMORIES = "merge_memories"
@@ -57,6 +59,7 @@ class ResolutionAction(Enum):
 @dataclass
 class ResolutionResult:
     """Result of an issue resolution"""
+
     issue_type: IssueType
     action: ResolutionAction
     success: bool
@@ -97,7 +100,9 @@ class AutonomousIssueResolver:
 
             if not host or not user or not password:
                 # If config couldn't hydrate from DB_* and DATABASE_URL, we cannot proceed.
-                raise RuntimeError("Database configuration is incomplete for AutonomousIssueResolver")
+                raise RuntimeError(
+                    "Database configuration is incomplete for AutonomousIssueResolver"
+                )
 
             # Keep resolver connectivity aligned with the main DB pool:
             # - allow either 5432 (direct) or 6543 (tx pooler)
@@ -170,20 +175,23 @@ class AutonomousIssueResolver:
             "stale_memories": 0,
             "unapplied_insights": 0,
             "pending_proposals": 0,
-            "total_issues": 0
+            "total_issues": 0,
         }
 
         # Get stuck executions (pending/running for > threshold)
         stuck_threshold = datetime.utcnow() - timedelta(minutes=self.stuck_agent_threshold_minutes)
         try:
-            stuck = await pool.fetch("""
+            stuck = await pool.fetch(
+                """
                 SELECT id, agent_type, status, created_at, started_at
                 FROM agent_executions
                 WHERE status IN ('pending', 'running')
                   AND COALESCE(started_at, created_at) < $1
                 ORDER BY COALESCE(started_at, created_at)
                 LIMIT 20
-            """, stuck_threshold)
+            """,
+                stuck_threshold,
+            )
             issues["stuck_agents"] = [{"table": "agent_executions", **dict(r)} for r in stuck]
         except Exception as e:
             logger.warning(f"Could not query stuck agents: {e}")
@@ -201,72 +209,96 @@ class AutonomousIssueResolver:
                 """,
                 stuck_threshold,
             )
-            issues["stuck_agents"].extend([{"table": "ai_agent_executions", **dict(r)} for r in stuck_ai])
+            issues["stuck_agents"].extend(
+                [{"table": "ai_agent_executions", **dict(r)} for r in stuck_ai]
+            )
         except Exception as e:
             logger.warning(f"Could not query stuck ai_agent_executions: {e}")
 
         # Get failed agents in last hour
         try:
-            failed = await pool.fetch("""
+            failed = await pool.fetch(
+                """
                 SELECT id, agent_type, error_message, created_at
                 FROM agent_executions
                 WHERE status IN ('failed', 'error', 'timeout')
                   AND created_at > NOW() - INTERVAL '1 hour'
                 ORDER BY created_at DESC
                 LIMIT 10
-            """)
+            """
+            )
             issues["failed_agents"] = [dict(r) for r in failed]
         except Exception as e:
             logger.warning(f"Could not query failed agents: {e}")
 
         # Count memory conflicts (open status)
         try:
-            conflicts = await pool.fetchval("""
+            conflicts = (
+                await pool.fetchval(
+                    """
                 SELECT COUNT(*) FROM memory_conflicts
                 WHERE resolution_status = 'open'
-            """) or 0
+            """
+                )
+                or 0
+            )
             issues["memory_conflicts"] = conflicts
         except Exception as e:
             logger.warning(f"Could not query memory conflicts: {e}")
 
         # Count stale memories (not accessed in 30 days)
         try:
-            stale = await pool.fetchval("""
-                SELECT COUNT(*) FROM brainops_unified_memory
+            stale = (
+                await pool.fetchval(
+                    """
+                SELECT COUNT(*) FROM unified_ai_memory
                 WHERE last_accessed < NOW() - INTERVAL '30 days'
                   OR last_accessed IS NULL
-            """) or 0
+            """
+                )
+                or 0
+            )
             issues["stale_memories"] = stale
         except Exception as e:
             logger.warning(f"Could not query stale memories: {e}")
 
         # Count unapplied/active insights
         try:
-            unapplied = await pool.fetchval("""
+            unapplied = (
+                await pool.fetchval(
+                    """
                 SELECT COUNT(*) FROM ai_insights
                 WHERE status = 'active'
-            """) or 0
+            """
+                )
+                or 0
+            )
             issues["unapplied_insights"] = unapplied
         except Exception as e:
             logger.warning(f"Could not query insights: {e}")
 
         # Count pending proposals
         try:
-            pending = await pool.fetchval("""
+            pending = (
+                await pool.fetchval(
+                    """
                 SELECT COUNT(*) FROM ai_proposals
                 WHERE status = 'pending'
-            """) or 0
+            """
+                )
+                or 0
+            )
             issues["pending_proposals"] = pending
         except Exception as e:
             logger.warning(f"Could not query proposals: {e}")
 
         issues["total_issues"] = (
-            len(issues["stuck_agents"]) +
-            len(issues["failed_agents"]) +
-            (1 if issues["memory_conflicts"] > 100 else 0) +
-            (1 if issues["stale_memories"] > 1000 else 0) +
-            issues["unapplied_insights"] +
-            issues["pending_proposals"]
+            len(issues["stuck_agents"])
+            + len(issues["failed_agents"])
+            + (1 if issues["memory_conflicts"] > 100 else 0)
+            + (1 if issues["stale_memories"] > 1000 else 0)
+            + issues["unapplied_insights"]
+            + issues["pending_proposals"]
         )
 
         return issues
@@ -280,7 +312,11 @@ class AutonomousIssueResolver:
         """
         pool = await self._get_pool()
 
-        threshold = threshold_minutes if threshold_minutes is not None else self.stuck_agent_threshold_minutes
+        threshold = (
+            threshold_minutes
+            if threshold_minutes is not None
+            else self.stuck_agent_threshold_minutes
+        )
         try:
             threshold = int(threshold)
         except Exception:
@@ -382,7 +418,7 @@ class AutonomousIssueResolver:
                 "per_table_fixed": per_table_fixed,
                 **({"errors": errors} if errors else {}),
             },
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
 
     async def resolve_memory_conflicts(self) -> ResolutionResult:
@@ -392,36 +428,45 @@ class AutonomousIssueResolver:
 
         try:
             # Get unresolved conflicts (resolution_status = 'open')
-            conflicts = await pool.fetch("""
+            conflicts = await pool.fetch(
+                """
                 SELECT id, memory_id_a, memory_id_b, conflict_type, detected_at
                 FROM memory_conflicts
                 WHERE resolution_status = 'open'
                 ORDER BY detected_at
                 LIMIT $1
-            """, self.memory_conflict_batch_size)
+            """,
+                self.memory_conflict_batch_size,
+            )
 
             for conflict in conflicts:
                 try:
                     # Resolve by auto-picking newer memory (by comparing IDs or timestamps)
-                    await pool.execute("""
+                    await pool.execute(
+                        """
                         UPDATE memory_conflicts
                         SET resolution_status = 'resolved',
                             resolved_at = NOW(),
                             resolved_by = 'autonomous_resolver',
                             resolution_notes = 'Auto-resolved: newer memory wins'
                         WHERE id = $1
-                    """, conflict['id'])
+                    """,
+                        conflict["id"],
+                    )
                     resolved += 1
                 except Exception as e:
                     logger.warning(f"Failed to resolve conflict {conflict['id']}: {e}")
 
             if resolved > 0:
                 try:
-                    await pool.execute("""
+                    await pool.execute(
+                        """
                         INSERT INTO unified_brain_logs
                         (agent_name, action_type, details, timestamp)
                         VALUES ('autonomous_resolver', 'resolve_memory_conflicts', $1, NOW())
-                    """, f"Resolved {resolved} memory conflicts")
+                    """,
+                        f"Resolved {resolved} memory conflicts",
+                    )
                 except Exception:
                     pass
         except Exception as e:
@@ -433,7 +478,7 @@ class AutonomousIssueResolver:
             success=True,
             items_fixed=resolved,
             details={"batch_size": self.memory_conflict_batch_size},
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
 
     async def cleanup_stale_memories(self) -> ResolutionResult:
@@ -444,52 +489,67 @@ class AutonomousIssueResolver:
 
         try:
             # Update access timestamp for orphaned memories (set decay)
-            # For brainops_unified_memory: update state or decay_rate for old memories
-            stale = await pool.fetch("""
-                SELECT id, importance, access_count, last_accessed, decay_rate
-                FROM brainops_unified_memory
+            # For unified_ai_memory: update archived or decay_rate for old memories
+            stale = await pool.fetch(
+                """
+                SELECT id, importance_score, access_count, last_accessed, decay_rate
+                FROM unified_ai_memory
                 WHERE (last_accessed < NOW() - INTERVAL '30 days' OR last_accessed IS NULL)
-                  AND state != 'archived'
+                  AND archived = false
                 ORDER BY last_accessed NULLS FIRST
                 LIMIT $1
-            """, self.memory_verify_batch_size)
+            """,
+                self.memory_verify_batch_size,
+            )
 
             for memory in stale:
                 try:
                     # Increase decay rate for stale memories
-                    current_decay = memory['decay_rate'] or 0.1
+                    current_decay = memory["decay_rate"] or 0.1
                     new_decay = min(1.0, current_decay + 0.1)
 
                     # If very low importance and high decay, archive it
-                    importance = memory['importance'] or 0.5
+                    importance = memory["importance_score"] or 0.5
                     if importance < 0.2 and new_decay > 0.5:
-                        await pool.execute("""
-                            UPDATE brainops_unified_memory
-                            SET state = 'archived',
+                        await pool.execute(
+                            """
+                            UPDATE unified_ai_memory
+                            SET archived = true,
+                                archived_at = NOW(),
                                 decay_rate = $2,
                                 updated_at = NOW()
                             WHERE id = $1
-                        """, memory['id'], new_decay)
+                        """,
+                            memory["id"],
+                            new_decay,
+                        )
                         cleaned += 1
                     else:
                         # Just increase decay rate
-                        await pool.execute("""
-                            UPDATE brainops_unified_memory
+                        await pool.execute(
+                            """
+                            UPDATE unified_ai_memory
                             SET decay_rate = $2,
                                 updated_at = NOW()
                             WHERE id = $1
-                        """, memory['id'], new_decay)
+                        """,
+                            memory["id"],
+                            new_decay,
+                        )
                         updated += 1
                 except Exception as e:
                     logger.warning(f"Failed to process stale memory {memory['id']}: {e}")
 
             if cleaned > 0 or updated > 0:
                 try:
-                    await pool.execute("""
+                    await pool.execute(
+                        """
                         INSERT INTO unified_brain_logs
                         (agent_name, action_type, details, timestamp)
                         VALUES ('autonomous_resolver', 'cleanup_stale_memories', $1, NOW())
-                    """, f"Archived {cleaned}, decayed {updated} stale memories")
+                    """,
+                        f"Archived {cleaned}, decayed {updated} stale memories",
+                    )
                 except Exception:
                     pass
         except Exception as e:
@@ -501,7 +561,7 @@ class AutonomousIssueResolver:
             success=True,
             items_fixed=cleaned + updated,
             details={"archived": cleaned, "decayed": updated},
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
 
     async def apply_insights(self) -> ResolutionResult:
@@ -511,37 +571,45 @@ class AutonomousIssueResolver:
 
         try:
             # Get active insights (status = 'active')
-            unapplied = await pool.fetch("""
+            unapplied = await pool.fetch(
+                """
                 SELECT id, category, priority, title, confidence_score, created_at
                 FROM ai_insights
                 WHERE status = 'active'
                 ORDER BY priority DESC, confidence_score DESC, created_at
                 LIMIT 20
-            """)
+            """
+            )
 
             for insight in unapplied:
                 try:
                     # Only auto-apply high-confidence insights
-                    confidence = insight.get('confidence_score', 0.5)
+                    confidence = insight.get("confidence_score", 0.5)
                     if confidence and confidence > 0.7:
-                        await pool.execute("""
+                        await pool.execute(
+                            """
                             UPDATE ai_insights
                             SET status = 'applied',
                                 resolved_at = NOW(),
                                 resolved_by = 'autonomous_resolver'
                             WHERE id = $1
-                        """, insight['id'])
+                        """,
+                            insight["id"],
+                        )
                         applied += 1
                 except Exception as e:
                     logger.warning(f"Failed to apply insight {insight['id']}: {e}")
 
             if applied > 0:
                 try:
-                    await pool.execute("""
+                    await pool.execute(
+                        """
                         INSERT INTO unified_brain_logs
                         (agent_name, action_type, details, timestamp)
                         VALUES ('autonomous_resolver', 'apply_insights', $1, NOW())
-                    """, f"Applied {applied} insights")
+                    """,
+                        f"Applied {applied} insights",
+                    )
                 except Exception:
                     pass
         except Exception as e:
@@ -553,7 +621,7 @@ class AutonomousIssueResolver:
             success=True,
             items_fixed=applied,
             details={},
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
 
     async def process_proposals(self) -> ResolutionResult:
@@ -561,37 +629,45 @@ class AutonomousIssueResolver:
         pool = await self._get_pool()
 
         # Get pending proposals
-        pending = await pool.fetch("""
+        pending = await pool.fetch(
+            """
             SELECT id, proposal_type, content, risk_level, created_at
             FROM ai_proposals
             WHERE status = 'pending'
             ORDER BY created_at
             LIMIT 10
-        """)
+        """
+        )
 
         processed = 0
         for proposal in pending:
             try:
-                risk = proposal.get('risk_level', 'medium')
+                risk = proposal.get("risk_level", "medium")
                 # Only auto-approve low-risk proposals
-                if risk in ('low', 'none') and self.auto_approve_low_risk:
-                    await pool.execute("""
+                if risk in ("low", "none") and self.auto_approve_low_risk:
+                    await pool.execute(
+                        """
                         UPDATE ai_proposals
                         SET status = 'approved',
                             approved_at = NOW(),
                             approved_by = 'autonomous_resolver'
                         WHERE id = $1
-                    """, proposal['id'])
+                    """,
+                        proposal["id"],
+                    )
                     processed += 1
             except Exception as e:
                 logger.warning(f"Failed to process proposal {proposal['id']}: {e}")
 
         if processed > 0:
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO unified_brain_logs
                 (agent_name, action_type, details, timestamp)
                 VALUES ('autonomous_resolver', 'process_proposals', $1, NOW())
-            """, f"Approved {processed} proposals")
+            """,
+                f"Approved {processed} proposals",
+            )
 
         return ResolutionResult(
             issue_type=IssueType.PENDING_PROPOSAL,
@@ -599,7 +675,7 @@ class AutonomousIssueResolver:
             success=True,
             items_fixed=processed,
             details={},
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
 
     async def run_full_resolution_cycle(self) -> dict[str, Any]:
@@ -644,12 +720,14 @@ class AutonomousIssueResolver:
         duration = (datetime.utcnow() - start_time).total_seconds()
 
         # Store resolution cycle
-        self._resolution_history.append({
-            "cycle_time": start_time,
-            "duration_seconds": duration,
-            "total_fixed": total_fixed,
-            "results": results
-        })
+        self._resolution_history.append(
+            {
+                "cycle_time": start_time,
+                "duration_seconds": duration,
+                "total_fixed": total_fixed,
+                "results": results,
+            }
+        )
 
         # Keep only last 100 cycles
         if len(self._resolution_history) > 100:
@@ -666,12 +744,12 @@ class AutonomousIssueResolver:
                     "issue_type": r.issue_type.value,
                     "action": r.action.value,
                     "items_fixed": r.items_fixed,
-                    "details": r.details
+                    "details": r.details,
                 }
                 for r in results
             ],
             "total_fixed": total_fixed,
-            "issues_reduced": issues_before["total_issues"] - issues_after["total_issues"]
+            "issues_reduced": issues_before["total_issues"] - issues_after["total_issues"],
         }
 
     async def start_continuous_resolution(self):
@@ -703,13 +781,15 @@ class AutonomousIssueResolver:
             return {"total_cycles": 0, "total_fixed": 0}
 
         total_fixed = sum(c.get("total_fixed", 0) for c in self._resolution_history)
-        avg_duration = sum(c.get("duration_seconds", 0) for c in self._resolution_history) / len(self._resolution_history)
+        avg_duration = sum(c.get("duration_seconds", 0) for c in self._resolution_history) / len(
+            self._resolution_history
+        )
 
         return {
             "total_cycles": len(self._resolution_history),
             "total_fixed": total_fixed,
             "avg_cycle_duration_seconds": round(avg_duration, 2),
-            "last_cycle": self._resolution_history[-1] if self._resolution_history else None
+            "last_cycle": self._resolution_history[-1] if self._resolution_history else None,
         }
 
 
