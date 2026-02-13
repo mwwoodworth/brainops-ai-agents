@@ -41,6 +41,7 @@ router = APIRouter(prefix="/events", tags=["Unified Events"])
 # Import LangGraph workflow trigger with fallback
 try:
     from langgraph_workflow_trigger import trigger_workflows_for_event
+
     WORKFLOW_TRIGGER_AVAILABLE = True
     logger.info("LangGraph workflow trigger loaded")
 except ImportError as e:
@@ -54,6 +55,7 @@ except ImportError as e:
 
 try:
     from database.async_connection import get_pool, using_fallback
+
     ASYNC_POOL_AVAILABLE = True
 except ImportError:
     ASYNC_POOL_AVAILABLE = False
@@ -62,6 +64,7 @@ except ImportError:
 
 try:
     from database.sync_pool import get_sync_pool
+
     SYNC_POOL_AVAILABLE = True
 except ImportError:
     SYNC_POOL_AVAILABLE = False
@@ -72,12 +75,13 @@ except ImportError:
 # SUPABASE REALTIME BROADCASTER
 # =============================================================================
 
+
 class SupabaseRealtimeBroadcaster:
     """Broadcasts events to Supabase Realtime channels"""
 
     def __init__(self):
-        self.supabase_url = os.getenv('PUBLIC_SUPABASE_URL', os.getenv('SUPABASE_URL'))
-        self.supabase_key = os.getenv('PUBLIC_SUPABASE_ANON_KEY', os.getenv('SUPABASE_KEY'))
+        self.supabase_url = os.getenv("PUBLIC_SUPABASE_URL", os.getenv("SUPABASE_URL"))
+        self.supabase_key = os.getenv("PUBLIC_SUPABASE_ANON_KEY", os.getenv("SUPABASE_KEY"))
         self._client = None
 
     @property
@@ -139,6 +143,7 @@ _broadcaster = SupabaseRealtimeBroadcaster()
 # EVENT STORAGE
 # =============================================================================
 
+
 async def ensure_unified_events_table():
     """Create unified_events table if not exists"""
     if not ASYNC_POOL_AVAILABLE or using_fallback():
@@ -155,16 +160,23 @@ async def ensure_unified_events_table():
 
 
 async def store_event(event: UnifiedEvent) -> bool:
-    """Store event in unified_events table with fallback to sync pool."""
-    logger.info(f"store_event called: ASYNC_POOL_AVAILABLE={ASYNC_POOL_AVAILABLE}, using_fallback={using_fallback()}")
+    """Store event in unified_events table with fallback to sync pool.
+
+    Returns True if newly stored, False if duplicate (already exists).
+    Only falls through to sync pool on errors (None from async).
+    """
+    logger.info(
+        f"store_event called: ASYNC_POOL_AVAILABLE={ASYNC_POOL_AVAILABLE}, using_fallback={using_fallback()}"
+    )
 
     # Try async pool first
     if ASYNC_POOL_AVAILABLE and not using_fallback():
         result = await _store_event_async(event)
-        if result:
-            return True
+        if result is not None:
+            # True = new, False = duplicate. Both are definitive answers.
+            return result
 
-    # Fallback to sync pool
+    # Fallback to sync pool (only reached on async error or pool unavailable)
     if SYNC_POOL_AVAILABLE and get_sync_pool:
         logger.info("Falling back to sync pool for event storage")
         result = _store_event_sync(event)
@@ -172,8 +184,10 @@ async def store_event(event: UnifiedEvent) -> bool:
             return True
 
     # Log warning but don't fail - event may still be broadcast
+    # Return None (not False) so callers can distinguish "storage unavailable"
+    # from "duplicate detected" (False).
     logger.warning(f"Event {event.event_id} not stored in DB (no pool available)")
-    return False
+    return None
 
 
 def _store_event_sync(event: UnifiedEvent) -> bool:
@@ -188,7 +202,8 @@ def _store_event_sync(event: UnifiedEvent) -> bool:
 
         record = event.to_db_record()
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO unified_events (
                     event_id, version, event_type, category, priority,
                     source, source_instance, tenant_id, timestamp, occurred_at,
@@ -200,28 +215,32 @@ def _store_event_sync(event: UnifiedEvent) -> bool:
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING
-            """, (
-                record['event_id'],
-                record['version'],
-                record['event_type'],
-                record['category'],
-                record['priority'],
-                record['source'],
-                record['source_instance'],
-                record['tenant_id'],
-                record['timestamp'],
-                record['occurred_at'],
-                json.dumps(record['payload']),
-                json.dumps(record['metadata']),
-                record['correlation_id'],
-                record['causation_id'],
-                record['actor_type'],
-                record['actor_id'],
-                record['processed'],
-                record['processed_at'],
-                json.dumps(record['processing_result']) if record['processing_result'] else None,
-                record['retry_count'],
-            ))
+            """,
+                (
+                    record["event_id"],
+                    record["version"],
+                    record["event_type"],
+                    record["category"],
+                    record["priority"],
+                    record["source"],
+                    record["source_instance"],
+                    record["tenant_id"],
+                    record["timestamp"],
+                    record["occurred_at"],
+                    json.dumps(record["payload"]),
+                    json.dumps(record["metadata"]),
+                    record["correlation_id"],
+                    record["causation_id"],
+                    record["actor_type"],
+                    record["actor_id"],
+                    record["processed"],
+                    record["processed_at"],
+                    json.dumps(record["processing_result"])
+                    if record["processing_result"]
+                    else None,
+                    record["retry_count"],
+                ),
+            )
             conn.commit()
         logger.info(f"Event {event.event_id} stored via sync pool")
         return True
@@ -236,7 +255,8 @@ async def _store_event_async(event: UnifiedEvent) -> bool:
         pool = get_pool()
         record = event.to_db_record()
 
-        row = await pool.fetchrow("""
+        row = await pool.fetchrow(
+            """
 	            INSERT INTO unified_events (
 	                event_id, version, event_type, category, priority,
 	                source, source_instance, tenant_id, timestamp, occurred_at,
@@ -251,55 +271,58 @@ async def _store_event_async(event: UnifiedEvent) -> bool:
 	            ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING
 	            RETURNING event_id
 	        """,
-            record['event_id'],
-            record['version'],
-            record['event_type'],
-            record['category'],
-            record['priority'],
-            record['source'],
-            record['source_instance'],
-            record['tenant_id'],
-            record['timestamp'],
-            record['occurred_at'],
-            json.dumps(record['payload']),
-            json.dumps(record['metadata']),
-            record['correlation_id'],
-            record['causation_id'],
-            record['actor_type'],
-            record['actor_id'],
-            record['processed'],
-            record['processed_at'],
-            json.dumps(record['processing_result']) if record['processing_result'] else None,
-            record['retry_count'],
+            record["event_id"],
+            record["version"],
+            record["event_type"],
+            record["category"],
+            record["priority"],
+            record["source"],
+            record["source_instance"],
+            record["tenant_id"],
+            record["timestamp"],
+            record["occurred_at"],
+            json.dumps(record["payload"]),
+            json.dumps(record["metadata"]),
+            record["correlation_id"],
+            record["causation_id"],
+            record["actor_type"],
+            record["actor_id"],
+            record["processed"],
+            record["processed_at"],
+            json.dumps(record["processing_result"]) if record["processing_result"] else None,
+            record["retry_count"],
         )
         if row:
             logger.info(f"Event {event.event_id} stored successfully")
+            return True
         else:
             logger.info(f"Event {event.event_id} already stored (idempotent duplicate)")
-        return True
+            return False
     except Exception as e:
         import traceback
+
         logger.error(f"Failed to store event {event.event_id}: {e}\n{traceback.format_exc()}")
-        return False
+        return None  # None = error (triggers sync fallback), distinct from False = duplicate
 
 
-async def mark_event_processed(
-    event_id: str,
-    result: Optional[dict[str, Any]] = None
-) -> bool:
+async def mark_event_processed(event_id: str, result: Optional[dict[str, Any]] = None) -> bool:
     """Mark an event as processed"""
     if not ASYNC_POOL_AVAILABLE or using_fallback():
         return False
 
     try:
         pool = get_pool()
-        await pool.execute("""
+        await pool.execute(
+            """
             UPDATE unified_events
             SET processed = TRUE,
                 processed_at = NOW(),
                 processing_result = $2
             WHERE event_id = $1
-        """, event_id, json.dumps(result, default=str) if result else None)
+        """,
+            event_id,
+            json.dumps(result, default=str) if result else None,
+        )
         return True
     except Exception as e:
         logger.error(f"Failed to mark event processed: {e}")
@@ -309,6 +332,7 @@ async def mark_event_processed(
 # =============================================================================
 # AGENT ROUTING
 # =============================================================================
+
 
 def _snake_to_pascal(value: str) -> str:
     parts = [p for p in (value or "").strip().split("_") if p]
@@ -380,7 +404,9 @@ async def _resolve_ai_agent_for_routing_key(agent_key: str) -> Optional[dict[str
     return None
 
 
-async def _enqueue_autonomous_task_for_agent(agent: dict[str, Any], event: UnifiedEvent) -> Optional[str]:
+async def _enqueue_autonomous_task_for_agent(
+    agent: dict[str, Any], event: UnifiedEvent
+) -> Optional[str]:
     """Create an ai_autonomous_tasks row for the resolved agent/event pair (idempotent)."""
     if not ASYNC_POOL_AVAILABLE or using_fallback():
         return None
@@ -459,7 +485,9 @@ async def _enqueue_autonomous_task_for_agent(agent: dict[str, Any], event: Unifi
     return str(task_id)
 
 
-async def route_event_to_agents(event: UnifiedEvent, background_tasks: BackgroundTasks) -> list[str]:
+async def route_event_to_agents(
+    event: UnifiedEvent, background_tasks: BackgroundTasks
+) -> list[str]:
     """Route event to appropriate agents for processing by enqueuing tasks."""
     agent_keys = get_agents_for_event(event.event_type)
     if not agent_keys:
@@ -483,7 +511,10 @@ async def route_event_to_agents(event: UnifiedEvent, background_tasks: Backgroun
         if fallback:
             resolved_agents.append(fallback)
         else:
-            logger.error("No agents resolved for event %s and no WorkflowAutomation fallback available", event.event_id)
+            logger.error(
+                "No agents resolved for event %s and no WorkflowAutomation fallback available",
+                event.event_id,
+            )
             return []
 
     routed_to: list[str] = []
@@ -498,7 +529,9 @@ async def route_event_to_agents(event: UnifiedEvent, background_tasks: Backgroun
             else:
                 tasks_skipped += 1
         except Exception as exc:
-            logger.error("Failed enqueuing autonomous task for agent %s: %s", agent.get("name"), exc)
+            logger.error(
+                "Failed enqueuing autonomous task for agent %s: %s", agent.get("name"), exc
+            )
 
     # Trigger LangGraph workflows for this event (runs in background)
     workflow_results = []
@@ -511,10 +544,12 @@ async def route_event_to_agents(event: UnifiedEvent, background_tasks: Backgroun
                         event_type=event.event_type,
                         event_payload=event.payload,
                         tenant_id=event.tenant_id,
-                        correlation_id=event.correlation_id
+                        correlation_id=event.correlation_id,
                     )
                     if results:
-                        logger.info(f"Triggered {len(results)} workflows for event {event.event_type}")
+                        logger.info(
+                            f"Triggered {len(results)} workflows for event {event.event_type}"
+                        )
                 except Exception as wf_err:
                     logger.error(f"Workflow trigger failed for {event.event_type}: {wf_err}")
 
@@ -550,9 +585,15 @@ async def execute_agent_for_event(agent_id: str, event: UnifiedEvent):
 
 async def execute_agent_directly(agent_id: str, event: UnifiedEvent):
     """Direct agent execution fallback (only used when explicitly enabled)."""
-    direct_enabled = os.getenv("BRAINOPS_UNIFIED_EVENTS_DIRECT_EXECUTION", "").lower() in ("1", "true", "yes")
+    direct_enabled = os.getenv("BRAINOPS_UNIFIED_EVENTS_DIRECT_EXECUTION", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     if not direct_enabled:
-        logger.info("Direct unified-event execution disabled; skipping %s for %s", agent_id, event.event_id)
+        logger.info(
+            "Direct unified-event execution disabled; skipping %s for %s", agent_id, event.event_id
+        )
         return
 
     try:
@@ -580,8 +621,10 @@ async def execute_agent_directly(agent_id: str, event: UnifiedEvent):
 # API ENDPOINTS
 # =============================================================================
 
+
 class PublishEventRequest(BaseModel):
     """Request to publish a new event"""
+
     event_type: str = Field(..., description="Event type in dot notation (e.g., 'job.created')")
     tenant_id: str = Field(..., description="Tenant ID")
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -598,6 +641,7 @@ class PublishEventRequest(BaseModel):
 
 class PublishEventResponse(BaseModel):
     """Response from publishing an event"""
+
     event_id: str
     stored: bool
     broadcast: bool
@@ -628,7 +672,9 @@ async def publish_event(
             payload=request.payload,
             source=EventSource(request.source) if request.source else EventSource.AI_AGENTS,
             priority=EventPriority(request.priority) if request.priority else EventPriority.NORMAL,
-            category=EventCategory(request.category) if request.category else EventCategory.BUSINESS,
+            category=EventCategory(request.category)
+            if request.category
+            else EventCategory.BUSINESS,
             correlation_id=request.correlation_id,
             actor_type=request.actor_type,
             actor_id=request.actor_id,
@@ -665,6 +711,7 @@ async def publish_event(
 
 class ERPEventWebhook(BaseModel):
     """Webhook payload from ERP SystemEventBus"""
+
     version: int = 1
     eventId: str
     type: str
@@ -686,7 +733,11 @@ async def verify_erp_signature(request: Request) -> bool:
 
     if not secret:
         environment = os.getenv("ENVIRONMENT", "production").lower()
-        allow_unverified = os.getenv("ALLOW_UNVERIFIED_ERP_WEBHOOKS", "").lower() in ("1", "true", "yes")
+        allow_unverified = os.getenv("ALLOW_UNVERIFIED_ERP_WEBHOOKS", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         if environment == "production" and not allow_unverified:
             logger.critical("ERP_WEBHOOK_SECRET not configured in production - rejecting webhook")
             return False
@@ -804,7 +855,8 @@ async def get_recent_events(
             "FROM unified_events "
             + where_clause
             + " ORDER BY timestamp DESC "
-            + "LIMIT $" + str(param_idx)
+            + "LIMIT $"
+            + str(param_idx)
         )
         params.append(limit)
 
@@ -812,20 +864,24 @@ async def get_recent_events(
 
         events = []
         for row in rows:
-            events.append({
-                'event_id': row['event_id'],
-                'event_type': row['event_type'],
-                'category': row['category'],
-                'priority': row['priority'],
-                'source': row['source'],
-                'tenant_id': row['tenant_id'],
-                'timestamp': row['timestamp'].isoformat() if row['timestamp'] else None,
-                'payload': row['payload'],
-                'metadata': row['metadata'],
-                'processed': row['processed'],
-                'processed_at': row['processed_at'].isoformat() if row['processed_at'] else None,
-                'processing_result': row['processing_result'],
-            })
+            events.append(
+                {
+                    "event_id": row["event_id"],
+                    "event_type": row["event_type"],
+                    "category": row["category"],
+                    "priority": row["priority"],
+                    "source": row["source"],
+                    "tenant_id": row["tenant_id"],
+                    "timestamp": row["timestamp"].isoformat() if row["timestamp"] else None,
+                    "payload": row["payload"],
+                    "metadata": row["metadata"],
+                    "processed": row["processed"],
+                    "processed_at": row["processed_at"].isoformat()
+                    if row["processed_at"]
+                    else None,
+                    "processing_result": row["processing_result"],
+                }
+            )
 
         return {"events": events, "count": len(events)}
 
@@ -947,16 +1003,15 @@ async def get_event_stats(
             "period_hours": hours,
             "tenant_id": tenant_id,
             "totals": {
-                "total": totals['total'],
-                "processed": totals['processed'],
-                "pending": totals['pending'],
-                "critical": totals['critical'],
+                "total": totals["total"],
+                "processed": totals["processed"],
+                "pending": totals["pending"],
+                "critical": totals["critical"],
             },
-            "by_type": {row['event_type']: row['count'] for row in type_rows},
-            "by_source": {row['source']: row['count'] for row in source_rows},
+            "by_type": {row["event_type"]: row["count"] for row in type_rows},
+            "by_source": {row["source"]: row["count"] for row in source_rows},
             "by_hour": [
-                {"hour": row['hour'].isoformat(), "count": row['count']}
-                for row in hourly_rows
+                {"hour": row["hour"].isoformat(), "count": row["count"]} for row in hourly_rows
             ],
         }
 
@@ -977,39 +1032,45 @@ async def replay_event(
     try:
         pool = get_pool()
 
-        row = await pool.fetchrow("""
+        row = await pool.fetchrow(
+            """
             SELECT * FROM unified_events WHERE event_id = $1
-        """, event_id)
+        """,
+            event_id,
+        )
 
         if not row:
             raise HTTPException(status_code=404, detail=f"Event {event_id} not found")
 
         # Reconstruct event
         event = UnifiedEvent(
-            event_id=row['event_id'],
-            version=row['version'],
-            event_type=row['event_type'],
-            category=EventCategory(row['category']),
-            priority=EventPriority(row['priority']),
-            source=EventSource(row['source']),
-            source_instance=row['source_instance'],
-            tenant_id=row['tenant_id'],
-            timestamp=row['timestamp'],
-            occurred_at=row['occurred_at'],
-            payload=row['payload'],
-            metadata=row['metadata'],
-            correlation_id=row['correlation_id'],
-            causation_id=row['causation_id'],
-            actor_type=row['actor_type'],
-            actor_id=row['actor_id'],
+            event_id=row["event_id"],
+            version=row["version"],
+            event_type=row["event_type"],
+            category=EventCategory(row["category"]),
+            priority=EventPriority(row["priority"]),
+            source=EventSource(row["source"]),
+            source_instance=row["source_instance"],
+            tenant_id=row["tenant_id"],
+            timestamp=row["timestamp"],
+            occurred_at=row["occurred_at"],
+            payload=row["payload"],
+            metadata=row["metadata"],
+            correlation_id=row["correlation_id"],
+            causation_id=row["causation_id"],
+            actor_type=row["actor_type"],
+            actor_id=row["actor_id"],
         )
 
         # Reset processed state
-        await pool.execute("""
+        await pool.execute(
+            """
             UPDATE unified_events
             SET processed = FALSE, processed_at = NULL, retry_count = retry_count + 1
             WHERE event_id = $1
-        """, event_id)
+        """,
+            event_id,
+        )
 
         # Re-route
         routed_to = await route_event_to_agents(event, background_tasks)
@@ -1065,9 +1126,11 @@ async def get_events_debug():
 
         # Try a test insert
         import uuid as uuid_mod
+
         test_event_id = f"evt_debug_{uuid_mod.uuid4().hex[:8]}"
         try:
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO unified_events (
                     event_id, version, event_type, category, priority,
                     source, source_instance, tenant_id, timestamp, occurred_at,
@@ -1081,16 +1144,16 @@ async def get_events_debug():
             """,
                 test_event_id,  # $1 event_id
                 1,  # $2 version
-                'system.debug',  # $3 event_type
-                'system',  # $4 category
-                'low',  # $5 priority
-                'ai-agents',  # $6 source
+                "system.debug",  # $3 event_type
+                "system",  # $4 category
+                "low",  # $5 priority
+                "ai-agents",  # $6 source
                 None,  # $7 source_instance
-                '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457',  # $8 tenant_id
+                "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457",  # $8 tenant_id
                 datetime.utcnow(),  # $9 timestamp - must be datetime, not string!
                 None,  # $10 occurred_at
                 '{"debug": true}',  # $11 payload
-                '{}',  # $12 metadata
+                "{}",  # $12 metadata
                 None,  # $13 correlation_id
                 None,  # $14 causation_id
                 None,  # $15 actor_type
@@ -1119,7 +1182,7 @@ async def get_events_debug():
 @router.post("/verify")
 async def verify_event_flow(
     tenant_id: str = Query(..., description="Tenant ID to test with"),
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks = None,
 ):
     """
     Publish a test event and verify it reaches all destinations.
@@ -1144,9 +1207,9 @@ async def verify_event_flow(
         payload={
             "test": True,
             "timestamp": datetime.utcnow().isoformat(),
-            "purpose": "Event flow verification"
+            "purpose": "Event flow verification",
         },
-        metadata={"verification": True}
+        metadata={"verification": True},
     )
 
     # Test storage
@@ -1164,7 +1227,7 @@ async def verify_event_flow(
                 event_type=test_event.event_type,
                 event_payload=test_event.payload,
                 tenant_id=test_event.tenant_id,
-                correlation_id=test_event.correlation_id
+                correlation_id=test_event.correlation_id,
             )
             workflows_triggered = True
             workflow_count = len(results) if results else 0
@@ -1195,6 +1258,7 @@ async def verify_event_flow(
 # INITIALIZATION
 # =============================================================================
 
+
 async def init_unified_events():
     """Initialize unified events system"""
     await ensure_unified_events_table()
@@ -1202,4 +1266,4 @@ async def init_unified_events():
 
 
 # Export router
-__all__ = ['router', 'init_unified_events', 'UnifiedEvent', 'store_event', 'mark_event_processed']
+__all__ = ["router", "init_unified_events", "UnifiedEvent", "store_event", "mark_event_processed"]

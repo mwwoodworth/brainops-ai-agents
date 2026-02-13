@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/v1/observability", tags=["observability"])
 
 class SystemHealth(BaseModel):
     """Complete system health snapshot"""
+
     status: str  # healthy, degraded, unhealthy
     version: str
     uptime_seconds: float
@@ -29,6 +30,7 @@ class SystemHealth(BaseModel):
 
 class AUREAStatus(BaseModel):
     """AUREA orchestrator status"""
+
     running: bool
     mode: str
     cycles_last_hour: int
@@ -39,6 +41,7 @@ class AUREAStatus(BaseModel):
 
 class AgentStatus(BaseModel):
     """Agent execution status"""
+
     total_scheduled: int
     executions_last_hour: int
     success_rate: float
@@ -47,6 +50,7 @@ class AgentStatus(BaseModel):
 
 class MemoryStatus(BaseModel):
     """Memory system status"""
+
     unified_brain_entries: int
     vector_memories: int
     knowledge_nodes: int
@@ -55,6 +59,7 @@ class MemoryStatus(BaseModel):
 
 class RevenueStatus(BaseModel):
     """Revenue pipeline status"""
+
     leads_in_pipeline: int
     proposals_pending: int
     mrr_estimate: float
@@ -63,6 +68,7 @@ class RevenueStatus(BaseModel):
 
 class FullDashboard(BaseModel):
     """Complete system dashboard"""
+
     timestamp: str
     overall_status: str
     systems: dict[str, dict[str, Any]]
@@ -84,6 +90,7 @@ async def _get_database_stats() -> dict[str, Any]:
     """Get database connection and table stats"""
     try:
         from database.async_connection import get_pool, using_fallback
+
         pool = get_pool()
 
         if using_fallback():
@@ -91,62 +98,63 @@ async def _get_database_stats() -> dict[str, Any]:
                 "status": "fallback",
                 "connected": False,
                 "using_in_memory": True,
-                "reason": "Database connection failed, using in-memory fallback"
+                "reason": "Database connection failed, using in-memory fallback",
             }
 
         # Test connection
         connected = await pool.test_connection()
         if not connected:
-            return {
-                "status": "disconnected",
-                "connected": False,
-                "error": "Connection test failed"
-            }
+            return {"status": "disconnected", "connected": False, "error": "Connection test failed"}
 
         # Get table counts
         try:
-            result = await pool.fetchrow("""
+            result = await pool.fetchrow(
+                """
                 SELECT
                     (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public') as total_tables,
                     (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'ai_%') as ai_tables
-            """)
+            """
+            )
             return {
                 "status": "connected",
                 "connected": True,
                 "total_tables": result["total_tables"] if result else 0,
-                "ai_tables": result["ai_tables"] if result else 0
+                "ai_tables": result["ai_tables"] if result else 0,
             }
         except Exception as e:
             return {
                 "status": "connected",
                 "connected": True,
-                "error": f"Could not get table stats: {e}"
+                "error": f"Could not get table stats: {e}",
             }
     except Exception as e:
-        return {
-            "status": "error",
-            "connected": False,
-            "error": str(e)
-        }
+        return {"status": "error", "connected": False, "error": str(e)}
 
 
 async def _get_aurea_stats() -> dict[str, Any]:
     """Get AUREA orchestrator stats"""
     try:
         from database.async_connection import get_pool, using_fallback
+
         if using_fallback():
             return {"status": "database_unavailable", "running": False}
 
         pool = get_pool()
 
         # Get cycle count in last hour
-        cycles = await pool.fetchval("""
+        cycles = (
+            await pool.fetchval(
+                """
             SELECT COUNT(*) FROM aurea_state
             WHERE timestamp > NOW() - INTERVAL '1 hour'
-        """) or 0
+        """
+            )
+            or 0
+        )
 
         # Get decision stats
-        decision_stats = await pool.fetchrow("""
+        decision_stats = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) as total,
                 COUNT(CASE WHEN execution_status = 'pending' THEN 1 END) as pending,
@@ -154,7 +162,8 @@ async def _get_aurea_stats() -> dict[str, Any]:
                 COUNT(CASE WHEN execution_status = 'failed' THEN 1 END) as failed
             FROM aurea_decisions
             WHERE created_at > NOW() - INTERVAL '24 hours'
-        """)
+        """
+        )
 
         total_decisions = decision_stats["total"] if decision_stats else 0
         pending = decision_stats["pending"] if decision_stats else 0
@@ -173,9 +182,9 @@ async def _get_aurea_stats() -> dict[str, Any]:
                 "pending": pending,
                 "completed": completed,
                 "failed": failed,
-                "success_rate": round(success_rate, 2)
+                "success_rate": round(success_rate, 2),
             },
-            "health_score": round(success_rate, 2)
+            "health_score": round(success_rate, 2),
         }
     except Exception as e:
         logger.error(f"Error getting AUREA stats: {e}")
@@ -186,13 +195,15 @@ async def _get_agent_stats() -> dict[str, Any]:
     """Get agent execution stats"""
     try:
         from database.async_connection import get_pool, using_fallback
+
         if using_fallback():
             return {"status": "database_unavailable"}
 
         pool = get_pool()
 
         # Get execution stats
-        executions = await pool.fetch("""
+        executions = await pool.fetch(
+            """
             SELECT
                 agent_name,
                 COUNT(*) as executions,
@@ -203,23 +214,29 @@ async def _get_agent_stats() -> dict[str, Any]:
             GROUP BY agent_name
             ORDER BY executions DESC
             LIMIT 10
-        """)
+        """
+        )
 
         total_executions = sum(r["executions"] for r in executions) if executions else 0
         total_successful = sum(r["successful"] for r in executions) if executions else 0
         success_rate = (total_successful / total_executions * 100) if total_executions > 0 else 0
 
         # Get scheduled agent count
-        scheduled_count = await pool.fetchval("""
+        scheduled_count = (
+            await pool.fetchval(
+                """
             SELECT COUNT(*) FROM agent_schedules WHERE enabled = true
-        """) or 0
+        """
+            )
+            or 0
+        )
 
         top_agents = [
             {
                 "name": r["agent_name"],
                 "executions": r["executions"],
                 "successful": r["successful"],
-                "last_run": r["last_run"].isoformat() if r["last_run"] else None
+                "last_run": r["last_run"].isoformat() if r["last_run"] else None,
             }
             for r in (executions or [])
         ]
@@ -229,7 +246,7 @@ async def _get_agent_stats() -> dict[str, Any]:
             "total_scheduled": scheduled_count,
             "executions_24h": total_executions,
             "success_rate": round(success_rate, 2),
-            "top_agents": top_agents
+            "top_agents": top_agents,
         }
     except Exception as e:
         logger.error(f"Error getting agent stats: {e}")
@@ -240,33 +257,51 @@ async def _get_learning_stats() -> dict[str, Any]:
     """Get learning system stats"""
     try:
         from database.async_connection import get_pool, using_fallback
+
         if using_fallback():
             return {"status": "database_unavailable"}
 
         pool = get_pool()
 
         # Get insight counts
-        insights_24h = await pool.fetchval("""
+        insights_24h = (
+            await pool.fetchval(
+                """
             SELECT COUNT(*) FROM ai_learning_insights
             WHERE created_at > NOW() - INTERVAL '24 hours'
-        """) or 0
+        """
+            )
+            or 0
+        )
 
-        insights_7d = await pool.fetchval("""
+        insights_7d = (
+            await pool.fetchval(
+                """
             SELECT COUNT(*) FROM ai_learning_insights
             WHERE created_at > NOW() - INTERVAL '7 days'
-        """) or 0
+        """
+            )
+            or 0
+        )
 
         # Get knowledge node count
-        knowledge_nodes = await pool.fetchval("""
+        knowledge_nodes = (
+            await pool.fetchval(
+                """
             SELECT COUNT(*) FROM ai_knowledge_graph
-        """) or 0
+        """
+            )
+            or 0
+        )
 
         return {
             "status": "active" if insights_24h > 0 else "idle",
             "insights_24h": insights_24h,
             "insights_7d": insights_7d,
             "knowledge_nodes": knowledge_nodes,
-            "learning_rate": round(insights_24h / 24, 2) if insights_24h else 0  # insights per hour
+            "learning_rate": round(insights_24h / 24, 2)
+            if insights_24h
+            else 0,  # insights per hour
         }
     except Exception as e:
         logger.error(f"Error getting learning stats: {e}")
@@ -277,20 +312,23 @@ async def _get_self_healing_stats() -> dict[str, Any]:
     """Get self-healing system stats"""
     try:
         from database.async_connection import get_pool, using_fallback
+
         if using_fallback():
             return {"status": "database_unavailable"}
 
         pool = get_pool()
 
         # Get remediation stats
-        remediations = await pool.fetchrow("""
+        remediations = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) as total,
                 COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
                 COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
             FROM remediation_history
             WHERE created_at > NOW() - INTERVAL '24 hours'
-        """)
+        """
+        )
 
         total = remediations["total"] if remediations else 0
         successful = remediations["successful"] if remediations else 0
@@ -301,7 +339,7 @@ async def _get_self_healing_stats() -> dict[str, Any]:
             "remediations_24h": total,
             "successful": successful,
             "failed": failed,
-            "success_rate": round(successful / total * 100, 2) if total > 0 else 100
+            "success_rate": round(successful / total * 100, 2) if total > 0 else 100,
         }
     except Exception as e:
         logger.error(f"Error getting self-healing stats: {e}")
@@ -312,26 +350,42 @@ async def _get_memory_stats() -> dict[str, Any]:
     """Get memory system stats"""
     try:
         from database.async_connection import get_pool, using_fallback
+
         if using_fallback():
             return {"status": "database_unavailable"}
 
         pool = get_pool()
 
         # Check for unified_brain table
-        brain_count = await pool.fetchval("""
+        brain_count = (
+            await pool.fetchval(
+                """
             SELECT COUNT(*) FROM unified_brain
-        """) or 0
+        """
+            )
+            or 0
+        )
 
         # Check for vector memories
-        vector_count = await pool.fetchval("""
+        vector_count = (
+            await pool.fetchval(
+                """
             SELECT COUNT(*) FROM ai_persistent_memory
-        """) or 0
+        """
+            )
+            or 0
+        )
 
         # Check for conversations (table was dropped during cleanup - gracefully default to 0)
         try:
-            conversation_count = await pool.fetchval("""
+            conversation_count = (
+                await pool.fetchval(
+                    """
                 SELECT COUNT(*) FROM ai_conversations
-            """) or 0
+            """
+                )
+                or 0
+            )
         except Exception:
             conversation_count = 0
 
@@ -340,7 +394,7 @@ async def _get_memory_stats() -> dict[str, Any]:
             "unified_brain_entries": brain_count,
             "vector_memories": vector_count,
             "conversations": conversation_count,
-            "total_memories": brain_count + vector_count
+            "total_memories": brain_count + vector_count,
         }
     except Exception as e:
         logger.error(f"Error getting memory stats: {e}")
@@ -351,14 +405,20 @@ async def _get_revenue_stats() -> dict[str, Any]:
     """Get revenue pipeline stats"""
     try:
         from database.async_connection import get_pool, using_fallback
+
         if using_fallback():
             return {"status": "database_unavailable"}
 
         pool = get_pool()
 
         async def _fetch_leads(table: str, include_status: bool) -> dict[str, Any]:
-            stage_expr = "LOWER(COALESCE(stage, status, ''))" if include_status else "LOWER(COALESCE(stage, ''))"
-            return await pool.fetchrow(f"""
+            stage_expr = (
+                "LOWER(COALESCE(stage, status, ''))"
+                if include_status
+                else "LOWER(COALESCE(stage, ''))"
+            )
+            return await pool.fetchrow(
+                f"""
                 SELECT
                     COUNT(*) as total,
                     COUNT(*) FILTER (WHERE {stage_expr} IN ('new', 'lead', 'open', 'incoming', 'discovered')) as new,
@@ -366,7 +426,8 @@ async def _get_revenue_stats() -> dict[str, Any]:
                     COUNT(*) FILTER (WHERE {stage_expr} IN ('proposal_sent', 'proposal', 'proposal sent', 'proposalsent', 'quote_sent', 'quoted')) as proposal_sent,
                     COUNT(*) FILTER (WHERE {stage_expr} IN ('won', 'closed_won', 'closed won', 'closedwon')) as won
                 FROM {table}
-            """)
+            """
+            )
 
         # Prefer revenue_leads, fallback to ai_leads for legacy data
         try:
@@ -376,12 +437,14 @@ async def _get_revenue_stats() -> dict[str, Any]:
             leads = await _fetch_leads("ai_leads", include_status=False)
 
         # Get tenant/customer stats (actual revenue)
-        tenant_stats = await pool.fetchrow("""
+        tenant_stats = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) as total_tenants,
                 COUNT(CASE WHEN status = 'active' THEN 1 END) as active_tenants
             FROM tenants
-        """)
+        """
+        )
 
         total_leads = leads["total"] if leads else 0
         won = leads["won"] if leads else 0
@@ -400,7 +463,7 @@ async def _get_revenue_stats() -> dict[str, Any]:
             "leads_won": won,
             "conversion_rate": round(won / total_leads * 100, 2) if total_leads > 0 else 0,
             "active_tenants": active_tenants,
-            "estimated_mrr": estimated_mrr
+            "estimated_mrr": estimated_mrr,
         }
     except Exception as e:
         logger.error(f"Error getting revenue stats: {e}")
@@ -415,16 +478,13 @@ async def _get_mcp_stats() -> dict[str, Any]:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(f"{mcp_url}/health") as resp:
                 if resp.status != 200:
-                    return {
-                        "status": "error",
-                        "error": f"Health check failed (HTTP {resp.status})"
-                    }
+                    return {"status": "error", "error": f"Health check failed (HTTP {resp.status})"}
                 data = await resp.json()
                 return {
                     "status": data.get("status", "unknown"),
                     "servers": data.get("mcpServers"),
                     "tools": data.get("totalTools"),
-                    "last_check": datetime.utcnow().isoformat()
+                    "last_check": datetime.utcnow().isoformat(),
                 }
     except Exception as e:
         return {"status": "error", "error": str(e)}
@@ -478,7 +538,8 @@ async def get_full_dashboard() -> dict[str, Any]:
     # Get version from environment or config
     try:
         from config import config
-        version = getattr(config, 'version', '9.8.1')
+
+        version = getattr(config, "version", "9.8.1")
     except (ImportError, AttributeError) as exc:
         logger.debug("Config version unavailable: %s", exc)
         version = "9.8.1"
@@ -490,7 +551,6 @@ async def get_full_dashboard() -> dict[str, Any]:
         "version": version,
         "uptime_seconds": round(uptime, 2),
         "uptime_human": str(timedelta(seconds=int(uptime))),
-
         "database": db_stats,
         "aurea": aurea_stats,
         "agents": agent_stats,
@@ -499,30 +559,23 @@ async def get_full_dashboard() -> dict[str, Any]:
         "memory": memory_stats,
         "revenue": revenue_stats,
         "mcp": mcp_stats,
-
         "systems": {
             "ai_agents": {
                 "url": "https://brainops-ai-agents.onrender.com",
                 "status": overall_status,
-                "version": version
+                "version": version,
             },
             "backend": {
                 "url": "https://brainops-backend-prod.onrender.com",
-                "status": "check_external"
+                "status": "check_external",
             },
-            "mrg_app": {
-                "url": "https://myroofgenius.com",
-                "status": "check_external"
-            },
-            "erp": {
-                "url": "https://weathercraft-erp.vercel.app",
-                "status": "check_external"
-            },
+            "mrg_app": {"url": "https://myroofgenius.com", "status": "check_external"},
+            "erp": {"url": "https://weathercraft-erp.vercel.app", "status": "check_external"},
             "mcp_bridge": {
                 "url": "https://brainops-mcp-bridge.onrender.com",
-                "status": "check_external"
-            }
-        }
+                "status": "check_external",
+            },
+        },
     }
 
 
@@ -537,41 +590,29 @@ async def deep_health_check() -> dict[str, Any]:
 
     # Check database
     db_stats = await _get_database_stats()
-    checks["database"] = {
-        "healthy": db_stats.get("connected", False),
-        "details": db_stats
-    }
+    checks["database"] = {"healthy": db_stats.get("connected", False), "details": db_stats}
     if not db_stats.get("connected"):
         all_healthy = False
 
     # Check AUREA
     aurea_stats = await _get_aurea_stats()
-    checks["aurea"] = {
-        "healthy": aurea_stats.get("running", False),
-        "details": aurea_stats
-    }
+    checks["aurea"] = {"healthy": aurea_stats.get("running", False), "details": aurea_stats}
     if not aurea_stats.get("running"):
         all_healthy = False
 
     # Check agents
     agent_stats = await _get_agent_stats()
     agent_healthy = agent_stats.get("executions_24h", 0) > 0
-    checks["agents"] = {
-        "healthy": agent_healthy,
-        "details": agent_stats
-    }
+    checks["agents"] = {"healthy": agent_healthy, "details": agent_stats}
 
     # Check memory
     memory_stats = await _get_memory_stats()
-    checks["memory"] = {
-        "healthy": memory_stats.get("status") != "error",
-        "details": memory_stats
-    }
+    checks["memory"] = {"healthy": memory_stats.get("status") != "error", "details": memory_stats}
 
     return {
         "timestamp": datetime.utcnow().isoformat(),
         "overall_healthy": all_healthy,
-        "checks": checks
+        "checks": checks,
     }
 
 
@@ -585,43 +626,51 @@ async def get_active_alerts() -> dict[str, Any]:
     # Check database
     db_stats = await _get_database_stats()
     if not db_stats.get("connected"):
-        alerts.append({
-            "severity": "critical",
-            "component": "database",
-            "message": "Database connection lost - using in-memory fallback",
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        alerts.append(
+            {
+                "severity": "critical",
+                "component": "database",
+                "message": "Database connection lost - using in-memory fallback",
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
     # Check AUREA
     aurea_stats = await _get_aurea_stats()
     if not aurea_stats.get("running"):
-        alerts.append({
-            "severity": "high",
-            "component": "aurea",
-            "message": "AUREA orchestrator not running",
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        alerts.append(
+            {
+                "severity": "high",
+                "component": "aurea",
+                "message": "AUREA orchestrator not running",
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
     pending_decisions = aurea_stats.get("decisions_24h", {}).get("pending", 0)
     if pending_decisions > 50:
-        alerts.append({
-            "severity": "medium",
-            "component": "aurea",
-            "message": f"{pending_decisions} decisions pending execution",
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        alerts.append(
+            {
+                "severity": "medium",
+                "component": "aurea",
+                "message": f"{pending_decisions} decisions pending execution",
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
     # Check agents
     agent_stats = await _get_agent_stats()
     if agent_stats.get("executions_24h", 0) < 10:
-        alerts.append({
-            "severity": "medium",
-            "component": "agents",
-            "message": "Low agent activity - only {} executions in 24h".format(
-                agent_stats.get("executions_24h", 0)
-            ),
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        alerts.append(
+            {
+                "severity": "medium",
+                "component": "agents",
+                "message": "Low agent activity - only {} executions in 24h".format(
+                    agent_stats.get("executions_24h", 0)
+                ),
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
     return {
         "timestamp": datetime.utcnow().isoformat(),
@@ -629,7 +678,7 @@ async def get_active_alerts() -> dict[str, Any]:
         "critical": len([a for a in alerts if a["severity"] == "critical"]),
         "high": len([a for a in alerts if a["severity"] == "high"]),
         "medium": len([a for a in alerts if a["severity"] == "medium"]),
-        "alerts": alerts
+        "alerts": alerts,
     }
 
 
@@ -658,7 +707,7 @@ async def get_diagnostics() -> dict[str, Any]:
         "python_version": sys.version,
         "platform": platform.platform(),
         "environment_vars": env_vars,
-        "database": await _get_database_stats()
+        "database": await _get_database_stats(),
     }
 
 
@@ -668,7 +717,7 @@ RENDER_API_KEY = os.getenv("RENDER_API_KEY", "")
 RENDER_SERVICES = {
     "brainops-ai-agents": "srv-d413iu75r7bs738btc10",
     "brainops-backend": "srv-d1tfs4idbo4c73di6k00",
-    "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770"
+    "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770",
 }
 
 
@@ -679,10 +728,7 @@ async def _fetch_render_api(endpoint: str) -> dict[str, Any]:
 
     timeout = aiohttp.ClientTimeout(total=15)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        headers = {
-            "Authorization": f"Bearer {RENDER_API_KEY}",
-            "Accept": "application/json"
-        }
+        headers = {"Authorization": f"Bearer {RENDER_API_KEY}", "Accept": "application/json"}
         async with session.get(f"https://api.render.com/v1{endpoint}", headers=headers) as resp:
             if resp.status != 200:
                 return {"error": f"HTTP {resp.status}", "status_code": resp.status}
@@ -703,15 +749,12 @@ async def get_render_services() -> dict[str, Any]:
                 "type": data.get("type"),
                 "region": data.get("region"),
                 "created": data.get("createdAt"),
-                "updated": data.get("updatedAt")
+                "updated": data.get("updatedAt"),
             }
         else:
             services[name] = data
 
-    return {
-        "timestamp": datetime.utcnow().isoformat(),
-        "services": services
-    }
+    return {"timestamp": datetime.utcnow().isoformat(), "services": services}
 
 
 @router.get("/render/deploys")
@@ -729,17 +772,16 @@ async def get_render_deploys() -> dict[str, Any]:
                     "trigger": d.get("deploy", {}).get("trigger"),
                     "created": d.get("deploy", {}).get("createdAt"),
                     "finished": d.get("deploy", {}).get("finishedAt"),
-                    "image_sha": d.get("deploy", {}).get("image", {}).get("sha", "")[:20] if d.get("deploy", {}).get("image") else None
+                    "image_sha": d.get("deploy", {}).get("image", {}).get("sha", "")[:20]
+                    if d.get("deploy", {}).get("image")
+                    else None,
                 }
                 for d in data[:5]
             ]
         else:
             deploys[name] = data
 
-    return {
-        "timestamp": datetime.utcnow().isoformat(),
-        "deploys": deploys
-    }
+    return {"timestamp": datetime.utcnow().isoformat(), "deploys": deploys}
 
 
 @router.get("/render/logs/{service_name}")
@@ -747,7 +789,10 @@ async def get_render_logs(service_name: str, limit: int = 100) -> dict[str, Any]
     """Get live logs from a Render service"""
     service_id = RENDER_SERVICES.get(service_name)
     if not service_id:
-        return {"error": f"Unknown service: {service_name}", "available": list(RENDER_SERVICES.keys())}
+        return {
+            "error": f"Unknown service: {service_name}",
+            "available": list(RENDER_SERVICES.keys()),
+        }
 
     # Render logs API endpoint
     data = await _fetch_render_api(f"/services/{service_id}/logs?limit={limit}")
@@ -762,7 +807,7 @@ async def get_render_logs(service_name: str, limit: int = 100) -> dict[str, Any]
             log_entry = {
                 "timestamp": log.get("timestamp"),
                 "message": log.get("message", ""),
-                "level": "info"
+                "level": "info",
             }
 
             msg = log.get("message", "").lower()
@@ -783,7 +828,7 @@ async def get_render_logs(service_name: str, limit: int = 100) -> dict[str, Any]
             "error_count": len(errors),
             "warning_count": len(warnings),
             "recent_errors": errors[-10:] if errors else [],
-            "logs": logs[-50:]  # Last 50 logs
+            "logs": logs[-50:],  # Last 50 logs
         }
 
     return {"error": "Failed to fetch logs", "data": data}
@@ -809,8 +854,8 @@ async def trigger_render_deploy(service_name: str) -> dict[str, Any]:
                 "trigger": deploy.get("trigger"),
                 "created": deploy.get("createdAt"),
                 "finished": deploy.get("finishedAt"),
-                "image": deploy.get("image", {}).get("ref") if deploy.get("image") else None
-            }
+                "image": deploy.get("image", {}).get("ref") if deploy.get("image") else None,
+            },
         }
 
     return {"error": "No deploys found"}
@@ -821,7 +866,7 @@ async def trigger_render_deploy(service_name: str) -> dict[str, Any]:
 VERCEL_TOKEN = os.getenv("VERCEL_TOKEN")  # SECURITY: No default - must be set via environment
 VERCEL_PROJECTS = {
     "weathercraft-erp": "prj_J4kZ8oQmGfU9lVWZxhYj6X7bR2nE",  # ERP project
-    "myroofgenius": "prj_abc123"  # MRG project (update with actual)
+    "myroofgenius": "prj_abc123",  # MRG project (update with actual)
 }
 
 
@@ -832,10 +877,7 @@ async def _fetch_vercel_api(endpoint: str) -> dict[str, Any]:
 
     timeout = aiohttp.ClientTimeout(total=15)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        headers = {
-            "Authorization": f"Bearer {VERCEL_TOKEN}",
-            "Content-Type": "application/json"
-        }
+        headers = {"Authorization": f"Bearer {VERCEL_TOKEN}", "Content-Type": "application/json"}
         async with session.get(f"https://api.vercel.com{endpoint}", headers=headers) as resp:
             if resp.status != 200:
                 return {"error": f"HTTP {resp.status}", "status_code": resp.status}
@@ -850,21 +892,23 @@ async def get_vercel_deployments(limit: int = 10) -> dict[str, Any]:
     if "deployments" in data:
         deployments = []
         for d in data["deployments"]:
-            deployments.append({
-                "id": d.get("uid"),
-                "name": d.get("name"),
-                "url": d.get("url"),
-                "state": d.get("state"),
-                "created": d.get("createdAt"),
-                "ready": d.get("readyState"),
-                "target": d.get("target"),
-                "source": d.get("source")
-            })
+            deployments.append(
+                {
+                    "id": d.get("uid"),
+                    "name": d.get("name"),
+                    "url": d.get("url"),
+                    "state": d.get("state"),
+                    "created": d.get("createdAt"),
+                    "ready": d.get("readyState"),
+                    "target": d.get("target"),
+                    "source": d.get("source"),
+                }
+            )
 
         return {
             "timestamp": datetime.utcnow().isoformat(),
             "total": len(deployments),
-            "deployments": deployments
+            "deployments": deployments,
         }
 
     return {"error": "Failed to fetch deployments", "data": data}
@@ -888,23 +932,28 @@ async def get_vercel_project(project_name: str) -> dict[str, Any]:
                 "framework": data.get("framework"),
                 "created": data.get("createdAt"),
                 "updated": data.get("updatedAt"),
-                "production_url": data.get("alias", [{}])[0].get("domain") if data.get("alias") else None
+                "production_url": data.get("alias", [{}])[0].get("domain")
+                if data.get("alias")
+                else None,
             },
             "recent_deployments": [
                 {
                     "id": d.get("uid"),
                     "state": d.get("state"),
                     "url": d.get("url"),
-                    "created": d.get("createdAt")
+                    "created": d.get("createdAt"),
                 }
                 for d in deploys.get("deployments", [])[:5]
-            ] if isinstance(deploys, dict) else []
+            ]
+            if isinstance(deploys, dict)
+            else [],
         }
 
     return {"error": f"Project not found: {project_name}", "data": data}
 
 
 # ==================== UNIFIED SYSTEM STATUS ====================
+
 
 @router.get("/live")
 async def get_live_system_status() -> dict[str, Any]:
@@ -943,7 +992,7 @@ async def get_live_system_status() -> dict[str, Any]:
             render_status[service_name] = {
                 "status": deploy.get("status"),
                 "last_deploy": deploy.get("finishedAt"),
-                "trigger": deploy.get("trigger")
+                "trigger": deploy.get("trigger"),
             }
         else:
             render_status[service_name] = {"status": "unknown", "error": str(deploy_data)}
@@ -953,11 +1002,9 @@ async def get_live_system_status() -> dict[str, Any]:
     vercel_status = []
     if "deployments" in vercel_deploys:
         for d in vercel_deploys["deployments"][:3]:
-            vercel_status.append({
-                "name": d.get("name"),
-                "state": d.get("state"),
-                "url": d.get("url")
-            })
+            vercel_status.append(
+                {"name": d.get("name"), "state": d.get("state"), "url": d.get("url")}
+            )
 
     # Calculate overall health
     issues = []
@@ -985,19 +1032,16 @@ async def get_live_system_status() -> dict[str, Any]:
         "overall_health": overall_health,
         "critical_issues": critical_issues,
         "issues": issues,
-
         "internal_systems": results,
-
         "render_services": render_status,
         "vercel_deployments": vercel_status,
-
         "quick_stats": {
             "db_connected": results.get("database", {}).get("connected", False),
             "aurea_running": results.get("aurea", {}).get("running", False),
             "agents_24h": results.get("agents", {}).get("executions_24h", 0),
             "memories": results.get("memory", {}).get("total_memories", 0),
-            "active_tenants": results.get("revenue", {}).get("active_tenants", 0)
-        }
+            "active_tenants": results.get("revenue", {}).get("active_tenants", 0),
+        },
     }
 
 
@@ -1006,25 +1050,50 @@ async def receive_render_webhook(payload: dict[str, Any]) -> dict[str, Any]:
     """
     Receive Render deploy webhooks for real-time notifications.
     Configure at: https://dashboard.render.com -> Webhook settings
+
+    Dedup: uses deploy_id (or event_type+service_id+timestamp hash) as
+    idempotency key via ON CONFLICT DO NOTHING.
     """
     logger.info(f"Render webhook received: {payload.get('type', 'unknown')}")
 
     event_type = payload.get("type")
     service_id = payload.get("service", {}).get("id")
+    # Render deploy webhooks include a deploy ID — use it as dedup key.
+    # Fall back to a hash of type+service+timestamp for other event types.
+    deploy_id = payload.get("deploy", {}).get("id") or payload.get("id") or ""
+    if not deploy_id:
+        import hashlib
 
-    # Store webhook event for tracking
+        raw = f"{event_type}:{service_id}:{payload.get('timestamp', '')}"
+        deploy_id = f"hash_{hashlib.sha256(raw.encode()).hexdigest()[:16]}"
+
+    # Store webhook event with dedup
+    is_new = True
     try:
         from database.async_connection import get_pool
+
         pool = get_pool()
-        await pool.execute("""
-            INSERT INTO render_webhook_events (event_type, service_id, payload, received_at)
-            VALUES ($1, $2, $3, NOW())
-        """, event_type, service_id, str(payload))
+        row = await pool.fetchrow(
+            """
+            INSERT INTO render_webhook_events (event_type, service_id, deploy_id, payload, received_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (deploy_id) DO NOTHING
+            RETURNING deploy_id
+        """,
+            event_type,
+            service_id,
+            deploy_id,
+            str(payload),
+        )
+        is_new = row is not None
+        if not is_new:
+            logger.info(f"Render webhook duplicate: deploy_id={deploy_id}")
     except Exception as e:
         logger.warning(f"Could not store webhook event: {e}")
 
     return {
         "received": True,
+        "is_new": is_new,
         "event_type": event_type,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
     }

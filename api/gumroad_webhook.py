@@ -35,12 +35,10 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "production").strip().lower()
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/gumroad",
-    tags=["gumroad", "income", "sales"]
-)
+router = APIRouter(prefix="/gumroad", tags=["gumroad", "income", "sales"])
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
 
 async def _require_internal_api_key(api_key: str = Security(_api_key_header)) -> bool:
     """
@@ -57,6 +55,7 @@ async def _require_internal_api_key(api_key: str = Security(_api_key_header)) ->
         raise HTTPException(status_code=403, detail="Forbidden")
     return True
 
+
 def _coerce_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -64,6 +63,7 @@ def _coerce_bool(value: Any) -> bool:
         return False
     text = str(value).strip().lower()
     return text in {"1", "true", "yes", "y", "on"}
+
 
 def _parse_gumroad_timestamp(value: Any) -> datetime:
     """
@@ -90,6 +90,7 @@ def _parse_gumroad_timestamp(value: Any) -> datetime:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
 
+
 def _parse_price(value: Any) -> Decimal:
     if value is None:
         return Decimal("0")
@@ -105,6 +106,7 @@ def _parse_price(value: Any) -> Decimal:
     except Exception:
         return Decimal("0")
 
+
 def _is_test_sale(sale_data: dict[str, Any]) -> bool:
     # Gumroad includes a `test` field for test purchases.
     if _coerce_bool(sale_data.get("test")):
@@ -113,125 +115,130 @@ def _is_test_sale(sale_data: dict[str, Any]) -> bool:
     if sale_id.startswith("TEST-"):
         return True
     email = str(sale_data.get("email") or "").strip().lower()
-    if any(token in email for token in ("test", "example", "demo", "sample", "fake", "placeholder", "localhost")):
+    if any(
+        token in email
+        for token in ("test", "example", "demo", "sample", "fake", "placeholder", "localhost")
+    ):
         return True
     return False
+
 
 # Product mapping - keyed by Gumroad permalink (uppercase) or product code
 PRODUCT_MAPPING = {
     # === LIVE GUMROAD PRODUCTS (Published) - Prices synced 2026-01-15 ===
-    'HJHMSM': {
-        'name': 'MCP Server Starter Kit',
-        'price': 49,  # Live price on Gumroad
-        'type': 'code_kit',
-        'convertkit_tag': 'mcp-kit-buyer',
-        'gumroad_url': 'https://woodworthia.gumroad.com/l/hjhmsm'
+    "HJHMSM": {
+        "name": "MCP Server Starter Kit",
+        "price": 49,  # Live price on Gumroad
+        "type": "code_kit",
+        "convertkit_tag": "mcp-kit-buyer",
+        "gumroad_url": "https://woodworthia.gumroad.com/l/hjhmsm",
     },
-    'VJXCEW': {
-        'name': 'SaaS Automation Scripts',
-        'price': 37,  # Live price on Gumroad
-        'type': 'code_kit',
-        'convertkit_tag': 'saas-scripts-buyer',
-        'gumroad_url': 'https://woodworthia.gumroad.com/l/vjxcew'
+    "VJXCEW": {
+        "name": "SaaS Automation Scripts",
+        "price": 37,  # Live price on Gumroad
+        "type": "code_kit",
+        "convertkit_tag": "saas-scripts-buyer",
+        "gumroad_url": "https://woodworthia.gumroad.com/l/vjxcew",
     },
-    'XGFKP': {
-        'name': 'AI Prompt Engineering Pack',
-        'price': 29,  # Live price on Gumroad
-        'type': 'prompt_pack',
-        'convertkit_tag': 'ai-prompts-buyer',
-        'gumroad_url': 'https://woodworthia.gumroad.com/l/xgfkp'
+    "XGFKP": {
+        "name": "AI Prompt Engineering Pack",
+        "price": 29,  # Live price on Gumroad
+        "type": "prompt_pack",
+        "convertkit_tag": "ai-prompts-buyer",
+        "gumroad_url": "https://woodworthia.gumroad.com/l/xgfkp",
     },
-    'GSAAVB': {
-        'name': 'AI Orchestration Framework',
-        'price': 97,  # Live price on Gumroad
-        'type': 'code_kit',
-        'convertkit_tag': 'ai-orchestration-buyer',
-        'gumroad_url': 'https://woodworthia.gumroad.com/l/gsaavb'
+    "GSAAVB": {
+        "name": "AI Orchestration Framework",
+        "price": 97,  # Live price on Gumroad
+        "type": "code_kit",
+        "convertkit_tag": "ai-orchestration-buyer",
+        "gumroad_url": "https://woodworthia.gumroad.com/l/gsaavb",
     },
-    'UPSYKR': {
-        'name': 'Command Center UI Kit',
-        'price': 149,  # Live price on Gumroad
-        'type': 'code_kit',
-        'convertkit_tag': 'ui-kit-buyer',
-        'gumroad_url': 'https://woodworthia.gumroad.com/l/upsykr'
+    "UPSYKR": {
+        "name": "Command Center UI Kit",
+        "price": 149,  # Live price on Gumroad
+        "type": "code_kit",
+        "convertkit_tag": "ui-kit-buyer",
+        "gumroad_url": "https://woodworthia.gumroad.com/l/upsykr",
     },
-    'CAWVO': {
-        'name': 'Business Automation Toolkit',
-        'price': 29,  # Live price on Gumroad
-        'type': 'prompt_pack',
-        'convertkit_tag': 'business-toolkit-buyer',
-        'gumroad_url': 'https://woodworthia.gumroad.com/l/cawvo'
+    "CAWVO": {
+        "name": "Business Automation Toolkit",
+        "price": 29,  # Live price on Gumroad
+        "type": "prompt_pack",
+        "convertkit_tag": "business-toolkit-buyer",
+        "gumroad_url": "https://woodworthia.gumroad.com/l/cawvo",
     },
     # === BRAINSTACK STORE PRODUCTS ===
-    'MMBQ': {
-        'name': 'BrainStack',
-        'price': 29.99,
-        'type': 'code_kit',
-        'convertkit_tag': 'brainstack-buyer',
-        'gumroad_url': 'https://brainstack.gumroad.com/l/mmbq'
+    "MMBQ": {
+        "name": "BrainStack",
+        "price": 29.99,
+        "type": "code_kit",
+        "convertkit_tag": "brainstack-buyer",
+        "gumroad_url": "https://brainstack.gumroad.com/l/mmbq",
     },
     # === LEGACY/FUTURE PRODUCTS ===
-    'GR-ROOFINT': {
-        'name': 'Commercial Roofing Intelligence Bundle',
-        'price': 97,
-        'type': 'prompt_pack',
-        'convertkit_tag': 'roofing-intelligence-buyer'
+    "GR-ROOFINT": {
+        "name": "Commercial Roofing Intelligence Bundle",
+        "price": 97,
+        "type": "prompt_pack",
+        "convertkit_tag": "roofing-intelligence-buyer",
     },
-    'GR-PMACC': {
-        'name': 'AI-Enhanced Project Management Accelerator',
-        'price': 127,
-        'type': 'prompt_pack',
-        'convertkit_tag': 'pm-accelerator-buyer'
+    "GR-PMACC": {
+        "name": "AI-Enhanced Project Management Accelerator",
+        "price": 127,
+        "type": "prompt_pack",
+        "convertkit_tag": "pm-accelerator-buyer",
     },
-    'GR-LAUNCH': {
-        'name': 'Digital Product Launch Optimizer',
-        'price': 147,
-        'type': 'prompt_pack',
-        'convertkit_tag': 'launch-optimizer-buyer'
+    "GR-LAUNCH": {
+        "name": "Digital Product Launch Optimizer",
+        "price": 147,
+        "type": "prompt_pack",
+        "convertkit_tag": "launch-optimizer-buyer",
     },
-    'GR-ONBOARD': {
-        'name': 'Intelligent Client Onboarding System',
-        'price': 297,
-        'type': 'automation',
-        'convertkit_tag': 'onboarding-system-buyer'
+    "GR-ONBOARD": {
+        "name": "Intelligent Client Onboarding System",
+        "price": 297,
+        "type": "automation",
+        "convertkit_tag": "onboarding-system-buyer",
     },
-    'GR-CONTENT': {
-        'name': 'AI-Powered Content Production Pipeline',
-        'price': 347,
-        'type': 'automation',
-        'convertkit_tag': 'content-pipeline-buyer'
+    "GR-CONTENT": {
+        "name": "AI-Powered Content Production Pipeline",
+        "price": 347,
+        "type": "automation",
+        "convertkit_tag": "content-pipeline-buyer",
     },
-    'GR-ROOFVAL': {
-        'name': 'Commercial Roofing Estimation Validator',
-        'price': 497,
-        'type': 'automation',
-        'convertkit_tag': 'roofing-validator-buyer'
+    "GR-ROOFVAL": {
+        "name": "Commercial Roofing Estimation Validator",
+        "price": 497,
+        "type": "automation",
+        "convertkit_tag": "roofing-validator-buyer",
     },
-    'GR-ERP-START': {
-        'name': 'SaaS ERP Starter Kit',
-        'price': 197,
-        'type': 'code_kit',
-        'convertkit_tag': 'erp-starter-buyer'
+    "GR-ERP-START": {
+        "name": "SaaS ERP Starter Kit",
+        "price": 197,
+        "type": "code_kit",
+        "convertkit_tag": "erp-starter-buyer",
     },
-    'GR-AI-ORCH': {
-        'name': 'BrainOps AI Orchestrator Framework',
-        'price': 147,
-        'type': 'code_kit',
-        'convertkit_tag': 'ai-orchestrator-buyer'
+    "GR-AI-ORCH": {
+        "name": "BrainOps AI Orchestrator Framework",
+        "price": 147,
+        "type": "code_kit",
+        "convertkit_tag": "ai-orchestrator-buyer",
     },
-    'GR-UI-KIT': {
-        'name': 'Modern Command Center UI Kit',
-        'price': 97,
-        'type': 'code_kit',
-        'convertkit_tag': 'ui-kit-buyer'
+    "GR-UI-KIT": {
+        "name": "Modern Command Center UI Kit",
+        "price": 97,
+        "type": "code_kit",
+        "convertkit_tag": "ui-kit-buyer",
     },
-    'GR-ULTIMATE': {
-        'name': 'Ultimate All-Access Bundle',
-        'price': 997,
-        'type': 'bundle',
-        'convertkit_tag': 'ultimate-bundle-buyer'
-    }
+    "GR-ULTIMATE": {
+        "name": "Ultimate All-Access Bundle",
+        "price": 997,
+        "type": "bundle",
+        "convertkit_tag": "ultimate-bundle-buyer",
+    },
 }
+
 
 class GumroadSale(BaseModel):
     email: str
@@ -244,8 +251,10 @@ class GumroadSale(BaseModel):
     currency: Optional[str] = "USD"
     download_url: Optional[str] = ""
 
+
 def _as_convertkit_tag_name(value: str) -> str:
     return value.strip().replace("_", " ").replace("-", " ").strip()
+
 
 def _resolve_convertkit_auth(prefer_secret: bool = False) -> Optional[dict[str, str]]:
     api_key = (CONVERTKIT_API_KEY or "").strip()
@@ -257,6 +266,7 @@ def _resolve_convertkit_auth(prefer_secret: bool = False) -> Optional[dict[str, 
     if api_secret:
         return {"key": "api_secret", "value": api_secret}
     return None
+
 
 async def _resolve_convertkit_tag_id(client: httpx.AsyncClient, tag_ref: str) -> Optional[str]:
     """
@@ -281,7 +291,11 @@ async def _resolve_convertkit_tag_id(client: httpx.AsyncClient, tag_ref: str) ->
             "https://api.convertkit.com/v3/tags",
             params={auth["key"]: auth["value"]},
         )
-        if response.status_code in (401, 403) and auth["key"] == "api_key" and CONVERTKIT_API_SECRET:
+        if (
+            response.status_code in (401, 403)
+            and auth["key"] == "api_key"
+            and CONVERTKIT_API_SECRET
+        ):
             # Retry with API secret if key is invalid
             response = await client.get(
                 "https://api.convertkit.com/v3/tags",
@@ -305,24 +319,32 @@ async def _resolve_convertkit_tag_id(client: httpx.AsyncClient, tag_ref: str) ->
 
     # Create tag if API secret is available
     if not CONVERTKIT_API_SECRET:
-        logger.warning("ConvertKit tag '%s' missing and CONVERTKIT_API_SECRET not set (cannot create)", tag_ref)
+        logger.warning(
+            "ConvertKit tag '%s' missing and CONVERTKIT_API_SECRET not set (cannot create)", tag_ref
+        )
         return None
 
     try:
         create_resp = await client.post(
             "https://api.convertkit.com/v3/tags",
-            data={"api_secret": CONVERTKIT_API_SECRET, "tag[name]": _as_convertkit_tag_name(tag_ref)},
+            data={
+                "api_secret": CONVERTKIT_API_SECRET,
+                "tag[name]": _as_convertkit_tag_name(tag_ref),
+            },
         )
         if create_resp.status_code in (200, 201):
             payload = create_resp.json()
             tag = payload.get("tag") if isinstance(payload, dict) else None
             if isinstance(tag, dict) and tag.get("id") is not None:
                 return str(tag.get("id"))
-        logger.warning("ConvertKit tag create failed: HTTP %s %s", create_resp.status_code, create_resp.text)
+        logger.warning(
+            "ConvertKit tag create failed: HTTP %s %s", create_resp.status_code, create_resp.text
+        )
     except Exception as exc:
         logger.warning("ConvertKit tag create error: %s", exc)
 
     return None
+
 
 async def add_to_convertkit(email: str, first_name: str, last_name: str, product_code: str):
     """Add subscriber to ConvertKit with product tagging"""
@@ -347,7 +369,11 @@ async def add_to_convertkit(email: str, first_name: str, last_name: str, product
                 f"https://api.convertkit.com/v3/forms/{CONVERTKIT_FORM_ID}/subscribe",
                 data=payload,
             )
-            if response.status_code in (401, 403) and auth["key"] == "api_key" and CONVERTKIT_API_SECRET:
+            if (
+                response.status_code in (401, 403)
+                and auth["key"] == "api_key"
+                and CONVERTKIT_API_SECRET
+            ):
                 # Retry with API secret if key is invalid
                 payload.pop("api_key", None)
                 payload["api_secret"] = CONVERTKIT_API_SECRET
@@ -365,7 +391,9 @@ async def add_to_convertkit(email: str, first_name: str, last_name: str, product
                     if tag_id:
                         tag_auth = _resolve_convertkit_auth(True) or auth
                         tag_payload = {
-                            (tag_auth["key"] if tag_auth else "api_key"): (tag_auth["value"] if tag_auth else auth["value"]),
+                            (tag_auth["key"] if tag_auth else "api_key"): (
+                                tag_auth["value"] if tag_auth else auth["value"]
+                            ),
                             "email": email,
                         }
                         await client.post(
@@ -373,7 +401,11 @@ async def add_to_convertkit(email: str, first_name: str, last_name: str, product
                             data=tag_payload,
                         )
                     else:
-                        logger.warning("ConvertKit tag not available for product_code=%s tag_ref=%s", product_code, tag_ref)
+                        logger.warning(
+                            "ConvertKit tag not available for product_code=%s tag_ref=%s",
+                            product_code,
+                            tag_ref,
+                        )
                 logger.info(f"Added {email} to ConvertKit with tag {product_code}")
                 return True
             else:
@@ -384,15 +416,27 @@ async def add_to_convertkit(email: str, first_name: str, last_name: str, product
         logger.error(f"ConvertKit integration error: {e}")
         return False
 
+
 async def record_sale_to_database(sale_data: dict[str, Any]):
-    """Record sale in Supabase database"""
+    """Record sale in Supabase database.
+
+    Returns True for new inserts, False for replays (sale_id already exists),
+    None on error.  The caller uses this to gate post-purchase automations.
+    """
     try:
         from database.async_connection import get_pool
 
         pool = get_pool()
+        sale_id = sale_data.get("sale_id")
         is_test = _is_test_sale(sale_data)
         sale_timestamp = _parse_gumroad_timestamp(sale_data.get("sale_timestamp"))
-        await pool.execute("""
+
+        # Detect replays: check if sale_id already recorded
+        existing = await pool.fetchval("SELECT 1 FROM gumroad_sales WHERE sale_id = $1", sale_id)
+        is_new = existing is None
+
+        await pool.execute(
+            """
             INSERT INTO gumroad_sales (
                 sale_id, email, customer_name, product_code,
                 product_name, price, currency, sale_timestamp,
@@ -413,26 +457,28 @@ async def record_sale_to_database(sale_data: dict[str, Any]):
                 sendgrid_sent = gumroad_sales.sendgrid_sent OR EXCLUDED.sendgrid_sent,
                 updated_at = NOW()
         """,
-            sale_data.get('sale_id'),
-            sale_data.get('email'),
-            sale_data.get('full_name'),
-            sale_data.get('product_code'),
-            sale_data.get('product_name'),
+            sale_id,
+            sale_data.get("email"),
+            sale_data.get("full_name"),
+            sale_data.get("product_code"),
+            sale_data.get("product_name"),
             _parse_price(sale_data.get("price")),
-            sale_data.get('currency', 'USD'),
+            sale_data.get("currency", "USD"),
             sale_timestamp,
             False,  # convertkit_synced (set true only after confirmed)
             False,  # stripe_synced
             False,  # sendgrid_sent
             is_test,
-            sale_data
+            sale_data,
         )
-        logger.info(f"Recorded sale {sale_data.get('sale_id')} to database (is_test={is_test})")
+        action = "inserted" if is_new else "updated (replay)"
+        logger.info(f"Sale {sale_id} {action} in database (is_test={is_test})")
 
         # Also track in real_revenue_tracking for consolidated revenue view
         if not is_test:
             try:
-                await pool.execute("""
+                await pool.execute(
+                    """
                     INSERT INTO real_revenue_tracking (
                         revenue_date, source, amount, description,
                         customer_email, is_verified, gumroad_sale_id,
@@ -440,24 +486,25 @@ async def record_sale_to_database(sale_data: dict[str, Any]):
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                     ON CONFLICT DO NOTHING
                 """,
-                    sale_timestamp.date() if hasattr(sale_timestamp, 'date') else sale_timestamp,
+                    sale_timestamp.date() if hasattr(sale_timestamp, "date") else sale_timestamp,
                     "Gumroad",
                     _parse_price(sale_data.get("price")),
                     f"Gumroad: {sale_data.get('product_name', 'Unknown')}",
-                    sale_data.get('email', ''),
+                    sale_data.get("email", ""),
                     True,
-                    sale_data.get('sale_id'),
-                    sale_data.get('currency', 'USD'),
-                    False
+                    sale_data.get("sale_id"),
+                    sale_data.get("currency", "USD"),
+                    False,
                 )
             except Exception as rev_err:
                 logger.warning(f"Failed to record to real_revenue_tracking: {rev_err}")
 
-        return True
+        return is_new  # True = new sale, False = replay
 
     except Exception as e:
         logger.error(f"Database recording error: {e}")
-        return False
+        return None  # None = error (distinct from False = replay)
+
 
 async def _update_sale_flags(
     sale_id: str,
@@ -499,6 +546,7 @@ async def _update_sale_flags(
     """
     await pool.execute(query, *params)
 
+
 async def send_purchase_email(email: str, name: str, product_name: str, download_url: str):
     """Send purchase confirmation via Resend (primary) or SendGrid (fallback)."""
 
@@ -539,29 +587,32 @@ async def send_purchase_email(email: str, name: str, product_name: str, download
             return False
 
         if not SENDGRID_API_KEY:
-            logger.warning("No email provider configured for purchase email (need RESEND_API_KEY or SENDGRID_API_KEY)")
+            logger.warning(
+                "No email provider configured for purchase email (need RESEND_API_KEY or SENDGRID_API_KEY)"
+            )
             return False
 
         async with httpx.AsyncClient(timeout=20.0) as client:
             email_data = {
-                "personalizations": [{
-                    "to": [{"email": email}],
-                    "subject": f"Your {product_name} is ready!"
-                }],
+                "personalizations": [
+                    {"to": [{"email": email}], "subject": f"Your {product_name} is ready!"}
+                ],
                 "from": {"email": SENDGRID_FROM_EMAIL or "support@myroofgenius.com"},
-                "content": [{
-                    "type": "text/html",
-                    "value": html_body,
-                }]
+                "content": [
+                    {
+                        "type": "text/html",
+                        "value": html_body,
+                    }
+                ],
             }
 
             response = await client.post(
                 "https://api.sendgrid.com/v3/mail/send",
                 headers={
                     "Authorization": f"Bearer {SENDGRID_API_KEY}",
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
                 },
-                json=email_data
+                json=email_data,
             )
 
         if response.status_code in [200, 202]:
@@ -574,6 +625,7 @@ async def send_purchase_email(email: str, name: str, product_name: str, download
         logger.error(f"Email sending error: {e}")
         return False
 
+
 @router.post("/webhook")
 async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundTasks):
     """Main webhook handler for Gumroad sales"""
@@ -584,7 +636,9 @@ async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundT
         # Webhook signature verification is mandatory in production.
         signature_required = ENVIRONMENT == "production"
         if signature_required and not GUMROAD_WEBHOOK_SECRET:
-            logger.critical("GUMROAD_WEBHOOK_SECRET is not set; refusing to process webhooks in production.")
+            logger.critical(
+                "GUMROAD_WEBHOOK_SECRET is not set; refusing to process webhooks in production."
+            )
             raise HTTPException(status_code=503, detail="Webhook not configured")
 
         if GUMROAD_WEBHOOK_SECRET:
@@ -593,9 +647,7 @@ async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundT
                 raise HTTPException(status_code=401, detail="Missing signature")
 
             expected_sig = hmac.new(
-                GUMROAD_WEBHOOK_SECRET.encode(),
-                body,
-                hashlib.sha256
+                GUMROAD_WEBHOOK_SECRET.encode(), body, hashlib.sha256
             ).hexdigest()
 
             if not hmac.compare_digest(signature, expected_sig):
@@ -635,33 +687,35 @@ async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundT
             if sale.email and "@" in sale.email
             else "<missing>"
         )
-        logger.info(f"Processing Gumroad sale: {sale.sale_id} for {redacted_email} - Product: {product_code}")
+        logger.info(
+            f"Processing Gumroad sale: {sale.sale_id} for {redacted_email} - Product: {product_code}"
+        )
 
         # Persist the full raw payload in metadata (includes fields like `test`)
         sale_dict = {**raw_data, **sale.dict(), "product_code": product_code}
 
         # Always record to DB synchronously (fail closed) so Gumroad retries on failure.
-        recorded = await record_sale_to_database(sale_dict)
-        if not recorded:
+        # Returns True for new inserts, False for replays (sale_id already exists).
+        is_new = await record_sale_to_database(sale_dict)
+        if is_new is None:
             raise HTTPException(status_code=500, detail="Failed to record sale")
 
         # Automations (ConvertKit, nurture sequences, upsells) are explicitly gated.
-        automations_enabled = os.getenv("GUMROAD_AUTOMATIONS_ENABLED", "").strip().lower() in {"1", "true", "yes"}
-        if automations_enabled and not _is_test_sale(sale_dict):
-            background_tasks.add_task(
-                process_sale,
-                sale_dict,
-                product_code,
-                first_name,
-                last_name
-            )
+        # Skip on replays to prevent re-firing background automations.
+        automations_enabled = os.getenv("GUMROAD_AUTOMATIONS_ENABLED", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        if automations_enabled and is_new and not _is_test_sale(sale_dict):
+            background_tasks.add_task(process_sale, sale_dict, product_code, first_name, last_name)
 
         return {
             "success": True,
             "sale_id": sale.sale_id,
             "recorded": True,
             "automations_enabled": automations_enabled,
-            "message": "Sale recorded"
+            "message": "Sale recorded",
         }
 
     except HTTPException:
@@ -669,6 +723,7 @@ async def handle_gumroad_webhook(request: Request, background_tasks: BackgroundT
     except Exception:
         logger.exception("Webhook processing error")
         raise HTTPException(status_code=500, detail="Internal error") from None
+
 
 async def enroll_in_nurture_sequence(
     email: str,
@@ -703,7 +758,9 @@ async def enroll_in_nurture_sequence(
         return False
 
 
-async def process_sale(sale_data: dict[str, Any], product_code: str, first_name: str, last_name: str):
+async def process_sale(
+    sale_data: dict[str, Any], product_code: str, first_name: str, last_name: str
+):
     """Process sale through all systems"""
     # Safety: do not run post-purchase automations for test purchases.
     if _is_test_sale(sale_data):
@@ -711,14 +768,15 @@ async def process_sale(sale_data: dict[str, Any], product_code: str, first_name:
         return
 
     product_info = PRODUCT_MAPPING.get(product_code, {})
-    product_name = product_info.get('name', sale_data.get('product_name', 'Product'))
-    product_type = product_info.get('type', 'code_kit')
-    download_url = sale_data.get('download_url', 'https://gumroad.com/library')
+    product_name = product_info.get("name", sale_data.get("product_name", "Product"))
+    product_type = product_info.get("type", "code_kit")
+    download_url = sale_data.get("download_url", "https://gumroad.com/library")
 
     # CRITICAL: Trigger AUREA/Agent Activation for REAL revenue event
     # This is REAL money - no dry_run protection needed!
     try:
         from agent_activation_system import BusinessEventType, get_activation_system
+
         activation_system = get_activation_system(os.getenv("DEFAULT_TENANT_ID"))
         await activation_system.handle_business_event(
             BusinessEventType.GUMROAD_SALE,
@@ -730,29 +788,32 @@ async def process_sale(sale_data: dict[str, Any], product_code: str, first_name:
                 "price": sale_data.get("price"),
                 "is_real_revenue": True,  # Explicitly mark as REAL revenue
                 "dry_run_outreach": False,  # REAL customer - outreach allowed!
-                "source": "gumroad_webhook"
-            }
+                "source": "gumroad_webhook",
+            },
         )
-        logger.info(f"🎯 GUMROAD_SALE event triggered for agent activation: {sale_data.get('sale_id')}")
+        logger.info(
+            f"🎯 GUMROAD_SALE event triggered for agent activation: {sale_data.get('sale_id')}"
+        )
     except Exception as agent_err:
         logger.error(f"Failed to trigger agent activation for Gumroad sale: {agent_err}")
 
     # Import upsell engine
     try:
         from upsell_engine import process_purchase_for_upsell
+
         upsell_task = process_purchase_for_upsell(
-            email=sale_data['email'],
+            email=sale_data["email"],
             first_name=first_name,
             product_code=product_code,
-            product_name=product_name
+            product_name=product_name,
         )
     except ImportError:
         upsell_task = asyncio.sleep(0)  # No-op if not available
 
     results = await asyncio.gather(
-        add_to_convertkit(sale_data['email'], first_name, last_name, product_code),
+        add_to_convertkit(sale_data["email"], first_name, last_name, product_code),
         enroll_in_nurture_sequence(
-            email=sale_data['email'],
+            email=sale_data["email"],
             first_name=first_name,
             product_name=product_name,
             product_type=product_type,
@@ -761,7 +822,7 @@ async def process_sale(sale_data: dict[str, Any], product_code: str, first_name:
             sale_id=str(sale_data.get("sale_id") or "").strip() or None,
         ),
         upsell_task,
-        return_exceptions=True
+        return_exceptions=True,
     )
 
     convertkit_ok = results[0] is True
@@ -769,7 +830,9 @@ async def process_sale(sale_data: dict[str, Any], product_code: str, first_name:
     try:
         await _update_sale_flags(sale_data.get("sale_id", ""), convertkit_synced=convertkit_ok)
     except Exception as exc:
-        logger.warning("Failed updating gumroad_sale flags for sale_id=%s: %s", sale_data.get("sale_id"), exc)
+        logger.warning(
+            "Failed updating gumroad_sale flags for sale_id=%s: %s", sale_data.get("sale_id"), exc
+        )
 
     logger.info(
         "Sale processing results - ConvertKit: %s, NurtureSequence: %s, Upsell: %s",
@@ -777,6 +840,7 @@ async def process_sale(sale_data: dict[str, Any], product_code: str, first_name:
         results[1],
         results[2],
     )
+
 
 @router.get("/analytics", dependencies=[Depends(_require_internal_api_key)])
 async def get_sales_analytics(include_test: bool = False):
@@ -790,16 +854,19 @@ async def get_sales_analytics(include_test: bool = False):
 
         # Get total sales
         total_sales = await pool.fetchval(
-            "SELECT COUNT(*) FROM gumroad_sales WHERE created_at > NOW() - INTERVAL '30 days'" + where_clause
+            "SELECT COUNT(*) FROM gumroad_sales WHERE created_at > NOW() - INTERVAL '30 days'"
+            + where_clause
         )
 
         # Get total revenue
         total_revenue = await pool.fetchval(
-            "SELECT COALESCE(SUM(price), 0) FROM gumroad_sales WHERE created_at > NOW() - INTERVAL '30 days'" + where_clause
+            "SELECT COALESCE(SUM(price), 0) FROM gumroad_sales WHERE created_at > NOW() - INTERVAL '30 days'"
+            + where_clause
         )
 
         # Get product breakdown
-        product_stats = await pool.fetch("""
+        product_stats = await pool.fetch(
+            """
             SELECT
                 product_code,
                 COUNT(*) as units_sold,
@@ -809,28 +876,34 @@ async def get_sales_analytics(include_test: bool = False):
               AND ($1::boolean OR COALESCE(is_test, FALSE) = FALSE)
             GROUP BY product_code
             ORDER BY revenue DESC
-        """, include_test)
+        """,
+            include_test,
+        )
 
         # Get recent sales
-        recent_sales = await pool.fetch("""
+        recent_sales = await pool.fetch(
+            """
             SELECT
                 sale_id, email, product_name, price, created_at
             FROM gumroad_sales
             WHERE ($1::boolean OR COALESCE(is_test, FALSE) = FALSE)
             ORDER BY created_at DESC
             LIMIT 10
-        """, include_test)
+        """,
+            include_test,
+        )
 
         return {
             "total_sales": total_sales or 0,
             "total_revenue": float(total_revenue) if total_revenue else 0,
             "product_stats": [dict(row) for row in product_stats],
-            "recent_sales": [dict(row) for row in recent_sales]
+            "recent_sales": [dict(row) for row in recent_sales],
         }
 
     except Exception as e:
         logger.error(f"Analytics error: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
 
 @router.post("/test", dependencies=[Depends(_require_internal_api_key)])
 async def test_webhook(background_tasks: BackgroundTasks):
@@ -847,27 +920,15 @@ async def test_webhook(background_tasks: BackgroundTasks):
         "sale_timestamp": datetime.utcnow().isoformat(),
         "price": "997.00",
         "currency": "USD",
-        "download_url": "https://gumroad.com/library"
+        "download_url": "https://gumroad.com/library",
     }
 
-    background_tasks.add_task(
-        process_sale,
-        test_sale,
-        "GR-ULTIMATE",
-        "Test",
-        "User"
-    )
+    background_tasks.add_task(process_sale, test_sale, "GR-ULTIMATE", "Test", "User")
 
-    return {
-        "success": True,
-        "message": "Test sale initiated",
-        "test_data": test_sale
-    }
+    return {"success": True, "message": "Test sale initiated", "test_data": test_sale}
+
 
 @router.get("/products", dependencies=[Depends(_require_internal_api_key)])
 async def get_products():
     """Get list of configured products"""
-    return {
-        "products": PRODUCT_MAPPING,
-        "total": len(PRODUCT_MAPPING)
-    }
+    return {"products": PRODUCT_MAPPING, "total": len(PRODUCT_MAPPING)}
