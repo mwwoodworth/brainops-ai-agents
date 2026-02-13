@@ -31,12 +31,15 @@ router = APIRouter(tags=["erp-bridge"])
 # API Key Security
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
+
 async def _verify_bridge_api_key(api_key: str = Security(_api_key_header)) -> str:
     """Verify API key for ERP bridge diagnostics endpoints"""
     from config import config
+
     if not api_key or api_key not in config.security.valid_api_keys:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return api_key
+
 
 # =============================================================================
 # UNIFIED EVENT SYSTEM INTEGRATION
@@ -47,6 +50,7 @@ try:
     from lib.events.schema import (
         UnifiedEvent,
     )
+
     UNIFIED_EVENTS_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Unified events not available: {e}")
@@ -59,6 +63,7 @@ except ImportError as e:
 # Customer Success Agent
 try:
     from customer_success_agent import CustomerSuccessAgent
+
     CUSTOMER_SUCCESS_AVAILABLE = True
 except ImportError:
     CUSTOMER_SUCCESS_AVAILABLE = False
@@ -67,6 +72,7 @@ except ImportError:
 # Revenue Generation System
 try:
     from revenue_generation_system import get_revenue_system
+
     REVENUE_SYSTEM_AVAILABLE = True
 except ImportError:
     REVENUE_SYSTEM_AVAILABLE = False
@@ -79,6 +85,7 @@ try:
         FollowUpType,
         get_intelligent_followup_system,
     )
+
     FOLLOWUP_SYSTEM_AVAILABLE = True
 except ImportError:
     FOLLOWUP_SYSTEM_AVAILABLE = False
@@ -89,6 +96,7 @@ except ImportError:
 # Task Orchestrator
 try:
     from intelligent_task_orchestrator import get_task_orchestrator
+
     ORCHESTRATOR_AVAILABLE = True
 except ImportError:
     ORCHESTRATOR_AVAILABLE = False
@@ -97,6 +105,7 @@ except ImportError:
 # Lead Qualification Agent
 try:
     from lead_qualification_agent import LeadQualificationAgent
+
     LEAD_QUALIFICATION_AVAILABLE = True
 except ImportError:
     LEAD_QUALIFICATION_AVAILABLE = False
@@ -105,6 +114,7 @@ except ImportError:
 # Notification System
 try:
     from notification_system import get_notification_system
+
     NOTIFICATION_AVAILABLE = True
 except ImportError:
     NOTIFICATION_AVAILABLE = False
@@ -114,6 +124,7 @@ except ImportError:
 # =============================================================================
 # ERP EVENT MODELS
 # =============================================================================
+
 
 class ERPSystemEvent(BaseModel):
     """
@@ -132,6 +143,7 @@ class ERPSystemEvent(BaseModel):
         "metadata": {...}
     }
     """
+
     # Required fields
     id: Optional[str] = Field(None, alias="eventId")
     type: str
@@ -151,6 +163,7 @@ class ERPSystemEvent(BaseModel):
 
 class ERPEventResponse(BaseModel):
     """Response for ERP webhook"""
+
     status: str
     event_id: str
     unified_event_id: Optional[str] = None
@@ -168,9 +181,11 @@ EVENT_PROCESSORS = {}
 
 def event_processor(event_type: str):
     """Decorator to register event processors"""
+
     def decorator(func):
         EVENT_PROCESSORS[event_type] = func
         return func
+
     return decorator
 
 
@@ -178,9 +193,12 @@ def event_processor(event_type: str):
 # EVENT PROCESSORS
 # =============================================================================
 
+
 @event_processor("CUSTOMER_CREATED")
 @event_processor("NEW_CUSTOMER")
-async def process_customer_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_customer_created(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process new customer creation - trigger onboarding"""
     result = {"agents": [], "actions": []}
 
@@ -207,13 +225,15 @@ async def process_customer_created(event: ERPSystemEvent, unified_event: Optiona
             revenue_system = get_revenue_system()
             if revenue_system:
                 # Log as new revenue opportunity
-                create_safe_task(revenue_system.track_opportunity(
-                    entity_type="customer",
-                    entity_id=customer_id,
-                    tenant_id=event.tenant_id,
-                    opportunity_type="new_customer",
-                    metadata=event.payload,
-                ))
+                create_safe_task(
+                    revenue_system.track_opportunity(
+                        entity_type="customer",
+                        entity_id=customer_id,
+                        tenant_id=event.tenant_id,
+                        opportunity_type="new_customer",
+                        metadata=event.payload,
+                    )
+                )
                 result["agents"].append("revenue_agent")
                 result["actions"].append("opportunity_tracking")
         except Exception as e:
@@ -223,7 +243,9 @@ async def process_customer_created(event: ERPSystemEvent, unified_event: Optiona
 
 
 @event_processor("LEAD_CREATED")
-async def process_lead_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_lead_created(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process new lead - trigger qualification and scoring"""
     result = {"agents": [], "actions": []}
 
@@ -269,7 +291,9 @@ async def process_lead_created(event: ERPSystemEvent, unified_event: Optional["U
 
 @event_processor("JOB_CREATED")
 @event_processor("NEW_JOB")
-async def process_job_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_job_created(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process new job - trigger scheduling and revenue tracking"""
     result = {"agents": [], "actions": []}
 
@@ -308,13 +332,15 @@ async def process_job_created(event: ERPSystemEvent, unified_event: Optional["Un
         try:
             revenue_system = get_revenue_system()
             if revenue_system:
-                create_safe_task(revenue_system.track_opportunity(
-                    entity_type="job",
-                    entity_id=job_id,
-                    tenant_id=event.tenant_id,
-                    opportunity_type="new_job",
-                    metadata=event.payload,
-                ))
+                create_safe_task(
+                    revenue_system.track_opportunity(
+                        entity_type="job",
+                        entity_id=job_id,
+                        tenant_id=event.tenant_id,
+                        opportunity_type="new_job",
+                        metadata=event.payload,
+                    )
+                )
                 result["agents"].append("revenue_agent")
                 result["actions"].append("job_revenue_tracking")
         except Exception as e:
@@ -324,7 +350,9 @@ async def process_job_created(event: ERPSystemEvent, unified_event: Optional["Un
 
 
 @event_processor("JOB_SCHEDULED")
-async def process_job_scheduled(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_job_scheduled(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process job scheduled - send notifications"""
     result = {"agents": [], "actions": []}
 
@@ -335,12 +363,14 @@ async def process_job_scheduled(event: ERPSystemEvent, unified_event: Optional["
         try:
             notification_system = get_notification_system()
             if notification_system:
-                create_safe_task(notification_system.send_job_scheduled_notification(
-                    job_id=job_id,
-                    tenant_id=event.tenant_id,
-                    scheduled_start=event.payload.get("scheduledStart"),
-                    scheduled_end=event.payload.get("scheduledEnd"),
-                ))
+                create_safe_task(
+                    notification_system.send_job_scheduled_notification(
+                        job_id=job_id,
+                        tenant_id=event.tenant_id,
+                        scheduled_start=event.payload.get("scheduledStart"),
+                        scheduled_end=event.payload.get("scheduledEnd"),
+                    )
+                )
                 result["agents"].append("notification_agent")
                 result["actions"].append("schedule_notification_sent")
         except Exception as e:
@@ -350,7 +380,9 @@ async def process_job_scheduled(event: ERPSystemEvent, unified_event: Optional["
 
 
 @event_processor("JOB_COMPLETED")
-async def process_job_completed(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_job_completed(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process job completion - trigger follow-up and review request"""
     result = {"agents": [], "actions": []}
 
@@ -368,18 +400,22 @@ async def process_job_completed(event: ERPSystemEvent, unified_event: Optional["
                 context = {
                     "job_id": job_id,
                     "customer_id": customer_id,
-                    "completion_date": event.payload.get("completedAt") or datetime.utcnow().isoformat(),
-                    "job_type": event.payload.get("job_type") or event.payload.get("jobType", "service"),
+                    "completion_date": event.payload.get("completedAt")
+                    or datetime.utcnow().isoformat(),
+                    "job_type": event.payload.get("job_type")
+                    or event.payload.get("jobType", "service"),
                     "actual_hours": event.payload.get("actualHours"),
                 }
 
-                create_safe_task(followup_system.create_followup_sequence(
-                    followup_type=FollowUpType.SERVICE_COMPLETION,
-                    entity_id=customer_id,
-                    entity_type="customer",
-                    context=context,
-                    priority=FollowUpPriority.HIGH,
-                ))
+                create_safe_task(
+                    followup_system.create_followup_sequence(
+                        followup_type=FollowUpType.SERVICE_COMPLETION,
+                        entity_id=customer_id,
+                        entity_type="customer",
+                        context=context,
+                        priority=FollowUpPriority.HIGH,
+                    )
+                )
                 result["agents"].append("followup_agent")
                 result["actions"].append("followup_sequence_created")
                 logger.info(f"Triggered follow-up for completed job {job_id}")
@@ -410,7 +446,9 @@ async def process_job_completed(event: ERPSystemEvent, unified_event: Optional["
 
 
 @event_processor("ESTIMATE_CREATED")
-async def process_estimate_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_estimate_created(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process new estimate - trigger pricing analysis"""
     result = {"agents": [], "actions": []}
 
@@ -442,7 +480,9 @@ async def process_estimate_created(event: ERPSystemEvent, unified_event: Optiona
 
 
 @event_processor("ESTIMATE_ACCEPTED")
-async def process_estimate_accepted(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_estimate_accepted(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process accepted estimate - trigger job creation workflow"""
     result = {"agents": [], "actions": []}
 
@@ -454,13 +494,15 @@ async def process_estimate_accepted(event: ERPSystemEvent, unified_event: Option
         try:
             revenue_system = get_revenue_system()
             if revenue_system:
-                create_safe_task(revenue_system.track_conversion(
-                    source_type="estimate",
-                    source_id=estimate_id,
-                    target_type="job",
-                    target_id=converted_job_id,
-                    tenant_id=event.tenant_id,
-                ))
+                create_safe_task(
+                    revenue_system.track_conversion(
+                        source_type="estimate",
+                        source_id=estimate_id,
+                        target_type="job",
+                        target_id=converted_job_id,
+                        tenant_id=event.tenant_id,
+                    )
+                )
                 result["agents"].append("revenue_agent")
                 result["actions"].append("conversion_tracked")
         except Exception as e:
@@ -470,7 +512,9 @@ async def process_estimate_accepted(event: ERPSystemEvent, unified_event: Option
 
 
 @event_processor("INVOICE_CREATED")
-async def process_invoice_created(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_invoice_created(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process new invoice - trigger notification"""
     result = {"agents": [], "actions": []}
 
@@ -485,12 +529,14 @@ async def process_invoice_created(event: ERPSystemEvent, unified_event: Optional
         try:
             notification_system = get_notification_system()
             if notification_system:
-                create_safe_task(notification_system.send_invoice_notification(
-                    invoice_id=invoice_id,
-                    customer_id=customer_id,
-                    amount=amount,
-                    tenant_id=event.tenant_id,
-                ))
+                create_safe_task(
+                    notification_system.send_invoice_notification(
+                        invoice_id=invoice_id,
+                        customer_id=customer_id,
+                        amount=amount,
+                        tenant_id=event.tenant_id,
+                    )
+                )
                 result["agents"].append("notification_agent")
                 result["actions"].append("invoice_notification_sent")
         except Exception as e:
@@ -501,7 +547,9 @@ async def process_invoice_created(event: ERPSystemEvent, unified_event: Optional
 
 @event_processor("INVOICE_PAID")
 @event_processor("PAYMENT_RECEIVED")
-async def process_payment_received(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_payment_received(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process payment - update revenue metrics and trigger thank you"""
     result = {"agents": [], "actions": []}
 
@@ -516,12 +564,15 @@ async def process_payment_received(event: ERPSystemEvent, unified_event: Optiona
         try:
             revenue_system = get_revenue_system()
             if revenue_system:
-                create_safe_task(revenue_system.record_payment(
-                    amount=amount,
-                    invoice_id=invoice_id,
-                    tenant_id=event.tenant_id,
-                    payment_method=event.payload.get("paymentMethod") or event.payload.get("payment_method"),
-                ))
+                create_safe_task(
+                    revenue_system.record_payment(
+                        amount=amount,
+                        invoice_id=invoice_id,
+                        tenant_id=event.tenant_id,
+                        payment_method=event.payload.get("paymentMethod")
+                        or event.payload.get("payment_method"),
+                    )
+                )
                 result["agents"].append("revenue_agent")
                 result["actions"].append("payment_recorded")
         except Exception as e:
@@ -532,17 +583,19 @@ async def process_payment_received(event: ERPSystemEvent, unified_event: Optiona
         try:
             followup_system = get_intelligent_followup_system()
             if followup_system:
-                create_safe_task(followup_system.create_followup_sequence(
-                    followup_type=FollowUpType.PAYMENT_THANK_YOU,
-                    entity_id=customer_id,
-                    entity_type="customer",
-                    context={
-                        "amount": amount,
-                        "invoice_id": invoice_id,
-                        "payment_date": datetime.utcnow().isoformat(),
-                    },
-                    priority=FollowUpPriority.NORMAL,
-                ))
+                create_safe_task(
+                    followup_system.create_followup_sequence(
+                        followup_type=FollowUpType.PAYMENT_THANK_YOU,
+                        entity_id=customer_id,
+                        entity_type="customer",
+                        context={
+                            "amount": amount,
+                            "invoice_id": invoice_id,
+                            "payment_date": datetime.utcnow().isoformat(),
+                        },
+                        priority=FollowUpPriority.NORMAL,
+                    )
+                )
                 result["agents"].append("followup_agent")
                 result["actions"].append("thank_you_scheduled")
         except Exception as e:
@@ -552,7 +605,9 @@ async def process_payment_received(event: ERPSystemEvent, unified_event: Optiona
 
 
 @event_processor("INVOICE_OVERDUE")
-async def process_invoice_overdue(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_invoice_overdue(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process overdue invoice - trigger collection workflow"""
     result = {"agents": [], "actions": []}
 
@@ -585,7 +640,9 @@ async def process_invoice_overdue(event: ERPSystemEvent, unified_event: Optional
 
 
 @event_processor("EMPLOYEE_CLOCK_IN")
-async def process_employee_clock_in(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_employee_clock_in(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process employee clock in - update workforce metrics"""
     result = {"agents": [], "actions": []}
 
@@ -599,7 +656,9 @@ async def process_employee_clock_in(event: ERPSystemEvent, unified_event: Option
 
 
 @event_processor("WEATHER_ALERT")
-async def process_weather_alert(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_weather_alert(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process weather alert - trigger rescheduling workflow"""
     result = {"agents": [], "actions": []}
 
@@ -634,7 +693,9 @@ async def process_weather_alert(event: ERPSystemEvent, unified_event: Optional["
 
 @event_processor("SYSTEM_ANOMALY")
 @event_processor("DATA_INTEGRITY_ISSUE")
-async def process_system_anomaly(event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]) -> dict[str, Any]:
+async def process_system_anomaly(
+    event: ERPSystemEvent, unified_event: Optional["UnifiedEvent"]
+) -> dict[str, Any]:
     """Process system anomaly - trigger self-healing"""
     result = {"agents": [], "actions": []}
 
@@ -649,9 +710,11 @@ async def process_system_anomaly(event: ERPSystemEvent, unified_event: Optional[
                     title=f"Investigate {event.type}",
                     task_type="self_healing",
                     payload={
-                        "anomaly_type": event.payload.get("anomalyType") or event.payload.get("issueType"),
+                        "anomaly_type": event.payload.get("anomalyType")
+                        or event.payload.get("issueType"),
                         "description": event.payload.get("description"),
-                        "affected_module": event.payload.get("affectedModule") or event.payload.get("tableName"),
+                        "affected_module": event.payload.get("affectedModule")
+                        or event.payload.get("tableName"),
                         "severity": severity,
                         "auto_fixable": event.payload.get("autoFixable", False),
                         "tenant_id": event.tenant_id,
@@ -669,6 +732,7 @@ async def process_system_anomaly(event: ERPSystemEvent, unified_event: Optional[
 # =============================================================================
 # MAIN WEBHOOK ENDPOINT
 # =============================================================================
+
 
 async def verify_erp_webhook_signature(request: Request) -> bool:
     """Verify HMAC signature from ERP webhook"""
@@ -696,8 +760,17 @@ async def verify_erp_webhook_signature(request: Request) -> bool:
     return True
 
 
-@router.post("/events/webhook/erp", response_model=ERPEventResponse, summary="Receive events from ERP SystemEventBus")
-@router.post("/events/webhook", response_model=ERPEventResponse, summary="Legacy webhook endpoint", include_in_schema=False)
+@router.post(
+    "/events/webhook/erp",
+    response_model=ERPEventResponse,
+    summary="Receive events from ERP SystemEventBus",
+)
+@router.post(
+    "/events/webhook",
+    response_model=ERPEventResponse,
+    summary="Legacy webhook endpoint",
+    include_in_schema=False,
+)
 async def handle_erp_event(
     event: ERPSystemEvent,
     request: Request,
@@ -732,25 +805,30 @@ async def handle_erp_event(
     unified_event = None
     if UNIFIED_EVENTS_AVAILABLE:
         try:
-            unified_event = UnifiedEvent.from_erp_event({
-                "version": event.version,
-                "eventId": event.id,
-                "type": event.type,
-                "tenantId": event.tenant_id,
-                "timestamp": event.timestamp.isoformat(),
-                "source": event.source,
-                "origin": event.origin,
-                "payload": event.payload,
-                "metadata": event.metadata,
-            })
+            unified_event = UnifiedEvent.from_erp_event(
+                {
+                    "version": event.version,
+                    "eventId": event.id,
+                    "type": event.type,
+                    "tenantId": event.tenant_id,
+                    "timestamp": event.timestamp.isoformat(),
+                    "source": event.source,
+                    "origin": event.origin,
+                    "payload": event.payload,
+                    "metadata": event.metadata,
+                }
+            )
             response.unified_event_id = unified_event.event_id
 
-            # Store in unified_events table
+            # Store in unified_events table (returns False for duplicates)
             stored = await store_event(unified_event)
             if stored:
                 logger.debug(f"Stored unified event: {unified_event.event_id}")
-            else:
-                logger.warning(f"Failed to store unified event: {unified_event.event_id}")
+            elif stored is False:
+                # Duplicate event — skip processing to prevent re-firing agents
+                logger.info(f"Duplicate event {unified_event.event_id} — skipping processing")
+                response.status = "duplicate"
+                return response
 
         except Exception as e:
             logger.error(f"Failed to create unified event: {e}")
@@ -781,7 +859,7 @@ async def handle_erp_event(
                     "agents": response.agents_triggered,
                     "errors": response.errors,
                     "processor": processor.__name__ if processor else None,
-                }
+                },
             )
         except Exception as e:
             logger.error(f"Failed to mark event processed: {e}")
@@ -798,6 +876,7 @@ async def handle_erp_event(
 # =============================================================================
 # UTILITY ENDPOINTS
 # =============================================================================
+
 
 @router.get("/events/processors", summary="List registered event processors")
 async def list_processors(api_key: str = Depends(_verify_bridge_api_key)):
