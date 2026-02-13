@@ -59,8 +59,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy installed packages from builder into a shared location (not /root)
-COPY --from=builder /root/.local /home/appuser/.local
+# Copy installed packages from builder into a shared location (not /root),
+# preserving appuser ownership to avoid expensive recursive chown layers.
+COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 
 # Ensure Python can find the installed packages under the non-root user's home
 ENV PATH=/home/appuser/.local/bin:$PATH
@@ -77,8 +78,8 @@ RUN if [ "$INSTALL_PLAYWRIGHT" = "1" ]; then \
         echo "Playwright browser install skipped (INSTALL_PLAYWRIGHT=0)"; \
     fi
 
-# Copy application code LAST for maximum cache benefit
-COPY . .
+# Copy application code LAST for maximum cache benefit and preserve appuser ownership.
+COPY --chown=appuser:appuser . .
 
 # Create necessary directories
 RUN mkdir -p logs /var/lib/ai-memory /var/log
@@ -88,8 +89,8 @@ COPY crontab /etc/cron.d/memory-sync
 RUN chmod 0644 /etc/cron.d/memory-sync && \
     crontab -u appuser /etc/cron.d/memory-sync
 
-# Set ownership of all application and data directories to appuser
-RUN chown -R appuser:appuser /app /home/appuser/.local /var/lib/ai-memory && \
+# Ensure runtime data/cache directories are writable by appuser.
+RUN chown -R appuser:appuser /var/lib/ai-memory && \
     chown -R appuser:appuser /home/appuser/.cache 2>/dev/null || true
 
 # Health check
