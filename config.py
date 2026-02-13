@@ -159,8 +159,8 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.17.0"
-        )  # V7: canonical memory migration + MCP privileged user fix
+            "VERSION", "v11.18.0"
+        )  # P1-WEBHOOK-006: processing-level dedup for ERP/Gumroad/Render
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "10000"))
