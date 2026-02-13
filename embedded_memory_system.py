@@ -517,6 +517,11 @@ class EmbeddedMemorySystem:
             logger.debug(f"📊 Local DB has {local_count} entries, skipping non-forced sync")
             return
 
+        # Keep periodic sync bounded so it cannot starve the HTTP loop.
+        memory_sync_limit = max(50, int(os.getenv("EMBEDDED_MEMORY_SYNC_MEMORY_LIMIT", "200")))
+        task_sync_limit = max(10, int(os.getenv("EMBEDDED_MEMORY_SYNC_TASK_LIMIT", "50")))
+        max_embeddings_per_sync = max(0, int(os.getenv("EMBEDDED_MEMORY_SYNC_MAX_EMBEDDINGS", "0")))
+
         logger.info(f"🔄 Syncing from master Postgres (local_count={local_count}, force={force})...")
 
         try:
@@ -525,8 +530,8 @@ class EmbeddedMemorySystem:
                 memories = await conn.fetch("""
                     SELECT * FROM unified_ai_memory
                     ORDER BY created_at DESC
-                    LIMIT 1000
-                """)
+                    LIMIT $1
+                """, memory_sync_limit)
 
                 cursor = self.sqlite_conn.cursor()
                 generated_count = 0
@@ -542,9 +547,10 @@ class EmbeddedMemorySystem:
                     if row and row[0]:
                         # Reuse existing local embedding
                         embedding = row[0]
-                    elif mem.get('content') and generated_count < 10:
-                        # Only generate new if missing AND limit not reached
-                        embedding = self._encode_embedding(mem['content'])
+                    elif mem.get('content') and generated_count < max_embeddings_per_sync:
+                        # Run sync embedding provider work off-loop to avoid
+                        # blocking health checks under load.
+                        embedding = await asyncio.to_thread(self._encode_embedding, mem['content'])
                         if embedding:
                             generated_count += 1
 
@@ -569,8 +575,8 @@ class EmbeddedMemorySystem:
                     SELECT * FROM ai_autonomous_tasks
                     WHERE status IN ('pending', 'in_progress')
                     ORDER BY created_at DESC
-                    LIMIT 100
-                """)
+                    LIMIT $1
+                """, task_sync_limit)
 
                 for task in tasks:
                     cursor.execute("""

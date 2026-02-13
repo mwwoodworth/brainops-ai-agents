@@ -1246,11 +1246,20 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ Permanent Observability Daemon startup failed: {e}")
 
-        # Start Always-Know Observability Brain (continuous state awareness)
+        # Start Always-Know Observability Brain (continuous state awareness).
+        # Keep it off the HTTP event loop: it performs synchronous DB operations
+        # and can starve /healthz when Supabase is slow.
         try:
             from always_know_brain import initialize_always_know_brain
-            await initialize_always_know_brain()
-            logger.info("🧠 Always-Know Brain STARTED - Continuous state monitoring active")
+
+            app.state.always_know_future = _run_on_bg_loop(
+                initialize_always_know_brain(),
+                "always_know_brain",
+            )
+            if app.state.always_know_future is None:
+                logger.info("🧠 Always-Know Brain STARTED - running on main loop fallback")
+            else:
+                logger.info("🧠 Always-Know Brain STARTED - running on background loop")
         except Exception as e:
             logger.error(f"❌ Always-Know Brain startup failed: {e}")
 
@@ -1424,17 +1433,8 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ Intelligent Task Orchestrator startup failed: {e}")
 
-        # Start rate limiter cleanup task (every 5 minutes)
-        async def rate_limiter_cleanup_loop():
-            while True:
-                await asyncio.sleep(300)  # 5 minutes
-                await _rate_limiter.cleanup()
-                await _auth_rate_limiter.cleanup()
-                await _trusted_rate_limiter.cleanup()
-                logger.debug("🧹 Rate limiter buckets cleaned up")
-
-        create_safe_task(rate_limiter_cleanup_loop(), "rate_limiter_cleanup")
-        logger.info("✅ Rate limiter cleanup task started")
+        # Category bucket cleanup is managed by _rate_limit_cleanup_loop below.
+        # Do not start duplicate cleanup loops here.
 
         # Initialize Slack alerting integration (Total Completion Protocol)
         try:
@@ -1796,6 +1796,7 @@ _CATEGORY_LIMITS = {
     "memory": (30, 8),
     "default": (30, 8),
 }
+_CATEGORY_BUCKET_MAX_IDENTITIES = int(os.getenv("RATE_LIMIT_BUCKET_MAX_IDENTITIES", "5000"))
 
 
 async def _category_is_allowed(category: str, identity: str) -> bool:
@@ -1804,6 +1805,17 @@ async def _category_is_allowed(category: str, identity: str) -> bool:
     rate = rpm / 60.0  # tokens per second
     async with _category_lock:
         bucket = _category_buckets.setdefault(category, {})
+        # Protect event-loop latency: do not allow unbounded growth by
+        # adversarial/high-churn identities. Resetting the bucket is safer
+        # than scanning very large maps on the main HTTP loop.
+        if len(bucket) >= _CATEGORY_BUCKET_MAX_IDENTITIES and identity not in bucket:
+            logger.warning(
+                "Rate-limit bucket reset: category=%s size=%d (max=%d)",
+                category,
+                len(bucket),
+                _CATEGORY_BUCKET_MAX_IDENTITIES,
+            )
+            bucket.clear()
         now = time.time()
         tokens, last_update = bucket.get(identity, (float(burst), now))
         elapsed = now - last_update
@@ -1822,6 +1834,17 @@ async def _category_cleanup() -> None:
         now = time.time()
         for category in list(_category_buckets.keys()):
             bucket = _category_buckets[category]
+            # Fast-path guard: keep cleanup bounded to protect health-check
+            # latency under high-cardinality traffic.
+            if len(bucket) > _CATEGORY_BUCKET_MAX_IDENTITIES:
+                logger.warning(
+                    "Rate-limit cleanup reset: category=%s size=%d (max=%d)",
+                    category,
+                    len(bucket),
+                    _CATEGORY_BUCKET_MAX_IDENTITIES,
+                )
+                bucket.clear()
+                continue
             stale = [k for k, (_, ts) in bucket.items() if now - ts > 300]
             for k in stale:
                 del bucket[k]
