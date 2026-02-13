@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Any, Optional
 from urllib.parse import unquote, urlparse
 
+
 # Normalize DB_* env vars from DATABASE_URL before importing any modules that
 # read credentials during import-time initialization.
 def _hydrate_db_env_from_database_url() -> None:
@@ -60,9 +61,10 @@ _hydrate_db_env_from_database_url()
 # 6543) shares connections across transactions, supporting far more concurrency.
 _db_host = os.getenv("DB_HOST", "")
 _db_url = os.getenv("DATABASE_URL", "")
-if ('pooler.supabase.com' in _db_host or 'pooler.supabase.com' in _db_url) \
-        and os.getenv('DB_PORT', '5432') == '5432':
-    os.environ['DB_PORT'] = '6543'
+if ("pooler.supabase.com" in _db_host or "pooler.supabase.com" in _db_url) and os.getenv(
+    "DB_PORT", "5432"
+) == "5432":
+    os.environ["DB_PORT"] = "6543"
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query, Request, Security
 from fastapi.encoders import jsonable_encoder
@@ -83,7 +85,7 @@ from auth.jwt import verify_jwt
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, config.log_level, logging.INFO),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
@@ -101,9 +103,7 @@ class BackgroundLoopRunner:
     def __init__(self) -> None:
         self.loop = asyncio.new_event_loop()
         self._started = threading.Event()
-        self._thread = threading.Thread(
-            target=self._run, name="brainops-bg-loop", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run, name="brainops-bg-loop", daemon=True)
         self._futures: set = set()  # Track futures for cleanup
 
     def _run(self) -> None:
@@ -166,9 +166,9 @@ def _rate_limit_key(request: Request) -> str:
     if not api_key:
         auth = request.headers.get("Authorization") or request.headers.get("authorization") or ""
         if auth.startswith("ApiKey "):
-            api_key = auth[len("ApiKey "):].strip()
+            api_key = auth[len("ApiKey ") :].strip()
         elif auth.startswith("Bearer "):
-            api_key = auth[len("Bearer "):].strip()
+            api_key = auth[len("Bearer ") :].strip()
     if api_key and api_key in config.security.valid_api_keys:
         return "key:" + hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:12]
     # Fall back to client IP (handle reverse-proxy forwarding)
@@ -189,7 +189,12 @@ limiter = Limiter(
 
 def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     """Custom 429 handler with Retry-After header."""
-    logger.warning("Rate limit exceeded for %s on %s: %s", _rate_limit_key(request), request.url.path, exc.detail)
+    logger.warning(
+        "Rate limit exceeded for %s on %s: %s",
+        _rate_limit_key(request),
+        request.url.path,
+        exc.detail,
+    )
     return JSONResponse(
         status_code=429,
         content={"detail": "Too many requests. Please slow down.", "limit": str(exc.detail)},
@@ -214,7 +219,7 @@ def safe_json_dumps(obj: Any, **kwargs) -> str:
             return float(o)
         if isinstance(o, Enum):
             return o.value
-        if hasattr(o, '__dict__'):
+        if hasattr(o, "__dict__"):
             return o.__dict__
         return str(o)  # Fallback to string representation
 
@@ -224,6 +229,7 @@ def safe_json_dumps(obj: Any, **kwargs) -> str:
 # Import agent executor for actual agent dispatch
 try:
     from agent_executor import AgentExecutor
+
     AGENT_EXECUTOR = AgentExecutor()
     AGENTS_AVAILABLE = True
 except ImportError as e:
@@ -239,6 +245,7 @@ from api.ai_awareness import (
 )
 from api.aurea_chat import router as aurea_chat_router  # AUREA Live Conversational Interface
 from api.brain import router as brain_router
+
 BRAIN_AVAILABLE = True  # Brain router is always imported
 from api.cicd import router as cicd_router  # Autonomous CI/CD Management - 1-10K systems
 from api.codebase_graph import router as codebase_graph_router
@@ -248,7 +255,9 @@ from api.e2e_verification import router as e2e_verification_router
 from api.logistics import router as logistics_router
 from api.infrastructure import router as infrastructure_router
 from api.gumroad_webhook import router as gumroad_router
-from api.stripe_webhook import router as stripe_webhook_router  # Stripe webhooks (no API key - uses Stripe signature)
+from api.stripe_webhook import (
+    router as stripe_webhook_router,
+)  # Stripe webhooks (no API key - uses Stripe signature)
 from api.market_intelligence import router as market_intelligence_router
 from api.mcp import router as mcp_router  # MCP Bridge Integration - 345 tools
 from api.memory import router as memory_router
@@ -257,21 +266,46 @@ from api.observability import (
     router as full_observability_router,  # Comprehensive Observability Dashboard
 )
 from api.revenue import router as revenue_router
+from api.taskmate import router as taskmate_router  # P1-TASKMATE-001: Cross-model task manager
 from api.revenue_automation import router as revenue_automation_router
 from api.income_streams import router as income_streams_router  # Automated Income Streams
 from api.revenue_complete import router as revenue_complete_router  # Complete Revenue API
-from api.revenue_control_tower import router as revenue_control_tower_router  # Revenue Control Tower - THE ground truth
-from api.pipeline import router as pipeline_router  # Pipeline State Machine - ledger-backed state transitions
-from api.proposals import router as proposals_router  # Proposal Engine - draft/approve/send workflow
-from api.outreach import router as outreach_router  # Outreach Engine - lead enrichment and sequences
-from api.payments import router as payments_router  # Payment Capture - invoices and revenue collection
-from api.communications import router as communications_router  # Communications - send estimates, invoices from ERP
-from api.revenue_operator import router as revenue_operator_router  # AI Revenue Operator - automated actions
-from api.lead_discovery import router as lead_discovery_router  # Lead Discovery Engine - automated lead discovery and qualification
-from api.lead_engine import router as lead_engine_router  # Lead Engine - MRG→ERP lead relay pipeline
-from api.campaigns import router as campaigns_router  # Campaign System - CO commercial reroof lead gen
-from api.email_capture import router as email_capture_router  # Email Capture - Lead generation for Gumroad products
-from api.neural_reconnection import router as neural_reconnection_router  # Neural Reconnection - Schema unification & mode logic
+from api.revenue_control_tower import (
+    router as revenue_control_tower_router,
+)  # Revenue Control Tower - THE ground truth
+from api.pipeline import (
+    router as pipeline_router,
+)  # Pipeline State Machine - ledger-backed state transitions
+from api.proposals import (
+    router as proposals_router,
+)  # Proposal Engine - draft/approve/send workflow
+from api.outreach import (
+    router as outreach_router,
+)  # Outreach Engine - lead enrichment and sequences
+from api.payments import (
+    router as payments_router,
+)  # Payment Capture - invoices and revenue collection
+from api.communications import (
+    router as communications_router,
+)  # Communications - send estimates, invoices from ERP
+from api.revenue_operator import (
+    router as revenue_operator_router,
+)  # AI Revenue Operator - automated actions
+from api.lead_discovery import (
+    router as lead_discovery_router,
+)  # Lead Discovery Engine - automated lead discovery and qualification
+from api.lead_engine import (
+    router as lead_engine_router,
+)  # Lead Engine - MRG→ERP lead relay pipeline
+from api.campaigns import (
+    router as campaigns_router,
+)  # Campaign System - CO commercial reroof lead gen
+from api.email_capture import (
+    router as email_capture_router,
+)  # Email Capture - Lead generation for Gumroad products
+from api.neural_reconnection import (
+    router as neural_reconnection_router,
+)  # Neural Reconnection - Schema unification & mode logic
 from api.relationships import router as relationships_router
 from api.roofing_labor_ml import router as roofing_labor_ml_router
 from api.self_awareness import router as self_awareness_router  # Self-Awareness Dashboard
@@ -279,8 +313,12 @@ from api.self_healing import router as self_healing_router
 from api.state_sync import router as state_sync_router
 from api.sync import router as sync_router  # Memory migration & consolidation
 from api.system_orchestrator import router as system_orchestrator_router
-from api.victoria import router as victoria_router  # ERP scheduling agent compatibility (draft suggestions)
-from api.google_keep import router as google_keep_router  # Google Keep Sync - Gemini Live real-time bridge
+from api.victoria import (
+    router as victoria_router,
+)  # ERP scheduling agent compatibility (draft suggestions)
+from api.google_keep import (
+    router as google_keep_router,
+)  # Google Keep Sync - Gemini Live real-time bridge
 from database.async_connection import (
     DatabaseUnavailableError,
     PoolConfig,
@@ -294,6 +332,7 @@ from models.agent import Agent, AgentCategory, AgentExecution, AgentList
 # Operational Verification API - PROVES systems work, doesn't assume
 try:
     from api.operational_verification import router as verification_router
+
     VERIFICATION_AVAILABLE = True
     logger.info("✅ Operational Verification Router loaded - PROVES systems work")
 except ImportError as e:
@@ -303,6 +342,7 @@ except ImportError as e:
 # System Integration API - Connects all systems, no more silos
 try:
     from api.system_integration import router as integration_router
+
     INTEGRATION_AVAILABLE = True
     logger.info("✅ System Integration Router loaded - full pipeline connectivity")
 except ImportError as e:
@@ -313,6 +353,7 @@ except ImportError as e:
 try:
     from api.background_monitoring import router as bg_monitoring_router
     from api.background_monitoring import start_all_monitoring
+
     BG_MONITORING_AVAILABLE = True
     logger.info("✅ Background Task Monitoring loaded - heartbeats for all tasks")
 except ImportError as e:
@@ -323,6 +364,7 @@ except ImportError as e:
 # AI-Powered UI Testing System
 try:
     from api.ui_testing import router as ui_testing_router
+
     UI_TESTING_AVAILABLE = True
     logger.info("AI UI Testing Router loaded - Automated visual testing")
 except ImportError as e:
@@ -333,6 +375,7 @@ except ImportError as e:
 try:
     from api.permanent_observability import router as permanent_observability_router
     from permanent_observability_daemon import start_observability_daemon, stop_observability_daemon
+
     PERMANENT_OBSERVABILITY_AVAILABLE = True
     logger.info("✅ Permanent Observability loaded - Never miss anything")
 except ImportError as e:
@@ -344,6 +387,7 @@ except ImportError as e:
 # DevOps Automation API - Permanent knowledge & automated operations (2026-01-03)
 try:
     from api.devops_api import router as devops_api_router
+
     DEVOPS_API_AVAILABLE = True
     logger.info("✅ DevOps Automation API loaded - Permanent knowledge enabled")
 except ImportError as e:
@@ -355,6 +399,7 @@ except ImportError as e:
 try:
     from api.neural_core import router as neural_core_router
     from neural_core import get_neural_core, initialize_neural_core
+
     NEURAL_CORE_AVAILABLE = True
     logger.info("🧠 NEURAL CORE loaded - The AI OS is now SELF-AWARE")
 except ImportError as e:
@@ -365,6 +410,7 @@ except ImportError as e:
 # Customer Acquisition API - Autonomous lead discovery and conversion (2026-01-03)
 try:
     from api.customer_acquisition import router as customer_acquisition_router
+
     CUSTOMER_ACQUISITION_API_AVAILABLE = True
     logger.info("✅ Customer Acquisition API loaded - Autonomous lead gen enabled")
 except ImportError as e:
@@ -373,7 +419,12 @@ except ImportError as e:
 
 # Email Scheduler Daemon - Background email processing
 try:
-    from email_scheduler_daemon import EmailSchedulerDaemon, start_email_scheduler, stop_email_scheduler
+    from email_scheduler_daemon import (
+        EmailSchedulerDaemon,
+        start_email_scheduler,
+        stop_email_scheduler,
+    )
+
     EMAIL_SCHEDULER_AVAILABLE = True
     logger.info("✅ Email Scheduler Daemon loaded")
 except ImportError as e:
@@ -385,6 +436,7 @@ except ImportError as e:
 # Bleeding Edge AI Capabilities - Revolutionary systems (2025-12-27)
 try:
     from api.bleeding_edge import router as bleeding_edge_router
+
     BLEEDING_EDGE_AVAILABLE = True
     logger.info("Bleeding Edge AI Router loaded - 6 revolutionary systems")
 except ImportError as e:
@@ -394,6 +446,7 @@ except ImportError as e:
 # AI Observability & Integration - Perfect cross-module integration (2025-12-27)
 try:
     from api.ai_observability_api import router as ai_observability_router
+
     AI_OBSERVABILITY_AVAILABLE = True
     logger.info("AI Observability Router loaded - unified metrics, events, integration")
 except ImportError as e:
@@ -403,6 +456,7 @@ except ImportError as e:
 # Predictive Execution - Proactive task execution with safety checks (2026-01-27)
 try:
     from api.predictive_execution import router as predictive_execution_router
+
     PREDICTIVE_EXECUTION_AVAILABLE = True
     logger.info("Predictive Execution Router loaded - proactive task execution")
 except ImportError as e:
@@ -412,6 +466,7 @@ except ImportError as e:
 # AI System Enhancements - Health scoring, alerting, correlation, WebSocket (2025-12-28)
 try:
     from api.ai_enhancements_api import router as ai_enhancements_router
+
     AI_ENHANCEMENTS_AVAILABLE = True
     logger.info("AI Enhancements Router loaded - health, alerting, correlation, WebSocket")
 except ImportError as e:
@@ -421,6 +476,7 @@ except ImportError as e:
 # Unified AI Awareness - Self-reporting AI OS consciousness (2025-12-27)
 try:
     from unified_awareness import check_status, get_status_report, get_unified_awareness
+
     UNIFIED_AWARENESS_AVAILABLE = True
     logger.info("Unified AI Awareness loaded - AI OS is now self-aware")
 except ImportError as e:
@@ -430,6 +486,7 @@ except ImportError as e:
 # True Self-Awareness - Live system truth, not static docs (2026-01-01)
 try:
     from true_self_awareness import get_quick_status, get_system_truth, get_true_awareness
+
     TRUE_AWARENESS_AVAILABLE = True
     logger.info("True Self-Awareness loaded - AI OS knows its own truth")
 except ImportError as e:
@@ -439,6 +496,7 @@ except ImportError as e:
 # New Pipeline Routers - Secure, authenticated endpoints
 try:
     from api.product_generation import router as product_generation_router
+
     PRODUCT_GEN_ROUTER_AVAILABLE = True
     logger.info("Product Generation Router loaded")
 except ImportError as e:
@@ -447,6 +505,7 @@ except ImportError as e:
 
 try:
     from api.affiliate import router as affiliate_router
+
     AFFILIATE_ROUTER_AVAILABLE = True
     logger.info("Affiliate Router loaded")
 except ImportError as e:
@@ -455,6 +514,7 @@ except ImportError as e:
 
 try:
     from api.knowledge import router as knowledge_base_router
+
     KNOWLEDGE_BASE_ROUTER_AVAILABLE = True
     logger.info("Knowledge Base Router loaded")
 except ImportError as e:
@@ -463,6 +523,7 @@ except ImportError as e:
 
 try:
     from api.sop import router as sop_router
+
     SOP_ROUTER_AVAILABLE = True
     logger.info("SOP Generator Router loaded")
 except ImportError as e:
@@ -471,6 +532,7 @@ except ImportError as e:
 
 try:
     from api.companycam import router as companycam_router
+
     COMPANYCAM_ROUTER_AVAILABLE = True
     logger.info("CompanyCam Router loaded")
 except ImportError as e:
@@ -480,6 +542,7 @@ except ImportError as e:
 # Voice Router (Added for AUREA)
 try:
     from api.voice import router as voice_router
+
     VOICE_ROUTER_AVAILABLE = True
     logger.info("Voice Router loaded")
 except ImportError as e:
@@ -489,6 +552,7 @@ except ImportError as e:
 # Always-Know Observability Brain - Deep continuous monitoring (2025-12-29)
 try:
     from api.always_know import router as always_know_router
+
     ALWAYS_KNOW_AVAILABLE = True
     logger.info("🧠 Always-Know Brain Router loaded - continuous state awareness")
 except ImportError as e:
@@ -497,6 +561,7 @@ except ImportError as e:
 
 try:
     from api.always_know_compat import router as always_know_compat_router
+
     ALWAYS_KNOW_COMPAT_AVAILABLE = True
     logger.info("🧠 Always-Know Compat Router loaded - legacy paths")
 except ImportError as e:
@@ -506,8 +571,11 @@ except ImportError as e:
 # Ultimate E2E System - COMPLETE e2e awareness (2025-12-31)
 try:
     from api.ultimate_e2e import router as ultimate_e2e_router
+
     ULTIMATE_E2E_AVAILABLE = True
-    logger.info("🚀 Ultimate E2E System loaded - build logs, DB awareness, UI tests, issue detection")
+    logger.info(
+        "🚀 Ultimate E2E System loaded - build logs, DB awareness, UI tests, issue detection"
+    )
 except ImportError as e:
     ULTIMATE_E2E_AVAILABLE = False
     logger.warning(f"Ultimate E2E System not available: {e}")
@@ -515,8 +583,11 @@ except ImportError as e:
 # TRUE Operational Validation - REAL operation testing (2025-12-31)
 try:
     from api.true_validation import router as true_validation_router
+
     TRUE_VALIDATION_AVAILABLE = True
-    logger.info("✅ TRUE Operational Validator loaded - executes real operations, not status checks")
+    logger.info(
+        "✅ TRUE Operational Validator loaded - executes real operations, not status checks"
+    )
 except ImportError as e:
     TRUE_VALIDATION_AVAILABLE = False
     logger.warning(f"TRUE Validation not available: {e}")
@@ -524,6 +595,7 @@ except ImportError as e:
 # Learning Feedback Loop - Closes the gap between insights and action (2025-12-30)
 try:
     from api.learning import router as learning_router
+
     LEARNING_ROUTER_AVAILABLE = True
     logger.info("🔄 Learning Feedback Loop Router loaded - insights now become actions")
 except ImportError as e:
@@ -533,6 +605,7 @@ except ImportError as e:
 # Learning Visibility API - Exposes what AI has learned (2026-02-02)
 try:
     from api.learning_visibility import router as learning_visibility_router
+
     LEARNING_VISIBILITY_AVAILABLE = True
     logger.info("👁️ Learning Visibility Router loaded - see what the AI has learned")
 except ImportError as e:
@@ -542,6 +615,7 @@ except ImportError as e:
 # ChatGPT-Agent-Level UI Tester - Human-like testing (2025-12-29)
 try:
     from chatgpt_agent_tester import run_chatgpt_agent_tests, run_quick_health_test
+
     CHATGPT_TESTER_AVAILABLE = True
     logger.info("🤖 ChatGPT Agent Tester loaded - human-like UI testing")
 except ImportError as e:
@@ -557,6 +631,7 @@ from erp_event_bridge import router as erp_event_router
 try:
     from api.events.unified import init_unified_events
     from api.events.unified import router as unified_events_router
+
     UNIFIED_EVENTS_AVAILABLE = True
     logger.info("Unified Events router loaded - central event bus for all systems")
 except ImportError as e:
@@ -569,6 +644,7 @@ from observability import RequestMetrics, TTLCache
 # System Observability - Makes AI OS transparent and queryable
 try:
     from system_observability import router as system_observability_router
+
     SYSTEM_OBSERVABILITY_AVAILABLE = True
     logger.info("✅ System Observability Layer loaded - AI OS now queryable")
 except ImportError as e:
@@ -579,6 +655,7 @@ except ImportError as e:
 # Agent Health Monitoring
 try:
     from agent_health_monitor import get_health_monitor
+
     HEALTH_MONITOR_AVAILABLE = True
 except ImportError:
     HEALTH_MONITOR_AVAILABLE = False
@@ -608,15 +685,12 @@ RESPONSE_CACHE = TTLCache(max_size=256)
 # long enough to prevent thundering-herd stalls on Render under load.
 HEALTH_CACHE_TTL_S = float(os.getenv("HEALTH_CACHE_TTL_S", "30"))
 HEALTH_PAYLOAD_TIMEOUT_S = float(os.getenv("HEALTH_PAYLOAD_TIMEOUT_S", "5"))
-CACHE_TTLS = {
-    "health": HEALTH_CACHE_TTL_S,
-    "agents": 30.0,
-    "systems_usage": 15.0
-}
+CACHE_TTLS = {"health": HEALTH_CACHE_TTL_S, "agents": 30.0, "systems_usage": 15.0}
 
 # Import agent scheduler with fallback
 try:
     from agent_scheduler import AgentScheduler
+
     SCHEDULER_AVAILABLE = True
     logger.info("✅ Agent Scheduler module loaded")
 except ImportError as e:
@@ -627,6 +701,7 @@ except ImportError as e:
 # Import AI Core with fallback
 try:
     from ai_core import RealAICore, ai_analyze, ai_generate
+
     ai_core = RealAICore()
 
     # Determine whether any real AI providers are configured
@@ -636,7 +711,9 @@ try:
 
     # In production, it is a hard failure if no real AI provider is available
     if config.environment == "production" and not AI_AVAILABLE:
-        raise RuntimeError("AI Core initialized but no real AI providers are configured in production.")
+        raise RuntimeError(
+            "AI Core initialized but no real AI providers are configured in production."
+        )
 
     logger.info("✅ Real AI Core initialized successfully")
 except Exception as e:
@@ -647,6 +724,7 @@ except Exception as e:
 # Import AUREA Master Orchestrator with fallback
 try:
     from aurea_orchestrator import AUREA, AutonomyLevel
+
     AUREA_AVAILABLE = True
     logger.info("✅ AUREA Master Orchestrator loaded")
 except ImportError as e:
@@ -658,6 +736,7 @@ except ImportError as e:
 # Import Self-Healing Recovery with fallback
 try:
     from self_healing_recovery import SelfHealingRecovery, ErrorContext, ErrorSeverity
+
     SELF_HEALING_AVAILABLE = True
     logger.info("✅ Self-Healing Recovery loaded")
 except ImportError as e:
@@ -669,6 +748,8 @@ except ImportError as e:
 
 # Global self-healing instance for exception handler integration
 _global_healer = None
+
+
 def _get_global_healer():
     """Lazy initialization of global self-healer to avoid startup delays"""
     global _global_healer
@@ -680,9 +761,11 @@ def _get_global_healer():
             logger.warning(f"Failed to initialize global healer: {e}")
     return _global_healer
 
+
 # Import Self-Healing Reconciler (continuous healing loop)
 try:
     from self_healing_reconciler import get_reconciler, start_healing_loop
+
     RECONCILER_AVAILABLE = True
     logger.info("✅ Self-Healing Reconciler loaded")
 except ImportError as e:
@@ -702,6 +785,7 @@ try:
         report_service_failure,
         CIRCUIT_BREAKER_CONFIG,
     )
+
     SERVICE_CIRCUIT_BREAKERS_AVAILABLE = True
     logger.info("✅ Service Circuit Breakers loaded - protecting all external service calls")
 except ImportError as e:
@@ -714,6 +798,7 @@ except ImportError as e:
 # Import Unified Memory Manager with fallback
 try:
     from unified_memory_manager import UnifiedMemoryManager
+
     MEMORY_AVAILABLE = True
     logger.info("✅ Unified Memory Manager loaded")
 except ImportError as e:
@@ -724,6 +809,7 @@ except ImportError as e:
 # Import Embedded Memory System with fallback
 try:
     from embedded_memory_system import get_embedded_memory
+
     EMBEDDED_MEMORY_AVAILABLE = True
     logger.info("✅ Embedded Memory System loaded")
 except ImportError as e:
@@ -734,6 +820,7 @@ except ImportError as e:
 # Import AI Training Pipeline with fallback
 try:
     from ai_training_pipeline import AITrainingPipeline
+
     TRAINING_AVAILABLE = True
     logger.info("✅ AI Training Pipeline loaded")
 except ImportError as e:
@@ -744,6 +831,7 @@ except ImportError as e:
 # Import Notebook LM+ Learning with fallback
 try:
     from notebook_lm_plus import NotebookLMPlus
+
     LEARNING_AVAILABLE = True
     logger.info("✅ Notebook LM+ Learning loaded")
 except ImportError as e:
@@ -756,6 +844,7 @@ except ImportError as e:
 # Import System Improvement Agent with fallback
 try:
     from system_improvement_agent import SystemImprovementAgent
+
     SYSTEM_IMPROVEMENT_AVAILABLE = True
     logger.info("✅ System Improvement Agent loaded")
 except ImportError as e:
@@ -766,6 +855,7 @@ except ImportError as e:
 # Import DevOps Optimization Agent with fallback
 try:
     from devops_optimization_agent import DevOpsOptimizationAgent
+
     DEVOPS_AGENT_AVAILABLE = True
     logger.info("✅ DevOps Optimization Agent loaded")
 except ImportError as e:
@@ -776,6 +866,7 @@ except ImportError as e:
 # Import Code Quality Agent with fallback
 try:
     from code_quality_agent import CodeQualityAgent
+
     CODE_QUALITY_AVAILABLE = True
     logger.info("✅ Code Quality Agent loaded")
 except ImportError as e:
@@ -786,6 +877,7 @@ except ImportError as e:
 # Import Customer Success Agent with fallback
 try:
     from customer_success_agent import CustomerSuccessAgent
+
     CUSTOMER_SUCCESS_AVAILABLE = True
     logger.info("✅ Customer Success Agent loaded")
 except ImportError as e:
@@ -796,6 +888,7 @@ except ImportError as e:
 # Import Competitive Intelligence Agent with fallback
 try:
     from competitive_intelligence_agent import CompetitiveIntelligenceAgent
+
     COMPETITIVE_INTEL_AVAILABLE = True
     logger.info("✅ Competitive Intelligence Agent loaded")
 except ImportError as e:
@@ -806,6 +899,7 @@ except ImportError as e:
 # Import Vision Alignment Agent with fallback
 try:
     from vision_alignment_agent import VisionAlignmentAgent
+
     VISION_ALIGNMENT_AVAILABLE = True
     logger.info("✅ Vision Alignment Agent loaded")
 except ImportError as e:
@@ -816,6 +910,7 @@ except ImportError as e:
 # Import AI Self-Awareness Module with fallback
 try:
     from ai_self_awareness import SelfAwareAI, get_self_aware_ai
+
     SELF_AWARENESS_AVAILABLE = True
     logger.info("✅ AI Self-Awareness Module loaded")
 except ImportError as e:
@@ -827,6 +922,7 @@ except ImportError as e:
 # Import NerveCenter - Central Nervous System of BrainOps AI OS
 try:
     from nerve_center import NerveCenter, get_nerve_center
+
     NERVE_CENTER_AVAILABLE = True
     logger.info("✅ NerveCenter module loaded")
 except ImportError as e:
@@ -843,6 +939,7 @@ try:
         TaskStatus,
         get_integration_layer,
     )
+
     INTEGRATION_LAYER_AVAILABLE = True
     logger.info("✅ AI Integration Layer loaded")
 except ImportError as e:
@@ -856,6 +953,7 @@ except ImportError as e:
 # Import LangGraph Orchestrator with fallback
 try:
     from langgraph_orchestrator import LangGraphOrchestrator
+
     LANGGRAPH_AVAILABLE = True
     logger.info("✅ LangGraph Orchestrator loaded")
 except ImportError as e:
@@ -868,6 +966,7 @@ try:
     from langchain_openai import ChatOpenAI
 
     from aurea_nlu_processor import AUREANLUProcessor
+
     AUREA_NLU_AVAILABLE = True
     logger.info("✅ AUREA NLU Processor loaded")
 except ImportError as e:
@@ -879,6 +978,7 @@ except ImportError as e:
 # Import AI Board of Directors
 try:
     from ai_board_governance import AIBoardOfDirectors
+
     AI_BOARD_AVAILABLE = True
     logger.info("✅ AI Board of Directors loaded")
 except ImportError as e:
@@ -924,7 +1024,10 @@ def _parse_capabilities(raw: Any) -> list[dict[str, Any]]:
         elif isinstance(item, dict):
             capabilities.append(
                 {
-                    "name": item.get("name") or item.get("capability") or item.get("id") or "capability",
+                    "name": item.get("name")
+                    or item.get("capability")
+                    or item.get("id")
+                    or "capability",
                     "description": item.get("description", ""),
                     "enabled": bool(item.get("enabled", True)),
                     "parameters": item.get("parameters", {}),
@@ -977,6 +1080,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager - FAST STARTUP for Render port detection"""
     # Startup - log immediately so Render sees activity
     import time as _time
+
     app.state._start_time = _time.time()
     logger.info(f"🚀 Starting BrainOps AI Agents v{VERSION} - Build: {BUILD_TIME}")
     logger.info("⚡ Fast startup mode - deferring heavy init to background")
@@ -1004,15 +1108,20 @@ async def lifespan(app: FastAPI):
 
     # Get tenant configuration from centralized config
     from config import config as app_config
+
     DEFAULT_TENANT_ID = app_config.tenant.default_tenant_id
 
     # Use environment-configured tenant for startup initialization
     # Per-request tenant resolution happens via X-Tenant-ID header in API endpoints
     tenant_id = DEFAULT_TENANT_ID
     if tenant_id:
-        logger.info(f"🔑 Default tenant_id: {tenant_id} (override per-request via {app_config.tenant.header_name} header)")
+        logger.info(
+            f"🔑 Default tenant_id: {tenant_id} (override per-request via {app_config.tenant.header_name} header)"
+        )
     else:
-        logger.warning("⚠️ No DEFAULT_TENANT_ID configured - set DEFAULT_TENANT_ID environment variable")
+        logger.warning(
+            "⚠️ No DEFAULT_TENANT_ID configured - set DEFAULT_TENANT_ID environment variable"
+        )
 
     # Keep handles defined to avoid unbound errors when optional systems are disabled
 
@@ -1029,12 +1138,12 @@ async def lifespan(app: FastAPI):
         try:
             loop = asyncio.get_running_loop()
             if not getattr(loop, "_brainops_exception_handler_set", False):
+
                 def _brainops_exception_handler(loop, context):
                     msg = context.get("message") or ""
                     exc = context.get("exception")
-                    if (
-                        "Future exception was never retrieved" in msg
-                        and isinstance(exc, asyncio.CancelledError)
+                    if "Future exception was never retrieved" in msg and isinstance(
+                        exc, asyncio.CancelledError
                     ):
                         logger.debug("Suppressed unhandled CancelledError future: %s", msg)
                         return
@@ -1079,7 +1188,9 @@ async def lifespan(app: FastAPI):
             )
             await init_pool(pool_config)
             if using_fallback():
-                logger.warning("⚠️ Running with in-memory fallback datastore (database unreachable).")
+                logger.warning(
+                    "⚠️ Running with in-memory fallback datastore (database unreachable)."
+                )
             else:
                 logger.info("✅ Database pool initialized")
 
@@ -1153,13 +1264,16 @@ async def lifespan(app: FastAPI):
                     logger.info("🧵 Scheduled %s on background loop", name)
                     return future
                 except Exception as exc:
-                    logger.error("Failed to schedule %s on background loop: %s", name, exc, exc_info=True)
+                    logger.error(
+                        "Failed to schedule %s on background loop: %s", name, exc, exc_info=True
+                    )
             create_safe_task(coro, name)
             return None
 
         # ── Phase 1: Core systems (scheduler, AUREA, healing) ──
         if SCHEDULER_AVAILABLE:
             try:
+
                 def _init_scheduler_sync():
                     scheduler = AgentScheduler()
                     scheduler.start()
@@ -1180,7 +1294,9 @@ async def lifespan(app: FastAPI):
                 app.state.aurea = aurea_instance
                 # AUREA uses synchronous DB operations (psycopg2) internally; run
                 # it off the HTTP event loop to prevent intermittent 502s.
-                app.state.aurea_future = _run_on_bg_loop(aurea_instance.orchestrate(), "aurea_orchestrate")
+                app.state.aurea_future = _run_on_bg_loop(
+                    aurea_instance.orchestrate(), "aurea_orchestrate"
+                )
                 logger.info("🧠 AUREA Master Orchestrator STARTED - Observe→Decide→Act loop ACTIVE")
             except Exception as e:
                 logger.error(f"❌ AUREA initialization failed: {e}")
@@ -1230,6 +1346,7 @@ async def lifespan(app: FastAPI):
         # Warm up Unified Brain for fast /brain/* endpoint responses
         try:
             from api.brain import brain, BRAIN_AVAILABLE
+
             if BRAIN_AVAILABLE and brain:
                 await asyncio.wait_for(brain._ensure_table(), timeout=15.0)
                 logger.info("🧠 Unified Brain warmed up and ready")
@@ -1274,14 +1391,19 @@ async def lifespan(app: FastAPI):
 
                 app.state.nerve_center = nerve_center
                 logger.info("🧬 NerveCenter ACTIVATED - AI OS Central Nervous System ONLINE")
-                logger.info("   └── Autonomic decisions, nerve signals, and consciousness coordination active")
+                logger.info(
+                    "   └── Autonomic decisions, nerve signals, and consciousness coordination active"
+                )
             except Exception as e:
                 logger.error(f"❌ NerveCenter activation failed: {e}")
                 app.state.nerve_center_error = str(e)
                 import traceback
+
                 logger.error(traceback.format_exc())
         elif NERVE_CENTER_AVAILABLE and not config.enable_nerve_center:
-            logger.info("⚠️ NerveCenter available but disabled (set ENABLE_NERVE_CENTER=true to enable)")
+            logger.info(
+                "⚠️ NerveCenter available but disabled (set ENABLE_NERVE_CENTER=true to enable)"
+            )
         elif not NERVE_CENTER_AVAILABLE:
             logger.warning("⚠️ NerveCenter module not available")
 
@@ -1376,17 +1498,19 @@ async def lifespan(app: FastAPI):
                 logger.error(f"❌ Self-Awareness Module activation failed: {e}")
 
         # Count activated agents
-        agents_active = sum([
-            app.state.training is not None,
-            app.state.learning is not None,
-            app.state.system_improvement is not None,
-            app.state.devops_agent is not None,
-            app.state.code_quality is not None,
-            app.state.customer_success is not None,
-            app.state.competitive_intel is not None,
-            app.state.vision_alignment is not None,
-            app.state.self_aware_ai is not None
-        ])
+        agents_active = sum(
+            [
+                app.state.training is not None,
+                app.state.learning is not None,
+                app.state.system_improvement is not None,
+                app.state.devops_agent is not None,
+                app.state.code_quality is not None,
+                app.state.customer_success is not None,
+                app.state.competitive_intel is not None,
+                app.state.vision_alignment is not None,
+                app.state.self_aware_ai is not None,
+            ]
+        )
         logger.info(f"🤖 {agents_active} specialized AI agents ACTIVATED and OPERATIONAL")
 
         # ── Phase 4: Background daemons (stagger to prevent DB pool exhaustion) ──
@@ -1427,9 +1551,13 @@ async def lifespan(app: FastAPI):
 
             # This orchestrator uses synchronous psycopg2 connections; run it off
             # the HTTP loop to prevent Render health check failures.
-            app.state.task_orchestrator_future = _run_on_bg_loop(start_task_orchestrator(), "task_orchestrator")
+            app.state.task_orchestrator_future = _run_on_bg_loop(
+                start_task_orchestrator(), "task_orchestrator"
+            )
             app.state.task_orchestrator = get_task_orchestrator()
-            logger.info("🎯 Intelligent Task Orchestrator STARTED - AI-driven task prioritization active")
+            logger.info(
+                "🎯 Intelligent Task Orchestrator STARTED - AI-driven task prioritization active"
+            )
         except Exception as e:
             logger.error(f"❌ Intelligent Task Orchestrator startup failed: {e}")
 
@@ -1439,6 +1567,7 @@ async def lifespan(app: FastAPI):
         # Initialize Slack alerting integration (Total Completion Protocol)
         try:
             from slack_notifications import setup_slack_alerting
+
             if setup_slack_alerting():
                 logger.info("📢 Slack alerting integration ACTIVATED")
             else:
@@ -1461,6 +1590,7 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ Neural Core initialization failed: {e}")
                 import traceback
+
                 logger.error(traceback.format_exc())
         else:
             logger.warning("⚠️ Neural Core not available - AI OS self-awareness limited")
@@ -1471,6 +1601,7 @@ async def lifespan(app: FastAPI):
         # Initialize Learning-Action Bridge - bridges learning to behavior
         try:
             from learning_action_bridge import get_learning_bridge, run_bridge_sync_loop
+
             bridge = await get_learning_bridge()
             app.state.learning_bridge = bridge
             logger.info("🔗 Learning-Action Bridge initialized")
@@ -1484,6 +1615,7 @@ async def lifespan(app: FastAPI):
         # Initialize Meta-Intelligence Controller - TRUE AGI capabilities
         try:
             from meta_intelligence import get_meta_intelligence
+
             meta_intel = await get_meta_intelligence()
             app.state.meta_intelligence = meta_intel
             state = meta_intel.get_intelligence_state()
@@ -1528,15 +1660,21 @@ async def lifespan(app: FastAPI):
                             BATCH_PER_TABLE,
                         )
                         for row in rows:
-                            text = row["content"] if isinstance(row["content"], str) else str(row["content"])
+                            text = (
+                                row["content"]
+                                if isinstance(row["content"], str)
+                                else str(row["content"])
+                            )
                             if not text:
                                 continue
                             emb = await generate_embedding_async(text[:30000])
                             if emb:
                                 import json as _json
+
                                 await pool.execute(
                                     "UPDATE unified_ai_memory SET embedding = $1::vector WHERE id = $2",
-                                    _json.dumps(emb), row["id"],
+                                    _json.dumps(emb),
+                                    row["id"],
                                 )
                                 total_updated += 1
                             await asyncio.sleep(SLEEP_BETWEEN_ROWS)
@@ -1552,15 +1690,21 @@ async def lifespan(app: FastAPI):
                             BATCH_PER_TABLE,
                         )
                         for row in rows:
-                            text = row["content"] if isinstance(row["content"], str) else str(row["content"])
+                            text = (
+                                row["content"]
+                                if isinstance(row["content"], str)
+                                else str(row["content"])
+                            )
                             if not text:
                                 continue
                             emb = await generate_embedding_async(text[:30000])
                             if emb:
                                 import json as _json
+
                                 await pool.execute(
                                     "UPDATE live_brain_memories SET embedding = $1::vector WHERE id = $2",
-                                    _json.dumps(emb), row["id"],
+                                    _json.dumps(emb),
+                                    row["id"],
                                 )
                                 total_updated += 1
                             await asyncio.sleep(SLEEP_BETWEEN_ROWS)
@@ -1634,6 +1778,7 @@ async def lifespan(app: FastAPI):
     # Stop Task Queue Consumer
     try:
         from task_queue_consumer import stop_task_queue_consumer
+
         await stop_task_queue_consumer()
         logger.info("✅ Task Queue Consumer stopped")
     except Exception as e:
@@ -1642,6 +1787,7 @@ async def lifespan(app: FastAPI):
     # Stop AI Task Queue Consumer
     try:
         from ai_task_queue_consumer import stop_ai_task_queue_consumer
+
         await stop_ai_task_queue_consumer()
         logger.info("✅ AI Task Queue Consumer stopped")
     except Exception as e:
@@ -1664,7 +1810,7 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Email Scheduler shutdown error: {e}")
 
     # Stop scheduler
-    if hasattr(app.state, 'scheduler') and app.state.scheduler:
+    if hasattr(app.state, "scheduler") and app.state.scheduler:
         try:
             app.state.scheduler.stop()
             logger.info("✅ Agent Scheduler stopped")
@@ -1672,7 +1818,7 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Scheduler shutdown error: {e}")
 
     # Stop AUREA
-    if hasattr(app.state, 'aurea') and app.state.aurea:
+    if hasattr(app.state, "aurea") and app.state.aurea:
         try:
             app.state.aurea.stop()
             logger.info("✅ AUREA Orchestrator stopped")
@@ -1680,7 +1826,7 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ AUREA shutdown error: {e}")
 
     # Stop NerveCenter
-    if hasattr(app.state, 'nerve_center') and app.state.nerve_center:
+    if hasattr(app.state, "nerve_center") and app.state.nerve_center:
         try:
             await app.state.nerve_center.deactivate()
             logger.info("✅ NerveCenter deactivated")
@@ -1690,6 +1836,7 @@ async def lifespan(app: FastAPI):
     # Close database pool
     try:
         from database import close_pool
+
         await close_pool()
         logger.info("✅ Database pool closed")
     except Exception as e:
@@ -1725,7 +1872,7 @@ app = FastAPI(
     title="BrainOps AI Agents",
     description="AI Native Operating System - Fully Autonomous AI Agents",
     version=VERSION,
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Attach slowapi rate limiter to app.
@@ -1757,6 +1904,7 @@ app.add_middleware(
 
 # Mount static files for landing pages (email capture, product pages)
 import os
+
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
@@ -1779,7 +1927,9 @@ if os.path.isdir(_static_dir):
 
 # Pre-compiled patterns for endpoint categories
 _HEALTH_PATHS = frozenset({"/health", "/healthz", "/ready", "/alive", "/"})
-_AGENT_EXEC_PATTERN = re.compile(r"^/agents/[^/]+/execute$|^/execute$|^/agents/execute$|^/api/v1/agents/execute$")
+_AGENT_EXEC_PATTERN = re.compile(
+    r"^/agents/[^/]+/execute$|^/execute$|^/agents/execute$|^/api/v1/agents/execute$"
+)
 _EMAIL_SEND_PATHS = frozenset({"/email/send", "/email/process", "/email/test"})
 _MEMORY_PREFIX = "/memory/"
 
@@ -1858,7 +2008,12 @@ def _classify_path(path: str) -> str:
         return "agent_exec"
     if path in _EMAIL_SEND_PATHS:
         return "email"
-    if path.startswith(_MEMORY_PREFIX) or path == "/memory/store" or path == "/memory/search" or path == "/memory/stats":
+    if (
+        path.startswith(_MEMORY_PREFIX)
+        or path == "/memory/store"
+        or path == "/memory/search"
+        or path == "/memory/stats"
+    ):
         return "memory"
     return "default"
 
@@ -1885,7 +2040,10 @@ async def rate_limit_middleware(request: Request, call_next):
         rpm, _ = _CATEGORY_LIMITS[category]
         logger.warning(
             "Rate limit exceeded: category=%s identity=%s path=%s limit=%d/min",
-            category, identity, path, rpm,
+            category,
+            identity,
+            path,
+            rpm,
         )
         return JSONResponse(
             status_code=429,
@@ -1918,11 +2076,9 @@ async def record_request_metrics(request: Request, call_next):
         duration_ms = (time.perf_counter() - start) * 1000
         path = request.url.path.split("?")[0]
         await REQUEST_METRICS.record(
-            path=path,
-            method=request.method,
-            status=status_code,
-            duration_ms=duration_ms
+            path=path, method=request.method, status=status_code, duration_ms=duration_ms
         )
+
 
 # API Key authentication
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -1938,7 +2094,7 @@ _API_KEY_ERROR_LOG_INTERVAL = 60  # Only log same path/error once per minute
 async def verify_api_key(
     request: Request,
     api_key: str = Security(api_key_header),
-    jwt_token: Optional[HTTPAuthorizationCredentials] = Security(jwt_bearer)
+    jwt_token: Optional[HTTPAuthorizationCredentials] = Security(jwt_bearer),
 ) -> bool:
     """
     Verify authentication using either API Key or JWT.
@@ -1947,7 +2103,7 @@ async def verify_api_key(
     # 0. Check Master Key (Immediate Override)
     # Check headers directly to catch it before JWT processing
     # (FastAPI dependencies might have already parsed it into api_key or jwt_token)
-    master_key = getattr(config.security, 'master_api_key', None) or os.getenv('MASTER_API_KEY')
+    master_key = getattr(config.security, "master_api_key", None) or os.getenv("MASTER_API_KEY")
 
     # Check X-API-Key header or api_key arg
     if master_key and api_key == master_key:
@@ -2013,7 +2169,9 @@ async def verify_api_key(
         if now - _api_key_error_log_times[error_key] > _API_KEY_ERROR_LOG_INTERVAL:
             _api_key_error_log_times[error_key] = now
             logger.warning(f"Auth missing for {path} (rate-limited)")
-        raise HTTPException(status_code=403, detail="Authentication required (API Key or Bearer Token)")
+        raise HTTPException(
+            status_code=403, detail="Authentication required (API Key or Bearer Token)"
+        )
 
     if master_key and provided == master_key:
         # Master key override (redundant but safe)
@@ -2051,50 +2209,117 @@ app.include_router(erp_event_router)
 # NOTE: /webhook/erp endpoint has its own signature verification, but other endpoints need auth
 if UNIFIED_EVENTS_AVAILABLE and unified_events_router:
     app.include_router(unified_events_router, dependencies=SECURED_DEPENDENCIES)
-    logger.info("Mounted: Unified Events API at /events - publish, webhook/erp, recent, stats, replay (SECURED)")
+    logger.info(
+        "Mounted: Unified Events API at /events - publish, webhook/erp, recent, stats, replay (SECURED)"
+    )
 
 app.include_router(google_keep_router, dependencies=SECURED_DEPENDENCIES)
 app.include_router(codebase_graph_router, dependencies=SECURED_DEPENDENCIES)
-app.include_router(state_sync_router, dependencies=SECURED_DEPENDENCIES)  # Real-time state synchronization
+app.include_router(
+    state_sync_router, dependencies=SECURED_DEPENDENCIES
+)  # Real-time state synchronization
 app.include_router(revenue_router, dependencies=SECURED_DEPENDENCIES)  # Revenue generation system
-app.include_router(revenue_complete_router, dependencies=SECURED_DEPENDENCIES)  # Complete Revenue API with billing
-app.include_router(revenue_control_tower_router, dependencies=SECURED_DEPENDENCIES)  # Revenue Control Tower - GROUND TRUTH (REAL vs TEST)
-app.include_router(pipeline_router, dependencies=SECURED_DEPENDENCIES)  # Pipeline State Machine - ledger-backed state transitions
-app.include_router(proposals_router, dependencies=SECURED_DEPENDENCIES)  # Proposal Engine - draft/approve/send workflow
-app.include_router(outreach_router, dependencies=SECURED_DEPENDENCIES)  # Outreach Engine - lead enrichment and sequences
-app.include_router(payments_router, dependencies=SECURED_DEPENDENCIES)  # Payment Capture - invoices and revenue collection
-app.include_router(communications_router, dependencies=SECURED_DEPENDENCIES)  # Communications - send estimates/invoices from Weathercraft ERP
-app.include_router(revenue_operator_router, dependencies=SECURED_DEPENDENCIES)  # AI Revenue Operator - automated actions
-app.include_router(lead_discovery_router, dependencies=SECURED_DEPENDENCIES)  # Lead Discovery Engine - automated lead discovery and qualification
-app.include_router(lead_engine_router, dependencies=SECURED_DEPENDENCIES)  # Lead Engine - MRG→ERP relay pipeline
-app.include_router(campaigns_router, dependencies=SECURED_DEPENDENCIES)  # Campaign System - CO commercial reroof lead gen
-app.include_router(email_capture_router)  # Email Capture - PUBLIC endpoint for lead generation (no auth required)
-app.include_router(neural_reconnection_router, dependencies=SECURED_DEPENDENCIES)  # Neural Reconnection - Schema unification & mode logic
-app.include_router(roofing_labor_ml_router, dependencies=SECURED_DEPENDENCIES)  # Roofing labor ML (RandomForest)
+app.include_router(
+    taskmate_router, dependencies=SECURED_DEPENDENCIES
+)  # P1-TASKMATE-001: Cross-model task manager
+app.include_router(
+    revenue_complete_router, dependencies=SECURED_DEPENDENCIES
+)  # Complete Revenue API with billing
+app.include_router(
+    revenue_control_tower_router, dependencies=SECURED_DEPENDENCIES
+)  # Revenue Control Tower - GROUND TRUTH (REAL vs TEST)
+app.include_router(
+    pipeline_router, dependencies=SECURED_DEPENDENCIES
+)  # Pipeline State Machine - ledger-backed state transitions
+app.include_router(
+    proposals_router, dependencies=SECURED_DEPENDENCIES
+)  # Proposal Engine - draft/approve/send workflow
+app.include_router(
+    outreach_router, dependencies=SECURED_DEPENDENCIES
+)  # Outreach Engine - lead enrichment and sequences
+app.include_router(
+    payments_router, dependencies=SECURED_DEPENDENCIES
+)  # Payment Capture - invoices and revenue collection
+app.include_router(
+    communications_router, dependencies=SECURED_DEPENDENCIES
+)  # Communications - send estimates/invoices from Weathercraft ERP
+app.include_router(
+    revenue_operator_router, dependencies=SECURED_DEPENDENCIES
+)  # AI Revenue Operator - automated actions
+app.include_router(
+    lead_discovery_router, dependencies=SECURED_DEPENDENCIES
+)  # Lead Discovery Engine - automated lead discovery and qualification
+app.include_router(
+    lead_engine_router, dependencies=SECURED_DEPENDENCIES
+)  # Lead Engine - MRG→ERP relay pipeline
+app.include_router(
+    campaigns_router, dependencies=SECURED_DEPENDENCIES
+)  # Campaign System - CO commercial reroof lead gen
+app.include_router(
+    email_capture_router
+)  # Email Capture - PUBLIC endpoint for lead generation (no auth required)
+app.include_router(
+    neural_reconnection_router, dependencies=SECURED_DEPENDENCIES
+)  # Neural Reconnection - Schema unification & mode logic
+app.include_router(
+    roofing_labor_ml_router, dependencies=SECURED_DEPENDENCIES
+)  # Roofing labor ML (RandomForest)
 
 # Bleeding-edge AI systems (2025)
-app.include_router(digital_twin_router, dependencies=SECURED_DEPENDENCIES)  # Digital Twin virtual replicas
-app.include_router(market_intelligence_router, dependencies=SECURED_DEPENDENCIES)  # Predictive market intelligence
-app.include_router(system_orchestrator_router, dependencies=SECURED_DEPENDENCIES)  # Autonomous system orchestration (1-10K systems)
-app.include_router(self_healing_router, dependencies=SECURED_DEPENDENCIES)  # Enhanced self-healing AI infrastructure
+app.include_router(
+    digital_twin_router, dependencies=SECURED_DEPENDENCIES
+)  # Digital Twin virtual replicas
+app.include_router(
+    market_intelligence_router, dependencies=SECURED_DEPENDENCIES
+)  # Predictive market intelligence
+app.include_router(
+    system_orchestrator_router, dependencies=SECURED_DEPENDENCIES
+)  # Autonomous system orchestration (1-10K systems)
+app.include_router(
+    self_healing_router, dependencies=SECURED_DEPENDENCIES
+)  # Enhanced self-healing AI infrastructure
 
 # System Observability - THE visibility layer that makes AI OS transparent
 if SYSTEM_OBSERVABILITY_AVAILABLE and system_observability_router:
     app.include_router(system_observability_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("Mounted: System Observability at /observe - status, problems, healing, ask")
-app.include_router(e2e_verification_router, dependencies=SECURED_DEPENDENCIES)  # E2E System Verification
+app.include_router(
+    e2e_verification_router, dependencies=SECURED_DEPENDENCIES
+)  # E2E System Verification
 app.include_router(logistics_router, dependencies=SECURED_DEPENDENCIES)  # Neuro-Symbolic Logistics
-app.include_router(victoria_router, dependencies=SECURED_DEPENDENCIES)  # Victoria scheduling agent (ERP compatibility)
-app.include_router(infrastructure_router, dependencies=SECURED_DEPENDENCIES)  # Self-Provisioning Infra
-app.include_router(revenue_automation_router, dependencies=SECURED_DEPENDENCIES)  # Revenue Automation Engine
-app.include_router(income_streams_router, dependencies=SECURED_DEPENDENCIES)  # Automated Income Streams (email, subscriptions, affiliates)
-app.include_router(mcp_router, dependencies=SECURED_DEPENDENCIES)  # MCP Bridge - 345 tools (Render, Vercel, Supabase, GitHub, Stripe, Docker)
-app.include_router(cicd_router, dependencies=SECURED_DEPENDENCIES)  # Autonomous CI/CD - manage 1-10K deployments
-app.include_router(a2ui_router, dependencies=SECURED_DEPENDENCIES)  # Google A2UI Protocol - Agent-generated UIs
-app.include_router(aurea_chat_router, dependencies=SECURED_DEPENDENCIES)  # AUREA Live Conversational AI
-app.include_router(full_observability_router, dependencies=SECURED_DEPENDENCIES)  # Comprehensive Observability Dashboard
-app.include_router(self_awareness_router, dependencies=SECURED_DEPENDENCIES)  # Self-Awareness Dashboard
-app.include_router(ai_awareness_router, dependencies=SECURED_DEPENDENCIES)  # Complete AI Awareness - THE endpoint
+app.include_router(
+    victoria_router, dependencies=SECURED_DEPENDENCIES
+)  # Victoria scheduling agent (ERP compatibility)
+app.include_router(
+    infrastructure_router, dependencies=SECURED_DEPENDENCIES
+)  # Self-Provisioning Infra
+app.include_router(
+    revenue_automation_router, dependencies=SECURED_DEPENDENCIES
+)  # Revenue Automation Engine
+app.include_router(
+    income_streams_router, dependencies=SECURED_DEPENDENCIES
+)  # Automated Income Streams (email, subscriptions, affiliates)
+app.include_router(
+    mcp_router, dependencies=SECURED_DEPENDENCIES
+)  # MCP Bridge - 345 tools (Render, Vercel, Supabase, GitHub, Stripe, Docker)
+app.include_router(
+    cicd_router, dependencies=SECURED_DEPENDENCIES
+)  # Autonomous CI/CD - manage 1-10K deployments
+app.include_router(
+    a2ui_router, dependencies=SECURED_DEPENDENCIES
+)  # Google A2UI Protocol - Agent-generated UIs
+app.include_router(
+    aurea_chat_router, dependencies=SECURED_DEPENDENCIES
+)  # AUREA Live Conversational AI
+app.include_router(
+    full_observability_router, dependencies=SECURED_DEPENDENCIES
+)  # Comprehensive Observability Dashboard
+app.include_router(
+    self_awareness_router, dependencies=SECURED_DEPENDENCIES
+)  # Self-Awareness Dashboard
+app.include_router(
+    ai_awareness_router, dependencies=SECURED_DEPENDENCIES
+)  # Complete AI Awareness - THE endpoint
 
 from api.autonomic_status import router as autonomic_status_router  # Autonomic Status API
 
@@ -2124,7 +2349,9 @@ if CUSTOMER_ACQUISITION_API_AVAILABLE:
 # AI-Powered UI Testing System (2025-12-29) - Automated visual testing with AI vision
 if UI_TESTING_AVAILABLE:
     app.include_router(ui_testing_router, dependencies=SECURED_DEPENDENCIES)
-    logger.info("Mounted: AI UI Testing API at /ui-testing - visual testing, accessibility, performance")
+    logger.info(
+        "Mounted: AI UI Testing API at /ui-testing - visual testing, accessibility, performance"
+    )
 
 # Bleeding Edge AI Systems (2025-12-27) - Revolutionary capabilities
 if BLEEDING_EDGE_AVAILABLE:
@@ -2150,6 +2377,7 @@ if NEURAL_CORE_AVAILABLE:
 # CODE QUALITY MONITOR - Deep code-level monitoring (2026-01-27)
 try:
     from api.code_quality import router as code_quality_router
+
     app.include_router(code_quality_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("🔬 Mounted: Code Quality Monitor at /code-quality - Deep code-level monitoring")
 except ImportError as e:
@@ -2158,6 +2386,7 @@ except ImportError as e:
 # AI OS UNIFIED DASHBOARD - The one endpoint to rule them all (2026-01-27)
 try:
     from api.ai_os_dashboard import router as ai_os_dashboard_router
+
     app.include_router(ai_os_dashboard_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("🌟 Mounted: AI OS Dashboard at /ai-os - UNIFIED COMMAND CENTER")
 except ImportError as e:
@@ -2166,6 +2395,7 @@ except ImportError as e:
 # TRUE AI INTELLIGENCE - Real LLM-powered analysis, not pattern matching (2026-01-27)
 try:
     from api.ai_intelligence import router as ai_intelligence_router
+
     app.include_router(ai_intelligence_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("🧠 Mounted: TRUE AI Intelligence at /intelligence - REAL LLM ANALYSIS")
 except ImportError as e:
@@ -2174,6 +2404,7 @@ except ImportError as e:
 # DATABASE INTELLIGENCE - AI-powered DB monitoring and optimization (2026-01-27)
 try:
     from api.db_intelligence import router as db_intelligence_router
+
     app.include_router(db_intelligence_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("🗄️ Mounted: Database Intelligence at /db-intelligence - AI DB OPTIMIZATION")
 except ImportError as e:
@@ -2182,6 +2413,7 @@ except ImportError as e:
 # CIRCUIT BREAKERS API - Centralized circuit breaker management (2026-01-27)
 try:
     from api.circuit_breakers import router as circuit_breakers_router
+
     app.include_router(circuit_breakers_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("🔌 Mounted: Circuit Breakers API at /circuit-breakers - SERVICE PROTECTION")
 except ImportError as e:
@@ -2190,6 +2422,7 @@ except ImportError as e:
 # DAILY BRIEFING API - AI-powered daily summary of agent activity (2026-02-02)
 try:
     from api.daily_briefing import router as daily_briefing_router
+
     app.include_router(daily_briefing_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("📋 Mounted: Daily Briefing API at /briefing - AI-POWERED SUMMARIES")
 except ImportError as e:
@@ -2222,6 +2455,7 @@ if COMPANYCAM_ROUTER_AVAILABLE:
 # DevOps Loop API (2025-12-31) - Ultimate self-healing DevOps orchestrator
 try:
     from api.devops_loop import router as devops_loop_router
+
     app.include_router(devops_loop_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("Mounted: DevOps Loop API at /devops-loop - continuous self-healing")
 except ImportError as e:
@@ -2240,7 +2474,9 @@ if INTEGRATION_AVAILABLE:
 # Background Task Monitoring (2025-12-29) - Heartbeats for all background tasks
 if BG_MONITORING_AVAILABLE:
     app.include_router(bg_monitoring_router, dependencies=SECURED_DEPENDENCIES)
-    logger.info("Mounted: Background Task Monitoring API at /monitor/background - no more fire-and-forget")
+    logger.info(
+        "Mounted: Background Task Monitoring API at /monitor/background - no more fire-and-forget"
+    )
 
 # Always-Know Observability Brain (2025-12-29) - Deep continuous monitoring
 if ALWAYS_KNOW_AVAILABLE:
@@ -2259,7 +2495,9 @@ if ULTIMATE_E2E_AVAILABLE:
 # TRUE Operational Validation (2025-12-31) - REAL operation testing
 if TRUE_VALIDATION_AVAILABLE:
     app.include_router(true_validation_router, dependencies=SECURED_DEPENDENCIES)
-    logger.info("Mounted: TRUE Validation at /validate - executes real operations, not status checks")
+    logger.info(
+        "Mounted: TRUE Validation at /validate - executes real operations, not status checks"
+    )
 
 # Learning Feedback Loop (2025-12-30) - Insights finally become actions
 if LEARNING_ROUTER_AVAILABLE:
@@ -2269,11 +2507,14 @@ if LEARNING_ROUTER_AVAILABLE:
 # Learning Visibility (2026-02-02) - See what the AI has learned
 if LEARNING_VISIBILITY_AVAILABLE:
     app.include_router(learning_visibility_router, dependencies=SECURED_DEPENDENCIES)
-    logger.info("Mounted: Learning Visibility at /api/learning-visibility - behavior rules & insights exposed")
+    logger.info(
+        "Mounted: Learning Visibility at /api/learning-visibility - behavior rules & insights exposed"
+    )
 
 # Import and include analytics router
 try:
     from analytics_endpoint import router as analytics_router
+
     app.include_router(analytics_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("✅ Analytics endpoint loaded")
 except ImportError as e:
@@ -2282,15 +2523,19 @@ except ImportError as e:
 # Revenue Pipeline Factory (2026-01-14) - Master revenue orchestrator
 try:
     from revenue_pipeline_factory import create_factory_router
+
     revenue_factory_router = create_factory_router()
     app.include_router(revenue_factory_router, dependencies=SECURED_DEPENDENCIES)
-    logger.info("✅ Revenue Pipeline Factory loaded at /revenue/factory - 6 automated revenue streams")
+    logger.info(
+        "✅ Revenue Pipeline Factory loaded at /revenue/factory - 6 automated revenue streams"
+    )
 except ImportError as e:
     logger.warning(f"Revenue Pipeline Factory not available: {e}")
 
 # API Monetization Engine (2026-01-14) - Usage-based billing
 try:
     from api_monetization_engine import create_monetization_router
+
     api_monetization_router = create_monetization_router()
     app.include_router(api_monetization_router, dependencies=SECURED_DEPENDENCIES)
     logger.info("✅ API Monetization Engine loaded at /api/billing - usage-based pricing")
@@ -2300,6 +2545,7 @@ except ImportError as e:
 # Memory Enforcement API (2026-01-15) - RBA/WBA enforcement, verification, audit
 try:
     from api.memory_enforcement_api import router as memory_enforcement_router
+
     app.include_router(memory_enforcement_router, dependencies=SECURED_DEPENDENCIES)
     MEMORY_ENFORCEMENT_AVAILABLE = True
     logger.info("✅ Memory Enforcement API loaded at /enforcement - RBA/WBA, verification, audit")
@@ -2310,6 +2556,7 @@ except ImportError as e:
 # Memory Hygiene API (2026-01-15) - Automated memory maintenance
 try:
     from api.memory_hygiene_api import router as memory_hygiene_router
+
     app.include_router(memory_hygiene_router, dependencies=SECURED_DEPENDENCIES)
     MEMORY_HYGIENE_AVAILABLE = True
     logger.info("✅ Memory Hygiene API loaded at /hygiene - deduplication, conflicts, decay")
@@ -2320,9 +2567,12 @@ except ImportError as e:
 # Memory Observability API (2026-01-27) - Comprehensive memory monitoring and metrics
 try:
     from api.memory_observability import router as memory_observability_router
+
     app.include_router(memory_observability_router, dependencies=SECURED_DEPENDENCIES)
     MEMORY_OBSERVABILITY_AVAILABLE = True
-    logger.info("✅ Memory Observability API loaded at /memory/observability - stats, health, hot/cold, decay, consolidation")
+    logger.info(
+        "✅ Memory Observability API loaded at /memory/observability - stats, health, hot/cold, decay, consolidation"
+    )
 except ImportError as e:
     MEMORY_OBSERVABILITY_AVAILABLE = False
     logger.warning(f"Memory Observability API not available: {e}")
@@ -2330,6 +2580,7 @@ except ImportError as e:
 # Advanced LangGraph Workflow Engine (2026-01-27) - State machines, checkpoints, HITL, OODA
 try:
     from api.workflows import router as workflows_router
+
     app.include_router(workflows_router, dependencies=SECURED_DEPENDENCIES)
     WORKFLOWS_AVAILABLE = True
     logger.info("Mounted: Advanced Workflow Engine at /workflows - checkpoints, HITL, OODA loops")
@@ -2340,9 +2591,12 @@ except ImportError as e:
 # Autonomous Issue Resolver (2026-01-27) - ACTUALLY FIXES detected issues
 try:
     from api.autonomous_resolver import router as autonomous_resolver_router
+
     app.include_router(autonomous_resolver_router, dependencies=SECURED_DEPENDENCIES)
     AUTONOMOUS_RESOLVER_AVAILABLE = True
-    logger.info("🔧 Mounted: Autonomous Issue Resolver at /resolver - detects AND FIXES AI OS issues")
+    logger.info(
+        "🔧 Mounted: Autonomous Issue Resolver at /resolver - detects AND FIXES AI OS issues"
+    )
 except ImportError as e:
     AUTONOMOUS_RESOLVER_AVAILABLE = False
     logger.warning(f"Autonomous Issue Resolver not available: {e}")
@@ -2350,9 +2604,12 @@ except ImportError as e:
 # Proactive Alerts API (2026-02-02) - AI-powered proactive recommendations
 try:
     from api.proactive_alerts import router as proactive_alerts_router
+
     app.include_router(proactive_alerts_router, dependencies=SECURED_DEPENDENCIES)
     PROACTIVE_ALERTS_AVAILABLE = True
-    logger.info("🎯 Mounted: Proactive Alerts API at /proactive - agent patterns, revenue opportunities, anomaly detection")
+    logger.info(
+        "🎯 Mounted: Proactive Alerts API at /proactive - agent patterns, revenue opportunities, anomaly detection"
+    )
 except ImportError as e:
     PROACTIVE_ALERTS_AVAILABLE = False
     logger.warning(f"Proactive Alerts API not available: {e}")
@@ -2393,7 +2650,9 @@ def _collect_active_systems() -> list[str]:
         active.append("Self-Healing Reconciler")
     # Bleeding Edge AI Systems (2025-12-27)
     if BLEEDING_EDGE_AVAILABLE:
-        active.append("Bleeding Edge AI (OODA, Hallucination, Memory, Dependability, Consciousness, Circuit Breaker)")
+        active.append(
+            "Bleeding Edge AI (OODA, Hallucination, Memory, Dependability, Consciousness, Circuit Breaker)"
+        )
     # Autonomous Issue Resolver (2026-01-27) - ACTUALLY FIXES issues
     if AUTONOMOUS_RESOLVER_AVAILABLE:
         active.append("Autonomous Issue Resolver (Detects AND FIXES AI OS Issues)")
@@ -2427,7 +2686,7 @@ def _scheduler_snapshot() -> dict[str, Any]:
                 "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
             }
             for job in apscheduler_jobs[:5]
-        ]
+        ],
     }
 
 
@@ -2472,22 +2731,27 @@ async def _memory_stats_snapshot(pool) -> dict[str, Any]:
     Reuses logic from /memory/status but keeps output minimal for usage reports.
     """
     try:
-        existing_tables = await pool.fetch("""
+        existing_tables = await pool.fetch(
+            """
             SELECT table_name
             FROM information_schema.tables
             WHERE table_schema = 'public'
             AND table_name IN ('ai_persistent_memory', 'memory_entries', 'memories')
-        """)
+        """
+        )
         if not existing_tables:
             return {"status": "not_configured"}
 
         table_names = [t["table_name"] for t in existing_tables]
-        preferred = next((t for t in ("ai_persistent_memory", "memory_entries", "memories") if t in table_names), table_names[0])
+        preferred = next(
+            (t for t in ("ai_persistent_memory", "memory_entries", "memories") if t in table_names),
+            table_names[0],
+        )
         stats = await pool.fetchrow(f"SELECT COUNT(*) AS total FROM {preferred}")
         return {
             "status": "operational",
             "table": preferred,
-            "total_records": stats["total"] if stats else 0
+            "total_records": stats["total"] if stats else 0,
         }
     except Exception as exc:
         logger.error("Failed to fetch memory stats: %s", exc)
@@ -2506,7 +2770,8 @@ async def _get_agent_usage(pool) -> dict[str, Any]:
 
     for agents_table, executions_table, join_cond, time_col in queries:
         try:
-            rows = await pool.fetch(f"""
+            rows = await pool.fetch(
+                f"""
                 SELECT
                     a.id::text AS id,
                     a.name,
@@ -2522,7 +2787,8 @@ async def _get_agent_usage(pool) -> dict[str, Any]:
                 GROUP BY a.id, a.name, a.category, a.enabled
                 ORDER BY executions_last_30d DESC, last_execution DESC NULLS LAST
                 LIMIT 20
-            """)
+            """
+            )
             usage = []
             for row in rows:
                 data = row if isinstance(row, dict) else dict(row)
@@ -2533,7 +2799,9 @@ async def _get_agent_usage(pool) -> dict[str, Any]:
                         "category": data.get("category"),
                         "enabled": bool(data.get("enabled", True)),
                         "executions_last_30d": int(data.get("executions_last_30d") or 0),
-                        "last_execution": data.get("last_execution").isoformat() if data.get("last_execution") else None,
+                        "last_execution": data.get("last_execution").isoformat()
+                        if data.get("last_execution")
+                        else None,
                         "avg_duration_ms": float(data.get("avg_duration_ms") or 0),
                     }
                 )
@@ -2550,7 +2818,8 @@ async def _get_schedule_usage(pool) -> dict[str, Any]:
     schedules: list[dict[str, Any]] = []
     try:
         # Note: public.agent_schedules does NOT have last_execution/next_execution columns
-        rows = await pool.fetch("""
+        rows = await pool.fetch(
+            """
             SELECT
                 s.id::text AS id,
                 s.agent_id::text AS agent_id,
@@ -2562,7 +2831,8 @@ async def _get_schedule_usage(pool) -> dict[str, Any]:
             LEFT JOIN ai_agents a ON a.id = s.agent_id
             ORDER BY s.enabled DESC, s.created_at DESC NULLS LAST
             LIMIT 50
-        """)
+        """
+        )
         for row in rows:
             data = row if isinstance(row, dict) else dict(row)
             schedules.append(
@@ -2572,7 +2842,9 @@ async def _get_schedule_usage(pool) -> dict[str, Any]:
                     "agent_name": data.get("agent_name"),
                     "enabled": bool(data.get("enabled", True)),
                     "frequency_minutes": data.get("frequency_minutes"),
-                    "created_at": data.get("created_at").isoformat() if data.get("created_at") else None,
+                    "created_at": data.get("created_at").isoformat()
+                    if data.get("created_at")
+                    else None,
                 }
             )
         return {"schedules": schedules, "table": "public.agent_schedules"}
@@ -2584,13 +2856,13 @@ async def _get_schedule_usage(pool) -> dict[str, Any]:
 # ==================== LANGGRAPH ENDPOINTS ====================
 
 if LANGGRAPH_AVAILABLE:
+
     @app.post("/langgraph/workflow")
     async def execute_langgraph_workflow(
-        request: dict[str, Any],
-        authenticated: bool = Depends(verify_api_key)
+        request: dict[str, Any], authenticated: bool = Depends(verify_api_key)
     ):
         """Execute a LangGraph-based workflow"""
-        if not hasattr(app.state, 'langgraph_orchestrator') or not app.state.langgraph_orchestrator:
+        if not hasattr(app.state, "langgraph_orchestrator") or not app.state.langgraph_orchestrator:
             raise HTTPException(status_code=503, detail="LangGraph Orchestrator not available")
 
         try:
@@ -2635,22 +2907,23 @@ if LANGGRAPH_AVAILABLE:
     @app.get("/langgraph/status")
     async def get_langgraph_status(authenticated: bool = Depends(verify_api_key)):
         """Get LangGraph orchestrator status"""
-        if not hasattr(app.state, 'langgraph_orchestrator') or not app.state.langgraph_orchestrator:
-            return {
-                "available": False,
-                "message": "LangGraph Orchestrator not initialized"
-            }
+        if not hasattr(app.state, "langgraph_orchestrator") or not app.state.langgraph_orchestrator:
+            return {"available": False, "message": "LangGraph Orchestrator not initialized"}
 
         orchestrator = app.state.langgraph_orchestrator
 
         return {
             "available": True,
             "components": {
-                "openai_llm": hasattr(orchestrator, 'openai_llm') and orchestrator.openai_llm is not None,
-                "anthropic_llm": hasattr(orchestrator, 'anthropic_llm') and orchestrator.anthropic_llm is not None,
-                "vector_store": hasattr(orchestrator, 'vector_store') and orchestrator.vector_store is not None,
-                "workflow_graph": hasattr(orchestrator, 'workflow') and orchestrator.workflow is not None
-            }
+                "openai_llm": hasattr(orchestrator, "openai_llm")
+                and orchestrator.openai_llm is not None,
+                "anthropic_llm": hasattr(orchestrator, "anthropic_llm")
+                and orchestrator.anthropic_llm is not None,
+                "vector_store": hasattr(orchestrator, "vector_store")
+                and orchestrator.vector_store is not None,
+                "workflow_graph": hasattr(orchestrator, "workflow")
+                and orchestrator.workflow is not None,
+            },
         }
 
 
@@ -2665,15 +2938,17 @@ async def root(request: Request):
         "build": BUILD_TIME,
         "environment": config.environment,
         "ai_enabled": AI_AVAILABLE,
-        "scheduler_enabled": SCHEDULER_AVAILABLE
+        "scheduler_enabled": SCHEDULER_AVAILABLE,
     }
 
 
 from src.graph.product_agent import app as product_agent_graph
 from langchain_core.messages import HumanMessage
 
+
 class ProductRequest(BaseModel):
     concept: str
+
 
 @app.post("/agents/product/run", tags=["Agents"], dependencies=SECURED_DEPENDENCIES)
 async def run_product_agent(request: ProductRequest):
@@ -2682,16 +2957,14 @@ async def run_product_agent(request: ProductRequest):
     """
     try:
         # Invoke the graph
-        result = product_agent_graph.invoke({
-            "messages": [HumanMessage(content=request.concept)]
-        })
-        
+        result = product_agent_graph.invoke({"messages": [HumanMessage(content=request.concept)]})
+
         # Extract the final message
         last_message = result["messages"][-1].content
         return {
             "status": "success",
             "result": last_message,
-            "trace": [m.content for m in result["messages"]]
+            "trace": [m.content for m in result["messages"]],
         }
     except Exception as e:
         logger.error(f"Product Agent Failed: {str(e)}")
@@ -2729,7 +3002,9 @@ class SendEmailPayload(BaseModel):
 
 @app.post("/email/send")
 @limiter.limit("5/minute")
-async def send_email_endpoint(request: Request, payload: SendEmailPayload, authenticated: bool = Depends(verify_api_key)):
+async def send_email_endpoint(
+    request: Request, payload: SendEmailPayload, authenticated: bool = Depends(verify_api_key)
+):
     """Send a one-off email (admin-only, API-key protected).
 
     Safety rail: unless OUTBOUND_EMAIL_MODE=live, the recipient must be allowlisted
@@ -2737,7 +3012,9 @@ async def send_email_endpoint(request: Request, payload: SendEmailPayload, authe
     """
     mode = os.getenv("OUTBOUND_EMAIL_MODE", "disabled").strip().lower()
     if mode != "live" and not _is_allowlisted_recipient(payload.recipient):
-        raise HTTPException(status_code=403, detail="Recipient is not allowlisted for outbound email")
+        raise HTTPException(
+            status_code=403, detail="Recipient is not allowlisted for outbound email"
+        )
 
     from email_sender import send_email
 
@@ -2751,13 +3028,21 @@ async def send_email_endpoint(request: Request, payload: SendEmailPayload, authe
         payload.metadata or {},
     )
 
-    recipient_masked = str(payload.recipient).split("@", 1)[0][:3] + "***@" + str(payload.recipient).split("@", 1)[1]
+    recipient_masked = (
+        str(payload.recipient).split("@", 1)[0][:3]
+        + "***@"
+        + str(payload.recipient).split("@", 1)[1]
+    )
     logger.info("One-off email send requested -> %s (success=%s)", recipient_masked, success)
     return {"success": success, "message": message}
 
+
 @app.get("/health")
 @limiter.limit("60/minute")
-async def health_check(request: Request, force_refresh: bool = Query(False, description="Bypass cache and force live health checks")):
+async def health_check(
+    request: Request,
+    force_refresh: bool = Query(False, description="Bypass cache and force live health checks"),
+):
     """Health check endpoint.
 
     Unauthenticated requests receive a minimal {"status": "ok", "version": "..."} response.
@@ -2802,13 +3087,15 @@ async def health_check(request: Request, force_refresh: bool = Query(False, desc
                     "version": VERSION,
                     "build": BUILD_TIME,
                     "database": "initializing",
-                    "message": "Service is starting up, database pool initializing..."
+                    "message": "Service is starting up, database pool initializing...",
                 }
             raise
         if db_timed_out:
             db_status = "timeout"
         else:
-            db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
+            db_status = (
+                "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
+            )
         auth_configured = config.security.auth_configured
 
         # Best-effort pool metrics: helps diagnose pool exhaustion vs. connectivity issues.
@@ -2842,7 +3129,9 @@ async def health_check(request: Request, force_refresh: bool = Query(False, desc
             "db_pool": pool_metrics,
             "active_systems": active_systems,
             "system_count": len(active_systems),
-            "embedded_memory_active": EMBEDDED_MEMORY_AVAILABLE and hasattr(app.state, 'embedded_memory') and app.state.embedded_memory is not None,
+            "embedded_memory_active": EMBEDDED_MEMORY_AVAILABLE
+            and hasattr(app.state, "embedded_memory")
+            and app.state.embedded_memory is not None,
             "embedded_memory_stats": embedded_memory_stats,
             "capabilities": {
                 # Phase 1
@@ -2890,9 +3179,11 @@ async def health_check(request: Request, force_refresh: bool = Query(False, desc
                 "unified_awareness": UNIFIED_AWARENESS_AVAILABLE,
                 "self_reporting": UNIFIED_AWARENESS_AVAILABLE,
                 # Phase 8 - Service Protection (2026-01-27)
-                "service_circuit_breakers": SERVICE_CIRCUIT_BREAKERS_AVAILABLE
+                "service_circuit_breakers": SERVICE_CIRCUIT_BREAKERS_AVAILABLE,
             },
-            "circuit_breakers": get_circuit_breaker_health() if SERVICE_CIRCUIT_BREAKERS_AVAILABLE and get_circuit_breaker_health else {"status": "unavailable"},
+            "circuit_breakers": get_circuit_breaker_health()
+            if SERVICE_CIRCUIT_BREAKERS_AVAILABLE and get_circuit_breaker_health
+            else {"status": "unavailable"},
             "config": {
                 "environment": config.environment,
                 "security": {
@@ -2900,7 +3191,7 @@ async def health_check(request: Request, force_refresh: bool = Query(False, desc
                     "dev_mode": config.security.dev_mode,
                     "auth_configured": auth_configured,
                     "api_keys_configured": len(config.security.valid_api_keys),
-                }
+                },
             },
             "missing_systems": getattr(app.state, "missing_systems", []),
         }
@@ -2970,145 +3261,183 @@ async def system_awareness():
             "SELECT COUNT(*) FROM gumroad_sales WHERE COALESCE(is_test, FALSE)"
         )
         if gumroad_real == 0:
-            issues.append({
-                "category": "REVENUE",
-                "problem": "Zero REAL Gumroad sales recorded",
-                "impact": "No personal revenue from digital products (test rows do not count as revenue)",
-                "fix": "Verify Gumroad webhook is receiving real purchases at /gumroad/webhook"
-            })
-            if gumroad_test and gumroad_test > 0:
-                warnings.append({
+            issues.append(
+                {
                     "category": "REVENUE",
-                    "problem": "Gumroad test rows present",
-                    "impact": "Webhook wiring may be OK, but there is still zero real revenue recorded",
-                    "fix": "Ensure production Gumroad products are live and receiving real purchases"
-                })
+                    "problem": "Zero REAL Gumroad sales recorded",
+                    "impact": "No personal revenue from digital products (test rows do not count as revenue)",
+                    "fix": "Verify Gumroad webhook is receiving real purchases at /gumroad/webhook",
+                }
+            )
+            if gumroad_test and gumroad_test > 0:
+                warnings.append(
+                    {
+                        "category": "REVENUE",
+                        "problem": "Gumroad test rows present",
+                        "impact": "Webhook wiring may be OK, but there is still zero real revenue recorded",
+                        "fix": "Ensure production Gumroad products are live and receiving real purchases",
+                    }
+                )
         else:
             healthy.append(f"Gumroad: {gumroad_real} real sales tracked")
             if gumroad_test and gumroad_test > 0:
-                warnings.append({
-                    "category": "REVENUE",
-                    "problem": "Gumroad test rows present",
-                    "impact": "Test rows are excluded from revenue totals; ensure dashboards filter is_test=false",
-                    "fix": "Continue filtering COALESCE(is_test,false)=false in all revenue reporting"
-                })
+                warnings.append(
+                    {
+                        "category": "REVENUE",
+                        "problem": "Gumroad test rows present",
+                        "impact": "Test rows are excluded from revenue totals; ensure dashboards filter is_test=false",
+                        "fix": "Continue filtering COALESCE(is_test,false)=false in all revenue reporting",
+                    }
+                )
 
         # Check MRG subscriptions (truthful: tenant-scoped default + global)
-        mrg_default_tenant = os.getenv("MRG_DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
+        mrg_default_tenant = os.getenv(
+            "MRG_DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001"
+        )
         mrg_active_default = await pool.fetchval(
             "SELECT COUNT(*) FROM mrg_subscriptions WHERE status='active' AND tenant_id = $1",
             mrg_default_tenant,
         )
-        mrg_active_all = await pool.fetchval("SELECT COUNT(*) FROM mrg_subscriptions WHERE status='active'")
+        mrg_active_all = await pool.fetchval(
+            "SELECT COUNT(*) FROM mrg_subscriptions WHERE status='active'"
+        )
 
         if mrg_active_default == 0:
-            issues.append({
-                "category": "REVENUE",
-                "problem": "Zero active MRG subscriptions (default tenant)",
-                "impact": "No SaaS recurring revenue",
-                "fix": "Verify Stripe webhook integration for subscriptions"
-            })
-            if mrg_active_all and mrg_active_all > 0:
-                warnings.append({
+            issues.append(
+                {
                     "category": "REVENUE",
-                    "problem": "MRG subscriptions exist for other tenants",
-                    "impact": "Tenant attribution may be misconfigured (MRG_DEFAULT_TENANT_ID mismatch)",
-                    "fix": "Set MRG_DEFAULT_TENANT_ID consistently on MRG + backend + agents"
-                })
-        else:
-            healthy.append(
-                f"MRG Subscriptions: {mrg_active_default} active (default tenant)"
+                    "problem": "Zero active MRG subscriptions (default tenant)",
+                    "impact": "No SaaS recurring revenue",
+                    "fix": "Verify Stripe webhook integration for subscriptions",
+                }
             )
+            if mrg_active_all and mrg_active_all > 0:
+                warnings.append(
+                    {
+                        "category": "REVENUE",
+                        "problem": "MRG subscriptions exist for other tenants",
+                        "impact": "Tenant attribution may be misconfigured (MRG_DEFAULT_TENANT_ID mismatch)",
+                        "fix": "Set MRG_DEFAULT_TENANT_ID consistently on MRG + backend + agents",
+                    }
+                )
+        else:
+            healthy.append(f"MRG Subscriptions: {mrg_active_default} active (default tenant)")
             if mrg_active_all and mrg_active_all > mrg_active_default:
-                warnings.append({
-                    "category": "REVENUE",
-                    "problem": "MRG subscriptions exist outside default tenant",
-                    "impact": "Revenue reporting can be fragmented across tenants",
-                    "fix": "Confirm tenant_id assignment in checkout metadata and webhook handlers"
-                })
+                warnings.append(
+                    {
+                        "category": "REVENUE",
+                        "problem": "MRG subscriptions exist outside default tenant",
+                        "impact": "Revenue reporting can be fragmented across tenants",
+                        "fix": "Confirm tenant_id assignment in checkout metadata and webhook handlers",
+                    }
+                )
 
         # Check learning system (uses ai_learning_insights, not ai_learning_patterns)
         learning = await pool.fetchval("SELECT COUNT(*) FROM ai_learning_insights")
-        learning_recent = await pool.fetchval("""
+        learning_recent = await pool.fetchval(
+            """
             SELECT COUNT(*) FROM ai_learning_insights
             WHERE created_at > NOW() - INTERVAL '24 hours'
-        """)
+        """
+        )
         if learning == 0:
-            issues.append({
-                "category": "LEARNING",
-                "problem": "AI learning insights table is empty",
-                "impact": "System is not learning from operations",
-                "fix": "Check LearningFeedbackLoop agent and /api/learning/run-cycle endpoint"
-            })
+            issues.append(
+                {
+                    "category": "LEARNING",
+                    "problem": "AI learning insights table is empty",
+                    "impact": "System is not learning from operations",
+                    "fix": "Check LearningFeedbackLoop agent and /api/learning/run-cycle endpoint",
+                }
+            )
         elif learning_recent == 0:
-            warnings.append({
-                "category": "LEARNING",
-                "problem": "No learning insights in last 24 hours",
-                "impact": "Learning may be stalled",
-                "fix": "Run /api/learning/run-cycle to trigger learning"
-            })
+            warnings.append(
+                {
+                    "category": "LEARNING",
+                    "problem": "No learning insights in last 24 hours",
+                    "impact": "Learning may be stalled",
+                    "fix": "Run /api/learning/run-cycle to trigger learning",
+                }
+            )
         else:
             healthy.append(f"Learning active: {learning} total, {learning_recent} in 24h")
 
         # Check agent activity
-        agents_1hr = await pool.fetchval("""
+        agents_1hr = await pool.fetchval(
+            """
             SELECT COUNT(DISTINCT agent_name) FROM agent_execution_logs
             WHERE timestamp > NOW() - INTERVAL '1 hour' AND execution_phase = 'completed'
-        """)
+        """
+        )
         if agents_1hr < 3:
-            warnings.append({
-                "category": "AGENTS",
-                "problem": f"Only {agents_1hr} agents ran in last hour",
-                "impact": "Autonomous operations may be stalled",
-                "fix": "Check scheduler at /scheduler/status and agent schedules in DB"
-            })
+            warnings.append(
+                {
+                    "category": "AGENTS",
+                    "problem": f"Only {agents_1hr} agents ran in last hour",
+                    "impact": "Autonomous operations may be stalled",
+                    "fix": "Check scheduler at /scheduler/status and agent schedules in DB",
+                }
+            )
         else:
             healthy.append(f"Agents active: {agents_1hr} ran in last hour")
 
         # Check unresolved alerts
-        unresolved = await pool.fetchval("SELECT COUNT(*) FROM brainops_alerts WHERE resolved = false")
+        unresolved = await pool.fetchval(
+            "SELECT COUNT(*) FROM brainops_alerts WHERE resolved = false"
+        )
         if unresolved > 20:
-            warnings.append({
-                "category": "ALERTS",
-                "problem": f"{unresolved} unresolved system alerts",
-                "impact": "System issues are being ignored",
-                "fix": "Review alerts and resolve or acknowledge them"
-            })
+            warnings.append(
+                {
+                    "category": "ALERTS",
+                    "problem": f"{unresolved} unresolved system alerts",
+                    "impact": "System issues are being ignored",
+                    "fix": "Review alerts and resolve or acknowledge them",
+                }
+            )
         elif unresolved > 0:
-            warnings.append({
-                "category": "ALERTS",
-                "problem": f"{unresolved} unresolved alerts need attention",
-                "impact": "Minor issues accumulating",
-                "fix": "Review at /system/alerts"
-            })
+            warnings.append(
+                {
+                    "category": "ALERTS",
+                    "problem": f"{unresolved} unresolved alerts need attention",
+                    "impact": "Minor issues accumulating",
+                    "fix": "Review at /system/alerts",
+                }
+            )
 
         # Check memory activity
-        memories_today = await pool.fetchval("""
+        memories_today = await pool.fetchval(
+            """
             SELECT COUNT(*) FROM unified_ai_memory WHERE created_at::date = CURRENT_DATE
-        """)
+        """
+        )
         if memories_today < 50:
-            warnings.append({
-                "category": "MEMORY",
-                "problem": f"Low memory activity today ({memories_today} entries)",
-                "impact": "System may not be learning from interactions",
-                "fix": "Check memory endpoints at /memory/store"
-            })
+            warnings.append(
+                {
+                    "category": "MEMORY",
+                    "problem": f"Low memory activity today ({memories_today} entries)",
+                    "impact": "System may not be learning from interactions",
+                    "fix": "Check memory endpoints at /memory/store",
+                }
+            )
         else:
             healthy.append(f"Memory active: {memories_today} entries today")
 
         # Check scheduled agents
-        scheduled = await pool.fetchval("""
+        scheduled = await pool.fetchval(
+            """
             SELECT COUNT(*) FROM agents
             WHERE enabled = true AND array_length(schedule_hours, 1) > 0
-        """)
+        """
+        )
         total_agents = await pool.fetchval("SELECT COUNT(*) FROM agents WHERE enabled = true")
         if scheduled < total_agents * 0.5:
-            warnings.append({
-                "category": "SCHEDULER",
-                "problem": f"Only {scheduled}/{total_agents} agents have schedules",
-                "impact": "Most agents won't run automatically",
-                "fix": "Set schedule_hours for agents in database"
-            })
+            warnings.append(
+                {
+                    "category": "SCHEDULER",
+                    "problem": f"Only {scheduled}/{total_agents} agents have schedules",
+                    "impact": "Most agents won't run automatically",
+                    "fix": "Set schedule_hours for agents in database",
+                }
+            )
         else:
             healthy.append(f"Scheduled agents: {scheduled}/{total_agents}")
 
@@ -3128,7 +3457,7 @@ async def system_awareness():
             "warnings": warnings,
             "healthy_systems": healthy,
             "summary": f"{len(issues)} critical, {len(warnings)} warnings, {len(healthy)} healthy",
-            "message": "This is your AI OS telling you what's broken. Fix the critical issues first."
+            "message": "This is your AI OS telling you what's broken. Fix the critical issues first.",
         }
 
     except Exception as e:
@@ -3136,7 +3465,7 @@ async def system_awareness():
         return {
             "status": "ERROR",
             "error": str(e),
-            "message": "Could not complete system awareness check"
+            "message": "Could not complete system awareness check",
         }
 
 
@@ -3146,7 +3475,8 @@ async def get_system_alerts(limit: int = 50, unresolved_only: bool = True):
     pool = get_pool()
     try:
         if unresolved_only:
-            alerts = await pool.fetch("""
+            alerts = await pool.fetch(
+                """
                 SELECT alert_type, severity, message, details, created_at
                 FROM brainops_alerts
                 WHERE resolved = false
@@ -3154,19 +3484,21 @@ async def get_system_alerts(limit: int = 50, unresolved_only: bool = True):
                     CASE severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
                     created_at DESC
                 LIMIT $1
-            """, limit)
+            """,
+                limit,
+            )
         else:
-            alerts = await pool.fetch("""
+            alerts = await pool.fetch(
+                """
                 SELECT alert_type, severity, message, details, created_at, resolved
                 FROM brainops_alerts
                 ORDER BY created_at DESC
                 LIMIT $1
-            """, limit)
+            """,
+                limit,
+            )
 
-        return {
-            "count": len(alerts),
-            "alerts": [dict(a) for a in alerts]
-        }
+        return {"count": len(alerts), "alerts": [dict(a) for a in alerts]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -3259,12 +3591,14 @@ async def diagnostics(request: Request):
 
     try:
         pool = get_pool()
-        last_error_row = await pool.fetchrow("""
+        last_error_row = await pool.fetchrow(
+            """
             SELECT error_type, error_message, severity, component, timestamp
             FROM ai_error_logs
             ORDER BY timestamp DESC
             LIMIT 1
-        """)
+        """
+        )
         if last_error_row:
             last_error = dict(last_error_row)
     except Exception as exc:
@@ -3307,7 +3641,7 @@ async def alive_status(request: Request):
     except Exception:
         pass
 
-    uptime = _time.time() - getattr(app.state, '_start_time', _time.time())
+    uptime = _time.time() - getattr(app.state, "_start_time", _time.time())
 
     # The service is "alive" if it's running, DB is connected, and systems are active
     is_alive = db_ok and len(active_systems) > 0
@@ -3323,7 +3657,7 @@ async def alive_status(request: Request):
     }
 
     # If NerveCenter is available, add its status too
-    nc_value = getattr(app.state, 'nerve_center', None)
+    nc_value = getattr(app.state, "nerve_center", None)
     if nc_value:
         try:
             nc_status = nc_value.get_status()
@@ -3342,12 +3676,12 @@ async def alive_status(request: Request):
 @app.get("/alive/thoughts", dependencies=SECURED_DEPENDENCIES)
 async def get_recent_thoughts():
     """Get recent thoughts from the AI consciousness stream (requires auth)"""
-    if hasattr(app.state, 'nerve_center') and app.state.nerve_center:
+    if hasattr(app.state, "nerve_center") and app.state.nerve_center:
         if app.state.nerve_center.alive_core:
             return {
                 "thoughts": app.state.nerve_center.alive_core.get_recent_thoughts(50),
                 "consciousness_state": app.state.nerve_center.alive_core.state.value,
-                "attention_focus": app.state.nerve_center.alive_core.attention_focus
+                "attention_focus": app.state.nerve_center.alive_core.attention_focus,
             }
     return {"thoughts": [], "error": "Consciousness not active"}
 
@@ -3355,6 +3689,7 @@ async def get_recent_thoughts():
 # ============================================================================
 # UNIFIED AI AWARENESS - Self-Reporting AI OS
 # ============================================================================
+
 
 @app.get("/awareness", dependencies=SECURED_DEPENDENCIES)
 async def get_awareness_status():
@@ -3406,6 +3741,7 @@ async def get_system_pulse():
 # TRUE SELF-AWARENESS - Live System Truth (not static documentation)
 # ============================================================================
 
+
 @app.get("/truth", dependencies=SECURED_DEPENDENCIES)
 async def get_truth():
     """
@@ -3445,6 +3781,7 @@ async def get_truth_quick():
 # TELEMETRY INGESTION - Neural System Event Collection
 # ============================================================================
 
+
 @app.post("/api/v1/telemetry/events")
 async def receive_telemetry_events(request: Request, authenticated: bool = Depends(verify_api_key)):
     """
@@ -3466,7 +3803,8 @@ async def receive_telemetry_events(request: Request, authenticated: bool = Depen
             pool = get_pool()
             async with pool.acquire() as conn:
                 for event in events:
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         INSERT INTO ai_nerve_signals (
                             source, event_type, payload, metadata, created_at
                         ) VALUES ($1, $2, $3, $4, NOW())
@@ -3475,7 +3813,7 @@ async def receive_telemetry_events(request: Request, authenticated: bool = Depen
                         event.get("source", "unknown"),
                         event.get("type", "telemetry"),
                         json.dumps(event.get("data", {})),
-                        json.dumps(event.get("metadata", {}))
+                        json.dumps(event.get("metadata", {})),
                     )
                     stored_count += 1
         except Exception as db_err:
@@ -3485,7 +3823,7 @@ async def receive_telemetry_events(request: Request, authenticated: bool = Depen
             "success": True,
             "received": len(events),
             "stored": stored_count,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Telemetry ingestion error: {e}")
@@ -3512,6 +3850,7 @@ async def store_knowledge(request: Request, authenticated: bool = Depends(verify
         if BRAIN_AVAILABLE:
             try:
                 from api.brain import brain_store
+
                 await brain_store(key=key, value=value, category=category)
                 return {"success": True, "key": key}
             except Exception as brain_err:
@@ -3557,13 +3896,8 @@ async def debug_database(authenticated: bool = Depends(verify_api_key)):
     import psycopg2
 
     results = {
-        "async_pool": {
-            "using_fallback": using_fallback(),
-            "status": "unknown"
-        },
-        "sync_psycopg2": {
-            "status": "unknown"
-        },
+        "async_pool": {"using_fallback": using_fallback(), "status": "unknown"},
+        "sync_psycopg2": {"status": "unknown"},
         "config": {
             "host": config.database.host,
             "port": config.database.port,
@@ -3572,7 +3906,7 @@ async def debug_database(authenticated: bool = Depends(verify_api_key)):
             "password_set": bool(config.database.password),
             "ssl": config.database.ssl,
             "ssl_verify": config.database.ssl_verify,
-        }
+        },
     }
 
     # Test async pool
@@ -3596,7 +3930,7 @@ async def debug_database(authenticated: bool = Depends(verify_api_key)):
             database=config.database.database,
             user=config.database.user,
             password=config.database.password,
-            sslmode='require'
+            sslmode="require",
         )
         cur = conn.cursor()
         start = time.perf_counter()
@@ -3664,11 +3998,13 @@ async def debug_scheduler(authenticated: bool = Depends(verify_api_key)):
 # EMAIL QUEUE ENDPOINTS
 # =========================================================================
 
+
 @app.get("/email/status")
 async def email_queue_status(authenticated: bool = Depends(verify_api_key)):
     """Get email queue status - shows pending, sent, failed counts."""
     try:
         from email_sender import get_queue_status
+
         return get_queue_status()
     except ImportError:
         return {"error": "email_sender module not available"}
@@ -3682,7 +4018,7 @@ async def process_email_queue_endpoint(
     request: Request,
     batch_size: int = Query(default=10, ge=1, le=50),
     dry_run: bool = Query(default=False),
-    authenticated: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key),
 ):
     """
     Manually trigger email queue processing.
@@ -3691,6 +4027,7 @@ async def process_email_queue_endpoint(
     """
     try:
         from email_sender import process_email_queue
+
         result = process_email_queue(batch_size=batch_size, dry_run=dry_run)
         return result
     except ImportError:
@@ -3705,22 +4042,19 @@ async def process_email_queue_endpoint(
 async def test_email_sending(
     request: Request,
     recipient: str = Query(..., description="Email address to send test to"),
-    authenticated: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key),
 ):
     """Send a test email to verify email configuration is working."""
     try:
         from email_sender import send_email
+
         success, message = send_email(
             recipient,
             "Test Email from BrainOps AI",
             "<h1>Test Email</h1><p>This is a test email from the BrainOps AI email system.</p><p>If you received this, email sending is working correctly.</p>",
-            {}
+            {},
         )
-        return {
-            "success": success,
-            "message": message,
-            "recipient": recipient
-        }
+        return {"success": success, "message": message, "recipient": recipient}
     except ImportError:
         return {"error": "email_sender module not available", "success": False}
     except Exception as e:
@@ -3732,12 +4066,14 @@ async def email_scheduler_stats(authenticated: bool = Depends(verify_api_key)):
     """Get email scheduler daemon statistics."""
     try:
         from email_scheduler_daemon import get_email_scheduler
+
         daemon = get_email_scheduler()
         stats = daemon.get_stats()
 
         # Also get queue counts from database
         pool = get_pool()
-        queue_counts = await pool.fetchrow("""
+        queue_counts = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) FILTER (WHERE status = 'queued') as queued,
                 COUNT(*) FILTER (WHERE status = 'processing') as processing,
@@ -3746,12 +4082,13 @@ async def email_scheduler_stats(authenticated: bool = Depends(verify_api_key)):
                 COUNT(*) FILTER (WHERE status = 'skipped') as skipped,
                 COUNT(*) as total
             FROM ai_email_queue
-        """)
+        """
+        )
 
         return {
             "daemon_stats": stats,
             "queue_counts": dict(queue_counts) if queue_counts else {},
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except ImportError:
         return {"error": "email_scheduler_daemon module not available"}
@@ -3773,9 +4110,11 @@ async def systems_usage(authenticated: bool = Depends(verify_api_key)):
         customer_success_preview = None
         if CUSTOMER_SUCCESS_AVAILABLE and getattr(app.state, "customer_success", None):
             try:
-                customer_success_preview = await app.state.customer_success.generate_onboarding_plan(
-                    customer_id="sample-customer",
-                    plan_type="value-check",
+                customer_success_preview = (
+                    await app.state.customer_success.generate_onboarding_plan(
+                        customer_id="sample-customer",
+                        plan_type="value-check",
+                    )
                 )
             except Exception as exc:
                 customer_success_preview = {"error": str(exc)}
@@ -3786,13 +4125,17 @@ async def systems_usage(authenticated: bool = Depends(verify_api_key)):
             "schedules": {**schedule_usage, "scheduler_runtime": _scheduler_snapshot()},
             "memory": memory_usage,
             "learning": {
-                "available": LEARNING_AVAILABLE and getattr(app.state, "learning", None) is not None,
-                "notes": "Notebook LM+ initialized" if getattr(app.state, "learning", None) else "Learning system not initialized",
+                "available": LEARNING_AVAILABLE
+                and getattr(app.state, "learning", None) is not None,
+                "notes": "Notebook LM+ initialized"
+                if getattr(app.state, "learning", None)
+                else "Learning system not initialized",
             },
             "aurea": _aurea_status(),
             "self_healing": _self_healing_status(),
             "customer_success": {
-                "available": CUSTOMER_SUCCESS_AVAILABLE and getattr(app.state, "customer_success", None) is not None,
+                "available": CUSTOMER_SUCCESS_AVAILABLE
+                and getattr(app.state, "customer_success", None) is not None,
                 "sample_plan": customer_success_preview,
             },
         }
@@ -3824,7 +4167,7 @@ async def get_agents(
     offset: int = Query(0, ge=0),
     include_capabilities: bool = Query(True),
     include_configuration: bool = Query(False),
-    authenticated: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key),
 ) -> AgentList:
     """Get list of available agents"""
     try:
@@ -3859,11 +4202,17 @@ async def get_agents(
                     "a.created_at",
                     "a.updated_at",
                     ("a.capabilities" if include_capabilities else "'[]'::jsonb AS capabilities"),
-                    ("a.configuration" if include_configuration else "'{}'::jsonb AS configuration"),
+                    (
+                        "a.configuration"
+                        if include_configuration
+                        else "'{}'::jsonb AS configuration"
+                    ),
                 ]
                 select_sql = ", ".join(select_cols)
 
-                total = await pool.fetchval(f"SELECT COUNT(*) FROM agents a {where_sql}", *params) or 0
+                total = (
+                    await pool.fetchval(f"SELECT COUNT(*) FROM agents a {where_sql}", *params) or 0
+                )
 
                 # IMPORTANT: Do NOT aggregate the full ai_agent_executions table inside the agents list query.
                 # That can hang under load (large execution history). Instead, fetch agents first, then
@@ -3900,7 +4249,11 @@ async def get_agents(
                         exec_stats_by_agent_name = {
                             str(r.get("agent_name")): (r if isinstance(r, dict) else dict(r))
                             for r in exec_rows
-                            if (r.get("agent_name") if isinstance(r, dict) else dict(r).get("agent_name"))
+                            if (
+                                r.get("agent_name")
+                                if isinstance(r, dict)
+                                else dict(r).get("agent_name")
+                            )
                         }
                 except Exception as stats_error:
                     # Execution stats are nice-to-have; never block /agents on them.
@@ -3928,9 +4281,7 @@ async def get_agents(
                 raise HTTPException(status_code=500, detail="Failed to load agents") from e
 
         agents_response, _ = await RESPONSE_CACHE.get_or_set(
-            cache_key,
-            CACHE_TTLS["agents"],
-            _load_agents
+            cache_key, CACHE_TTLS["agents"], _load_agents
         )
         return agents_response
     except HTTPException:
@@ -3943,9 +4294,7 @@ async def get_agents(
 @app.post("/agents/{agent_id}/execute")
 @limiter.limit("10/minute")
 async def execute_agent(
-    agent_id: str,
-    request: Request,
-    authenticated: bool = Depends(verify_api_key)
+    agent_id: str, request: Request, authenticated: bool = Depends(verify_api_key)
 ):
     """Execute an agent"""
     pool = get_pool()
@@ -3953,7 +4302,7 @@ async def execute_agent(
     try:
         # Resolve agent aliases before database lookup (ERP compatibility)
         resolved_agent_id = agent_id
-        if AGENTS_AVAILABLE and AGENT_EXECUTOR and hasattr(AGENT_EXECUTOR, 'AGENT_ALIASES'):
+        if AGENTS_AVAILABLE and AGENT_EXECUTOR and hasattr(AGENT_EXECUTOR, "AGENT_ALIASES"):
             if agent_id in AGENT_EXECUTOR.AGENT_ALIASES:
                 resolved_agent_id = AGENT_EXECUTOR.AGENT_ALIASES[agent_id]
                 logger.info(f"Resolved agent alias: {agent_id} -> {resolved_agent_id}")
@@ -3966,7 +4315,10 @@ async def execute_agent(
             resolved_agent_id,
         )
         if not agent:
-            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found (resolved: {resolved_agent_id})")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Agent {agent_id} not found (resolved: {resolved_agent_id})",
+            )
 
         if not agent["enabled"]:
             raise HTTPException(status_code=400, detail=f"Agent {agent_id} is disabled")
@@ -3982,10 +4334,17 @@ async def execute_agent(
         agent_uuid = str(agent["id"])
         agent_name = agent["name"]
         try:
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO ai_agent_executions (id, agent_name, task_type, input_data, status)
                 VALUES ($1, $2, $3, $4, $5)
-            """, execution_id, agent_name, "execute", json.dumps(body), "running")
+            """,
+                execution_id,
+                agent_name,
+                "execute",
+                json.dumps(body),
+                "running",
+            )
             logger.info(f"✅ Logged execution start for {agent_name}: {execution_id}")
         except Exception as insert_error:
             logger.warning("Failed to persist execution start: %s", insert_error)
@@ -4004,7 +4363,11 @@ async def execute_agent(
             try:
                 # Use the actual agent executor to run the correct agent class
                 agent_result = await AGENT_EXECUTOR.execute(agent_name, exec_task)
-                result = agent_result if isinstance(agent_result, dict) else {"status": "completed", "result": agent_result}
+                result = (
+                    agent_result
+                    if isinstance(agent_result, dict)
+                    else {"status": "completed", "result": agent_result}
+                )
                 result["agent_executed"] = True
             except Exception as e:
                 logger.error(f"Agent execution failed: {e}")
@@ -4030,12 +4393,20 @@ async def execute_agent(
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
         try:
-            await pool.execute("""
+            await pool.execute(
+                """
                 UPDATE ai_agent_executions
                 SET status = $1, output_data = $2, execution_time_ms = $3
                 WHERE id = $4
-            """, "completed", safe_json_dumps(result), duration_ms, execution_id)
-            logger.info(f"✅ Logged execution completion for {agent_name}: {execution_id} ({duration_ms}ms)")
+            """,
+                "completed",
+                safe_json_dumps(result),
+                duration_ms,
+                execution_id,
+            )
+            logger.info(
+                f"✅ Logged execution completion for {agent_name}: {execution_id} ({duration_ms}ms)"
+            )
         except Exception as update_error:
             logger.warning("Failed to persist execution completion: %s", update_error)
 
@@ -4060,7 +4431,7 @@ async def execute_agent(
             completed_at=completed_at,
             input_data=body,
             output_data=result,
-            duration_ms=duration_ms
+            duration_ms=duration_ms,
         )
 
     except HTTPException:
@@ -4069,21 +4440,26 @@ async def execute_agent(
         logger.error(f"Agent execution failed: {e}")
 
         # Update execution as failed
-        if 'execution_id' in locals():
+        if "execution_id" in locals():
             try:
-                await pool.execute("""
+                await pool.execute(
+                    """
                     UPDATE ai_agent_executions
                     SET status = $1, error_message = $2
                     WHERE id = $3
-                """, "failed", str(e), execution_id)
+                """,
+                    "failed",
+                    str(e),
+                    execution_id,
+                )
             except Exception as fail_error:
                 logger.warning("Failed to persist failed execution: %s", fail_error)
 
             LOCAL_EXECUTIONS.appendleft(
                 {
                     "execution_id": execution_id,
-                    "agent_id": agent_uuid if 'agent_uuid' in locals() else agent_id,
-                    "agent_name": agent["name"] if 'agent' in locals() else agent_id,
+                    "agent_id": agent_uuid if "agent_uuid" in locals() else agent_id,
+                    "agent_name": agent["name"] if "agent" in locals() else agent_id,
                     "status": "failed",
                     "started_at": locals().get("started_at"),
                     "completed_at": datetime.utcnow(),
@@ -4105,7 +4481,8 @@ async def get_all_agents_status(authenticated: bool = Depends(verify_api_key)):
         # Fallback to basic agent list
         pool = get_pool()
         try:
-            result = await pool.fetch("""
+            result = await pool.fetch(
+                """
                 SELECT
                     a.id,
                     a.name,
@@ -4120,14 +4497,15 @@ async def get_all_agents_status(authenticated: bool = Depends(verify_api_key)):
                 FROM ai_agents a
                 LEFT JOIN agent_schedules s ON s.agent_id = a.id
                 ORDER BY a.name
-            """)
+            """
+            )
 
             agents = [dict(row) for row in result]
             return {
                 "total_agents": len(agents),
                 "agents": agents,
                 "health_monitoring": False,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e)) from e
@@ -4148,7 +4526,9 @@ async def get_all_agents_status(authenticated: bool = Depends(verify_api_key)):
         if total_agents == 0:
             try:
                 pool = get_pool()
-                db_agents = await pool.fetch("SELECT id, name, type, status FROM ai_agents ORDER BY name")
+                db_agents = await pool.fetch(
+                    "SELECT id, name, type, status FROM ai_agents ORDER BY name"
+                )
                 total_agents = len(db_agents)
                 agents_list = [dict(row) for row in db_agents]
             except Exception:
@@ -4160,14 +4540,14 @@ async def get_all_agents_status(authenticated: bool = Depends(verify_api_key)):
                 "healthy": health_summary.get("healthy", 0),
                 "degraded": health_summary.get("degraded", 0),
                 "critical": health_summary.get("critical", 0),
-                "unknown": health_summary.get("unknown", 0)
+                "unknown": health_summary.get("unknown", 0),
             },
             "agents": agents_list,
             "critical_agents": detailed_summary.get("critical_agents", []),
             "active_alerts": detailed_summary.get("active_alerts", []),
             "recent_restarts": detailed_summary.get("recent_restarts", []),
             "health_monitoring": True,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Error getting agent status: {e}", exc_info=True)
@@ -4175,10 +4555,7 @@ async def get_all_agents_status(authenticated: bool = Depends(verify_api_key)):
 
 
 @app.get("/agents/{agent_id}")
-async def get_agent(
-    agent_id: str,
-    authenticated: bool = Depends(verify_api_key)
-) -> Agent:
+async def get_agent(agent_id: str, authenticated: bool = Depends(verify_api_key)) -> Agent:
     """Get a specific agent"""
     pool = get_pool()
 
@@ -4205,7 +4582,7 @@ async def get_executions(
     agent_id: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 100,
-    authenticated: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key),
 ):
     """Get agent executions"""
     try:
@@ -4248,7 +4625,9 @@ async def get_executions(
                 "agent_name": data.get("agent_type"),
                 "status": data.get("status"),
                 "started_at": data["started_at"].isoformat() if data.get("started_at") else None,
-                "completed_at": data["completed_at"].isoformat() if data.get("completed_at") else None,
+                "completed_at": data["completed_at"].isoformat()
+                if data.get("completed_at")
+                else None,
                 "duration_ms": data.get("duration_ms"),
                 "error": data.get("error_message"),
             }
@@ -4266,8 +4645,12 @@ async def get_executions(
                     "agent_id": entry.get("agent_id"),
                     "agent_name": entry.get("agent_name"),
                     "status": entry.get("status"),
-                    "started_at": entry.get("started_at").isoformat() if entry.get("started_at") else None,
-                    "completed_at": entry.get("completed_at").isoformat() if entry.get("completed_at") else None,
+                    "started_at": entry.get("started_at").isoformat()
+                    if entry.get("started_at")
+                    else None,
+                    "completed_at": entry.get("completed_at").isoformat()
+                    if entry.get("completed_at")
+                    else None,
                     "duration_ms": entry.get("duration_ms"),
                     "error": entry.get("error"),
                 },
@@ -4287,10 +4670,7 @@ async def get_executions(
 
 @app.post("/execute")
 @limiter.limit("10/minute")
-async def execute_scheduled_agents(
-    request: Request,
-    authenticated: bool = Depends(verify_api_key)
-):
+async def execute_scheduled_agents(request: Request, authenticated: bool = Depends(verify_api_key)):
     """Execute scheduled agents (called by cron)"""
     if not SCHEDULER_AVAILABLE or not app.state.scheduler:
         return {"status": "scheduler_disabled", "message": "Agent scheduler not available"}
@@ -4302,14 +4682,17 @@ async def execute_scheduled_agents(
         current_hour = datetime.utcnow().hour
 
         # Get agents scheduled for this hour
-        agents = await pool.fetch("""
+        agents = await pool.fetch(
+            """
             SELECT id, name, type, enabled, description, capabilities, configuration,
                    schedule_hours, created_at, updated_at
             FROM agents
             WHERE enabled = true
             AND schedule_hours @> ARRAY[$1]::integer[]
             LIMIT 50
-        """, current_hour)
+        """,
+            current_hour,
+        )
 
         # Cron can call /execute multiple times per hour; ensure each scheduled agent runs at most
         # once per hour to prevent runaway execution spam.
@@ -4348,10 +4731,16 @@ async def execute_scheduled_agents(
                     continue
 
                 # Log execution start - task_execution_id is NULL for scheduled executions
-                await pool.execute("""
+                await pool.execute(
+                    """
                     INSERT INTO agent_executions (id, agent_type, status, prompt)
                     VALUES ($1, $2, $3, $4)
-                """, execution_id, agent.get("type", "scheduled"), "running", json.dumps({"scheduled": True, "agent_name": agent_name}))
+                """,
+                    execution_id,
+                    agent.get("type", "scheduled"),
+                    "running",
+                    json.dumps({"scheduled": True, "agent_name": agent_name}),
+                )
 
                 # ACTUALLY EXECUTE THE AGENT using AgentExecutor
                 result = {"status": "skipped", "message": "No executor available"}
@@ -4389,58 +4778,74 @@ async def execute_scheduled_agents(
                         }
                     except NotImplementedError:
                         # Agent doesn't have execute method - log as warning, NOT completed!
-                        logger.warning(f"⚠️ Agent {agent_name} has no execute method (NotImplementedError)")
+                        logger.warning(
+                            f"⚠️ Agent {agent_name} has no execute method (NotImplementedError)"
+                        )
                         result = {
                             "status": "not_implemented",
                             "message": f"Agent {agent_name} missing execute implementation",
                             "scheduled_execution": True,
-                            "warning": "This agent needs implementation"
+                            "warning": "This agent needs implementation",
                         }
                     except Exception as exec_err:
                         logger.error(f"Agent {agent_name} execution error: {exec_err}")
                         result = {
                             "status": "error",
                             "error": str(exec_err),
-                            "scheduled_execution": True
+                            "scheduled_execution": True,
                         }
                 else:
                     result = {
                         "status": "completed",
                         "message": "AgentExecutor not available - logged only",
-                        "scheduled_execution": True
+                        "scheduled_execution": True,
                     }
 
                 # Update execution record with actual result (use correct columns: response not output_data)
                 result_status = (result.get("status") or "").lower()
-                final_status = "failed" if result_status in {"error", "failed", "timeout", "not_implemented"} else "completed"
-                await pool.execute("""
+                final_status = (
+                    "failed"
+                    if result_status in {"error", "failed", "timeout", "not_implemented"}
+                    else "completed"
+                )
+                await pool.execute(
+                    """
                     UPDATE agent_executions
                     SET completed_at = $1, status = $2, response = $3
                     WHERE id = $4
-                """, datetime.utcnow(), final_status, safe_json_dumps(result), execution_id)
+                """,
+                    datetime.utcnow(),
+                    final_status,
+                    safe_json_dumps(result),
+                    execution_id,
+                )
 
-                results.append({
-                    "agent_id": str(agent["id"]),
-                    "agent_name": agent["name"],
-                    "execution_id": execution_id,
-                    "status": final_status,
-                    "result_status": result.get("status"),
-                })
+                results.append(
+                    {
+                        "agent_id": str(agent["id"]),
+                        "agent_name": agent["name"],
+                        "execution_id": execution_id,
+                        "status": final_status,
+                        "result_status": result.get("status"),
+                    }
+                )
 
             except Exception as e:
                 logger.error(f"Failed to execute agent {agent['id']}: {e}")
-                results.append({
-                    "agent_id": str(agent["id"]),
-                    "agent_name": agent["name"],
-                    "error": str(e),
-                    "status": "failed"
-                })
+                results.append(
+                    {
+                        "agent_id": str(agent["id"]),
+                        "agent_name": agent["name"],
+                        "error": str(e),
+                        "status": "failed",
+                    }
+                )
 
         return {
             "status": "completed",
             "executed": len(results),
             "results": results,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -4460,99 +4865,142 @@ async def trigger_self_healing():
         "timestamp": datetime.utcnow().isoformat(),
         "issues_detected": [],
         "actions_taken": [],
-        "status": "completed"
+        "status": "completed",
     }
 
     try:
         pool = get_pool()
 
         # 1. Check for failed AUREA decisions and retry
-        failed_decisions = await pool.fetch("""
+        failed_decisions = await pool.fetch(
+            """
             SELECT id, decision_type, context
             FROM aurea_decisions
             WHERE execution_status = 'failed'
             AND created_at > NOW() - INTERVAL '24 hours'
             LIMIT 10
-        """)
+        """
+        )
 
         for decision in failed_decisions:
-            results["issues_detected"].append({
-                "type": "failed_decision",
-                "id": str(decision["id"]),
-                "decision_type": decision["decision_type"]
-            })
+            results["issues_detected"].append(
+                {
+                    "type": "failed_decision",
+                    "id": str(decision["id"]),
+                    "decision_type": decision["decision_type"],
+                }
+            )
             # Reset for retry
-            await pool.execute("""
+            await pool.execute(
+                """
                 UPDATE aurea_decisions
                 SET execution_status = 'pending',
                     execution_result = NULL
                 WHERE id = $1
-            """, decision["id"])
-            results["actions_taken"].append({
-                "action": "reset_for_retry",
-                "target": str(decision["id"])
-            })
+            """,
+                decision["id"],
+            )
+            results["actions_taken"].append(
+                {"action": "reset_for_retry", "target": str(decision["id"])}
+            )
 
         # 2. Check healing rules and match against recent errors
-        recent_errors = await pool.fetch("""
+        recent_errors = (
+            await pool.fetch(
+                """
             SELECT DISTINCT error_type, error_message, component
             FROM ai_error_logs
             WHERE timestamp > NOW() - INTERVAL '1 hour'
             LIMIT 20
-        """) if await pool.fetchval("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'ai_error_logs')") else []
+        """
+            )
+            if await pool.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'ai_error_logs')"
+            )
+            else []
+        )
 
-        healing_rules = await pool.fetch("""
+        healing_rules = await pool.fetch(
+            """
             SELECT id, component, error_pattern, fix_action, confidence
             FROM ai_healing_rules
             WHERE enabled = true
-        """)
+        """
+        )
 
         for error in recent_errors:
             for rule in healing_rules:
-                if rule["error_pattern"] in str(error.get("error_message", "")) or \
-                   rule["error_pattern"] in str(error.get("error_type", "")):
-                    results["issues_detected"].append({
-                        "type": "matched_error",
-                        "error_type": error.get("error_type"),
-                        "matched_rule": str(rule["id"])
-                    })
-                    results["actions_taken"].append({
-                        "action": rule["fix_action"],
-                        "component": rule["component"],
-                        "confidence": float(rule["confidence"] or 0)
-                    })
+                if rule["error_pattern"] in str(error.get("error_message", "")) or rule[
+                    "error_pattern"
+                ] in str(error.get("error_type", "")):
+                    results["issues_detected"].append(
+                        {
+                            "type": "matched_error",
+                            "error_type": error.get("error_type"),
+                            "matched_rule": str(rule["id"]),
+                        }
+                    )
+                    results["actions_taken"].append(
+                        {
+                            "action": rule["fix_action"],
+                            "component": rule["component"],
+                            "confidence": float(rule["confidence"] or 0),
+                        }
+                    )
                     # Update rule usage
-                    await pool.execute("""
+                    await pool.execute(
+                        """
                         UPDATE ai_healing_rules
                         SET success_count = success_count + 1, updated_at = NOW()
                         WHERE id = $1
-                    """, rule["id"])
+                    """,
+                        rule["id"],
+                    )
 
         # 3. Check for stalled agents (use correct column: type not agent_type)
-        stalled_agents = await pool.fetch("""
+        stalled_agents = (
+            await pool.fetch(
+                """
             SELECT id, name, type
             FROM ai_agents
             WHERE enabled = true
             AND last_execution_at < NOW() - INTERVAL '2 hours'
-        """) if await pool.fetchval("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'ai_agents' AND column_name = 'last_execution_at')") else []
+        """
+            )
+            if await pool.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'ai_agents' AND column_name = 'last_execution_at')"
+            )
+            else []
+        )
 
         for agent in stalled_agents:
-            results["issues_detected"].append({
-                "type": "stalled_agent",
-                "agent_id": str(agent["id"]),
-                "agent_name": agent["name"]
-            })
+            results["issues_detected"].append(
+                {"type": "stalled_agent", "agent_id": str(agent["id"]), "agent_name": agent["name"]}
+            )
 
         # 4. Log healing run
-        await pool.execute("""
+        await pool.execute(
+            """
             INSERT INTO remediation_history (action_type, target_component, result, success, metadata, created_at)
             VALUES ($1, $2, $3, $4, $5, NOW())
-        """, "self_heal_trigger", "system", json.dumps(results), True, json.dumps({
-            "issues_count": len(results["issues_detected"]),
-            "actions_count": len(results["actions_taken"])
-        })) if await pool.fetchval("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'remediation_history')") else None
+        """,
+            "self_heal_trigger",
+            "system",
+            json.dumps(results),
+            True,
+            json.dumps(
+                {
+                    "issues_count": len(results["issues_detected"]),
+                    "actions_count": len(results["actions_taken"]),
+                }
+            ),
+        ) if await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'remediation_history')"
+        ) else None
 
-        logger.info(f"🏥 Self-healing check complete: {len(results['issues_detected'])} issues, {len(results['actions_taken'])} actions")
+        logger.info(
+            f"🏥 Self-healing check complete: {len(results['issues_detected'])} issues, {len(results['actions_taken'])} actions"
+        )
 
     except Exception as e:
         logger.error(f"Self-healing trigger failed: {e}")
@@ -4566,6 +5014,7 @@ async def trigger_self_healing():
 # TRAINING & LEARNING ENDPOINTS - Critical for AI system improvement
 # =============================================================================
 
+
 @app.post("/training/capture-interaction", dependencies=SECURED_DEPENDENCIES)
 async def capture_interaction(interaction_data: dict[str, Any] = Body(...)):
     """
@@ -4574,7 +5023,7 @@ async def capture_interaction(interaction_data: dict[str, Any] = Body(...)):
     This is CRITICAL for the learning system - without captured interactions,
     the AI cannot learn and improve.
     """
-    if not TRAINING_AVAILABLE or not hasattr(app.state, 'training') or not app.state.training:
+    if not TRAINING_AVAILABLE or not hasattr(app.state, "training") or not app.state.training:
         raise HTTPException(status_code=503, detail="Training pipeline not available")
 
     try:
@@ -4588,7 +5037,7 @@ async def capture_interaction(interaction_data: dict[str, Any] = Body(...)):
             channel=interaction_data.get("channel"),
             context=interaction_data.get("context", {}),
             outcome=interaction_data.get("outcome"),
-            value=interaction_data.get("value")
+            value=interaction_data.get("value"),
         )
 
         logger.info(f"📝 Captured interaction {interaction_id} for training")
@@ -4602,24 +5051,28 @@ async def capture_interaction(interaction_data: dict[str, Any] = Body(...)):
 @app.get("/training/stats", dependencies=SECURED_DEPENDENCIES)
 async def get_training_stats():
     """Get training pipeline statistics (requires auth)"""
-    if not TRAINING_AVAILABLE or not hasattr(app.state, 'training') or not app.state.training:
+    if not TRAINING_AVAILABLE or not hasattr(app.state, "training") or not app.state.training:
         return {"available": False, "message": "Training pipeline not available"}
 
     try:
         pool = get_pool()
-        stats = await pool.fetchrow("""
+        stats = await pool.fetchrow(
+            """
             SELECT
                 (SELECT COUNT(*) FROM ai_customer_interactions) as total_interactions,
                 (SELECT MAX(created_at) FROM ai_customer_interactions) as last_interaction,
                 (SELECT COUNT(*) FROM ai_training_data) as training_samples,
                 (SELECT COUNT(*) FROM ai_learning_insights) as insights_generated
-        """)
+        """
+        )
         return {
             "available": True,
             "total_interactions": stats["total_interactions"],
-            "last_interaction": stats["last_interaction"].isoformat() if stats["last_interaction"] else None,
+            "last_interaction": stats["last_interaction"].isoformat()
+            if stats["last_interaction"]
+            else None,
             "training_samples": stats["training_samples"],
-            "insights_generated": stats["insights_generated"]
+            "insights_generated": stats["insights_generated"],
         }
     except Exception as e:
         return {"available": True, "error": str(e)}
@@ -4629,11 +5082,15 @@ async def get_training_stats():
 async def get_scheduler_status():
     """Get detailed scheduler status and diagnostics (requires auth)"""
     try:
-        if not SCHEDULER_AVAILABLE or not hasattr(app.state, 'scheduler') or not app.state.scheduler:
+        if (
+            not SCHEDULER_AVAILABLE
+            or not hasattr(app.state, "scheduler")
+            or not app.state.scheduler
+        ):
             return {
                 "enabled": False,
                 "message": "Scheduler not available",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
         scheduler = app.state.scheduler
@@ -4651,11 +5108,11 @@ async def get_scheduler_status():
                     "id": job.id,
                     "name": job.name,
                     "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
-                    "trigger": str(job.trigger)
+                    "trigger": str(job.trigger),
                 }
                 for job in apscheduler_jobs
             ],
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Error getting scheduler status: {e}", exc_info=True)
@@ -4665,8 +5122,8 @@ async def get_scheduler_status():
                 "enabled": False,
                 "error": str(e),
                 "message": "Failed to retrieve scheduler status",
-                "timestamp": datetime.utcnow().isoformat()
-            }
+                "timestamp": datetime.utcnow().isoformat(),
+            },
         )
 
 
@@ -4732,10 +5189,10 @@ async def restart_agent(agent_id: str):
             raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
         health_monitor = get_health_monitor()
-        result = health_monitor.restart_failed_agent(agent_id, agent['name'])
+        result = health_monitor.restart_failed_agent(agent_id, agent["name"])
 
-        if not result.get('success'):
-            raise HTTPException(status_code=500, detail=result.get('error', 'Restart failed'))
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Restart failed"))
 
         return result
     except HTTPException:
@@ -4768,7 +5225,7 @@ async def activate_all_agents_scheduler():
     Schedule ALL agents that don't have active schedules.
     This activates the full AI OS by ensuring every agent runs on a schedule.
     """
-    if not SCHEDULER_AVAILABLE or not hasattr(app.state, 'scheduler') or not app.state.scheduler:
+    if not SCHEDULER_AVAILABLE or not hasattr(app.state, "scheduler") or not app.state.scheduler:
         raise HTTPException(status_code=503, detail="Scheduler not available")
 
     scheduler = app.state.scheduler
@@ -4776,41 +5233,49 @@ async def activate_all_agents_scheduler():
 
     try:
         # Get all agents
-        agents_result = await pool.fetch("SELECT id, name, type, category FROM ai_agents WHERE status = 'active'")
+        agents_result = await pool.fetch(
+            "SELECT id, name, type, category FROM ai_agents WHERE status = 'active'"
+        )
 
         # Get existing schedules
-        existing_result = await pool.fetch("SELECT agent_id FROM agent_schedules WHERE enabled = true")
-        existing_agent_ids = {str(row['agent_id']) for row in existing_result}
+        existing_result = await pool.fetch(
+            "SELECT agent_id FROM agent_schedules WHERE enabled = true"
+        )
+        existing_agent_ids = {str(row["agent_id"]) for row in existing_result}
 
         scheduled_count = 0
         already_scheduled = 0
         errors = []
 
         for agent in agents_result:
-            agent_id = str(agent['id'])
-            agent_name = agent['name']
-            agent_type = agent.get('type', 'general').lower()
+            agent_id = str(agent["id"])
+            agent_name = agent["name"]
+            agent_type = agent.get("type", "general").lower()
 
             if agent_id in existing_agent_ids:
                 already_scheduled += 1
                 continue
 
             # Determine frequency based on agent type
-            if agent_type in ['analytics', 'revenue', 'customer']:
+            if agent_type in ["analytics", "revenue", "customer"]:
                 frequency = 30  # High-value agents: every 30 min
-            elif agent_type in ['monitor', 'security']:
+            elif agent_type in ["monitor", "security"]:
                 frequency = 15  # Critical agents: every 15 min
-            elif agent_type in ['learning', 'optimization']:
+            elif agent_type in ["learning", "optimization"]:
                 frequency = 60  # Learning agents: every hour
             else:
                 frequency = 60  # Default: every hour
 
             try:
                 # Insert schedule
-                await pool.execute("""
+                await pool.execute(
+                    """
                     INSERT INTO agent_schedules (id, agent_id, frequency_minutes, enabled, created_at)
                     VALUES (gen_random_uuid(), $1, $2, true, NOW())
-                """, agent_id, frequency)
+                """,
+                    agent_id,
+                    frequency,
+                )
 
                 # Add to scheduler
                 scheduler.add_schedule(agent_id, agent_name, frequency)
@@ -4827,7 +5292,7 @@ async def activate_all_agents_scheduler():
             "new_schedules": scheduled_count,
             "already_scheduled": already_scheduled,
             "total_agents": len(agents_result),
-            "errors": errors if errors else None
+            "errors": errors if errors else None,
         }
 
     except Exception as e:
@@ -4838,13 +5303,14 @@ async def activate_all_agents_scheduler():
 # ==================== MISSING ENDPOINTS FIX (2026-01-06) ====================
 # These endpoints were returning 404 - now properly implemented
 
+
 @app.post("/agents/execute", dependencies=SECURED_DEPENDENCIES)
 @limiter.limit("10/minute")
 async def execute_agent_generic(
     request: Request,
     agent_type: str = Body("general", embed=True),
     task: str = Body("", embed=True),
-    parameters: dict = Body({}, embed=True)
+    parameters: dict = Body({}, embed=True),
 ):
     """
     Generic agent execution endpoint - executes an agent by type without requiring agent_id.
@@ -4856,33 +5322,44 @@ async def execute_agent_generic(
 
     try:
         # Find a matching active agent by type (no 'description' column in agents table)
-        agent = await pool.fetchrow("""
+        agent = await pool.fetchrow(
+            """
             SELECT id, name, type
             FROM agents
             WHERE LOWER(type) = LOWER($1) AND status = 'active'
             ORDER BY RANDOM() LIMIT 1
-        """, agent_type)
+        """,
+            agent_type,
+        )
 
         if not agent:
             # If no agent of that type, try by name pattern
-            agent = await pool.fetchrow("""
+            agent = await pool.fetchrow(
+                """
                 SELECT id, name, type
                 FROM agents
                 WHERE LOWER(name) LIKE LOWER($1) AND status = 'active'
                 ORDER BY RANDOM() LIMIT 1
-            """, f"%{agent_type}%")
+            """,
+                f"%{agent_type}%",
+            )
 
         agent_id = str(agent["id"]) if agent else "system"
         # Use agent_type directly for alias resolution (don't append _agent suffix)
         agent_name = agent["name"] if agent else agent_type
 
         # Log execution start (use correct column names: task_type, no agent_id or started_at)
-        await pool.execute("""
+        await pool.execute(
+            """
             INSERT INTO ai_agent_executions (id, agent_name, task_type, status, input_data, created_at)
             VALUES ($1, $2, $3, 'running', $4, $5)
-        """, execution_id, agent_name, agent_type, json.dumps({
-            "type": agent_type, "task": task, "parameters": parameters
-        }), started_at)
+        """,
+            execution_id,
+            agent_name,
+            agent_type,
+            json.dumps({"type": agent_type, "task": task, "parameters": parameters}),
+            started_at,
+        )
 
         execution_status = "completed"
         error_message = None
@@ -4919,11 +5396,18 @@ async def execute_agent_generic(
 
         # Update execution record (use correct column: execution_time_ms, no completed_at)
         # Use jsonable_encoder to handle datetime and other non-serializable types
-        await pool.execute("""
+        await pool.execute(
+            """
             UPDATE ai_agent_executions
             SET status = $1, execution_time_ms = $2, output_data = $3, error_message = $4
             WHERE id = $5
-        """, execution_status, duration_ms, json.dumps(jsonable_encoder(result)), error_message, execution_id)
+        """,
+            execution_status,
+            duration_ms,
+            json.dumps(jsonable_encoder(result)),
+            error_message,
+            execution_id,
+        )
 
         response_payload = {
             "success": execution_status == "completed",
@@ -4933,7 +5417,7 @@ async def execute_agent_generic(
             "agent_type": agent_type,
             "result": result,
             "duration_ms": duration_ms,
-            "timestamp": completed_at.isoformat()
+            "timestamp": completed_at.isoformat(),
         }
 
         if execution_status != "completed":
@@ -4945,9 +5429,13 @@ async def execute_agent_generic(
         raise
     except Exception as e:
         logger.error(f"Generic agent execution failed: {e}")
-        await pool.execute("""
+        await pool.execute(
+            """
             UPDATE ai_agent_executions SET status = 'failed', error_message = $1 WHERE id = $2
-        """, str(e), execution_id)
+        """,
+            str(e),
+            execution_id,
+        )
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -4956,7 +5444,7 @@ async def schedule_agent(
     agent_id: str = Body(..., embed=True),
     frequency_minutes: int = Body(60, embed=True),
     enabled: bool = Body(True, embed=True),
-    run_at: Optional[str] = Body(None, embed=True)
+    run_at: Optional[str] = Body(None, embed=True),
 ):
     """
     Schedule an agent for future execution.
@@ -4978,23 +5466,34 @@ async def schedule_agent(
 
         if existing:
             # Update existing schedule
-            await pool.execute("""
+            await pool.execute(
+                """
                 UPDATE agent_schedules
                 SET frequency_minutes = $1, enabled = $2, updated_at = NOW()
                 WHERE agent_id = $3
-            """, frequency_minutes, enabled, agent_id)
+            """,
+                frequency_minutes,
+                enabled,
+                agent_id,
+            )
             schedule_id = str(existing["id"])
             action = "updated"
         else:
             # Create new schedule
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO agent_schedules (id, agent_id, frequency_minutes, enabled, created_at)
                 VALUES ($1, $2, $3, $4, NOW())
-            """, schedule_id, agent_id, frequency_minutes, enabled)
+            """,
+                schedule_id,
+                agent_id,
+                frequency_minutes,
+                enabled,
+            )
             action = "created"
 
         # Add to runtime scheduler if available
-        if SCHEDULER_AVAILABLE and hasattr(app.state, 'scheduler') and app.state.scheduler:
+        if SCHEDULER_AVAILABLE and hasattr(app.state, "scheduler") and app.state.scheduler:
             app.state.scheduler.add_schedule(agent_id, agent["name"], frequency_minutes)
 
         return {
@@ -5006,7 +5505,7 @@ async def schedule_agent(
             "frequency_minutes": frequency_minutes,
             "enabled": enabled,
             "next_run": run_at or f"In {frequency_minutes} minutes",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     except HTTPException:
@@ -5019,7 +5518,9 @@ async def schedule_agent(
 @app.get("/brain/decide", dependencies=SECURED_DEPENDENCIES)
 async def brain_decide(
     context: str = Query(..., description="Decision context or question"),
-    decision_type: str = Query("operational", description="Type: strategic, operational, tactical, emergency")
+    decision_type: str = Query(
+        "operational", description="Type: strategic, operational, tactical, emergency"
+    ),
 ):
     """
     AI decision endpoint - uses the brain to make autonomous decisions.
@@ -5030,12 +5531,15 @@ async def brain_decide(
 
     try:
         # Check for similar past decisions (use execution_result, not result)
-        similar_decisions = await pool.fetch("""
+        similar_decisions = await pool.fetch(
+            """
             SELECT decision_type, context, execution_result as result, confidence, created_at
             FROM aurea_decisions
             WHERE decision_type = $1
             ORDER BY created_at DESC LIMIT 5
-        """, decision_type)
+        """,
+            decision_type,
+        )
 
         # Generate decision using available AI systems
         decision_result = {
@@ -5048,26 +5552,37 @@ async def brain_decide(
             "reasoning": [
                 f"Context analyzed: {context[:100]}...",
                 f"Decision type: {decision_type}",
-                f"Similar past decisions reviewed: {len(similar_decisions)}"
+                f"Similar past decisions reviewed: {len(similar_decisions)}",
             ],
             "actions": [
                 {"action": "evaluate", "priority": "high"},
-                {"action": "monitor", "priority": "medium"}
+                {"action": "monitor", "priority": "medium"},
             ],
             "historical_context": [
                 {
                     "type": d["decision_type"],
                     "result": d["result"],
-                    "confidence": float(d["confidence"]) if d.get("confidence") else 0.5
-                } for d in similar_decisions[:3]
-            ] if similar_decisions else []
+                    "confidence": float(d["confidence"]) if d.get("confidence") else 0.5,
+                }
+                for d in similar_decisions[:3]
+            ]
+            if similar_decisions
+            else [],
         }
 
         # Log decision (context is JSONB, use execution_result for output, add description)
-        await pool.execute("""
+        await pool.execute(
+            """
             INSERT INTO aurea_decisions (id, decision_type, description, context, execution_result, confidence, status, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, 'completed', NOW())
-        """, decision_id, decision_type, f"Decision for: {context[:100]}", json.dumps({"query": context}), json.dumps(decision_result), 0.85)
+        """,
+            decision_id,
+            decision_type,
+            f"Decision for: {context[:100]}",
+            json.dumps({"query": context}),
+            json.dumps(decision_result),
+            0.85,
+        )
 
         return decision_result
 
@@ -5081,7 +5596,7 @@ async def brain_learn(
     insight: str = Body(..., embed=True),
     source: str = Body("manual", embed=True),
     category: str = Body("general", embed=True),
-    importance: float = Body(0.5, embed=True)
+    importance: float = Body(0.5, embed=True),
 ):
     """
     Store learning insights in the AI brain.
@@ -5092,19 +5607,31 @@ async def brain_learn(
 
     try:
         # Store insight (use correct column names: insight_type for source, impact_score for importance)
-        await pool.execute("""
+        await pool.execute(
+            """
             INSERT INTO ai_learning_insights (id, insight, insight_type, category, impact_score, created_at)
             VALUES ($1, $2, $3, $4, $5, NOW())
             ON CONFLICT DO NOTHING
-        """, insight_id, insight, source, category, importance)
+        """,
+            insight_id,
+            insight,
+            source,
+            category,
+            importance,
+        )
 
         # Also store in thought stream for consciousness (use correct column names)
         thought_id = str(uuid.uuid4())
-        await pool.execute("""
+        await pool.execute(
+            """
             INSERT INTO ai_thought_stream (id, thought_id, thought_type, thought_content, metadata, timestamp)
             VALUES (gen_random_uuid(), $1, 'learning', $2, $3, NOW())
             ON CONFLICT DO NOTHING
-        """, thought_id, insight, json.dumps({"source": source, "category": category}))
+        """,
+            thought_id,
+            insight,
+            json.dumps({"source": source, "category": category}),
+        )
 
         # Update learning system if available
         learning_active = LEARNING_AVAILABLE and getattr(app.state, "learning", None) is not None
@@ -5117,7 +5644,7 @@ async def brain_learn(
             "category": category,
             "importance": importance,
             "learning_system_active": learning_active,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -5135,23 +5662,27 @@ async def get_consciousness_status():
 
     try:
         # Get thought stream stats (using 'timestamp' column, not 'created_at')
-        thought_stats = await pool.fetchrow("""
+        thought_stats = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) as total_thoughts,
                 COUNT(*) FILTER (WHERE timestamp > NOW() - INTERVAL '1 hour') as thoughts_last_hour,
                 COUNT(*) FILTER (WHERE timestamp > NOW() - INTERVAL '24 hours') as thoughts_last_day,
                 MAX(timestamp) as last_thought_at
             FROM ai_thought_stream
-        """)
+        """
+        )
 
         # Get decision stats
-        decision_stats = await pool.fetchrow("""
+        decision_stats = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) as total_decisions,
                 COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour') as decisions_last_hour,
                 AVG(confidence) as avg_confidence
             FROM aurea_decisions
-        """)
+        """
+        )
 
         # Check consciousness emergence status
         nerve_center = getattr(app.state, "nerve_center", None)
@@ -5173,20 +5704,26 @@ async def get_consciousness_status():
                 "total_thoughts": thought_stats["total_thoughts"] if thought_stats else 0,
                 "thoughts_last_hour": thought_stats["thoughts_last_hour"] if thought_stats else 0,
                 "thoughts_last_day": thought_stats["thoughts_last_day"] if thought_stats else 0,
-                "last_thought_at": thought_stats["last_thought_at"].isoformat() if thought_stats and thought_stats["last_thought_at"] else None
+                "last_thought_at": thought_stats["last_thought_at"].isoformat()
+                if thought_stats and thought_stats["last_thought_at"]
+                else None,
             },
             "decision_making": {
                 "total_decisions": decision_stats["total_decisions"] if decision_stats else 0,
-                "decisions_last_hour": decision_stats["decisions_last_hour"] if decision_stats else 0,
-                "avg_confidence": float(decision_stats["avg_confidence"]) if decision_stats and decision_stats["avg_confidence"] else 0
+                "decisions_last_hour": decision_stats["decisions_last_hour"]
+                if decision_stats
+                else 0,
+                "avg_confidence": float(decision_stats["avg_confidence"])
+                if decision_stats and decision_stats["avg_confidence"]
+                else 0,
             },
             "systems_active": {
                 "nerve_center": nerve_center is not None,
                 "bleeding_edge": BLEEDING_EDGE_AVAILABLE,
                 "learning": LEARNING_AVAILABLE,
-                "memory": MEMORY_AVAILABLE
+                "memory": MEMORY_AVAILABLE,
             },
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -5198,6 +5735,7 @@ async def get_consciousness_status():
 # META-INTELLIGENCE STATUS ENDPOINT
 # ============================================================================
 
+
 @app.get("/meta-intelligence/status", dependencies=SECURED_DEPENDENCIES)
 async def get_meta_intelligence_status():
     """
@@ -5205,17 +5743,9 @@ async def get_meta_intelligence_status():
     These are the TRUE AGI capabilities that enable genuine learning from experience.
     """
     result = {
-        "meta_intelligence": {
-            "initialized": False,
-            "intelligence_level": 0,
-            "components": {}
-        },
-        "learning_bridge": {
-            "initialized": False,
-            "rules_count": 0,
-            "status": {}
-        },
-        "timestamp": datetime.utcnow().isoformat()
+        "meta_intelligence": {"initialized": False, "intelligence_level": 0, "components": {}},
+        "learning_bridge": {"initialized": False, "rules_count": 0, "status": {}},
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
     # Check Meta-Intelligence Controller
@@ -5233,7 +5763,7 @@ async def get_meta_intelligence_status():
                     k: "active" if v else "inactive"
                     for k, v in state.get("components", {}).items()
                     if isinstance(v, dict) and v
-                }
+                },
             }
         except Exception as e:
             result["meta_intelligence"]["error"] = str(e)
@@ -5251,7 +5781,7 @@ async def get_meta_intelligence_status():
                 "rules_applied": status.get("rules_applied", 0),
                 "rules_created": status.get("rules_created", 0),
                 "last_sync": status.get("last_sync"),
-                "memory_available": status.get("memory_available", False)
+                "memory_available": status.get("memory_available", False),
             }
         except Exception as e:
             result["learning_bridge"]["error"] = str(e)
@@ -5263,6 +5793,7 @@ async def get_meta_intelligence_status():
 # WORKFLOW ENGINE STATUS ENDPOINTS
 # ============================================================================
 
+
 @app.post("/workflow-engine/status", dependencies=SECURED_DEPENDENCIES)
 @app.get("/workflow-engine/status", dependencies=SECURED_DEPENDENCIES)
 async def get_workflow_engine_status():
@@ -5272,6 +5803,7 @@ async def get_workflow_engine_status():
     """
     try:
         from ai_workflow_templates import get_workflow_engine
+
         engine = get_workflow_engine()
 
         if not engine._initialized:
@@ -5287,21 +5819,17 @@ async def get_workflow_engine_status():
             "stats": stats,
             "templates_available": stats.get("templates_count", 0),
             "running_workflows": stats.get("running_executions", 0),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except ImportError:
         return {
             "status": "unavailable",
             "message": "Workflow engine module not available",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.warning(f"Workflow engine status check: {e}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"status": "error", "error": str(e), "timestamp": datetime.utcnow().isoformat()}
 
 
 @app.post("/workflow-automation/status", dependencies=SECURED_DEPENDENCIES)
@@ -5316,17 +5844,20 @@ async def get_workflow_automation_status():
     try:
         # Get workflow automation stats from database
         # Schema: is_active (bool), not status
-        automation_stats = await pool.fetchrow("""
+        automation_stats = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) as total_workflows,
                 COUNT(*) FILTER (WHERE is_active = true) as active_workflows,
                 MAX(updated_at) as last_activity
             FROM workflow_automation
-        """)
+        """
+        )
 
         # Get recent run stats
         # Schema: run_status (not status)
-        run_stats = await pool.fetchrow("""
+        run_stats = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) as total_runs,
                 COUNT(*) FILTER (WHERE run_status = 'completed') as completed_runs,
@@ -5334,23 +5865,26 @@ async def get_workflow_automation_status():
                 COUNT(*) FILTER (WHERE run_status = 'running') as running_workflows,
                 COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as runs_last_24h
             FROM workflow_automation_runs
-        """)
+        """
+        )
 
         return {
             "status": "healthy",
             "automation": {
                 "total_workflows": automation_stats["total_workflows"] if automation_stats else 0,
                 "active_workflows": automation_stats["active_workflows"] if automation_stats else 0,
-                "last_activity": automation_stats["last_activity"].isoformat() if automation_stats and automation_stats["last_activity"] else None
+                "last_activity": automation_stats["last_activity"].isoformat()
+                if automation_stats and automation_stats["last_activity"]
+                else None,
             },
             "runs": {
                 "total": run_stats["total_runs"] if run_stats else 0,
                 "completed": run_stats["completed_runs"] if run_stats else 0,
                 "failed": run_stats["failed_runs"] if run_stats else 0,
                 "running": run_stats["running_workflows"] if run_stats else 0,
-                "last_24h": run_stats["runs_last_24h"] if run_stats else 0
+                "last_24h": run_stats["runs_last_24h"] if run_stats else 0,
             },
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.warning(f"Workflow automation status check: {e}")
@@ -5358,7 +5892,7 @@ async def get_workflow_automation_status():
             "status": "degraded",
             "error": str(e),
             "message": "Workflow automation tables may not exist",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
 
@@ -5380,40 +5914,59 @@ async def check_self_healing():
             await pool.fetchval("SELECT 1")
         except Exception:
             db_healthy = False
-            issues.append({"type": "database", "severity": "critical", "message": "Database connection failed"})
+            issues.append(
+                {
+                    "type": "database",
+                    "severity": "critical",
+                    "message": "Database connection failed",
+                }
+            )
             health_score -= 30
 
         # Check for stalled agents (use created_at, not started_at)
-        stalled_agents = await pool.fetch("""
+        stalled_agents = await pool.fetch(
+            """
             SELECT id, agent_name, status, created_at
             FROM ai_agent_executions
             WHERE status = 'running'
             AND created_at < NOW() - INTERVAL '30 minutes'
             LIMIT 10
-        """)
+        """
+        )
 
         if stalled_agents:
             for agent in stalled_agents:
-                issues.append({
-                    "type": "stalled_agent",
-                    "severity": "high",
-                    "agent_name": agent["agent_name"],
-                    "started_at": agent["created_at"].isoformat() if agent["created_at"] else None
-                })
+                issues.append(
+                    {
+                        "type": "stalled_agent",
+                        "severity": "high",
+                        "agent_name": agent["agent_name"],
+                        "started_at": agent["created_at"].isoformat()
+                        if agent["created_at"]
+                        else None,
+                    }
+                )
             health_score -= len(stalled_agents) * 5
 
         # Check for failed executions in last hour (use created_at, not started_at)
-        failed_count = await pool.fetchval("""
+        failed_count = (
+            await pool.fetchval(
+                """
             SELECT COUNT(*) FROM ai_agent_executions
             WHERE status = 'failed' AND created_at > NOW() - INTERVAL '1 hour'
-        """) or 0
+        """
+            )
+            or 0
+        )
 
         if failed_count > 5:
-            issues.append({
-                "type": "high_failure_rate",
-                "severity": "medium",
-                "message": f"{failed_count} failed executions in last hour"
-            })
+            issues.append(
+                {
+                    "type": "high_failure_rate",
+                    "severity": "medium",
+                    "message": f"{failed_count} failed executions in last hour",
+                }
+            )
             health_score -= min(failed_count, 20)
 
         # Check healer status
@@ -5421,15 +5974,27 @@ async def check_self_healing():
         healer_active = healer is not None
 
         # Get recent remediation history
-        remediation_history = await pool.fetch("""
+        remediation_history = (
+            await pool.fetch(
+                """
             SELECT action_type, target_component, success, created_at
             FROM remediation_history
             ORDER BY created_at DESC LIMIT 5
-        """) if await pool.fetchval("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'remediation_history')") else []
+        """
+            )
+            if await pool.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'remediation_history')"
+            )
+            else []
+        )
 
         return {
             "health_score": max(0, health_score),
-            "status": "healthy" if health_score >= 80 else "degraded" if health_score >= 50 else "critical",
+            "status": "healthy"
+            if health_score >= 80
+            else "degraded"
+            if health_score >= 50
+            else "critical",
             "issues_count": len(issues),
             "issues": issues,
             "self_healer_active": healer_active,
@@ -5441,10 +6006,13 @@ async def check_self_healing():
                     "action": r["action_type"],
                     "target": r["target_component"],
                     "success": r["success"],
-                    "at": r["created_at"].isoformat() if r["created_at"] else None
-                } for r in remediation_history
-            ] if remediation_history else [],
-            "timestamp": datetime.utcnow().isoformat()
+                    "at": r["created_at"].isoformat() if r["created_at"] else None,
+                }
+                for r in remediation_history
+            ]
+            if remediation_history
+            else [],
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -5462,28 +6030,21 @@ async def store_memory(
     content: str = Body(...),
     memory_type: str = Body("operational"),
     category: str = Body(default=None),
-    metadata: dict[str, Any] = Body(default=None)
+    metadata: dict[str, Any] = Body(default=None),
 ):
     """
     Store a memory in the AI memory system.
     This enables the AI to remember and learn from experiences.
     """
-    if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory') or not app.state.memory:
+    if not MEMORY_AVAILABLE or not hasattr(app.state, "memory") or not app.state.memory:
         raise HTTPException(status_code=503, detail="Memory system not available")
 
     try:
         memory_manager = app.state.memory
         memory_id = await memory_manager.store_async(
-            content=content,
-            memory_type=memory_type,
-            category=category,
-            metadata=metadata or {}
+            content=content, memory_type=memory_type, category=category, metadata=metadata or {}
         )
-        return {
-            "success": True,
-            "memory_id": memory_id,
-            "message": "Memory stored successfully"
-        }
+        return {"success": True, "memory_id": memory_id, "message": "Memory stored successfully"}
     except Exception as e:
         logger.error(f"Failed to store memory: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -5495,34 +6056,25 @@ async def search_memory(
     request: Request,
     query: str = Query(..., description="Search query"),
     limit: int = Query(10, description="Max results"),
-    memory_type: str = Query(None, description="Filter by type")
+    memory_type: str = Query(None, description="Filter by type"),
 ):
     """
     Search the AI memory system for relevant memories (requires auth).
     """
-    if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory') or not app.state.memory:
+    if not MEMORY_AVAILABLE or not hasattr(app.state, "memory") or not app.state.memory:
         return {
             "success": False,
             "status": "degraded",
             "query": query,
             "count": 0,
             "memories": [],
-            "message": "Memory system not available (database initializing or unavailable)"
+            "message": "Memory system not available (database initializing or unavailable)",
         }
 
     try:
         memory_manager = app.state.memory
-        memories = await memory_manager.search(
-            query=query,
-            limit=limit,
-            memory_type=memory_type
-        )
-        return {
-            "success": True,
-            "query": query,
-            "count": len(memories),
-            "memories": memories
-        }
+        memories = await memory_manager.search(query=query, limit=limit, memory_type=memory_type)
+        return {"success": True, "query": query, "count": len(memories), "memories": memories}
     except Exception as e:
         logger.error(f"Failed to search memory: {e}")
         return {
@@ -5531,7 +6083,7 @@ async def search_memory(
             "query": query,
             "count": 0,
             "memories": [],
-            "message": f"Memory search degraded: {type(e).__name__}"
+            "message": f"Memory search degraded: {type(e).__name__}",
         }
 
 
@@ -5547,7 +6099,7 @@ async def unified_search(
     Unified cross-table search across memory, documents, and episodic memory.
     Returns ranked results using RRF hybrid search.
     """
-    if not MEMORY_AVAILABLE or not hasattr(app.state, 'memory') or not app.state.memory:
+    if not MEMORY_AVAILABLE or not hasattr(app.state, "memory") or not app.state.memory:
         return {
             "success": False,
             "status": "degraded",
@@ -5555,7 +6107,7 @@ async def unified_search(
             "count": 0,
             "results": [],
             "sources": [],
-            "message": "Memory system not available (database initializing or unavailable)"
+            "message": "Memory system not available (database initializing or unavailable)",
         }
 
     try:
@@ -5581,7 +6133,7 @@ async def unified_search(
             "count": 0,
             "results": [],
             "sources": [],
-            "message": f"Unified search degraded: {type(e).__name__}"
+            "message": f"Unified search degraded: {type(e).__name__}",
         }
 
 
@@ -5590,7 +6142,7 @@ async def unified_search(
 async def backfill_embeddings(
     request: Request,
     batch_size: int = Query(100, description="Batch size per run"),
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks = None,
 ):
     """
     Backfill missing embeddings in unified_ai_memory using the fallback chain.
@@ -5613,40 +6165,57 @@ async def backfill_embeddings(
         conn = psycopg2.connect(**db_config)
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
-        cur.execute("""
+        cur.execute(
+            """
         SELECT id, content, memory_type
         FROM unified_ai_memory
         WHERE embedding IS NULL
         LIMIT %s
-        """, (batch_size,))
+        """,
+            (batch_size,),
+        )
 
         memories = cur.fetchall()
         if not memories:
             cur.close()
             conn.close()
-            return {"success": True, "message": "No memories need embedding backfill", "processed": 0}
+            return {
+                "success": True,
+                "message": "No memories need embedding backfill",
+                "processed": 0,
+            }
 
         # Try local embedding model (always available)
         try:
             from sentence_transformers import SentenceTransformer
-            embedder = SentenceTransformer('all-MiniLM-L6-v2')
+
+            embedder = SentenceTransformer("all-MiniLM-L6-v2")
             embedding_model = "local:all-MiniLM-L6-v2"
         except ImportError:
             cur.close()
             conn.close()
-            raise HTTPException(status_code=503, detail="sentence-transformers not available for backfill") from None
+            raise HTTPException(
+                status_code=503, detail="sentence-transformers not available for backfill"
+            ) from None
 
         processed = 0
         for mem in memories:
             try:
-                content_str = json.dumps(mem['content']) if isinstance(mem['content'], dict) else str(mem['content'])
+                content_str = (
+                    json.dumps(mem["content"])
+                    if isinstance(mem["content"], dict)
+                    else str(mem["content"])
+                )
                 embedding = embedder.encode(content_str).tolist()
 
-                cur.execute("""
+                cur.execute(
+                    """
                 UPDATE unified_ai_memory
                 SET embedding = %s
                 WHERE id = %s
-                """, (embedding, mem['id']))
+                """,
+                    (embedding, mem["id"]),
+                )
                 processed += 1
             except Exception as e:
                 logger.warning(f"Failed to embed memory {mem['id']}: {e}")
@@ -5668,7 +6237,7 @@ async def backfill_embeddings(
             "processed": processed,
             "remaining": remaining,
             "model_used": embedding_model,
-            "message": f"Backfilled {processed} embeddings, {remaining} remaining"
+            "message": f"Backfilled {processed} embeddings, {remaining} remaining",
         }
 
     except HTTPException:
@@ -5688,10 +6257,7 @@ async def force_sync_embedded_memory(request: Request):
     embedded_memory = getattr(app.state, "embedded_memory", None)
 
     if not embedded_memory:
-        raise HTTPException(
-            status_code=503,
-            detail="Embedded memory system not available"
-        )
+        raise HTTPException(status_code=503, detail="Embedded memory system not available")
 
     try:
         # Get stats before sync
@@ -5709,8 +6275,10 @@ async def force_sync_embedded_memory(request: Request):
             "before_count": before_count,
             "after_count": after_count,
             "synced_count": after_count - before_count,
-            "last_sync": embedded_memory.last_sync.isoformat() if embedded_memory.last_sync else None,
-            "pool_connected": embedded_memory.pg_pool is not None
+            "last_sync": embedded_memory.last_sync.isoformat()
+            if embedded_memory.last_sync
+            else None,
+            "pool_connected": embedded_memory.pg_pool is not None,
         }
 
     except Exception as e:
@@ -5728,10 +6296,7 @@ async def get_memory_stats(request: Request):
     embedded_memory = getattr(app.state, "embedded_memory", None)
 
     if not embedded_memory:
-        return {
-            "enabled": False,
-            "message": "Embedded memory system not available"
-        }
+        return {"enabled": False, "message": "Embedded memory system not available"}
 
     try:
         cursor = embedded_memory.sqlite_conn.cursor()
@@ -5739,7 +6304,9 @@ async def get_memory_stats(request: Request):
         # Get counts
         total_memories = cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0]
         total_tasks = cursor.execute("SELECT COUNT(*) FROM ai_autonomous_tasks").fetchone()[0]
-        pending_tasks = cursor.execute("SELECT COUNT(*) FROM ai_autonomous_tasks WHERE status = 'pending'").fetchone()[0]
+        pending_tasks = cursor.execute(
+            "SELECT COUNT(*) FROM ai_autonomous_tasks WHERE status = 'pending'"
+        ).fetchone()[0]
 
         # Get sync metadata
         cursor.execute("SELECT * FROM sync_metadata WHERE table_name = 'unified_ai_memory'")
@@ -5752,13 +6319,17 @@ async def get_memory_stats(request: Request):
             "total_memories": total_memories,
             "total_tasks": total_tasks,
             "pending_tasks": pending_tasks,
-            "last_sync": embedded_memory.last_sync.isoformat() if embedded_memory.last_sync else None,
+            "last_sync": embedded_memory.last_sync.isoformat()
+            if embedded_memory.last_sync
+            else None,
             "sync_metadata": {
                 "last_sync_time": sync_meta[1] if sync_meta else None,
                 "last_sync_count": sync_meta[2] if sync_meta else None,
-                "total_records": sync_meta[3] if sync_meta else None
-            } if sync_meta else None,
-            "embedding_model": embedded_memory.embedding_model
+                "total_records": sync_meta[3] if sync_meta else None,
+            }
+            if sync_meta
+            else None,
+            "embedding_model": embedded_memory.embedding_model,
         }
 
     except Exception as e:
@@ -5768,20 +6339,25 @@ async def get_memory_stats(request: Request):
 
 # ==================== AI SELF-AWARENESS ENDPOINTS ====================
 
+
 @app.post("/ai/self-assess", dependencies=SECURED_DEPENDENCIES)
 async def ai_self_assess(
     request: Request,
     task_id: str,
     agent_id: str,
     task_description: str,
-    task_context: dict[str, Any] = None
+    task_context: dict[str, Any] = None,
 ):
     """
     AI assesses its own confidence in completing a task (requires auth)
 
     Revolutionary feature - AI knows what it doesn't know!
     """
-    if not SELF_AWARENESS_AVAILABLE or not hasattr(app.state, 'self_aware_ai') or not app.state.self_aware_ai:
+    if (
+        not SELF_AWARENESS_AVAILABLE
+        or not hasattr(app.state, "self_aware_ai")
+        or not app.state.self_aware_ai
+    ):
         raise HTTPException(status_code=503, detail="AI Self-Awareness not available")
 
     try:
@@ -5791,7 +6367,7 @@ async def ai_self_assess(
             task_id=task_id,
             agent_id=agent_id,
             task_description=task_description,
-            task_context=task_context or {}
+            task_context=task_context or {},
         )
 
         return {
@@ -5809,7 +6385,7 @@ async def ai_self_assess(
             "human_help_reason": assessment.human_help_reason,
             "risk_level": assessment.risk_level,
             "mitigation_strategies": assessment.mitigation_strategies,
-            "timestamp": assessment.timestamp.isoformat()
+            "timestamp": assessment.timestamp.isoformat(),
         }
 
     except Exception as e:
@@ -5819,18 +6395,18 @@ async def ai_self_assess(
 
 @app.post("/ai/explain-reasoning", dependencies=SECURED_DEPENDENCIES)
 async def ai_explain_reasoning(
-    request: Request,
-    task_id: str,
-    agent_id: str,
-    decision: str,
-    reasoning_process: dict[str, Any]
+    request: Request, task_id: str, agent_id: str, decision: str, reasoning_process: dict[str, Any]
 ):
     """
     AI explains its reasoning in human-understandable terms (requires auth)
 
     Transparency builds trust!
     """
-    if not SELF_AWARENESS_AVAILABLE or not hasattr(app.state, 'self_aware_ai') or not app.state.self_aware_ai:
+    if (
+        not SELF_AWARENESS_AVAILABLE
+        or not hasattr(app.state, "self_aware_ai")
+        or not app.state.self_aware_ai
+    ):
         raise HTTPException(status_code=503, detail="AI Self-Awareness not available")
 
     try:
@@ -5840,7 +6416,7 @@ async def ai_explain_reasoning(
             task_id=task_id,
             agent_id=agent_id,
             decision=decision,
-            reasoning_process=reasoning_process
+            reasoning_process=reasoning_process,
         )
 
         return {
@@ -5856,16 +6432,19 @@ async def ai_explain_reasoning(
             "potential_errors": explanation.potential_errors,
             "verification_methods": explanation.verification_methods,
             "human_review_recommended": explanation.human_review_recommended,
-            "timestamp": explanation.timestamp.isoformat()
+            "timestamp": explanation.timestamp.isoformat(),
         }
 
     except Exception as e:
         logger.error(f"Reasoning explanation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Reasoning explanation failed: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Reasoning explanation failed: {str(e)}"
+        ) from e
 
 
 class ReasoningRequest(BaseModel):
     """Request model for o3 reasoning endpoint"""
+
     problem: str
     context: Optional[dict[str, Any]] = None
     max_tokens: int = 4000
@@ -5895,10 +6474,7 @@ async def ai_deep_reasoning(request: Request, body: ReasoningRequest):
 
     try:
         result = await ai_core.reason(
-            problem=body.problem,
-            context=body.context,
-            max_tokens=body.max_tokens,
-            model=body.model
+            problem=body.problem, context=body.context, max_tokens=body.max_tokens, model=body.model
         )
 
         return {
@@ -5907,7 +6483,7 @@ async def ai_deep_reasoning(request: Request, body: ReasoningRequest):
             "conclusion": result.get("conclusion", ""),
             "model_used": result.get("model_used", body.model),
             "tokens_used": result.get("tokens_used"),
-            "error": result.get("error")
+            "error": result.get("error"),
         }
 
     except Exception as e:
@@ -5922,18 +6498,23 @@ async def ai_learn_from_mistake(
     agent_id: str,
     expected_outcome: Any,
     actual_outcome: Any,
-    confidence_before: float
+    confidence_before: float,
 ):
     """
     AI analyzes its own mistakes and learns from them (requires auth)
 
     This is how AI gets smarter over time!
     """
-    if not SELF_AWARENESS_AVAILABLE or not hasattr(app.state, 'self_aware_ai') or not app.state.self_aware_ai:
+    if (
+        not SELF_AWARENESS_AVAILABLE
+        or not hasattr(app.state, "self_aware_ai")
+        or not app.state.self_aware_ai
+    ):
         raise HTTPException(status_code=503, detail="AI Self-Awareness not available")
 
     try:
         from decimal import Decimal
+
         self_aware_ai = app.state.self_aware_ai
 
         learning = await self_aware_ai.learn_from_mistake(
@@ -5941,7 +6522,7 @@ async def ai_learn_from_mistake(
             agent_id=agent_id,
             expected_outcome=expected_outcome,
             actual_outcome=actual_outcome,
-            confidence_before=Decimal(str(confidence_before))
+            confidence_before=Decimal(str(confidence_before)),
         )
 
         return {
@@ -5959,12 +6540,14 @@ async def ai_learn_from_mistake(
             "confidence_after": float(learning.confidence_after),
             "similar_mistakes_count": learning.similar_mistakes_count,
             "applied_to_agents": learning.applied_to_agents,
-            "timestamp": learning.timestamp.isoformat()
+            "timestamp": learning.timestamp.isoformat(),
         }
 
     except Exception as e:
         logger.error(f"Learning from mistake failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Learning from mistake failed: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Learning from mistake failed: {str(e)}"
+        ) from e
 
 
 @app.get("/ai/self-awareness/stats", dependencies=SECURED_DEPENDENCIES)
@@ -5977,32 +6560,38 @@ async def get_self_awareness_stats():
         pool = get_pool()
 
         # Get assessment stats
-        assessment_stats = await pool.fetchrow("""
+        assessment_stats = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) as total_assessments,
                 AVG(confidence_score) as avg_confidence,
                 COUNT(CASE WHEN can_complete_alone THEN 1 END) as can_complete_alone_count,
                 COUNT(CASE WHEN requires_human_review THEN 1 END) as requires_review_count
             FROM ai_self_assessments
-        """)
+        """
+        )
 
         # Get mistake learning stats
-        learning_stats = await pool.fetchrow("""
+        learning_stats = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) as total_mistakes,
                 COUNT(CASE WHEN should_have_known THEN 1 END) as should_have_known_count,
                 AVG(confidence_before - confidence_after) as avg_confidence_drop
             FROM ai_learning_from_mistakes
-        """)
+        """
+        )
 
         # Get reasoning explanation stats
-        reasoning_stats = await pool.fetchrow("""
+        reasoning_stats = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) as total_explanations,
                 AVG(confidence_in_decision) as avg_decision_confidence,
                 COUNT(CASE WHEN human_review_recommended THEN 1 END) as human_review_count
             FROM ai_reasoning_explanations
-        """)
+        """
+        )
 
         return {
             "self_awareness_enabled": True,
@@ -6010,30 +6599,34 @@ async def get_self_awareness_stats():
                 "total": assessment_stats["total_assessments"] or 0,
                 "avg_confidence": float(assessment_stats["avg_confidence"] or 0),
                 "can_complete_alone_rate": (
-                    (assessment_stats["can_complete_alone_count"] or 0) /
-                    max(assessment_stats["total_assessments"] or 1, 1) * 100
+                    (assessment_stats["can_complete_alone_count"] or 0)
+                    / max(assessment_stats["total_assessments"] or 1, 1)
+                    * 100
                 ),
                 "requires_review_rate": (
-                    (assessment_stats["requires_review_count"] or 0) /
-                    max(assessment_stats["total_assessments"] or 1, 1) * 100
-                )
+                    (assessment_stats["requires_review_count"] or 0)
+                    / max(assessment_stats["total_assessments"] or 1, 1)
+                    * 100
+                ),
             },
             "learning": {
                 "total_mistakes_analyzed": learning_stats["total_mistakes"] or 0,
                 "should_have_known_rate": (
-                    (learning_stats["should_have_known_count"] or 0) /
-                    max(learning_stats["total_mistakes"] or 1, 1) * 100
+                    (learning_stats["should_have_known_count"] or 0)
+                    / max(learning_stats["total_mistakes"] or 1, 1)
+                    * 100
                 ),
-                "avg_confidence_adjustment": float(learning_stats["avg_confidence_drop"] or 0)
+                "avg_confidence_adjustment": float(learning_stats["avg_confidence_drop"] or 0),
             },
             "reasoning": {
                 "total_explanations": reasoning_stats["total_explanations"] or 0,
                 "avg_decision_confidence": float(reasoning_stats["avg_decision_confidence"] or 0),
                 "human_review_rate": (
-                    (reasoning_stats["human_review_count"] or 0) /
-                    max(reasoning_stats["total_explanations"] or 1, 1) * 100
-                )
-            }
+                    (reasoning_stats["human_review_count"] or 0)
+                    / max(reasoning_stats["total_explanations"] or 1, 1)
+                    * 100
+                ),
+            },
         }
 
     except Exception as e:
@@ -6047,9 +6640,11 @@ async def get_self_awareness_stats():
 @app.post("/ai/tasks/execute/{task_id}", dependencies=SECURED_DEPENDENCIES)
 async def execute_ai_task(task_id: str):
     """Manually trigger execution of a specific task (requires auth - CRITICAL)"""
-    integration_layer = getattr(app.state, 'integration_layer', None)
+    integration_layer = getattr(app.state, "integration_layer", None)
     if not INTEGRATION_LAYER_AVAILABLE or integration_layer is None:
-        raise HTTPException(status_code=503, detail="AI Integration Layer not available or not initialized")
+        raise HTTPException(
+            status_code=503, detail="AI Integration Layer not available or not initialized"
+        )
 
     try:
         # Get task
@@ -6060,11 +6655,7 @@ async def execute_ai_task(task_id: str):
         # Execute task (will be picked up by task executor loop)
         await integration_layer._execute_task(task)
 
-        return {
-            "success": True,
-            "message": "Task execution triggered",
-            "task_id": task_id
-        }
+        return {"success": True, "message": "Task execution triggered", "task_id": task_id}
 
     except HTTPException:
         raise
@@ -6076,9 +6667,11 @@ async def execute_ai_task(task_id: str):
 @app.get("/ai/tasks/stats", dependencies=SECURED_DEPENDENCIES)
 async def get_task_stats():
     """Get AI task system statistics (requires auth)"""
-    integration_layer = getattr(app.state, 'integration_layer', None)
+    integration_layer = getattr(app.state, "integration_layer", None)
     if not INTEGRATION_LAYER_AVAILABLE or integration_layer is None:
-        raise HTTPException(status_code=503, detail="AI Integration Layer not available or not initialized")
+        raise HTTPException(
+            status_code=503, detail="AI Integration Layer not available or not initialized"
+        )
 
     try:
         # Get all tasks
@@ -6086,27 +6679,27 @@ async def get_task_stats():
 
         # Calculate stats
         stats = {
-            'total': len(all_tasks),
-            'by_status': {},
-            'by_priority': {},
-            'agents_active': len(integration_layer.agents_registry),
-            'execution_queue_size': integration_layer.execution_queue.qsize()
+            "total": len(all_tasks),
+            "by_status": {},
+            "by_priority": {},
+            "agents_active": len(integration_layer.agents_registry),
+            "execution_queue_size": integration_layer.execution_queue.qsize(),
         }
 
         for task in all_tasks:
             # Count by status
-            status = task.get('status', 'unknown')
-            stats['by_status'][status] = stats['by_status'].get(status, 0) + 1
+            status = task.get("status", "unknown")
+            stats["by_status"][status] = stats["by_status"].get(status, 0) + 1
 
             # Count by priority
-            priority = task.get('priority', 'unknown')
-            stats['by_priority'][priority] = stats['by_priority'].get(priority, 0) + 1
+            priority = task.get("priority", "unknown")
+            stats["by_priority"][priority] = stats["by_priority"].get(priority, 0) + 1
 
         return {
             "success": True,
             "stats": stats,
             "system_status": "operational",
-            "task_executor_running": True
+            "task_executor_running": True,
         }
 
     except Exception as e:
@@ -6120,30 +6713,21 @@ class AureaCommandRequest(BaseModel):
 
 @app.post("/ai/orchestrate", dependencies=SECURED_DEPENDENCIES)
 async def orchestrate_complex_workflow(
-    request: Request,
-    task_description: str,
-    context: dict[str, Any] = {}
+    request: Request, task_description: str, context: dict[str, Any] = {}
 ):
     """
     Execute complex multi-stage workflow using LangGraph orchestration
     This is for sophisticated tasks that need multi-agent coordination
     """
-    if not hasattr(app.state, 'langgraph_orchestrator') or not app.state.langgraph_orchestrator:
+    if not hasattr(app.state, "langgraph_orchestrator") or not app.state.langgraph_orchestrator:
         raise HTTPException(status_code=503, detail="LangGraph Orchestrator not available")
 
     try:
         orchestrator = app.state.langgraph_orchestrator
 
-        result = await orchestrator.execute(
-            task_description=task_description,
-            context=context
-        )
+        result = await orchestrator.execute(task_description=task_description, context=context)
 
-        return {
-            "success": True,
-            "result": result,
-            "message": "Workflow orchestrated successfully"
-        }
+        return {"success": True, "result": result, "message": "Workflow orchestrated successfully"}
 
     except Exception as e:
         logger.error(f"❌ Orchestration failed: {e}")
@@ -6152,6 +6736,7 @@ async def orchestrate_complex_workflow(
 
 class AIAnalyzeRequest(BaseModel):
     """Request model for /ai/analyze endpoint - matches weathercraft-erp frontend format"""
+
     agent: str
     action: str
     data: dict[str, Any] = {}
@@ -6159,10 +6744,7 @@ class AIAnalyzeRequest(BaseModel):
 
 
 @app.post("/ai/analyze", dependencies=SECURED_DEPENDENCIES)
-async def ai_analyze(
-    request: Request,
-    payload: AIAnalyzeRequest = Body(...)
-):
+async def ai_analyze(request: Request, payload: AIAnalyzeRequest = Body(...)):
     """
     AI analysis endpoint for weathercraft-erp and other frontends.
     Accepts JSON body with agent, action, data, and context fields.
@@ -6180,45 +6762,43 @@ async def ai_analyze(
             task_description += f" with data: {json.dumps(data)[:200]}"
 
         # Try to use LangGraph orchestrator if available
-        if hasattr(app.state, 'langgraph_orchestrator') and app.state.langgraph_orchestrator:
+        if hasattr(app.state, "langgraph_orchestrator") and app.state.langgraph_orchestrator:
             orchestrator = app.state.langgraph_orchestrator
             result = await orchestrator.execute(
                 agent_name=agent_name,
                 prompt=task_description,
-                context={**context, "action": action, "data": data}
+                context={**context, "action": action, "data": data},
             )
             return {
                 "success": True,
                 "agent": agent_name,
                 "action": action,
                 "result": result,
-                "message": "Analysis completed via orchestrator"
+                "message": "Analysis completed via orchestrator",
             }
 
         # Fallback: Use module-level agent executor singleton
         try:
             from agent_executor import executor as agent_executor_singleton
+
             if agent_executor_singleton:
                 result = await agent_executor_singleton.execute(
-                    agent_name=agent_name,
-                    task={
-                        "action": action,
-                        "data": data,
-                        "context": context
-                    }
+                    agent_name=agent_name, task={"action": action, "data": data, "context": context}
                 )
                 return {
                     "success": True,
                     "agent": agent_name,
                     "action": action,
                     "result": result,
-                    "message": "Analysis completed via agent executor"
+                    "message": "Analysis completed via agent executor",
                 }
         except (ImportError, Exception) as e:
             logger.warning(f"Agent executor fallback failed: {e}")
 
         # No orchestrator available - queue task for later processing instead of mock response
-        logger.warning(f"No orchestrator/executor available for agent {agent_name}, queueing for async processing")
+        logger.warning(
+            f"No orchestrator/executor available for agent {agent_name}, queueing for async processing"
+        )
 
         # Queue the task to ai_autonomous_tasks for later execution
         try:
@@ -6283,15 +6863,15 @@ async def ai_analyze(
                 "result": {
                     "status": "queued",
                     "task_id": task_id,
-                    "message": f"Request queued for async processing (task: {task_id})"
+                    "message": f"Request queued for async processing (task: {task_id})",
                 },
-                "message": "Request queued - orchestrator temporarily unavailable"
+                "message": "Request queued - orchestrator temporarily unavailable",
             }
         except Exception as queue_error:
             logger.error(f"Failed to queue task: {queue_error}")
             raise HTTPException(
                 status_code=503,
-                detail=f"AI orchestrator unavailable and task queueing failed: {str(queue_error)}"
+                detail=f"AI orchestrator unavailable and task queueing failed: {str(queue_error)}",
             ) from queue_error
 
     except Exception as e:
@@ -6316,24 +6896,30 @@ async def get_aurea_status():
                 "endpoints": {
                     "full_status": "/aurea/chat/status",
                     "chat": "/aurea/chat/message",
-                    "websocket": "/aurea/chat/ws/{session_id}"
-                }
+                    "websocket": "/aurea/chat/ws/{session_id}",
+                },
             }
 
         # Use pool methods directly (they handle acquire internally)
-        recent_cycles = await pool.fetchval("""
+        recent_cycles = await pool.fetchval(
+            """
             SELECT COUNT(*) FROM aurea_state
             WHERE timestamp > NOW() - INTERVAL '5 minutes'
-        """)
+        """
+        )
 
-        recent_decisions = await pool.fetchval("""
+        recent_decisions = await pool.fetchval(
+            """
             SELECT COUNT(*) FROM aurea_decisions
             WHERE created_at > NOW() - INTERVAL '1 hour'
-        """)
+        """
+        )
 
-        active_agents = await pool.fetchval("""
+        active_agents = await pool.fetchval(
+            """
             SELECT COUNT(*) FROM ai_agents WHERE status = 'active'
-        """)
+        """
+        )
 
         # AUREA is operational if we have recent OODA cycles
         aurea_operational = recent_cycles > 0
@@ -6348,8 +6934,8 @@ async def get_aurea_status():
             "endpoints": {
                 "full_status": "/aurea/chat/status",
                 "chat": "/aurea/chat/message",
-                "websocket": "/aurea/chat/ws/{session_id}"
-            }
+                "websocket": "/aurea/chat/ws/{session_id}",
+            },
         }
     except Exception as e:
         logger.error(f"Failed to get AUREA status: {e!r}", exc_info=True)
@@ -6358,16 +6944,13 @@ async def get_aurea_status():
             content={
                 "status": "error",
                 "message": str(e),
-                "timestamp": datetime.utcnow().isoformat()
-            }
+                "timestamp": datetime.utcnow().isoformat(),
+            },
         )
 
 
 @app.post("/aurea/command/natural_language", dependencies=SECURED_DEPENDENCIES)
-async def execute_aurea_nl_command(
-    request: Request,
-    payload: AureaCommandRequest = Body(...)
-):
+async def execute_aurea_nl_command(request: Request, payload: AureaCommandRequest = Body(...)):
     """
     Execute a natural language command through AUREA's NLU processor (requires auth - CRITICAL).
     Founder-level authority for natural language system control.
@@ -6378,7 +6961,7 @@ async def execute_aurea_nl_command(
     - "Get AUREA status"
     - "Execute task abc-123"
     """
-    if not hasattr(app.state, 'aurea_nlu') or not app.state.aurea_nlu:
+    if not hasattr(app.state, "aurea_nlu") or not app.state.aurea_nlu:
         raise HTTPException(status_code=503, detail="AUREA NLU Processor not available")
 
     try:
@@ -6390,7 +6973,7 @@ async def execute_aurea_nl_command(
             "success": True,
             "command": command_text,
             "result": result,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -6406,6 +6989,7 @@ async def execute_aurea_nl_command(
 
 class KnowledgeStoreRequest(BaseModel):
     """Request payload for storing knowledge/memory entries."""
+
     content: str
     memory_type: str = "knowledge"
     source_system: Optional[str] = None
@@ -6418,6 +7002,7 @@ class KnowledgeStoreRequest(BaseModel):
 
 class KnowledgeQueryRequest(BaseModel):
     """Request payload for querying unified memory/knowledge."""
+
     query: str
     limit: int = 10
     memory_type: Optional[str] = None
@@ -6426,6 +7011,7 @@ class KnowledgeQueryRequest(BaseModel):
 
 class ErpAnalyzeRequest(BaseModel):
     """Request payload for ERP job analysis."""
+
     tenant_id: Optional[str] = None
     job_ids: Optional[list[str]] = None
     limit: int = 20
@@ -6433,6 +7019,7 @@ class ErpAnalyzeRequest(BaseModel):
 
 class AgentExecuteRequest(BaseModel):
     """Request payload for executing an agent via v1 API."""
+
     agent_id: Optional[str] = None
     id: Optional[str] = None
     payload: dict[str, Any] = {}
@@ -6440,6 +7027,7 @@ class AgentExecuteRequest(BaseModel):
 
 class AgentActivateRequest(BaseModel):
     """Request payload for activating or deactivating an agent."""
+
     agent_id: Optional[str] = None
     agent_name: Optional[str] = None
     enabled: bool = True
@@ -6447,6 +7035,7 @@ class AgentActivateRequest(BaseModel):
 
 class AUREAEventRequest(BaseModel):
     """Request model for AUREA event execution"""
+
     event_id: str
     topic: str
     source: str
@@ -6457,9 +7046,7 @@ class AUREAEventRequest(BaseModel):
 
 @app.post("/api/v1/knowledge/store")
 async def api_v1_knowledge_store(
-    payload: KnowledgeStoreRequest,
-    request: Request,
-    authenticated: bool = Depends(verify_api_key)
+    payload: KnowledgeStoreRequest, request: Request, authenticated: bool = Depends(verify_api_key)
 ):
     """
     Store a knowledge/memory entry in the unified memory system.
@@ -6492,7 +7079,9 @@ async def api_v1_knowledge_store(
                 importance_score=payload.importance,
             )
             if not success:
-                raise HTTPException(status_code=500, detail="Failed to store memory in embedded backend")
+                raise HTTPException(
+                    status_code=500, detail="Failed to store memory in embedded backend"
+                )
         except Exception as exc:
             logger.error("Embedded memory store failed: %s", exc)
             raise HTTPException(status_code=500, detail="Failed to store memory") from exc
@@ -6527,9 +7116,7 @@ async def api_v1_knowledge_store(
 
 @app.post("/api/v1/knowledge/query")
 async def api_v1_knowledge_query(
-    payload: KnowledgeQueryRequest,
-    request: Request,
-    authenticated: bool = Depends(verify_api_key)
+    payload: KnowledgeQueryRequest, request: Request, authenticated: bool = Depends(verify_api_key)
 ):
     """
     Query the unified memory / knowledge store.
@@ -6617,9 +7204,7 @@ async def api_v1_knowledge_query(
 
 
 @app.get("/api/v1/knowledge/graph/stats")
-async def api_v1_knowledge_graph_stats(
-    authenticated: bool = Depends(verify_api_key)
-):
+async def api_v1_knowledge_graph_stats(authenticated: bool = Depends(verify_api_key)):
     """
     Get knowledge graph statistics - node counts, edge counts, extraction status.
     """
@@ -6632,21 +7217,25 @@ async def api_v1_knowledge_graph_stats(
         graph_count = await pool.fetchval("SELECT COUNT(*) FROM ai_knowledge_graph") or 0
 
         # Get node type distribution
-        node_types = await pool.fetch("""
+        node_types = await pool.fetch(
+            """
             SELECT node_type, COUNT(*) as count
             FROM ai_knowledge_nodes
             GROUP BY node_type
             ORDER BY count DESC
-        """)
+        """
+        )
 
         # Get recent extraction info
-        recent_graph = await pool.fetchrow("""
+        recent_graph = await pool.fetchrow(
+            """
             SELECT node_data, updated_at
             FROM ai_knowledge_graph
             WHERE node_type = 'graph_metadata'
             ORDER BY updated_at DESC
             LIMIT 1
-        """)
+        """
+        )
 
         extraction_stats = {}
         last_extraction = None
@@ -6654,13 +7243,14 @@ async def api_v1_knowledge_graph_stats(
             node_data = recent_graph.get("node_data", {})
             if isinstance(node_data, str):
                 import json
+
                 node_data = json.loads(node_data)
             extraction_stats = node_data.get("extraction_stats", {})
             last_extraction = recent_graph.get("updated_at")
 
         # Get extractor instance stats if available
         extractor_stats = {}
-        if hasattr(app.state, 'knowledge_extractor') and app.state.knowledge_extractor:
+        if hasattr(app.state, "knowledge_extractor") and app.state.knowledge_extractor:
             extractor_stats = app.state.knowledge_extractor.extraction_stats
 
         return {
@@ -6671,7 +7261,8 @@ async def api_v1_knowledge_graph_stats(
             "node_types": [dict(row) for row in node_types],
             "last_extraction": last_extraction.isoformat() if last_extraction else None,
             "extraction_stats": extraction_stats or extractor_stats,
-            "extractor_active": hasattr(app.state, 'knowledge_extractor') and app.state.knowledge_extractor is not None
+            "extractor_active": hasattr(app.state, "knowledge_extractor")
+            and app.state.knowledge_extractor is not None,
         }
     except Exception as e:
         logger.error(f"Knowledge graph stats error: {e}")
@@ -6680,8 +7271,7 @@ async def api_v1_knowledge_graph_stats(
 
 @app.post("/api/v1/knowledge/graph/extract")
 async def api_v1_knowledge_graph_extract(
-    hours_back: int = 24,
-    authenticated: bool = Depends(verify_api_key)
+    hours_back: int = 24, authenticated: bool = Depends(verify_api_key)
 ):
     """
     Manually trigger knowledge graph extraction.
@@ -6689,6 +7279,7 @@ async def api_v1_knowledge_graph_extract(
     """
     try:
         from knowledge_graph_extractor import get_knowledge_extractor
+
         extractor = get_knowledge_extractor()
         await extractor.initialize()
 
@@ -6697,7 +7288,7 @@ async def api_v1_knowledge_graph_extract(
         return {
             "success": result.get("success", False),
             "message": f"Extracted {result.get('nodes_stored', 0)} nodes and {result.get('edges_stored', 0)} edges",
-            "details": result
+            "details": result,
         }
     except Exception as e:
         logger.error(f"Knowledge graph extraction error: {e}")
@@ -6706,8 +7297,7 @@ async def api_v1_knowledge_graph_extract(
 
 @app.post("/api/v1/erp/analyze")
 async def api_v1_erp_analyze(
-    payload: ErpAnalyzeRequest,
-    authenticated: bool = Depends(verify_api_key)
+    payload: ErpAnalyzeRequest, authenticated: bool = Depends(verify_api_key)
 ):
     """
     Analyze ERP jobs using centralized BrainOps Core.
@@ -6743,7 +7333,9 @@ async def api_v1_erp_analyze(
             filters.append(f"j.tenant_id = ${len(params) + 1}::uuid")
             params.append(payload.tenant_id)
         elif payload.tenant_id and not has_tenant_id:
-            logger.warning("Tenant filter requested but jobs.tenant_id column not found; returning unscoped jobs")
+            logger.warning(
+                "Tenant filter requested but jobs.tenant_id column not found; returning unscoped jobs"
+            )
 
         if payload.job_ids:
             filters.append(f"j.id = ANY(${len(params) + 1}::uuid[])")
@@ -6779,11 +7371,12 @@ async def api_v1_erp_analyze(
             if not dt:
                 return None
             # Handle both datetime and date objects
-            if hasattr(dt, 'tzinfo'):
+            if hasattr(dt, "tzinfo"):
                 return dt.replace(tzinfo=None) if dt.tzinfo else dt
             else:
                 # It's a date object, convert to naive datetime
                 from datetime import date
+
                 if isinstance(dt, date):
                     return datetime.combine(dt, datetime.min.time())
                 return dt
@@ -6950,10 +7543,16 @@ async def api_v1_erp_analyze(
                         "action": (
                             "Schedule emergency crew meeting"
                             if risk_level == "critical"
-                            else ("Add crew members" if risk_level == "high" else "Continue monitoring")
+                            else (
+                                "Add crew members"
+                                if risk_level == "high"
+                                else "Continue monitoring"
+                            )
                         ),
                         "priority": (
-                            "urgent" if risk_level == "critical" else ("high" if risk_level == "high" else "medium")
+                            "urgent"
+                            if risk_level == "critical"
+                            else ("high" if risk_level == "high" else "medium")
                         ),
                         "reasoning": [
                             (
@@ -6986,9 +7585,7 @@ async def api_v1_erp_analyze(
 @app.post("/api/v1/agents/execute")
 @limiter.limit("10/minute")
 async def api_v1_agents_execute(
-    request: Request,
-    payload: AgentExecuteRequest,
-    authenticated: bool = Depends(verify_api_key)
+    request: Request, payload: AgentExecuteRequest, authenticated: bool = Depends(verify_api_key)
 ):
     """
     Execute an agent via the v1 API surface.
@@ -7021,8 +7618,7 @@ async def api_v1_agents_execute(
 
 @app.post("/api/v1/agents/activate")
 async def api_v1_agents_activate(
-    payload: AgentActivateRequest,
-    authenticated: bool = Depends(verify_api_key)
+    payload: AgentActivateRequest, authenticated: bool = Depends(verify_api_key)
 ):
     """
     Activate or deactivate an agent via the v1 API surface.
@@ -7083,14 +7679,15 @@ async def api_v1_agents_activate(
 
 @app.post("/api/v1/aurea/execute-event")
 async def execute_aurea_event(
-    request: AUREAEventRequest,
-    authenticated: bool = Depends(verify_api_key)
+    request: AUREAEventRequest, authenticated: bool = Depends(verify_api_key)
 ):
     """
     Execute event with specified AI agent via AUREA orchestration.
     Called by Event Router daemon to process events from brainops_core.event_bus.
     """
-    logger.info(f"🎯 AUREA Event: {request.event_id} ({request.topic}) -> {request.target_agent['name']}")
+    logger.info(
+        f"🎯 AUREA Event: {request.event_id} ({request.topic}) -> {request.target_agent['name']}"
+    )
 
     pool = get_pool()
 
@@ -7102,17 +7699,17 @@ async def execute_aurea_event(
             FROM agents
             WHERE name = $1 AND enabled = TRUE
             """,
-            request.target_agent['name']
+            request.target_agent["name"],
         )
 
         if not agent_row:
             raise HTTPException(
                 status_code=404,
-                detail=f"Agent '{request.target_agent['name']}' not found or disabled"
+                detail=f"Agent '{request.target_agent['name']}' not found or disabled",
             )
 
-        str(agent_row['id'])
-        agent_name = agent_row['name']
+        str(agent_row["id"])
+        agent_name = agent_row["name"]
 
         # Prepare agent execution payload
 
@@ -7123,7 +7720,7 @@ async def execute_aurea_event(
             "agent": agent_name,
             "event_id": request.event_id,
             "topic": request.topic,
-            "action": "processed"
+            "action": "processed",
         }
 
         # Update agent last_active_at in brainops_core.agents (if table exists)
@@ -7134,7 +7731,7 @@ async def execute_aurea_event(
                 SET last_active_at = NOW()
                 WHERE name = $1
                 """,
-                agent_name
+                agent_name,
             )
         except Exception as exc:
             logger.debug("Failed to update agent heartbeat: %s", exc, exc_info=True)
@@ -7151,9 +7748,9 @@ async def execute_aurea_event(
                     metadata={
                         "event_id": request.event_id,
                         "topic": request.topic,
-                        "source": request.source
+                        "source": request.source,
                     },
-                    importance_score=0.7
+                    importance_score=0.7,
                 )
             except Exception as e:
                 logger.warning(f"Could not store in embedded memory: {e}")
@@ -7165,17 +7762,14 @@ async def execute_aurea_event(
             "event_id": request.event_id,
             "agent": agent_name,
             "topic": request.topic,
-            "result": result
+            "result": result,
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"❌ AUREA Event {request.event_id} failed: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Event execution failed: {str(e)}"
-        ) from e
+        raise HTTPException(status_code=500, detail=f"Event execution failed: {str(e)}") from e
 
 
 # ==================== END BRAINOPS CORE v1 API ====================
@@ -7186,20 +7780,25 @@ async def execute_aurea_event(
 # In-memory log buffer for recent logs
 LOG_BUFFER: deque = deque(maxlen=500)
 
+
 class LogCapture(logging.Handler):
     """Capture logs to buffer for API access"""
+
     def emit(self, record):
         try:
-            LOG_BUFFER.append({
-                "timestamp": datetime.fromtimestamp(record.created).isoformat(),
-                "level": record.levelname,
-                "logger": record.name,
-                "message": record.getMessage(),
-                "module": record.module,
-                "line": record.lineno
-            })
+            LOG_BUFFER.append(
+                {
+                    "timestamp": datetime.fromtimestamp(record.created).isoformat(),
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "message": record.getMessage(),
+                    "module": record.module,
+                    "line": record.lineno,
+                }
+            )
         except Exception:
             self.handleError(record)
+
 
 # Add log capture handler
 _log_capture = LogCapture()
@@ -7212,7 +7811,7 @@ async def get_recent_logs(
     level: Optional[str] = None,
     logger_name: Optional[str] = None,
     limit: int = Query(default=100, le=500),
-    contains: Optional[str] = None
+    contains: Optional[str] = None,
 ):
     """Get recent logs with filtering"""
     logs = list(LOG_BUFFER)
@@ -7234,7 +7833,7 @@ async def get_recent_logs(
         "logs": logs[-limit:],
         "total_in_buffer": len(LOG_BUFFER),
         "returned": min(limit, len(logs)),
-        "filters": {"level": level, "logger": logger_name, "contains": contains}
+        "filters": {"level": level, "logger": logger_name, "contains": contains},
     }
 
 
@@ -7248,7 +7847,7 @@ async def get_full_observability():
         "services": {},
         "database": {},
         "recent_errors": [],
-        "system_metrics": {}
+        "system_metrics": {},
     }
 
     # Check all services
@@ -7258,7 +7857,7 @@ async def get_full_observability():
         "mcp_bridge": "https://brainops-mcp-bridge.onrender.com/health",
         "myroofgenius": "https://myroofgenius.com",
         "weathercraft_erp": "https://weathercraft-erp.vercel.app",
-        "brainstackstudio": "https://brainstackstudio.com"
+        "brainstackstudio": "https://brainstackstudio.com",
     }
 
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -7268,7 +7867,9 @@ async def get_full_observability():
                 results["services"][name] = {
                     "status": "healthy" if resp.status_code == 200 else "degraded",
                     "code": resp.status_code,
-                    "data": resp.json() if resp.headers.get("content-type", "").startswith("application/json") else None
+                    "data": resp.json()
+                    if resp.headers.get("content-type", "").startswith("application/json")
+                    else None,
                 }
             except Exception as e:
                 results["services"][name] = {"status": "error", "error": str(e)}
@@ -7276,7 +7877,8 @@ async def get_full_observability():
     # Get database stats
     try:
         pool = get_pool()
-        db_stats = await pool.fetchrow("""
+        db_stats = await pool.fetchrow(
+            """
             SELECT
                 (SELECT COUNT(*) FROM customers) as customers,
                 (SELECT COUNT(*) FROM jobs) as jobs,
@@ -7284,24 +7886,25 @@ async def get_full_observability():
                 (SELECT COUNT(*) FROM ai_agent_executions) as executions,
                 (SELECT COUNT(*) FROM ai_agent_executions WHERE created_at > NOW() - INTERVAL '1 hour') as recent_executions,
                 (SELECT COUNT(*) FROM ai_agent_executions WHERE status = 'failed' AND created_at > NOW() - INTERVAL '1 hour') as recent_failures
-        """)
+        """
+        )
         results["database"] = dict(db_stats) if db_stats else {}
     except Exception as e:
         results["database"] = {"error": str(e)}
 
     # Get recent errors from logs
     results["recent_errors"] = [
-        l for l in list(LOG_BUFFER)[-100:]
-        if l["level"] in ["ERROR", "CRITICAL"]
+        l for l in list(LOG_BUFFER)[-100:] if l["level"] in ["ERROR", "CRITICAL"]
     ][-20:]
 
     # Get system metrics
     try:
         import psutil
+
         results["system_metrics"] = {
             "cpu_percent": psutil.cpu_percent(),
             "memory_percent": psutil.virtual_memory().percent,
-            "disk_percent": psutil.disk_usage('/').percent
+            "disk_percent": psutil.disk_usage("/").percent,
         }
     except ImportError:
         results["system_metrics"] = {"note": "psutil not available"}
@@ -7315,13 +7918,7 @@ async def get_all_errors():
     errors = [l for l in list(LOG_BUFFER) if l["level"] in ["ERROR", "CRITICAL", "WARNING"]]
 
     # Categorize errors
-    categorized = {
-        "database": [],
-        "connection": [],
-        "schema": [],
-        "api": [],
-        "other": []
-    }
+    categorized = {"database": [], "connection": [], "schema": [], "api": [], "other": []}
 
     for err in errors:
         msg = err["message"].lower()
@@ -7340,7 +7937,7 @@ async def get_all_errors():
         "total_errors": len(errors),
         "categorized": {k: len(v) for k, v in categorized.items()},
         "recent_errors": errors[-50:],
-        "by_category": categorized
+        "by_category": categorized,
     }
 
 
@@ -7353,14 +7950,17 @@ async def get_unified_system_status():
         "version": VERSION,
         "timestamp": datetime.utcnow().isoformat(),
         "overall_health": "healthy",
-        "components": {}
+        "components": {},
     }
 
     # Check each major component
     components = [
         ("database", "SELECT 1"),
         ("agents", "SELECT COUNT(*) FROM ai_agents"),
-        ("executions", "SELECT COUNT(*) FROM ai_agent_executions WHERE created_at > NOW() - INTERVAL '24 hours'"),
+        (
+            "executions",
+            "SELECT COUNT(*) FROM ai_agent_executions WHERE created_at > NOW() - INTERVAL '24 hours'",
+        ),
         ("memory", "SELECT COUNT(*) FROM unified_brain"),
         ("revenue", "SELECT COUNT(*) FROM revenue_leads"),
     ]
@@ -7388,6 +7988,7 @@ async def get_unified_system_status():
 
 try:
     from multi_ai_content_orchestrator import MultiAIContentOrchestrator, ContentType
+
     CONTENT_ORCHESTRATOR_AVAILABLE = True
     logger.info("Multi-AI Content Orchestrator loaded")
 except ImportError as e:
@@ -7409,7 +8010,7 @@ class ContentGenerationRequest(BaseModel):
 async def generate_content(
     request: ContentGenerationRequest,
     background_tasks: BackgroundTasks,
-    authenticated: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key),
 ):
     """
     Generate content using Multi-AI Orchestration.
@@ -7432,7 +8033,7 @@ async def generate_content(
         "target_audience": request.target_audience,
         "chapters": request.chapters,
         "module_number": request.module_number,
-        "include_image": request.include_image
+        "include_image": request.include_image,
     }
 
     # Run in background for long-running content
@@ -7443,7 +8044,7 @@ async def generate_content(
             "status": "accepted",
             "job_id": job_id,
             "message": f"Ebook generation started for: {request.topic}",
-            "check_status": f"/content/status/{job_id}"
+            "check_status": f"/content/status/{job_id}",
         }
 
     # Run synchronously for faster content types
@@ -7465,7 +8066,7 @@ async def _run_content_generation(orchestrator, task, job_id):
 async def generate_newsletter(
     topic: str = Body(..., embed=True),
     brand: str = Body("BrainOps", embed=True),
-    authenticated: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key),
 ):
     """Generate a complete newsletter with HTML template."""
     if not CONTENT_ORCHESTRATOR_AVAILABLE:
@@ -7482,18 +8083,16 @@ async def generate_ebook(
     chapters: int = Body(5, embed=True),
     author: str = Body("BrainOps AI", embed=True),
     background_tasks: BackgroundTasks = None,
-    authenticated: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key),
 ):
     """Generate a complete ebook with multiple chapters."""
     if not CONTENT_ORCHESTRATOR_AVAILABLE:
         raise HTTPException(status_code=503, detail="Content orchestrator not available")
 
     orchestrator = MultiAIContentOrchestrator()
-    result = await orchestrator.generate_ebook({
-        "topic": topic,
-        "chapters": chapters,
-        "author": author
-    })
+    result = await orchestrator.generate_ebook(
+        {"topic": topic, "chapters": chapters, "author": author}
+    )
     return result
 
 
@@ -7502,18 +8101,16 @@ async def generate_training_doc(
     topic: str = Body(..., embed=True),
     module_number: int = Body(1, embed=True),
     skill_level: str = Body("beginner", embed=True),
-    authenticated: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key),
 ):
     """Generate training documentation with exercises and quizzes."""
     if not CONTENT_ORCHESTRATOR_AVAILABLE:
         raise HTTPException(status_code=503, detail="Content orchestrator not available")
 
     orchestrator = MultiAIContentOrchestrator()
-    result = await orchestrator.generate_training_doc({
-        "topic": topic,
-        "module_number": module_number,
-        "skill_level": skill_level
-    })
+    result = await orchestrator.generate_training_doc(
+        {"topic": topic, "module_number": module_number, "skill_level": skill_level}
+    )
     return result
 
 
@@ -7522,12 +8119,34 @@ async def get_content_types():
     """Get available content generation types (requires auth)."""
     return {
         "types": [
-            {"id": "blog_post", "name": "Blog Post", "description": "SEO-optimized blog articles with research"},
-            {"id": "newsletter", "name": "Newsletter", "description": "Complete email newsletters with HTML templates"},
-            {"id": "ebook", "name": "Ebook", "description": "Full ebooks with multiple chapters and TOC"},
-            {"id": "training", "name": "Training Doc", "description": "Training modules with exercises and quizzes"}
+            {
+                "id": "blog_post",
+                "name": "Blog Post",
+                "description": "SEO-optimized blog articles with research",
+            },
+            {
+                "id": "newsletter",
+                "name": "Newsletter",
+                "description": "Complete email newsletters with HTML templates",
+            },
+            {
+                "id": "ebook",
+                "name": "Ebook",
+                "description": "Full ebooks with multiple chapters and TOC",
+            },
+            {
+                "id": "training",
+                "name": "Training Doc",
+                "description": "Training modules with exercises and quizzes",
+            },
         ],
-        "models_used": ["perplexity:sonar-pro", "anthropic:claude-3-sonnet", "google:gemini-2.0-flash", "openai:gpt-4-turbo-preview", "openai:dall-e-3"]
+        "models_used": [
+            "perplexity:sonar-pro",
+            "anthropic:claude-3-sonnet",
+            "google:gemini-2.0-flash",
+            "openai:gpt-4-turbo-preview",
+            "openai:dall-e-3",
+        ],
     }
 
 
@@ -7535,6 +8154,7 @@ async def get_content_types():
 
 
 # ==================== PRODUCT & REVENUE INVENTORY ====================
+
 
 @app.get("/inventory/products", tags=["Inventory"])
 async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
@@ -7555,7 +8175,7 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "type": "code_kit",
                         "url": "https://woodworthia.gumroad.com/l/hjhmsm",
                         "status": "active",
-                        "description": "Build AI tool integrations fast with MCP Server patterns"
+                        "description": "Build AI tool integrations fast with MCP Server patterns",
                     },
                     {
                         "code": "GSAAVB",
@@ -7564,7 +8184,7 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "type": "code_kit",
                         "url": "https://woodworthia.gumroad.com/l/gsaavb",
                         "status": "active",
-                        "description": "Multi-LLM smart routing and orchestration system"
+                        "description": "Multi-LLM smart routing and orchestration system",
                     },
                     {
                         "code": "VJXCEW",
@@ -7572,7 +8192,7 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "price": 67,
                         "type": "code_kit",
                         "url": "https://woodworthia.gumroad.com/l/vjxcew",
-                        "status": "active"
+                        "status": "active",
                     },
                     {
                         "code": "UPSYKR",
@@ -7580,7 +8200,7 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "price": 149,
                         "type": "code_kit",
                         "url": "https://woodworthia.gumroad.com/l/upsykr",
-                        "status": "active"
+                        "status": "active",
                     },
                     {
                         "code": "XGFKP",
@@ -7588,7 +8208,7 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "price": 47,
                         "type": "prompt_pack",
                         "url": "https://woodworthia.gumroad.com/l/xgfkp",
-                        "status": "active"
+                        "status": "active",
                     },
                     {
                         "code": "CAWVO",
@@ -7596,7 +8216,7 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "price": 49,
                         "type": "prompt_pack",
                         "url": "https://woodworthia.gumroad.com/l/cawvo",
-                        "status": "active"
+                        "status": "active",
                     },
                     {
                         "code": "GR-ERP-START",
@@ -7605,7 +8225,7 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "type": "code_kit",
                         "url": "https://woodworthia.gumroad.com/l/gr-erp-start",
                         "status": "active",
-                        "description": "Multi-tenant SaaS foundation with auth, CRM, jobs, invoicing"
+                        "description": "Multi-tenant SaaS foundation with auth, CRM, jobs, invoicing",
                     },
                     {
                         "code": "GR-CONTENT",
@@ -7614,7 +8234,7 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "type": "automation",
                         "url": "https://woodworthia.gumroad.com/l/gr-content",
                         "status": "active",
-                        "description": "Scale content 10x with multi-stage AI pipeline"
+                        "description": "Scale content 10x with multi-stage AI pipeline",
                     },
                     {
                         "code": "GR-ONBOARD",
@@ -7622,7 +8242,7 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "price": 297,
                         "type": "automation",
                         "url": "https://woodworthia.gumroad.com/l/gr-onboard",
-                        "status": "active"
+                        "status": "active",
                     },
                     {
                         "code": "GR-PMCMD",
@@ -7630,11 +8250,11 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "price": 197,
                         "type": "template",
                         "url": "https://woodworthia.gumroad.com/l/gr-pmcmd",
-                        "status": "active"
-                    }
+                        "status": "active",
+                    },
                 ],
                 "pricing_model": "one_time",
-                "total_products": 10
+                "total_products": 10,
             },
             "myroofgenius": {
                 "url": "https://myroofgenius.com",
@@ -7645,7 +8265,7 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "price_annual": 588,
                         "type": "subscription",
                         "status": "ready",
-                        "features": ["1-3 users", "2-10 jobs/month", "Basic analysis"]
+                        "features": ["1-3 users", "2-10 jobs/month", "Basic analysis"],
                     },
                     {
                         "name": "Professional",
@@ -7653,7 +8273,7 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "price_annual": 1188,
                         "type": "subscription",
                         "status": "ready",
-                        "features": ["Up to 10 users", "10-30 jobs/month", "Advanced analytics"]
+                        "features": ["Up to 10 users", "10-30 jobs/month", "Advanced analytics"],
                     },
                     {
                         "name": "Enterprise",
@@ -7661,13 +8281,13 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "price_annual": 2388,
                         "type": "subscription",
                         "status": "ready",
-                        "features": ["Unlimited users", "30+ jobs/month", "Full features"]
-                    }
+                        "features": ["Unlimited users", "30+ jobs/month", "Full features"],
+                    },
                 ],
                 "pricing_model": "subscription",
                 "payment_processor": "stripe",
                 "current_mrr": 0,
-                "active_subscribers": 0
+                "active_subscribers": 0,
             },
             "brainstack_studio": {
                 "url": "https://brainstackstudio.com",
@@ -7677,13 +8297,17 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
                         "price": 0,
                         "type": "free",
                         "status": "active",
-                        "features": ["Claude, GPT, Gemini access", "Local storage", "Basic highlighting"]
+                        "features": [
+                            "Claude, GPT, Gemini access",
+                            "Local storage",
+                            "Basic highlighting",
+                        ],
                     }
                 ],
                 "pricing_model": "freemium",
                 "monetization_status": "needs_setup",
-                "notes": "Currently free - needs subscription model or upsell to Gumroad products"
-            }
+                "notes": "Currently free - needs subscription model or upsell to Gumroad products",
+            },
         },
         "revenue_summary": {
             "gumroad_lifetime": 0.0,
@@ -7693,8 +8317,8 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
             "mrg_mrr": 0.0,
             "mrg_active_subscribers_default_tenant": 0,
             "total_real_revenue": 0.0,
-            "note": "Owner revenue only (Gumroad + MRG). Excludes Weathercraft ERP client operations and ERP invoice ledger."
-        }
+            "note": "Owner revenue only (Gumroad + MRG). Excludes Weathercraft ERP client operations and ERP invoice ledger.",
+        },
     }
 
     # Never hardcode revenue. Compute live, truthy numbers (exclude tests).
@@ -7702,7 +8326,9 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
         from email_sender import get_db_connection
         from psycopg2.extras import RealDictCursor
 
-        mrg_default_tenant = os.getenv("MRG_DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
+        mrg_default_tenant = os.getenv(
+            "MRG_DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001"
+        )
 
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -7770,22 +8396,26 @@ async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
     try:
         from email_sender import get_db_connection
         from psycopg2.extras import RealDictCursor
+
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
         # Get real Gumroad sales
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT
                 COUNT(*) as total_sales,
                 COALESCE(SUM(price::numeric), 0) as total_revenue,
                 MAX(sale_timestamp) as last_sale
             FROM gumroad_sales
             WHERE is_test = false OR is_test IS NULL
-        """)
+        """
+        )
         gumroad = cursor.fetchone() or {"total_sales": 0, "total_revenue": 0}
 
         # Get MRG subscriptions
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT
                 COUNT(*) as active_subscriptions,
                 COALESCE(SUM(
@@ -7797,7 +8427,8 @@ async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
                 ), 0) as mrr
             FROM mrg_subscriptions
             WHERE status = 'active'
-        """)
+        """
+        )
         mrg = cursor.fetchone() or {"active_subscriptions": 0, "mrr": 0}
 
         cursor.close()
@@ -7809,16 +8440,18 @@ async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
                 "gumroad": {
                     "total_sales": gumroad.get("total_sales", 0),
                     "total_revenue": float(gumroad.get("total_revenue", 0)),
-                    "last_sale": str(gumroad.get("last_sale")) if gumroad.get("last_sale") else None
+                    "last_sale": str(gumroad.get("last_sale"))
+                    if gumroad.get("last_sale")
+                    else None,
                 },
                 "myroofgenius": {
                     "active_subscriptions": mrg.get("active_subscriptions", 0),
-                    "mrr": float(mrg.get("mrr", 0))
+                    "mrr": float(mrg.get("mrr", 0)),
                 },
                 "total_lifetime_revenue": float(gumroad.get("total_revenue", 0)),
-                "total_mrr": float(mrg.get("mrr", 0))
+                "total_mrr": float(mrg.get("mrr", 0)),
             },
-            "warning": "Weathercraft ERP customer/job/invoice data is client operations, not owner revenue."
+            "warning": "Weathercraft ERP customer/job/invoice data is client operations, not owner revenue.",
         }
 
     except Exception as e:
@@ -7827,9 +8460,9 @@ async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
             "timestamp": datetime.utcnow().isoformat(),
             "real_revenue": {
                 "gumroad": {"total_sales": 0, "total_revenue": 0},
-                "myroofgenius": {"active_subscriptions": 0, "mrr": 0}
+                "myroofgenius": {"active_subscriptions": 0, "mrr": 0},
             },
-            "error": str(e)
+            "error": str(e),
         }
 
 
@@ -7844,8 +8477,9 @@ try:
         get_revenue_system,
         get_business_state,
         get_revenue,
-        sync_to_brain
+        sync_to_brain,
     )
+
     REVENUE_INTEL_AVAILABLE = True
     logger.info("Revenue Intelligence System loaded")
 except ImportError as e:
@@ -7886,7 +8520,7 @@ async def get_all_products_inventory(authenticated: bool = Depends(verify_api_ke
     return {
         "products": system.get_all_products(),
         "social": system.get_social_presence(),
-        "websites": system.get_websites()
+        "websites": system.get_websites(),
     }
 
 
@@ -7918,7 +8552,7 @@ async def record_revenue_event(
     platform: str = Body(..., embed=True),
     amount: float = Body(0, embed=True),
     metadata: dict = Body(None, embed=True),
-    authenticated: bool = Depends(verify_api_key)
+    authenticated: bool = Depends(verify_api_key),
 ):
     """Record a revenue event for tracking."""
     if not REVENUE_INTEL_AVAILABLE:
@@ -7981,8 +8615,8 @@ async def global_exception_handler(request: Request, exc: Exception):
                         "method": request.method,
                         "path": str(request.url.path),
                         "query": str(request.query_params),
-                        "client_host": request.client.host if request.client else "unknown"
-                    }
+                        "client_host": request.client.host if request.client else "unknown",
+                    },
                 )
 
                 # Log to database for pattern learning
@@ -7998,16 +8632,12 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={
             "detail": "Internal server error",
             "type": type(exc).__name__,
-            "message": str(exc) if config.security.dev_mode else "An error occurred"
-        }
+            "message": str(exc) if config.security.dev_mode else "An error occurred",
+        },
     )
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        app,
-        host=config.host,
-        port=config.port,
-        log_level=config.log_level.lower()
-    )
+
+    uvicorn.run(app, host=config.host, port=config.port, log_level=config.log_level.lower())
