@@ -2051,6 +2051,12 @@ async def rate_limit_middleware(request: Request, call_next):
         return await call_next(request)
 
     identity = _rate_limit_key(request)
+
+    # Internal E2E verification requests get unique keys (e2e-internal:*).
+    # Skip the category bucket entirely so the verifier never 429s itself.
+    if identity.startswith("e2e-internal:"):
+        return await call_next(request)
+
     category = _classify_path(path)
 
     if not await _category_is_allowed(category, identity):

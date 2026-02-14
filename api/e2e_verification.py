@@ -28,7 +28,9 @@ def _extract_api_key(request: Request) -> str | None:
     if api_key:
         return api_key
 
-    authorization = request.headers.get("Authorization") or request.headers.get("authorization") or ""
+    authorization = (
+        request.headers.get("Authorization") or request.headers.get("authorization") or ""
+    )
     if authorization.startswith("ApiKey "):
         return authorization[len("ApiKey ") :].strip() or None
     if authorization.startswith("Bearer "):
@@ -56,19 +58,20 @@ async def run_verification(
         api_key_override = _extract_api_key(request)
 
         if quick:
-            result = await run_quick_health_check(api_key_override=api_key_override, skip_erp=skip_erp)
+            result = await run_quick_health_check(
+                api_key_override=api_key_override, skip_erp=skip_erp
+            )
             return {
                 "verification_type": "quick",
                 "is_100_percent_operational": result["is_healthy"],
                 "skip_erp": skip_erp,
-                **result
+                **result,
             }
         else:
-            result = await run_full_e2e_verification(api_key_override=api_key_override, skip_erp=skip_erp)
-            return {
-                "verification_type": "full",
-                **result
-            }
+            result = await run_full_e2e_verification(
+                api_key_override=api_key_override, skip_erp=skip_erp
+            )
+            return {"verification_type": "full", **result}
     except Exception as e:
         logger.error(f"E2E verification failed: {e}")
         raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}") from e
@@ -94,9 +97,15 @@ async def get_verification_status():
             "status": "operational",
             "total_tests_configured": len(e2e_verification.tests),
             "categories": {
-                "core_api": sum(1 for t in e2e_verification.tests if t.category.value == "core_api"),
-                "bleeding_edge": sum(1 for t in e2e_verification.tests if t.category.value == "bleeding_edge"),
-                "frontend": sum(1 for t in e2e_verification.tests if t.category.value == "frontend"),
+                "core_api": sum(
+                    1 for t in e2e_verification.tests if t.category.value == "core_api"
+                ),
+                "bleeding_edge": sum(
+                    1 for t in e2e_verification.tests if t.category.value == "bleeding_edge"
+                ),
+                "frontend": sum(
+                    1 for t in e2e_verification.tests if t.category.value == "frontend"
+                ),
                 "mcp": sum(1 for t in e2e_verification.tests if t.category.value == "mcp"),
             },
             "critical_tests": sum(1 for t in e2e_verification.tests if t.critical),
@@ -106,16 +115,12 @@ async def get_verification_status():
                 "quick_health_check",
                 "category_breakdown",
                 "actionable_recommendations",
-                "100_percent_operational_check"
-            ]
+                "100_percent_operational_check",
+            ],
         }
     except Exception as e:
         logger.error(f"Could not get verification status: {e}")
-        return {
-            "system": "e2e_verification",
-            "status": "error",
-            "error": str(e)
-        }
+        return {"system": "e2e_verification", "status": "error", "error": str(e)}
 
 
 @router.get("/last-report")
@@ -128,13 +133,10 @@ async def get_last_report():
         if not report:
             return {
                 "message": "No verification report available. Run /e2e/verify first.",
-                "has_report": False
+                "has_report": False,
             }
 
-        return {
-            "has_report": True,
-            **report
-        }
+        return {"has_report": True, **report}
     except Exception as e:
         logger.error(f"Could not get last report: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -154,17 +156,15 @@ async def get_health_matrix():
         for test in e2e_verification.tests:
             cat = test.category.value
             if cat not in matrix:
-                matrix[cat] = {
-                    "endpoints": [],
-                    "critical_count": 0,
-                    "total_count": 0
+                matrix[cat] = {"endpoints": [], "critical_count": 0, "total_count": 0}
+            matrix[cat]["endpoints"].append(
+                {
+                    "name": test.name,
+                    "url": test.url,
+                    "critical": test.critical,
+                    "timeout": test.timeout_seconds,
                 }
-            matrix[cat]["endpoints"].append({
-                "name": test.name,
-                "url": test.url,
-                "critical": test.critical,
-                "timeout": test.timeout_seconds
-            })
+            )
             matrix[cat]["total_count"] += 1
             if test.critical:
                 matrix[cat]["critical_count"] += 1
@@ -173,7 +173,7 @@ async def get_health_matrix():
             "health_matrix": matrix,
             "total_endpoints": len(e2e_verification.tests),
             "total_critical": sum(1 for t in e2e_verification.tests if t.critical),
-            "message": "Use /e2e/verify to run actual verification"
+            "message": "Use /e2e/verify to run actual verification",
         }
     except Exception as e:
         logger.error(f"Could not get health matrix: {e}")
@@ -192,7 +192,7 @@ async def start_background_verification(
     if _background_verification_running:
         return {
             "status": "already_running",
-            "message": "Background verification is already in progress"
+            "message": "Background verification is already in progress",
         }
 
     api_key_override = _extract_api_key(request)
@@ -201,6 +201,7 @@ async def start_background_verification(
         global _background_verification_running, _last_background_result
         try:
             from e2e_system_verification import run_full_e2e_verification
+
             _background_verification_running = True
             _last_background_result = await run_full_e2e_verification(
                 api_key_override=api_key_override,
@@ -214,7 +215,7 @@ async def start_background_verification(
 
     return {
         "status": "started",
-        "message": "Background verification started. Check /e2e/verify/background/status for results."
+        "message": "Background verification started. Check /e2e/verify/background/status for results.",
     }
 
 
@@ -224,20 +225,14 @@ async def get_background_verification_status():
     global _background_verification_running, _last_background_result
 
     if _background_verification_running:
-        return {
-            "status": "running",
-            "message": "Verification in progress..."
-        }
+        return {"status": "running", "message": "Verification in progress..."}
 
     if _last_background_result:
-        return {
-            "status": "completed",
-            "result": _last_background_result
-        }
+        return {"status": "completed", "result": _last_background_result}
 
     return {
         "status": "not_started",
-        "message": "No background verification has been run. Use POST /e2e/verify/background to start."
+        "message": "No background verification has been run. Use POST /e2e/verify/background to start.",
     }
 
 
@@ -254,11 +249,7 @@ async def list_verified_systems():
             base_url = "/".join(url_parts[:3])
 
             if base_url not in systems:
-                systems[base_url] = {
-                    "base_url": base_url,
-                    "endpoints": [],
-                    "critical_endpoints": 0
-                }
+                systems[base_url] = {"base_url": base_url, "endpoints": [], "critical_endpoints": 0}
 
             systems[base_url]["endpoints"].append(test.name)
             if test.critical:
@@ -267,7 +258,7 @@ async def list_verified_systems():
         return {
             "systems": list(systems.values()),
             "total_systems": len(systems),
-            "total_endpoints": len(e2e_verification.tests)
+            "total_endpoints": len(e2e_verification.tests),
         }
     except Exception as e:
         logger.error(f"Could not list systems: {e}")
@@ -279,18 +270,31 @@ async def debug_api_key():
     """Debug endpoint to check which API key the E2E module is using"""
     import os
 
-    from e2e_system_verification import API_KEY, _api_keys_list
+    from e2e_system_verification import (
+        API_KEY,
+        BRAINOPS_API_URL,
+        _api_keys_list,
+        _compute_e2e_internal_sig,
+    )
 
     api_keys_env = os.getenv("API_KEYS", "NOT SET")
     brainops_key_env = os.getenv("BRAINOPS_API_KEY", "NOT SET")
+
+    # Compute the HMAC sig the verifier would use, for comparison
+    sig = _compute_e2e_internal_sig(API_KEY) if API_KEY else "NO_KEY"
 
     return {
         "e2e_api_key_used": API_KEY[:10] + "..." if len(API_KEY) > 10 else API_KEY,
         "api_key_full_length": len(API_KEY),
         "api_keys_from_env": api_keys_env[:15] + "..." if len(api_keys_env) > 15 else api_keys_env,
         "api_keys_parsed_count": len(_api_keys_list),
-        "brainops_api_key_env": brainops_key_env[:10] + "..." if len(brainops_key_env) > 10 else brainops_key_env,
-        "source": "API_KEYS" if _api_keys_list else "BRAINOPS_API_KEY or default"
+        "brainops_api_key_env": brainops_key_env[:10] + "..."
+        if len(brainops_key_env) > 10
+        else brainops_key_env,
+        "source": "API_KEYS" if _api_keys_list else "BRAINOPS_API_KEY or default",
+        "brainops_api_url": BRAINOPS_API_URL,
+        "e2e_internal_sig_first_12": sig[:12] if sig else "NONE",
+        "has_compute_sig_func": True,
     }
 
 
@@ -298,11 +302,9 @@ async def debug_api_key():
 # UI Testing with Playwright (True Browser-Based Testing)
 # =============================================================================
 
+
 @router.get("/ui/test/{app_name}")
-async def run_ui_test(
-    app_name: str,
-    background_tasks: BackgroundTasks
-):
+async def run_ui_test(app_name: str, background_tasks: BackgroundTasks):
     """
     Run Playwright-based UI tests for a specific application.
 
@@ -318,10 +320,7 @@ async def run_ui_test(
     """
     valid_apps = ["weathercraft-erp", "myroofgenius", "brainops-command-center"]
     if app_name not in valid_apps:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid app. Valid options: {valid_apps}"
-        )
+        raise HTTPException(status_code=400, detail=f"Invalid app. Valid options: {valid_apps}")
 
     try:
         from ui_tester_agent import PLAYWRIGHT_AVAILABLE, UITesterAgent
@@ -330,7 +329,7 @@ async def run_ui_test(
             return {
                 "status": "error",
                 "error": "Playwright not installed. Browser testing unavailable.",
-                "recommendation": "Use /e2e/verify for API-level testing instead"
+                "recommendation": "Use /e2e/verify for API-level testing instead",
             }
 
         tester = UITesterAgent()
@@ -339,8 +338,9 @@ async def run_ui_test(
         return {
             "test_type": "ui_browser",
             "application": app_name,
-            "is_operational": results["summary"]["failed"] == 0 and results["summary"]["errors"] == 0,
-            "results": results
+            "is_operational": results["summary"]["failed"] == 0
+            and results["summary"]["errors"] == 0,
+            "results": results,
         }
     except Exception as e:
         logger.error(f"UI test failed for {app_name}: {e}")
@@ -361,7 +361,7 @@ async def run_all_ui_tests():
             return {
                 "status": "error",
                 "error": "Playwright not available",
-                "recommendation": "Install with: pip install playwright && playwright install chromium"
+                "recommendation": "Install with: pip install playwright && playwright install chromium",
             }
 
         tester = UITesterAgent()
@@ -384,9 +384,15 @@ async def run_all_ui_tests():
             "results": all_results,
             "summary": {
                 "total_apps": len(all_results),
-                "apps_passed": sum(1 for r in all_results.values() if r.get("summary", {}).get("failed", 1) == 0),
-                "apps_failed": sum(1 for r in all_results.values() if r.get("summary", {}).get("failed", 0) > 0 or "error" in r)
-            }
+                "apps_passed": sum(
+                    1 for r in all_results.values() if r.get("summary", {}).get("failed", 1) == 0
+                ),
+                "apps_failed": sum(
+                    1
+                    for r in all_results.values()
+                    if r.get("summary", {}).get("failed", 0) > 0 or "error" in r
+                ),
+            },
         }
     except Exception as e:
         logger.error(f"All UI tests failed: {e}")
@@ -403,7 +409,7 @@ async def get_ui_test_status():
             return {
                 "ui_testing_available": False,
                 "reason": "Playwright not installed",
-                "install_command": "pip install playwright && playwright install chromium"
+                "install_command": "pip install playwright && playwright install chromium",
             }
 
         tester = UITesterAgent()
@@ -417,19 +423,13 @@ async def get_ui_test_status():
                 "responsive_design",
                 "performance",
                 "accessibility",
-                "api_integration"
+                "api_integration",
             ],
-            "endpoints": {
-                "test_single": "/e2e/ui/test/{app_name}",
-                "test_all": "/e2e/ui/test-all"
-            }
+            "endpoints": {"test_single": "/e2e/ui/test/{app_name}", "test_all": "/e2e/ui/test-all"},
         }
     except Exception as e:
         logger.error(f"UI status check failed: {e}")
-        return {
-            "ui_testing_available": False,
-            "error": str(e)
-        }
+        return {"ui_testing_available": False, "error": str(e)}
 
 
 @router.get("/ui/visual-ai/{app_name}")
@@ -449,10 +449,7 @@ async def run_visual_ai_analysis(app_name: str):
     """
     valid_apps = ["weathercraft-erp", "myroofgenius", "brainops-command-center"]
     if app_name not in valid_apps:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid app. Valid options: {valid_apps}"
-        )
+        raise HTTPException(status_code=400, detail=f"Invalid app. Valid options: {valid_apps}")
 
     try:
         from ui_tester_agent import GEMINI_VISION_AVAILABLE, PLAYWRIGHT_AVAILABLE, UITesterAgent
@@ -464,7 +461,7 @@ async def run_visual_ai_analysis(app_name: str):
             return {
                 "status": "error",
                 "error": "Gemini Vision not available (GOOGLE_API_KEY not set)",
-                "recommendation": "Set GOOGLE_API_KEY environment variable"
+                "recommendation": "Set GOOGLE_API_KEY environment variable",
             }
 
         tester = UITesterAgent()
@@ -479,7 +476,7 @@ async def run_visual_ai_analysis(app_name: str):
             "test_type": "visual_ai_analysis",
             "application": app_name,
             "powered_by": "gemini-1.5-pro-002",
-            "results": result
+            "results": result,
         }
     except Exception as e:
         logger.error(f"Visual AI analysis failed: {e}")
@@ -499,7 +496,7 @@ async def run_all_visual_ai_analysis():
             return {
                 "status": "error",
                 "playwright_available": PLAYWRIGHT_AVAILABLE,
-                "gemini_vision_available": GEMINI_VISION_AVAILABLE
+                "gemini_vision_available": GEMINI_VISION_AVAILABLE,
             }
 
         tester = UITesterAgent()
@@ -526,8 +523,8 @@ async def run_all_visual_ai_analysis():
             "ecosystem_health": {
                 "average_score": sum(overall_scores) / len(overall_scores) if overall_scores else 0,
                 "apps_analyzed": len(all_results),
-                "apps_passing": sum(1 for r in all_results.values() if r.get("status") == "pass")
-            }
+                "apps_passing": sum(1 for r in all_results.values() if r.get("status") == "pass"),
+            },
         }
     except Exception as e:
         logger.error(f"All visual AI analysis failed: {e}")
@@ -535,7 +532,9 @@ async def run_all_visual_ai_analysis():
 
 
 @router.get("/complete-verification")
-async def complete_verification(skip_erp: bool = Query(False, description="Exclude ERP checks (non-ERP verification scope)")):
+async def complete_verification(
+    skip_erp: bool = Query(False, description="Exclude ERP checks (non-ERP verification scope)")
+):
     """
     Run COMPLETE verification: API + UI tests combined.
 
@@ -547,12 +546,13 @@ async def complete_verification(skip_erp: bool = Query(False, description="Exclu
         "verification_type": "complete",
         "api_verification": None,
         "ui_verification": None,
-        "is_100_percent_operational": False
+        "is_100_percent_operational": False,
     }
 
     # Run API verification
     try:
         from e2e_system_verification import run_full_e2e_verification
+
         results["api_verification"] = await run_full_e2e_verification(skip_erp=skip_erp)
     except Exception as e:
         results["api_verification"] = {"error": str(e), "is_100_percent_operational": False}
@@ -581,25 +581,32 @@ async def complete_verification(skip_erp: bool = Query(False, description="Exclu
             results["ui_verification"] = {
                 "available": True,
                 "all_pass": ui_pass,
-                "apps": ui_results
+                "apps": ui_results,
             }
         else:
-            results["ui_verification"] = {
-                "available": False,
-                "reason": "Playwright not installed"
-            }
+            results["ui_verification"] = {"available": False, "reason": "Playwright not installed"}
     except Exception as e:
         results["ui_verification"] = {"error": str(e), "available": False}
 
     # Determine overall status
-    api_ok = results["api_verification"].get("is_100_percent_operational", False) if isinstance(results["api_verification"], dict) else False
-    ui_ok = results["ui_verification"].get("all_pass", False) if isinstance(results["ui_verification"], dict) else False
+    api_ok = (
+        results["api_verification"].get("is_100_percent_operational", False)
+        if isinstance(results["api_verification"], dict)
+        else False
+    )
+    ui_ok = (
+        results["ui_verification"].get("all_pass", False)
+        if isinstance(results["ui_verification"], dict)
+        else False
+    )
 
     results["is_100_percent_operational"] = api_ok and ui_ok
     results["summary"] = {
         "api_ok": api_ok,
         "ui_ok": ui_ok,
-        "recommendation": "System fully operational" if results["is_100_percent_operational"] else "Check failed tests for issues"
+        "recommendation": "System fully operational"
+        if results["is_100_percent_operational"]
+        else "Check failed tests for issues",
     }
 
     return results
