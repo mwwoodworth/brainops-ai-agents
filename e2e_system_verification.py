@@ -873,8 +873,17 @@ class E2ESystemVerification:
         # shared per-key rate-limit counter.  Only applied to requests
         # targeting BRAINOPS_API_URL (i.e. this service) with a valid key.
         headers = dict(test.headers) if test.headers else {}
-        if API_KEY and test.url.startswith(BRAINOPS_API_URL):
+        is_self_call = bool(API_KEY) and test.url.startswith(BRAINOPS_API_URL)
+        if is_self_call:
             headers["X-Internal-E2E"] = _compute_e2e_internal_sig(API_KEY)
+        logger.info(
+            "E2E _run_single_test: name=%s is_self=%s api_key_set=%s url_prefix=%s has_e2e_hdr=%s",
+            test.name,
+            is_self_call,
+            bool(API_KEY),
+            test.url[:50],
+            "X-Internal-E2E" in headers,
+        )
 
         try:
             async with session.request(
