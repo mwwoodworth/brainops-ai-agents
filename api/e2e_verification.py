@@ -361,6 +361,55 @@ async def debug_self_probe():
     }
 
 
+@router.get("/debug/burst-test")
+async def debug_burst_test(count: int = Query(40, ge=1, le=60)):
+    """Fire N rapid localhost self-calls and report status codes."""
+    import os
+
+    import aiohttp
+
+    from e2e_system_verification import API_KEY, _compute_e2e_internal_sig
+
+    port = os.getenv("PORT", "10000")
+    base = f"http://localhost:{port}"
+    headers = {"X-API-Key": API_KEY}
+    if API_KEY:
+        headers["X-Internal-E2E"] = _compute_e2e_internal_sig(API_KEY)
+
+    codes = []
+    bodies_429 = []
+    sem = asyncio.Semaphore(10)
+
+    async def _probe(session, idx):
+        async with sem:
+            url = f"{base}/health"
+            async with session.get(
+                url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                codes.append(resp.status)
+                if resp.status == 429:
+                    try:
+                        body = await resp.json()
+                    except Exception:
+                        body = await resp.text()
+                    bodies_429.append({"idx": idx, "body": body})
+
+    async with aiohttp.ClientSession() as session:
+        await asyncio.gather(*[_probe(session, i) for i in range(count)])
+
+    ok = sum(1 for c in codes if c == 200)
+    rate_limited = sum(1 for c in codes if c == 429)
+    other = sum(1 for c in codes if c not in (200, 429))
+
+    return {
+        "total": count,
+        "ok": ok,
+        "rate_limited": rate_limited,
+        "other": other,
+        "sample_429_bodies": bodies_429[:3],
+    }
+
+
 # =============================================================================
 # UI Testing with Playwright (True Browser-Based Testing)
 # =============================================================================
