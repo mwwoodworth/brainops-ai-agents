@@ -133,8 +133,11 @@ jobs:
           exit 1
 
       - name: Verify deployment
-        if: ${{ secrets.BRAINOPS_API_KEY != '' }}
         run: |
+          if [ -z "${{ secrets.BRAINOPS_API_KEY }}" ]; then
+            echo "::notice::BRAINOPS_API_KEY not set; skipping post-deploy verification"
+            exit 0
+          fi
           sleep 5
           HEALTH=$(curl -s "https://brainops-ai-agents.onrender.com/health" \
             -H "X-API-Key: ${{ secrets.BRAINOPS_API_KEY }}")
