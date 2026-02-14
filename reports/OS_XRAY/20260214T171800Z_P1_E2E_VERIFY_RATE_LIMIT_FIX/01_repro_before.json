@@ -1,0 +1,28 @@
+{
+  "description": "E2E verify quick baseline - before fix (v11.20.0)",
+  "timestamp": "2026-02-14T16:05:21Z",
+  "version": "v11.20.0",
+  "result": {
+    "is_healthy": false,
+    "critical_tests": 39,
+    "passed": 25,
+    "failed": 14,
+    "failed_endpoints": [
+      {"name": "Observability Metrics", "error": "Expected status 200, got 429"},
+      {"name": "Observability Dashboard", "error": "Expected status 200, got 429"},
+      {"name": "Systems Usage", "error": "Expected status 200, got 429"},
+      {"name": "Digital Twin - Status", "error": "Expected status 200, got 429"},
+      {"name": "Digital Twin - List Twins", "error": "Expected status 200, got 429"},
+      {"name": "Market Intelligence - Status", "error": "Expected status 200, got 429"},
+      {"name": "Market Intelligence - Dashboard", "error": "Expected status 200, got 429"},
+      {"name": "Market Intelligence - Trends", "error": "Expected status 200, got 429"},
+      {"name": "Market Intelligence - Signals", "error": "Expected status 200, got 429"},
+      {"name": "Roofing Labor ML - Status", "error": "Expected status 200, got 429"},
+      {"name": "Orchestrator - Status", "error": "Expected status 200, got 429"},
+      {"name": "Orchestrator - Dashboard", "error": "Expected status 200, got 429"},
+      {"name": "Self-Healing - Status", "error": "Expected status 200, got 429"},
+      {"name": "Self-Healing - Dashboard", "error": "Expected status 200, got 429"}
+    ]
+  },
+  "root_cause": "E2E verifier's _apply_api_key_override() replaced X-API-Key in test headers with the caller's key, but _run_single_test() signed the X-Internal-E2E HMAC with the global API_KEY. Server validated HMAC using the request's actual key, causing mismatch. All self-probes shared a single rate-limit counter and hit 429 after ~25 requests."
+}

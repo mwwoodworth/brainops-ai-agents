@@ -1,0 +1,42 @@
+P1-E2E-VERIFY-001: E2E Verifier Self-Rate-Limiting Fix
+======================================================
+Version: v11.21.0
+Commits: 0d9e016..abb7026 (7 commits, 4 net files changed)
+
+ROOT CAUSE:
+  _apply_api_key_override() replaces X-API-Key in test headers with the
+  caller's key (brainops_prod_key_2025), but _run_single_test() computed
+  the X-Internal-E2E HMAC with the global API_KEY (brainops_dev_key_2025).
+  Server validated HMAC using the key from the request header — mismatch.
+  All self-probes fell through to the shared per-key rate-limit counter
+  and hit 429 after ~25 requests.
+
+FIX (two-part):
+  1. Localhost rewrite: self-calls go to http://localhost:PORT instead of
+     the external URL, eliminating network round-trips.
+  2. HMAC signing key: use headers.get("X-API-Key") instead of global
+     API_KEY so the signature always matches the request's actual key.
+
+Files Changed:
+  app.py                              +6  (HMAC bypass in _rate_limit_key + middleware)
+  e2e_system_verification.py          +26 (localhost rewrite + correct signing key)
+  api/e2e_verification.py             net 0 (debug endpoints added then removed)
+  tests/test_e2e_rate_limit_bypass.py +32 (7 regression tests including key mismatch)
+
+Key Commits:
+  0d9e016 - fix(e2e): add HMAC-based rate-limit bypass for E2E verifier
+  5ca8a14 - debug(e2e): add logging to _run_single_test
+  2edc4b1 - fix(e2e): explicit middleware bypass + debug endpoint
+  83e7dab - fix(e2e): rewrite self-call URLs to localhost
+  6b8fffa - fix(e2e): sign HMAC with actual request API key (ROOT CAUSE FIX)
+  abb7026 - chore(e2e): remove debug scaffolding
+
+Deploy History:
+  dep-d68a3busb7us73c8gigg - v11.21.0 initial (HMAC only) — 14/39 fail
+  dep-d68a85bh46gs73fbbnf0 - debug logging — 14/39 fail
+  dep-d68achjh46gs73fbeti0 - middleware bypass — 18/39 fail
+  dep-d68ahjmsb7us73c8q8p0 - localhost rewrite — 14/39 fail
+  dep-d68akdesb7us73c8s7a0 - self-probe debug — debugging
+  dep-d68anec9c44c73fpepfg - burst-test debug — 40/40 pass (isolated)
+  dep-d68apoi48b3s73aj095g - CORRECT SIGNING KEY — 39/39 pass
+  dep-d68arpnpm1nc739039s0 - final clean — 39/39 pass (verified 2x)

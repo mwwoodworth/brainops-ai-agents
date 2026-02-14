@@ -1,0 +1,110 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/matt-woodworth/dev/brainops-ai-agents
+configfile: pytest.ini
+plugins: langsmith-0.4.27, anyio-4.10.0, asyncio-1.2.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 7 items
+
+tests/test_e2e_rate_limit_bypass.py::test_compute_e2e_internal_sig_deterministic PASSED [ 14%]
+tests/test_e2e_rate_limit_bypass.py::test_compute_e2e_internal_sig_varies_by_key PASSED [ 28%]
+tests/test_e2e_rate_limit_bypass.py::test_compute_e2e_internal_sig_matches_server_expectation PASSED [ 42%]
+tests/test_e2e_rate_limit_bypass.py::test_internal_header_injected_for_self_calls PASSED [ 57%]
+tests/test_e2e_rate_limit_bypass.py::test_hmac_uses_overridden_api_key PASSED [ 71%]
+tests/test_e2e_rate_limit_bypass.py::test_internal_header_not_injected_for_external_calls PASSED [ 85%]
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header SKIPPED [100%]
+
+=============================== warnings summary ===============================
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/api/revenue.py:72: PydanticDeprecatedSince20: Pydantic V1 style `@root_validator` validators are deprecated. You should migrate to Pydantic V2 style `@model_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @root_validator(pre=True)
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/api/revenue_automation.py:69: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator('email')
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/api/revenue_automation.py:75: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator('name')
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/api/revenue_automation.py:81: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator('industry')
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/api/revenue_automation.py:96: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator('source')
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/api/revenue_automation.py:113: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator('qualification_data')
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/api/revenue_automation.py:126: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator('amount')
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/api/models/invoice.py:19: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class InvoiceLineItem(BaseModel):
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/api/models/invoice.py:32: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class Invoice(BaseModel):
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/api/proposals.py:42: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @router.on_event("startup")
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/api/payments.py:41: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @router.on_event("startup")
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/api/neural_reconnection.py:276: DeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    lead_type: str = Query(default="all", regex="^(all|reengagement|upsell|referral)$")
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/models/agent.py:51: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("id")
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/models/agent.py:58: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("capabilities")
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/models/agent.py:34: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class Agent(BaseModel):
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/.local/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:319: PydanticDeprecatedSince20: `json_encoders` is deprecated. See https://docs.pydantic.dev/2.12/concepts/serialization/#custom-serializers for alternatives. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    warnings.warn(
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/models/agent.py:84: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("status")
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/models/agent.py:71: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class AgentExecution(BaseModel):
+
+tests/test_e2e_rate_limit_bypass.py::test_rate_limit_key_exempts_valid_e2e_header
+  /home/matt-woodworth/dev/brainops-ai-agents/models/agent.py:106: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("total")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================== 6 passed, 1 skipped, 23 warnings in 5.01s ===================
