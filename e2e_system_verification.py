@@ -877,12 +877,18 @@ class E2ESystemVerification:
         # round-trips and any edge-level rate limiting.  We also inject the
         # X-Internal-E2E HMAC header so the application-level rate limiter
         # gives each probe its own bucket (defence in depth).
+        #
+        # IMPORTANT: The HMAC must be computed with the ACTUAL X-API-Key that
+        # will appear in the request headers — _apply_api_key_override may
+        # have replaced the key from the original test definition with the
+        # caller's key, so we must sign with whatever key the server will see.
         headers = dict(test.headers) if test.headers else {}
         url = test.url
         is_self_call = bool(API_KEY) and url.startswith(BRAINOPS_API_URL)
         if is_self_call:
             url = _SELF_CALL_BASE + url[len(BRAINOPS_API_URL) :]
-            headers["X-Internal-E2E"] = _compute_e2e_internal_sig(API_KEY)
+            signing_key = headers.get("X-API-Key") or API_KEY
+            headers["X-Internal-E2E"] = _compute_e2e_internal_sig(signing_key)
 
         try:
             async with session.request(

@@ -55,10 +55,40 @@ def test_internal_header_injected_for_self_calls(monkeypatch):
     # so we verify the header injection logic directly:
     headers = dict(test.headers) if test.headers else {}
     if mod.API_KEY and test.url.startswith(mod.BRAINOPS_API_URL):
-        headers["X-Internal-E2E"] = mod._compute_e2e_internal_sig(mod.API_KEY)
+        signing_key = headers.get("X-API-Key") or mod.API_KEY
+        headers["X-Internal-E2E"] = mod._compute_e2e_internal_sig(signing_key)
 
     assert "X-Internal-E2E" in headers
     assert len(headers["X-Internal-E2E"]) == 64
+
+
+def test_hmac_uses_overridden_api_key(monkeypatch):
+    """When _apply_api_key_override replaces X-API-Key, HMAC must use the override key.
+
+    Root cause of P1-E2E-VERIFY-001: the verifier signed with API_KEY but the
+    request carried a different key (from the caller), causing HMAC mismatch
+    and falling through to the shared rate-limit counter.
+    """
+    monkeypatch.setattr(mod, "API_KEY", "internal-key")
+    monkeypatch.setattr(mod, "BRAINOPS_API_URL", "https://brainops-api.test")
+
+    # Simulate _apply_api_key_override replacing the key with the caller's key
+    test = mod.EndpointTest(
+        name="Self Call with Override",
+        url="https://brainops-api.test/agents",
+        headers={"X-API-Key": "caller-override-key"},
+    )
+
+    headers = dict(test.headers) if test.headers else {}
+    if mod.API_KEY and test.url.startswith(mod.BRAINOPS_API_URL):
+        signing_key = headers.get("X-API-Key") or mod.API_KEY
+        headers["X-Internal-E2E"] = mod._compute_e2e_internal_sig(signing_key)
+
+    # HMAC must be signed with the OVERRIDE key, not the internal key
+    expected_sig = mod._compute_e2e_internal_sig("caller-override-key")
+    wrong_sig = mod._compute_e2e_internal_sig("internal-key")
+    assert headers["X-Internal-E2E"] == expected_sig
+    assert headers["X-Internal-E2E"] != wrong_sig
 
 
 def test_internal_header_not_injected_for_external_calls(monkeypatch):
