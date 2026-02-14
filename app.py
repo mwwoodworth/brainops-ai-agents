@@ -4,6 +4,7 @@ Type-safe, async, fully operational
 """
 import asyncio
 import hashlib
+import hmac as hmac_mod
 import inspect
 import json
 import logging
@@ -155,7 +156,14 @@ class BackgroundLoopRunner:
 
 
 def _rate_limit_key(request: Request) -> str:
-    """Extract rate-limit identity: API key hash if valid, else client IP."""
+    """Extract rate-limit identity: API key hash if valid, else client IP.
+
+    Internal E2E verification requests that present a valid HMAC signature
+    (X-Internal-E2E header) get a unique-per-request key so they are never
+    throttled by the shared per-key counter.  This prevents the /e2e/verify
+    endpoint from self-failing with 429s when it probes many endpoints in
+    rapid succession.  Unauthenticated requests are never exempt.
+    """
     api_key = (
         request.headers.get("X-API-Key")
         or request.headers.get("x-api-key")
@@ -170,6 +178,15 @@ def _rate_limit_key(request: Request) -> str:
         elif auth.startswith("Bearer "):
             api_key = auth[len("Bearer ") :].strip()
     if api_key and api_key in config.security.valid_api_keys:
+        # --- Internal E2E exemption ---
+        e2e_sig = request.headers.get("X-Internal-E2E", "")
+        if e2e_sig:
+            expected = hmac_mod.new(
+                api_key.encode("utf-8"), b"brainops-e2e-internal", hashlib.sha256
+            ).hexdigest()
+            if hmac_mod.compare_digest(e2e_sig, expected):
+                # Unique key per request = own counter = never shares the burst quota
+                return f"e2e-internal:{id(request)}"
         return "key:" + hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:12]
     # Fall back to client IP (handle reverse-proxy forwarding)
     forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
