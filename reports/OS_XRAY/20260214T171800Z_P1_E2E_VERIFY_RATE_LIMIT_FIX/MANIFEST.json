@@ -1,0 +1,30 @@
+{
+  "task_id": "P1-E2E-VERIFY-001",
+  "title": "E2E Verifier Self-Rate-Limiting Fix",
+  "version": "v11.21.0",
+  "timestamp": "2026-02-14T17:18:00Z",
+  "result": "FIXED - 39/39 pass, 0 false negatives, verified 2x consecutive",
+  "root_cause": "HMAC signing key mismatch: _run_single_test signed with global API_KEY but request carried caller override key from _apply_api_key_override",
+  "artifacts": [
+    {
+      "file": "01_repro_before.json",
+      "sha256": "1956404631f9c2ddeb8e1416637424c12a8d5e8ff36d3f134d126b4c44d2685b"
+    },
+    {
+      "file": "02_diff_index.txt",
+      "sha256": "807945da289d9deaf69a5ad2066e32a4ea423b53fe9a18eb8276e816fe3edf69"
+    },
+    {
+      "file": "03_tests.txt",
+      "sha256": "c46184ec8a82168d6e1641ead836f82457637c19df1b0bde583542a5a9b9362a"
+    },
+    {
+      "file": "04_deploy_proof.txt",
+      "sha256": "2663061cf7a1705403be5ce5672cc39e3898cbda446ab0447c8d9b1bd553002c"
+    },
+    {
+      "file": "05_repro_after.json",
+      "sha256": "3e9a4101926cf1682ec6b8f866a50dab8c0a902cdec873dc0bd4429316695378"
+    }
+  ]
+}
