@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 # Production configuration
 BRAINOPS_API_URL = os.getenv("BRAINOPS_API_URL", "https://brainops-ai-agents.onrender.com")
+# Localhost URL for self-calls: avoids external round-trip and rate-limit contention.
+_SELF_CALL_PORT = os.getenv("PORT", "10000")
+_SELF_CALL_BASE = f"http://localhost:{_SELF_CALL_PORT}"
 BRAINOPS_BACKEND_URL = os.getenv(
     "BRAINOPS_BACKEND_URL", "https://brainops-backend-prod.onrender.com"
 )
@@ -869,26 +872,22 @@ class E2ESystemVerification:
                     error_message=f"Missing required env var(s): {', '.join(missing)}",
                 )
 
-        # Inject X-Internal-E2E header for self-calls so they bypass the
-        # shared per-key rate-limit counter.  Only applied to requests
-        # targeting BRAINOPS_API_URL (i.e. this service) with a valid key.
+        # Self-call optimisation: when probing *this* service, rewrite the URL
+        # to localhost so the request stays in-process.  This avoids external
+        # round-trips and any edge-level rate limiting.  We also inject the
+        # X-Internal-E2E HMAC header so the application-level rate limiter
+        # gives each probe its own bucket (defence in depth).
         headers = dict(test.headers) if test.headers else {}
-        is_self_call = bool(API_KEY) and test.url.startswith(BRAINOPS_API_URL)
+        url = test.url
+        is_self_call = bool(API_KEY) and url.startswith(BRAINOPS_API_URL)
         if is_self_call:
+            url = _SELF_CALL_BASE + url[len(BRAINOPS_API_URL) :]
             headers["X-Internal-E2E"] = _compute_e2e_internal_sig(API_KEY)
-        logger.info(
-            "E2E _run_single_test: name=%s is_self=%s api_key_set=%s url_prefix=%s has_e2e_hdr=%s",
-            test.name,
-            is_self_call,
-            bool(API_KEY),
-            test.url[:50],
-            "X-Internal-E2E" in headers,
-        )
 
         try:
             async with session.request(
                 method=test.method,
-                url=test.url,
+                url=url,
                 headers=headers,
                 json=test.body if test.body else None,
                 timeout=aiohttp.ClientTimeout(total=test.timeout_seconds),
