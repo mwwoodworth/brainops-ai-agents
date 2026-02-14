@@ -298,6 +298,69 @@ async def debug_api_key():
     }
 
 
+@router.get("/debug/self-probe")
+async def debug_self_probe():
+    """Make a single self-call like the E2E verifier does, returning debug info."""
+    import os
+
+    import aiohttp
+
+    from e2e_system_verification import (
+        API_KEY,
+        BRAINOPS_API_URL,
+        _SELF_CALL_BASE,
+        _compute_e2e_internal_sig,
+    )
+
+    port = os.getenv("PORT", "10000")
+    local_url = f"http://localhost:{port}/health"
+    external_url = f"{BRAINOPS_API_URL}/health"
+
+    headers = {"X-API-Key": API_KEY}
+    if API_KEY:
+        headers["X-Internal-E2E"] = _compute_e2e_internal_sig(API_KEY)
+
+    results = {}
+    async with aiohttp.ClientSession() as session:
+        # Test localhost
+        try:
+            async with session.get(
+                local_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                body = await resp.json()
+                results["localhost"] = {
+                    "url": local_url,
+                    "status": resp.status,
+                    "version": body.get("version"),
+                }
+        except Exception as exc:
+            results["localhost"] = {"url": local_url, "error": str(exc)}
+
+        # Test external (without HMAC to avoid rate limit interference)
+        ext_headers = {"X-API-Key": API_KEY}
+        try:
+            async with session.get(
+                external_url, headers=ext_headers, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                body = await resp.json()
+                results["external"] = {
+                    "url": external_url,
+                    "status": resp.status,
+                    "version": body.get("version"),
+                }
+        except Exception as exc:
+            results["external"] = {"url": external_url, "error": str(exc)}
+
+    return {
+        "api_key_len": len(API_KEY),
+        "api_key_first_10": API_KEY[:10] if API_KEY else "NONE",
+        "hmac_sig_first_12": _compute_e2e_internal_sig(API_KEY)[:12] if API_KEY else "NONE",
+        "self_call_base": _SELF_CALL_BASE,
+        "headers_sent": {k: v[:12] + "..." if len(v) > 12 else v for k, v in headers.items()},
+        "results": results,
+    }
+
+
 # =============================================================================
 # UI Testing with Playwright (True Browser-Based Testing)
 # =============================================================================
