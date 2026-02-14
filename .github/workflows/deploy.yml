@@ -10,13 +10,49 @@ on:
         required: false
         default: 'false'
 
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   RENDER_SERVICE_ID: srv-d413iu75r7bs738btc10
   DOCKER_IMAGE: mwwoodworth/brainops-ai-agents
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      can_deploy: ${{ steps.check.outputs.can_deploy }}
+    steps:
+      - id: check
+        run: |
+          missing=0
+
+          if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ] || [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "::warning::Missing DOCKERHUB_USERNAME/DOCKERHUB_TOKEN; deploy job will be skipped"
+            missing=1
+          fi
+
+          if [ -z "${{ secrets.RENDER_API_KEY }}" ]; then
+            echo "::warning::Missing RENDER_API_KEY; deploy job will be skipped"
+            missing=1
+          fi
+
+          if [ -z "${{ secrets.BRAINOPS_API_KEY }}" ]; then
+            echo "::warning::Missing BRAINOPS_API_KEY; post-deploy verification will be skipped"
+          fi
+
+          if [ "$missing" -eq 0 ]; then
+            echo "can_deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "can_deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: preflight
+    if: ${{ needs.preflight.outputs.can_deploy == 'true' }}
 
     steps:
       - name: Checkout code
@@ -34,7 +70,11 @@ jobs:
       - name: Extract version from config
         id: version
         run: |
-          VERSION=$(grep "self.version" config.py | grep -oP "'\K[^']+(?=')" | head -1)
+          VERSION="$(grep -oP '"VERSION",\s*"(v[0-9.]+)"' config.py | grep -oP 'v[0-9.]+')"
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not extract VERSION from config.py via grep"
+            exit 1
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
@@ -93,6 +133,7 @@ jobs:
           exit 1
 
       - name: Verify deployment
+        if: ${{ secrets.BRAINOPS_API_KEY != '' }}
         run: |
           sleep 5
           HEALTH=$(curl -s "https://brainops-ai-agents.onrender.com/health" \
