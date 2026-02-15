@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # Config from environment
 KEEP_EMAIL = os.getenv("GOOGLE_KEEP_EMAIL", "")
 KEEP_MASTER_TOKEN = os.getenv("GOOGLE_KEEP_MASTER_TOKEN", "")
-BRAINOPS_API_KEY = os.getenv("BRAINOPS_API_KEY", "brainops_prod_key_2025")
+BRAINOPS_API_KEY = os.getenv("BRAINOPS_API_KEY", "")
 
 # API endpoints
 API_SELF = "http://localhost:10000"
@@ -211,9 +211,7 @@ class KeepSyncAgent:
             "pipeline": "/api/income/pipeline",
             "stripe": "/api/income/stripe",
         }
-        cc_data, cc_ok, cc_total = self._fetch_batch(
-            API_CC, cc_endpoints, h, timeout=10
-        )
+        cc_data, cc_ok, cc_total = self._fetch_batch(API_CC, cc_endpoints, h, timeout=10)
         data.update(cc_data)
         source_health["command_center"] = f"{cc_ok}/{cc_total}"
 
@@ -247,11 +245,23 @@ class KeepSyncAgent:
         h = data.get("health", {})
         awareness = data.get("awareness", {})
         alerts_data = data.get("alerts", {})
-        alerts = alerts_data.get("alerts", []) if isinstance(alerts_data, dict) else (alerts_data if isinstance(alerts_data, list) else [])
+        alerts = (
+            alerts_data.get("alerts", [])
+            if isinstance(alerts_data, dict)
+            else (alerts_data if isinstance(alerts_data, list) else [])
+        )
         tasks_data = data.get("tasks", {})
-        tasks = tasks_data.get("tasks", []) if isinstance(tasks_data, dict) else (tasks_data if isinstance(tasks_data, list) else [])
+        tasks = (
+            tasks_data.get("tasks", [])
+            if isinstance(tasks_data, dict)
+            else (tasks_data if isinstance(tasks_data, list) else [])
+        )
         completed_data = data.get("completed_tasks", {})
-        completed = completed_data.get("tasks", []) if isinstance(completed_data, dict) else (completed_data if isinstance(completed_data, list) else [])
+        completed = (
+            completed_data.get("tasks", [])
+            if isinstance(completed_data, dict)
+            else (completed_data if isinstance(completed_data, list) else [])
+        )
         con = data.get("consciousness", {})
         heal = data.get("self_heal", {})
         rev = data.get("revenue", {})
@@ -267,12 +277,19 @@ class KeepSyncAgent:
         deploys = data.get("deployments", {})
         mcp = data.get("mcp_health", {})
 
-        overall = awareness.get("overall_status") or h.get("global_status") or h.get("status") or "UNKNOWN"
+        overall = (
+            awareness.get("overall_status")
+            or h.get("global_status")
+            or h.get("status")
+            or "UNKNOWN"
+        )
         broken = awareness.get("broken_systems", [])
 
         lines = []
         lines.append(f"BRAINOPS AI OS | LIVE OPS | {ts}")
-        lines.append(f"Sync #{self.sync_count} | Global: {self._fmt_status(overall)} | Keep Errors: {self.consecutive_errors}")
+        lines.append(
+            f"Sync #{self.sync_count} | Global: {self._fmt_status(overall)} | Keep Errors: {self.consecutive_errors}"
+        )
 
         # Source health summary
         sh = self._source_health
@@ -290,8 +307,8 @@ class KeepSyncAgent:
                 if isinstance(a, str):
                     lines.append(f"! {a}")
                 else:
-                    sev = a.get('severity', 'INFO')
-                    msg = (a.get('message') or a.get('description') or str(a))[:80]
+                    sev = a.get("severity", "INFO")
+                    msg = (a.get("message") or a.get("description") or str(a))[:80]
                     lines.append(f"[{sev}] {msg}")
         lines.append("")
 
@@ -304,7 +321,7 @@ class KeepSyncAgent:
         lines.append(f"Database: {db_status}")
         lines.append(f"Consciousness: {con.get('state') or con.get('status') or '?'}")
         heal_line = f"Self-Heal: {heal.get('status', '?')}"
-        if 'issues_found' in heal:
+        if "issues_found" in heal:
             heal_line += f" | Issues: {heal['issues_found']} Fixed: {heal.get('auto_fixed', 0)}"
         lines.append(heal_line)
         lines.append(f"MCP Bridge: {self._fmt_status(mcp.get('status'))}")
@@ -337,18 +354,28 @@ class KeepSyncAgent:
 
         # REVENUE (REAL ONLY)
         lines.append("=== REVENUE (REAL ONLY) ===")
-        lines.append(f"Total: ${self._fmt_money(rev.get('totalRevenue'))} | MRR: ${self._fmt_money(rev.get('mrr'))}")
+        lines.append(
+            f"Total: ${self._fmt_money(rev.get('totalRevenue'))} | MRR: ${self._fmt_money(rev.get('mrr'))}"
+        )
         lines.append(f"Active Subs: {rev.get('activeSubscriptions', 0)}")
-        lines.append(f"Gumroad: ${self._fmt_money(gum.get('total_revenue'))} ({gum.get('sales_count', 0)} sales)")
-        lines.append(f"Stripe: ${self._fmt_money(stripe.get('total_revenue') or stripe.get('revenue'))}")
-        lines.append(f"Pipeline: ${self._fmt_money(pip.get('pipeline_value'))} | Leads: {pip.get('total_leads', 0)}")
+        lines.append(
+            f"Gumroad: ${self._fmt_money(gum.get('total_revenue'))} ({gum.get('sales_count', 0)} sales)"
+        )
+        lines.append(
+            f"Stripe: ${self._fmt_money(stripe.get('total_revenue') or stripe.get('revenue'))}"
+        )
+        lines.append(
+            f"Pipeline: ${self._fmt_money(pip.get('pipeline_value'))} | Leads: {pip.get('total_leads', 0)}"
+        )
         lines.append(f"Burn Rate: ~$450/mo | Break-even: ~9 Starter or ~5 Pro subs")
         lines.append("WARNING: ERP data = DEMO. Only Gumroad/Stripe/MRG = real.")
         lines.append("")
 
         # METRICS
         lines.append("=== METRICS ===")
-        lines.append(f"Done Today: {m.get('completedToday', 0)} | In Progress: {m.get('inProgress', 0)} | Blocked: {m.get('blocked', 0)}")
+        lines.append(
+            f"Done Today: {m.get('completedToday', 0)} | In Progress: {m.get('inProgress', 0)} | Blocked: {m.get('blocked', 0)}"
+        )
         lines.append("")
 
         # BRIEFING
@@ -366,9 +393,9 @@ class KeepSyncAgent:
         if agent_list:
             lines.append(f"=== AGENTS ({len(agent_list)}) ===")
             for ag in agent_list[:10]:
-                name = ag.get('name', '?')
-                status = ag.get('status', '?')
-                last = ag.get('last_run', '')
+                name = ag.get("name", "?")
+                status = ag.get("status", "?")
+                last = ag.get("last_run", "")
                 lines.append(f"  {name}: {status}" + (f" ({last[:16]})" if last else ""))
             lines.append("")
 
@@ -383,7 +410,11 @@ class KeepSyncAgent:
             lines.append("")
 
         # RECENT EVENTS / ALERTS
-        event_list = (events.get("events") or events.get("alerts") or []) if isinstance(events, dict) else (events if isinstance(events, list) else [])
+        event_list = (
+            (events.get("events") or events.get("alerts") or [])
+            if isinstance(events, dict)
+            else (events if isinstance(events, list) else [])
+        )
         if event_list:
             lines.append(f"=== RECENT EVENTS ===")
             for ev in event_list[:5]:
@@ -393,7 +424,11 @@ class KeepSyncAgent:
             lines.append("")
 
         # RECENT DEPLOYMENTS
-        deploy_list = deploys.get("deployments", []) if isinstance(deploys, dict) else (deploys if isinstance(deploys, list) else [])
+        deploy_list = (
+            deploys.get("deployments", [])
+            if isinstance(deploys, dict)
+            else (deploys if isinstance(deploys, list) else [])
+        )
         if deploy_list:
             lines.append("=== RECENT DEPLOYMENTS ===")
             for d in deploy_list[:3]:
@@ -416,7 +451,9 @@ class KeepSyncAgent:
         # VOICE COMMANDS
         lines.append("=== VOICE COMMANDS ===")
         lines.append("Say: 'Add to BrainOps Ops list: [command]'")
-        lines.append("Commands: deploy [service], restart [service], check health, heal, force sync, scale [service], rollback [service], analyze [target], resolve alert [id], brain store [key: value]")
+        lines.append(
+            "Commands: deploy [service], restart [service], check health, heal, force sync, scale [service], rollback [service], analyze [target], resolve alert [id], brain store [key: value]"
+        )
         lines.append("")
         lines.append("Say: 'Add to BrainOps Brainstorm list: [idea]'")
         lines.append("-> AI assessment + Supabase archive + task generation")
@@ -456,8 +493,15 @@ class KeepSyncAgent:
         else:
             for i, entry in enumerate(entries[:10], 1):
                 if isinstance(entry, dict):
-                    title = entry.get("title") or entry.get("key") or entry.get("idea") or "Untitled"
-                    desc = entry.get("description") or entry.get("value") or entry.get("assessment") or ""
+                    title = (
+                        entry.get("title") or entry.get("key") or entry.get("idea") or "Untitled"
+                    )
+                    desc = (
+                        entry.get("description")
+                        or entry.get("value")
+                        or entry.get("assessment")
+                        or ""
+                    )
                     status = entry.get("status", "new")
                     impact = entry.get("impact_score", "?")
                     lines.append(f"{i}. [{status}] {str(title)[:60]}")
@@ -528,16 +572,20 @@ class KeepSyncAgent:
         if pending_start == -1 or completed_start == -1:
             return
 
-        pending_section = text[pending_start + len("--- PENDING ---"):completed_start].strip()
+        pending_section = text[pending_start + len("--- PENDING ---") : completed_start].strip()
         if not pending_section or pending_section.startswith("(Write"):
             return
 
         # Extract command lines
-        commands = [line.strip() for line in pending_section.split("\n") if line.strip() and not line.strip().startswith("(")]
+        commands = [
+            line.strip()
+            for line in pending_section.split("\n")
+            if line.strip() and not line.strip().startswith("(")
+        ]
         if not commands:
             return
 
-        completed_section = text[completed_start + len("--- COMPLETED ---"):].strip()
+        completed_section = text[completed_start + len("--- COMPLETED ---") :].strip()
         h = {"X-API-Key": BRAINOPS_API_KEY, "Content-Type": "application/json"}
 
         for cmd in commands:
@@ -560,20 +608,34 @@ class KeepSyncAgent:
                 elif cmd_lower.startswith("brain store "):
                     parts = cmd_lower.replace("brain store ", "").split(":", 1)
                     if len(parts) == 2:
-                        self._post_json(API_SELF, "/brain/store",
-                                        {"key": parts[0].strip(), "value": parts[1].strip()}, h)
+                        self._post_json(
+                            API_SELF,
+                            "/brain/store",
+                            {"key": parts[0].strip(), "value": parts[1].strip()},
+                            h,
+                        )
                         result = f"stored: {parts[0].strip()}"
                 elif cmd_lower.startswith("brainstorm:"):
                     idea = cmd.split(":", 1)[1].strip()
-                    self._post_json(API_SELF, "/brain/store",
-                                    {"key": "brainstorm", "value": idea, "category": "brainstorm"}, h)
+                    self._post_json(
+                        API_SELF,
+                        "/brain/store",
+                        {"key": "brainstorm", "value": idea, "category": "brainstorm"},
+                        h,
+                    )
                     result = f"brainstorm recorded"
                 elif cmd_lower.startswith("task:"):
                     title = cmd.split(":", 1)[1].strip()
                     self._post_json(
-                        API_CC, "/api/tasks/unified-v2",
-                        {"title": title, "status": "pending", "source": "keep-voice", "assigned_to": "matt"},
-                        h
+                        API_CC,
+                        "/api/tasks/unified-v2",
+                        {
+                            "title": title,
+                            "status": "pending",
+                            "source": "keep-voice",
+                            "assigned_to": "matt",
+                        },
+                        h,
                     )
                     result = f"task created: {title[:40]}"
                 else:
@@ -586,7 +648,7 @@ class KeepSyncAgent:
             completed_section = f"[{now_str}] {cmd} -> {result}\n{completed_section}"
 
         # Rewrite note with commands moved to completed
-        new_text = text[:pending_start + len("--- PENDING ---")]
+        new_text = text[: pending_start + len("--- PENDING ---")]
         new_text += "\n(Write commands here)\n\n"
         new_text += "--- COMPLETED ---\n"
         new_text += completed_section
@@ -689,8 +751,8 @@ class KeepSyncAgent:
                     "fetch": round(t_fetch - start, 2),
                     "build": round(t_build - t_fetch, 2),
                     "keep_sync": round(t_sync - t_build, 2),
-                    "total": round(t_sync - start, 2)
-                }
+                    "total": round(t_sync - start, 2),
+                },
             }
             logger.info("Keep sync OK: %s", json.dumps(result))
             return result
@@ -703,8 +765,9 @@ class KeepSyncAgent:
 
         except Exception as e:
             self.consecutive_errors += 1
-            logger.error("Keep sync failed (%d consecutive): %s",
-                         self.consecutive_errors, e, exc_info=True)
+            logger.error(
+                "Keep sync failed (%d consecutive): %s", self.consecutive_errors, e, exc_info=True
+            )
             return {"success": False, "error": str(e)}
 
     # ------------------------------------------------------------------
