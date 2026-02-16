@@ -159,7 +159,7 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.21.0"
+            "VERSION", "v11.21.1"
         )  # P1-E2E-VERIFY-001: fix E2E verifier self-rate-limiting
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")
