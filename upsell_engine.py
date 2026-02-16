@@ -16,14 +16,17 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from database.async_connection import get_pool
+
 # We'll use the outreach engine to generate the content
 try:
     from outreach_engine import get_outreach_engine
+
     OUTREACH_AVAILABLE = True
 except ImportError:
     OUTREACH_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
 
 class UpsellEngine:
     def __init__(self):
@@ -31,23 +34,26 @@ class UpsellEngine:
         # Live Gumroad products: HJHMSM($49), VJXCEW($37), XGFKP($29), GSAAVB($97), UPSYKR($149), CAWVO($29)
         self.rules = {
             "prompt_to_kit": {
-                "trigger_product": ["XGFKP", "CAWVO"],  # Prompt Pack ($29) / Automation Toolkit ($29)
+                "trigger_product": [
+                    "XGFKP",
+                    "CAWVO",
+                ],  # Prompt Pack ($29) / Automation Toolkit ($29)
                 "target_product": "HJHMSM",  # MCP Server Starter Kit ($49)
                 "delay_days": 3,
-                "template": "upsell_starter_kit"
+                "template": "upsell_starter_kit",
             },
             "kit_to_framework": {
                 "trigger_product": ["HJHMSM", "VJXCEW"],  # Starter Kit ($49) / SaaS Scripts ($37)
                 "target_product": "GSAAVB",  # AI Orchestration Framework ($97)
                 "delay_days": 7,
-                "template": "upsell_framework"
+                "template": "upsell_framework",
             },
             "any_to_bundle": {
                 "trigger_product": ["HJHMSM", "VJXCEW", "XGFKP", "GSAAVB", "CAWVO"],
                 "target_product": "UPSYKR",  # Command Center UI Kit ($149)
                 "delay_days": 5,
-                "template": "upsell_premium_bundle"
-            }
+                "template": "upsell_premium_bundle",
+            },
         }
 
     async def process_missed_upsells(self, days_back: int = 7, limit: int = 50):
@@ -63,19 +69,14 @@ class UpsellEngine:
             logger.error("Outreach engine unavailable")
             return {"error": "Outreach engine unavailable"}
 
-        results = {
-            "processed": 0,
-            "opportunities_found": 0,
-            "drafts_created": 0,
-            "details": []
-        }
+        results = {"processed": 0, "opportunities_found": 0, "drafts_created": 0, "details": []}
 
         # For each rule, find matching customers
         for rule_name, rule in self.rules.items():
             # Find customers who bought trigger product X days ago
             # Checking unified 'revenue_leads' or specific sales tables?
             # Ideally we use 'gumroad_sales' and 'stripe_events' but 'revenue_leads' should be the source of truth for people.
-            
+
             # Simplified Logic: Query customers with purchase history
             query = """
                 SELECT 
@@ -100,38 +101,42 @@ class UpsellEngine:
                     )
                 LIMIT $3
             """
-            
-            # Note: This assumes 'purchase_history' is populated. 
-            # In a real run, we might need to join with gumroad_sales. 
+
+            # Note: This assumes 'purchase_history' is populated.
+            # In a real run, we might need to join with gumroad_sales.
             # For robustness, let's look at the raw sales tables if revenue_leads isn't fully populated.
-            
+
             # Fallback Query (using gumroad_sales directly)
             # Find emails that bought X but not Y
             fallback_query = """
                 SELECT DISTINCT s1.email
                 FROM gumroad_sales s1
-                LEFT JOIN gumroad_sales s2 ON s1.email = s2.email AND s2.product_permalink = $2
-                WHERE s1.product_permalink = ANY($1)
+                LEFT JOIN gumroad_sales s2 ON s1.email = s2.email AND s2.product_code = $2
+                WHERE s1.product_code = ANY($1)
                 AND s1.sale_timestamp < NOW() - INTERVAL '3 days' -- Using rule delay
                 AND s2.email IS NULL
                 LIMIT $3
             """
-            
+
             # Execution
             try:
                 # We'll use the fallback logic for now as it's safer
-                rows = await pool.fetch(fallback_query, rule["trigger_product"], rule["target_product"], limit)
-                
+                rows = await pool.fetch(
+                    fallback_query, rule["trigger_product"], rule["target_product"], limit
+                )
+
                 outreach = get_outreach_engine()
-                
+
                 for row in rows:
-                    email = row['email']
-                    
+                    email = row["email"]
+
                     # Check if we have a lead for this email
-                    lead = await pool.fetchrow("SELECT id FROM revenue_leads WHERE email = $1", email)
-                    lead_id = str(lead['id']) if lead else None
-                    
-                    # If lead doesn't exist, create it? 
+                    lead = await pool.fetchrow(
+                        "SELECT id FROM revenue_leads WHERE email = $1", email
+                    )
+                    lead_id = str(lead["id"]) if lead else None
+
+                    # If lead doesn't exist, create it?
                     # Yes, any paying customer is a lead.
                     if not lead_id:
                         # Skip for now to keep it simple, or log it
@@ -139,49 +144,60 @@ class UpsellEngine:
 
                     # Generate Draft
                     success, _, draft = await outreach.generate_outreach_draft(
-                        lead_id=lead_id,
-                        template_name=rule["template"]
+                        lead_id=lead_id, template_name=rule["template"]
                     )
-                    
+
                     if success:
                         results["drafts_created"] += 1
-                        results["details"].append({
-                            "email": email,
-                            "rule": rule_name,
-                            "draft_id": str(draft.id) if draft else "unknown"
-                        })
-                        
+                        results["details"].append(
+                            {
+                                "email": email,
+                                "rule": rule_name,
+                                "draft_id": str(draft.id) if draft else "unknown",
+                            }
+                        )
+
                         # Update lead metadata to prevent spam
-                        await pool.execute("""
+                        await pool.execute(
+                            """
                             UPDATE revenue_leads 
                             SET metadata = jsonb_set(COALESCE(metadata, '{}'), '{last_upsell_pitch}', to_jsonb(NOW()))
                             WHERE id = $1
-                        """, lead_id)
+                        """,
+                            lead_id,
+                        )
 
             except Exception as e:
                 logger.error(f"Error processing rule {rule_name}: {e}")
-                
+
         return results
 
     async def get_customer_purchase_history(self, email: str) -> List[dict]:
         """Get consolidated purchase history for a customer"""
         pool = get_pool()
-        if not pool: return []
-        
+        if not pool:
+            return []
+
         # Gumroad
-        gumroad = await pool.fetch("""
-            SELECT product_name as product, price, sale_timestamp as date, 'gumroad' as source, product_permalink as product_code
+        gumroad = await pool.fetch(
+            """
+            SELECT product_name as product, price, sale_timestamp as date, 'gumroad' as source, product_code
             FROM gumroad_sales WHERE email = $1
-        """, email)
-        
+        """,
+            email,
+        )
+
         # Stripe
-        stripe = await pool.fetch("""
+        stripe = await pool.fetch(
+            """
             SELECT 'Stripe Product' as product, amount_cents/100.0 as price, created_at as date, 'stripe' as source, 'stripe_charge' as product_code
             FROM stripe_events WHERE customer_email = $1 AND event_type = 'charge.succeeded'
-        """, email)
-        
+        """,
+            email,
+        )
+
         history = [dict(r) for r in gumroad] + [dict(r) for r in stripe]
-        history.sort(key=lambda x: x['date'], reverse=True)
+        history.sort(key=lambda x: x["date"], reverse=True)
         return history
 
     async def get_recommended_upsells(self, email: str, current_product: str) -> List[dict]:
@@ -189,15 +205,19 @@ class UpsellEngine:
         recommendations = []
         for rule_name, rule in self.rules.items():
             if current_product in rule["trigger_product"]:
-                recommendations.append({
-                    "product": rule["target_product"],
-                    "reason": f"Upgrade from {current_product}",
-                    "rule": rule_name
-                })
+                recommendations.append(
+                    {
+                        "product": rule["target_product"],
+                        "reason": f"Upgrade from {current_product}",
+                        "rule": rule_name,
+                    }
+                )
         return recommendations
+
 
 # Singleton
 _upsell_engine = None
+
 
 def get_upsell_engine():
     global _upsell_engine
@@ -207,11 +227,11 @@ def get_upsell_engine():
 
 
 # Module-level convenience functions (used by gumroad_webhook.py and revenue_complete.py)
-async def process_purchase_for_upsell(email: str, product_permalink: str, sale_data: dict = None):
+async def process_purchase_for_upsell(email: str, product_code: str, **kwargs):
     """Process a new purchase to trigger upsell opportunities."""
     engine = get_upsell_engine()
     try:
-        recommendations = await engine.get_recommended_upsells(email, product_permalink)
+        recommendations = await engine.get_recommended_upsells(email, product_code)
         if recommendations:
             logger.info(f"Found {len(recommendations)} upsell opportunities for {email}")
         return {"email": email, "recommendations": recommendations}
