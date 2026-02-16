@@ -803,9 +803,7 @@ async def process_sale(
 
         upsell_task = process_purchase_for_upsell(
             email=sale_data["email"],
-            first_name=first_name,
             product_code=product_code,
-            product_name=product_name,
         )
     except ImportError:
         upsell_task = asyncio.sleep(0)  # No-op if not available
