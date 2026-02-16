@@ -51,3 +51,6 @@ temp/
 .venv/
 *.findings*.txt
 findings_*.txt
+
+# Supabase CLI temp files
+supabase/.temp/
