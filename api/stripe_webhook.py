@@ -416,9 +416,10 @@ async def _dedup_event(event_id: str, event_type: str) -> bool:
             return True
         return False
     except Exception as exc:
-        # If dedup check fails (e.g., table missing), process anyway to avoid data loss
-        logger.warning("Dedup check failed, processing event anyway: %s", exc)
-        return False
+        # FAIL CLOSED: DB errors must NOT allow duplicate financial processing.
+        # Re-raise so the caller returns an error instead of processing the event.
+        logger.error("Dedup insert failed (fail-closed) for %s: %s", event_id, exc)
+        raise
 
 
 async def _mark_event_status(event_id: str, status: str):
@@ -444,7 +445,14 @@ async def process_stripe_event(event: dict, background_tasks: BackgroundTasks) -
     logger.info(f"Processing Stripe event: {event_type} ({event_id})")
 
     # ── Top-level dedup: skip if event.id already processed ───────────
-    if await _dedup_event(event_id, event_type):
+    # Fail-closed: if dedup DB check errors, return 503 (do NOT process).
+    try:
+        is_duplicate = await _dedup_event(event_id, event_type)
+    except Exception as dedup_exc:
+        logger.error("Dedup unavailable for %s — rejecting to prevent duplicate processing: %s", event_id, dedup_exc)
+        return {"status": "error", "event_type": event_type, "event_id": event_id,
+                "error": "Dedup check failed, refusing to process (fail-closed)"}
+    if is_duplicate:
         return {"status": "duplicate", "event_type": event_type, "event_id": event_id}
 
     try:
