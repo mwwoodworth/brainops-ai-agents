@@ -733,16 +733,29 @@ async def verify_erp_signature(request: Request) -> bool:
 
     if not secret:
         environment = os.getenv("ENVIRONMENT", "production").lower()
-        allow_unverified = os.getenv("ALLOW_UNVERIFIED_ERP_WEBHOOKS", "").lower() in (
-            "1",
-            "true",
-            "yes",
+        # F-007 FIX: ALLOW_UNVERIFIED_ERP_WEBHOOKS is ONLY honored in
+        # development/test environments. In production (or any unrecognized
+        # environment), missing ERP_WEBHOOK_SECRET always rejects the webhook.
+        # This prevents an env-var-only bypass of signature verification.
+        if environment in ("development", "test"):
+            allow_unverified = os.getenv("ALLOW_UNVERIFIED_ERP_WEBHOOKS", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+            if allow_unverified:
+                logger.warning(
+                    "ERP_WEBHOOK_SECRET not configured - verification disabled "
+                    "(ALLOW_UNVERIFIED_ERP_WEBHOOKS=%s, ENVIRONMENT=%s)",
+                    os.getenv("ALLOW_UNVERIFIED_ERP_WEBHOOKS", ""),
+                    environment,
+                )
+                return True
+        logger.critical(
+            "ERP_WEBHOOK_SECRET not configured - rejecting webhook (ENVIRONMENT=%s)",
+            environment,
         )
-        if environment == "production" and not allow_unverified:
-            logger.critical("ERP_WEBHOOK_SECRET not configured in production - rejecting webhook")
-            return False
-        logger.warning("ERP_WEBHOOK_SECRET not configured - webhook verification disabled")
-        return True
+        return False
 
     if not signature:
         logger.error("Missing ERP webhook signature header")

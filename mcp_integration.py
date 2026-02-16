@@ -242,20 +242,20 @@ class MCPClient:
 
         try:
             session = await self._get_session()
-            async with session.get(f"{self.base_url}/tools") as response:
+            async with session.get(f"{self.base_url}/mcp/tools/definitions") as response:
                 if response.status == 200:
                     data = await response.json()
                     tools_data = data.get("tools", [])
 
                     for tool_info in tools_data:
                         server = tool_info.get("server", "unknown")
-                        tool_name = tool_info.get("name", "")
+                        tool_name = tool_info.get("originalName") or tool_info.get("name", "")
 
                         registration = ToolRegistration(
                             server=server,
                             tool_name=tool_name,
                             description=tool_info.get("description", ""),
-                            parameters=tool_info.get("parameters", {})
+                            parameters=tool_info.get("inputSchema") or tool_info.get("parameters", {})
                         )
 
                         key = f"{server}/{tool_name}"
