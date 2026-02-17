@@ -29,6 +29,24 @@ def _get_async_pool():
     return get_pool()
 
 
+def _get_tenant_id() -> str:
+    """Get the default tenant ID for RLS context."""
+    from config import config as app_config
+
+    return app_config.tenant.default_tenant_id
+
+
+async def _set_tenant_ctx(conn) -> None:
+    """Set tenant context on an asyncpg connection for RLS policies.
+
+    Uses session-level (false) because asyncpg auto-commits each statement,
+    so transaction-local (true) would only last for the set_config call itself.
+    """
+    tenant_id = _get_tenant_id()
+    if tenant_id:
+        await conn.execute("SELECT set_config('app.current_tenant_id', $1, false)", tenant_id)
+
+
 @router.post("/health-check")
 async def run_health_check(
     service: Optional[str] = Query(None, description="Specific service name, or omit for all"),
@@ -74,6 +92,7 @@ async def run_ooda_cycle() -> dict[str, Any]:
     try:
         pool = _get_async_pool()
         async with pool.acquire() as conn:
+            await _set_tenant_ctx(conn)
             slow = await conn.fetchval(
                 """
                 SELECT count(*) FROM pg_stat_activity
@@ -197,6 +216,7 @@ async def get_daily_briefing() -> dict[str, Any]:
     if pool:
         try:
             async with pool.acquire() as conn:
+                await _set_tenant_ctx(conn)
                 gumroad = await conn.fetchrow(
                     """
                     SELECT
@@ -257,6 +277,7 @@ async def get_daily_briefing() -> dict[str, Any]:
     if pool:
         try:
             async with pool.acquire() as conn:
+                await _set_tenant_ctx(conn)
                 db_size = await conn.fetchval(
                     "SELECT pg_size_pretty(pg_database_size(current_database()))"
                 )
@@ -287,6 +308,7 @@ async def get_daily_briefing() -> dict[str, Any]:
     if pool:
         try:
             async with pool.acquire() as conn:
+                await _set_tenant_ctx(conn)
                 executions = await conn.fetchrow(
                     """
                     SELECT
@@ -314,6 +336,7 @@ async def get_daily_briefing() -> dict[str, Any]:
     if pool:
         try:
             async with pool.acquire() as conn:
+                await _set_tenant_ctx(conn)
                 emails = await conn.fetchrow(
                     """
                     SELECT
