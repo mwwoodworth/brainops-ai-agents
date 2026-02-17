@@ -22,6 +22,7 @@ except ImportError:
 # Import unified memory for intelligent thought generation
 try:
     from unified_memory_manager import get_memory_manager, Memory, MemoryType
+
     MEMORY_AVAILABLE = True
 except ImportError:
     MEMORY_AVAILABLE = False
@@ -29,6 +30,7 @@ except ImportError:
 # Import shared async pool
 try:
     from database.async_connection import get_pool
+
     _ASYNC_POOL_AVAILABLE = True
 except ImportError:
     _ASYNC_POOL_AVAILABLE = False
@@ -47,8 +49,7 @@ except ImportError:
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("ConsciousnessLoop")
 
@@ -86,6 +87,7 @@ def _resolve_database_url(explicit_db_url: Optional[str]) -> Optional[str]:
 
     return None
 
+
 @dataclass
 class VitalSigns:
     cpu_usage: float
@@ -95,6 +97,7 @@ class VitalSigns:
     active_connections: int
     system_load: float
     component_health_score: float
+
 
 class ConsciousnessLoop:
     """
@@ -128,22 +131,39 @@ class ConsciousnessLoop:
         self.running = True
 
         # Initialize DB connection - Use SHARED pool to prevent MaxClientsInSessionMode
+        # Wait up to 60 seconds for the shared pool (deferred_init creates it concurrently)
         if _ASYNC_POOL_AVAILABLE:
-            try:
-                self.pool = get_pool()
-                logger.info("Connected to consciousness database via shared pool.")
-            except RuntimeError as exc:
-                if self._is_production:
-                    raise RuntimeError(
-                        "ConsciousnessLoop requires initialized shared async pool in production."
-                    ) from exc
-                logger.warning("Shared async pool not yet initialized; running without DB persistence.")
-                self.pool = None
-            except Exception as e:
-                if self._is_production:
-                    raise RuntimeError("ConsciousnessLoop failed to access shared async pool.") from e
-                logger.error(f"Failed to get shared pool: {e}")
-                self.pool = None
+            pool_acquired = False
+            for _attempt in range(30):
+                try:
+                    self.pool = get_pool()
+                    logger.info("Connected to consciousness database via shared pool.")
+                    pool_acquired = True
+                    break
+                except RuntimeError:
+                    if _attempt < 29:
+                        logger.debug(
+                            "Shared async pool not yet ready, waiting... (attempt %d/30)",
+                            _attempt + 1,
+                        )
+                        await asyncio.sleep(2)
+                    else:
+                        if self._is_production:
+                            raise RuntimeError(
+                                "ConsciousnessLoop: shared async pool not available after 60s in production."
+                            )
+                        logger.warning(
+                            "Shared async pool not initialized after 60s; running without DB."
+                        )
+                        self.pool = None
+                except Exception as e:
+                    if self._is_production:
+                        raise RuntimeError(
+                            "ConsciousnessLoop failed to access shared async pool."
+                        ) from e
+                    logger.error(f"Failed to get shared pool: {e}")
+                    self.pool = None
+                    break
         elif asyncpg and self.db_url:
             if self._is_production:
                 raise RuntimeError(
@@ -156,7 +176,9 @@ class ConsciousnessLoop:
                 logger.info("Connected to consciousness database (fallback pool).")
             except Exception as e:
                 if self._is_production:
-                    raise RuntimeError("ConsciousnessLoop database initialization failed in production.") from e
+                    raise RuntimeError(
+                        "ConsciousnessLoop database initialization failed in production."
+                    ) from e
                 logger.error(f"Failed to connect to database: {e}")
                 self.pool = None
         else:
@@ -170,7 +192,9 @@ class ConsciousnessLoop:
             raise RuntimeError("ConsciousnessLoop requires database connectivity in production.")
 
         # Boot sequence thought
-        await self._record_thought("I am waking up. Systems coming online.", "observation", intensity=0.8)
+        await self._record_thought(
+            "I am waking up. Systems coming online.", "observation", intensity=0.8
+        )
 
         # Main Loop
         try:
@@ -223,7 +247,7 @@ class ConsciousnessLoop:
             # Fallback
             try:
                 load = os.getloadavg()[0]
-                cpu = load * 10 # Rough approximation
+                cpu = load * 10  # Rough approximation
             except OSError as exc:
                 logger.debug("Failed to read load average: %s", exc, exc_info=True)
 
@@ -232,14 +256,14 @@ class ConsciousnessLoop:
         err_rate = 0.0
         health_score = 0.5
 
-        if self.ai_os and hasattr(self.ai_os, 'orchestrator'):
+        if self.ai_os and hasattr(self.ai_os, "orchestrator"):
             try:
                 health = await self.ai_os.orchestrator.get_system_health()
-                req_rate = health.get('metrics', {}).get('total_requests', 0)
-                err_rate = health.get('metrics', {}).get('error_rate', 0.0)
-                if health.get('status') == 'operational':
+                req_rate = health.get("metrics", {}).get("total_requests", 0)
+                err_rate = health.get("metrics", {}).get("error_rate", 0.0)
+                if health.get("status") == "operational":
                     health_score = 0.9
-                elif health.get('status') == 'degraded':
+                elif health.get("status") == "degraded":
                     health_score = 0.6
                 else:
                     health_score = 0.3
@@ -251,9 +275,9 @@ class ConsciousnessLoop:
             memory_usage=mem,
             request_rate=req_rate,
             error_rate=err_rate,
-            active_connections=0, # Need external data source for this
+            active_connections=0,  # Need external data source for this
             system_load=load,
-            component_health_score=health_score
+            component_health_score=health_score,
         )
 
     async def _update_awareness_state(self, vitals: VitalSigns):
@@ -295,7 +319,7 @@ class ConsciousnessLoop:
             json.dumps(active_sys),
             context,
             len(self.short_term_memory) / 100.0,
-            json.dumps({"vitals": str(vitals)})
+            json.dumps({"vitals": str(vitals)}),
         )
 
     async def _recall_relevant_context(self, vitals: VitalSigns) -> list[dict]:
@@ -321,10 +345,7 @@ class ConsciousnessLoop:
             query = " ".join(query_parts)
 
             # Recall past experiences with similar situations
-            context = memory.recall(
-                query,
-                limit=5
-            )
+            context = memory.recall(query, limit=5)
 
             return context if context else []
 
@@ -370,14 +391,14 @@ class ConsciousnessLoop:
         if context_memories:
             past_response = None
             for mem in context_memories:
-                content = mem.get('content', {})
+                content = mem.get("content", {})
                 if isinstance(content, str):
                     try:
                         content = json.loads(content)
                     except (json.JSONDecodeError, TypeError):
                         continue
-                if content.get('outcome') == 'success' and content.get('response'):
-                    past_response = content.get('response')
+                if content.get("outcome") == "success" and content.get("response"):
+                    past_response = content.get("response")
                     break
 
             if past_response and vitals.error_rate > 0.1:
@@ -388,7 +409,9 @@ class ConsciousnessLoop:
         # Heuristic thought generation (if no memory-based response)
         if not thought:
             if vitals.error_rate > 0.1:
-                thought = f"Error rate is critical ({vitals.error_rate:.2f}). I need to investigate."
+                thought = (
+                    f"Error rate is critical ({vitals.error_rate:.2f}). I need to investigate."
+                )
                 kind = "alert"
                 intensity = 0.9
             elif vitals.cpu_usage > 85:
@@ -410,26 +433,28 @@ class ConsciousnessLoop:
             if MEMORY_AVAILABLE:
                 try:
                     memory = get_memory_manager()
-                    memory.store(Memory(
-                        memory_type=MemoryType.PROCEDURAL,
-                        content={
-                            "vitals": {
-                                "cpu": vitals.cpu_usage,
-                                "memory": vitals.memory_usage,
-                                "error_rate": vitals.error_rate,
-                                "load": vitals.system_load
+                    memory.store(
+                        Memory(
+                            memory_type=MemoryType.PROCEDURAL,
+                            content={
+                                "vitals": {
+                                    "cpu": vitals.cpu_usage,
+                                    "memory": vitals.memory_usage,
+                                    "error_rate": vitals.error_rate,
+                                    "load": vitals.system_load,
+                                },
+                                "response": thought,
+                                "kind": kind,
+                                "intensity": intensity,
+                                "outcome": "pending",  # Will be updated by feedback loop
                             },
-                            "response": thought,
-                            "kind": kind,
-                            "intensity": intensity,
-                            "outcome": "pending"  # Will be updated by feedback loop
-                        },
-                        source_system="consciousness_loop",
-                        source_agent="thought_processor",
-                        created_by="consciousness",
-                        importance_score=intensity,
-                        tags=["thought", "consciousness", kind]
-                    ))
+                            source_system="consciousness_loop",
+                            source_agent="thought_processor",
+                            created_by="consciousness",
+                            importance_score=intensity,
+                            tags=["thought", "consciousness", kind],
+                        )
+                    )
                 except Exception as e:
                     logger.debug(f"Failed to store thought in memory: {e}")
 
@@ -503,7 +528,7 @@ class ConsciousnessLoop:
             vitals.error_rate,
             vitals.active_connections,
             vitals.system_load,
-            vitals.component_health_score
+            vitals.component_health_score,
         )
 
     async def shutdown(self):
@@ -542,6 +567,7 @@ class ConsciousnessLoop:
             if self._is_production:
                 raise RuntimeError(message)
             logger.warning(message)
+
 
 # Entry point for standalone execution
 if __name__ == "__main__":

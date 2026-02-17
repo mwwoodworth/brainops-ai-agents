@@ -21,22 +21,21 @@ from config import config
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 VALID_API_KEYS = config.security.valid_api_keys
 
+
 async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     """Verify API key for authentication"""
     if not api_key or api_key not in VALID_API_KEYS:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return api_key
 
+
 # All endpoints require API key authentication
-router = APIRouter(
-    prefix="/brain",
-    tags=["brain"],
-    dependencies=[Depends(verify_api_key)]
-)
+router = APIRouter(prefix="/brain", tags=["brain"], dependencies=[Depends(verify_api_key)])
 
 # Import unified brain with fallback
 try:
     from unified_brain import brain
+
     BRAIN_AVAILABLE = True
     logger.info("✅ Unified Brain loaded")
 except ImportError as e:
@@ -46,13 +45,19 @@ except ImportError as e:
 
 
 _SECRET_REPLACEMENTS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"brainops_[A-Za-z0-9_]*key_[A-Za-z0-9_]*", re.IGNORECASE), "<REDACTED_BRAINOPS_API_KEY>"),
+    (
+        re.compile(r"brainops_[A-Za-z0-9_]*key_[A-Za-z0-9_]*", re.IGNORECASE),
+        "<REDACTED_BRAINOPS_API_KEY>",
+    ),
     (re.compile(r"\brnd_[A-Za-z0-9]{10,}\b"), "rnd_<REDACTED>"),
     (re.compile(r"\bsk_live_[A-Za-z0-9]{10,}\b"), "sk_live_<REDACTED>"),
     (re.compile(r"\bsk_test_[A-Za-z0-9]{10,}\b"), "sk_test_<REDACTED>"),
     (re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"), "<REDACTED_JWT>"),
     # Redact DB URL passwords (keep scheme/user/host/path)
-    (re.compile(r"(postgres(?:ql)?://[^:/\\s]+:)([^@\\s]+)(@)", re.IGNORECASE), r"\\1<REDACTED>\\3"),
+    (
+        re.compile(r"(postgres(?:ql)?://[^:/\\s]+:)([^@\\s]+)(@)", re.IGNORECASE),
+        r"\\1<REDACTED>\\3",
+    ),
 ]
 
 
@@ -86,9 +91,12 @@ def _sanitize_entry(entry: dict[str, Any]) -> dict[str, Any]:
 
 class BrainEntry(BaseModel):
     """Brain entry model with enhanced features"""
+
     key: str = Field(..., description="Unique key for this context")
     value: Any = Field(..., description="The actual data")
-    category: str = Field("general", description="Category: system, session, architecture, deployment, issue")
+    category: str = Field(
+        "general", description="Category: system, session, architecture, deployment, issue"
+    )
     priority: str = Field("medium", description="Priority: critical, high, medium, low")
     source: str = Field("api", description="Source: claude_code, codex, api, manual, automated")
     metadata: Optional[dict[str, Any]] = Field(default_factory=dict)
@@ -97,9 +105,11 @@ class BrainEntry(BaseModel):
 
 class BrainQuery(BaseModel):
     """Brain search query with semantic options"""
+
     query: str = Field(..., description="Search query")
     limit: int = Field(20, ge=1, le=100)
     use_semantic: bool = Field(True, description="Use semantic vector search if available")
+
 
 _BRAIN_STATUS_CACHE: tuple[dict[str, Any], float] | None = None
 _BRAIN_STATUS_CACHE_TTL_S = float(os.getenv("BRAIN_STATUS_CACHE_TTL_S", "30"))
@@ -117,23 +127,19 @@ async def get_full_context():
             "status": "unavailable",
             "message": "Unified Brain is initializing or not configured",
             "context": {},
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     try:
         context = redact_secrets(await brain.get_full_context())
-        return {
-            "status": "ok",
-            "context": context,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"status": "ok", "context": context, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Failed to get full context: {e}", exc_info=True)
         return {
             "status": "error",
             "message": str(e),
             "context": {},
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
 
@@ -143,7 +149,7 @@ async def brain_ping():
     return {
         "status": "ok" if BRAIN_AVAILABLE else "unavailable",
         "brain_loaded": BRAIN_AVAILABLE,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 
@@ -157,7 +163,7 @@ async def get_brain_status():
         return {
             "status": "unavailable",
             "message": "Unified Brain is initializing or not configured",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     global _BRAIN_STATUS_CACHE
@@ -174,7 +180,8 @@ async def get_brain_status():
 
         pool = get_pool()
         stats = await asyncio.wait_for(
-            pool.fetchrow("""
+            pool.fetchrow(
+                """
                 SELECT
                     -- Avoid COUNT(*) full-table scans in hot-path health checks.
                     COALESCE(
@@ -186,16 +193,19 @@ async def get_brain_status():
                      FROM unified_brain
                      ORDER BY last_updated DESC NULLS LAST
                      LIMIT 1) as last_update
-            """),
-            timeout=5.0
+            """
+            ),
+            timeout=5.0,
         )
 
         payload = {
             "status": "ok",
             "total_entries": stats["total_entries"] if stats else 0,
-            "last_update": stats["last_update"].isoformat() if stats and stats["last_update"] else None,
+            "last_update": stats["last_update"].isoformat()
+            if stats and stats["last_update"]
+            else None,
             "approximate_total": True,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
         _BRAIN_STATUS_CACHE = (payload, now + _BRAIN_STATUS_CACHE_TTL_S)
         return payload
@@ -204,15 +214,11 @@ async def get_brain_status():
         return {
             "status": "timeout",
             "message": "Database query timed out after 5s",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Brain status check failed: {e}", exc_info=True)
-        return {
-            "status": "error",
-            "message": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"status": "error", "message": str(e), "timestamp": datetime.utcnow().isoformat()}
 
 
 @router.get("/critical")
@@ -226,7 +232,7 @@ async def get_critical_context():
             "status": "unavailable",
             "message": "Unified Brain is initializing or not configured",
             "critical_items": [],
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     try:
@@ -237,7 +243,7 @@ async def get_critical_context():
             "status": "ok",
             "critical_items": critical_items,
             "count": len(critical_items),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except asyncio.TimeoutError:
         logger.error("Critical context query timed out")
@@ -245,7 +251,7 @@ async def get_critical_context():
             "status": "timeout",
             "message": "Database query timed out after 10s",
             "critical_items": [],
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to get critical context: {e}", exc_info=True)
@@ -253,15 +259,12 @@ async def get_critical_context():
             "status": "error",
             "message": str(e),
             "critical_items": [],
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
 
 @router.get("/category/{category}", response_model=list[dict[str, Any]])
-async def get_by_category(
-    category: str,
-    limit: int = Query(100, ge=1, le=500)
-):
+async def get_by_category(category: str, limit: int = Query(100, ge=1, le=500)):
     """Get all context in a specific category"""
     import asyncio
 
@@ -280,8 +283,7 @@ async def get_by_category(
 
 @router.get("/get/{key}", response_model=dict[str, Any])
 async def get_context(
-    key: str,
-    include_related: bool = Query(False, description="Include related entries")
+    key: str, include_related: bool = Query(False, description="Include related entries")
 ):
     """Retrieve a specific piece of context with optional related entries"""
     import asyncio
@@ -291,8 +293,7 @@ async def get_context(
 
     try:
         result = await asyncio.wait_for(
-            brain.get(key, include_related=include_related),
-            timeout=10.0
+            brain.get(key, include_related=include_related), timeout=10.0
         )
         if not result:
             raise HTTPException(status_code=404, detail=f"Key not found: {key}")
@@ -325,7 +326,7 @@ async def store_context(entry: BrainEntry):
             priority=entry.priority,
             source=entry.source,
             metadata=safe_metadata,
-            ttl_hours=entry.ttl_hours
+            ttl_hours=entry.ttl_hours,
         )
         return {"id": entry_id, "key": entry.key, "status": "stored"}
     except Exception as e:
@@ -342,17 +343,85 @@ async def search_context(query: BrainQuery):
     try:
         return [
             _sanitize_entry(item)
-            for item in await brain.search(query.query, query.limit, use_semantic=query.use_semantic)
+            for item in await brain.search(
+                query.query, query.limit, use_semantic=query.use_semantic
+            )
         ]
     except Exception as e:
         logger.error(f"Failed to search: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+class RecallQuery(BaseModel):
+    """Query model for memory recall (vector similarity search on unified_ai_memory)"""
+
+    query: str = Field(..., description="Natural language query for semantic recall")
+    limit: int = Field(10, ge=1, le=50, description="Max results to return")
+    memory_type: Optional[str] = Field(
+        None, description="Filter by memory type (e.g. semantic, episodic, procedural)"
+    )
+    context: Optional[str] = Field(None, description="Context ID to filter results")
+
+
+@router.post("/recall", response_model=dict[str, Any])
+async def recall_memory(query: RecallQuery):
+    """
+    Recall memories via vector similarity search on unified_ai_memory.
+    Uses embeddings for semantic matching — the RAG retrieval endpoint.
+    """
+    import asyncio
+
+    try:
+        from unified_memory_manager import get_memory_manager, MemoryType
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Unified Memory Manager not available")
+
+    try:
+        memory = get_memory_manager()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Memory Manager not initialized: {e}")
+
+    # Resolve optional memory type filter
+    mem_type = None
+    if query.memory_type:
+        try:
+            mem_type = MemoryType(query.memory_type.lower())
+        except ValueError:
+            pass  # Ignore invalid type, search all
+
+    try:
+        # recall() is synchronous (psycopg2) — run in thread
+        results = await asyncio.to_thread(
+            memory.recall,
+            query.query,
+            context=query.context,
+            limit=query.limit,
+            memory_type=mem_type,
+        )
+
+        # Sanitize results
+        sanitized = []
+        for r in results or []:
+            entry = dict(r) if hasattr(r, "keys") else r
+            # Remove raw embedding vectors from response
+            entry.pop("embedding", None)
+            sanitized.append(redact_secrets(entry))
+
+        return {
+            "status": "ok",
+            "query": query.query,
+            "results": sanitized,
+            "count": len(sanitized),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Memory recall failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.post("/session", response_model=dict[str, str])
 async def record_session(
-    session_id: str = Body(..., embed=True),
-    summary: dict[str, Any] = Body(...)
+    session_id: str = Body(..., embed=True), summary: dict[str, Any] = Body(...)
 ):
     """Record a Claude Code session summary"""
     if not BRAIN_AVAILABLE or not brain:
@@ -371,7 +440,7 @@ async def record_deployment(
     service: str = Body(...),
     version: str = Body(...),
     status: str = Body(...),
-    metadata: Optional[dict] = Body(None)
+    metadata: Optional[dict] = Body(None),
 ):
     """Record a deployment"""
     if not BRAIN_AVAILABLE or not brain:
@@ -386,10 +455,7 @@ async def record_deployment(
 
 
 @router.post("/system-state", response_model=dict[str, str])
-async def update_system_state(
-    component: str = Body(...),
-    state: dict[str, Any] = Body(...)
-):
+async def update_system_state(component: str = Body(...), state: dict[str, Any] = Body(...)):
     """Update current system state"""
     if not BRAIN_AVAILABLE or not brain:
         raise HTTPException(status_code=503, detail="Unified Brain not available")
@@ -408,7 +474,7 @@ async def brain_health():
     return {
         "status": "operational" if BRAIN_AVAILABLE else "unavailable",
         "brain_available": BRAIN_AVAILABLE,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 
@@ -429,7 +495,7 @@ async def get_statistics():
 @router.get("/similar/{key}", response_model=list[dict[str, Any]])
 async def find_similar(
     key: str,
-    limit: int = Query(10, ge=1, le=50, description="Maximum number of similar entries to return")
+    limit: int = Query(10, ge=1, le=50, description="Maximum number of similar entries to return"),
 ):
     """Find entries similar to the given key using vector similarity"""
     if not BRAIN_AVAILABLE or not brain:
@@ -445,7 +511,7 @@ async def find_similar(
 @router.get("/related/{key}", response_model=list[dict[str, Any]])
 async def get_related(
     key: str,
-    max_depth: int = Query(2, ge=1, le=5, description="Maximum depth of relationship traversal")
+    max_depth: int = Query(2, ge=1, le=5, description="Maximum depth of relationship traversal"),
 ):
     """Get related entries recursively up to max_depth"""
     if not BRAIN_AVAILABLE or not brain:
@@ -466,11 +532,7 @@ async def cleanup_expired():
 
     try:
         count = await brain.cleanup_expired()
-        return {
-            "status": "ok",
-            "deleted_count": count,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"status": "ok", "deleted_count": count, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Failed to cleanup expired entries: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -480,8 +542,10 @@ async def cleanup_expired():
 async def add_reference(
     from_key: str = Body(...),
     to_key: str = Body(...),
-    reference_type: str = Body("related", description="Type: related, superseded, depends_on, derived_from"),
-    strength: float = Body(1.0, ge=0.0, le=1.0, description="Strength of relationship (0-1)")
+    reference_type: str = Body(
+        "related", description="Type: related, superseded, depends_on, derived_from"
+    ),
+    strength: float = Body(1.0, ge=0.0, le=1.0, description="Strength of relationship (0-1)"),
 ):
     """Add a cross-reference between two entries"""
     if not BRAIN_AVAILABLE or not brain:
@@ -493,7 +557,7 @@ async def add_reference(
             "status": "ok",
             "from_key": from_key,
             "to_key": to_key,
-            "reference_type": reference_type
+            "reference_type": reference_type,
         }
     except Exception as e:
         logger.error(f"Failed to add reference: {e}")
@@ -516,41 +580,55 @@ async def get_operational_truth():
 
     try:
         # Get real revenue data
-        gumroad_real = await pool.fetchval(
-            "SELECT COALESCE(SUM(price), 0) FROM gumroad_sales WHERE is_test = false"
-        ) or 0
+        gumroad_real = (
+            await pool.fetchval(
+                "SELECT COALESCE(SUM(price), 0) FROM gumroad_sales WHERE is_test = false"
+            )
+            or 0
+        )
 
-        gumroad_test = await pool.fetchval(
-            "SELECT COUNT(*) FROM gumroad_sales WHERE is_test = true"
-        ) or 0
+        gumroad_test = (
+            await pool.fetchval("SELECT COUNT(*) FROM gumroad_sales WHERE is_test = true") or 0
+        )
 
         # MRG subscriptions with Stripe (real payments)
-        mrg_real = await pool.fetchrow("""
+        mrg_real = await pool.fetchrow(
+            """
             SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as mrr
             FROM mrg_subscriptions
             WHERE stripe_subscription_id IS NOT NULL AND status = 'active'
-        """)
+        """
+        )
 
-        mrg_demo = await pool.fetchval("""
+        mrg_demo = (
+            await pool.fetchval(
+                """
             SELECT COUNT(*) FROM mrg_subscriptions
             WHERE stripe_subscription_id IS NULL
-        """) or 0
+        """
+            )
+            or 0
+        )
 
         # Acquisition targets
-        targets = await pool.fetchrow("""
+        targets = await pool.fetchrow(
+            """
             SELECT COUNT(*) as total,
                    COUNT(*) FILTER (WHERE status = 'contacted') as contacted,
                    COUNT(*) FILTER (WHERE status = 'converted') as converted
             FROM acquisition_targets
-        """)
+        """
+        )
 
         # Revenue leads
-        leads = await pool.fetchrow("""
+        leads = await pool.fetchrow(
+            """
             SELECT COUNT(*) as total,
                    COUNT(*) FILTER (WHERE stage = 'won') as won,
                    COALESCE(SUM(estimated_value) FILTER (WHERE stage = 'won'), 0) as won_value
             FROM revenue_leads
-        """)
+        """
+        )
 
         return {
             "status": "operational",
@@ -558,28 +636,30 @@ async def get_operational_truth():
             "truth": {
                 "real_revenue": {
                     "gumroad_total": float(gumroad_real),
-                    "mrg_mrr": float(mrg_real['mrr'] if mrg_real else 0),
-                    "total_real_mrr": float(mrg_real['mrr'] if mrg_real else 0),
-                    "has_paying_customers": float(mrg_real['mrr'] if mrg_real else 0) > 0
+                    "mrg_mrr": float(mrg_real["mrr"] if mrg_real else 0),
+                    "total_real_mrr": float(mrg_real["mrr"] if mrg_real else 0),
+                    "has_paying_customers": float(mrg_real["mrr"] if mrg_real else 0) > 0,
                 },
                 "demo_data": {
                     "gumroad_test_sales": gumroad_test,
                     "mrg_demo_subscriptions": mrg_demo,
-                    "warning": "Demo data exists - do not report as real revenue"
+                    "warning": "Demo data exists - do not report as real revenue",
                 },
                 "acquisition": {
-                    "targets_total": targets['total'] if targets else 0,
-                    "targets_contacted": targets['contacted'] if targets else 0,
-                    "targets_converted": targets['converted'] if targets else 0
+                    "targets_total": targets["total"] if targets else 0,
+                    "targets_contacted": targets["contacted"] if targets else 0,
+                    "targets_converted": targets["converted"] if targets else 0,
                 },
                 "pipeline": {
-                    "leads_total": leads['total'] if leads else 0,
-                    "leads_won": leads['won'] if leads else 0,
-                    "won_value": float(leads['won_value'] if leads else 0)
-                }
+                    "leads_total": leads["total"] if leads else 0,
+                    "leads_won": leads["won"] if leads else 0,
+                    "won_value": float(leads["won_value"] if leads else 0),
+                },
             },
-            "action_required": float(mrg_real['mrr'] if mrg_real else 0) == 0,
-            "priority_action": "Acquire first paying customer" if float(mrg_real['mrr'] if mrg_real else 0) == 0 else "Scale revenue"
+            "action_required": float(mrg_real["mrr"] if mrg_real else 0) == 0,
+            "priority_action": "Acquire first paying customer"
+            if float(mrg_real["mrr"] if mrg_real else 0) == 0
+            else "Scale revenue",
         }
     except Exception as e:
         logger.error(f"Failed to get operational truth: {e}")

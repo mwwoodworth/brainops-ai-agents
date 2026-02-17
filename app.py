@@ -1267,6 +1267,23 @@ async def lifespan(app: FastAPI):
         await asyncio.sleep(2)  # Give server time to be fully ready
         logger.info("🔄 Starting heavy component initialization...")
 
+        # Wait for DB pool to be ready (deferred_init creates it concurrently)
+        _pool_wait_start = asyncio.get_event_loop().time()
+        for _attempt in range(30):  # Up to 30 seconds
+            try:
+                _p = get_pool()
+                if _p is not None and not using_fallback():
+                    logger.info(
+                        "✅ DB pool ready for heavy init (waited %.1fs)",
+                        asyncio.get_event_loop().time() - _pool_wait_start,
+                    )
+                    break
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+        else:
+            logger.warning("⚠️ DB pool not ready after 30s — proceeding with heavy init anyway")
+
         # Some long-running BrainOps subsystems still perform synchronous I/O
         # (psycopg2, shell-outs, CPU-heavy work). Run those loops on a dedicated
         # background event loop thread so they can't starve Uvicorn's HTTP loop

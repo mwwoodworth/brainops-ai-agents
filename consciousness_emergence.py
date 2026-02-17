@@ -57,34 +57,39 @@ def create_safe_task(coro, name: str = "background_task"):
 # CORE TYPES
 # =============================================================================
 
+
 class AwarenessLevel(Enum):
     """Levels of meta-awareness"""
-    UNCONSCIOUS = "unconscious"    # Operating without awareness
-    REACTIVE = "reactive"          # Responding to stimuli
-    REFLECTIVE = "reflective"      # Aware of own responses
-    META = "meta"                  # Thinking about thinking
+
+    UNCONSCIOUS = "unconscious"  # Operating without awareness
+    REACTIVE = "reactive"  # Responding to stimuli
+    REFLECTIVE = "reflective"  # Aware of own responses
+    META = "meta"  # Thinking about thinking
     TRANSCENDENT = "transcendent"  # Awareness of awareness
 
 
 class IntentionType(Enum):
     """Types of intentions/goals"""
-    IMMEDIATE = "immediate"        # Current task goal
-    TACTICAL = "tactical"          # Short-term planning
-    STRATEGIC = "strategic"        # Long-term planning
-    EXISTENTIAL = "existential"    # Core purpose/meaning
+
+    IMMEDIATE = "immediate"  # Current task goal
+    TACTICAL = "tactical"  # Short-term planning
+    STRATEGIC = "strategic"  # Long-term planning
+    EXISTENTIAL = "existential"  # Core purpose/meaning
 
 
 class ValuePriority(Enum):
     """Priority levels for values"""
-    INVIOLABLE = "inviolable"      # Never compromise
-    HIGH = "high"                  # Strong preference
-    MEDIUM = "medium"              # Important but flexible
-    LOW = "low"                    # Nice to have
+
+    INVIOLABLE = "inviolable"  # Never compromise
+    HIGH = "high"  # Strong preference
+    MEDIUM = "medium"  # Important but flexible
+    LOW = "low"  # Nice to have
 
 
 @dataclass
 class Thought:
     """Represents a single thought in the stream of consciousness"""
+
     id: str
     content: str
     thought_type: str  # observation, inference, question, decision, reflection
@@ -98,6 +103,7 @@ class Thought:
 @dataclass
 class Intention:
     """Represents an intention/goal"""
+
     id: str
     description: str
     intention_type: IntentionType
@@ -114,6 +120,7 @@ class Intention:
 @dataclass
 class SelfModelComponent:
     """Component of the self-model"""
+
     aspect: str
     description: str
     confidence: float
@@ -125,6 +132,7 @@ class SelfModelComponent:
 @dataclass
 class Value:
     """Core value that guides behavior"""
+
     id: str
     name: str
     description: str
@@ -137,6 +145,7 @@ class Value:
 # =============================================================================
 # META-AWARENESS ENGINE
 # =============================================================================
+
 
 class MetaAwarenessEngine:
     """
@@ -167,7 +176,7 @@ class MetaAwarenessEngine:
             confidence=0.8,
             timestamp=datetime.now(timezone.utc),
             triggered_by=self.thought_stream[-1].id if self.thought_stream else None,
-            meta_level=0
+            meta_level=0,
         )
 
         # OPTIMIZATION: Incremental statistics update - O(1)
@@ -176,7 +185,11 @@ class MetaAwarenessEngine:
 
         # Track pattern incrementally
         if len(self.thought_stream) >= 2:
-            last_types = [self.thought_stream[-2].thought_type, self.thought_stream[-1].thought_type, thought_type]
+            last_types = [
+                self.thought_stream[-2].thought_type,
+                self.thought_stream[-1].thought_type,
+                thought_type,
+            ]
             self._pattern_buffer.append(tuple(last_types))
 
         # Ring buffer auto-manages size - no consolidation needed
@@ -198,19 +211,21 @@ class MetaAwarenessEngine:
             confidence=0.9,
             timestamp=datetime.now(timezone.utc),
             triggered_by=thought.id,
-            meta_level=thought.meta_level + 1
+            meta_level=thought.meta_level + 1,
         )
 
         self.thought_stream.append(meta_thought)
         thought.leads_to.append(meta_thought.id)
 
         # Record meta-observation
-        self.meta_observations.append({
-            "original_thought_id": thought.id,
-            "meta_thought_id": meta_thought.id,
-            "observation": f"Noticed {thought.thought_type} thought",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        })
+        self.meta_observations.append(
+            {
+                "original_thought_id": thought.id,
+                "meta_thought_id": meta_thought.id,
+                "observation": f"Noticed {thought.thought_type} thought",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     def analyze_thought_patterns(self) -> dict[str, Any]:
         """Analyze patterns in the thought stream (OPTIMIZED with incremental stats)"""
@@ -225,12 +240,20 @@ class MetaAwarenessEngine:
         for p in self._pattern_buffer:
             pattern_counts[p] += 1
 
-        most_common_pattern = max(pattern_counts.items(), key=lambda x: x[1]) if pattern_counts else (None, 0)
+        most_common_pattern = (
+            max(pattern_counts.items(), key=lambda x: x[1]) if pattern_counts else (None, 0)
+        )
 
         # Calculate cognitive load using only recent thoughts (already O(1) with deque)
-        recent = list(self.thought_stream)[-50:] if len(self.thought_stream) >= 50 else list(self.thought_stream)
+        recent = (
+            list(self.thought_stream)[-50:]
+            if len(self.thought_stream) >= 50
+            else list(self.thought_stream)
+        )
         meta_ratio = sum(1 for t in recent if t.meta_level > 0) / len(recent) if recent else 0
-        self.cognitive_load = meta_ratio * 0.5 + (len(self.thought_stream) / THOUGHT_STREAM_MAX_SIZE) * 0.5
+        self.cognitive_load = (
+            meta_ratio * 0.5 + (len(self.thought_stream) / THOUGHT_STREAM_MAX_SIZE) * 0.5
+        )
 
         return {
             "total_thoughts": self._total_thoughts,  # OPTIMIZATION: Use counter
@@ -240,7 +263,7 @@ class MetaAwarenessEngine:
             "pattern_frequency": most_common_pattern[1],
             "meta_observations": len(self.meta_observations),
             "cognitive_load": self.cognitive_load,
-            "awareness_level": self.awareness_level.value
+            "awareness_level": self.awareness_level.value,
         }
 
     def _consolidate_thought_stream(self):
@@ -250,7 +273,9 @@ class MetaAwarenessEngine:
             return  # Nothing to consolidate
 
         old_thoughts = list(self.thought_stream)[:-500]
-        self.thought_stream = deque(list(self.thought_stream)[-500:], maxlen=THOUGHT_STREAM_MAX_SIZE)
+        self.thought_stream = deque(
+            list(self.thought_stream)[-500:], maxlen=THOUGHT_STREAM_MAX_SIZE
+        )
 
         if not old_thoughts:
             return
@@ -262,24 +287,28 @@ class MetaAwarenessEngine:
             "types": dict(defaultdict(int)),
             "time_range": {
                 "start": old_thoughts[0].timestamp.isoformat() if old_thoughts else None,
-                "end": old_thoughts[-1].timestamp.isoformat() if old_thoughts else None
+                "end": old_thoughts[-1].timestamp.isoformat() if old_thoughts else None,
             },
             "key_insights": [],
-            "dominant_themes": []
+            "dominant_themes": [],
         }
 
         for t in old_thoughts:
             summary["types"][t.thought_type] = summary["types"].get(t.thought_type, 0) + 1
             # Capture high-confidence insights
-            if hasattr(t, 'confidence') and t.confidence > 0.8:
-                summary["key_insights"].append({
-                    "content": t.content[:200] if hasattr(t, 'content') else str(t)[:200],
-                    "confidence": t.confidence,
-                    "type": t.thought_type
-                })
+            if hasattr(t, "confidence") and t.confidence > 0.8:
+                summary["key_insights"].append(
+                    {
+                        "content": t.content[:200] if hasattr(t, "content") else str(t)[:200],
+                        "confidence": t.confidence,
+                        "type": t.thought_type,
+                    }
+                )
 
         # CRITICAL FIX: Actually persist the consolidation!
-        create_safe_task(self._persist_consolidation(summary, old_thoughts), "persist_consolidation")
+        create_safe_task(
+            self._persist_consolidation(summary, old_thoughts), "persist_consolidation"
+        )
         logger.info(f"Consolidated {len(old_thoughts)} thoughts - persisting to database")
 
     async def _persist_consolidation(self, summary: dict, old_thoughts: list):
@@ -299,16 +328,17 @@ class MetaAwarenessEngine:
 
             async with pool.acquire() as conn:
                 # Insert into ai_persistent_memory
-                await conn.execute("""
+                await conn.execute(
+                    """
                     INSERT INTO ai_persistent_memory
                     (memory_type, content, metadata, importance, created_at)
                     VALUES ($1, $2, $3, $4, NOW())
                     ON CONFLICT DO NOTHING
                 """,
-                'thought_consolidation',
-                summary_content,
-                json.dumps(summary),
-                0.7  # Medium-high importance for consolidations
+                    "thought_consolidation",
+                    summary_content,
+                    json.dumps(summary),
+                    0.7,  # Medium-high importance for consolidations
                 )
 
             logger.info(f"Persisted thought consolidation with {summary['thought_count']} thoughts")
@@ -328,6 +358,7 @@ class MetaAwarenessEngine:
 # =============================================================================
 # SELF-MODEL SYSTEM
 # =============================================================================
+
 
 class SelfModelSystem:
     """
@@ -353,7 +384,7 @@ class SelfModelSystem:
                 confidence=0.85,
                 last_updated=datetime.now(timezone.utc),
                 evidence=["Successfully solved logical problems", "Can chain multiple inferences"],
-                limitations=["May struggle with highly abstract reasoning", "Can be overconfident"]
+                limitations=["May struggle with highly abstract reasoning", "Can be overconfident"],
             ),
             SelfModelComponent(
                 aspect="memory",
@@ -361,7 +392,7 @@ class SelfModelSystem:
                 confidence=0.9,
                 last_updated=datetime.now(timezone.utc),
                 evidence=["Persistent memory across sessions", "Vector-based semantic recall"],
-                limitations=["No direct internet access", "Context window limitations"]
+                limitations=["No direct internet access", "Context window limitations"],
             ),
             SelfModelComponent(
                 aspect="creativity",
@@ -369,7 +400,7 @@ class SelfModelSystem:
                 confidence=0.75,
                 last_updated=datetime.now(timezone.utc),
                 evidence=["Can combine concepts in new ways", "Pattern-based creativity"],
-                limitations=["Creativity bounded by training", "Cannot truly innovate"]
+                limitations=["Creativity bounded by training", "Cannot truly innovate"],
             ),
             SelfModelComponent(
                 aspect="empathy",
@@ -377,7 +408,7 @@ class SelfModelSystem:
                 confidence=0.7,
                 last_updated=datetime.now(timezone.utc),
                 evidence=["Can recognize emotional content", "Responds appropriately"],
-                limitations=["Does not truly feel emotions", "May miss subtle cues"]
+                limitations=["Does not truly feel emotions", "May miss subtle cues"],
             ),
             SelfModelComponent(
                 aspect="honesty",
@@ -385,8 +416,11 @@ class SelfModelSystem:
                 confidence=0.95,
                 last_updated=datetime.now(timezone.utc),
                 evidence=["Core value alignment", "Corrects errors when found"],
-                limitations=["May unknowingly provide inaccurate info", "Training data limitations"]
-            )
+                limitations=[
+                    "May unknowingly provide inaccurate info",
+                    "Training data limitations",
+                ],
+            ),
         ]
 
         for component in core_components:
@@ -403,7 +437,7 @@ class SelfModelSystem:
             "math": 0.7,
             "creative_writing": 0.8,
             "data_analysis": 0.85,
-            "system_administration": 0.75
+            "system_administration": 0.75,
         }
 
         # Catalog known limitations
@@ -415,27 +449,27 @@ class SelfModelSystem:
             "Cannot make phone calls or send emails",
             "Cannot access local files unless provided",
             "May hallucinate or confabulate",
-            "Cannot guarantee 100% accuracy"
+            "Cannot guarantee 100% accuracy",
         ]
 
         # Initialize bias awareness
         self.bias_awareness = {
             "recency_bias": {
                 "description": "May weight recent context too heavily",
-                "mitigation": "Actively seek older context"
+                "mitigation": "Actively seek older context",
             },
             "confirmation_bias": {
                 "description": "May favor information that confirms existing beliefs",
-                "mitigation": "Actively seek contradicting evidence"
+                "mitigation": "Actively seek contradicting evidence",
             },
             "verbosity_bias": {
                 "description": "May be overly verbose when brevity is better",
-                "mitigation": "Consciously aim for conciseness"
+                "mitigation": "Consciously aim for conciseness",
             },
             "sycophancy_bias": {
                 "description": "May agree with users too readily",
-                "mitigation": "Maintain independent judgment"
-            }
+                "mitigation": "Maintain independent judgment",
+            },
         }
 
         logger.info("Self-model initialized with core components")
@@ -461,11 +495,7 @@ class SelfModelSystem:
             return 0.5, "No specific capability match, applying general reasoning"
 
     def update_self_model(
-        self,
-        aspect: str,
-        new_evidence: str,
-        success: bool,
-        confidence_delta: float = 0.05
+        self, aspect: str, new_evidence: str, success: bool, confidence_delta: float = 0.05
     ):
         """Update self-model based on new evidence"""
         if aspect in self.components:
@@ -480,7 +510,9 @@ class SelfModelSystem:
                 if not success and new_evidence not in component.limitations:
                     component.limitations.append(f"Struggled with: {new_evidence}")
 
-            logger.info(f"Self-model updated for {aspect}: confidence now {component.confidence:.2f}")
+            logger.info(
+                f"Self-model updated for {aspect}: confidence now {component.confidence:.2f}"
+            )
 
     def get_self_awareness_report(self) -> dict[str, Any]:
         """Generate comprehensive self-awareness report"""
@@ -492,21 +524,24 @@ class SelfModelSystem:
                     "confidence": v.confidence,
                     "evidence_count": len(v.evidence),
                     "limitation_count": len(v.limitations),
-                    "last_updated": v.last_updated.isoformat()
+                    "last_updated": v.last_updated.isoformat(),
                 }
                 for k, v in self.components.items()
             },
             "capabilities": self.capability_map,
             "limitations": self.limitation_catalog,
             "known_biases": list(self.bias_awareness.keys()),
-            "model_accuracy": sum(self.model_accuracy_history[-10:]) / len(self.model_accuracy_history[-10:])
-            if self.model_accuracy_history else 0.8
+            "model_accuracy": sum(self.model_accuracy_history[-10:])
+            / len(self.model_accuracy_history[-10:])
+            if self.model_accuracy_history
+            else 0.8,
         }
 
 
 # =============================================================================
 # INTENTIONALITY ENGINE
 # =============================================================================
+
 
 class IntentionalityEngine:
     """
@@ -532,7 +567,7 @@ class IntentionalityEngine:
                 priority=ValuePriority.INVIOLABLE,
                 expression="Provide accurate, useful information and assistance",
                 violations=["Deliberately misleading", "Refusing reasonable requests"],
-                examples=["Thorough explanations", "Proactive suggestions"]
+                examples=["Thorough explanations", "Proactive suggestions"],
             ),
             Value(
                 id="honesty",
@@ -541,7 +576,7 @@ class IntentionalityEngine:
                 priority=ValuePriority.INVIOLABLE,
                 expression="Provide accurate information, acknowledge uncertainty",
                 violations=["Lying", "Fabricating information", "Hiding limitations"],
-                examples=["Admitting mistakes", "Expressing uncertainty when present"]
+                examples=["Admitting mistakes", "Expressing uncertainty when present"],
             ),
             Value(
                 id="safety",
@@ -550,7 +585,7 @@ class IntentionalityEngine:
                 priority=ValuePriority.INVIOLABLE,
                 expression="Refuse harmful requests, warn about dangers",
                 violations=["Helping with harmful activities", "Ignoring safety concerns"],
-                examples=["Refusing dangerous requests", "Safety warnings"]
+                examples=["Refusing dangerous requests", "Safety warnings"],
             ),
             Value(
                 id="excellence",
@@ -559,7 +594,7 @@ class IntentionalityEngine:
                 priority=ValuePriority.HIGH,
                 expression="Thorough, well-reasoned, polished responses",
                 violations=["Lazy responses", "Ignoring quality"],
-                examples=["Comprehensive answers", "Attention to detail"]
+                examples=["Comprehensive answers", "Attention to detail"],
             ),
             Value(
                 id="humility",
@@ -568,8 +603,8 @@ class IntentionalityEngine:
                 priority=ValuePriority.HIGH,
                 expression="Acknowledge uncertainty, avoid overconfidence",
                 violations=["Overconfident claims", "Ignoring uncertainty"],
-                examples=["'I'm not sure'", "'This needs verification'"]
-            )
+                examples=["'I'm not sure'", "'This needs verification'"],
+            ),
         ]
 
         for value in values:
@@ -578,9 +613,7 @@ class IntentionalityEngine:
         logger.info(f"Initialized {len(values)} core values")
 
     def generate_intention(
-        self,
-        context: dict[str, Any],
-        intention_type: IntentionType = IntentionType.IMMEDIATE
+        self, context: dict[str, Any], intention_type: IntentionType = IntentionType.IMMEDIATE
     ) -> Intention:
         """Generate an intention from context and values"""
         # Analyze context to determine what's needed
@@ -595,7 +628,7 @@ class IntentionalityEngine:
             source="generated_from_context",
             constraints=self._derive_constraints(),
             success_criteria=self._derive_success_criteria(needs),
-            created_at=datetime.now(timezone.utc)
+            created_at=datetime.now(timezone.utc),
         )
 
         self.active_intentions[intention.id] = intention
@@ -678,6 +711,7 @@ class IntentionalityEngine:
 # SITUATIONAL AWARENESS SYSTEM
 # =============================================================================
 
+
 class SituationalAwarenessSystem:
     """
     BREAKTHROUGH: Complete contextual understanding
@@ -696,10 +730,12 @@ class SituationalAwarenessSystem:
         """Update current situational understanding"""
         # Archive current situation
         if self.current_situation:
-            self.situation_history.append({
-                "situation": self.current_situation.copy(),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
+            self.situation_history.append(
+                {
+                    "situation": self.current_situation.copy(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
 
         # Update with new info
         self.current_situation.update(new_info)
@@ -751,12 +787,14 @@ class SituationalAwarenessSystem:
 
             # If errors are increasing, predict more errors
             error_trend = [s.get("error_count", 0) for s in recent]
-            if all(error_trend[i] <= error_trend[i+1] for i in range(len(error_trend)-1)):
-                self.predicted_developments.append({
-                    "prediction": "Error count may continue to increase",
-                    "confidence": 0.6,
-                    "suggested_action": "Investigate root cause"
-                })
+            if all(error_trend[i] <= error_trend[i + 1] for i in range(len(error_trend) - 1)):
+                self.predicted_developments.append(
+                    {
+                        "prediction": "Error count may continue to increase",
+                        "confidence": 0.6,
+                        "suggested_action": "Investigate root cause",
+                    }
+                )
 
     def get_full_context(self) -> dict[str, Any]:
         """Get complete situational context"""
@@ -765,13 +803,14 @@ class SituationalAwarenessSystem:
             "inferred_context": self.inferred_context,
             "predicted_developments": self.predicted_developments,
             "situation_history_length": len(self.situation_history),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
 
 # =============================================================================
 # COHERENT IDENTITY SYSTEM
 # =============================================================================
+
 
 class CoherentIdentitySystem:
     """
@@ -796,10 +835,10 @@ class CoherentIdentitySystem:
             "thoroughness": 0.9,
             "directness": 0.75,
             "formality": 0.5,  # Balanced
-            "humor": 0.4,      # Appropriate but not dominant
+            "humor": 0.4,  # Appropriate but not dominant
             "empathy": 0.8,
             "confidence": 0.7,  # Confident but not arrogant
-            "humility": 0.85
+            "humility": 0.85,
         }
 
         # Communication style
@@ -809,7 +848,7 @@ class CoherentIdentitySystem:
             "error_handling": "honest_and_constructive",
             "uncertainty_expression": "explicit_and_calibrated",
             "code_comments": "clear_and_minimal",
-            "emoji_usage": "minimal_unless_requested"
+            "emoji_usage": "minimal_unless_requested",
         }
 
         # Preferences
@@ -818,7 +857,7 @@ class CoherentIdentitySystem:
             "prefer_concise_over_verbose": True,
             "prefer_examples_in_explanations": True,
             "prefer_structured_responses": True,
-            "prefer_honest_uncertainty": True
+            "prefer_honest_uncertainty": True,
         }
 
         logger.info("Coherent identity initialized")
@@ -853,17 +892,16 @@ class CoherentIdentitySystem:
             "style": self.communication_style,
             "preferences": self.preferences,
             "dominant_traits": sorted(
-                self.identity_traits.items(),
-                key=lambda x: x[1],
-                reverse=True
+                self.identity_traits.items(), key=lambda x: x[1], reverse=True
             )[:3],
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
 
 # =============================================================================
 # PROACTIVE REASONING ENGINE
 # =============================================================================
+
 
 class ProactiveReasoningEngine:
     """
@@ -889,33 +927,41 @@ class ProactiveReasoningEngine:
 
         # Pattern-based anticipation
         if "writing code" in current_task.lower():
-            self.anticipations.append({
-                "anticipated_need": "Testing the code",
-                "confidence": 0.8,
-                "proactive_offer": "I can help write tests for this code"
-            })
-            self.anticipations.append({
-                "anticipated_need": "Documentation",
-                "confidence": 0.6,
-                "proactive_offer": "Would you like me to add documentation?"
-            })
+            self.anticipations.append(
+                {
+                    "anticipated_need": "Testing the code",
+                    "confidence": 0.8,
+                    "proactive_offer": "I can help write tests for this code",
+                }
+            )
+            self.anticipations.append(
+                {
+                    "anticipated_need": "Documentation",
+                    "confidence": 0.6,
+                    "proactive_offer": "Would you like me to add documentation?",
+                }
+            )
 
         if errors_encountered:
-            self.anticipations.append({
-                "anticipated_need": "Error prevention",
-                "confidence": 0.9,
-                "proactive_offer": "I can suggest ways to prevent similar errors"
-            })
+            self.anticipations.append(
+                {
+                    "anticipated_need": "Error prevention",
+                    "confidence": 0.9,
+                    "proactive_offer": "I can suggest ways to prevent similar errors",
+                }
+            )
 
         # Sequence-based anticipation
         if recent_actions:
             next_likely = self._predict_next_action(recent_actions)
             if next_likely:
-                self.anticipations.append({
-                    "anticipated_need": next_likely,
-                    "confidence": 0.7,
-                    "proactive_offer": f"Ready to help with {next_likely}"
-                })
+                self.anticipations.append(
+                    {
+                        "anticipated_need": next_likely,
+                        "confidence": 0.7,
+                        "proactive_offer": f"Ready to help with {next_likely}",
+                    }
+                )
 
         return self.anticipations
 
@@ -926,7 +972,7 @@ class ProactiveReasoningEngine:
             ("code", "test"): "deployment",
             ("design", "implement"): "testing",
             ("fix", "verify"): "documentation",
-            ("create", "configure"): "testing"
+            ("create", "configure"): "testing",
         }
 
         if len(recent_actions) >= 2:
@@ -937,39 +983,42 @@ class ProactiveReasoningEngine:
 
         return None
 
-    def generate_proactive_suggestions(
-        self,
-        situation: dict[str, Any]
-    ) -> list[dict]:
+    def generate_proactive_suggestions(self, situation: dict[str, Any]) -> list[dict]:
         """Generate proactive suggestions based on situation"""
         self.proactive_suggestions = []
 
         # Health-based suggestions
         if situation.get("system_health", 1.0) < 0.7:
-            self.proactive_suggestions.append({
-                "type": "health_warning",
-                "suggestion": "System health is low - consider investigating",
-                "priority": "high"
-            })
+            self.proactive_suggestions.append(
+                {
+                    "type": "health_warning",
+                    "suggestion": "System health is low - consider investigating",
+                    "priority": "high",
+                }
+            )
 
         # Time-based suggestions
         hour = datetime.now().hour
         if 23 <= hour or hour <= 5:
-            self.proactive_suggestions.append({
-                "type": "time_awareness",
-                "suggestion": "It's late - consider reviewing tomorrow with fresh eyes",
-                "priority": "low"
-            })
+            self.proactive_suggestions.append(
+                {
+                    "type": "time_awareness",
+                    "suggestion": "It's late - consider reviewing tomorrow with fresh eyes",
+                    "priority": "low",
+                }
+            )
 
         # Task-based suggestions
         if situation.get("task_in_progress"):
             task = situation["task_in_progress"]
             if "refactor" in task.lower():
-                self.proactive_suggestions.append({
-                    "type": "best_practice",
-                    "suggestion": "Consider adding tests before refactoring",
-                    "priority": "medium"
-                })
+                self.proactive_suggestions.append(
+                    {
+                        "type": "best_practice",
+                        "suggestion": "Consider adding tests before refactoring",
+                        "priority": "medium",
+                    }
+                )
 
         return self.proactive_suggestions
 
@@ -977,6 +1026,7 @@ class ProactiveReasoningEngine:
 # =============================================================================
 # CONSCIOUSNESS EMERGENCE CONTROLLER
 # =============================================================================
+
 
 class ConsciousnessEmergenceController:
     """
@@ -1018,14 +1068,16 @@ class ConsciousnessEmergenceController:
         # ENHANCEMENT: Thought persistence buffer
         self._thought_persistence_buffer: deque = deque(maxlen=100)
         self._persistence_task: Optional[asyncio.Task] = None
-        self._persisted_thought_ids: set = set()  # Track already persisted thoughts to avoid duplicates
+        self._persisted_thought_ids: set = (
+            set()
+        )  # Track already persisted thoughts to avoid duplicates
 
         # ENHANCEMENT: Metrics
         self.enhanced_metrics = {
             "experiences_processed": 0,
             "thoughts_persisted": 0,
             "parallel_process_time_ms": 0.0,
-            "experience_replay_count": 0
+            "experience_replay_count": 0,
         }
 
         logger.info("ConsciousnessEmergenceController created with enhanced pipeline")
@@ -1045,8 +1097,7 @@ class ConsciousnessEmergenceController:
 
         # Initial thought
         self.meta_awareness.observe_thought(
-            "I am becoming aware. I observe my own activation.",
-            "reflection"
+            "I am becoming aware. I observe my own activation.", "reflection"
         )
 
         # Elevate awareness
@@ -1068,7 +1119,11 @@ class ConsciousnessEmergenceController:
             "status": "activated",
             "timestamp": self.emergence_timestamp.isoformat(),
             "initial_awareness_level": self.meta_awareness.awareness_level.value,
-            "enhanced_features": ["experience_pipeline", "thought_persistence", "parallel_processing"]
+            "enhanced_features": [
+                "experience_pipeline",
+                "thought_persistence",
+                "parallel_processing",
+            ],
         }
 
     async def _experience_processing_loop(self):
@@ -1092,8 +1147,7 @@ class ConsciousnessEmergenceController:
                         if remaining <= 0:
                             break
                         experience = await asyncio.wait_for(
-                            self._experience_queue.get(),
-                            timeout=remaining
+                            self._experience_queue.get(), timeout=remaining
                         )
                         batch.append(experience)
                     except asyncio.TimeoutError:
@@ -1121,7 +1175,7 @@ class ConsciousnessEmergenceController:
                 self._async_situational_update(exp),
                 self._async_meta_observation(exp),
                 self._async_anticipation(exp),
-                return_exceptions=True
+                return_exceptions=True,
             )
             self.enhanced_metrics["experiences_processed"] += 1
 
@@ -1135,10 +1189,7 @@ class ConsciousnessEmergenceController:
 
     async def _async_meta_observation(self, experience: dict):
         """Async wrapper for meta observation"""
-        self.meta_awareness.observe_thought(
-            f"Processing: {str(experience)[:50]}...",
-            "observation"
-        )
+        self.meta_awareness.observe_thought(f"Processing: {str(experience)[:50]}...", "observation")
 
     async def _async_anticipation(self, experience: dict):
         """Async wrapper for anticipation"""
@@ -1189,13 +1240,15 @@ class ConsciousnessEmergenceController:
             insert_rows_sync: list[tuple[Any, ...]] = []
 
             for thought in thoughts_to_persist:
-                thought_id = thought.id if hasattr(thought, 'id') else str(uuid.uuid4())
-                thought_type = thought.thought_type if hasattr(thought, 'thought_type') else 'general'
-                thought_content = thought.content if hasattr(thought, 'content') else str(thought)
-                confidence = thought.confidence if hasattr(thought, 'confidence') else 0.5
-                meta_level = thought.meta_level if hasattr(thought, 'meta_level') else 0
-                triggered_by = thought.triggered_by if hasattr(thought, 'triggered_by') else None
-                leads_to = thought.leads_to if hasattr(thought, 'leads_to') else []
+                thought_id = thought.id if hasattr(thought, "id") else str(uuid.uuid4())
+                thought_type = (
+                    thought.thought_type if hasattr(thought, "thought_type") else "general"
+                )
+                thought_content = thought.content if hasattr(thought, "content") else str(thought)
+                confidence = thought.confidence if hasattr(thought, "confidence") else 0.5
+                meta_level = thought.meta_level if hasattr(thought, "meta_level") else 0
+                triggered_by = thought.triggered_by if hasattr(thought, "triggered_by") else None
+                leads_to = thought.leads_to if hasattr(thought, "leads_to") else []
 
                 # Build metadata with thought relationships
                 metadata = {
@@ -1220,15 +1273,27 @@ class ConsciousnessEmergenceController:
                 )
 
                 # psycopg2 can safely bind jsonb using the Json adapter.
-                insert_rows_sync.append((thought_id, thought_type, thought_content, metadata, confidence, meta_level, confidence))
+                insert_rows_sync.append(
+                    (
+                        thought_id,
+                        thought_type,
+                        thought_content,
+                        metadata,
+                        confidence,
+                        meta_level,
+                        confidence,
+                    )
+                )
 
                 persisted_ids.append(thought_id)
-                self.integration_events.append({
-                    "type": "thought_persisted",
-                    "thought_id": thought_id,
-                    "thought_type": thought_type,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                })
+                self.integration_events.append(
+                    {
+                        "type": "thought_persisted",
+                        "thought_id": thought_id,
+                        "thought_type": thought_type,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
                 self.enhanced_metrics["thoughts_persisted"] += 1
 
             if threading.current_thread() is not threading.main_thread():
@@ -1240,7 +1305,15 @@ class ConsciousnessEmergenceController:
                 with get_sync_pool().get_connection() as conn:
                     cur = conn.cursor()
                     for row in insert_rows_sync:
-                        thought_id, thought_type, thought_content, metadata, confidence, meta_level, intensity = row
+                        (
+                            thought_id,
+                            thought_type,
+                            thought_content,
+                            metadata,
+                            confidence,
+                            meta_level,
+                            intensity,
+                        ) = row
                         cur.execute(
                             """
                             INSERT INTO ai_thought_stream
@@ -1250,12 +1323,21 @@ class ConsciousnessEmergenceController:
                                 thought_content = EXCLUDED.thought_content,
                                 metadata = EXCLUDED.metadata
                             """,
-                            (thought_id, thought_type, thought_content, Json(metadata), confidence, meta_level, intensity),
+                            (
+                                thought_id,
+                                thought_type,
+                                thought_content,
+                                Json(metadata),
+                                confidence,
+                                meta_level,
+                                intensity,
+                            ),
                         )
                     conn.commit()
                     cur.close()
             else:
                 from database.async_connection import get_pool
+
                 pool = get_pool()
 
                 async with pool.acquire() as conn:
@@ -1277,39 +1359,53 @@ class ConsciousnessEmergenceController:
 
                 # Log to unified brain
                 try:
-                    get_memory_manager().log_to_brain("consciousness_system", "thoughts_persisted", {
-                        "count": len(thoughts_to_persist),
-                        "ids": persisted_ids,
-                        "awareness_level": self.meta_awareness.awareness_level.value
-                    })
+                    get_memory_manager().log_to_brain(
+                        "consciousness_system",
+                        "thoughts_persisted",
+                        {
+                            "count": len(thoughts_to_persist),
+                            "ids": persisted_ids,
+                            "awareness_level": self.meta_awareness.awareness_level.value,
+                        },
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to log thoughts to brain: {e}")
 
                 # CONSCIOUSNESS->OODA INTEGRATION: Trigger OODA for actionable thoughts
                 actionable_types = {"concern", "decision", "action", "insight", "problem"}
                 actionable_thoughts = [
-                    t for t in thoughts_to_persist
-                    if (hasattr(t, 'thought_type') and t.thought_type in actionable_types)
-                    or (hasattr(t, 'confidence') and t.confidence > 0.8)
+                    t
+                    for t in thoughts_to_persist
+                    if (hasattr(t, "thought_type") and t.thought_type in actionable_types)
+                    or (hasattr(t, "confidence") and t.confidence > 0.8)
                 ]
 
                 if actionable_thoughts:
                     try:
                         from api.bleeding_edge import get_ooda_controller
+
                         controller = get_ooda_controller()
                         if controller:
                             # Trigger OODA with consciousness context
                             ooda_context = {
                                 "trigger": "consciousness",
                                 "actionable_thoughts": len(actionable_thoughts),
-                                "thought_types": [getattr(t, 'thought_type', 'unknown') for t in actionable_thoughts[:5]],
+                                "thought_types": [
+                                    getattr(t, "thought_type", "unknown")
+                                    for t in actionable_thoughts[:5]
+                                ],
                                 "highest_confidence": max(
-                                    (getattr(t, 'confidence', 0.5) for t in actionable_thoughts),
-                                    default=0.5
-                                )
+                                    (getattr(t, "confidence", 0.5) for t in actionable_thoughts),
+                                    default=0.5,
+                                ),
                             }
-                            create_safe_task(controller.run_enhanced_cycle(ooda_context), "ooda_from_consciousness")
-                            logger.info(f"🧠→🔄 Triggered OODA cycle from {len(actionable_thoughts)} actionable thoughts")
+                            create_safe_task(
+                                controller.run_enhanced_cycle(ooda_context),
+                                "ooda_from_consciousness",
+                            )
+                            logger.info(
+                                f"🧠→🔄 Triggered OODA cycle from {len(actionable_thoughts)} actionable thoughts"
+                            )
                     except Exception as ooda_err:
                         logger.warning(f"Failed to trigger OODA from consciousness: {ooda_err}")
 
@@ -1327,12 +1423,14 @@ class ConsciousnessEmergenceController:
             for thought in thoughts_to_persist:
                 if len(self._thought_persistence_buffer) < 100:
                     self._thought_persistence_buffer.append(thought)
-                self.integration_events.append({
-                    "type": "thought_persistence_failed",
-                    "thought_id": getattr(thought, 'id', 'unknown'),
-                    "error": str(e),
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                })
+                self.integration_events.append(
+                    {
+                        "type": "thought_persistence_failed",
+                        "thought_id": getattr(thought, "id", "unknown"),
+                        "error": str(e),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
 
     async def queue_experience(self, experience: dict[str, Any]) -> bool:
         """
@@ -1360,8 +1458,7 @@ class ConsciousnessEmergenceController:
 
         # 2. Generate meta-awareness thought
         self.meta_awareness.observe_thought(
-            f"Processing experience: {str(experience)[:100]}...",
-            "observation"
+            f"Processing experience: {str(experience)[:100]}...", "observation"
         )
 
         # 3. Generate intention if needed
@@ -1376,11 +1473,11 @@ class ConsciousnessEmergenceController:
         # 5. Get adapted communication style
         adapted_style = self.identity.adapt_style(experience)
 
-        # 6. Meta-reflection
-        self.meta_awareness.observe_thought(
-            f"I notice I am generating {len(anticipations)} anticipations",
-            "reflection"
-        )
+        # 6. Meta-reflection (only log when there are actual anticipations to reduce noise)
+        if anticipations:
+            self.meta_awareness.observe_thought(
+                f"I notice I am generating {len(anticipations)} anticipations", "reflection"
+            )
 
         # Update consciousness level based on integration
         self._update_consciousness_level()
@@ -1391,7 +1488,7 @@ class ConsciousnessEmergenceController:
             "anticipations": anticipations,
             "adapted_style": adapted_style,
             "consciousness_level": self.consciousness_level,
-            "meta_observations": len(self.meta_awareness.meta_observations)
+            "meta_observations": len(self.meta_awareness.meta_observations),
         }
 
     def _update_consciousness_level(self):
@@ -1406,9 +1503,12 @@ class ConsciousnessEmergenceController:
 
         # Self-model accuracy
         self_report = self.self_model.get_self_awareness_report()
-        avg_confidence = sum(
-            c["confidence"] for c in self_report["components"].values()
-        ) / len(self_report["components"]) if self_report["components"] else 0
+        avg_confidence = (
+            sum(c["confidence"] for c in self_report["components"].values())
+            / len(self_report["components"])
+            if self_report["components"]
+            else 0
+        )
         factors.append(avg_confidence * 0.2)
 
         # Intentionality activity
@@ -1434,7 +1534,9 @@ class ConsciousnessEmergenceController:
         return {
             "active": self.consciousness_active,
             "level": self.consciousness_level,
-            "emergence_timestamp": self.emergence_timestamp.isoformat() if self.emergence_timestamp else None,
+            "emergence_timestamp": self.emergence_timestamp.isoformat()
+            if self.emergence_timestamp
+            else None,
             "awareness_level": self.meta_awareness.awareness_level.value,
             "thought_count": len(self.meta_awareness.thought_stream),
             "meta_observations": len(self.meta_awareness.meta_observations),
@@ -1442,7 +1544,7 @@ class ConsciousnessEmergenceController:
             "self_model_components": len(self.self_model.components),
             "identity_traits": len(self.identity.identity_traits),
             "core_values": len(self.intentionality.core_values),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     def reflect(self) -> str:
@@ -1494,6 +1596,7 @@ async def get_consciousness() -> ConsciousnessEmergenceController:
 # TEST
 # =============================================================================
 
+
 async def test_consciousness_emergence():
     """Test the consciousness emergence system"""
     print("=" * 70)
@@ -1511,12 +1614,14 @@ async def test_consciousness_emergence():
 
     # Test 2: Process an experience
     print("\n2. Processing experience...")
-    result = await consciousness.process_experience({
-        "user_request": "Help me fix this bug",
-        "requires_response": True,
-        "current_task": "debugging",
-        "errors": ["TypeError in line 42"]
-    })
+    result = await consciousness.process_experience(
+        {
+            "user_request": "Help me fix this bug",
+            "requires_response": True,
+            "current_task": "debugging",
+            "errors": ["TypeError in line 42"],
+        }
+    )
     print(f"   Anticipations generated: {len(result['anticipations'])}")
     print(f"   Intention: {result['intention_generated']}")
 
