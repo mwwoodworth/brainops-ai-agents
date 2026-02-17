@@ -164,8 +164,8 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.25.1"
-        )  # Fix RLS violations: tenant context in all DB write paths
+            "VERSION", "v11.25.2"
+        )  # Daily briefing email + observability daemon fix
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "10000"))

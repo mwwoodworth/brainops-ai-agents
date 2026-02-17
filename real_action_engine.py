@@ -421,6 +421,88 @@ async def decide_and_act(observations: list[dict[str, Any]]) -> dict[str, Any]:
     return summary
 
 
+# ─── Daily Briefing Email ─────────────────────────────────────────────────────
+
+
+async def send_daily_briefing() -> dict[str, Any]:
+    """Generate and email the daily operational intelligence briefing.
+
+    Called by the agent scheduler every morning. Fetches the real briefing
+    data from /ops/briefing logic and formats it as an HTML email.
+    """
+    from api.real_ops import get_daily_briefing
+
+    try:
+        briefing = await get_daily_briefing()
+        sections = briefing.get("sections", {})
+
+        # Build HTML email
+        health = sections.get("service_health", {})
+        revenue = sections.get("revenue", {})
+        db = sections.get("database", {})
+        agents = sections.get("agent_activity", {})
+        email_sec = sections.get("email", {})
+
+        healthy_count = health.get("healthy", "?")
+        total_count = health.get("total", "?")
+        unhealthy = health.get("unhealthy", [])
+
+        gumroad = revenue.get("gumroad", {})
+        mrg = revenue.get("mrg_subscriptions", {})
+        leads = revenue.get("leads", {})
+
+        html = f"""
+        <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #1a1a2e; border-bottom: 2px solid #16213e;">BrainOps Daily Briefing</h2>
+            <p style="color: #666;">{briefing.get('generated_at', 'Unknown')}</p>
+
+            <h3 style="color: #16213e;">Service Health: {healthy_count}/{total_count}</h3>
+            {'<p style="color: #27ae60;">All systems operational</p>' if not unhealthy else f'<p style="color: #e74c3c;">Unhealthy: {", ".join(unhealthy)}</p>'}
+
+            <h3 style="color: #16213e;">Revenue</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr style="background: #f8f9fa;">
+                    <td style="padding: 8px; border: 1px solid #dee2e6;">Gumroad Revenue</td>
+                    <td style="padding: 8px; border: 1px solid #dee2e6; text-align: right;">${gumroad.get('total_revenue', 0):.2f}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #dee2e6;">MRG Active Subs</td>
+                    <td style="padding: 8px; border: 1px solid #dee2e6; text-align: right;">{mrg.get('active', 0)}</td>
+                </tr>
+                <tr style="background: #f8f9fa;">
+                    <td style="padding: 8px; border: 1px solid #dee2e6;">Active Leads</td>
+                    <td style="padding: 8px; border: 1px solid #dee2e6; text-align: right;">{leads.get('active', 0)} / {leads.get('total', 0)}</td>
+                </tr>
+            </table>
+
+            <h3 style="color: #16213e;">Database</h3>
+            <p>Size: {db.get('size', '?')} | Tables: {db.get('tables', '?')} | Memory: {db.get('memory_entries', '?'):,} entries</p>
+            <p>Violations: {db.get('unresolved_violations', '?')} | Alerts: {db.get('unresolved_alerts', '?')}</p>
+
+            <h3 style="color: #16213e;">Agent Activity (24h)</h3>
+            <p>{'No errors' if isinstance(agents, dict) and 'error' not in agents else agents}</p>
+
+            <h3 style="color: #16213e;">Email (24h)</h3>
+            <p>Sent: {email_sec.get('last_24h', {}).get('sent', 0)} | Queued: {email_sec.get('last_24h', {}).get('queued', 0)}</p>
+
+            <hr style="border: 1px solid #eee; margin: 20px 0;">
+            <p style="color: #999; font-size: 12px;">BrainOps AI OS v11.25.1 | Automated daily briefing</p>
+        </div>
+        """
+
+        result = await send_alert(
+            subject="Daily Operational Briefing",
+            body_html=html,
+            severity="info",
+        )
+        result["briefing_data"] = briefing
+        return result
+
+    except Exception as e:
+        logger.error(f"Daily briefing email failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 # ─── Memory logging ──────────────────────────────────────────────────────────
 
 
