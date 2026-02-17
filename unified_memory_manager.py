@@ -390,6 +390,7 @@ class UnifiedMemoryManager:
                     1 - (embedding <=> %s::vector) as similarity
                 FROM unified_ai_memory
                 WHERE tenant_id = %s
+                  AND embedding IS NOT NULL
                 """
 
                 params = [query_embedding, tenant_id]

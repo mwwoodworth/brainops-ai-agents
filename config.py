@@ -159,8 +159,8 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.22.0"
-        )  # Add /brain/recall, DB pool wait, consciousness resilience, NerveCenter enabled
+            "VERSION", "v11.23.0"
+        )  # Fix RAG vector search (NULL embedding sort), agent scheduler schema, embedding diagnostic
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "10000"))
