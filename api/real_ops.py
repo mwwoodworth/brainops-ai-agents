@@ -12,9 +12,7 @@ Endpoints:
 - GET  /ops/briefing           - Get daily operational intelligence briefing
 """
 
-import json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -22,6 +20,13 @@ from fastapi import APIRouter, Body, HTTPException, Query
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ops", tags=["real-operations"])
+
+
+def _get_async_pool():
+    """Get the async connection pool (sync call, not a coroutine)."""
+    from database.async_connection import get_pool
+
+    return get_pool()
 
 
 @router.post("/health-check")
@@ -67,11 +72,8 @@ async def run_ooda_cycle() -> dict[str, Any]:
 
     # Also observe DB health
     try:
-        from database.async_connection import get_pool
-
-        pool = await get_pool()
+        pool = _get_async_pool()
         async with pool.acquire() as conn:
-            # Check for slow queries
             slow = await conn.fetchval(
                 """
                 SELECT count(*) FROM pg_stat_activity
@@ -89,7 +91,6 @@ async def run_ooda_cycle() -> dict[str, Any]:
                     }
                 )
 
-            # Check dead tuple bloat
             bloated = await conn.fetch(
                 """
                 SELECT relname, n_dead_tup
@@ -102,7 +103,7 @@ async def run_ooda_cycle() -> dict[str, Any]:
                 for row in bloated:
                     observations.append(
                         {
-                            "type": "db_slow_query",
+                            "type": "db_bloat",
                             "severity": "info",
                             "data": {"table": row["relname"], "dead_tuples": row["n_dead_tup"]},
                         }
@@ -185,146 +186,155 @@ async def get_daily_briefing() -> dict[str, Any]:
     except Exception as e:
         briefing["sections"]["service_health"] = {"error": str(e)}
 
-    # Section 2: Revenue (REAL - from gumroad_sales and mrg_subscriptions)
+    # Get pool once for all DB sections
+    pool = None
     try:
-        from database.async_connection import get_pool
-
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            # Gumroad sales
-            gumroad = await conn.fetchrow(
-                """
-                SELECT
-                    count(*) as total_sales,
-                    coalesce(sum(price), 0) as total_revenue,
-                    count(*) FILTER (WHERE sale_timestamp > now() - interval '30 days') as sales_30d,
-                    coalesce(sum(price) FILTER (WHERE sale_timestamp > now() - interval '30 days'), 0) as revenue_30d
-                FROM gumroad_sales
-                WHERE is_test = false
-            """
-            )
-
-            # MRG subscriptions
-            mrg = await conn.fetchrow(
-                """
-                SELECT
-                    count(*) as total_subs,
-                    count(*) FILTER (WHERE status = 'active') as active_subs,
-                    count(*) FILTER (WHERE created_at > now() - interval '30 days') as new_subs_30d
-                FROM mrg_subscriptions
-            """
-            )
-
-            # Revenue leads
-            leads = await conn.fetchrow(
-                """
-                SELECT
-                    count(*) as total_leads,
-                    count(*) FILTER (WHERE status = 'new' OR status = 'contacted') as active_leads,
-                    count(*) FILTER (WHERE created_at > now() - interval '30 days') as new_leads_30d
-                FROM revenue_leads
-                WHERE is_test = false AND is_demo = false
-            """
-            )
-
-            briefing["sections"]["revenue"] = {
-                "gumroad": {
-                    "total_sales": gumroad["total_sales"] if gumroad else 0,
-                    "total_revenue": float(gumroad["total_revenue"]) if gumroad else 0,
-                    "sales_30d": gumroad["sales_30d"] if gumroad else 0,
-                    "revenue_30d": float(gumroad["revenue_30d"]) if gumroad else 0,
-                },
-                "mrg_subscriptions": {
-                    "total": mrg["total_subs"] if mrg else 0,
-                    "active": mrg["active_subs"] if mrg else 0,
-                    "new_30d": mrg["new_subs_30d"] if mrg else 0,
-                },
-                "leads": {
-                    "total": leads["total_leads"] if leads else 0,
-                    "active": leads["active_leads"] if leads else 0,
-                    "new_30d": leads["new_leads_30d"] if leads else 0,
-                },
-            }
+        pool = _get_async_pool()
     except Exception as e:
-        briefing["sections"]["revenue"] = {"error": str(e)}
+        logger.error(f"Failed to get async pool for briefing: {e}")
+
+    # Section 2: Revenue (REAL - from gumroad_sales and mrg_subscriptions)
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                gumroad = await conn.fetchrow(
+                    """
+                    SELECT
+                        count(*) as total_sales,
+                        coalesce(sum(price), 0) as total_revenue,
+                        count(*) FILTER (WHERE sale_timestamp > now() - interval '30 days') as sales_30d,
+                        coalesce(sum(price) FILTER (WHERE sale_timestamp > now() - interval '30 days'), 0) as revenue_30d
+                    FROM gumroad_sales
+                    WHERE is_test = false
+                """
+                )
+
+                mrg = await conn.fetchrow(
+                    """
+                    SELECT
+                        count(*) as total_subs,
+                        count(*) FILTER (WHERE status = 'active') as active_subs,
+                        count(*) FILTER (WHERE created_at > now() - interval '30 days') as new_subs_30d
+                    FROM mrg_subscriptions
+                """
+                )
+
+                leads = await conn.fetchrow(
+                    """
+                    SELECT
+                        count(*) as total_leads,
+                        count(*) FILTER (WHERE status = 'new' OR status = 'contacted') as active_leads,
+                        count(*) FILTER (WHERE created_at > now() - interval '30 days') as new_leads_30d
+                    FROM revenue_leads
+                    WHERE is_test = false AND is_demo = false
+                """
+                )
+
+                briefing["sections"]["revenue"] = {
+                    "gumroad": {
+                        "total_sales": gumroad["total_sales"] if gumroad else 0,
+                        "total_revenue": float(gumroad["total_revenue"]) if gumroad else 0,
+                        "sales_30d": gumroad["sales_30d"] if gumroad else 0,
+                        "revenue_30d": float(gumroad["revenue_30d"]) if gumroad else 0,
+                    },
+                    "mrg_subscriptions": {
+                        "total": mrg["total_subs"] if mrg else 0,
+                        "active": mrg["active_subs"] if mrg else 0,
+                        "new_30d": mrg["new_subs_30d"] if mrg else 0,
+                    },
+                    "leads": {
+                        "total": leads["total_leads"] if leads else 0,
+                        "active": leads["active_leads"] if leads else 0,
+                        "new_30d": leads["new_leads_30d"] if leads else 0,
+                    },
+                }
+        except Exception as e:
+            briefing["sections"]["revenue"] = {"error": str(e)}
+    else:
+        briefing["sections"]["revenue"] = {"error": "Database pool unavailable"}
 
     # Section 3: Database Health
-    try:
-        async with pool.acquire() as conn:
-            db_size = await conn.fetchval(
-                "SELECT pg_size_pretty(pg_database_size(current_database()))"
-            )
-            table_count = await conn.fetchval(
-                "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"
-            )
-            memory_count = await conn.fetchval("SELECT count(*) FROM unified_ai_memory")
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                db_size = await conn.fetchval(
+                    "SELECT pg_size_pretty(pg_database_size(current_database()))"
+                )
+                table_count = await conn.fetchval(
+                    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"
+                )
+                memory_count = await conn.fetchval("SELECT count(*) FROM unified_ai_memory")
+                violations = await conn.fetchval(
+                    "SELECT count(*) FROM invariant_violations WHERE resolved = false"
+                )
+                alerts = await conn.fetchval(
+                    "SELECT count(*) FROM brainops_alerts WHERE resolved = false"
+                )
 
-            # Invariant violations
-            violations = await conn.fetchval(
-                "SELECT count(*) FROM invariant_violations WHERE resolved = false"
-            )
-
-            # Unresolved alerts
-            alerts = await conn.fetchval(
-                "SELECT count(*) FROM brainops_alerts WHERE resolved = false"
-            )
-
-            briefing["sections"]["database"] = {
-                "size": db_size,
-                "tables": table_count,
-                "memory_entries": memory_count,
-                "unresolved_violations": violations,
-                "unresolved_alerts": alerts,
-            }
-    except Exception as e:
-        briefing["sections"]["database"] = {"error": str(e)}
+                briefing["sections"]["database"] = {
+                    "size": db_size,
+                    "tables": table_count,
+                    "memory_entries": memory_count,
+                    "unresolved_violations": violations,
+                    "unresolved_alerts": alerts,
+                }
+        except Exception as e:
+            briefing["sections"]["database"] = {"error": str(e)}
+    else:
+        briefing["sections"]["database"] = {"error": "Database pool unavailable"}
 
     # Section 4: Agent Activity (last 24h)
-    try:
-        async with pool.acquire() as conn:
-            executions = await conn.fetchrow(
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                executions = await conn.fetchrow(
+                    """
+                    SELECT
+                        count(*) as total,
+                        count(*) FILTER (WHERE status = 'completed') as completed,
+                        count(*) FILTER (WHERE status = 'failed') as failed
+                    FROM ai_agent_executions
+                    WHERE created_at > now() - interval '24 hours'
                 """
-                SELECT
-                    count(*) as total,
-                    count(*) FILTER (WHERE status = 'completed') as completed,
-                    count(*) FILTER (WHERE status = 'failed') as failed
-                FROM ai_agent_executions
-                WHERE created_at > now() - interval '24 hours'
-            """
-            )
+                )
 
-            briefing["sections"]["agent_activity"] = {
-                "last_24h": {
-                    "total": executions["total"] if executions else 0,
-                    "completed": executions["completed"] if executions else 0,
-                    "failed": executions["failed"] if executions else 0,
-                },
-            }
-    except Exception as e:
-        briefing["sections"]["agent_activity"] = {"error": str(e)}
+                briefing["sections"]["agent_activity"] = {
+                    "last_24h": {
+                        "total": executions["total"] if executions else 0,
+                        "completed": executions["completed"] if executions else 0,
+                        "failed": executions["failed"] if executions else 0,
+                    },
+                }
+        except Exception as e:
+            briefing["sections"]["agent_activity"] = {"error": str(e)}
+    else:
+        briefing["sections"]["agent_activity"] = {"error": "Database pool unavailable"}
 
     # Section 5: Email Activity
-    try:
-        async with pool.acquire() as conn:
-            emails = await conn.fetchrow(
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                emails = await conn.fetchrow(
+                    """
+                    SELECT
+                        count(*) FILTER (WHERE status = 'sent') as sent_24h,
+                        count(*) FILTER (WHERE status = 'queued') as queued,
+                        count(*) FILTER (WHERE status = 'failed') as failed_24h
+                    FROM ai_email_queue
+                    WHERE created_at > now() - interval '24 hours'
                 """
-                SELECT
-                    count(*) FILTER (WHERE status = 'sent') as sent_24h,
-                    count(*) FILTER (WHERE status = 'queued') as queued,
-                    count(*) FILTER (WHERE status = 'failed') as failed_24h
-                FROM ai_email_queue
-                WHERE created_at > now() - interval '24 hours'
-            """
-            )
+                )
 
-            briefing["sections"]["email"] = {
-                "last_24h": {
-                    "sent": emails["sent_24h"] if emails else 0,
-                    "queued": emails["queued"] if emails else 0,
-                    "failed": emails["failed_24h"] if emails else 0,
-                },
-            }
-    except Exception as e:
-        briefing["sections"]["email"] = {"error": str(e)}
+                briefing["sections"]["email"] = {
+                    "last_24h": {
+                        "sent": emails["sent_24h"] if emails else 0,
+                        "queued": emails["queued"] if emails else 0,
+                        "failed": emails["failed_24h"] if emails else 0,
+                    },
+                }
+        except Exception as e:
+            briefing["sections"]["email"] = {"error": str(e)}
+    else:
+        briefing["sections"]["email"] = {"error": "Database pool unavailable"}
 
     return briefing
