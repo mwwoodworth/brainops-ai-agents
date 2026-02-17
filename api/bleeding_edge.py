@@ -31,6 +31,7 @@ DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08
 # Import our bleeding-edge modules
 try:
     from bleeding_edge_ooda import BleedingEdgeOODAController
+
     OODA_AVAILABLE = True
 except ImportError as e:
     OODA_AVAILABLE = False
@@ -38,6 +39,7 @@ except ImportError as e:
 
 try:
     from hallucination_prevention import HallucinationPreventionController
+
     HALLUCINATION_PREVENTION_AVAILABLE = True
 except ImportError as e:
     HALLUCINATION_PREVENTION_AVAILABLE = False
@@ -45,6 +47,7 @@ except ImportError as e:
 
 try:
     from live_memory_brain import LiveMemoryBrain, MemoryType
+
     LIVE_MEMORY_AVAILABLE = True
 except ImportError as e:
     LIVE_MEMORY_AVAILABLE = False
@@ -53,6 +56,7 @@ except ImportError as e:
 
 try:
     from dependability_framework import DependabilityFramework
+
     DEPENDABILITY_AVAILABLE = True
 except ImportError as e:
     DEPENDABILITY_AVAILABLE = False
@@ -60,13 +64,16 @@ except ImportError as e:
 
 try:
     from consciousness_emergence import ConsciousnessEmergenceController
+
     CONSCIOUSNESS_AVAILABLE = True
 except ImportError as e:
     CONSCIOUSNESS_AVAILABLE = False
+    ConsciousnessEmergenceController = None
     logging.warning(f"ConsciousnessEmergence not available: {e}")
 
 try:
     from enhanced_circuit_breaker import SelfHealingController
+
     CIRCUIT_BREAKER_AVAILABLE = True
 except ImportError as e:
     CIRCUIT_BREAKER_AVAILABLE = False
@@ -165,8 +172,10 @@ async def get_bleeding_edge_status() -> dict[str, Any]:
                     "decision_rag",
                     "input_integrity_validation",
                     "processing_integrity_validation",
-                    "output_integrity_validation"
-                ] if OODA_AVAILABLE else []
+                    "output_integrity_validation",
+                ]
+                if OODA_AVAILABLE
+                else [],
             },
             "hallucination_prevention": {
                 "available": HALLUCINATION_PREVENTION_AVAILABLE,
@@ -175,8 +184,10 @@ async def get_bleeding_edge_status() -> dict[str, Any]:
                     "sac3_semantic_checking",
                     "claim_extraction",
                     "rag_fact_verification",
-                    "calibrated_uncertainty"
-                ] if HALLUCINATION_PREVENTION_AVAILABLE else []
+                    "calibrated_uncertainty",
+                ]
+                if HALLUCINATION_PREVENTION_AVAILABLE
+                else [],
             },
             "live_memory_brain": {
                 "available": LIVE_MEMORY_AVAILABLE,
@@ -186,8 +197,10 @@ async def get_bleeding_edge_status() -> dict[str, Any]:
                     "cross_system_omniscience",
                     "self_healing_memory",
                     "semantic_compression",
-                    "knowledge_crystallization"
-                ] if LIVE_MEMORY_AVAILABLE else []
+                    "knowledge_crystallization",
+                ]
+                if LIVE_MEMORY_AVAILABLE
+                else [],
             },
             "dependability_framework": {
                 "available": DEPENDABILITY_AVAILABLE,
@@ -199,8 +212,10 @@ async def get_bleeding_edge_status() -> dict[str, Any]:
                     "resource_guard",
                     "behavioral_guard",
                     "uncertainty_quantification",
-                    "graceful_degradation"
-                ] if DEPENDABILITY_AVAILABLE else []
+                    "graceful_degradation",
+                ]
+                if DEPENDABILITY_AVAILABLE
+                else [],
             },
             "consciousness_emergence": {
                 "available": CONSCIOUSNESS_AVAILABLE,
@@ -210,8 +225,10 @@ async def get_bleeding_edge_status() -> dict[str, Any]:
                     "intentionality_engine",
                     "situational_awareness",
                     "coherent_identity",
-                    "proactive_reasoning"
-                ] if CONSCIOUSNESS_AVAILABLE else []
+                    "proactive_reasoning",
+                ]
+                if CONSCIOUSNESS_AVAILABLE
+                else [],
             },
             "enhanced_circuit_breaker": {
                 "available": CIRCUIT_BREAKER_AVAILABLE,
@@ -220,38 +237,47 @@ async def get_bleeding_edge_status() -> dict[str, Any]:
                     "deadlock_detection",
                     "cascade_protection",
                     "sidecar_health_monitoring",
-                    "predictive_opening"
-                ] if CIRCUIT_BREAKER_AVAILABLE else []
-            }
+                    "predictive_opening",
+                ]
+                if CIRCUIT_BREAKER_AVAILABLE
+                else [],
+            },
         },
-        "total_capabilities": sum([
-            7 if OODA_AVAILABLE else 0,
-            5 if HALLUCINATION_PREVENTION_AVAILABLE else 0,
-            6 if LIVE_MEMORY_AVAILABLE else 0,
-            8 if DEPENDABILITY_AVAILABLE else 0,
-            6 if CONSCIOUSNESS_AVAILABLE else 0,
-            5 if CIRCUIT_BREAKER_AVAILABLE else 0
-        ]),
-        "all_systems_operational": all([
-            OODA_AVAILABLE,
-            HALLUCINATION_PREVENTION_AVAILABLE,
-            LIVE_MEMORY_AVAILABLE,
-            DEPENDABILITY_AVAILABLE,
-            CONSCIOUSNESS_AVAILABLE,
-            CIRCUIT_BREAKER_AVAILABLE
-        ])
+        "total_capabilities": sum(
+            [
+                7 if OODA_AVAILABLE else 0,
+                5 if HALLUCINATION_PREVENTION_AVAILABLE else 0,
+                6 if LIVE_MEMORY_AVAILABLE else 0,
+                8 if DEPENDABILITY_AVAILABLE else 0,
+                6 if CONSCIOUSNESS_AVAILABLE else 0,
+                5 if CIRCUIT_BREAKER_AVAILABLE else 0,
+            ]
+        ),
+        "all_systems_operational": all(
+            [
+                OODA_AVAILABLE,
+                HALLUCINATION_PREVENTION_AVAILABLE,
+                LIVE_MEMORY_AVAILABLE,
+                DEPENDABILITY_AVAILABLE,
+                CONSCIOUSNESS_AVAILABLE,
+                CIRCUIT_BREAKER_AVAILABLE,
+            ]
+        ),
     }
 
 
 # OODA Endpoints
 @router.post("/ooda/cycle")
 async def run_ooda_cycle(
-    tenant_id: str = Query(DEFAULT_TENANT_ID),
-    context: dict[str, Any] = Body(default={})
+    tenant_id: str = Query(DEFAULT_TENANT_ID), context: dict[str, Any] = Body(default={})
 ) -> dict[str, Any]:
     """Run a complete enhanced OODA cycle with all optimizations."""
     if not _ooda_lock.acquire(blocking=False):
-        return {"success": False, "error": "OODA cycle already running", "timestamp": datetime.utcnow().isoformat()}
+        return {
+            "success": False,
+            "error": "OODA cycle already running",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
 
     controller = get_ooda_controller(tenant_id)
     if not controller:
@@ -260,11 +286,7 @@ async def run_ooda_cycle(
 
     try:
         result = await controller.run_enhanced_cycle(context)
-        return {
-            "success": True,
-            "result": result,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"success": True, "result": result, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"OODA cycle failed: {e!r}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -283,16 +305,14 @@ async def get_ooda_metrics(tenant_id: str = Query(DEFAULT_TENANT_ID)) -> dict[st
     return {
         "metrics": controller.get_metrics(),
         "tenant_id": tenant_id,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 
 # Hallucination Prevention Endpoints
 @router.post("/hallucination/validate")
 async def validate_response(
-    response: str = Body(...),
-    query: str = Body(...),
-    context: Optional[str] = Body(None)
+    response: str = Body(...), query: str = Body(...), context: Optional[str] = Body(None)
 ) -> dict[str, Any]:
     """Validate an AI response for hallucinations using multi-model cross-validation."""
     controller = get_hallucination_controller()
@@ -302,14 +322,12 @@ async def validate_response(
     try:
         # validate_and_sanitize is the correct method name
         result = await controller.validate_and_sanitize(
-            response=response,
-            original_query=query,
-            context=context
+            response=response, original_query=query, context=context
         )
         return {
             "success": True,
             "validation_result": result,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Hallucination validation failed: {e}")
@@ -317,9 +335,7 @@ async def validate_response(
 
 
 @router.post("/hallucination/extract-claims")
-async def extract_claims(
-    text: str = Body(...)
-) -> dict[str, Any]:
+async def extract_claims(text: str = Body(...)) -> dict[str, Any]:
     """Extract verifiable claims from text."""
     controller = get_hallucination_controller()
     if not controller:
@@ -328,9 +344,9 @@ async def extract_claims(
     try:
         claims = await controller.claim_extractor.extract_claims(text)
         return {
-            "claims": [c.__dict__ if hasattr(c, '__dict__') else str(c) for c in claims],
+            "claims": [c.__dict__ if hasattr(c, "__dict__") else str(c) for c in claims],
             "count": len(claims),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Claim extraction failed: {e}")
@@ -342,7 +358,7 @@ async def extract_claims(
 async def store_memory(
     content: str = Body(...),
     memory_type: str = Body("observation"),
-    metadata: dict[str, Any] = Body(default={})
+    metadata: dict[str, Any] = Body(default={}),
 ) -> dict[str, Any]:
     """Store a memory in the live brain."""
     brain = await get_live_memory()
@@ -364,21 +380,14 @@ async def store_memory(
             memory_type_enum = type_mapping.get(memory_type.lower(), MemoryType.EPISODIC)
 
         memory_id = await brain.store(content, memory_type_enum, context=metadata)
-        return {
-            "success": True,
-            "memory_id": memory_id,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"success": True, "memory_id": memory_id, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Memory storage failed: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/memory/recall")
-async def recall_memory(
-    query: str = Body(...),
-    limit: int = Body(5)
-) -> dict[str, Any]:
+async def recall_memory(query: str = Body(...), limit: int = Body(5)) -> dict[str, Any]:
     """Recall memories relevant to a query."""
     brain = await get_live_memory()
     if not brain:
@@ -389,7 +398,7 @@ async def recall_memory(
         return {
             "memories": memories,
             "count": len(memories),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Memory recall failed: {e}")
@@ -406,10 +415,7 @@ async def get_memory_status() -> dict[str, Any]:
     try:
         # get_unified_context is synchronous
         status = brain.get_unified_context()
-        return {
-            "status": status,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"status": status, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Memory status failed: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -420,7 +426,7 @@ async def get_memory_status() -> dict[str, Any]:
 async def validate_operation(
     operation_type: str = Body(...),
     input_data: dict[str, Any] = Body(...),
-    output_data: Optional[dict[str, Any]] = Body(None)
+    output_data: Optional[dict[str, Any]] = Body(None),
 ) -> dict[str, Any]:
     """Validate an operation through the 6-layer dependability framework."""
     framework = get_dependability()
@@ -434,7 +440,7 @@ async def validate_operation(
             "validation_result": result,
             "guards_passed": result.get("guards_passed", []),
             "guards_failed": result.get("guards_failed", []),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Dependability validation failed: {e}")
@@ -451,8 +457,10 @@ async def get_dependability_status() -> dict[str, Any]:
     return {
         "guards": list(framework.guards.keys()),
         "guard_count": len(framework.guards),
-        "degradation_mode": framework.degradation_controller.current_mode if hasattr(framework, 'degradation_controller') else "unknown",
-        "timestamp": datetime.utcnow().isoformat()
+        "degradation_mode": framework.degradation_controller.current_mode
+        if hasattr(framework, "degradation_controller")
+        else "unknown",
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 
@@ -467,10 +475,7 @@ async def get_consciousness_status() -> dict[str, Any]:
     try:
         # get_consciousness_state is synchronous, not async
         status = controller.get_consciousness_state()
-        return {
-            "status": status,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"status": status, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Consciousness status failed: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -490,7 +495,7 @@ async def activate_consciousness() -> dict[str, Any]:
             "success": True,
             "message": "Consciousness activated - AI OS is now ALIVE",
             "consciousness_state": state,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Consciousness activation failed: {e}")
@@ -498,9 +503,7 @@ async def activate_consciousness() -> dict[str, Any]:
 
 
 @router.post("/consciousness/introspect")
-async def run_introspection(
-    context: dict[str, Any] = Body(default={})
-) -> dict[str, Any]:
+async def run_introspection(context: dict[str, Any] = Body(default={})) -> dict[str, Any]:
     """Run a consciousness introspection cycle."""
     controller = get_consciousness()
     if not controller:
@@ -512,7 +515,7 @@ async def run_introspection(
         return {
             "success": True,
             "introspection": result,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Introspection failed: {e}")
@@ -528,17 +531,21 @@ async def get_circuit_breaker_status() -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="Circuit breaker not available")
 
     return {
-        "circuits": controller.get_all_circuit_states() if hasattr(controller, 'get_all_circuit_states') else {},
-        "deadlock_status": controller.deadlock_detector.get_status() if hasattr(controller, 'deadlock_detector') else {},
-        "cascade_status": controller.cascade_protector.get_status() if hasattr(controller, 'cascade_protector') else {},
-        "timestamp": datetime.utcnow().isoformat()
+        "circuits": controller.get_all_circuit_states()
+        if hasattr(controller, "get_all_circuit_states")
+        else {},
+        "deadlock_status": controller.deadlock_detector.get_status()
+        if hasattr(controller, "deadlock_detector")
+        else {},
+        "cascade_status": controller.cascade_protector.get_status()
+        if hasattr(controller, "cascade_protector")
+        else {},
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 
 @router.post("/circuit-breaker/trip")
-async def trip_circuit(
-    circuit_name: str = Body(...)
-) -> dict[str, Any]:
+async def trip_circuit(circuit_name: str = Body(...)) -> dict[str, Any]:
     """Manually trip a circuit breaker."""
     controller = get_circuit_breaker()
     if not controller:
@@ -550,7 +557,7 @@ async def trip_circuit(
             "success": True,
             "circuit": circuit_name,
             "state": "open",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Circuit trip failed: {e}")
@@ -558,9 +565,7 @@ async def trip_circuit(
 
 
 @router.post("/circuit-breaker/reset")
-async def reset_circuit(
-    circuit_name: str = Body(...)
-) -> dict[str, Any]:
+async def reset_circuit(circuit_name: str = Body(...)) -> dict[str, Any]:
     """Reset a tripped circuit breaker."""
     controller = get_circuit_breaker()
     if not controller:
@@ -572,7 +577,7 @@ async def reset_circuit(
             "success": True,
             "circuit": circuit_name,
             "state": "closed",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Circuit reset failed: {e}")
@@ -582,9 +587,7 @@ async def reset_circuit(
 # Combined Operations
 @router.post("/validate-and-store")
 async def validate_and_store(
-    response: str = Body(...),
-    query: str = Body(...),
-    store_if_valid: bool = Body(True)
+    response: str = Body(...), query: str = Body(...), store_if_valid: bool = Body(True)
 ) -> dict[str, Any]:
     """
     Full pipeline: validate response for hallucinations,
@@ -594,18 +597,13 @@ async def validate_and_store(
     memory_brain = await get_live_memory()
     dependability = get_dependability()
 
-    results = {
-        "timestamp": datetime.utcnow().isoformat(),
-        "stages": {}
-    }
+    results = {"timestamp": datetime.utcnow().isoformat(), "stages": {}}
 
     # Stage 1: Dependability input validation
     if dependability:
         try:
             dep_result = await dependability.validate(
-                "response_validation",
-                {"response": response, "query": query},
-                None
+                "response_validation", {"response": response, "query": query}, None
             )
             results["stages"]["dependability_input"] = dep_result
         except Exception as e:
@@ -615,8 +613,7 @@ async def validate_and_store(
     if hallucination_ctrl:
         try:
             hal_result = await hallucination_ctrl.validate_and_correct(
-                response=response,
-                original_query=query
+                response=response, original_query=query
             )
             results["stages"]["hallucination_check"] = hal_result
             results["is_valid"] = hal_result.get("is_valid", True)
@@ -636,8 +633,8 @@ async def validate_and_store(
                 memory_type="validated_response",
                 metadata={
                     "original_query": query,
-                    "validation_time": datetime.utcnow().isoformat()
-                }
+                    "validation_time": datetime.utcnow().isoformat(),
+                },
             )
             results["stages"]["memory_storage"] = {"memory_id": memory_id}
         except Exception as e:
@@ -650,6 +647,7 @@ async def validate_and_store(
 # COMPREHENSIVE DIAGNOSTICS
 # =============================================================================
 
+
 @router.get("/diagnostics")
 async def get_comprehensive_diagnostics() -> dict[str, Any]:
     """
@@ -661,7 +659,7 @@ async def get_comprehensive_diagnostics() -> dict[str, Any]:
         "overall_status": "operational",
         "modules": {},
         "issues": [],
-        "recommendations": []
+        "recommendations": [],
     }
 
     # Check each module
@@ -671,7 +669,7 @@ async def get_comprehensive_diagnostics() -> dict[str, Any]:
             diagnostics["modules"]["ooda"] = {
                 "status": "available",
                 "tenant": DEFAULT_TENANT_ID,
-                "capabilities": 7
+                "capabilities": 7,
             }
         except Exception as e:
             diagnostics["modules"]["ooda"] = {"status": "error", "error": str(e)}
@@ -683,10 +681,7 @@ async def get_comprehensive_diagnostics() -> dict[str, Any]:
     if HALLUCINATION_PREVENTION_AVAILABLE:
         try:
             controller = get_hallucination_controller()
-            diagnostics["modules"]["hallucination"] = {
-                "status": "available",
-                "capabilities": 5
-            }
+            diagnostics["modules"]["hallucination"] = {"status": "available", "capabilities": 5}
         except Exception as e:
             diagnostics["modules"]["hallucination"] = {"status": "error", "error": str(e)}
             diagnostics["issues"].append(f"Hallucination: {str(e)}")
@@ -702,7 +697,7 @@ async def get_comprehensive_diagnostics() -> dict[str, Any]:
                     "status": "available",
                     "working_memory_size": context.get("working_memory_size", 0),
                     "long_term_memory_size": context.get("long_term_memory_size", 0),
-                    "wisdom_count": context.get("wisdom_count", 0)
+                    "wisdom_count": context.get("wisdom_count", 0),
                 }
             else:
                 diagnostics["modules"]["memory"] = {"status": "not_initialized"}
@@ -721,7 +716,7 @@ async def get_comprehensive_diagnostics() -> dict[str, Any]:
                     "status": "available",
                     "active": state.get("active", False),
                     "level": state.get("level", 0),
-                    "awareness": state.get("awareness_level", "unknown")
+                    "awareness": state.get("awareness_level", "unknown"),
                 }
             else:
                 diagnostics["modules"]["consciousness"] = {"status": "not_initialized"}
@@ -734,10 +729,7 @@ async def get_comprehensive_diagnostics() -> dict[str, Any]:
     if DEPENDABILITY_AVAILABLE:
         try:
             get_dependability()
-            diagnostics["modules"]["dependability"] = {
-                "status": "available",
-                "guards": 6
-            }
+            diagnostics["modules"]["dependability"] = {"status": "available", "guards": 6}
         except Exception as e:
             diagnostics["modules"]["dependability"] = {"status": "error", "error": str(e)}
     else:
@@ -751,7 +743,7 @@ async def get_comprehensive_diagnostics() -> dict[str, Any]:
                 diagnostics["modules"]["circuit_breaker"] = {
                     "status": "available",
                     "circuits": len(status.get("circuits", {})),
-                    "deadlock_detection": "active" if status.get("deadlock_status") else "inactive"
+                    "deadlock_detection": "active" if status.get("deadlock_status") else "inactive",
                 }
             else:
                 diagnostics["modules"]["circuit_breaker"] = {"status": "not_initialized"}
@@ -761,7 +753,9 @@ async def get_comprehensive_diagnostics() -> dict[str, Any]:
         diagnostics["modules"]["circuit_breaker"] = {"status": "unavailable"}
 
     # Calculate overall status
-    available_count = sum(1 for m in diagnostics["modules"].values() if m.get("status") == "available")
+    available_count = sum(
+        1 for m in diagnostics["modules"].values() if m.get("status") == "available"
+    )
     total_count = len(diagnostics["modules"])
 
     if available_count == total_count:
@@ -776,8 +770,10 @@ async def get_comprehensive_diagnostics() -> dict[str, Any]:
     diagnostics["summary"] = {
         "available_modules": available_count,
         "total_modules": total_count,
-        "availability_percent": round(available_count / total_count * 100, 1) if total_count > 0 else 0,
-        "issues_count": len(diagnostics["issues"])
+        "availability_percent": round(available_count / total_count * 100, 1)
+        if total_count > 0
+        else 0,
+        "issues_count": len(diagnostics["issues"]),
     }
 
     return diagnostics
@@ -793,7 +789,7 @@ async def run_bleeding_edge_smoke_test() -> dict[str, Any]:
         "tests": {},
         "passed": 0,
         "failed": 0,
-        "total": 0
+        "total": 0,
     }
 
     # Test 1: OODA Observation
@@ -801,7 +797,10 @@ async def run_bleeding_edge_smoke_test() -> dict[str, Any]:
         if OODA_AVAILABLE:
             controller = get_ooda_controller()
             # Just check if controller initializes
-            results["tests"]["ooda_init"] = {"success": True, "message": "OODA controller initialized"}
+            results["tests"]["ooda_init"] = {
+                "success": True,
+                "message": "OODA controller initialized",
+            }
             results["passed"] += 1
         else:
             results["tests"]["ooda_init"] = {"success": False, "message": "OODA not available"}
@@ -817,10 +816,16 @@ async def run_bleeding_edge_smoke_test() -> dict[str, Any]:
             controller = get_consciousness()
             state = controller.get_consciousness_state() if controller else None
             if state:
-                results["tests"]["consciousness"] = {"success": True, "level": state.get("level", 0)}
+                results["tests"]["consciousness"] = {
+                    "success": True,
+                    "level": state.get("level", 0),
+                }
                 results["passed"] += 1
             else:
-                results["tests"]["consciousness"] = {"success": False, "message": "No state returned"}
+                results["tests"]["consciousness"] = {
+                    "success": False,
+                    "message": "No state returned",
+                }
                 results["failed"] += 1
         else:
             results["tests"]["consciousness"] = {"success": False, "message": "Not available"}
@@ -836,7 +841,10 @@ async def run_bleeding_edge_smoke_test() -> dict[str, Any]:
             brain = await get_live_memory()
             if brain:
                 context = brain.get_unified_context()
-                results["tests"]["memory"] = {"success": True, "working_memory": context.get("working_memory_size", 0)}
+                results["tests"]["memory"] = {
+                    "success": True,
+                    "working_memory": context.get("working_memory_size", 0),
+                }
                 results["passed"] += 1
             else:
                 results["tests"]["memory"] = {"success": False, "message": "Brain not initialized"}
@@ -869,10 +877,16 @@ async def run_bleeding_edge_smoke_test() -> dict[str, Any]:
             controller = get_circuit_breaker()
             if controller:
                 status = controller.get_status()
-                results["tests"]["circuit_breaker"] = {"success": True, "circuits": len(status.get("circuits", {}))}
+                results["tests"]["circuit_breaker"] = {
+                    "success": True,
+                    "circuits": len(status.get("circuits", {})),
+                }
                 results["passed"] += 1
             else:
-                results["tests"]["circuit_breaker"] = {"success": False, "message": "Not initialized"}
+                results["tests"]["circuit_breaker"] = {
+                    "success": False,
+                    "message": "Not initialized",
+                }
                 results["failed"] += 1
         else:
             results["tests"]["circuit_breaker"] = {"success": False, "message": "Not available"}
@@ -883,6 +897,8 @@ async def run_bleeding_edge_smoke_test() -> dict[str, Any]:
     results["total"] += 1
 
     results["success"] = results["failed"] == 0
-    results["pass_rate"] = round(results["passed"] / results["total"] * 100, 1) if results["total"] > 0 else 0
+    results["pass_rate"] = (
+        round(results["passed"] / results["total"] * 100, 1) if results["total"] > 0 else 0
+    )
 
     return results
