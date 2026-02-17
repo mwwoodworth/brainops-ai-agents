@@ -159,8 +159,8 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.23.2"
-        )  # L2-normalize embeddings, IVFFlat probes=10
+            "VERSION", "v11.24.0"
+        )  # AI OS Awakening Phase 1: Kill theater, keep real
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "10000"))
@@ -171,6 +171,9 @@ class AppConfig:
         self.tenant = TenantConfig()
 
         # Autonomic Systems Feature Flags
+        # DISABLED BY DEFAULT: NerveCenter runs consciousness_loop + alive_core which
+        # write ~16K useless thought/heartbeat rows/day to the DB.
+        # Re-enable ONLY when these systems produce actionable output.
         self.enable_nerve_center = os.getenv("ENABLE_NERVE_CENTER", "false").lower() == "true"
         self.enable_autonomic_loop = os.getenv("ENABLE_AUTONOMIC_LOOP", "false").lower() == "true"
         self.autonomic_loop_interval = float(os.getenv("AUTONOMIC_LOOP_INTERVAL", "30"))
