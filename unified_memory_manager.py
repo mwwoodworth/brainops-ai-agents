@@ -382,6 +382,11 @@ class UnifiedMemoryManager:
                 return self._keyword_search(query, tenant_id, context, limit, memory_type)
 
             with self._get_cursor() as cur:
+                # Convert embedding list to pgvector string format [0.1,0.2,...]
+                # psycopg2 serializes lists as {0.1,0.2,...} (array format) but
+                # pgvector ::vector cast expects [0.1,0.2,...] (vector string format)
+                embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
+
                 # Build the query
                 base_query = """
                 SELECT
@@ -393,7 +398,7 @@ class UnifiedMemoryManager:
                   AND embedding IS NOT NULL
                 """
 
-                params = [query_embedding, tenant_id]
+                params = [embedding_str, tenant_id]
 
                 # Add filters
                 filters = []
@@ -413,7 +418,7 @@ class UnifiedMemoryManager:
                 ORDER BY (1 - (embedding <=> %s::vector)) * importance_score DESC
                 LIMIT %s
                 """
-                params.extend([query_embedding, limit])
+                params.extend([embedding_str, limit])
 
                 cur.execute(base_query, params)
                 memories = cur.fetchall()
@@ -819,8 +824,12 @@ class UnifiedMemoryManager:
     def _find_related_memories(self, content: dict, tenant_id: str, limit: int = 5) -> list[dict]:
         """Find memories related to the given content"""
         embedding = self._generate_embedding(content)
+        if embedding is None:
+            return []
 
         with self._get_cursor() as cur:
+            # Convert to pgvector string format (psycopg2 lists → {..} but pgvector needs [..])
+            embedding_str = "[" + ",".join(map(str, embedding)) + "]"
             query = """
             SELECT id, memory_type, importance_score,
                    1 - (embedding <=> %s::vector) as similarity
@@ -830,8 +839,17 @@ class UnifiedMemoryManager:
             ORDER BY embedding <=> %s::vector
             LIMIT %s
             """
-            cur.execute(query, (embedding, tenant_id, embedding, limit))
+            cur.execute(query, (embedding_str, tenant_id, embedding_str, limit))
             return cur.fetchall()
+
+    @staticmethod
+    def _to_pgvector(embedding: list[float]) -> str:
+        """Convert embedding list to pgvector string format.
+
+        psycopg2 serializes Python lists as PostgreSQL arrays ``{0.1,0.2,...}``
+        but the pgvector ``::vector`` cast expects ``[0.1,0.2,...]``.
+        """
+        return "[" + ",".join(map(str, embedding)) + "]"
 
     def _generate_embedding(self, content: dict) -> Optional[list[float]]:
         """Generate embedding using configured provider order (no silent mixing)."""
@@ -1255,6 +1273,7 @@ class UnifiedMemoryManager:
                     return []
 
                 if embedding:
+                    emb_str = self._to_pgvector(embedding)
                     cur.execute(
                         """
                         SELECT id, session_id, episode_type, question, objective,
@@ -1271,13 +1290,13 @@ class UnifiedMemoryManager:
                         LIMIT %s
                         """,
                         (
-                            embedding,
+                            emb_str,
                             episode_type,
                             episode_type,
                             min_outcome_score,
                             tid,
                             tid,
-                            embedding,
+                            emb_str,
                             limit,
                         ),
                     )
@@ -1321,6 +1340,7 @@ class UnifiedMemoryManager:
         """
         tid = tenant_id or self.tenant_id
         embedding = self._generate_embedding({"text": query})
+        emb_str = self._to_pgvector(embedding) if embedding else None
 
         try:
             with self._get_cursor() as cur:
@@ -1336,7 +1356,7 @@ class UnifiedMemoryManager:
                         p_limit := %s
                     )
                     """,
-                    (query, embedding, tid, limit),
+                    (query, emb_str, tid, limit),
                 )
                 rows = cur.fetchall()
                 return [dict(r) for r in rows] if rows else []
@@ -1361,6 +1381,7 @@ class UnifiedMemoryManager:
         """
         tid = tenant_id or self.tenant_id
         embedding = self._generate_embedding({"text": query})
+        emb_str = self._to_pgvector(embedding) if embedding else None
 
         results = []
 
@@ -1375,7 +1396,7 @@ class UnifiedMemoryManager:
                     SELECT id, content, 'memory' as source_type, score_fused as score
                     FROM hybrid_search_unified_memory(%s, %s::vector, %s::uuid, %s)
                     """,
-                    (query, embedding, tid, limit),
+                    (query, emb_str, tid, limit),
                 )
                 memory_rows = cur.fetchall()
                 for row in memory_rows:
@@ -1400,7 +1421,7 @@ class UnifiedMemoryManager:
                         ORDER BY embedding <=> %s::vector
                         LIMIT %s
                         """,
-                        (embedding, tid, embedding, limit),
+                        (emb_str, tid, emb_str, limit),
                     )
                     doc_rows = cur.fetchall()
                     for row in doc_rows:
@@ -1430,7 +1451,7 @@ class UnifiedMemoryManager:
                         ORDER BY embedding <=> %s::vector
                         LIMIT %s
                         """,
-                        (embedding, embedding, embedding, limit),
+                        (emb_str, emb_str, emb_str, limit),
                     )
                     epi_rows = cur.fetchall()
                     for row in epi_rows:
