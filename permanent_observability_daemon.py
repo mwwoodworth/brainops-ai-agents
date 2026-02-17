@@ -495,8 +495,11 @@ class PermanentObservabilityDaemon:
                     timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
 
                 async with pool.acquire() as conn:
+                    # Use session-level (false) because asyncpg auto-commits each
+                    # statement. Transaction-local (true) only lasts for the
+                    # set_config call itself, leaving the INSERT without context.
                     await conn.execute(
-                        "SELECT set_config('app.current_tenant_id', $1, true)",
+                        "SELECT set_config('app.current_tenant_id', $1, false)",
                         tenant_id,
                     )
                     await conn.execute(
