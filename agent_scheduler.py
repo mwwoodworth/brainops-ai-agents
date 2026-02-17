@@ -1694,6 +1694,17 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("Daily WC Report failed: %s", exc, exc_info=True)
 
+    def _run_daily_briefing(self):
+        """Generate and email the daily operational intelligence briefing."""
+        try:
+            from real_action_engine import send_daily_briefing
+
+            result = run_on_main_loop(send_daily_briefing(), timeout=60)
+            success = result.get("success", False)
+            logger.info("Daily Briefing: sent=%s", success)
+        except Exception as exc:
+            logger.error("Daily Briefing failed: %s", exc, exc_info=True)
+
     def _run_outreach_executor(self):
         """Execute outreach cycle: process ai_scheduled_outreach + run campaigns for new leads.
         DISABLED: Requires ENABLE_OUTREACH_EXECUTOR=true env var.
@@ -2047,6 +2058,26 @@ class AgentScheduler:
                 logger.info("Scheduled Daily WC Intelligence Report every 24 hours")
             except Exception as exc:
                 logger.error("Failed to schedule Daily WC Report: %s", exc, exc_info=True)
+
+        # Daily Operational Briefing: email Matt with full system intelligence every morning
+        try:
+            job_id = "daily_ops_briefing"
+            self.scheduler.add_job(
+                func=self._run_daily_briefing,
+                trigger=IntervalTrigger(hours=24),
+                id=job_id,
+                name="Daily Ops Briefing",
+                replace_existing=True,
+            )
+            self.registered_jobs[job_id] = {
+                "agent_id": "daily_ops_briefing",
+                "agent_name": "DailyOpsBriefing",
+                "frequency_minutes": 1440,
+                "added_at": datetime.utcnow().isoformat(),
+            }
+            logger.info("Scheduled Daily Ops Briefing every 24 hours")
+        except Exception as exc:
+            logger.error("Failed to schedule Daily Ops Briefing: %s", exc, exc_info=True)
 
         # Keep execution logs clean: auto-timeout stuck rows regularly so `brainops verify` stays green.
         cleanup_enabled_env = os.getenv("ENABLE_STUCK_EXECUTION_CLEANUP")

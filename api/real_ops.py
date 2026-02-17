@@ -361,3 +361,11 @@ async def get_daily_briefing() -> dict[str, Any]:
         briefing["sections"]["email"] = {"error": "Database pool unavailable"}
 
     return briefing
+
+
+@router.post("/briefing/send")
+async def send_briefing_email() -> dict[str, Any]:
+    """Send the daily briefing as an email RIGHT NOW."""
+    from real_action_engine import send_daily_briefing
+
+    return await send_daily_briefing()
