@@ -31,6 +31,7 @@ DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08
 # Bleeding Edge OODA (Consciousness)
 try:
     from api.bleeding_edge import get_ooda_controller, _ooda_lock
+
     OODA_AVAILABLE = True
 except ImportError:
     OODA_AVAILABLE = False
@@ -40,6 +41,7 @@ except ImportError:
 # Revenue Drive (autonomous goals)
 try:
     from drives.revenue_drive import RevenueDrive
+
     REVENUE_DRIVE_AVAILABLE = True
 except Exception as exc:
     RevenueDrive = None
@@ -49,6 +51,7 @@ except Exception as exc:
 # Memory Hygiene System (2026-01-15 - Total Completion Protocol)
 try:
     from memory_hygiene import run_scheduled_hygiene
+
     MEMORY_HYGIENE_AVAILABLE = True
 except ImportError:
     MEMORY_HYGIENE_AVAILABLE = False
@@ -58,6 +61,7 @@ except ImportError:
 # Gumroad Revenue Agent (2026-01-21 - Deep Integration Protocol)
 try:
     from gumroad_revenue_agent import GumroadRevenueAgent
+
     GUMROAD_AGENT_AVAILABLE = True
 except ImportError:
     GUMROAD_AGENT_AVAILABLE = False
@@ -68,6 +72,7 @@ except ImportError:
 # Runs all revenue pipelines: API monetization, product sales, lead nurturing, content marketing
 try:
     from revenue_pipeline_factory import RevenuePipelineFactory, get_factory
+
     REVENUE_FACTORY_AVAILABLE = True
 except ImportError:
     REVENUE_FACTORY_AVAILABLE = False
@@ -78,6 +83,7 @@ except ImportError:
 # Automated Reporting System (2026-02-08 - Daily Reports Fix)
 try:
     from automated_reporting_system import get_automated_reporting_system
+
     REPORTING_AVAILABLE = True
 except ImportError:
     REPORTING_AVAILABLE = False
@@ -86,6 +92,7 @@ except ImportError:
 # Google Keep Sync (2026-02-09 - Gemini Live Bridge)
 try:
     from google_keep_sync import run_keep_sync, get_keep_status
+
     KEEP_SYNC_AVAILABLE = True
 except ImportError:
     KEEP_SYNC_AVAILABLE = False
@@ -96,6 +103,7 @@ except ImportError:
 # CRITICAL: This finally activates the 4,700+ insights that were sitting idle!
 try:
     from learning_feedback_loop import run_scheduled_feedback_loop
+
     LEARNING_FEEDBACK_AVAILABLE = True
 except ImportError:
     LEARNING_FEEDBACK_AVAILABLE = False
@@ -104,7 +112,11 @@ except ImportError:
 
 # Lead Discovery Engine (2026-01-27 - Automated Lead Discovery)
 try:
-    from lead_discovery_scheduler import handle_lead_discovery_task, get_scheduler as get_lead_scheduler
+    from lead_discovery_scheduler import (
+        handle_lead_discovery_task,
+        get_scheduler as get_lead_scheduler,
+    )
+
     LEAD_DISCOVERY_AVAILABLE = True
 except ImportError:
     LEAD_DISCOVERY_AVAILABLE = False
@@ -116,6 +128,7 @@ except ImportError:
 # Enrolls MRG and BSS platform users in cross-sell sequences
 try:
     from platform_cross_sell import process_platform_cross_sells
+
     CROSS_SELL_AVAILABLE = True
 except ImportError:
     CROSS_SELL_AVAILABLE = False
@@ -125,6 +138,7 @@ except ImportError:
 # Intelligent Follow-up System (payment reminders, outreach sequences)
 try:
     from intelligent_followup_system import get_intelligent_followup_system
+
     FOLLOWUP_AVAILABLE = True
 except Exception as exc:
     FOLLOWUP_AVAILABLE = False
@@ -134,6 +148,7 @@ except Exception as exc:
 # Outreach Executor (bridges ai_scheduled_outreach → ai_email_queue + campaigns)
 try:
     from outreach_executor import run_outreach_cycle
+
     OUTREACH_EXECUTOR_AVAILABLE = True
 except ImportError:
     OUTREACH_EXECUTOR_AVAILABLE = False
@@ -143,6 +158,7 @@ except ImportError:
 # Daily WC Intelligence Report
 try:
     from daily_wc_report import generate_daily_wc_report
+
     DAILY_WC_REPORT_AVAILABLE = True
 except ImportError:
     DAILY_WC_REPORT_AVAILABLE = False
@@ -151,11 +167,14 @@ except ImportError:
 
 # Safe-by-default: autonomous revenue drive is OFF unless explicitly enabled.
 _revenue_drive_env = os.getenv("ENABLE_REVENUE_DRIVE")
-ENABLE_REVENUE_DRIVE = bool(_revenue_drive_env and _revenue_drive_env.lower() in ("1", "true", "yes"))
+ENABLE_REVENUE_DRIVE = bool(
+    _revenue_drive_env and _revenue_drive_env.lower() in ("1", "true", "yes")
+)
 
 # CRITICAL: Use shared connection pool to prevent MaxClientsInSessionMode
 try:
     from database.sync_pool import get_sync_pool
+
     _SYNC_POOL_AVAILABLE = True
 except ImportError:
     _SYNC_POOL_AVAILABLE = False
@@ -172,11 +191,11 @@ def _get_pooled_connection(db_config=None):
         # Fallback for environments without shared pool
         if db_config is None:
             db_config = {
-                'host': os.getenv('DB_HOST'),
-                'database': os.getenv('DB_NAME', 'postgres'),
-                'user': os.getenv('DB_USER'),
-                'password': os.getenv('DB_PASSWORD'),
-                'port': int(os.getenv('DB_PORT', 5432))
+                "host": os.getenv("DB_HOST"),
+                "database": os.getenv("DB_NAME", "postgres"),
+                "user": os.getenv("DB_USER"),
+                "password": os.getenv("DB_PASSWORD"),
+                "port": int(os.getenv("DB_PORT", 5432)),
             }
         conn = psycopg2.connect(**db_config)
         try:
@@ -185,9 +204,11 @@ def _get_pooled_connection(db_config=None):
             if conn and not conn.closed:
                 conn.close()
 
+
 # Import UnifiedBrain for persistent memory integration
 try:
     from unified_brain import UnifiedBrain
+
     BRAIN_AVAILABLE = True
 except ImportError:
     BRAIN_AVAILABLE = False
@@ -195,7 +216,13 @@ except ImportError:
 
 # Customer Acquisition Agents
 try:
-    from customer_acquisition_agents import WebSearchAgent, SocialMediaAgent, OutreachAgent, ConversionAgent
+    from customer_acquisition_agents import (
+        WebSearchAgent,
+        SocialMediaAgent,
+        OutreachAgent,
+        ConversionAgent,
+    )
+
     ACQUISITION_AGENTS_AVAILABLE = True
 except ImportError:
     ACQUISITION_AGENTS_AVAILABLE = False
@@ -204,12 +231,14 @@ except ImportError:
 # Content Generation Agent
 try:
     from content_generation_agent import ContentGeneratorAgent
+
     CONTENT_GENERATOR_AVAILABLE = True
 except ImportError:
     CONTENT_GENERATOR_AVAILABLE = False
     logging.warning("Content Generation Agent unavailable")
 
 logger = logging.getLogger(__name__)
+
 
 class AgentScheduler:
     """Manages automatic execution of AI agents"""
@@ -221,34 +250,34 @@ class AgentScheduler:
         if db_config:
             self.db_config = db_config
         else:
-            host = os.getenv('DB_HOST')
-            user = os.getenv('DB_USER')
-            password = os.getenv('DB_PASSWORD')
+            host = os.getenv("DB_HOST")
+            user = os.getenv("DB_USER")
+            password = os.getenv("DB_PASSWORD")
 
             # Fallback to DATABASE_URL if individual vars not set
             if not all([host, user, password]):
-                database_url = os.getenv('DATABASE_URL', '')
+                database_url = os.getenv("DATABASE_URL", "")
                 if database_url:
                     parsed = urlparse(database_url)
-                    host = parsed.hostname or ''
-                    user = parsed.username or ''
-                    password = parsed.password or ''
+                    host = parsed.hostname or ""
+                    user = parsed.username or ""
+                    password = parsed.password or ""
                     self.db_config = {
-                        'host': host,
-                        'database': parsed.path.lstrip('/') if parsed.path else 'postgres',
-                        'user': user,
-                        'password': password,
-                        'port': parsed.port or 5432
+                        "host": host,
+                        "database": parsed.path.lstrip("/") if parsed.path else "postgres",
+                        "user": user,
+                        "password": password,
+                        "port": parsed.port or 5432,
                     }
                 else:
                     raise ValueError("DB_HOST/DB_USER/DB_PASSWORD or DATABASE_URL required")
             else:
                 self.db_config = {
-                    'host': host,
-                    'database': os.getenv('DB_NAME', 'postgres'),
-                    'user': user,
-                    'password': password,
-                    'port': int(os.getenv('DB_PORT', 5432))
+                    "host": host,
+                    "database": os.getenv("DB_NAME", "postgres"),
+                    "user": user,
+                    "password": password,
+                    "port": int(os.getenv("DB_PORT", 5432)),
                 }
         # Use BackgroundScheduler instead of AsyncIOScheduler for FastAPI compatibility
         self.scheduler = BackgroundScheduler()
@@ -264,7 +293,9 @@ class AgentScheduler:
                 logger.warning(f"⚠️ UnifiedBrain initialization failed: {e}")
                 self.brain = None
 
-        logger.info(f"🔧 AgentScheduler initialized with DB: {self.db_config['host']}:{self.db_config['port']}")
+        logger.info(
+            f"🔧 AgentScheduler initialized with DB: {self.db_config['host']}:{self.db_config['port']}"
+        )
 
     @contextmanager
     def get_db_connection(self):
@@ -291,15 +322,22 @@ class AgentScheduler:
                     logger.error("❌ Database connection failed, cannot execute agent")
                     return
 
+                # Disable autocommit so commit/rollback work correctly
+                # (sync_pool sets autocommit=True which breaks transaction semantics)
+                prev_autocommit = conn.autocommit
+                conn.autocommit = False
                 cur = conn.cursor(cursor_factory=RealDictCursor)
 
                 try:
                     # Record execution start
-                    cur.execute("""
+                    cur.execute(
+                        """
                         INSERT INTO ai_agent_executions
                         (id, agent_name, status)
                         VALUES (%s, %s, %s)
-                    """, (execution_id, agent_name, 'running'))
+                    """,
+                        (execution_id, agent_name, "running"),
+                    )
                     conn.commit()
                     logger.info(f"📝 Execution {execution_id} recorded as 'running'")
 
@@ -309,11 +347,14 @@ class AgentScheduler:
 
                     if not agent:
                         logger.error(f"❌ Agent {agent_id} not found in database")
-                        cur.execute("""
+                        cur.execute(
+                            """
                             UPDATE ai_agent_executions
                             SET status = %s, error_message = %s
                             WHERE id = %s
-                        """, ('failed', 'Agent not found', execution_id))
+                        """,
+                            ("failed", "Agent not found", execution_id),
+                        )
                         conn.commit()
                         return
 
@@ -323,38 +364,26 @@ class AgentScheduler:
                     execution_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
 
                     # Record execution completion
-                    cur.execute("""
+                    cur.execute(
+                        """
                         UPDATE ai_agent_executions
                         SET status = %s, output_data = %s, execution_time_ms = %s
                         WHERE id = %s
-                    """, ('completed', json.dumps(result), execution_time_ms, execution_id))
+                    """,
+                        ("completed", json.dumps(result), execution_time_ms, execution_id),
+                    )
 
                     # Update agent statistics
-                    cur.execute("""
+                    cur.execute(
+                        """
                         UPDATE ai_agents
                         SET total_executions = total_executions + 1,
                             last_activation = %s,
                             last_active = %s
                         WHERE id = %s
-                    """, (datetime.utcnow(), datetime.utcnow(), agent_id))
-
-                    # Update schedule next execution with row locking to prevent race conditions
-                    # First lock the row and get frequency_minutes, then update to prevent concurrent executions
-                    cur.execute("""
-                        SELECT id, frequency_minutes FROM agent_schedules
-                        WHERE agent_id = %s AND enabled = true
-                        FOR UPDATE NOWAIT
-                    """, (agent_id,))
-                    schedule_row = cur.fetchone()
-                    frequency_minutes = (schedule_row['frequency_minutes'] if schedule_row else None) or 60
-
-                    cur.execute("""
-                        UPDATE agent_schedules
-                        SET last_execution = %s,
-                            next_execution = %s,
-                            updated_at = NOW()
-                        WHERE agent_id = %s AND enabled = true
-                    """, (datetime.utcnow(), datetime.utcnow() + timedelta(minutes=frequency_minutes), agent_id))
+                    """,
+                        (datetime.utcnow(), datetime.utcnow(), agent_id),
+                    )
 
                     conn.commit()
                     logger.info(f"Agent {agent_name} executed successfully")
@@ -371,12 +400,12 @@ class AgentScheduler:
                                     "status": "completed",
                                     "execution_time_ms": execution_time_ms,
                                     "result_summary": str(result)[:500] if result else None,
-                                    "timestamp": datetime.utcnow().isoformat()
+                                    "timestamp": datetime.utcnow().isoformat(),
                                 },
                                 category="agent_execution",
                                 priority="medium",
                                 source="agent_scheduler",
-                                metadata={"agent_type": agent.get('type', 'unknown')}
+                                metadata={"agent_type": agent.get("type", "unknown")},
                             )
                             logger.debug(f"🧠 Stored execution {execution_id} in persistent memory")
                         except Exception as mem_err:
@@ -386,11 +415,14 @@ class AgentScheduler:
                     logger.error(f"Error executing agent {agent_name}: {e}")
                     try:
                         conn.rollback()  # Rollback any pending transaction
-                        cur.execute("""
+                        cur.execute(
+                            """
                             UPDATE ai_agent_executions
                             SET status = %s, error_message = %s
                             WHERE id = %s
-                        """, ('failed', str(e), execution_id))
+                        """,
+                            ("failed", str(e), execution_id),
+                        )
                         conn.commit()
 
                         # Store failure in memory for learning from mistakes
@@ -402,7 +434,7 @@ class AgentScheduler:
                                     mistake=f"Agent {agent_name} failed during execution",
                                     lesson=f"Error type: {type(e).__name__}. Need to handle: {str(e)[:200]}",
                                     root_cause=str(e)[:500],
-                                    impact="medium"
+                                    impact="medium",
                                 )
                                 logger.debug(f"🧠 Stored failure learning for {agent_name}")
                             except Exception as learn_err:
@@ -411,55 +443,66 @@ class AgentScheduler:
                         logger.error(f"Failed to log error: {log_error}")
                 finally:
                     cur.close()
+                    # Restore autocommit for pool reuse
+                    conn.autocommit = prev_autocommit
 
         except Exception as outer_e:
             logger.error(f"Failed to get database connection for agent {agent_name}: {outer_e}")
 
     def _execute_by_type_sync(self, agent: dict, cur, conn) -> dict:
         """Execute agent based on its type (SYNCHRONOUS)"""
-        agent_type = agent.get('type', '').lower()
-        agent_name = agent.get('name', 'Unknown')
+        agent_type = agent.get("type", "").lower()
+        agent_name = agent.get("name", "Unknown")
 
         logger.info(f"⚙️ Executing {agent_type} agent: {agent_name}")
 
         # Health monitoring agent
-        if agent_name == 'HealthMonitor':
+        if agent_name == "HealthMonitor":
             return self._execute_health_monitor(agent, cur, conn)
 
         # Revenue-generating agents
-        elif 'revenue' in agent_type or agent_name == 'RevenueOptimizer':
+        elif "revenue" in agent_type or agent_name == "RevenueOptimizer":
             return self._execute_revenue_agent(agent, cur, conn)
 
         # Lead generation and revenue pipeline agents
-        elif 'lead' in agent_type or 'nurture' in agent_type or agent_name in [
-            'LeadGenerationAgent', 'LeadScorer', 'LeadQualificationAgent',
-            'LeadDiscoveryAgent', 'NurtureExecutorAgent', 'DealClosingAgent',
-            'RevenueProposalAgent'
-        ]:
+        elif (
+            "lead" in agent_type
+            or "nurture" in agent_type
+            or agent_name
+            in [
+                "LeadGenerationAgent",
+                "LeadScorer",
+                "LeadQualificationAgent",
+                "LeadDiscoveryAgent",
+                "NurtureExecutorAgent",
+                "DealClosingAgent",
+                "RevenueProposalAgent",
+            ]
+        ):
             return self._execute_lead_agent(agent, cur, conn)
 
         # Customer intelligence agents
-        elif 'customer' in agent_type or agent_name == 'CustomerIntelligence':
+        elif "customer" in agent_type or agent_name == "CustomerIntelligence":
             return self._execute_customer_agent(agent, cur, conn)
 
         # Analytics agents
-        elif agent_type == 'analytics':
+        elif agent_type == "analytics":
             return self._execute_analytics_agent(agent, cur, conn)
 
         # Email processor agent
-        elif agent_name == 'EmailProcessor' or 'email' in agent_type:
+        elif agent_name == "EmailProcessor" or "email" in agent_type:
             return self._execute_email_processor(agent, cur, conn)
 
         # Learning Feedback Loop agent - closes the gap between insights and action
-        elif agent_name == 'LearningFeedbackLoop' or agent_type == 'system_improvement':
+        elif agent_name == "LearningFeedbackLoop" or agent_type == "system_improvement":
             return self._execute_learning_feedback_loop(agent, cur, conn)
 
         # Content Generation
-        elif agent_name in ['ContentGenerator', 'BlogAutomation', 'ContentAgent']:
+        elif agent_name in ["ContentGenerator", "BlogAutomation", "ContentAgent"]:
             return self._execute_content_agent(agent, cur, conn)
 
         # Customer Acquisition
-        elif agent_name in ['WebSearch', 'SocialMedia', 'Outreach', 'Conversion']:
+        elif agent_name in ["WebSearch", "SocialMedia", "Outreach", "Conversion"]:
             return self._execute_acquisition_agent(agent, cur, conn)
 
         # Default: log and continue
@@ -473,16 +516,19 @@ class AgentScheduler:
         actions_taken = []
 
         # Get revenue opportunities
-        cur.execute("""
+        cur.execute(
+            """
             SELECT COUNT(*) as total_jobs,
                    COUNT(*) FILTER (WHERE status = 'pending') as pending_jobs,
                    COUNT(*) FILTER (WHERE status = 'in_progress') as active_jobs
             FROM jobs
-        """)
+        """
+        )
         stats = cur.fetchone()
 
         # Get pending estimates that need follow-up (older than 3 days)
-        cur.execute("""
+        cur.execute(
+            """
             SELECT e.id, e.customer_id, e.total_amount, c.name as customer_name, c.email
             FROM estimates e
             LEFT JOIN customers c ON c.id = e.customer_id
@@ -494,7 +540,8 @@ class AgentScheduler:
                 AND o.created_at > NOW() - INTERVAL '7 days'
             )
             LIMIT 10
-        """)
+        """
+        )
         stale_estimates = cur.fetchall()
 
         # Create follow-up tasks for stale estimates
@@ -502,59 +549,75 @@ class AgentScheduler:
             try:
                 block_reason = email_block_reason(est.get("email"))
                 if block_reason:
-                    actions_taken.append({
-                        'action': 'followup_blocked',
-                        'customer_id': str(est.get('customer_id')),
-                        'estimate_id': str(est.get('id')),
-                        'reason': block_reason,
-                    })
+                    actions_taken.append(
+                        {
+                            "action": "followup_blocked",
+                            "customer_id": str(est.get("customer_id")),
+                            "estimate_id": str(est.get("id")),
+                            "reason": block_reason,
+                        }
+                    )
                     continue
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO ai_scheduled_outreach
                     (target_id, channel, message_template, personalization, scheduled_for, status, metadata)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    str(est['customer_id']),
-                    'email',
-                    'estimate_followup',
-                    json.dumps({
-                        'customer_name': est['customer_name'],
-                        'estimate_amount': float(est['total_amount'] or 0)
-                    }),
-                    datetime.utcnow() + timedelta(hours=24),
-                    'scheduled',
-                    json.dumps({
-                        'estimate_id': str(est['id']),
-                        'amount': float(est['total_amount'] or 0),
-                        'reason': 'Stale estimate - no response in 3+ days',
-                        'priority': 'high' if float(est['total_amount'] or 0) > 5000 else 'medium'
-                    })
-                ))
-                actions_taken.append({
-                    'action': 'scheduled_followup',
-                    'customer_id': str(est['customer_id']),
-                    'estimate_amount': float(est['total_amount'] or 0)
-                })
+                """,
+                    (
+                        str(est["customer_id"]),
+                        "email",
+                        "estimate_followup",
+                        json.dumps(
+                            {
+                                "customer_name": est["customer_name"],
+                                "estimate_amount": float(est["total_amount"] or 0),
+                            }
+                        ),
+                        datetime.utcnow() + timedelta(hours=24),
+                        "scheduled",
+                        json.dumps(
+                            {
+                                "estimate_id": str(est["id"]),
+                                "amount": float(est["total_amount"] or 0),
+                                "reason": "Stale estimate - no response in 3+ days",
+                                "priority": "high"
+                                if float(est["total_amount"] or 0) > 5000
+                                else "medium",
+                            }
+                        ),
+                    ),
+                )
+                actions_taken.append(
+                    {
+                        "action": "scheduled_followup",
+                        "customer_id": str(est["customer_id"]),
+                        "estimate_amount": float(est["total_amount"] or 0),
+                    }
+                )
             except Exception as e:
                 logger.warning(f"Could not create followup for estimate {est['id']}: {e}")
 
         # Record revenue insight if significant opportunities exist
-        potential_revenue = sum(float(e['total_amount'] or 0) for e in stale_estimates)
+        potential_revenue = sum(float(e["total_amount"] or 0) for e in stale_estimates)
         if potential_revenue > 1000:
             try:
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO ai_business_insights
                     (insight_type, category, title, description, impact_score, urgency)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                """, (
-                    'revenue_opportunity',
-                    'sales',
-                    f'${potential_revenue:,.0f} in stale estimates need follow-up',
-                    f'{len(stale_estimates)} estimates older than 3 days with no follow-up scheduled. Agent: {agent["name"]}',
-                    min(100, int(potential_revenue / 100)),  # Impact score based on revenue
-                    'high' if potential_revenue > 10000 else 'medium'
-                ))
-                actions_taken.append({'action': 'created_insight', 'revenue': potential_revenue})
+                """,
+                    (
+                        "revenue_opportunity",
+                        "sales",
+                        f"${potential_revenue:,.0f} in stale estimates need follow-up",
+                        f'{len(stale_estimates)} estimates older than 3 days with no follow-up scheduled. Agent: {agent["name"]}',
+                        min(100, int(potential_revenue / 100)),  # Impact score based on revenue
+                        "high" if potential_revenue > 10000 else "medium",
+                    ),
+                )
+                actions_taken.append({"action": "created_insight", "revenue": potential_revenue})
             except Exception as e:
                 logger.warning(f"Could not create insight: {e}")
 
@@ -568,22 +631,19 @@ class AgentScheduler:
                 criteria = {
                     "location": "United States",
                     "company_size": "Small to Medium",
-                    "industry": "Roofing"
+                    "industry": "Roofing",
                 }
                 new_leads = await rev_sys.identify_new_leads(criteria)
 
                 # 2. Automatically qualify and start workflow for new leads
                 processed = 0
                 for lead_id in new_leads:
-                    if processed >= 3: # Limit to avoid overload per cycle
+                    if processed >= 3:  # Limit to avoid overload per cycle
                         break
                     await rev_sys.run_revenue_workflow(lead_id)
                     processed += 1
 
-                return {
-                    "new_leads_identified": len(new_leads),
-                    "workflows_started": processed
-                }
+                return {"new_leads_identified": len(new_leads), "workflows_started": processed}
 
             # Run autonomous tasks - create dedicated event loop for this thread
             try:
@@ -592,10 +652,7 @@ class AgentScheduler:
             except Exception as e:
                 logger.error(f"Failed to run autonomous tasks: {e}")
                 auto_stats = {"error": str(e)}
-            actions_taken.append({
-                'action': 'autonomous_revenue_cycle',
-                'stats': auto_stats
-            })
+            actions_taken.append({"action": "autonomous_revenue_cycle", "stats": auto_stats})
             logger.info(f"✅ Autonomous revenue cycle completed: {auto_stats}")
 
         except Exception as e:
@@ -606,14 +663,14 @@ class AgentScheduler:
         conn.commit()
 
         return {
-            "agent": agent['name'],
-            "jobs_analyzed": stats['total_jobs'],
-            "pending_jobs": stats['pending_jobs'],
-            "active_jobs": stats['active_jobs'],
+            "agent": agent["name"],
+            "jobs_analyzed": stats["total_jobs"],
+            "pending_jobs": stats["pending_jobs"],
+            "active_jobs": stats["active_jobs"],
             "stale_estimates_found": len(stale_estimates),
             "potential_revenue": potential_revenue,
             "actions_taken": actions_taken,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     def _execute_lead_agent(self, agent: dict, cur, conn) -> dict:
@@ -623,9 +680,11 @@ class AgentScheduler:
         """
         enabled = os.getenv("ENABLE_LEAD_AGENTS", "").lower() in ("1", "true", "yes")
         if not enabled:
-            logger.debug("Lead agents disabled (ERP data is demo). Set ENABLE_LEAD_AGENTS=true to enable.")
+            logger.debug(
+                "Lead agents disabled (ERP data is demo). Set ENABLE_LEAD_AGENTS=true to enable."
+            )
             return {
-                "agent": agent['name'],
+                "agent": agent["name"],
                 "status": "disabled",
                 "reason": "ERP customers table contains demo data. Set ENABLE_LEAD_AGENTS=true when real data exists.",
             }
@@ -633,16 +692,19 @@ class AgentScheduler:
         actions_taken = []
 
         # Get lead statistics
-        cur.execute("""
+        cur.execute(
+            """
             SELECT COUNT(*) as total_customers,
                    COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') as new_this_week,
                    COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') as new_this_month
             FROM customers
-        """)
+        """
+        )
         stats = cur.fetchone()
 
         # Find high-value customers who haven't been contacted recently (potential leads)
-        cur.execute("""
+        cur.execute(
+            """
             SELECT c.id, c.name, c.email, c.phone,
                    COUNT(j.id) as job_count,
                    COALESCE(SUM(i.total_amount), 0) as total_spent,
@@ -658,29 +720,38 @@ class AgentScheduler:
             AND MAX(j.created_at) < NOW() - INTERVAL '60 days'
             ORDER BY COALESCE(SUM(i.total_amount), 0) DESC
             LIMIT 15
-        """)
+        """
+        )
         dormant_valuable_customers = cur.fetchall()
 
         # Calculate and update lead scores
         for customer in dormant_valuable_customers:
-            total_spent = float(customer['total_spent'] or 0)
-            job_count = customer['job_count'] or 0
+            total_spent = float(customer["total_spent"] or 0)
+            job_count = customer["job_count"] or 0
 
             # Score based on historical value and recency
-            score = min(100, int(
-                (total_spent / 1000) * 10 +  # $1k = 10 points
-                job_count * 15 +              # each job = 15 points
-                30                            # base score for returning customer
-            ))
+            score = min(
+                100,
+                int(
+                    (total_spent / 1000) * 10  # $1k = 10 points
+                    + job_count * 15  # each job = 15 points
+                    + 30  # base score for returning customer
+                ),
+            )
 
             try:
                 # Get tenant_id from customer
-                cur.execute("SELECT tenant_id FROM customers WHERE id = %s", (customer['id'],))
+                cur.execute("SELECT tenant_id FROM customers WHERE id = %s", (customer["id"],))
                 tenant_row = cur.fetchone()
-                tenant_id = tenant_row['tenant_id'] if tenant_row else '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457'
+                tenant_id = (
+                    tenant_row["tenant_id"]
+                    if tenant_row
+                    else "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+                )
 
                 # Update or insert lead score
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO ai_lead_scores
                     (customer_id, score, probability_to_close, estimated_value, factors, tenant_id)
                     VALUES (%s, %s, %s, %s, %s, %s)
@@ -690,63 +761,77 @@ class AgentScheduler:
                         estimated_value = EXCLUDED.estimated_value,
                         factors = EXCLUDED.factors,
                         updated_at = NOW()
-                """, (
-                    customer['id'],
-                    score,
-                    min(0.9, score / 100.0),  # Convert score to probability
-                    total_spent * 0.3,  # Estimate 30% of historical value as potential
-                    json.dumps({
-                        'total_spent': total_spent,
-                        'job_count': job_count,
-                        'days_inactive': 60,
-                        'calculation': 'dormant_valuable_customer'
-                    }),
-                    tenant_id
-                ))
+                """,
+                    (
+                        customer["id"],
+                        score,
+                        min(0.9, score / 100.0),  # Convert score to probability
+                        total_spent * 0.3,  # Estimate 30% of historical value as potential
+                        json.dumps(
+                            {
+                                "total_spent": total_spent,
+                                "job_count": job_count,
+                                "days_inactive": 60,
+                                "calculation": "dormant_valuable_customer",
+                            }
+                        ),
+                        tenant_id,
+                    ),
+                )
 
                 # Schedule re-engagement for high-score leads
                 if score >= 50:
                     block_reason = email_block_reason(customer.get("email"))
                     if block_reason:
-                        actions_taken.append({
-                            'action': 'reengagement_blocked',
-                            'customer_id': str(customer.get('id')),
-                            'lead_score': score,
-                            'reason': block_reason,
-                        })
+                        actions_taken.append(
+                            {
+                                "action": "reengagement_blocked",
+                                "customer_id": str(customer.get("id")),
+                                "lead_score": score,
+                                "reason": block_reason,
+                            }
+                        )
                     else:
-                        cur.execute("""
+                        cur.execute(
+                            """
                             INSERT INTO ai_scheduled_outreach
                             (target_id, channel, message_template, personalization, scheduled_for, status, metadata)
                             VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """, (
-                            str(customer['id']),
-                            'email',
-                            'reengagement',
-                            json.dumps({
-                                'customer_name': customer['name'],
-                                'lead_score': score
-                            }),
-                            datetime.utcnow() + timedelta(hours=48),
-                            'scheduled',
-                            json.dumps({
-                                'lead_score': score,
-                                'total_spent': total_spent,
-                                'reason': 'High-value dormant customer - re-engagement opportunity',
-                                'priority': 'high' if score >= 70 else 'medium'
-                            })
-                        ))
-                        actions_taken.append({
-                            'action': 'scheduled_reengagement',
-                            'customer_id': str(customer['id']),
-                            'lead_score': score
-                        })
+                        """,
+                            (
+                                str(customer["id"]),
+                                "email",
+                                "reengagement",
+                                json.dumps(
+                                    {"customer_name": customer["name"], "lead_score": score}
+                                ),
+                                datetime.utcnow() + timedelta(hours=48),
+                                "scheduled",
+                                json.dumps(
+                                    {
+                                        "lead_score": score,
+                                        "total_spent": total_spent,
+                                        "reason": "High-value dormant customer - re-engagement opportunity",
+                                        "priority": "high" if score >= 70 else "medium",
+                                    }
+                                ),
+                            ),
+                        )
+                        actions_taken.append(
+                            {
+                                "action": "scheduled_reengagement",
+                                "customer_id": str(customer["id"]),
+                                "lead_score": score,
+                            }
+                        )
 
-                actions_taken.append({
-                    'action': 'updated_lead_score',
-                    'customer_id': str(customer['id']),
-                    'score': score
-                })
+                actions_taken.append(
+                    {
+                        "action": "updated_lead_score",
+                        "customer_id": str(customer["id"]),
+                        "score": score,
+                    }
+                )
             except Exception as e:
                 logger.warning(f"Could not update lead score for customer {customer['id']}: {e}")
 
@@ -756,7 +841,8 @@ class AgentScheduler:
         # Score REAL leads from revenue_leads using AdvancedLeadScoringEngine
         advanced_scores_updated = 0
         try:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT id, source, email, metadata, status, created_at
                 FROM revenue_leads
                 WHERE status = 'new'
@@ -766,7 +852,8 @@ class AgentScheduler:
                 AND email NOT LIKE '%%brainops.test'
                 ORDER BY created_at DESC
                 LIMIT 25
-            """)
+            """
+            )
             real_leads = cur.fetchall()
 
             if real_leads:
@@ -775,33 +862,39 @@ class AgentScheduler:
                 for lead in real_leads:
                     try:
                         # Build lead_data from metadata
-                        metadata = lead.get('metadata') or {}
+                        metadata = lead.get("metadata") or {}
                         lead_data = {
-                            'company': metadata.get('company', {}),
-                            'intent_signals': metadata.get('intent_signals', {}),
-                            'velocity': metadata.get('velocity', {}),
-                            'financial': metadata.get('financial', {})
+                            "company": metadata.get("company", {}),
+                            "intent_signals": metadata.get("intent_signals", {}),
+                            "velocity": metadata.get("velocity", {}),
+                            "financial": metadata.get("financial", {}),
                         }
 
                         # Calculate advanced multi-factor score (async)
                         result = run_on_main_loop(
-                            scoring_engine.calculate_multi_factor_score(str(lead['id']), lead_data),
+                            scoring_engine.calculate_multi_factor_score(str(lead["id"]), lead_data),
                             timeout=60,
                         )
                         advanced_scores_updated += 1
-                        actions_taken.append({
-                            'action': 'advanced_lead_scored',
-                            'lead_id': str(lead['id']),
-                            'composite_score': result.composite_score,
-                            'tier': result.tier.value,
-                            'next_best_action': result.next_best_action
-                        })
-                        logger.info(f"Advanced scored lead {lead['id']}: {result.composite_score} ({result.tier.value})")
+                        actions_taken.append(
+                            {
+                                "action": "advanced_lead_scored",
+                                "lead_id": str(lead["id"]),
+                                "composite_score": result.composite_score,
+                                "tier": result.tier.value,
+                                "next_best_action": result.next_best_action,
+                            }
+                        )
+                        logger.info(
+                            f"Advanced scored lead {lead['id']}: {result.composite_score} ({result.tier.value})"
+                        )
 
                     except Exception as e:
                         logger.warning(f"Advanced scoring failed for lead {lead['id']}: {e}")
 
-                logger.info(f"Advanced Lead Scoring: {advanced_scores_updated}/{len(real_leads)} leads scored")
+                logger.info(
+                    f"Advanced Lead Scoring: {advanced_scores_updated}/{len(real_leads)} leads scored"
+                )
                 conn.commit()
 
         except Exception as e:
@@ -815,45 +908,57 @@ class AgentScheduler:
         leads_discovered = 0
         leads_synced = 0
         enable_discovery = os.getenv("ENABLE_LEAD_DISCOVERY", "").lower() in ("1", "true", "yes")
-        if enable_discovery and LEAD_DISCOVERY_AVAILABLE and agent.get('name') in ['LeadDiscoveryAgent', 'LeadGenerationAgent']:
+        if (
+            enable_discovery
+            and LEAD_DISCOVERY_AVAILABLE
+            and agent.get("name") in ["LeadDiscoveryAgent", "LeadGenerationAgent"]
+        ):
             try:
                 discovery_result = run_on_main_loop(
-                    handle_lead_discovery_task({
-                        'id': str(uuid.uuid4()),
-                        'sources': ['erp_reactivation', 'erp_upsell', 'erp_referral'],
-                        'limit': 50,
-                        'sync_revenue': True,
-                        'sync_erp': False
-                    }),
+                    handle_lead_discovery_task(
+                        {
+                            "id": str(uuid.uuid4()),
+                            "sources": ["erp_reactivation", "erp_upsell", "erp_referral"],
+                            "limit": 50,
+                            "sync_revenue": True,
+                            "sync_erp": False,
+                        }
+                    ),
                     timeout=300,
                 )
-                if discovery_result.get('status') == 'completed':
-                    result_data = discovery_result.get('result', {})
-                    leads_discovered = result_data.get('leads_discovered', 0)
-                    leads_synced = result_data.get('synced_to_revenue', 0)
-                    actions_taken.append({
-                        'action': 'lead_discovery_completed',
-                        'leads_discovered': leads_discovered,
-                        'leads_synced': leads_synced,
-                        'sources': result_data.get('by_source', {})
-                    })
-                    logger.info(f"Lead Discovery: {leads_discovered} discovered, {leads_synced} synced")
+                if discovery_result.get("status") == "completed":
+                    result_data = discovery_result.get("result", {})
+                    leads_discovered = result_data.get("leads_discovered", 0)
+                    leads_synced = result_data.get("synced_to_revenue", 0)
+                    actions_taken.append(
+                        {
+                            "action": "lead_discovery_completed",
+                            "leads_discovered": leads_discovered,
+                            "leads_synced": leads_synced,
+                            "sources": result_data.get("by_source", {}),
+                        }
+                    )
+                    logger.info(
+                        f"Lead Discovery: {leads_discovered} discovered, {leads_synced} synced"
+                    )
             except Exception as e:
                 logger.warning(f"Lead discovery engine failed: {e}")
 
         return {
-            "agent": agent['name'],
-            "total_customers": stats['total_customers'],
-            "new_this_week": stats['new_this_week'],
-            "new_this_month": stats['new_this_month'],
+            "agent": agent["name"],
+            "total_customers": stats["total_customers"],
+            "new_this_week": stats["new_this_week"],
+            "new_this_month": stats["new_this_month"],
             "dormant_valuable_found": len(dormant_valuable_customers),
-            "leads_scored": len([a for a in actions_taken if a['action'] == 'updated_lead_score']),
+            "leads_scored": len([a for a in actions_taken if a["action"] == "updated_lead_score"]),
             "advanced_leads_scored": advanced_scores_updated,
             "leads_discovered": leads_discovered,
             "leads_synced": leads_synced,
-            "reengagements_scheduled": len([a for a in actions_taken if a['action'] == 'scheduled_reengagement']),
+            "reengagements_scheduled": len(
+                [a for a in actions_taken if a["action"] == "scheduled_reengagement"]
+            ),
             "actions_taken": actions_taken,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     def _execute_customer_agent(self, agent: dict, cur, conn) -> dict:
@@ -862,7 +967,8 @@ class AgentScheduler:
         actions_taken = []
 
         # Get customer insights
-        cur.execute("""
+        cur.execute(
+            """
             SELECT
                 COUNT(DISTINCT c.id) as total_customers,
                 COUNT(DISTINCT j.id) as total_jobs,
@@ -871,11 +977,13 @@ class AgentScheduler:
             FROM customers c
             LEFT JOIN jobs j ON j.customer_id = c.id
             LEFT JOIN invoices i ON i.job_id = j.id
-        """)
+        """
+        )
         stats = cur.fetchone()
 
         # Identify at-risk customers (high value, no recent activity)
-        cur.execute("""
+        cur.execute(
+            """
             SELECT c.id, c.name, c.email, c.phone,
                    COALESCE(SUM(i.total_amount), 0) as lifetime_value,
                    COUNT(DISTINCT j.id) as total_jobs,
@@ -892,29 +1000,38 @@ class AgentScheduler:
             AND MAX(j.created_at) < NOW() - INTERVAL '90 days'
             ORDER BY COALESCE(SUM(i.total_amount), 0) DESC
             LIMIT 10
-        """)
+        """
+        )
         at_risk_customers = cur.fetchall()
 
         # Create customer health records and interventions
         for customer in at_risk_customers:
-            ltv = float(customer['lifetime_value'] or 0)
-            days_inactive = int(customer['days_inactive'] or 0)
+            ltv = float(customer["lifetime_value"] or 0)
+            days_inactive = int(customer["days_inactive"] or 0)
 
             # Calculate churn risk score (0-100)
-            churn_risk = min(100, int(
-                (days_inactive / 90) * 30 +  # More days = higher risk
-                (ltv / 5000) * 20 +           # Higher LTV = higher concern
-                30                            # Base risk for inactivity
-            ))
+            churn_risk = min(
+                100,
+                int(
+                    (days_inactive / 90) * 30  # More days = higher risk
+                    + (ltv / 5000) * 20  # Higher LTV = higher concern
+                    + 30  # Base risk for inactivity
+                ),
+            )
 
             try:
                 # Get tenant_id from customer
-                cur.execute("SELECT tenant_id FROM customers WHERE id = %s", (customer['id'],))
+                cur.execute("SELECT tenant_id FROM customers WHERE id = %s", (customer["id"],))
                 tenant_row = cur.fetchone()
-                tenant_id = tenant_row['tenant_id'] if tenant_row else '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457'
+                tenant_id = (
+                    tenant_row["tenant_id"]
+                    if tenant_row
+                    else "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+                )
 
                 # Record customer health status
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO ai_customer_health
                     (customer_id, health_score, churn_probability, churn_risk, lifetime_value,
                      days_since_last_activity, health_status, tenant_id)
@@ -927,78 +1044,94 @@ class AgentScheduler:
                         days_since_last_activity = EXCLUDED.days_since_last_activity,
                         health_status = EXCLUDED.health_status,
                         updated_at = NOW()
-                """, (
-                    customer['id'],
-                    100 - churn_risk,  # Health score is inverse of churn risk
-                    churn_risk / 100.0,  # Convert to probability (0-1)
-                    'high' if churn_risk > 70 else 'medium' if churn_risk > 40 else 'low',
-                    ltv,
-                    days_inactive,
-                    'at_risk' if churn_risk > 60 else 'declining',
-                    tenant_id
-                ))
+                """,
+                    (
+                        customer["id"],
+                        100 - churn_risk,  # Health score is inverse of churn risk
+                        churn_risk / 100.0,  # Convert to probability (0-1)
+                        "high" if churn_risk > 70 else "medium" if churn_risk > 40 else "low",
+                        ltv,
+                        days_inactive,
+                        "at_risk" if churn_risk > 60 else "declining",
+                        tenant_id,
+                    ),
+                )
 
                 # Create intervention for high-risk customers
                 if churn_risk > 50:
-                    cur.execute("""
+                    cur.execute(
+                        """
                         INSERT INTO ai_customer_interventions
                         (customer_id, intervention_type, reason, triggered_by, scheduled_date, tenant_id)
                         VALUES (%s, %s, %s, %s, %s, %s)
-                    """, (
-                        customer['id'],
-                        'retention',
-                        f"High-value customer ({customer['name']}) inactive for {days_inactive} days. LTV: ${ltv:,.0f}. Churn risk: {churn_risk}%. Email: {customer['email']}",
-                        'CustomerIntelligence Agent',
-                        datetime.utcnow() + timedelta(days=1),
-                        tenant_id
-                    ))
-                    actions_taken.append({
-                        'action': 'created_intervention',
-                        'customer_id': str(customer['id']),
-                        'churn_risk': churn_risk,
-                        'ltv': ltv
-                    })
+                    """,
+                        (
+                            customer["id"],
+                            "retention",
+                            f"High-value customer ({customer['name']}) inactive for {days_inactive} days. LTV: ${ltv:,.0f}. Churn risk: {churn_risk}%. Email: {customer['email']}",
+                            "CustomerIntelligence Agent",
+                            datetime.utcnow() + timedelta(days=1),
+                            tenant_id,
+                        ),
+                    )
+                    actions_taken.append(
+                        {
+                            "action": "created_intervention",
+                            "customer_id": str(customer["id"]),
+                            "churn_risk": churn_risk,
+                            "ltv": ltv,
+                        }
+                    )
 
-                actions_taken.append({
-                    'action': 'updated_health',
-                    'customer_id': str(customer['id']),
-                    'health_score': 100 - churn_risk
-                })
+                actions_taken.append(
+                    {
+                        "action": "updated_health",
+                        "customer_id": str(customer["id"]),
+                        "health_score": 100 - churn_risk,
+                    }
+                )
             except Exception as e:
                 logger.warning(f"Could not process customer {customer['id']}: {e}")
 
         # Generate aggregate insight if multiple at-risk customers
         if len(at_risk_customers) >= 3:
-            total_at_risk_value = sum(float(c['lifetime_value'] or 0) for c in at_risk_customers)
+            total_at_risk_value = sum(float(c["lifetime_value"] or 0) for c in at_risk_customers)
             try:
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO ai_business_insights
                     (insight_type, category, title, description, impact_score, urgency)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                """, (
-                    'customer_health',
-                    'retention',
-                    f'{len(at_risk_customers)} high-value customers at churn risk',
-                    f'Combined LTV of ${total_at_risk_value:,.0f} at risk. Immediate retention action recommended. Agent: {agent["name"]}',
-                    min(100, int(total_at_risk_value / 200)),  # Impact score based on value
-                    'critical' if total_at_risk_value > 20000 else 'high'
-                ))
-                actions_taken.append({'action': 'created_churn_insight', 'value_at_risk': total_at_risk_value})
+                """,
+                    (
+                        "customer_health",
+                        "retention",
+                        f"{len(at_risk_customers)} high-value customers at churn risk",
+                        f'Combined LTV of ${total_at_risk_value:,.0f} at risk. Immediate retention action recommended. Agent: {agent["name"]}',
+                        min(100, int(total_at_risk_value / 200)),  # Impact score based on value
+                        "critical" if total_at_risk_value > 20000 else "high",
+                    ),
+                )
+                actions_taken.append(
+                    {"action": "created_churn_insight", "value_at_risk": total_at_risk_value}
+                )
             except Exception as e:
                 logger.warning(f"Could not create insight: {e}")
 
         conn.commit()
 
         return {
-            "agent": agent['name'],
-            "total_customers": stats['total_customers'],
-            "total_jobs": stats['total_jobs'],
-            "total_invoices": stats['total_invoices'],
-            "total_revenue": float(stats['total_revenue'] or 0),
+            "agent": agent["name"],
+            "total_customers": stats["total_customers"],
+            "total_jobs": stats["total_jobs"],
+            "total_invoices": stats["total_invoices"],
+            "total_revenue": float(stats["total_revenue"] or 0),
             "at_risk_customers_found": len(at_risk_customers),
-            "interventions_created": len([a for a in actions_taken if a['action'] == 'created_intervention']),
+            "interventions_created": len(
+                [a for a in actions_taken if a["action"] == "created_intervention"]
+            ),
             "actions_taken": actions_taken,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     def _execute_analytics_agent(self, agent: dict, cur, conn) -> dict:
@@ -1006,24 +1139,26 @@ class AgentScheduler:
         logger.info(f"Running analytics for agent: {agent['name']}")
 
         # Get general analytics
-        cur.execute("""
+        cur.execute(
+            """
             SELECT
                 (SELECT COUNT(*) FROM customers) as total_customers,
                 (SELECT COUNT(*) FROM jobs) as total_jobs,
                 (SELECT COUNT(*) FROM invoices) as total_invoices,
                 (SELECT COUNT(*) FROM estimates) as total_estimates
-        """)
+        """
+        )
         stats = cur.fetchone()
 
         return {
-            "agent": agent['name'],
+            "agent": agent["name"],
             "analytics": {
-                "customers": stats['total_customers'],
-                "jobs": stats['total_jobs'],
-                "invoices": stats['total_invoices'],
-                "estimates": stats['total_estimates']
+                "customers": stats["total_customers"],
+                "jobs": stats["total_jobs"],
+                "invoices": stats["total_invoices"],
+                "estimates": stats["total_estimates"],
             },
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     def _execute_health_monitor(self, agent: dict, cur, conn) -> dict:
@@ -1047,6 +1182,7 @@ class AgentScheduler:
         try:
             # Import health monitor - skip table init to avoid nested DB connections
             from agent_health_monitor import get_health_monitor
+
             health_monitor = get_health_monitor(skip_table_init=True)
 
             # Apply DB-side timeouts on the pooled connection to avoid long hangs
@@ -1091,36 +1227,36 @@ class AgentScheduler:
                             "healthy": health_summary.get("healthy", 0),
                             "degraded": health_summary.get("degraded", 0),
                             "critical": health_summary.get("critical", 0),
-                            "restarted": restart_result.get("restarted", 0)
+                            "restarted": restart_result.get("restarted", 0),
                         },
                         category="health_monitoring",
                         priority="high" if health_summary.get("critical", 0) > 0 else "medium",
-                        source="health_monitor_agent"
+                        source="health_monitor_agent",
                     )
                 except Exception as mem_err:
                     logger.warning(f"Failed to store health check in brain: {mem_err}")
 
             return {
-                "agent": agent['name'],
+                "agent": agent["name"],
                 "health_summary": health_summary,
                 "auto_restart_result": restart_result,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
         except TimeoutError as e:
             logger.error(f"Health monitoring timed out: {e}")
             return {
-                "agent": agent['name'],
+                "agent": agent["name"],
                 "error": str(e),
                 "timed_out": True,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
         except Exception as e:
             logger.error(f"Health monitoring failed: {e}")
             return {
-                "agent": agent['name'],
+                "agent": agent["name"],
                 "error": str(e),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
         finally:
             # Restore session timeouts for pooled connection reuse safety
@@ -1160,43 +1296,43 @@ class AgentScheduler:
                     self.brain.store(
                         key=f"email_processing_{datetime.utcnow().isoformat()}",
                         value={
-                            "agent": agent['name'],
-                            "processed": result.get('processed', 0),
-                            "sent": result.get('sent', 0),
-                            "failed": result.get('failed', 0),
-                            "skipped": result.get('skipped', 0),
-                            "retried": result.get('retried', 0),
-                            "reset_failed": result.get('reset_failed', 0),
-                            "provider": result.get('provider', 'unknown'),
-                            "timestamp": datetime.utcnow().isoformat()
+                            "agent": agent["name"],
+                            "processed": result.get("processed", 0),
+                            "sent": result.get("sent", 0),
+                            "failed": result.get("failed", 0),
+                            "skipped": result.get("skipped", 0),
+                            "retried": result.get("retried", 0),
+                            "reset_failed": result.get("reset_failed", 0),
+                            "provider": result.get("provider", "unknown"),
+                            "timestamp": datetime.utcnow().isoformat(),
                         },
                         category="email_processing",
                         priority="medium",
-                        source="email_processor_agent"
+                        source="email_processor_agent",
                     )
                 except Exception as mem_err:
                     logger.warning(f"Failed to store email processing in brain: {mem_err}")
 
             return {
-                "agent": agent['name'],
-                "queue_before": queue_status.get('totals', {}),
+                "agent": agent["name"],
+                "queue_before": queue_status.get("totals", {}),
                 "processing_result": result,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
         except ImportError as e:
             logger.error(f"Email sender module not available: {e}")
             return {
-                "agent": agent['name'],
+                "agent": agent["name"],
                 "error": f"Email sender module not available: {e}",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
         except Exception as e:
             logger.error(f"Email processing failed: {e}")
             return {
-                "agent": agent['name'],
+                "agent": agent["name"],
                 "error": str(e),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
     def _execute_learning_feedback_loop(self, agent: dict, cur, conn) -> dict:
@@ -1230,16 +1366,16 @@ class AgentScheduler:
                     self.brain.store(
                         key=f"learning_feedback_loop_{datetime.utcnow().isoformat()}",
                         value={
-                            "agent": agent['name'],
-                            "patterns_found": cycle_result.get('patterns_found', 0),
-                            "proposals_generated": cycle_result.get('proposals_generated', 0),
-                            "auto_approved": cycle_result.get('auto_approved', 0),
-                            "improvements_applied": cycle_result.get('improvements_applied', 0),
-                            "timestamp": datetime.utcnow().isoformat()
+                            "agent": agent["name"],
+                            "patterns_found": cycle_result.get("patterns_found", 0),
+                            "proposals_generated": cycle_result.get("proposals_generated", 0),
+                            "auto_approved": cycle_result.get("auto_approved", 0),
+                            "improvements_applied": cycle_result.get("improvements_applied", 0),
+                            "timestamp": datetime.utcnow().isoformat(),
                         },
                         category="learning_feedback",
                         priority="high",
-                        source="learning_feedback_loop_agent"
+                        source="learning_feedback_loop_agent",
                     )
                 except Exception as mem_err:
                     logger.warning(f"Failed to store learning cycle in brain: {mem_err}")
@@ -1252,24 +1388,24 @@ class AgentScheduler:
             )
 
             return {
-                "agent": agent['name'],
+                "agent": agent["name"],
                 "cycle_result": cycle_result,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
         except ImportError as e:
             logger.error(f"Learning feedback loop module not available: {e}")
             return {
-                "agent": agent['name'],
+                "agent": agent["name"],
                 "error": f"Learning feedback loop module not available: {e}",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
         except Exception as e:
             logger.error(f"Learning feedback loop failed: {e}")
             return {
-                "agent": agent['name'],
+                "agent": agent["name"],
                 "error": str(e),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
     def _execute_content_agent(self, agent: dict, cur, conn) -> dict:
@@ -1281,18 +1417,22 @@ class AgentScheduler:
                 return {"status": "skipped", "error": "Content generator unavailable"}
 
             agent_instance = ContentGeneratorAgent()
-            
+
             # Determine task based on agent name or config
             action = "generate_blog"
             topic = None
-            if "idea" in agent['name'].lower():
+            if "idea" in agent["name"].lower():
                 action = "generate_topic_ideas"
 
             result = run_on_main_loop(
                 agent_instance.execute({"action": action, "topic": topic}),
                 timeout=300,
             )
-            return {"status": "completed", "result": result, "timestamp": datetime.utcnow().isoformat()}
+            return {
+                "status": "completed",
+                "result": result,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
 
         except Exception as e:
             logger.error(f"Content generation failed: {e}")
@@ -1306,28 +1446,30 @@ class AgentScheduler:
             if not ACQUISITION_AGENTS_AVAILABLE:
                 return {"status": "skipped", "error": "Acquisition agents unavailable"}
 
-            if 'WebSearch' in agent['name']:
+            if "WebSearch" in agent["name"]:
                 instance = WebSearchAgent()
-                result = run_on_main_loop(instance.search_for_leads({"industry": "roofing"}), timeout=300)
-            elif 'SocialMedia' in agent['name']:
+                result = run_on_main_loop(
+                    instance.search_for_leads({"industry": "roofing"}), timeout=300
+                )
+            elif "SocialMedia" in agent["name"]:
                 instance = SocialMediaAgent()
                 result = run_on_main_loop(instance.monitor_social_signals(), timeout=300)
-            elif 'Outreach' in agent['name']:
+            elif "Outreach" in agent["name"]:
                 # Outreach usually needs a target_id, placeholder for now
                 result = {"status": "outreach_scan_completed"}
-            elif 'Conversion' in agent['name']:
+            elif "Conversion" in agent["name"]:
                 result = {"status": "conversion_optimization_completed"}
             else:
                 result = {"status": "unknown_acquisition_agent"}
-            
+
             # Count results
             count = len(result) if isinstance(result, list) else 0
-            
+
             return {
-                "status": "completed", 
-                "agent": agent['name'], 
+                "status": "completed",
+                "agent": agent["name"],
                 "items_found": count,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
         except Exception as e:
@@ -1347,23 +1489,27 @@ class AgentScheduler:
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 try:
                     # Get all enabled schedules
-                    cur.execute("""
+                    cur.execute(
+                        """
                         SELECT s.*, a.name as agent_name, a.type as agent_type
                         FROM agent_schedules s
                         JOIN ai_agents a ON a.id = s.agent_id
                         WHERE s.enabled = true
-                    """)
+                    """
+                    )
 
                     schedules = cur.fetchall()
                     logger.info(f"✅ Found {len(schedules)} enabled agent schedules")
 
                     for schedule in schedules:
-                        logger.info(f"   • {schedule['agent_name']} - Every {schedule['frequency_minutes']} minutes")
+                        logger.info(
+                            f"   • {schedule['agent_name']} - Every {schedule['frequency_minutes']} minutes"
+                        )
                         self.add_schedule(
-                            agent_id=schedule['agent_id'],
-                            agent_name=schedule['agent_name'],
-                            frequency_minutes=schedule['frequency_minutes'] or 60,
-                            schedule_id=schedule['id']
+                            agent_id=schedule["agent_id"],
+                            agent_name=schedule["agent_name"],
+                            frequency_minutes=schedule["frequency_minutes"] or 60,
+                            schedule_id=schedule["id"],
                         )
                 finally:
                     cur.close()
@@ -1393,7 +1539,7 @@ class AgentScheduler:
                 "Learning Feedback Loop completed: %d patterns -> %d proposals -> %d applied",
                 result.get("patterns_found", 0),
                 result.get("proposals_generated", 0),
-                result.get("improvements_applied", 0)
+                result.get("improvements_applied", 0),
             )
         except Exception as exc:
             logger.error("Learning Feedback Loop failed: %s", exc, exc_info=True)
@@ -1425,7 +1571,9 @@ class AgentScheduler:
 
             # Also check for revenue report
             report = run_on_main_loop(agent.execute("revenue_report", days=30), timeout=300)
-            logger.info("📊 GumroadRevenueAgent revenue report: total=%s", report.get("total_revenue", 0))
+            logger.info(
+                "📊 GumroadRevenueAgent revenue report: total=%s", report.get("total_revenue", 0)
+            )
         except Exception as exc:
             logger.error("GumroadRevenueAgent failed: %s", exc, exc_info=True)
 
@@ -1476,8 +1624,11 @@ class AgentScheduler:
                 run_on_main_loop(factory.initialize(), timeout=300)
             # Run all pipelines
             result = run_on_main_loop(factory.run_all_pipelines(), timeout=600)
-            logger.info("💰 RevenuePipelineFactory completed: %d pipelines, %d leads generated",
-                       result.get("pipelines_run", 0), result.get("total_leads", 0))
+            logger.info(
+                "💰 RevenuePipelineFactory completed: %d pipelines, %d leads generated",
+                result.get("pipelines_run", 0),
+                result.get("total_leads", 0),
+            )
         except Exception as exc:
             logger.error("RevenuePipelineFactory failed: %s", exc, exc_info=True)
 
@@ -1488,8 +1639,11 @@ class AgentScheduler:
             return
         try:
             result = run_on_main_loop(process_platform_cross_sells(), timeout=300)
-            logger.info("📧 Platform Cross-Sell completed: MRG=%d, BSS=%d enrolled",
-                       result.get("mrg_enrolled", 0), result.get("bss_enrolled", 0))
+            logger.info(
+                "📧 Platform Cross-Sell completed: MRG=%d, BSS=%d enrolled",
+                result.get("mrg_enrolled", 0),
+                result.get("bss_enrolled", 0),
+            )
         except Exception as exc:
             logger.error("Platform Cross-Sell failed: %s", exc, exc_info=True)
 
@@ -1501,7 +1655,10 @@ class AgentScheduler:
         try:
             reporting_system = get_automated_reporting_system()
             report_ids = run_on_main_loop(reporting_system.execute_scheduled_reports(), timeout=300)
-            logger.info("📊 Daily Reports executed: %d reports generated", len(report_ids) if report_ids else 0)
+            logger.info(
+                "📊 Daily Reports executed: %d reports generated",
+                len(report_ids) if report_ids else 0,
+            )
         except Exception as exc:
             logger.error("Daily Reports failed: %s", exc, exc_info=True)
 
@@ -1530,7 +1687,9 @@ class AgentScheduler:
             bids = result.get("active_bids", 0)
             logger.info(
                 "Daily WC Report: sent=%s, prospects=%d, active_bids=%d",
-                sent, total, bids,
+                sent,
+                total,
+                bids,
             )
         except Exception as exc:
             logger.error("Daily WC Report failed: %s", exc, exc_info=True)
@@ -1563,9 +1722,7 @@ class AgentScheduler:
         """Auto-clean stuck execution rows so dashboards/metrics stay honest."""
         enabled_env = os.getenv("ENABLE_STUCK_EXECUTION_CLEANUP")
         enable_cleanup = (
-            enabled_env.lower() in ("1", "true", "yes")
-            if enabled_env is not None
-            else True
+            enabled_env.lower() in ("1", "true", "yes") if enabled_env is not None else True
         )
         if not enable_cleanup:
             logger.info("Stuck execution cleanup skipped: ENABLE_STUCK_EXECUTION_CLEANUP disabled")
@@ -1603,7 +1760,7 @@ class AgentScheduler:
         # Register Invariant Monitor (Sentinel)
         try:
             from invariant_monitor import check_invariants
-            
+
             async def run_invariant_monitor():
                 await check_invariants()
 
@@ -1718,7 +1875,9 @@ class AgentScheduler:
                 job_id = "revenue_pipeline_factory"
                 self.scheduler.add_job(
                     func=self._run_revenue_pipeline_factory,
-                    trigger=IntervalTrigger(hours=6),  # Run every 6 hours to generate leads and content
+                    trigger=IntervalTrigger(
+                        hours=6
+                    ),  # Run every 6 hours to generate leads and content
                     id=job_id,
                     name="Revenue Pipeline Factory",
                     replace_existing=True,
@@ -1881,7 +2040,9 @@ class AgentScheduler:
             try:
                 job_id = "stuck_execution_cleanup"
                 try:
-                    interval_minutes = int(os.getenv("STUCK_EXECUTION_CLEANUP_INTERVAL_MINUTES", "10"))
+                    interval_minutes = int(
+                        os.getenv("STUCK_EXECUTION_CLEANUP_INTERVAL_MINUTES", "10")
+                    )
                 except Exception:
                     interval_minutes = 10
                 if interval_minutes < 5:
@@ -1900,7 +2061,9 @@ class AgentScheduler:
                     "frequency_minutes": interval_minutes,
                     "added_at": datetime.utcnow().isoformat(),
                 }
-                logger.info("✅ Scheduled stuck execution cleanup every %d minutes", interval_minutes)
+                logger.info(
+                    "✅ Scheduled stuck execution cleanup every %d minutes", interval_minutes
+                )
             except Exception as exc:
                 logger.error("Failed to schedule stuck execution cleanup: %s", exc, exc_info=True)
 
@@ -1928,7 +2091,9 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("Failed to schedule RevenueDrive: %s", exc, exc_info=True)
 
-    def add_schedule(self, agent_id: str, agent_name: str, frequency_minutes: int, schedule_id: str = None):
+    def add_schedule(
+        self, agent_id: str, agent_name: str, frequency_minutes: int, schedule_id: str = None
+    ):
         """Add an agent to the scheduler"""
         try:
             job_id = schedule_id or str(uuid.uuid4())
@@ -1940,17 +2105,19 @@ class AgentScheduler:
                 args=[agent_id, agent_name],
                 id=job_id,
                 name=f"Agent: {agent_name}",
-                replace_existing=True
+                replace_existing=True,
             )
 
             self.registered_jobs[job_id] = {
                 "agent_id": agent_id,
                 "agent_name": agent_name,
                 "frequency_minutes": frequency_minutes,
-                "added_at": datetime.utcnow().isoformat()
+                "added_at": datetime.utcnow().isoformat(),
             }
 
-            logger.info(f"✅ Scheduled agent {agent_name} (ID: {job_id}) to run every {frequency_minutes} minutes")
+            logger.info(
+                f"✅ Scheduled agent {agent_name} (ID: {job_id}) to run every {frequency_minutes} minutes"
+            )
 
         except Exception as e:
             logger.error(f"❌ Error adding schedule for {agent_name}: {e}", exc_info=True)
@@ -1997,10 +2164,10 @@ class AgentScheduler:
                 {
                     "id": job_id,
                     "agent": job_info["agent_name"],
-                    "frequency_minutes": job_info["frequency_minutes"]
+                    "frequency_minutes": job_info["frequency_minutes"],
                 }
                 for job_id, job_info in self.registered_jobs.items()
-            ]
+            ],
         }
 
 
@@ -2031,21 +2198,23 @@ def create_execution_table(db_config: dict):
 # Example usage
 if __name__ == "__main__":
     # Configure database
-    db_password = os.getenv('DB_PASSWORD')
+    db_password = os.getenv("DB_PASSWORD")
     if not db_password:
-        raise RuntimeError("DB_PASSWORD environment variable is required for agent scheduler startup.")
+        raise RuntimeError(
+            "DB_PASSWORD environment variable is required for agent scheduler startup."
+        )
 
     # All credentials MUST come from environment variables - no hardcoded defaults
-    db_host = os.getenv('DB_HOST')
-    db_user = os.getenv('DB_USER')
+    db_host = os.getenv("DB_HOST")
+    db_user = os.getenv("DB_USER")
     if not all([db_host, db_user, db_password]):
         raise RuntimeError("DB_HOST, DB_USER, and DB_PASSWORD environment variables are required")
     DB_CONFIG = {
-        'host': db_host,
-        'database': os.getenv('DB_NAME', 'postgres'),
-        'user': db_user,
-        'password': db_password,
-        'port': int(os.getenv('DB_PORT', 5432))
+        "host": db_host,
+        "database": os.getenv("DB_NAME", "postgres"),
+        "user": db_user,
+        "password": db_password,
+        "port": int(os.getenv("DB_PORT", 5432)),
     }
 
     # Create execution table
