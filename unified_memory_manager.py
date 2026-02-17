@@ -132,29 +132,26 @@ class UnifiedMemoryManager:
                     yield None
                     return
                 self._current_conn = conn  # Store for backward compat
+                # Disable autocommit so SET LOCAL + query share one transaction.
+                # Supavisor transaction-mode pooling assigns backend connections
+                # per-transaction, so autocommit (1 stmt = 1 txn) loses the GUC.
+                prev_autocommit = conn.autocommit
+                conn.autocommit = False
                 try:
                     cursor = conn.cursor(cursor_factory=RealDictCursor)
-                    # Set tenant context for RLS — without this, all rows are filtered out.
-                    # Pool uses autocommit=True so SET LOCAL (transaction-scoped) won't persist.
-                    # Use set_config(..., false) for session-level scope instead, then reset after.
                     if self.tenant_id:
                         cursor.execute(
-                            "SELECT set_config('app.current_tenant_id', %s, false)",
+                            "SELECT set_config('app.current_tenant_id', %s, true)",
                             [self.tenant_id],
                         )
                     yield cursor
+                    conn.commit()
                     cursor.close()
+                except Exception:
+                    conn.rollback()
+                    raise
                 finally:
-                    # Reset session-level tenant context to prevent cross-request leaks
-                    try:
-                        if self.tenant_id:
-                            reset_cur = conn.cursor()
-                            reset_cur.execute(
-                                "SELECT set_config('app.current_tenant_id', '', false)"
-                            )
-                            reset_cur.close()
-                    except Exception:
-                        pass
+                    conn.autocommit = prev_autocommit
                     self._current_conn = None
 
         return cursor_context()
