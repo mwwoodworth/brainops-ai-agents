@@ -241,7 +241,7 @@ class NotificationService:
         self.slack_webhook = os.getenv("SLACK_WEBHOOK_URL")
         self.email_api_key = os.getenv("SENDGRID_API_KEY")
         self.sms_api_key = os.getenv("TWILIO_API_KEY")
-        self.owner_email = os.getenv("OWNER_EMAIL", "matt@weathercraft.com")
+        self.owner_email = os.getenv("OWNER_EMAIL", "matthew@weathercraft.net")
         self.owner_phone = os.getenv("OWNER_PHONE")
 
         # Notification preferences - use string values for JSON serialization

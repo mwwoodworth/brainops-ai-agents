@@ -41,8 +41,12 @@ logger = logging.getLogger(__name__)
 
 # ── Alert configuration ──────────────────────────────────────────────
 RESEND_API_KEY = (os.getenv("RESEND_API_KEY") or "").strip()
-RESEND_FROM_EMAIL = (os.getenv("RESEND_FROM_EMAIL") or "BrainOps Alerts <matt@myroofgenius.com>").strip()
-ALERT_EMAIL = (os.getenv("ALERT_EMAIL") or os.getenv("OWNER_EMAIL") or "matt@weathercraft.com").strip()
+RESEND_FROM_EMAIL = (
+    os.getenv("RESEND_FROM_EMAIL") or "BrainOps Alerts <matt@myroofgenius.com>"
+).strip()
+ALERT_EMAIL = (
+    os.getenv("ALERT_EMAIL") or os.getenv("OWNER_EMAIL") or "matthew@weathercraft.net"
+).strip()
 TWILIO_ACCOUNT_SID = (os.getenv("TWILIO_ACCOUNT_SID") or "").strip()
 TWILIO_AUTH_TOKEN = (os.getenv("TWILIO_AUTH_TOKEN") or "").strip()
 TWILIO_FROM_NUMBER = (os.getenv("TWILIO_FROM_NUMBER") or "").strip()
@@ -72,55 +76,72 @@ class InvariantEngine:
         """Get the database pool (system-level, not tenant-scoped)."""
         if self._pool is None:
             from database.async_connection import get_pool
+
             self._pool = get_pool()
         return self._pool
 
-    async def _persist_violation(self, check_name: str, severity: str,
-                                 message: str, details: dict | None = None) -> str | None:
+    async def _persist_violation(
+        self, check_name: str, severity: str, message: str, details: dict | None = None
+    ) -> str | None:
         """Insert a violation row and return its ID."""
         pool = self._get_pool()
         try:
-            row_id = await pool.fetchval("""
+            row_id = await pool.fetchval(
+                """
                 INSERT INTO invariant_violations (check_name, severity, message, details)
                 VALUES ($1, $2, $3, $4::jsonb)
                 RETURNING id::text
-            """, check_name, severity, message, json.dumps(details or {}))
+            """,
+                check_name,
+                severity,
+                message,
+                json.dumps(details or {}),
+            )
             return row_id
         except Exception as exc:
             logger.error("Failed to persist violation: %s", exc)
             try:
-                await pool.execute("""
+                await pool.execute(
+                    """
                     INSERT INTO unified_brain_logs (system, action, data, created_at)
                     VALUES ($1, $2, $3, NOW())
-                """, "invariant_engine", "violation_detected", json.dumps({
-                    "check": check_name, "severity": severity, "message": message
-                }))
+                """,
+                    "invariant_engine",
+                    "violation_detected",
+                    json.dumps({"check": check_name, "severity": severity, "message": message}),
+                )
             except Exception:
                 pass
             return None
 
-    async def _send_slack_alert(self, severity: str, title: str,
-                                message: str, fields: dict | None = None) -> None:
+    async def _send_slack_alert(
+        self, severity: str, title: str, message: str, fields: dict | None = None
+    ) -> None:
         """Fire Slack alert for critical/high violations."""
         try:
             from slack_notifications import get_slack_notifier
+
             notifier = get_slack_notifier()
             if not notifier.enabled:
                 return
             await notifier.send_alert(
-                title=title, message=message,
-                severity=severity, fields=fields,
+                title=title,
+                message=message,
+                severity=severity,
+                fields=fields,
             )
         except Exception as exc:
             logger.warning("Slack alert failed (non-fatal): %s", exc)
 
-    async def _send_email_alert(self, severity: str, title: str,
-                                message: str, fields: dict | None = None) -> None:
+    async def _send_email_alert(
+        self, severity: str, title: str, message: str, fields: dict | None = None
+    ) -> None:
         """Send email alert via Resend for critical/high violations."""
         if not RESEND_API_KEY or not ALERT_EMAIL:
             return
         try:
             import httpx
+
             color = "#dc2626" if severity == "critical" else "#f59e0b"
             fields_html = ""
             if fields:
@@ -129,9 +150,9 @@ class InvariantEngine:
                 f'<div style="border-left:4px solid {color};padding:12px;margin:8px 0">'
                 f'<h2 style="color:{color};margin:0">[{severity.upper()}] {title}</h2>'
                 f'<p style="margin:8px 0">{message}</p>'
-                f'{fields_html}'
-                f'<hr><small>BrainOps Invariant Engine | {datetime.now(timezone.utc).isoformat()}</small>'
-                f'</div>'
+                f"{fields_html}"
+                f"<hr><small>BrainOps Invariant Engine | {datetime.now(timezone.utc).isoformat()}</small>"
+                f"</div>"
             )
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(
@@ -162,6 +183,7 @@ class InvariantEngine:
             return
         try:
             import httpx
+
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(
                     f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
@@ -179,24 +201,36 @@ class InvariantEngine:
         except Exception as exc:
             logger.warning("SMS alert failed (non-fatal): %s", exc)
 
-    async def _record(self, violations: list, check_name: str,
-                      severity: str, msg: str, details: dict | None = None) -> None:
+    async def _record(
+        self,
+        violations: list,
+        check_name: str,
+        severity: str,
+        msg: str,
+        details: dict | None = None,
+    ) -> None:
         """Record a violation: persist + alert (Slack, email, SMS) + append to run list."""
-        violations.append({
-            "check": check_name, "severity": severity, "message": msg,
-        })
+        violations.append(
+            {
+                "check": check_name,
+                "severity": severity,
+                "message": msg,
+            }
+        )
         vid = await self._persist_violation(check_name, severity, msg, details)
         if severity in ("critical", "high"):
             fields = {"severity": severity, "violation_id": vid or "unknown"}
             await self._send_slack_alert(
                 severity=severity,
                 title=f"Invariant Violation: {check_name}",
-                message=msg, fields=fields,
+                message=msg,
+                fields=fields,
             )
             await self._send_email_alert(
                 severity=severity,
                 title=f"Invariant Violation: {check_name}",
-                message=msg, fields=fields,
+                message=msg,
+                fields=fields,
             )
             await self._send_sms_alert(severity=severity, message=f"{check_name}: {msg}")
 
@@ -209,8 +243,10 @@ class InvariantEngine:
         try:
             current_user = await pool.fetchval("SELECT current_user")
             if current_user != self.EXPECTED_AGENT_USER:
-                await self._record(violations,
-                    "runtime_identity", "critical",
+                await self._record(
+                    violations,
+                    "runtime_identity",
+                    "critical",
                     f"Agents running as '{current_user}', expected '{self.EXPECTED_AGENT_USER}'",
                     {"current_user": current_user},
                 )
@@ -225,8 +261,10 @@ class InvariantEngine:
                 "SELECT has_table_privilege($1, 'users', 'DELETE')", current_user
             )
             if can_delete:
-                await self._record(violations,
-                    "privilege_escalation", "critical",
+                await self._record(
+                    violations,
+                    "privilege_escalation",
+                    "critical",
                     f"User '{current_user}' has DELETE on users table",
                 )
         except Exception as exc:
@@ -235,12 +273,12 @@ class InvariantEngine:
     async def _check_orphaned_invoices(self, pool, violations: list) -> None:
         """Check 3: No invoices with NULL tenant_id."""
         try:
-            orphans = await pool.fetchval(
-                "SELECT count(*) FROM invoices WHERE tenant_id IS NULL"
-            )
+            orphans = await pool.fetchval("SELECT count(*) FROM invoices WHERE tenant_id IS NULL")
             if orphans and orphans > 0:
-                await self._record(violations,
-                    "orphaned_invoices", "high",
+                await self._record(
+                    violations,
+                    "orphaned_invoices",
+                    "high",
                     f"{orphans} invoices with NULL tenant_id",
                     {"count": orphans},
                 )
@@ -250,15 +288,19 @@ class InvariantEngine:
     async def _check_cross_tenant_mismatch(self, pool, violations: list) -> None:
         """Check 4: Jobs linked to correct tenant customers."""
         try:
-            mismatches = await pool.fetchval("""
+            mismatches = await pool.fetchval(
+                """
                 SELECT count(*)
                 FROM jobs j
                 JOIN customers c ON j.customer_id = c.id
                 WHERE j.tenant_id != c.tenant_id
-            """)
+            """
+            )
             if mismatches and mismatches > 0:
-                await self._record(violations,
-                    "cross_tenant_mismatch", "critical",
+                await self._record(
+                    violations,
+                    "cross_tenant_mismatch",
+                    "critical",
                     f"{mismatches} jobs linked to cross-tenant customers",
                     {"count": mismatches},
                 )
@@ -268,15 +310,19 @@ class InvariantEngine:
     async def _check_stuck_webhooks(self, pool, violations: list) -> None:
         """Check 5: No webhooks stuck in processing > 1 hour."""
         try:
-            stuck = await pool.fetchval("""
+            stuck = await pool.fetchval(
+                """
                 SELECT count(*)
                 FROM stripe_webhook_events
                 WHERE status = 'processing'
                   AND created_at < NOW() - INTERVAL '1 hour'
-            """)
+            """
+            )
             if stuck and stuck > 0:
-                await self._record(violations,
-                    "stuck_webhooks", "warning",
+                await self._record(
+                    violations,
+                    "stuck_webhooks",
+                    "warning",
                     f"{stuck} webhooks stuck in 'processing' for >1 hour",
                     {"count": stuck},
                 )
@@ -286,7 +332,8 @@ class InvariantEngine:
     async def _check_rls_no_policies(self, pool, violations: list) -> None:
         """Check 6: No tables with RLS enabled but zero policies."""
         try:
-            uncovered = await pool.fetch("""
+            uncovered = await pool.fetch(
+                """
                 SELECT c.relname as table_name
                 FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -297,11 +344,14 @@ class InvariantEngine:
                       SELECT 1 FROM pg_policies p
                       WHERE p.schemaname = 'public' AND p.tablename = c.relname
                   )
-            """)
+            """
+            )
             if uncovered:
                 table_names = [r["table_name"] for r in uncovered]
-                await self._record(violations,
-                    "rls_no_policies", "high",
+                await self._record(
+                    violations,
+                    "rls_no_policies",
+                    "high",
                     f"{len(uncovered)} tables have RLS enabled with ZERO policies",
                     {"tables": table_names[:20]},
                 )
@@ -320,21 +370,22 @@ class InvariantEngine:
             "spatial_ref_sys",
         }
         try:
-            no_rls = await pool.fetch("""
+            no_rls = await pool.fetch(
+                """
                 SELECT c.relname as table_name
                 FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace
                 WHERE n.nspname = 'public'
                   AND c.relkind = 'r'
                   AND c.relrowsecurity = false
-            """)
-            new_tables = [
-                r["table_name"] for r in no_rls
-                if r["table_name"] not in known_no_rls
-            ]
+            """
+            )
+            new_tables = [r["table_name"] for r in no_rls if r["table_name"] not in known_no_rls]
             if new_tables:
-                await self._record(violations,
-                    "rls_disabled_new", "high",
+                await self._record(
+                    violations,
+                    "rls_disabled_new",
+                    "high",
                     f"{len(new_tables)} NEW table(s) without RLS detected",
                     {"tables": new_tables[:20]},
                 )
@@ -344,7 +395,8 @@ class InvariantEngine:
     async def _check_invoice_line_item_mismatch(self, pool, violations: list) -> None:
         """Check 8: Invoice total matches sum of line items."""
         try:
-            mismatches = await pool.fetchval("""
+            mismatches = await pool.fetchval(
+                """
                 SELECT count(*)
                 FROM (
                     SELECT i.id
@@ -353,10 +405,13 @@ class InvariantEngine:
                     GROUP BY i.id, i.total_amount
                     HAVING ABS(i.total_amount - COALESCE(SUM(ii.total_price), 0)) > 0.01
                 ) AS mismatches
-            """)
+            """
+            )
             if mismatches and mismatches > 0:
-                await self._record(violations,
-                    "invoice_line_item_mismatch", "high",
+                await self._record(
+                    violations,
+                    "invoice_line_item_mismatch",
+                    "high",
                     f"{mismatches} invoices have total_amount != sum of line items",
                     {"count": mismatches},
                 )
@@ -366,12 +421,12 @@ class InvariantEngine:
     async def _check_negative_invoices(self, pool, violations: list) -> None:
         """Check 9: No negative invoice amounts."""
         try:
-            negative = await pool.fetchval(
-                "SELECT count(*) FROM invoices WHERE total_amount < 0"
-            )
+            negative = await pool.fetchval("SELECT count(*) FROM invoices WHERE total_amount < 0")
             if negative and negative > 0:
-                await self._record(violations,
-                    "negative_invoices", "high",
+                await self._record(
+                    violations,
+                    "negative_invoices",
+                    "high",
                     f"{negative} invoices have negative total_amount",
                     {"count": negative},
                 )
@@ -385,8 +440,10 @@ class InvariantEngine:
                 "SELECT count(*) FROM real_revenue_tracking WHERE is_demo IS NULL"
             )
             if unmarked and unmarked > 0:
-                await self._record(violations,
-                    "revenue_demo_flag_missing", "warning",
+                await self._record(
+                    violations,
+                    "revenue_demo_flag_missing",
+                    "warning",
                     f"{unmarked} rows in real_revenue_tracking have NULL is_demo flag",
                     {"count": unmarked},
                 )
@@ -400,31 +457,41 @@ class InvariantEngine:
         (e.g., someone grants it superuser or additional roles).
         """
         try:
-            memberships = await pool.fetch("""
+            memberships = await pool.fetch(
+                """
                 SELECT r.rolname
                 FROM pg_auth_members m
                 JOIN pg_roles r ON r.oid = m.roleid
                 JOIN pg_roles u ON u.oid = m.member
                 WHERE u.rolname = 'agent_worker'
-            """)
+            """
+            )
             current_roles = {r["rolname"] for r in memberships}
             unexpected = current_roles - self.EXPECTED_ROLE_MEMBERSHIPS
             if unexpected:
-                await self._record(violations,
-                    "role_drift", "critical",
+                await self._record(
+                    violations,
+                    "role_drift",
+                    "critical",
                     f"agent_worker has unexpected role memberships: {unexpected}",
-                    {"expected": list(self.EXPECTED_ROLE_MEMBERSHIPS),
-                     "actual": list(current_roles),
-                     "unexpected": list(unexpected)},
+                    {
+                        "expected": list(self.EXPECTED_ROLE_MEMBERSHIPS),
+                        "actual": list(current_roles),
+                        "unexpected": list(unexpected),
+                    },
                 )
             missing = self.EXPECTED_ROLE_MEMBERSHIPS - current_roles
             if missing:
-                await self._record(violations,
-                    "role_drift", "high",
+                await self._record(
+                    violations,
+                    "role_drift",
+                    "high",
                     f"agent_worker MISSING expected role memberships: {missing}",
-                    {"expected": list(self.EXPECTED_ROLE_MEMBERSHIPS),
-                     "actual": list(current_roles),
-                     "missing": list(missing)},
+                    {
+                        "expected": list(self.EXPECTED_ROLE_MEMBERSHIPS),
+                        "actual": list(current_roles),
+                        "missing": list(missing),
+                    },
                 )
         except Exception as exc:
             logger.error("Role drift check failed: %s", exc)
@@ -438,30 +505,38 @@ class InvariantEngine:
         """
         try:
             # Check if ai_agent_executions has a correlation_id column
-            has_col = await pool.fetchval("""
+            has_col = await pool.fetchval(
+                """
                 SELECT count(*) FROM information_schema.columns
                 WHERE table_schema = 'public'
                   AND table_name = 'ai_agent_executions'
                   AND column_name = 'correlation_id'
-            """)
+            """
+            )
             if not has_col:
                 # Column doesn't exist yet — skip silently
                 return
 
-            total = await pool.fetchval("""
+            total = await pool.fetchval(
+                """
                 SELECT count(*) FROM ai_agent_executions
                 WHERE created_at > NOW() - INTERVAL '1 hour'
-            """)
-            missing = await pool.fetchval("""
+            """
+            )
+            missing = await pool.fetchval(
+                """
                 SELECT count(*) FROM ai_agent_executions
                 WHERE created_at > NOW() - INTERVAL '1 hour'
                   AND (correlation_id IS NULL OR correlation_id = '')
-            """)
+            """
+            )
             if total and total > 0 and missing and missing > 0:
                 pct = round(missing / total * 100, 1)
                 if pct > 50:
-                    await self._record(violations,
-                        "correlation_missing", "warning",
+                    await self._record(
+                        violations,
+                        "correlation_missing",
+                        "warning",
                         f"{missing}/{total} ({pct}%) agent executions missing correlation_id in last hour",
                         {"total": total, "missing": missing, "percent": pct},
                     )
@@ -471,7 +546,8 @@ class InvariantEngine:
     async def _check_financial_double_count(self, pool, violations: list) -> None:
         """Check 13: No duplicate revenue tracking rows (double-counting)."""
         try:
-            duplicates = await pool.fetchval("""
+            duplicates = await pool.fetchval(
+                """
                 SELECT count(*) FROM (
                     SELECT source_event_id, count(*)
                     FROM real_revenue_tracking
@@ -479,10 +555,13 @@ class InvariantEngine:
                     GROUP BY source_event_id
                     HAVING count(*) > 1
                 ) AS dupes
-            """)
+            """
+            )
             if duplicates and duplicates > 0:
-                await self._record(violations,
-                    "financial_double_count", "high",
+                await self._record(
+                    violations,
+                    "financial_double_count",
+                    "high",
                     f"{duplicates} duplicate source_event_id entries in revenue tracking",
                     {"count": duplicates},
                 )
@@ -495,21 +574,25 @@ class InvariantEngine:
     async def _check_synthetic_canary(self, pool, violations: list) -> bool:
         """Check 14: Synthetic canary drill — proves write/read pipeline alive."""
         try:
-            canary_id = await pool.fetchval("""
+            canary_id = await pool.fetchval(
+                """
                 INSERT INTO invariant_violations
                     (check_name, severity, message, details, resolved, resolved_at)
                 VALUES ('synthetic_canary', 'info',
                         'Synthetic drill -- monitoring pipeline alive',
                         '{"drill": true}'::jsonb, true, NOW())
                 RETURNING id::text
-            """)
+            """
+            )
             readback = await pool.fetchval(
                 "SELECT id::text FROM invariant_violations WHERE id = $1::uuid",
                 canary_id,
             )
             if readback != canary_id:
-                await self._record(violations,
-                    "canary_readback_failed", "critical",
+                await self._record(
+                    violations,
+                    "canary_readback_failed",
+                    "critical",
                     "Synthetic canary inserted but could not be read back",
                 )
                 return False
@@ -517,8 +600,10 @@ class InvariantEngine:
             return True
         except Exception as exc:
             logger.error("Canary drill failed: %s", exc)
-            await self._record(violations,
-                "canary_drill_error", "critical",
+            await self._record(
+                violations,
+                "canary_drill_error",
+                "critical",
                 f"Synthetic canary drill threw an exception: {exc}",
             )
             return False
@@ -534,25 +619,29 @@ class InvariantEngine:
         Previously-open violations are auto-resolved so they don't accumulate.
         """
         try:
-            resolved = await pool.fetchval("""
+            resolved = await pool.fetchval(
+                """
                 UPDATE invariant_violations
                 SET resolved = true, resolved_at = NOW()
                 WHERE resolved = false
                   AND check_name != 'synthetic_canary'
                 RETURNING count(*)
-            """)
+            """
+            )
             # fetchval on UPDATE RETURNING count(*) may not work; use execute + status
             return 0  # placeholder
         except Exception:
             pass
 
         try:
-            result = await pool.execute("""
+            result = await pool.execute(
+                """
                 UPDATE invariant_violations
                 SET resolved = true, resolved_at = NOW()
                 WHERE resolved = false
                   AND check_name != 'synthetic_canary'
-            """)
+            """
+            )
             # asyncpg returns 'UPDATE N' string
             if result and result.startswith("UPDATE "):
                 return int(result.split()[-1])
@@ -561,14 +650,15 @@ class InvariantEngine:
             logger.warning("Failed to resolve stale violations: %s", exc)
             return 0
 
-    async def _record_validation_run(self, pool, checks_run: int,
-                                     violations: list[dict], duration_ms: int,
-                                     canary_ok: bool) -> None:
+    async def _record_validation_run(
+        self, pool, checks_run: int, violations: list[dict], duration_ms: int, canary_ok: bool
+    ) -> None:
         """Record this monitor cycle in the invariant_validations table."""
         run_id = f"run_{self.run_count}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
         passed = len(violations) == 0
         try:
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO invariant_validations
                     (invariant_id, invariant_name, entity_type, passed,
                      violation_count, sample_violations, validation_query,
@@ -587,14 +677,17 @@ class InvariantEngine:
                 run_id,
                 os.getenv("ENVIRONMENT", "production"),
                 str(duration_ms),
-                json.dumps({
-                    "canary_ok": canary_ok,
-                    "consecutive_clean": self.consecutive_clean,
-                    "total_violations_detected": self.total_violations_detected,
-                }),
+                json.dumps(
+                    {
+                        "canary_ok": canary_ok,
+                        "consecutive_clean": self.consecutive_clean,
+                        "total_violations_detected": self.total_violations_detected,
+                    }
+                ),
             )
-            logger.info("Recorded validation run %s (passed=%s, duration=%dms)",
-                        run_id, passed, duration_ms)
+            logger.info(
+                "Recorded validation run %s (passed=%s, duration=%dms)", run_id, passed, duration_ms
+            )
         except Exception as exc:
             logger.warning("Failed to record validation run: %s", exc)
 
@@ -662,11 +755,15 @@ class InvariantEngine:
 
         if violations:
             for v in violations:
-                logger.error("VIOLATION [%s] %s: %s",
-                             v["severity"], v["check"], v["message"])
+                logger.error("VIOLATION [%s] %s: %s", v["severity"], v["check"], v["message"])
         else:
-            logger.info("All %d invariant checks passed (run #%d, %d consecutive clean, %dms).",
-                        checks_run, self.run_count, self.consecutive_clean, duration_ms)
+            logger.info(
+                "All %d invariant checks passed (run #%d, %d consecutive clean, %dms).",
+                checks_run,
+                self.run_count,
+                self.consecutive_clean,
+                duration_ms,
+            )
 
         return summary
 
@@ -785,7 +882,9 @@ if __name__ == "__main__":
     async def run():
         env = (os.getenv("ENVIRONMENT") or os.getenv("NODE_ENV") or "production").strip().lower()
         if env in {"production", "prod"} and _as_bool(os.getenv("ALLOW_INMEMORY_FALLBACK")):
-            raise RuntimeError("ALLOW_INMEMORY_FALLBACK is forbidden for production invariant checks.")
+            raise RuntimeError(
+                "ALLOW_INMEMORY_FALLBACK is forbidden for production invariant checks."
+            )
 
         config = _pool_config_from_env()
 
