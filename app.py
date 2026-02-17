@@ -271,6 +271,7 @@ from api.digital_twin import router as digital_twin_router
 from api.e2e_verification import router as e2e_verification_router
 from api.logistics import router as logistics_router
 from api.infrastructure import router as infrastructure_router
+from api.real_ops import router as real_ops_router  # Real Operations: health, OODA, briefing
 from api.gumroad_webhook import router as gumroad_router
 from api.stripe_webhook import (
     router as stripe_webhook_router,
@@ -2333,6 +2334,9 @@ app.include_router(
 app.include_router(
     infrastructure_router, dependencies=SECURED_DEPENDENCIES
 )  # Self-Provisioning Infra
+app.include_router(
+    real_ops_router, dependencies=SECURED_DEPENDENCIES
+)  # Real Operations: health, OODA, briefing, alerts
 app.include_router(
     revenue_automation_router, dependencies=SECURED_DEPENDENCIES
 )  # Revenue Automation Engine

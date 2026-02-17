@@ -159,8 +159,8 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.24.0"
-        )  # AI OS Awakening Phase 1: Kill theater, keep real
+            "VERSION", "v11.25.0"
+        )  # AI OS Awakening Phase 4: Real action engine, OODA decide+act, briefing
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "10000"))
