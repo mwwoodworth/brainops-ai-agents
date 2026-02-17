@@ -86,7 +86,13 @@ class UnifiedMemoryManager:
     def __init__(self, tenant_id: Optional[str] = None):
         self.embedding_cache = {}
         self.consolidation_threshold = 0.85  # Similarity threshold for consolidation
-        self.tenant_id = tenant_id or os.getenv("TENANT_ID") or os.getenv("DEFAULT_TENANT_ID")
+        # Resolve tenant_id: explicit > env var > hardcoded fallback (Weathercraft primary tenant)
+        self.tenant_id = (
+            tenant_id
+            or os.getenv("TENANT_ID")
+            or os.getenv("DEFAULT_TENANT_ID")
+            or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"  # Weathercraft primary tenant fallback
+        )
         self._pool = None
         self._init_pool()
 

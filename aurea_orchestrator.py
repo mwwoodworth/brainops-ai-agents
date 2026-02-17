@@ -27,6 +27,7 @@ from psycopg2.extras import Json, RealDictCursor
 # ============================================================================
 try:
     from database.sync_pool import get_sync_pool
+
     _POOL_AVAILABLE = True
 except ImportError:
     _POOL_AVAILABLE = False
@@ -64,12 +65,13 @@ from unified_memory_manager import Memory, MemoryType, get_memory_manager
 # Consciousness Emergence - The Next Frontier
 try:
     from consciousness_emergence import get_consciousness, ConsciousnessEmergenceController
+
     CONSCIOUSNESS_AVAILABLE = True
 except ImportError:
     CONSCIOUSNESS_AVAILABLE = False
     ConsciousnessEmergenceController = None
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 
 def json_safe_serialize(obj: Any) -> Any:
@@ -85,10 +87,11 @@ def json_safe_serialize(obj: Any) -> Any:
     elif isinstance(obj, bytes):
         # Convert bytes to base64 string to avoid bytea interpretation errors
         import base64
-        return base64.b64encode(obj).decode('utf-8')
+
+        return base64.b64encode(obj).decode("utf-8")
     elif isinstance(obj, (int, float, str, bool)):
         return obj
-    elif hasattr(obj, '__dataclass_fields__'):
+    elif hasattr(obj, "__dataclass_fields__"):
         # Handle dataclasses
         return {k: json_safe_serialize(v) for k, v in obj.__dict__.items()}
     elif isinstance(obj, dict):
@@ -97,7 +100,7 @@ def json_safe_serialize(obj: Any) -> Any:
         return [json_safe_serialize(item) for item in obj]
     elif isinstance(obj, tuple):
         return list(json_safe_serialize(item) for item in obj)
-    elif hasattr(obj, '__dict__'):
+    elif hasattr(obj, "__dict__"):
         return json_safe_serialize(obj.__dict__)
     else:
         # Fallback: convert to string
@@ -110,10 +113,10 @@ MCP_API_KEY = (os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "").
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-logger = logging.getLogger('AUREA')
+logger = logging.getLogger("AUREA")
+
 
 # Database configuration - supports both individual env vars and DATABASE_URL
 def _get_db_config():
@@ -128,48 +131,51 @@ def _get_db_config():
 
     # Fallback to DATABASE_URL if individual vars not set
     if not all([db_host, db_user, db_password]):
-        database_url = os.getenv('DATABASE_URL', '')
+        database_url = os.getenv("DATABASE_URL", "")
         if database_url:
             parsed = urlparse(database_url)
-            db_host = parsed.hostname or ''
-            db_name = parsed.path.lstrip('/') if parsed.path else 'postgres'
-            db_user = parsed.username or ''
-            db_password = parsed.password or ''
-            db_port = str(parsed.port) if parsed.port else '5432'
+            db_host = parsed.hostname or ""
+            db_name = parsed.path.lstrip("/") if parsed.path else "postgres"
+            db_user = parsed.username or ""
+            db_password = parsed.password or ""
+            db_port = str(parsed.port) if parsed.port else "5432"
 
     if not all([db_host, db_user, db_password]):
         raise RuntimeError("Missing required: DB_HOST/DB_USER/DB_PASSWORD or DATABASE_URL")
 
     return {
-        'host': db_host,
-        'database': db_name,
-        'user': db_user,
-        'password': db_password,
-        'port': int(db_port)
+        "host": db_host,
+        "database": db_name,
+        "user": db_user,
+        "password": db_password,
+        "port": int(db_port),
     }
+
 
 DB_CONFIG = _get_db_config()
 
 
 class DecisionType(Enum):
     """Types of decisions AUREA can make"""
-    STRATEGIC = "strategic"          # Long-term business decisions
-    OPERATIONAL = "operational"      # Day-to-day operations
-    TACTICAL = "tactical"            # Short-term optimizations
-    EMERGENCY = "emergency"          # Crisis response
-    FINANCIAL = "financial"          # Money-related decisions
-    CUSTOMER = "customer"            # Customer-facing decisions
-    TECHNICAL = "technical"          # System and infrastructure
-    LEARNING = "learning"            # Self-improvement decisions
+
+    STRATEGIC = "strategic"  # Long-term business decisions
+    OPERATIONAL = "operational"  # Day-to-day operations
+    TACTICAL = "tactical"  # Short-term optimizations
+    EMERGENCY = "emergency"  # Crisis response
+    FINANCIAL = "financial"  # Money-related decisions
+    CUSTOMER = "customer"  # Customer-facing decisions
+    TECHNICAL = "technical"  # System and infrastructure
+    LEARNING = "learning"  # Self-improvement decisions
 
 
 class AutonomyLevel(Enum):
     """Levels of autonomous operation"""
-    MANUAL = 0        # Human operates, AI observes
-    ASSISTED = 25     # AI suggests, human decides
-    SUPERVISED = 50   # AI acts, human can veto
-    AUTONOMOUS = 75   # AI acts, human monitors
-    FULL_AUTO = 100   # AI decides everything autonomously
+
+    MANUAL = 0  # Human operates, AI observes
+    ASSISTED = 25  # AI suggests, human decides
+    SUPERVISED = 50  # AI acts, human can veto
+    AUTONOMOUS = 75  # AI acts, human monitors
+    FULL_AUTO = 100  # AI decides everything autonomously
     # Backwards-compatible aliases
     SEMI_AUTO = 50
     MOSTLY_AUTO = 75
@@ -178,6 +184,7 @@ class AutonomyLevel(Enum):
 @dataclass
 class Decision:
     """A decision made by AUREA"""
+
     id: str
     type: DecisionType
     description: str
@@ -194,6 +201,7 @@ class Decision:
 @dataclass
 class SystemHealth:
     """Overall system health metrics"""
+
     overall_score: float  # 0-100
     component_health: dict[str, float]
     active_agents: int
@@ -207,6 +215,7 @@ class SystemHealth:
 @dataclass
 class CycleMetrics:
     """Metrics for a single OODA loop cycle"""
+
     cycle_number: int
     timestamp: datetime
     observations_count: int
@@ -226,6 +235,7 @@ class CycleMetrics:
 @dataclass
 class AutonomousGoal:
     """A goal set by AUREA autonomously based on system state"""
+
     id: str
     goal_type: str  # performance, efficiency, revenue, quality, learning
     description: str
@@ -248,7 +258,7 @@ class AUREA:
         self,
         autonomy_level: AutonomyLevel = AutonomyLevel.SUPERVISED,
         tenant_id: Optional[str] = None,
-        db_pool: Optional[Any] = None  # Async database pool injection
+        db_pool: Optional[Any] = None,  # Async database pool injection
     ):
         if not tenant_id:
             raise ValueError("tenant_id is required for AUREA")
@@ -263,7 +273,9 @@ class AUREA:
         if self.live_mode:
             logger.info("🚀 AUREA LIVE MODE ENABLED - Real autonomous actions will be executed")
         else:
-            logger.info("🔒 AUREA in protected mode - Outreach actions are dry_run (set AUREA_LIVE_MODE=true to enable)")
+            logger.info(
+                "🔒 AUREA in protected mode - Outreach actions are dry_run (set AUREA_LIVE_MODE=true to enable)"
+            )
 
         self.memory = get_memory_manager()
         self.activation_system = get_activation_system(tenant_id)
@@ -272,7 +284,9 @@ class AUREA:
         self.safety_ref: Optional[SelfAwareAI] = None
         self.revenue_ref: Optional[AutonomousRevenueSystem] = None
         self.knowledge_ref: Optional[AIKnowledgeGraph] = None
-        self.consciousness_ref: Optional[ConsciousnessEmergenceController] = None  # Consciousness layer
+        self.consciousness_ref: Optional[
+            ConsciousnessEmergenceController
+        ] = None  # Consciousness layer
         self.brain: UnifiedBrain = get_brain()
         self.running = False
         self.cycle_count = 0
@@ -292,7 +306,9 @@ class AUREA:
         self._last_recommended_action_at: dict[str, datetime] = {}
         self._init_database()
 
-        logger.info(f"🧠 AUREA initialized for tenant {tenant_id} at autonomy level: {autonomy_level.name}")
+        logger.info(
+            f"🧠 AUREA initialized for tenant {tenant_id} at autonomy level: {autonomy_level.name}"
+        )
 
     def _recommended_action_cooldown_seconds(self, action: str, default_seconds: int) -> int:
         env_key = f"AUREA_ACTION_COOLDOWN_SECONDS_{action.upper()}"
@@ -333,6 +349,7 @@ class AUREA:
             return None
         try:
             from database.async_connection import get_pool
+
             return get_pool()
         except Exception as exc:
             logger.debug("Shared pool unavailable: %s", exc, exc_info=True)
@@ -341,7 +358,7 @@ class AUREA:
     @property
     def mcp(self) -> MCPClient:
         """Get singleton MCPClient - the centralized MCP Bridge integration"""
-        if not hasattr(self, '_mcp_client') or self._mcp_client is None:
+        if not hasattr(self, "_mcp_client") or self._mcp_client is None:
             self._mcp_client = get_mcp_client()
         return self._mcp_client
 
@@ -394,7 +411,7 @@ class AUREA:
         import re
 
         # Find all $N placeholders in order of appearance
-        placeholders = re.findall(r'\$(\d+)', query)
+        placeholders = re.findall(r"\$(\d+)", query)
 
         if not placeholders:
             return query, args
@@ -410,7 +427,7 @@ class AUREA:
                 expanded_args.append(None)
 
         # Replace all $N with %s
-        converted_query = re.sub(r'\$\d+', '%s', query)
+        converted_query = re.sub(r"\$\d+", "%s", query)
 
         return converted_query, tuple(expanded_args)
 
@@ -568,6 +585,12 @@ class AUREA:
                 if not conn:
                     return False
                 cur = conn.cursor()
+                # Set tenant context for RLS (agent_worker has NOBYPASSRLS)
+                if self.tenant_id:
+                    cur.execute(
+                        "SELECT set_config('app.current_tenant_id', %s, true)",
+                        (self.tenant_id,),
+                    )
                 cur.execute(query, params)
                 conn.commit()
                 cur.close()
@@ -583,11 +606,7 @@ class AUREA:
         return s[: max_len - 3] + "..."
 
     def _compact_rows(
-        self,
-        rows: list[dict[str, Any]],
-        *,
-        max_rows: int = 30,
-        max_field_len: int = 600
+        self, rows: list[dict[str, Any]], *, max_rows: int = 30, max_field_len: int = 600
     ) -> list[dict[str, Any]]:
         compacted: list[dict[str, Any]] = []
         for row in (rows or [])[:max_rows]:
@@ -614,7 +633,13 @@ class AUREA:
     def _extract_keywords(self, signals: list[dict[str, Any]]) -> list[str]:
         keywords: list[str] = []
         for s in signals or []:
-            for key in ("affected_components", "components", "component", "metric_name", "agent_name"):
+            for key in (
+                "affected_components",
+                "components",
+                "component",
+                "metric_name",
+                "agent_name",
+            ):
                 v = s.get(key)
                 if isinstance(v, list):
                     keywords.extend([str(x) for x in v if x])
@@ -665,12 +690,12 @@ class AUREA:
         If tables are missing, AUREA logs an error and degrades gracefully.
         """
         required_tables = [
-            'aurea_decisions',
-            'aurea_state',
-            'aurea_learning',
-            'aurea_cycle_metrics',
-            'aurea_autonomous_goals',
-            'aurea_patterns',
+            "aurea_decisions",
+            "aurea_state",
+            "aurea_learning",
+            "aurea_cycle_metrics",
+            "aurea_autonomous_goals",
+            "aurea_patterns",
         ]
         try:
             with _get_pooled_connection() as conn:
@@ -678,7 +703,7 @@ class AUREA:
                 cur.execute(
                     "SELECT COUNT(*) FROM information_schema.tables "
                     "WHERE table_schema = 'public' AND table_name = ANY(%s)",
-                    (required_tables,)
+                    (required_tables,),
                 )
                 found = cur.fetchone()[0]
                 cur.close()
@@ -687,10 +712,13 @@ class AUREA:
                 logger.error(
                     "Required AUREA tables missing (found %s/%s). "
                     "Run migrations to create them. AUREA will operate in degraded mode.",
-                    found, len(required_tables)
+                    found,
+                    len(required_tables),
                 )
             else:
-                logger.info("AUREA database tables verified (%s/%s present)", found, len(required_tables))
+                logger.info(
+                    "AUREA database tables verified (%s/%s present)", found, len(required_tables)
+                )
 
         except Exception as e:
             logger.error("Failed to verify AUREA database tables: %s", e)
@@ -708,37 +736,49 @@ class AUREA:
 
                 # Phase 1: Observe - Check all triggers and gather data
                 observations = await self._observe()
-                self._store_state_snapshot("observe", {
-                    "cycle": self.cycle_count,
-                    "observations_count": len(observations),
-                    "observations": observations[:10]  # Limit for storage
-                })
+                self._store_state_snapshot(
+                    "observe",
+                    {
+                        "cycle": self.cycle_count,
+                        "observations_count": len(observations),
+                        "observations": observations[:10],  # Limit for storage
+                    },
+                )
 
                 # Phase 2: Orient - Analyze situation and context
                 context = await self._orient(observations)
-                self._store_state_snapshot("orient", {
-                    "cycle": self.cycle_count,
-                    "priorities_count": len(context.get("priorities", [])),
-                    "risks_count": len(context.get("risks", [])),
-                    "opportunities_count": len(context.get("opportunities", []))
-                })
+                self._store_state_snapshot(
+                    "orient",
+                    {
+                        "cycle": self.cycle_count,
+                        "priorities_count": len(context.get("priorities", [])),
+                        "risks_count": len(context.get("risks", [])),
+                        "opportunities_count": len(context.get("opportunities", [])),
+                    },
+                )
 
                 # Phase 3: Decide - Make decisions based on context
                 decisions = await self._decide(context)
-                self._store_state_snapshot("decide", {
-                    "cycle": self.cycle_count,
-                    "decisions_count": len(decisions),
-                    "decision_types": [d.type.value for d in decisions]
-                })
+                self._store_state_snapshot(
+                    "decide",
+                    {
+                        "cycle": self.cycle_count,
+                        "decisions_count": len(decisions),
+                        "decision_types": [d.type.value for d in decisions],
+                    },
+                )
 
                 # Phase 4: Act - Execute decisions through agents
                 results = await self._act(decisions)
-                self._store_state_snapshot("act", {
-                    "cycle": self.cycle_count,
-                    "results_count": len(results),
-                    "success_count": len([r for r in results if r.get("status") != "failed"]),
-                    "failed_count": len([r for r in results if r.get("status") == "failed"])
-                })
+                self._store_state_snapshot(
+                    "act",
+                    {
+                        "cycle": self.cycle_count,
+                        "results_count": len(results),
+                        "success_count": len([r for r in results if r.get("status") != "failed"]),
+                        "failed_count": len([r for r in results if r.get("status") == "failed"]),
+                    },
+                )
 
                 # Phase 5: Learn - Analyze results and improve
                 await self._learn(results)
@@ -752,9 +792,16 @@ class AUREA:
                         experience = {
                             "cycle": self.cycle_count,
                             "observations": observations[:5],  # Limit for processing
-                            "decisions": [{"type": d.type.value, "description": d.description, "confidence": d.confidence} for d in decisions],
+                            "decisions": [
+                                {
+                                    "type": d.type.value,
+                                    "description": d.description,
+                                    "confidence": d.confidence,
+                                }
+                                for d in decisions
+                            ],
                             "results": results[:5],
-                            "timestamp": datetime.now().isoformat()
+                            "timestamp": datetime.now().isoformat(),
                         }
                         await self.consciousness_ref.process_experience(experience)
                     except Exception as e:
@@ -764,11 +811,19 @@ class AUREA:
                 cycle_time = (datetime.now() - cycle_start).total_seconds()
 
                 # Count patterns detected this cycle
-                patterns_count = len([obs for obs in observations if obs.get("type") == "patterns_detected"])
+                patterns_count = len(
+                    [obs for obs in observations if obs.get("type") == "patterns_detected"]
+                )
 
                 # Count goals achieved and set this cycle
-                goals_achieved = len([g for g in self.autonomous_goals if g.status == "achieved" and
-                                      (datetime.now() - g.created_at).total_seconds() < cycle_time])
+                goals_achieved = len(
+                    [
+                        g
+                        for g in self.autonomous_goals
+                        if g.status == "achieved"
+                        and (datetime.now() - g.created_at).total_seconds() < cycle_time
+                    ]
+                )
                 goals_set = len([obs for obs in observations if obs.get("type") == "goal_progress"])
 
                 # Create comprehensive cycle metrics
@@ -781,12 +836,18 @@ class AUREA:
                     actions_successful=len([r for r in results if r.get("status") != "failed"]),
                     actions_failed=len([r for r in results if r.get("status") == "failed"]),
                     cycle_duration_seconds=cycle_time,
-                    learning_insights_generated=len(self.learning_insights) if self.learning_insights else 0,
+                    learning_insights_generated=len(self.learning_insights)
+                    if self.learning_insights
+                    else 0,
                     health_score=self.system_health.overall_score if self.system_health else 0,
                     autonomy_level=self.autonomy_level.value,
-                    patterns_detected=[obs.get("type", "") for obs in observations if obs.get("type") == "patterns_detected"],
+                    patterns_detected=[
+                        obs.get("type", "")
+                        for obs in observations
+                        if obs.get("type") == "patterns_detected"
+                    ],
                     goals_achieved=goals_achieved,
-                    goals_set=goals_set
+                    goals_set=goals_set,
                 )
 
                 # Store cycle metrics
@@ -797,37 +858,43 @@ class AUREA:
                 await self._store_cycle_metrics(cycle_metrics)
 
                 # Store final cycle state
-                self._store_state_snapshot("cycle_complete", {
-                    "cycle": self.cycle_count,
-                    "cycle_time_seconds": cycle_time,
-                    "observations": len(observations),
-                    "decisions": len(decisions),
-                    "results": len(results),
-                    "patterns_detected": patterns_count,
-                    "goals_achieved": goals_achieved,
-                    "goals_set": goals_set
-                })
+                self._store_state_snapshot(
+                    "cycle_complete",
+                    {
+                        "cycle": self.cycle_count,
+                        "cycle_time_seconds": cycle_time,
+                        "observations": len(observations),
+                        "decisions": len(decisions),
+                        "results": len(results),
+                        "patterns_detected": patterns_count,
+                        "goals_achieved": goals_achieved,
+                        "goals_set": goals_set,
+                    },
+                )
 
                 # Store cycle in memory
-                self.memory.store(Memory(
-                    memory_type=MemoryType.PROCEDURAL,
-                    content={
-                        "cycle": self.cycle_count,
-                        "signals_observed": len(observations),
-                        "decisions": len(decisions),
-                        "actions_executed": len(results),
-                        "cycle_time_seconds": cycle_time,
-                        "autonomy_level": self.autonomy_level.value,
-                        "patterns_detected": patterns_count,
-                        "success_rate": cycle_metrics.actions_successful / max(cycle_metrics.actions_executed, 1)
-                    },
-                    source_system="aurea",
-                    source_agent="orchestrator",
-                    created_by="aurea",
-                    importance_score=0.3,
-                    tags=["orchestration", "cycle"],
-                    tenant_id=self.tenant_id
-                ))
+                self.memory.store(
+                    Memory(
+                        memory_type=MemoryType.PROCEDURAL,
+                        content={
+                            "cycle": self.cycle_count,
+                            "signals_observed": len(observations),
+                            "decisions": len(decisions),
+                            "actions_executed": len(results),
+                            "cycle_time_seconds": cycle_time,
+                            "autonomy_level": self.autonomy_level.value,
+                            "patterns_detected": patterns_count,
+                            "success_rate": cycle_metrics.actions_successful
+                            / max(cycle_metrics.actions_executed, 1),
+                        },
+                        source_system="aurea",
+                        source_agent="orchestrator",
+                        created_by="aurea",
+                        importance_score=0.3,
+                        tags=["orchestration", "cycle"],
+                        tenant_id=self.tenant_id,
+                    )
+                )
 
                 # Log cycle completion
                 if self.cycle_count % 10 == 0:
@@ -857,57 +924,75 @@ class AUREA:
             # Detect patterns from historical data
             patterns_detected = await self._detect_patterns()
             if patterns_detected:
-                observations.append({
-                    "type": "patterns_detected",
-                    "patterns": patterns_detected,
-                    "count": len(patterns_detected),
-                    "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK
-                })
+                observations.append(
+                    {
+                        "type": "patterns_detected",
+                        "patterns": patterns_detected,
+                        "count": len(patterns_detected),
+                        "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK,
+                    }
+                )
             # Check for new customers (ASYNC)
-            new_cust = await self._async_fetchrow("""
+            new_cust = await self._async_fetchrow(
+                """
             SELECT COUNT(*) as count FROM customers
             WHERE created_at > NOW() - INTERVAL '5 minutes'
             AND tenant_id = $1
-            """, self.tenant_id)
-            if new_cust and new_cust.get('count', 0) > 0:
-                observations.append({
-                    "type": "new_customers",
-                    "count": new_cust['count'],
-                    "trigger": BusinessEventType.NEW_CUSTOMER
-                })
+            """,
+                self.tenant_id,
+            )
+            if new_cust and new_cust.get("count", 0) > 0:
+                observations.append(
+                    {
+                        "type": "new_customers",
+                        "count": new_cust["count"],
+                        "trigger": BusinessEventType.NEW_CUSTOMER,
+                    }
+                )
 
             # Check for pending estimates (ASYNC)
-            pending_est = await self._async_fetchrow("""
+            pending_est = await self._async_fetchrow(
+                """
             SELECT COUNT(*) as count, MIN(created_at) as oldest
             FROM estimates WHERE status = 'pending'
             AND tenant_id = $1
-            """, self.tenant_id)
-            if pending_est and pending_est.get('count', 0) > 0:
-                observations.append({
-                    "type": "pending_estimates",
-                    "count": pending_est['count'],
-                    "oldest": pending_est.get('oldest'),
-                    "trigger": BusinessEventType.ESTIMATE_REQUESTED
-                })
+            """,
+                self.tenant_id,
+            )
+            if pending_est and pending_est.get("count", 0) > 0:
+                observations.append(
+                    {
+                        "type": "pending_estimates",
+                        "count": pending_est["count"],
+                        "oldest": pending_est.get("oldest"),
+                        "trigger": BusinessEventType.ESTIMATE_REQUESTED,
+                    }
+                )
 
             # Check for overdue invoices (ASYNC)
-            overdue = await self._async_fetchrow("""
+            overdue = await self._async_fetchrow(
+                """
             SELECT COUNT(*) as count,
                    SUM(COALESCE(balance_cents::numeric/100, 0)) as total_due
             FROM invoices
             WHERE due_date < NOW() AND status != 'paid'
             AND tenant_id = $1
-            """, self.tenant_id)
-            if overdue and overdue.get('count', 0) > 0:
-                observations.append({
-                    "type": "overdue_invoices",
-                    "count": overdue['count'],
-                    "total_due": float(overdue.get('total_due') or 0),
-                    "trigger": BusinessEventType.INVOICE_OVERDUE
-                })
+            """,
+                self.tenant_id,
+            )
+            if overdue and overdue.get("count", 0) > 0:
+                observations.append(
+                    {
+                        "type": "overdue_invoices",
+                        "count": overdue["count"],
+                        "total_due": float(overdue.get("total_due") or 0),
+                        "trigger": BusinessEventType.INVOICE_OVERDUE,
+                    }
+                )
 
             # Check for scheduling conflicts (ASYNC)
-            conflicts = await self._async_fetchrow("""
+            conflicts = await self._async_fetchrow(
+                """
             SELECT COUNT(*) as conflicts FROM jobs j1
             JOIN jobs j2 ON j1.crew_id = j2.crew_id
             WHERE j1.id != j2.id
@@ -915,38 +1000,49 @@ class AUREA:
               AND j1.scheduled_end > j2.scheduled_start
               AND j1.status = 'scheduled' AND j2.status = 'scheduled'
               AND j1.tenant_id = $1 AND j2.tenant_id = $1
-            """, self.tenant_id)
-            if conflicts and conflicts.get('conflicts', 0) > 0:
-                observations.append({
-                    "type": "scheduling_conflicts",
-                    "count": conflicts['conflicts'],
-                    "trigger": BusinessEventType.SCHEDULING_CONFLICT
-                })
+            """,
+                self.tenant_id,
+            )
+            if conflicts and conflicts.get("conflicts", 0) > 0:
+                observations.append(
+                    {
+                        "type": "scheduling_conflicts",
+                        "count": conflicts["conflicts"],
+                        "trigger": BusinessEventType.SCHEDULING_CONFLICT,
+                    }
+                )
 
             # Check system health
             if (datetime.now() - self.last_health_check).total_seconds() > 300:
                 health = await self._check_system_health()
-                observations.append({
-                    "type": "system_health",
-                    "health": health,
-                    "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK
-                })
+                observations.append(
+                    {
+                        "type": "system_health",
+                        "health": health,
+                        "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK,
+                    }
+                )
 
             # Check for customer churn risks (ASYNC)
-            churn = await self._async_fetchrow("""
+            churn = await self._async_fetchrow(
+                """
             SELECT COUNT(*) as at_risk FROM customers c
             WHERE EXISTS (SELECT 1 FROM jobs j WHERE j.customer_id = c.id)
               AND COALESCE(c.last_job_date,
                           (SELECT MAX(scheduled_start) FROM jobs WHERE customer_id = c.id),
                           c.created_at) < NOW() - INTERVAL '90 days'
               AND tenant_id = $1
-            """, self.tenant_id)
-            if churn and churn.get('at_risk', 0) > 0:
-                observations.append({
-                    "type": "churn_risk",
-                    "count": churn['at_risk'],
-                    "trigger": BusinessEventType.CUSTOMER_CHURN_RISK
-                })
+            """,
+                self.tenant_id,
+            )
+            if churn and churn.get("at_risk", 0) > 0:
+                observations.append(
+                    {
+                        "type": "churn_risk",
+                        "count": churn["at_risk"],
+                        "trigger": BusinessEventType.CUSTOMER_CHURN_RISK,
+                    }
+                )
 
         except Exception as e:
             logger.error(f"Observation error: {e}")
@@ -959,26 +1055,34 @@ class AUREA:
                 for app_name, app_url in [
                     ("weathercraft-erp", "https://weathercraft-erp.vercel.app"),
                     ("myroofgenius", "https://myroofgenius.com"),
-                    ("command-center", "https://brainops-command-center.vercel.app")
+                    ("command-center", "https://brainops-command-center.vercel.app"),
                 ]:
                     try:
-                        async with session.get(app_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        async with session.get(
+                            app_url, timeout=aiohttp.ClientTimeout(total=10)
+                        ) as resp:
                             frontend_health["apps"][app_name] = {
                                 "status": "healthy" if resp.status == 200 else "degraded",
-                                "status_code": resp.status
+                                "status_code": resp.status,
                             }
                     except Exception as e:
                         frontend_health["apps"][app_name] = {"status": "down", "error": str(e)}
 
                 # Check if any frontends are down
-                unhealthy_apps = [app for app, data in frontend_health["apps"].items() if data["status"] != "healthy"]
+                unhealthy_apps = [
+                    app
+                    for app, data in frontend_health["apps"].items()
+                    if data["status"] != "healthy"
+                ]
                 if unhealthy_apps:
-                    observations.append({
-                        "type": "frontend_health_issue",
-                        "unhealthy_apps": unhealthy_apps,
-                        "details": frontend_health["apps"],
-                        "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK
-                    })
+                    observations.append(
+                        {
+                            "type": "frontend_health_issue",
+                            "unhealthy_apps": unhealthy_apps,
+                            "details": frontend_health["apps"],
+                            "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK,
+                        }
+                    )
                 else:
                     frontend_health["status"] = "all_healthy"
         except Exception as e:
@@ -987,37 +1091,45 @@ class AUREA:
         # Check autonomous goals progress
         goal_updates = await self._check_goal_progress()
         if goal_updates:
-            observations.append({
-                "type": "goal_progress",
-                "goals_updated": goal_updates,
-                "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK
-            })
+            observations.append(
+                {
+                    "type": "goal_progress",
+                    "goals_updated": goal_updates,
+                    "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK,
+                }
+            )
 
         # Analyze performance trends
         trends = await self._analyze_performance_trends()
         if trends.get("anomalies"):
-            observations.append({
-                "type": "performance_anomaly",
-                "trends": trends,
-                "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK
-            })
+            observations.append(
+                {
+                    "type": "performance_anomaly",
+                    "trends": trends,
+                    "trigger": BusinessEventType.SYSTEM_HEALTH_CHECK,
+                }
+            )
 
         # Active Revenue Generation - Proactively scan for new opportunities
         if self.revenue_ref and self.cycle_count % 5 == 0:  # Every 5 cycles
             try:
                 # Scan for new leads using the revenue system
-                new_leads = await self.revenue_ref.identify_new_leads({
-                    "location": "United States",
-                    "company_size": "small to medium",
-                    "indicators": ["roofing", "contractor", "growth"]
-                })
+                new_leads = await self.revenue_ref.identify_new_leads(
+                    {
+                        "location": "United States",
+                        "company_size": "small to medium",
+                        "indicators": ["roofing", "contractor", "growth"],
+                    }
+                )
                 if new_leads:
-                    observations.append({
-                        "type": "revenue_opportunities",
-                        "leads_found": len(new_leads),
-                        "leads": new_leads[:3],  # Limit for observation
-                        "trigger": BusinessEventType.OPPORTUNITY_DETECTED
-                    })
+                    observations.append(
+                        {
+                            "type": "revenue_opportunities",
+                            "leads_found": len(new_leads),
+                            "leads": new_leads[:3],  # Limit for observation
+                            "trigger": BusinessEventType.OPPORTUNITY_DETECTED,
+                        }
+                    )
                     logger.info(f"💰 Revenue system found {len(new_leads)} potential leads")
             except Exception as e:
                 logger.debug(f"Revenue lead scan: {e}")
@@ -1030,11 +1142,11 @@ class AUREA:
                     "cycle": self.cycle_count,
                     "observation_count": len(observations),
                     "patterns_detected": len(patterns_detected),
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now().isoformat(),
                 },
                 category="aurea_metrics",
                 priority="medium",
-                source="aurea_observe"
+                source="aurea_observe",
             )
         except Exception as e:
             logger.warning(f"Failed to store observations in brain: {e}")
@@ -1055,7 +1167,7 @@ class AUREA:
             "risks": [],
             "opportunities": [],
             "patterns": [],
-            "autonomous_goals": []
+            "autonomous_goals": [],
         }
 
         # Set autonomous goals based on system state
@@ -1065,46 +1177,56 @@ class AUREA:
         # Analyze each observation for priority
         for obs in observations:
             if obs["type"] == "overdue_invoices" and obs["total_due"] > 10000:
-                context["priorities"].append({
-                    "type": "financial",
-                    "description": f"Collect ${obs['total_due']:.2f} in overdue invoices",
-                    "urgency": "high"
-                })
+                context["priorities"].append(
+                    {
+                        "type": "financial",
+                        "description": f"Collect ${obs['total_due']:.2f} in overdue invoices",
+                        "urgency": "high",
+                    }
+                )
 
             elif obs["type"] == "scheduling_conflicts":
-                context["priorities"].append({
-                    "type": "operational",
-                    "description": f"Resolve {obs['count']} scheduling conflicts",
-                    "urgency": "high"
-                })
+                context["priorities"].append(
+                    {
+                        "type": "operational",
+                        "description": f"Resolve {obs['count']} scheduling conflicts",
+                        "urgency": "high",
+                    }
+                )
 
             elif obs["type"] == "churn_risk":
-                context["risks"].append({
-                    "type": "customer",
-                    "description": f"{obs['count']} customers at churn risk",
-                    "impact": "revenue_loss"
-                })
+                context["risks"].append(
+                    {
+                        "type": "customer",
+                        "description": f"{obs['count']} customers at churn risk",
+                        "impact": "revenue_loss",
+                    }
+                )
 
             elif obs["type"] == "pending_estimates":
-                context["opportunities"].append({
-                    "type": "revenue",
-                    "description": f"Convert {obs['count']} pending estimates",
-                    "potential_value": obs['count'] * 5000  # Assume $5k average
-                })
+                context["opportunities"].append(
+                    {
+                        "type": "revenue",
+                        "description": f"Convert {obs['count']} pending estimates",
+                        "potential_value": obs["count"] * 5000,  # Assume $5k average
+                    }
+                )
 
             elif obs["type"] == "frontend_health_issue":
-                context["priorities"].append({
-                    "type": "technical",
-                    "description": f"Frontend apps unhealthy: {', '.join(obs['unhealthy_apps'])}",
-                    "urgency": "critical",
-                    "details": obs.get("details", {})
-                })
+                context["priorities"].append(
+                    {
+                        "type": "technical",
+                        "description": f"Frontend apps unhealthy: {', '.join(obs['unhealthy_apps'])}",
+                        "urgency": "critical",
+                        "details": obs.get("details", {}),
+                    }
+                )
 
         # Recall relevant memories for context
         relevant_memories = self.memory.recall(
             {"context": "decision_making", "observations": observations},
             tenant_id=self.tenant_id,
-            limit=5
+            limit=5,
         )
         context["historical_context"] = relevant_memories
 
@@ -1129,14 +1251,16 @@ class AUREA:
                     alternatives=["send_reminders", "offer_payment_plans", "escalate_to_legal"],
                     requires_human_approval=self.autonomy_level.value < 75,
                     deadline=datetime.now() + timedelta(hours=24),
-                    context={"priority": priority}
+                    context={"priority": priority},
                 )
                 decisions.append(decision)
 
         # Operational decisions
         for priority in context.get("priorities", []):
             if priority["type"] == "operational":
-                if not self._should_emit_recommended_action("activate_scheduling_optimization", 900):
+                if not self._should_emit_recommended_action(
+                    "activate_scheduling_optimization", 900
+                ):
                     continue
                 decision = Decision(
                     id=f"dec-{self.cycle_count}-{len(decisions)}",
@@ -1148,7 +1272,7 @@ class AUREA:
                     alternatives=["manual_rescheduling", "crew_reallocation"],
                     requires_human_approval=self.autonomy_level.value < 50,
                     deadline=datetime.now() + timedelta(hours=2),
-                    context={"priority": priority}
+                    context={"priority": priority},
                 )
                 decisions.append(decision)
 
@@ -1167,7 +1291,7 @@ class AUREA:
                     alternatives=["check_vercel_logs", "redeploy_frontend", "notify_devops"],
                     requires_human_approval=False,  # Auto-investigate technical issues
                     deadline=datetime.now() + timedelta(minutes=30),
-                    context={"priority": priority}
+                    context={"priority": priority},
                 )
                 decisions.append(decision)
 
@@ -1186,7 +1310,7 @@ class AUREA:
                     alternatives=["personal_outreach", "special_offers", "loyalty_program"],
                     requires_human_approval=self.autonomy_level.value < 50,
                     deadline=datetime.now() + timedelta(days=7),
-                    context={"risk": risk}
+                    context={"risk": risk},
                 )
                 decisions.append(decision)
 
@@ -1205,7 +1329,7 @@ class AUREA:
                     alternatives=["follow_up_calls", "discount_offers", "urgency_campaign"],
                     requires_human_approval=self.autonomy_level.value < 75,
                     deadline=datetime.now() + timedelta(days=3),
-                    context={"opportunity": opportunity}
+                    context={"opportunity": opportunity},
                 )
                 decisions.append(decision)
 
@@ -1230,21 +1354,25 @@ class AUREA:
                 if decision.requires_human_approval:
                     approval = await self._request_human_approval(decision)
                     if not approval:
-                        results.append({
-                            "decision_id": decision.id,
-                            "status": "rejected",
-                            "reason": "Human approval denied"
-                        })
+                        results.append(
+                            {
+                                "decision_id": decision.id,
+                                "status": "rejected",
+                                "reason": "Human approval denied",
+                            }
+                        )
                         continue
 
                 # Check if decision was logged to database
                 if not decision.db_id:
                     logger.warning(f"⚠️ Decision {decision.id} has no db_id - skipping execution")
-                    results.append({
-                        "decision_id": decision.id,
-                        "status": "skipped",
-                        "reason": "Decision not logged to database"
-                    })
+                    results.append(
+                        {
+                            "decision_id": decision.id,
+                            "status": "skipped",
+                            "reason": "Decision not logged to database",
+                        }
+                    )
                     continue
 
                 # Execute the decision (ACTIVE mode for internal operations)
@@ -1259,32 +1387,36 @@ class AUREA:
                 logger.info(f"✅ Decision {decision.db_id} executed and marked completed")
 
                 # Store execution in memory
-                self.memory.store(Memory(
-                    memory_type=MemoryType.EPISODIC,
-                    content={
-                        "decision": json_safe_serialize(asdict(decision)),
-                        "execution_result": json_safe_serialize(result),
-                        "timestamp": datetime.now().isoformat()
-                    },
-                    source_system="aurea",
-                    source_agent="executor",
-                    created_by="aurea",
-                    importance_score=0.7,
-                    tags=["decision", "execution", decision.type.value],
-                    tenant_id=self.tenant_id
-                ))
+                self.memory.store(
+                    Memory(
+                        memory_type=MemoryType.EPISODIC,
+                        content={
+                            "decision": json_safe_serialize(asdict(decision)),
+                            "execution_result": json_safe_serialize(result),
+                            "timestamp": datetime.now().isoformat(),
+                        },
+                        source_system="aurea",
+                        source_agent="executor",
+                        created_by="aurea",
+                        importance_score=0.7,
+                        tags=["decision", "execution", decision.type.value],
+                        tenant_id=self.tenant_id,
+                    )
+                )
 
             except Exception as e:
                 logger.error(f"Failed to execute decision {decision.id}: {e}")
                 # Only update database if we have a valid db_id
                 if decision.db_id:
                     await self._update_decision_status(decision.db_id, "failed", {"error": str(e)})
-                results.append({
-                    "decision_id": decision.id,
-                    "db_id": decision.db_id,
-                    "status": "failed",
-                    "error": str(e)
-                })
+                results.append(
+                    {
+                        "decision_id": decision.id,
+                        "db_id": decision.db_id,
+                        "status": "failed",
+                        "error": str(e),
+                    }
+                )
 
         return results
 
@@ -1298,7 +1430,8 @@ class AUREA:
             # Try async first, fallback to sync
             pool = self.db_pool
             if pool is not None:
-                await pool.execute("""
+                await pool.execute(
+                    """
                 UPDATE aurea_decisions
                 SET execution_status = $1::varchar,
                     execution_result = $2::jsonb,
@@ -1308,13 +1441,18 @@ class AUREA:
                     executed_at = NOW(),
                     updated_at = NOW()
                 WHERE id::text = $3::text
-                """, status, safe_json, str(decision_id))
+                """,
+                    status,
+                    safe_json,
+                    str(decision_id),
+                )
                 logger.info(f"✅ Updated decision {decision_id} status to {status} with outcome")
             else:
                 # Sync fallback - uses shared pool
                 with _get_pooled_connection() as conn:
                     cur = conn.cursor()
-                    cur.execute("""
+                    cur.execute(
+                        """
                     UPDATE aurea_decisions
                     SET execution_status = %s,
                         execution_result = %s,
@@ -1324,19 +1462,23 @@ class AUREA:
                         executed_at = NOW(),
                         updated_at = NOW()
                     WHERE id::text = %s
-                    """, (
-                        status,
-                        Json(safe_result) if safe_result else None,
-                        Json(safe_result) if safe_result else None,
-                        status,
-                        status == 'completed',
-                        decision_id
-                    ))
+                    """,
+                        (
+                            status,
+                            Json(safe_result) if safe_result else None,
+                            Json(safe_result) if safe_result else None,
+                            status,
+                            status == "completed",
+                            decision_id,
+                        ),
+                    )
                     rows_updated = cur.rowcount
                     conn.commit()
                     cur.close()
                     if rows_updated > 0:
-                        logger.info(f"✅ Updated decision {decision_id} status to {status} with outcome")
+                        logger.info(
+                            f"✅ Updated decision {decision_id} status to {status} with outcome"
+                        )
                     else:
                         logger.warning(f"⚠️ No decision found with id {decision_id} to update")
 
@@ -1379,7 +1521,9 @@ class AUREA:
         try:
             mcp = self.mcp
             service_id = context.get("service_id", "brainops-ai-agents")
-            result = await mcp.execute_tool(MCPServer.RENDER, "render_trigger_deploy", {"service_id": service_id})
+            result = await mcp.execute_tool(
+                MCPServer.RENDER, "render_trigger_deploy", {"service_id": service_id}
+            )
             logger.info(f"🚀 Triggered deploy via MCP: {result}")
             return {"action": "trigger_deploy", "mcp_result": result, "mode": "active"}
         except Exception as e:
@@ -1391,7 +1535,9 @@ class AUREA:
         try:
             mcp = self.mcp
             service_id = context.get("service_id", "brainops-ai-agents")
-            result = await mcp.execute_tool(MCPServer.RENDER, "render_restart_service", {"service_id": service_id})
+            result = await mcp.execute_tool(
+                MCPServer.RENDER, "render_restart_service", {"service_id": service_id}
+            )
             logger.info(f"🔄 Restarted service via MCP: {result}")
             return {"action": "restart_service", "mcp_result": result, "mode": "active"}
         except Exception as e:
@@ -1403,15 +1549,25 @@ class AUREA:
         dry_run = not self.live_mode  # Only dry_run if NOT in live mode
         result = await self.activation_system.handle_business_event(
             BusinessEventType.INVOICE_OVERDUE,
-            {"context": context, "aurea_initiated": True, "execution_active": True, "dry_run_outreach": dry_run}
+            {
+                "context": context,
+                "aurea_initiated": True,
+                "execution_active": True,
+                "dry_run_outreach": dry_run,
+            },
         )
-        return {"action": "collection_agents", "result": result, "mode": "live" if self.live_mode else "protected", "outreach_protected": dry_run}
+        return {
+            "action": "collection_agents",
+            "result": result,
+            "mode": "live" if self.live_mode else "protected",
+            "outreach_protected": dry_run,
+        }
 
     async def _activate_scheduling_optimization(self, context: dict) -> dict:
         """Activate scheduling optimization (Fully active - internal operation)"""
         result = await self.activation_system.handle_business_event(
             BusinessEventType.SCHEDULING_CONFLICT,
-            {"context": context, "aurea_initiated": True, "execution_active": True}
+            {"context": context, "aurea_initiated": True, "execution_active": True},
         )
         return {"action": "scheduling_optimization", "result": result, "mode": "active"}
 
@@ -1420,18 +1576,38 @@ class AUREA:
         dry_run = not self.live_mode  # Only dry_run if NOT in live mode
         result = await self.activation_system.handle_business_event(
             BusinessEventType.CUSTOMER_CHURN_RISK,
-            {"context": context, "aurea_initiated": True, "execution_active": True, "dry_run_outreach": dry_run}
+            {
+                "context": context,
+                "aurea_initiated": True,
+                "execution_active": True,
+                "dry_run_outreach": dry_run,
+            },
         )
-        return {"action": "retention_campaign", "result": result, "mode": "live" if self.live_mode else "protected", "outreach_protected": dry_run}
+        return {
+            "action": "retention_campaign",
+            "result": result,
+            "mode": "live" if self.live_mode else "protected",
+            "outreach_protected": dry_run,
+        }
 
     async def _activate_sales_acceleration(self, context: dict) -> dict:
         """Activate sales acceleration (Live mode enables real outreach)"""
         dry_run = not self.live_mode  # Only dry_run if NOT in live mode
         result = await self.activation_system.handle_business_event(
             BusinessEventType.QUOTE_REQUESTED,
-            {"context": context, "aurea_initiated": True, "execution_active": True, "dry_run_outreach": dry_run}
+            {
+                "context": context,
+                "aurea_initiated": True,
+                "execution_active": True,
+                "dry_run_outreach": dry_run,
+            },
         )
-        return {"action": "sales_acceleration", "result": result, "mode": "live" if self.live_mode else "protected", "outreach_protected": dry_run}
+        return {
+            "action": "sales_acceleration",
+            "result": result,
+            "mode": "live" if self.live_mode else "protected",
+            "outreach_protected": dry_run,
+        }
 
     async def _activate_agents_for_decision(self, decision: Decision) -> dict:
         """Generic agent activation based on decision type (ACTIVE mode)"""
@@ -1439,7 +1615,7 @@ class AUREA:
             DecisionType.FINANCIAL: BusinessEventType.PAYMENT_RECEIVED,
             DecisionType.OPERATIONAL: BusinessEventType.JOB_SCHEDULED,
             DecisionType.CUSTOMER: BusinessEventType.NEW_CUSTOMER,
-            DecisionType.STRATEGIC: BusinessEventType.SYSTEM_HEALTH_CHECK
+            DecisionType.STRATEGIC: BusinessEventType.SYSTEM_HEALTH_CHECK,
         }
 
         event_type = event_type_map.get(decision.type, BusinessEventType.SYSTEM_HEALTH_CHECK)
@@ -1448,15 +1624,26 @@ class AUREA:
 
         # Live mode enables real outreach; protected mode keeps dry_run for customer-facing actions
         requires_outreach = decision.type in [DecisionType.CUSTOMER]
-        dry_run = requires_outreach and not self.live_mode  # Only dry_run if requires outreach AND not live mode
+        dry_run = (
+            requires_outreach and not self.live_mode
+        )  # Only dry_run if requires outreach AND not live mode
         result = await self.activation_system.handle_business_event(
             event_type,
-            {"decision": decision_dict, "aurea_initiated": True, "execution_active": True,
-             "dry_run_outreach": dry_run}
+            {
+                "decision": decision_dict,
+                "aurea_initiated": True,
+                "execution_active": True,
+                "dry_run_outreach": dry_run,
+            },
         )
 
-        return {"action": "generic_activation", "event_type": event_type.value, "result": result,
-                "mode": "live" if self.live_mode else "protected", "outreach_protected": dry_run}
+        return {
+            "action": "generic_activation",
+            "event_type": event_type.value,
+            "result": result,
+            "mode": "live" if self.live_mode else "protected",
+            "outreach_protected": dry_run,
+        }
 
     async def _learn(self, results: list[dict[str, Any]]):
         """
@@ -1484,8 +1671,8 @@ class AUREA:
                 "total_decisions": len(results),
                 "successful": len(successful),
                 "failed": len(failed),
-                "timestamp": datetime.now().isoformat()
-            }
+                "timestamp": datetime.now().isoformat(),
+            },
         }
         self.learning_insights.append(insight)
         await self._apply_learning(insight)
@@ -1498,7 +1685,7 @@ class AUREA:
                 mistake=f"Cycle execution with {success_rate*100:.0f}% success",
                 lesson=f"Decision patterns and outcomes from cycle {self.cycle_count}",
                 root_cause="autonomous_operation",
-                impact="high" if success_rate < 0.7 else "medium"
+                impact="high" if success_rate < 0.7 else "medium",
             )
         except Exception as e:
             logger.warning(f"Failed to store learning in unified brain: {e}")
@@ -1509,7 +1696,7 @@ class AUREA:
                 "type": "performance",
                 "insight": "Low success rate in decision execution",
                 "recommendation": "Review decision confidence thresholds",
-                "data": {"success_rate": success_rate, "failures": failed}
+                "data": {"success_rate": success_rate, "failures": failed},
             }
             self.learning_insights.append(performance_insight)
             await self._apply_learning(performance_insight)
@@ -1520,22 +1707,26 @@ class AUREA:
             await self._analyze_decision_patterns()
 
         # Store learning in memory
-        self.memory.store(Memory(
-            memory_type=MemoryType.META,
-            content={
-                "cycle": self.cycle_count,
-                "results_analyzed": len(results),
-                "success_rate": success_rate,
-                "insights": self.learning_insights[-5:] if self.learning_insights else [],
-                "success_rate_trend": self._decision_success_rate_history[-10:] if self._decision_success_rate_history else []
-            },
-            source_system="aurea",
-            source_agent="learner",
-            created_by="aurea",
-            importance_score=0.6,
-            tags=["learning", "meta"],
-            tenant_id=self.tenant_id
-        ))
+        self.memory.store(
+            Memory(
+                memory_type=MemoryType.META,
+                content={
+                    "cycle": self.cycle_count,
+                    "results_analyzed": len(results),
+                    "success_rate": success_rate,
+                    "insights": self.learning_insights[-5:] if self.learning_insights else [],
+                    "success_rate_trend": self._decision_success_rate_history[-10:]
+                    if self._decision_success_rate_history
+                    else [],
+                },
+                source_system="aurea",
+                source_agent="learner",
+                created_by="aurea",
+                importance_score=0.6,
+                tags=["learning", "meta"],
+                tenant_id=self.tenant_id,
+            )
+        )
 
         # Synthesize broader patterns every 10 cycles
         if self.cycle_count % 10 == 0:
@@ -1549,7 +1740,7 @@ class AUREA:
                         value=pattern,
                         category="pattern",
                         priority="high",
-                        source="aurea_learning"
+                        source="aurea_learning",
                     )
                 except Exception as e:
                     logger.warning(f"Failed to store pattern in brain: {e}")
@@ -1562,54 +1753,73 @@ class AUREA:
 
                 # ALWAYS store the learning insight to the database
                 adjustment = "none"
-                if insight["type"] == "performance" and insight["data"].get("success_rate", 1.0) < 0.5:
+                if (
+                    insight["type"] == "performance"
+                    and insight["data"].get("success_rate", 1.0) < 0.5
+                ):
                     adjustment = "reduced_confidence_threshold"
                 elif insight["type"] == "execution_cycle":
                     adjustment = "cycle_recorded"
 
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO ai_learning_insights
                     (tenant_id, insight_type, category, insight, confidence, impact_score, recommendations, applied, metadata, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                """, (
-                    self.tenant_id,
-                    insight["type"],
-                    "aurea_ooda",  # category
-                    insight.get("insight", f"Cycle insight: {insight['type']}"),
-                    insight.get("data", {}).get("success_rate", 0.8),  # confidence
-                    0.5,  # impact_score
-                    json.dumps([adjustment]),  # recommendations as array
-                    adjustment != "none",  # applied boolean
-                    json.dumps(insight.get("data", {}))  # metadata
-                ))
+                """,
+                    (
+                        self.tenant_id,
+                        insight["type"],
+                        "aurea_ooda",  # category
+                        insight.get("insight", f"Cycle insight: {insight['type']}"),
+                        insight.get("data", {}).get("success_rate", 0.8),  # confidence
+                        0.5,  # impact_score
+                        json.dumps([adjustment]),  # recommendations as array
+                        adjustment != "none",  # applied boolean
+                        json.dumps(insight.get("data", {})),  # metadata
+                    ),
+                )
                 conn.commit()
                 logger.info(f"📚 Learning recorded: {insight['type']} - {adjustment}")
 
-                if insight["type"] == "performance" and insight["data"].get("success_rate", 1.0) < 0.5:
+                if (
+                    insight["type"] == "performance"
+                    and insight["data"].get("success_rate", 1.0) < 0.5
+                ):
                     # Adjust agent confidence thresholds for poor performers
                     if "agent_name" in insight["data"]:
-                        cur.execute("""
+                        cur.execute(
+                            """
                             UPDATE ai_agents
                             SET config = config || '{"confidence_threshold": 0.7}'::jsonb,
                                 updated_at = NOW()
                             WHERE name = %s AND tenant_id = %s
-                        """, (insight["data"]["agent_name"], self.tenant_id))
+                        """,
+                            (insight["data"]["agent_name"], self.tenant_id),
+                        )
 
-                    logger.info("📚 Learning applied: Adjusted confidence thresholds for low-performing agents")
+                    logger.info(
+                        "📚 Learning applied: Adjusted confidence thresholds for low-performing agents"
+                    )
 
                 elif insight["type"] == "pattern" and insight.get("pattern_confidence", 0) > 0.8:
                     # Store high-confidence patterns for future decision making
-                    cur.execute("""
+                    cur.execute(
+                        """
                         INSERT INTO ai_decision_patterns (tenant_id, pattern_type, pattern_data, confidence, created_at)
                         VALUES (%s, %s, %s, %s, NOW())
                         ON CONFLICT DO NOTHING
-                    """, (
-                        self.tenant_id,
-                        insight.get("pattern_type", "general"),
-                        json.dumps(insight["data"]),
-                        insight.get("pattern_confidence", 0.8)
-                    ))
-                    logger.info(f"📚 Learning applied: Stored new decision pattern with {insight.get('pattern_confidence', 0.8):.0%} confidence")
+                    """,
+                        (
+                            self.tenant_id,
+                            insight.get("pattern_type", "general"),
+                            json.dumps(insight["data"]),
+                            insight.get("pattern_confidence", 0.8),
+                        ),
+                    )
+                    logger.info(
+                        f"📚 Learning applied: Stored new decision pattern with {insight.get('pattern_confidence', 0.8):.0%} confidence"
+                    )
 
                 conn.commit()
                 cur.close()
@@ -1655,22 +1865,26 @@ class AUREA:
         # =========================================================================
         if self.system_health.error_rate > 0.2:
             logger.critical(f"🚨 Critical error rate: {self.system_health.error_rate*100:.1f}%")
-            mcp_actions.append({
-                "action": "mcp:render:restart_service",
-                "reason": f"Critical error rate {self.system_health.error_rate*100:.1f}%",
-                "params": {"service_id": "srv-d0ulv1idbo4c73apd4t0"}  # AI Agents service
-            })
+            mcp_actions.append(
+                {
+                    "action": "mcp:render:restart_service",
+                    "reason": f"Critical error rate {self.system_health.error_rate*100:.1f}%",
+                    "params": {"service_id": "srv-d0ulv1idbo4c73apd4t0"},  # AI Agents service
+                }
+            )
 
         # =========================================================================
         # RULE 3: Very low health (<50) - Scale up services
         # =========================================================================
         if self.system_health.overall_score < 50:
             logger.critical(f"🚨 Very low health: {self.system_health.overall_score}")
-            mcp_actions.append({
-                "action": "mcp:render:scale_service",
-                "reason": f"Health score critical: {self.system_health.overall_score}",
-                "params": {"num_instances": 2}
-            })
+            mcp_actions.append(
+                {
+                    "action": "mcp:render:scale_service",
+                    "reason": f"Health score critical: {self.system_health.overall_score}",
+                    "params": {"num_instances": 2},
+                }
+            )
 
         # =========================================================================
         # RULE 4: Performance score very low (<40) - Consider rollback
@@ -1679,18 +1893,20 @@ class AUREA:
             logger.warning(f"⚠️ Performance degraded: {self.system_health.performance_score}")
             # Check if this started recently (after a deployment)
             # For now, log it for human review
-            mcp_actions.append({
-                "action": "mcp:supabase:execute_sql",
-                "reason": "Log performance alert",
-                "params": {
-                    "query": f"""
+            mcp_actions.append(
+                {
+                    "action": "mcp:supabase:execute_sql",
+                    "reason": "Log performance alert",
+                    "params": {
+                        "query": f"""
                         INSERT INTO ai_system_alerts (alert_type, severity, message, component, created_at)
                         VALUES ('performance_degraded', 'high',
                                 'Performance score: {self.system_health.performance_score}',
                                 'aurea_orchestrator', NOW())
                     """
+                    },
                 }
-            })
+            )
 
         # =========================================================================
         # RULE 5: Memory pressure - Notify and potentially scale
@@ -1701,11 +1917,13 @@ class AUREA:
             healing_actions.append("consolidate_memory")
             # If still high, might need infrastructure action
             if self.system_health.memory_utilization > 0.95:
-                mcp_actions.append({
-                    "action": "mcp:render:restart_service",
-                    "reason": f"Memory exhaustion: {self.system_health.memory_utilization*100:.1f}%",
-                    "params": {"service_id": "srv-d0ulv1idbo4c73apd4t0"}
-                })
+                mcp_actions.append(
+                    {
+                        "action": "mcp:render:restart_service",
+                        "reason": f"Memory exhaustion: {self.system_health.memory_utilization*100:.1f}%",
+                        "params": {"service_id": "srv-d0ulv1idbo4c73apd4t0"},
+                    }
+                )
 
         # =========================================================================
         # EXECUTE: Internal healing actions first, then MCP actions
@@ -1714,22 +1932,27 @@ class AUREA:
             await self._execute_healing_action(action)
 
         for mcp_action in mcp_actions:
-            logger.info(f"🔧 Executing MCP auto-remediation: {mcp_action['action']} - {mcp_action['reason']}")
+            logger.info(
+                f"🔧 Executing MCP auto-remediation: {mcp_action['action']} - {mcp_action['reason']}"
+            )
             result = await self._execute_mcp_action(mcp_action["action"])
             # Log the remediation attempt - uses shared pool
             try:
                 with _get_pooled_connection() as conn:
                     cur = conn.cursor()
-                    cur.execute("""
+                    cur.execute(
+                        """
                         INSERT INTO remediation_history
                         (incident_type, component, action_taken, success, recovery_time_seconds)
                         VALUES (%s, %s, %s, %s, 0)
-                    """, (
-                        mcp_action["reason"][:100],
-                        "aurea_orchestrator",
-                        mcp_action["action"],
-                        result.get("success", False)
-                    ))
+                    """,
+                        (
+                            mcp_action["reason"][:100],
+                            "aurea_orchestrator",
+                            mcp_action["action"],
+                            result.get("success", False),
+                        ),
+                    )
                     conn.commit()
                     cur.close()
             except Exception as e:
@@ -1746,10 +1969,13 @@ class AUREA:
             try:
                 with _get_pooled_connection() as conn:
                     cur = conn.cursor()
-                    cur.execute("""
+                    cur.execute(
+                        """
                         UPDATE ai_agents SET status = 'active', updated_at = NOW()
                         WHERE status = 'failed' AND tenant_id = %s
-                    """, (self.tenant_id,))
+                    """,
+                        (self.tenant_id,),
+                    )
                     restarted = cur.rowcount
                     conn.commit()
                     cur.close()
@@ -1761,11 +1987,13 @@ class AUREA:
             try:
                 with _get_pooled_connection() as conn:
                     cur = conn.cursor()
-                    cur.execute("""
+                    cur.execute(
+                        """
                         UPDATE aurea_decisions
                         SET execution_status = 'expired', updated_at = NOW()
                         WHERE execution_status = 'pending' AND created_at < NOW() - INTERVAL '24 hours'
-                    """)
+                    """
+                    )
                     cleared = cur.rowcount
                     conn.commit()
                     cur.close()
@@ -1794,9 +2022,7 @@ class AUREA:
 
             # Use centralized MCPClient with connection pooling and retry logic
             result: MCPToolResult = await self.mcp.execute_tool(
-                server,
-                tool,
-                {"triggered_by": "aurea", "tenant_id": self.tenant_id}
+                server, tool, {"triggered_by": "aurea", "tenant_id": self.tenant_id}
             )
 
             if result.success:
@@ -1836,28 +2062,48 @@ class AUREA:
     def _infer_mcp_server(self, tool: str) -> str:
         """Infer which MCP server to use based on tool name"""
         tool_lower = tool.lower()
-        if tool_lower.startswith("render_") or any(k in tool_lower for k in ["render", "service", "deploy", "restart"]):
+        if tool_lower.startswith("render_") or any(
+            k in tool_lower for k in ["render", "service", "deploy", "restart"]
+        ):
             return "render"
-        elif tool_lower.startswith("vercel_") or any(k in tool_lower for k in ["vercel", "preview", "domain", "deployment"]):
+        elif tool_lower.startswith("vercel_") or any(
+            k in tool_lower for k in ["vercel", "preview", "domain", "deployment"]
+        ):
             return "vercel"
-        elif tool_lower.startswith("supabase_") or any(k in tool_lower for k in ["supabase", "sql", "database", "query", "insert"]):
+        elif tool_lower.startswith("supabase_") or any(
+            k in tool_lower for k in ["supabase", "sql", "database", "query", "insert"]
+        ):
             return "supabase"
-        elif tool_lower.startswith("github_") or any(k in tool_lower for k in ["github", "repo", "branch", "pr", "issue", "workflow"]):
+        elif tool_lower.startswith("github_") or any(
+            k in tool_lower for k in ["github", "repo", "branch", "pr", "issue", "workflow"]
+        ):
             return "github"
-        elif tool_lower.startswith("docker_") or any(k in tool_lower for k in ["docker", "container", "image", "kubernetes"]):
+        elif tool_lower.startswith("docker_") or any(
+            k in tool_lower for k in ["docker", "container", "image", "kubernetes"]
+        ):
             return "docker"
-        elif tool_lower.startswith("stripe_") or any(k in tool_lower for k in ["stripe", "payment", "invoice", "subscription", "customer"]):
+        elif tool_lower.startswith("stripe_") or any(
+            k in tool_lower for k in ["stripe", "payment", "invoice", "subscription", "customer"]
+        ):
             return "stripe"
-        elif tool_lower.startswith("playwright_") or any(k in tool_lower for k in ["playwright", "browser", "screenshot"]):
+        elif tool_lower.startswith("playwright_") or any(
+            k in tool_lower for k in ["playwright", "browser", "screenshot"]
+        ):
             return "playwright"
-        elif tool_lower.startswith("openai_") or any(k in tool_lower for k in ["openai", "gpt", "embedding"]):
+        elif tool_lower.startswith("openai_") or any(
+            k in tool_lower for k in ["openai", "gpt", "embedding"]
+        ):
             return "openai"
-        elif tool_lower.startswith("anthropic_") or any(k in tool_lower for k in ["anthropic", "claude"]):
+        elif tool_lower.startswith("anthropic_") or any(
+            k in tool_lower for k in ["anthropic", "claude"]
+        ):
             return "anthropic"
         else:
             return "render"  # Default to Render for infrastructure
 
-    async def execute_external_tool(self, server: str, tool: str, params: dict[str, Any] = None) -> dict[str, Any]:
+    async def execute_external_tool(
+        self, server: str, tool: str, params: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """Public method for AUREA to execute any MCP tool - uses centralized MCPClient"""
         try:
             server_enum = self._get_mcp_server_enum(server)
@@ -1868,7 +2114,7 @@ class AUREA:
                 "result": result.result,
                 "error": result.error,
                 "duration_ms": result.duration_ms,
-                "execution_id": result.execution_id
+                "execution_id": result.execution_id,
             }
         except Exception as e:
             logger.error(f"External tool execution error: {e}")
@@ -1887,41 +2133,60 @@ class AUREA:
                 memory_stats = self.memory.get_stats(self.tenant_id)
 
                 # Get error rate from logs
-                cur.execute("""
+                cur.execute(
+                    """
                 SELECT
                     COUNT(CASE WHEN status = 'failed' THEN 1 END)::float /
                     NULLIF(COUNT(*), 0) as error_rate
                 FROM agent_activation_log
                 WHERE created_at > NOW() - INTERVAL '1 hour'
                 AND tenant_id = %s
-                """, (self.tenant_id,))
-                error_rate = cur.fetchone()['error_rate'] or 0
+                """,
+                    (self.tenant_id,),
+                )
+                error_rate = cur.fetchone()["error_rate"] or 0
 
                 # Get decision backlog
-                cur.execute("""
+                cur.execute(
+                    """
                 SELECT COUNT(*) as backlog
                 FROM aurea_decisions
                 WHERE execution_status = 'pending'
                   AND created_at > NOW() - INTERVAL '24 hours'
                   AND tenant_id = %s
-                """, (self.tenant_id,))
-                decision_backlog = cur.fetchone()['backlog']
+                """,
+                    (self.tenant_id,),
+                )
+                decision_backlog = cur.fetchone()["backlog"]
                 cur.close()
 
             # Calculate performance score based on error rate and backlog
             # Performance = 100 - (Error Rate % * 0.5) - (Backlog Penalty)
-            performance_score = max(0, 100 - (error_rate * 100 * 0.5) - (min(decision_backlog, 50) * 0.5))
+            performance_score = max(
+                0, 100 - (error_rate * 100 * 0.5) - (min(decision_backlog, 50) * 0.5)
+            )
 
             # Build health_components from gathered metrics
             health_components = {
-                "agents": min(100, (agent_stats.get("enabled_agents", 0) / max(agent_stats.get("total_agents", 1), 1)) * 100),
-                "memory": min(100, 100 - (memory_stats.get("total_memories", 0) / 1000000) * 100) if memory_stats.get("total_memories", 0) < 1000000 else 10,
+                "agents": min(
+                    100,
+                    (
+                        agent_stats.get("enabled_agents", 0)
+                        / max(agent_stats.get("total_agents", 1), 1)
+                    )
+                    * 100,
+                ),
+                "memory": min(100, 100 - (memory_stats.get("total_memories", 0) / 1000000) * 100)
+                if memory_stats.get("total_memories", 0) < 1000000
+                else 10,
                 "errors": max(0, 100 - (error_rate * 100)),
                 "backlog": max(0, 100 - (min(decision_backlog, 100) * 1)),
-                "performance": performance_score
+                "performance": performance_score,
             }
 
-            overall_score = sum(health_components.values()) / len(health_components) if health_components else 0
+            overall_score = (
+                sum(health_components.values()) / len(health_components) if health_components else 0
+            )
 
             self.system_health = SystemHealth(
                 overall_score=overall_score,
@@ -1931,7 +2196,7 @@ class AUREA:
                 decision_backlog=decision_backlog,
                 error_rate=error_rate,
                 performance_score=performance_score,
-                alerts=[]
+                alerts=[],
             )
 
             self.last_health_check = datetime.now()
@@ -1947,7 +2212,7 @@ class AUREA:
                 decision_backlog=0,
                 error_rate=1.0,
                 performance_score=0,
-                alerts=[f"Health check failed: {str(e)}"]
+                alerts=[f"Health check failed: {str(e)}"],
             )
 
     async def _request_human_approval(self, decision: Decision) -> bool:
@@ -1965,11 +2230,14 @@ class AUREA:
                 cur = conn.cursor()
                 try:
                     # Update decision status
-                    cur.execute("""
+                    cur.execute(
+                        """
                     UPDATE aurea_decisions
                     SET execution_status = 'pending'
                     WHERE id = %s
-                    """, (decision.id,))
+                    """,
+                        (decision.id,),
+                    )
 
                     # Insert notification if task_notifications table exists
                     # NOTE: DDL removed — agent_worker has no CREATE TABLE permission (P0-LOCK).
@@ -1979,17 +2247,22 @@ class AUREA:
                             "WHERE table_schema = 'public' AND table_name = 'task_notifications'"
                         )
                         if cur.fetchone():
-                            cur.execute("""
+                            cur.execute(
+                                """
                                 INSERT INTO task_notifications (title, message, type, tenant_id)
                                 VALUES (%s, %s, %s, %s)
-                            """, (
-                                f"Approval Required: {decision.type.value}",
-                                f"Decision requires approval: {decision.description}",
-                                "approval_request",
-                                self.tenant_id
-                            ))
+                            """,
+                                (
+                                    f"Approval Required: {decision.type.value}",
+                                    f"Decision requires approval: {decision.description}",
+                                    "approval_request",
+                                    self.tenant_id,
+                                ),
+                            )
                         else:
-                            logger.warning("task_notifications table missing — skipping notification")
+                            logger.warning(
+                                "task_notifications table missing — skipping notification"
+                            )
                     except Exception as notify_err:
                         logger.warning(f"Could not create notification: {notify_err}")
 
@@ -2010,25 +2283,28 @@ class AUREA:
             with _get_pooled_connection() as conn:
                 cur = conn.cursor()
 
-                cur.execute("""
+                cur.execute(
+                    """
                 INSERT INTO aurea_decisions
                 (decision_type, description, confidence, impact_assessment,
                  recommended_action, alternatives, requires_human_approval,
                  execution_status, context, tenant_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
-                """, (
-                    decision.type.value,
-                    decision.description,
-                    decision.confidence,
-                    decision.impact_assessment,
-                    decision.recommended_action,
-                    Json(decision.alternatives),
-                    decision.requires_human_approval,
-                    "pending",
-                    Json(decision.context),
-                    self.tenant_id
-                ))
+                """,
+                    (
+                        decision.type.value,
+                        decision.description,
+                        decision.confidence,
+                        decision.impact_assessment,
+                        decision.recommended_action,
+                        Json(decision.alternatives),
+                        decision.requires_human_approval,
+                        "pending",
+                        Json(decision.context),
+                        self.tenant_id,
+                    ),
+                )
 
                 result = cur.fetchone()
                 db_id = str(result[0]) if result else None
@@ -2041,13 +2317,17 @@ class AUREA:
                 self._persist_to_ai_decisions(decision, conn, cur)
 
                 # Log to unified brain
-                self.memory.log_to_brain("aurea_orchestrator", "decision_made", {
-                    "decision_id": decision.id,
-                    "db_id": db_id,
-                    "type": decision.type.value,
-                    "description": decision.description,
-                    "confidence": decision.confidence
-                })
+                self.memory.log_to_brain(
+                    "aurea_orchestrator",
+                    "decision_made",
+                    {
+                        "decision_id": decision.id,
+                        "db_id": db_id,
+                        "type": decision.type.value,
+                        "description": decision.description,
+                        "confidence": decision.confidence,
+                    },
+                )
 
                 conn.commit()
                 cur.close()
@@ -2072,7 +2352,7 @@ class AUREA:
                 "context": json_safe_serialize(decision.context),
                 "cycle_count": self.cycle_count,
                 "autonomy_level": self.autonomy_level.value,
-                "tenant_id": str(self.tenant_id) if self.tenant_id else None
+                "tenant_id": str(self.tenant_id) if self.tenant_id else None,
             }
 
             # Build output_data with reasoning (WHY the decision was made)
@@ -2084,20 +2364,23 @@ class AUREA:
                 "impact_assessment": decision.impact_assessment,
                 "requires_human_approval": decision.requires_human_approval,
                 "deadline": decision.deadline.isoformat() if decision.deadline else None,
-                "db_id": decision.db_id
+                "db_id": decision.db_id,
             }
 
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO ai_decisions
                 (agent_id, decision_type, input_data, output_data, confidence, timestamp)
                 VALUES (%s, %s, %s, %s, %s, NOW())
-            """, (
-                "AUREA",  # agent_id
-                decision.type.value,  # decision_type
-                Json(input_data),  # input_data
-                Json(output_data),  # output_data
-                decision.confidence  # confidence
-            ))
+            """,
+                (
+                    "AUREA",  # agent_id
+                    decision.type.value,  # decision_type
+                    Json(input_data),  # input_data
+                    Json(output_data),  # output_data
+                    decision.confidence,  # confidence
+                ),
+            )
 
             logger.debug(f"📊 Decision {decision.id} also logged to ai_decisions table")
 
@@ -2121,9 +2404,11 @@ class AUREA:
             DecisionType.CUSTOMER: "Customer-related risk or opportunity detected requiring action",
             DecisionType.TECHNICAL: "Technical issue affecting system performance or user experience",
             DecisionType.STRATEGIC: "Strategic opportunity identified with significant business impact",
-            DecisionType.LEARNING: "Self-improvement opportunity identified for system enhancement"
+            DecisionType.LEARNING: "Self-improvement opportunity identified for system enhancement",
         }
-        reasoning_parts.append(type_reasoning.get(decision.type, "Decision criteria met based on system analysis"))
+        reasoning_parts.append(
+            type_reasoning.get(decision.type, "Decision criteria met based on system analysis")
+        )
 
         # Add context-specific reasoning
         context = decision.context or {}
@@ -2132,24 +2417,34 @@ class AUREA:
         if "priority" in context:
             priority = context["priority"]
             if priority.get("urgency") == "high":
-                reasoning_parts.append(f"HIGH URGENCY: {priority.get('description', 'Immediate action required')}")
+                reasoning_parts.append(
+                    f"HIGH URGENCY: {priority.get('description', 'Immediate action required')}"
+                )
             elif priority.get("urgency") == "critical":
-                reasoning_parts.append(f"CRITICAL: {priority.get('description', 'System stability at risk')}")
+                reasoning_parts.append(
+                    f"CRITICAL: {priority.get('description', 'System stability at risk')}"
+                )
 
         # Risk-based reasoning
         if "risk" in context:
             risk = context["risk"]
-            reasoning_parts.append(f"Risk identified: {risk.get('description', 'Potential negative outcome detected')}")
+            reasoning_parts.append(
+                f"Risk identified: {risk.get('description', 'Potential negative outcome detected')}"
+            )
 
         # Opportunity-based reasoning
         if "opportunity" in context:
             opportunity = context["opportunity"]
             if "potential_value" in opportunity:
-                reasoning_parts.append(f"Revenue opportunity: ${opportunity['potential_value']:,.2f} potential value")
+                reasoning_parts.append(
+                    f"Revenue opportunity: ${opportunity['potential_value']:,.2f} potential value"
+                )
 
         # Confidence level reasoning
         if decision.confidence >= 0.90:
-            reasoning_parts.append("High confidence based on strong historical patterns and clear indicators")
+            reasoning_parts.append(
+                "High confidence based on strong historical patterns and clear indicators"
+            )
         elif decision.confidence >= 0.75:
             reasoning_parts.append("Good confidence based on consistent data signals")
         else:
@@ -2166,21 +2461,23 @@ class AUREA:
         logger.error(f"Orchestration error: {error}")
 
         # Store error in memory
-        self.memory.store(Memory(
-            memory_type=MemoryType.META,
-            content={
-                "error": str(error),
-                "cycle": self.cycle_count,
-                "timestamp": datetime.now().isoformat(),
-                "recovery_action": "restart_cycle"
-            },
-            source_system="aurea",
-            source_agent="error_handler",
-            created_by="aurea",
-            importance_score=0.9,
-            tags=["error", "orchestration"],
-            tenant_id=self.tenant_id
-        ))
+        self.memory.store(
+            Memory(
+                memory_type=MemoryType.META,
+                content={
+                    "error": str(error),
+                    "cycle": self.cycle_count,
+                    "timestamp": datetime.now().isoformat(),
+                    "recovery_action": "restart_cycle",
+                },
+                source_system="aurea",
+                source_agent="error_handler",
+                created_by="aurea",
+                importance_score=0.9,
+                tags=["error", "orchestration"],
+                tenant_id=self.tenant_id,
+            )
+        )
 
     def _calculate_sleep_time(self, observations: int, decisions: int) -> int:
         """Calculate adaptive sleep time based on activity - OPTIMIZED for stability"""
@@ -2203,53 +2500,66 @@ class AUREA:
                 recent_metrics = self.cycle_metrics_history[-10:]
 
                 # Pattern: Declining success rate
-                success_rates = [m.actions_successful / max(m.actions_executed, 1) for m in recent_metrics if m.actions_executed > 0]
+                success_rates = [
+                    m.actions_successful / max(m.actions_executed, 1)
+                    for m in recent_metrics
+                    if m.actions_executed > 0
+                ]
                 if len(success_rates) >= 3:
                     if success_rates[-1] < success_rates[0] * 0.7:
-                        patterns.append({
-                            "type": "declining_success",
-                            "description": "Decision execution success rate declining",
-                            "confidence": 0.8,
-                            "data": {"success_rates": success_rates}
-                        })
+                        patterns.append(
+                            {
+                                "type": "declining_success",
+                                "description": "Decision execution success rate declining",
+                                "confidence": 0.8,
+                                "data": {"success_rates": success_rates},
+                            }
+                        )
 
                 # Pattern: Consistent high performance
                 if all(sr > 0.9 for sr in success_rates[-5:] if sr):
-                    patterns.append({
-                        "type": "high_performance",
-                        "description": "Consistently high execution success rate",
-                        "confidence": 0.9,
-                        "data": {"success_rates": success_rates}
-                    })
+                    patterns.append(
+                        {
+                            "type": "high_performance",
+                            "description": "Consistently high execution success rate",
+                            "confidence": 0.9,
+                            "data": {"success_rates": success_rates},
+                        }
+                    )
 
                 # Pattern: Increasing cycle time
                 cycle_times = [m.cycle_duration_seconds for m in recent_metrics]
                 if cycle_times[-1] > cycle_times[0] * 1.5:
-                    patterns.append({
-                        "type": "increasing_latency",
-                        "description": "OODA cycle duration increasing",
-                        "confidence": 0.75,
-                        "data": {"cycle_times": cycle_times}
-                    })
+                    patterns.append(
+                        {
+                            "type": "increasing_latency",
+                            "description": "OODA cycle duration increasing",
+                            "confidence": 0.75,
+                            "data": {"cycle_times": cycle_times},
+                        }
+                    )
 
             # Store detected patterns - uses shared pool
             for pattern in patterns:
                 try:
                     with _get_pooled_connection() as conn:
                         cur = conn.cursor()
-                        cur.execute("""
+                        cur.execute(
+                            """
                             INSERT INTO aurea_patterns (pattern_type, pattern_description, confidence,
                                                          frequency, impact_score, pattern_data, tenant_id)
                             VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """, (
-                            pattern["type"],
-                            pattern["description"],
-                            pattern["confidence"],
-                            1,
-                            0.7,
-                            Json(pattern.get("data", {})),
-                            self.tenant_id
-                        ))
+                        """,
+                            (
+                                pattern["type"],
+                                pattern["description"],
+                                pattern["confidence"],
+                                1,
+                                0.7,
+                                Json(pattern.get("data", {})),
+                                self.tenant_id,
+                            ),
+                        )
                         conn.commit()
                         cur.close()
                 except Exception as e:
@@ -2274,30 +2584,34 @@ class AUREA:
 
                 # Update progress
                 if goal.target_value != goal.current_value:
-                    goal.progress = min(100, max(0,
-                        ((current_value - goal.current_value) / (goal.target_value - goal.current_value)) * 100
-                    ))
+                    goal.progress = min(
+                        100,
+                        max(
+                            0,
+                            (
+                                (current_value - goal.current_value)
+                                / (goal.target_value - goal.current_value)
+                            )
+                            * 100,
+                        ),
+                    )
 
                 goal.current_value = current_value
 
                 # Check if goal achieved
                 if goal.progress >= 100:
                     goal.status = "achieved"
-                    goal_updates.append({
-                        "goal_id": goal.id,
-                        "status": "achieved",
-                        "progress": goal.progress
-                    })
+                    goal_updates.append(
+                        {"goal_id": goal.id, "status": "achieved", "progress": goal.progress}
+                    )
                     logger.info(f"🎯 Goal achieved: {goal.description}")
 
                 # Check if deadline passed
                 elif datetime.now() > goal.deadline:
                     goal.status = "failed"
-                    goal_updates.append({
-                        "goal_id": goal.id,
-                        "status": "failed",
-                        "progress": goal.progress
-                    })
+                    goal_updates.append(
+                        {"goal_id": goal.id, "status": "failed", "progress": goal.progress}
+                    )
 
                 # Update database
                 await self._update_goal_in_db(goal)
@@ -2315,7 +2629,9 @@ class AUREA:
                     return self.system_health.error_rate
             elif metric_name == "success_rate":
                 if self._decision_success_rate_history:
-                    return sum(self._decision_success_rate_history[-10:]) / len(self._decision_success_rate_history[-10:])
+                    return sum(self._decision_success_rate_history[-10:]) / len(
+                        self._decision_success_rate_history[-10:]
+                    )
             elif metric_name == "cycle_time":
                 if self.cycle_metrics_history:
                     return self.cycle_metrics_history[-1].cycle_duration_seconds
@@ -2332,12 +2648,15 @@ class AUREA:
         try:
             with _get_pooled_connection() as conn:
                 cur = conn.cursor()
-                cur.execute("""
+                cur.execute(
+                    """
                     UPDATE aurea_autonomous_goals
                     SET current_value = %s, progress = %s, status = %s, updated_at = NOW(),
                         achieved_at = CASE WHEN %s = 'achieved' THEN NOW() ELSE achieved_at END
                     WHERE id = %s
-                """, (goal.current_value, goal.progress, goal.status, goal.status, goal.id))
+                """,
+                    (goal.current_value, goal.progress, goal.status, goal.status, goal.id),
+                )
                 conn.commit()
                 cur.close()
         except Exception as e:
@@ -2345,11 +2664,7 @@ class AUREA:
 
     async def _analyze_performance_trends(self) -> dict[str, Any]:
         """Analyze performance trends and detect anomalies"""
-        trends = {
-            "anomalies": [],
-            "improvements": [],
-            "degradations": []
-        }
+        trends = {"anomalies": [], "improvements": [], "degradations": []}
 
         try:
             # Analyze success rate trend
@@ -2364,23 +2679,26 @@ class AUREA:
                     trends["improvements"].append("Decision success rate improving")
                 elif recent_avg < older_avg * 0.8:
                     trends["degradations"].append("Decision success rate declining")
-                    trends["anomalies"].append({
-                        "type": "performance_degradation",
-                        "metric": "success_rate",
-                        "severity": "high"
-                    })
+                    trends["anomalies"].append(
+                        {
+                            "type": "performance_degradation",
+                            "metric": "success_rate",
+                            "severity": "high",
+                        }
+                    )
 
             # Analyze cycle time trends
             if len(self.cycle_metrics_history) >= 10:
                 recent_times = [m.cycle_duration_seconds for m in self.cycle_metrics_history[-5:]]
                 older_times = [m.cycle_duration_seconds for m in self.cycle_metrics_history[-10:-5]]
 
-                if sum(recent_times) / len(recent_times) > sum(older_times) / len(older_times) * 1.3:
-                    trends["anomalies"].append({
-                        "type": "latency_increase",
-                        "metric": "cycle_time",
-                        "severity": "medium"
-                    })
+                if (
+                    sum(recent_times) / len(recent_times)
+                    > sum(older_times) / len(older_times) * 1.3
+                ):
+                    trends["anomalies"].append(
+                        {"type": "latency_increase", "metric": "cycle_time", "severity": "medium"}
+                    )
 
         except Exception as e:
             logger.error(f"Trend analysis error: {e}")
@@ -2394,7 +2712,9 @@ class AUREA:
         try:
             # Goal: Improve success rate if below threshold
             if self._decision_success_rate_history:
-                current_rate = sum(self._decision_success_rate_history[-5:]) / len(self._decision_success_rate_history[-5:])
+                current_rate = sum(self._decision_success_rate_history[-5:]) / len(
+                    self._decision_success_rate_history[-5:]
+                )
                 if current_rate < 0.85:
                     goal = AutonomousGoal(
                         id=str(uuid.uuid4()),
@@ -2407,7 +2727,7 @@ class AUREA:
                         priority=8,
                         created_at=datetime.now(),
                         status="active",
-                        progress=0.0
+                        progress=0.0,
                     )
                     new_goals.append(goal)
                     self.autonomous_goals.append(goal)
@@ -2426,14 +2746,17 @@ class AUREA:
                     priority=9,
                     created_at=datetime.now(),
                     status="active",
-                    progress=0.0
+                    progress=0.0,
                 )
                 new_goals.append(goal)
                 self.autonomous_goals.append(goal)
                 await self._store_goal_in_db(goal)
 
             # Goal: Improve response time if slow
-            if self.cycle_metrics_history and self.cycle_metrics_history[-1].cycle_duration_seconds > 30:
+            if (
+                self.cycle_metrics_history
+                and self.cycle_metrics_history[-1].cycle_duration_seconds > 30
+            ):
                 goal = AutonomousGoal(
                     id=str(uuid.uuid4()),
                     goal_type="efficiency",
@@ -2445,7 +2768,7 @@ class AUREA:
                     priority=7,
                     created_at=datetime.now(),
                     status="active",
-                    progress=0.0
+                    progress=0.0,
                 )
                 new_goals.append(goal)
                 self.autonomous_goals.append(goal)
@@ -2461,16 +2784,27 @@ class AUREA:
         try:
             with _get_pooled_connection() as conn:
                 cur = conn.cursor()
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO aurea_autonomous_goals
                     (id, goal_type, description, target_metric, current_value, target_value,
                      deadline, priority, status, progress, tenant_id)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    goal.id, goal.goal_type, goal.description, goal.target_metric,
-                    goal.current_value, goal.target_value, goal.deadline, goal.priority,
-                    goal.status, goal.progress, self.tenant_id
-                ))
+                """,
+                    (
+                        goal.id,
+                        goal.goal_type,
+                        goal.description,
+                        goal.target_metric,
+                        goal.current_value,
+                        goal.target_value,
+                        goal.deadline,
+                        goal.priority,
+                        goal.status,
+                        goal.progress,
+                        self.tenant_id,
+                    ),
+                )
                 conn.commit()
                 cur.close()
             logger.info(f"🎯 New autonomous goal set: {goal.description}")
@@ -2489,9 +2823,13 @@ class AUREA:
                     logger.info("🔧 Self-improvement: Detected timeout pattern, adjusting timeouts")
                     # Could adjust timeout parameters
                 elif "permission" in error.lower() or "denied" in error.lower():
-                    logger.info("🔧 Self-improvement: Detected permission issue, reviewing access controls")
+                    logger.info(
+                        "🔧 Self-improvement: Detected permission issue, reviewing access controls"
+                    )
                 elif "database" in error.lower() or "connection" in error.lower():
-                    logger.info("🔧 Self-improvement: Detected DB issue, triggering connection pool refresh")
+                    logger.info(
+                        "🔧 Self-improvement: Detected DB issue, triggering connection pool refresh"
+                    )
 
                 # Store self-improvement action in brain
                 self.brain.store(
@@ -2500,11 +2838,11 @@ class AUREA:
                         "failure": error,
                         "decision_id": decision_id,
                         "improvement_action": "parameter_adjustment",
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now().isoformat(),
                     },
                     category="self_improvement",
                     priority="high",
-                    source="aurea_learning"
+                    source="aurea_learning",
                 )
 
         except Exception as e:
@@ -2517,7 +2855,8 @@ class AUREA:
             with _get_pooled_connection() as conn:
                 cur = conn.cursor(cursor_factory=RealDictCursor)
 
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT decision_type, confidence, execution_status,
                            COUNT(*) as count,
                            AVG(confidence) as avg_confidence
@@ -2526,19 +2865,21 @@ class AUREA:
                       AND tenant_id = %s
                     GROUP BY decision_type, confidence, execution_status
                     ORDER BY decision_type, confidence DESC
-                """, (self.tenant_id,))
+                """,
+                    (self.tenant_id,),
+                )
 
                 patterns = cur.fetchall()
                 cur.close()
 
             # Analyze patterns and adjust thresholds
             for pattern in patterns:
-                decision_type = pattern['decision_type']
-                status = pattern['execution_status']
-                avg_conf = pattern['avg_confidence']
+                decision_type = pattern["decision_type"]
+                status = pattern["execution_status"]
+                avg_conf = pattern["avg_confidence"]
 
                 # If high confidence decisions are failing, raise threshold
-                if status == 'failed' and avg_conf > 0.7:
+                if status == "failed" and avg_conf > 0.7:
                     logger.info(f"🔧 Adjusting confidence threshold for {decision_type} decisions")
                     # Store adjustment in brain
                     self.brain.store(
@@ -2547,11 +2888,11 @@ class AUREA:
                             "decision_type": decision_type,
                             "old_threshold": avg_conf,
                             "adjustment": "increase",
-                            "reason": "high_failure_rate"
+                            "reason": "high_failure_rate",
                         },
                         category="self_improvement",
                         priority="high",
-                        source="aurea_pattern_analysis"
+                        source="aurea_pattern_analysis",
                     )
 
         except Exception as e:
@@ -2563,35 +2904,54 @@ class AUREA:
             with _get_pooled_connection() as conn:
                 cur = conn.cursor()
 
-                cur.execute("""
+                # Set tenant context for RLS (agent_worker has NOBYPASSRLS)
+                if self.tenant_id:
+                    cur.execute(
+                        "SELECT set_config('app.current_tenant_id', %s, true)",
+                        (self.tenant_id,),
+                    )
+
+                cur.execute(
+                    """
                     INSERT INTO aurea_cycle_metrics
                     (cycle_number, timestamp, observations_count, decisions_count,
                      actions_executed, actions_successful, actions_failed, cycle_duration_seconds,
                      learning_insights_generated, health_score, autonomy_level,
                      patterns_detected, goals_achieved, goals_set, tenant_id)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    metrics.cycle_number, metrics.timestamp, metrics.observations_count,
-                    metrics.decisions_count, metrics.actions_executed, metrics.actions_successful,
-                    metrics.actions_failed, metrics.cycle_duration_seconds,
-                    metrics.learning_insights_generated, metrics.health_score,
-                    metrics.autonomy_level, Json(metrics.patterns_detected),
-                    metrics.goals_achieved, metrics.goals_set, self.tenant_id
-                ))
+                """,
+                    (
+                        metrics.cycle_number,
+                        metrics.timestamp,
+                        metrics.observations_count,
+                        metrics.decisions_count,
+                        metrics.actions_executed,
+                        metrics.actions_successful,
+                        metrics.actions_failed,
+                        metrics.cycle_duration_seconds,
+                        metrics.learning_insights_generated,
+                        metrics.health_score,
+                        metrics.autonomy_level,
+                        Json(metrics.patterns_detected),
+                        metrics.goals_achieved,
+                        metrics.goals_set,
+                        self.tenant_id,
+                    ),
+                )
 
                 conn.commit()
                 cur.close()
 
             # Also store in unified brain (convert datetime to string for JSON)
             metrics_dict = asdict(metrics)
-            if 'timestamp' in metrics_dict and hasattr(metrics_dict['timestamp'], 'isoformat'):
-                metrics_dict['timestamp'] = metrics_dict['timestamp'].isoformat()
+            if "timestamp" in metrics_dict and hasattr(metrics_dict["timestamp"], "isoformat"):
+                metrics_dict["timestamp"] = metrics_dict["timestamp"].isoformat()
             self.brain.store(
                 key=f"cycle_metrics_{metrics.cycle_number}",
                 value=metrics_dict,
                 category="aurea_metrics",
                 priority="medium",
-                source="aurea_orchestrator"
+                source="aurea_orchestrator",
             )
 
         except Exception as e:
@@ -2612,11 +2972,15 @@ class AUREA:
         # Calculate current averages
         recent_success_rate = 0.0
         if self._decision_success_rate_history:
-            recent_success_rate = sum(self._decision_success_rate_history[-10:]) / len(self._decision_success_rate_history[-10:])
+            recent_success_rate = sum(self._decision_success_rate_history[-10:]) / len(
+                self._decision_success_rate_history[-10:]
+            )
 
         recent_cycle_time = 0.0
         if self.cycle_metrics_history:
-            recent_cycle_time = sum(m.cycle_duration_seconds for m in self.cycle_metrics_history[-10:]) / len(self.cycle_metrics_history[-10:])
+            recent_cycle_time = sum(
+                m.cycle_duration_seconds for m in self.cycle_metrics_history[-10:]
+            ) / len(self.cycle_metrics_history[-10:])
 
         active_goals = [g for g in self.autonomous_goals if g.status == "active"]
         achieved_goals = [g for g in self.autonomous_goals if g.status == "achieved"]
@@ -2634,7 +2998,9 @@ class AUREA:
                 "recent_success_rate": recent_success_rate,
                 "recent_cycle_time_avg": recent_cycle_time,
                 "total_cycle_metrics": len(self.cycle_metrics_history),
-                "success_rate_trend": self._decision_success_rate_history[-10:] if self._decision_success_rate_history else []
+                "success_rate_trend": self._decision_success_rate_history[-10:]
+                if self._decision_success_rate_history
+                else [],
             },
             "autonomous_goals": {
                 "active": len(active_goals),
@@ -2645,28 +3011,31 @@ class AUREA:
                         "description": g.description,
                         "progress": g.progress,
                         "target_metric": g.target_metric,
-                        "priority": g.priority
+                        "priority": g.priority,
                     }
                     for g in active_goals[:5]
-                ]
+                ],
             },
             "learning": {
                 "total_insights": len(self.learning_insights),
                 "recent_patterns": len(self.pattern_history),
-                "self_improvement_actions": len([i for i in self.learning_insights if i.get("type") == "self_improvement"])
-            }
+                "self_improvement_actions": len(
+                    [i for i in self.learning_insights if i.get("type") == "self_improvement"]
+                ),
+            },
         }
 
 
 # Global AUREA instance
 aurea_instance = None
 
+
 def get_aurea(tenant_id: Optional[str] = None) -> AUREA:
     """Get or create the singleton AUREA instance"""
     global aurea_instance
     if aurea_instance is None:
         if not tenant_id:
-             raise ValueError("Tenant ID required for initial AUREA instantiation")
+            raise ValueError("Tenant ID required for initial AUREA instantiation")
         aurea_instance = AUREA(tenant_id=tenant_id)
     return aurea_instance
 
@@ -2679,7 +3048,8 @@ async def run_aurea(tenant_id: str):
 
 if __name__ == "__main__":
     # Start AUREA
-    print("""
+    print(
+        """
     ╔══════════════════════════════════════════════════════════╗
     ║                                                          ║
     ║     🧠 AUREA - Autonomous Universal Resource            ║
@@ -2690,7 +3060,8 @@ if __name__ == "__main__":
     ╚══════════════════════════════════════════════════════════╝
 
     Starting autonomous orchestration...
-    """)
+    """
+    )
 
     # Test Tenant ID for standalone run
     TEST_TENANT_ID = "test-tenant-id"

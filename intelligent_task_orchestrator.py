@@ -35,6 +35,7 @@ from psycopg2.extras import Json, RealDictCursor
 # CRITICAL: Use shared connection pool to prevent MaxClientsInSessionMode
 try:
     from database.sync_pool import get_sync_pool
+
     SYNC_POOL_AVAILABLE = True
 except ImportError:
     SYNC_POOL_AVAILABLE = False
@@ -43,23 +44,27 @@ except ImportError:
 # Import our cutting-edge systems
 try:
     from meta_critic_scoring import get_meta_critic
+
     META_CRITIC_AVAILABLE = True
 except ImportError:
     META_CRITIC_AVAILABLE = False
 
 try:
     from self_healing_reconciler import get_reconciler
+
     HEALING_AVAILABLE = True
 except ImportError:
     HEALING_AVAILABLE = False
 
 try:
     from ai_core import RealAICore
+
     AI_CORE_AVAILABLE = True
 except ImportError:
     AI_CORE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
 
 # Database configuration - supports both individual env vars and DATABASE_URL
 def _get_db_config():
@@ -74,14 +79,14 @@ def _get_db_config():
 
     # Fallback to DATABASE_URL if individual vars not set
     if not all([db_host, db_user, db_password]):
-        database_url = os.getenv('DATABASE_URL', '')
+        database_url = os.getenv("DATABASE_URL", "")
         if database_url:
             parsed = urlparse(database_url)
-            db_host = parsed.hostname or ''
-            db_name = unquote(parsed.path.lstrip('/')) if parsed.path else 'postgres'
-            db_user = unquote(parsed.username) if parsed.username else ''
-            db_password = unquote(parsed.password) if parsed.password else ''
-            db_port = str(parsed.port) if parsed.port else '5432'
+            db_host = parsed.hostname or ""
+            db_name = unquote(parsed.path.lstrip("/")) if parsed.path else "postgres"
+            db_user = unquote(parsed.username) if parsed.username else ""
+            db_password = unquote(parsed.password) if parsed.password else ""
+            db_port = str(parsed.port) if parsed.port else "5432"
 
     if not all([db_host, db_user, db_password]):
         raise RuntimeError("Missing required: DB_HOST/DB_USER/DB_PASSWORD or DATABASE_URL")
@@ -91,8 +96,9 @@ def _get_db_config():
         "database": db_name,
         "user": db_user,
         "password": db_password,
-        "port": int(db_port)
+        "port": int(db_port),
     }
+
 
 DB_CONFIG = _get_db_config()
 
@@ -100,9 +106,17 @@ DB_CONFIG = _get_db_config()
 # Helper context manager to use shared pool with fallback
 from contextlib import contextmanager
 
+
 @contextmanager
 def get_db_connection():
-    """Get database connection from shared pool or create direct connection."""
+    """Get database connection from shared pool or create direct connection.
+
+    Sets app.current_tenant_id for RLS policies (agent_worker has NOBYPASSRLS).
+    """
+    from config import config as app_config
+
+    tenant_id = app_config.tenant.default_tenant_id
+
     conn = None
     from_pool = False
     try:
@@ -110,10 +124,26 @@ def get_db_connection():
             pool = get_sync_pool()
             with pool.get_connection() as pooled_conn:
                 if pooled_conn:
+                    # Set tenant context for RLS
+                    if tenant_id:
+                        _cur = pooled_conn.cursor()
+                        _cur.execute(
+                            "SELECT set_config('app.current_tenant_id', %s, true)",
+                            (tenant_id,),
+                        )
+                        _cur.close()
                     yield pooled_conn
                     return
         # Fallback to direct connection
         conn = psycopg2.connect(**DB_CONFIG)
+        # Set tenant context for RLS
+        if tenant_id:
+            _cur = conn.cursor()
+            _cur.execute(
+                "SELECT set_config('app.current_tenant_id', %s, true)",
+                (tenant_id,),
+            )
+            _cur.close()
         yield conn
     finally:
         if conn and not from_pool:
@@ -125,6 +155,7 @@ def get_db_connection():
 
 class TaskPriority(Enum):
     """Task priority levels"""
+
     CRITICAL = 100
     HIGH = 75
     MEDIUM = 50
@@ -134,6 +165,7 @@ class TaskPriority(Enum):
 
 class TaskStatus(Enum):
     """Task execution status"""
+
     PENDING = "pending"
     QUEUED = "queued"
     IN_PROGRESS = "in_progress"
@@ -146,6 +178,7 @@ class TaskStatus(Enum):
 
 class NotificationChannel(Enum):
     """Notification channels"""
+
     SLACK = "slack"
     EMAIL = "email"
     SMS = "sms"
@@ -157,6 +190,7 @@ class NotificationChannel(Enum):
 @dataclass
 class TaskNotification:
     """Notification about task status"""
+
     task_id: str
     task_title: str
     event_type: str
@@ -171,6 +205,7 @@ class TaskNotification:
 @dataclass
 class IntelligentTask:
     """Enhanced task with AI-driven properties"""
+
     id: str
     title: str
     description: str
@@ -211,7 +246,11 @@ class NotificationService:
 
         # Notification preferences - use string values for JSON serialization
         self.severity_channels = {
-            "critical": [NotificationChannel.SLACK.value, NotificationChannel.SMS.value, NotificationChannel.DATABASE.value],
+            "critical": [
+                NotificationChannel.SLACK.value,
+                NotificationChannel.SMS.value,
+                NotificationChannel.DATABASE.value,
+            ],
             "high": [NotificationChannel.SLACK.value, NotificationChannel.DATABASE.value],
             "medium": [NotificationChannel.DATABASE.value],
             "low": [NotificationChannel.DATABASE.value],
@@ -261,26 +300,17 @@ class NotificationService:
             "blocks": [
                 {
                     "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": f"{emoji} {notification.event_type}"
-                    }
+                    "text": {"type": "plain_text", "text": f"{emoji} {notification.event_type}"},
                 },
                 {
                     "type": "section",
                     "fields": [
                         {"type": "mrkdwn", "text": f"*Task:*\n{notification.task_title}"},
                         {"type": "mrkdwn", "text": f"*Severity:*\n{notification.severity}"},
-                    ]
+                    ],
                 },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": notification.message
-                    }
-                }
-            ]
+                {"type": "section", "text": {"type": "mrkdwn", "text": notification.message}},
+            ],
         }
 
         async with httpx.AsyncClient() as client:
@@ -293,19 +323,22 @@ class NotificationService:
                 if not conn:
                     return
                 cur = conn.cursor()
-                cur.execute("""
+                cur.execute(
+                    """
                 INSERT INTO task_notifications
                 (task_id, event_type, severity, message, details, channels, sent_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    notification.task_id,
-                    notification.event_type,
-                    notification.severity,
-                    notification.message,
-                    Json(notification.details),
-                    Json(notification.channels),
-                    notification.sent_at
-                ))
+                """,
+                    (
+                        notification.task_id,
+                        notification.event_type,
+                        notification.severity,
+                        notification.message,
+                        Json(notification.details),
+                        Json(notification.channels),
+                        notification.sent_at,
+                    ),
+                )
                 conn.commit()
                 cur.close()
         except Exception as e:
@@ -348,16 +381,19 @@ class IntelligentTaskOrchestrator:
     def _init_database(self):
         """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
         required_tables = [
-                "task_notifications",
-                "task_execution_history",
-                "ai_priority_adjustments",
-                "revenue_audit_log",
+            "task_notifications",
+            "task_execution_history",
+            "ai_priority_adjustments",
+            "revenue_audit_log",
         ]
         try:
             from database.verify_tables import verify_tables_sync
+
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
-            ok = verify_tables_sync(required_tables, cursor, module_name="intelligent_task_orchestrator")
+            ok = verify_tables_sync(
+                required_tables, cursor, module_name="intelligent_task_orchestrator"
+            )
             cursor.close()
             conn.close()
             if not ok:
@@ -365,13 +401,17 @@ class IntelligentTaskOrchestrator:
             self._tables_initialized = True
         except Exception as exc:
             logger.error("Table verification failed: %s", exc)
+
     async def start(self):
         """Start the intelligent task orchestrator"""
         self.running = True
         logger.info("🧠 Intelligent Task Orchestrator started")
 
-        await self._notify_status("orchestrator_started", "medium",
-            "Intelligent Task Orchestrator is now online and processing tasks")
+        await self._notify_status(
+            "orchestrator_started",
+            "medium",
+            "Intelligent Task Orchestrator is now online and processing tasks",
+        )
 
         # Start background processing
         create_safe_task(self._process_task_queue(), "task_queue_processor")
@@ -381,8 +421,9 @@ class IntelligentTaskOrchestrator:
     async def stop(self):
         """Stop the orchestrator"""
         self.running = False
-        await self._notify_status("orchestrator_stopped", "high",
-            "Intelligent Task Orchestrator has been stopped")
+        await self._notify_status(
+            "orchestrator_stopped", "high", "Intelligent Task Orchestrator has been stopped"
+        )
 
     async def _process_task_queue(self):
         """Main task processing loop"""
@@ -414,7 +455,8 @@ class IntelligentTaskOrchestrator:
 
                 # Get pending tasks ordered by AI-adjusted priority
                 # CAST t.priority to FLOAT to match ap.adjusted_priority type
-                cur.execute("""
+                cur.execute(
+                    """
                 SELECT t.*,
                        COALESCE(ap.adjusted_priority,
                                 CASE WHEN t.priority ~ '^[0-9.]+$'
@@ -425,7 +467,8 @@ class IntelligentTaskOrchestrator:
                 WHERE t.status = 'pending'
                 ORDER BY effective_priority DESC, t.created_at ASC
                 LIMIT 1
-                """)
+                """
+                )
 
                 row = cur.fetchone()
                 cur.close()
@@ -499,7 +542,7 @@ class IntelligentTaskOrchestrator:
                 analysis = await self.ai_core.generate(
                     prompt=f"Analyze task urgency (1-100 score): {row.get('title', 'Unknown task')}. Payload: {json.dumps(payload)[:500]}",
                     model="gpt-4o-mini",
-                    max_tokens=100
+                    max_tokens=100,
                 )
                 # Parse urgency from response
                 if analysis:
@@ -548,8 +591,9 @@ class IntelligentTaskOrchestrator:
         self.running_tasks[task.id] = task
 
         # Notify task start
-        await self._notify_task_event(task, "task_started", "low",
-            f"Task '{task.title}' has started execution")
+        await self._notify_task_event(
+            task, "task_started", "low", f"Task '{task.title}' has started execution"
+        )
 
         # Update database status
         await self._update_task_status(task.id, "in_progress")
@@ -566,8 +610,9 @@ class IntelligentTaskOrchestrator:
             await self._update_task_status(task.id, "completed", result)
             await self._store_execution_history(task, "completed", result)
 
-            await self._notify_task_event(task, "task_completed", "low",
-                f"Task '{task.title}' completed successfully")
+            await self._notify_task_event(
+                task, "task_completed", "low", f"Task '{task.title}' completed successfully"
+            )
 
         except Exception as e:
             logger.error(f"Task {task.id} failed: {e}")
@@ -578,16 +623,24 @@ class IntelligentTaskOrchestrator:
                 task.status = TaskStatus.RETRYING.value
 
                 await self._update_task_status(task.id, "pending")  # Re-queue
-                await self._notify_task_event(task, "task_retrying", "medium",
-                    f"Task '{task.title}' failed, retrying ({task.retry_count}/{task.max_retries})")
+                await self._notify_task_event(
+                    task,
+                    "task_retrying",
+                    "medium",
+                    f"Task '{task.title}' failed, retrying ({task.retry_count}/{task.max_retries})",
+                )
 
             else:
                 task.status = TaskStatus.FAILED.value
                 await self._update_task_status(task.id, "failed", {"error": str(e)})
                 await self._store_execution_history(task, "failed", {"error": str(e)})
 
-                await self._notify_task_event(task, "task_failed", "high",
-                    f"Task '{task.title}' failed after {task.retry_count} retries: {str(e)[:200]}")
+                await self._notify_task_event(
+                    task,
+                    "task_failed",
+                    "high",
+                    f"Task '{task.title}' failed after {task.retry_count} retries: {str(e)[:200]}",
+                )
 
         finally:
             if task.id in self.running_tasks:
@@ -621,7 +674,7 @@ class IntelligentTaskOrchestrator:
         result = await self.ai_core.generate(
             prompt=prompt,
             model=task.payload.get("model", "gpt-4o-mini"),
-            max_tokens=task.payload.get("max_tokens", 1000)
+            max_tokens=task.payload.get("max_tokens", 1000),
         )
         return {"analysis": result}
 
@@ -640,7 +693,7 @@ class IntelligentTaskOrchestrator:
                     "synced": True,
                     "records_verified": count,
                     "timestamp": datetime.now().isoformat(),
-                    "sync_type": "full_verification"
+                    "sync_type": "full_verification",
                 }
         except Exception as e:
             logger.error(f"Data sync failed: {e}")
@@ -659,7 +712,7 @@ class IntelligentTaskOrchestrator:
                 cur = conn.cursor()
                 cur.execute(
                     "INSERT INTO revenue_audit_log (action, amount, task_id) VALUES (%s, %s, %s)",
-                    (action, amount, task.id)
+                    (action, amount, task.id),
                 )
                 conn.commit()
                 cur.close()
@@ -685,7 +738,7 @@ class IntelligentTaskOrchestrator:
             message=task.payload.get("message", task.description),
             details=task.payload,
             channels=task.payload.get("channels", ["database"]),
-            sent_at=datetime.now()
+            sent_at=datetime.now(),
         )
         await self.notification_service.notify(notification)
         return {"notification_sent": True}
@@ -700,8 +753,12 @@ class IntelligentTaskOrchestrator:
                 for task_id, task in list(self.running_tasks.items()):
                     if task.started_at and (now - task.started_at) > timeout_threshold:
                         logger.warning(f"Task {task_id} timed out")
-                        await self._notify_task_event(task, "task_timeout", "high",
-                            f"Task '{task.title}' has exceeded timeout of {self.task_timeout_mins} minutes")
+                        await self._notify_task_event(
+                            task,
+                            "task_timeout",
+                            "high",
+                            f"Task '{task.title}' has exceeded timeout of {self.task_timeout_mins} minutes",
+                        )
 
                 await asyncio.sleep(30)
 
@@ -730,13 +787,15 @@ class IntelligentTaskOrchestrator:
                     return
                 cur = conn.cursor(cursor_factory=RealDictCursor)
 
-                cur.execute("""
+                cur.execute(
+                    """
                 SELECT id, title, payload, priority, created_at
                 FROM ai_autonomous_tasks
                 WHERE status = 'pending'
                 ORDER BY created_at ASC
                 LIMIT 20
-                """)
+                """
+                )
 
                 tasks = cur.fetchall()
                 cur.close()
@@ -770,7 +829,7 @@ class IntelligentTaskOrchestrator:
                     str(task["id"]),
                     int(base_priority),
                     adjusted_priority,
-                    f"Age boost: +{age_boost:.1f} (task age: {age_hours:.1f}h)"
+                    f"Age boost: +{age_boost:.1f} (task age: {age_hours:.1f}h)",
                 )
 
         except Exception as e:
@@ -783,12 +842,15 @@ class IntelligentTaskOrchestrator:
                 if not conn:
                     return
                 cur = conn.cursor()
-                cur.execute("""
+                cur.execute(
+                    """
                 INSERT INTO ai_priority_adjustments
                 (task_id, original_priority, adjusted_priority, adjustment_reason)
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT DO NOTHING
-                """, (task_id, original, adjusted, reason))
+                """,
+                    (task_id, original, adjusted, reason),
+                )
                 conn.commit()
                 cur.close()
         except Exception as e:
@@ -802,11 +864,14 @@ class IntelligentTaskOrchestrator:
                     return
                 cur = conn.cursor()
 
-                cur.execute("""
+                cur.execute(
+                    """
                 UPDATE ai_autonomous_tasks
                 SET status = %s, updated_at = NOW()
                 WHERE id = %s::uuid
-                """, (status, task_id))
+                """,
+                    (status, task_id),
+                )
 
                 conn.commit()
                 cur.close()
@@ -816,42 +881,48 @@ class IntelligentTaskOrchestrator:
     def _assess_task_risk(self, task: IntelligentTask) -> dict[str, Any]:
         """Assess risk level of a task"""
         risk_assessment = {
-            'overall_risk': 0.0,
-            'risk_categories': {},
-            'risk_factors': [],
-            'mitigation_strategies': []
+            "overall_risk": 0.0,
+            "risk_categories": {},
+            "risk_factors": [],
+            "mitigation_strategies": [],
         }
 
         # High-risk task types
-        high_risk_types = ['revenue_action', 'data_sync', 'financial', 'deletion', 'payment']
+        high_risk_types = ["revenue_action", "data_sync", "financial", "deletion", "payment"]
         if task.task_type in high_risk_types:
-            risk_assessment['risk_categories']['task_type'] = 0.8
-            risk_assessment['risk_factors'].append(f"High-risk task type: {task.task_type}")
+            risk_assessment["risk_categories"]["task_type"] = 0.8
+            risk_assessment["risk_factors"].append(f"High-risk task type: {task.task_type}")
 
         # Retry history indicates instability
         if task.retry_count > 0:
             retry_risk = min(task.retry_count / task.max_retries, 1.0)
-            risk_assessment['risk_categories']['retry_history'] = retry_risk
-            risk_assessment['risk_factors'].append(f"Task has been retried {task.retry_count} times")
+            risk_assessment["risk_categories"]["retry_history"] = retry_risk
+            risk_assessment["risk_factors"].append(
+                f"Task has been retried {task.retry_count} times"
+            )
 
         # Priority vs complexity
         if task.priority > 75 and task.estimated_duration_mins > 30:
-            risk_assessment['risk_categories']['complexity'] = 0.7
-            risk_assessment['risk_factors'].append("High-priority complex task")
+            risk_assessment["risk_categories"]["complexity"] = 0.7
+            risk_assessment["risk_factors"].append("High-priority complex task")
 
         # Dependencies create risk
         if len(task.dependencies) > 3:
-            risk_assessment['risk_categories']['dependencies'] = 0.6
-            risk_assessment['risk_factors'].append(f"{len(task.dependencies)} dependencies may cause cascading failures")
+            risk_assessment["risk_categories"]["dependencies"] = 0.6
+            risk_assessment["risk_factors"].append(
+                f"{len(task.dependencies)} dependencies may cause cascading failures"
+            )
 
         # Calculate overall risk
-        risk_values = list(risk_assessment['risk_categories'].values())
-        risk_assessment['overall_risk'] = sum(risk_values) / len(risk_values) if risk_values else 0.3
+        risk_values = list(risk_assessment["risk_categories"].values())
+        risk_assessment["overall_risk"] = (
+            sum(risk_values) / len(risk_values) if risk_values else 0.3
+        )
 
         # Generate mitigation strategies
-        if risk_assessment['overall_risk'] > 0.6:
-            risk_assessment['mitigation_strategies'].append("Enable detailed monitoring")
-            risk_assessment['mitigation_strategies'].append("Prepare rollback procedures")
+        if risk_assessment["overall_risk"] > 0.6:
+            risk_assessment["mitigation_strategies"].append("Enable detailed monitoring")
+            risk_assessment["mitigation_strategies"].append("Prepare rollback procedures")
 
         return risk_assessment
 
@@ -885,7 +956,7 @@ class IntelligentTaskOrchestrator:
         escalation_reasons = []
 
         # High-risk tasks
-        if task.risk_assessment and task.risk_assessment.get('overall_risk', 0) > 0.7:
+        if task.risk_assessment and task.risk_assessment.get("overall_risk", 0) > 0.7:
             escalation_reasons.append(f"High risk: {task.risk_assessment['overall_risk']:.1%}")
 
         # Low confidence
@@ -897,12 +968,16 @@ class IntelligentTaskOrchestrator:
             escalation_reasons.append(f"Near max retries: {task.retry_count}/{task.max_retries}")
 
         # Critical task types
-        critical_types = ['payment', 'financial', 'deletion', 'legal']
+        critical_types = ["payment", "financial", "deletion", "legal"]
         if task.task_type in critical_types:
             escalation_reasons.append(f"Critical task type: {task.task_type}")
 
         # High priority with high risk
-        if task.priority > 80 and task.risk_assessment and task.risk_assessment.get('overall_risk', 0) > 0.6:
+        if (
+            task.priority > 80
+            and task.risk_assessment
+            and task.risk_assessment.get("overall_risk", 0) > 0.6
+        ):
             escalation_reasons.append("High priority + high risk combination")
 
         human_escalation = len(escalation_reasons) > 0
@@ -921,26 +996,36 @@ class IntelligentTaskOrchestrator:
                 if not conn:
                     return
                 cur = conn.cursor()
-                cur.execute("""
+                cur.execute(
+                    """
                 INSERT INTO task_execution_history
                 (task_id, status, assigned_agent, started_at, completed_at, duration_ms, result, retry_count,
                  risk_assessment, confidence_score, human_escalation_required, escalation_reason)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    task.id, status, task.assigned_agent,
-                    task.started_at, task.completed_at, duration_ms,
-                    Json(result), task.retry_count,
-                    Json(task.risk_assessment) if task.risk_assessment else None,
-                    task.confidence_score,
-                    task.human_escalation_required,
-                    task.escalation_reason
-                ))
+                """,
+                    (
+                        task.id,
+                        status,
+                        task.assigned_agent,
+                        task.started_at,
+                        task.completed_at,
+                        duration_ms,
+                        Json(result),
+                        task.retry_count,
+                        Json(task.risk_assessment) if task.risk_assessment else None,
+                        task.confidence_score,
+                        task.human_escalation_required,
+                        task.escalation_reason,
+                    ),
+                )
                 conn.commit()
                 cur.close()
         except Exception as e:
             logger.error(f"Failed to store execution history: {e}")
 
-    async def _notify_task_event(self, task: IntelligentTask, event_type: str, severity: str, message: str):
+    async def _notify_task_event(
+        self, task: IntelligentTask, event_type: str, severity: str, message: str
+    ):
         """Send notification about task event"""
         notification = TaskNotification(
             task_id=task.id,
@@ -955,7 +1040,7 @@ class IntelligentTaskOrchestrator:
                 "retry_count": task.retry_count,
             },
             channels=self.notification_service.severity_channels.get(severity, ["database"]),
-            sent_at=datetime.now()
+            sent_at=datetime.now(),
         )
         await self.notification_service.notify(notification)
 
@@ -972,18 +1057,14 @@ class IntelligentTaskOrchestrator:
                 "max_concurrent": self.max_concurrent_tasks,
             },
             channels=self.notification_service.severity_channels.get(severity, ["database"]),
-            sent_at=datetime.now()
+            sent_at=datetime.now(),
         )
         await self.notification_service.notify(notification)
 
     # Public API methods
 
     async def submit_task(
-        self,
-        title: str,
-        task_type: str,
-        payload: dict[str, Any],
-        priority: int = 50
+        self, title: str, task_type: str, payload: dict[str, Any], priority: int = 50
     ) -> str:
         """Submit a new task to the orchestrator"""
         try:
@@ -992,11 +1073,14 @@ class IntelligentTaskOrchestrator:
                     raise RuntimeError("Failed to get database connection")
                 cur = conn.cursor()
 
-                cur.execute("""
+                cur.execute(
+                    """
                 INSERT INTO ai_autonomous_tasks (title, task_type, payload, priority, status, created_at)
                 VALUES (%s, %s, %s, %s, 'pending', NOW())
                 RETURNING id
-                """, (title, task_type, Json({"type": task_type, **payload}), priority))
+                """,
+                    (title, task_type, Json({"type": task_type, **payload}), priority),
+                )
 
                 task_id = str(cur.fetchone()[0])
                 conn.commit()
@@ -1017,17 +1101,21 @@ class IntelligentTaskOrchestrator:
                     return {"error": "Failed to get database connection"}
                 cur = conn.cursor(cursor_factory=RealDictCursor)
 
-                cur.execute("""
+                cur.execute(
+                    """
                 SELECT status, COUNT(*) as count
                 FROM ai_autonomous_tasks
                 GROUP BY status
-                """)
+                """
+                )
                 status_counts = {row["status"]: row["count"] for row in cur.fetchall()}
 
-                cur.execute("""
+                cur.execute(
+                    """
                 SELECT COUNT(*) as count FROM task_notifications
                 WHERE acknowledged = FALSE AND sent_at > NOW() - INTERVAL '24 hours'
-                """)
+                """
+                )
                 unread_notifications = cur.fetchone()["count"]
 
                 cur.close()

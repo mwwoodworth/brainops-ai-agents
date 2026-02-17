@@ -34,15 +34,17 @@ logger = logging.getLogger(__name__)
 
 class AlertSeverity(str, Enum):
     """Alert severity levels"""
+
     CRITICAL = "critical"  # Immediate action required
-    HIGH = "high"          # Action required within 1 hour
-    MEDIUM = "medium"      # Action required within 24 hours
-    LOW = "low"            # Informational
-    INFO = "info"          # Status update
+    HIGH = "high"  # Action required within 1 hour
+    MEDIUM = "medium"  # Action required within 24 hours
+    LOW = "low"  # Informational
+    INFO = "info"  # Status update
 
 
 class ServiceStatus(str, Enum):
     """Service health status"""
+
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"
@@ -52,6 +54,7 @@ class ServiceStatus(str, Enum):
 @dataclass
 class ServiceHealth:
     """Health snapshot for a service"""
+
     name: str
     url: str
     status: ServiceStatus
@@ -65,6 +68,7 @@ class ServiceHealth:
 @dataclass
 class SystemEvent:
     """Event captured from the system"""
+
     event_id: str
     event_type: str  # health_check, alert, recovery, deployment, error
     service: str
@@ -78,6 +82,7 @@ class SystemEvent:
 @dataclass
 class ObservabilityStats:
     """Daemon statistics"""
+
     started_at: str
     total_checks: int = 0
     total_events: int = 0
@@ -98,7 +103,7 @@ class PermanentObservabilityDaemon:
         self,
         poll_interval: int = 60,  # seconds
         brain_api_url: str = "https://brainops-ai-agents.onrender.com",
-        api_key: str = ""
+        api_key: str = "",
     ):
         self.poll_interval = poll_interval
         self.brain_api_url = brain_api_url
@@ -107,9 +112,7 @@ class PermanentObservabilityDaemon:
         self._task: Optional[asyncio.Task] = None
 
         # Initialize stats
-        self.stats = ObservabilityStats(
-            started_at=datetime.now(timezone.utc).isoformat()
-        )
+        self.stats = ObservabilityStats(started_at=datetime.now(timezone.utc).isoformat())
 
         # Event queue for batch persistence
         self._event_queue: list[SystemEvent] = []
@@ -120,38 +123,38 @@ class PermanentObservabilityDaemon:
                 "url": "https://brainops-ai-agents.onrender.com/health",
                 "headers": {"X-API-Key": self.api_key},
                 "critical": True,
-                "timeout": 10
+                "timeout": 10,
             },
             "brainops_backend": {
                 "url": "https://brainops-backend-prod.onrender.com/health",
                 "headers": {},
                 "critical": True,
-                "timeout": 10
+                "timeout": 10,
             },
             "mcp_bridge": {
                 "url": "https://brainops-mcp-bridge.onrender.com/health",
                 "headers": {},
                 "critical": True,
-                "timeout": 10
+                "timeout": 10,
             },
             "weathercraft_erp": {
                 "url": "https://weathercraft-erp.vercel.app",
                 "headers": {},
                 "critical": True,
-                "timeout": 15
+                "timeout": 15,
             },
             "myroofgenius": {
                 "url": "https://myroofgenius.com",
                 "headers": {},
                 "critical": True,
-                "timeout": 15
+                "timeout": 15,
             },
             "command_center": {
                 "url": "https://brainops-command-center.vercel.app/api/unified-health",
                 "headers": {},
                 "critical": False,
-                "timeout": 15
-            }
+                "timeout": 15,
+            },
         }
 
         self.stats.services_monitored = len(self.services)
@@ -177,7 +180,7 @@ class PermanentObservabilityDaemon:
             service="observability_daemon",
             severity=AlertSeverity.INFO,
             message="Permanent observability daemon started",
-            details={"services": list(self.services.keys())}
+            details={"services": list(self.services.keys())},
         )
 
     async def stop(self) -> None:
@@ -215,7 +218,7 @@ class PermanentObservabilityDaemon:
                     service="observability_daemon",
                     severity=AlertSeverity.HIGH,
                     message=f"Observability daemon error: {e}",
-                    details={"error": str(e)}
+                    details={"error": str(e)},
                 )
 
             # Wait for next poll
@@ -242,7 +245,7 @@ class PermanentObservabilityDaemon:
                         http_code=None,
                         error=str(result),
                         details={},
-                        checked_at=datetime.now(timezone.utc).isoformat()
+                        checked_at=datetime.now(timezone.utc).isoformat(),
                     )
                 else:
                     results[name] = result
@@ -254,10 +257,7 @@ class PermanentObservabilityDaemon:
         return results
 
     async def _check_service(
-        self,
-        session: aiohttp.ClientSession,
-        name: str,
-        config: dict
+        self, session: aiohttp.ClientSession, name: str, config: dict
     ) -> ServiceHealth:
         """Check a single service's health"""
         start_time = time.time()
@@ -267,7 +267,7 @@ class PermanentObservabilityDaemon:
                 config["url"],
                 headers=config.get("headers", {}),
                 timeout=aiohttp.ClientTimeout(total=config.get("timeout", 10)),
-                ssl=True
+                ssl=True,
             ) as response:
                 response_time_ms = int((time.time() - start_time) * 1000)
 
@@ -295,7 +295,7 @@ class PermanentObservabilityDaemon:
                     http_code=response.status,
                     error=None,
                     details=details,
-                    checked_at=datetime.now(timezone.utc).isoformat()
+                    checked_at=datetime.now(timezone.utc).isoformat(),
                 )
 
         except asyncio.TimeoutError:
@@ -307,7 +307,7 @@ class PermanentObservabilityDaemon:
                 http_code=None,
                 error="Connection timeout",
                 details={},
-                checked_at=datetime.now(timezone.utc).isoformat()
+                checked_at=datetime.now(timezone.utc).isoformat(),
             )
         except Exception as e:
             return ServiceHealth(
@@ -318,7 +318,7 @@ class PermanentObservabilityDaemon:
                 http_code=None,
                 error=str(e),
                 details={},
-                checked_at=datetime.now(timezone.utc).isoformat()
+                checked_at=datetime.now(timezone.utc).isoformat(),
             )
 
     async def _handle_state_change(self, name: str, health: ServiceHealth) -> None:
@@ -328,8 +328,7 @@ class PermanentObservabilityDaemon:
 
         # Track consecutive failures
         if current == ServiceStatus.UNHEALTHY:
-            self.stats.consecutive_failures[name] = \
-                self.stats.consecutive_failures.get(name, 0) + 1
+            self.stats.consecutive_failures[name] = self.stats.consecutive_failures.get(name, 0) + 1
         else:
             self.stats.consecutive_failures[name] = 0
 
@@ -344,8 +343,8 @@ class PermanentObservabilityDaemon:
                 details={
                     "status": current.value,
                     "response_time_ms": health.response_time_ms,
-                    "http_code": health.http_code
-                }
+                    "http_code": health.http_code,
+                },
             )
             return
 
@@ -361,8 +360,8 @@ class PermanentObservabilityDaemon:
                     details={
                         "status": current.value,
                         "response_time_ms": health.response_time_ms,
-                        "http_code": health.http_code
-                    }
+                        "http_code": health.http_code,
+                    },
                 )
             return
 
@@ -383,8 +382,8 @@ class PermanentObservabilityDaemon:
                     "current": current.value,
                     "error": health.error,
                     "http_code": health.http_code,
-                    "consecutive_failures": self.stats.consecutive_failures.get(name, 1)
-                }
+                    "consecutive_failures": self.stats.consecutive_failures.get(name, 1),
+                },
             )
             self.stats.alerts_generated += 1
 
@@ -398,8 +397,8 @@ class PermanentObservabilityDaemon:
                 details={
                     "previous": previous.value,
                     "current": current.value,
-                    "response_time_ms": health.response_time_ms
-                }
+                    "response_time_ms": health.response_time_ms,
+                },
             )
 
         else:
@@ -413,8 +412,8 @@ class PermanentObservabilityDaemon:
                     "previous": previous.value,
                     "current": current.value,
                     "response_time_ms": health.response_time_ms,
-                    "http_code": health.http_code
-                }
+                    "http_code": health.http_code,
+                },
             )
 
     async def _capture_event(
@@ -423,7 +422,7 @@ class PermanentObservabilityDaemon:
         service: str,
         severity: AlertSeverity,
         message: str,
-        details: dict[str, Any]
+        details: dict[str, Any],
     ) -> None:
         """Capture an event for persistence"""
         import uuid
@@ -435,7 +434,7 @@ class PermanentObservabilityDaemon:
             severity=severity,
             message=message,
             details=details,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         self._event_queue.append(event)
@@ -473,36 +472,49 @@ class PermanentObservabilityDaemon:
             row = await pool.fetchval(
                 "SELECT COUNT(*) FROM information_schema.tables "
                 "WHERE table_schema = 'public' AND table_name = ANY($1)",
-                ['ai_observability_events']
+                ["ai_observability_events"],
             )
             if row < 1:
                 logger.error(
                     "Required table ai_observability_events missing (found %s/1). "
-                    "Run migrations to create it.", row
+                    "Run migrations to create it.",
+                    row,
                 )
                 return
+
+            # Set tenant context for RLS (agent_worker has NOBYPASSRLS)
+            from config import config as app_config
+
+            tenant_id = app_config.tenant.default_tenant_id
 
             # Batch insert events
             for event in events_to_persist:
                 # Convert ISO string to datetime if needed
                 timestamp = event.timestamp
                 if isinstance(timestamp, str):
-                    timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
 
-                await pool.execute("""
-                    INSERT INTO ai_observability_events
-                    (event_id, event_type, service, severity, message, details, timestamp)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (event_id) DO NOTHING
-                """,
-                    event.event_id,
-                    event.event_type,
-                    event.service,
-                    event.severity.value,
-                    event.message,
-                    json.dumps(event.details),
-                    timestamp
-                )
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "SELECT set_config('app.current_tenant_id', $1, true)",
+                        tenant_id,
+                    )
+                    await conn.execute(
+                        """
+                        INSERT INTO ai_observability_events
+                        (event_id, event_type, service, severity, message, details, timestamp, tenant_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        ON CONFLICT (event_id) DO NOTHING
+                    """,
+                        event.event_id,
+                        event.event_type,
+                        event.service,
+                        event.severity.value,
+                        event.message,
+                        json.dumps(event.details),
+                        timestamp,
+                        tenant_id,
+                    )
                 event.persisted = True
 
             self.stats.events_persisted += len(events_to_persist)
@@ -517,7 +529,7 @@ class PermanentObservabilityDaemon:
         self,
         limit: int = 100,
         service: Optional[str] = None,
-        severity: Optional[AlertSeverity] = None
+        severity: Optional[AlertSeverity] = None,
     ) -> list[dict]:
         """Get recent events from the database"""
         try:
@@ -558,8 +570,12 @@ class PermanentObservabilityDaemon:
                     "service": row["service"],
                     "severity": row["severity"],
                     "message": row["message"],
-                    "details": row["details"] if isinstance(row["details"], dict) else json.loads(row["details"] or "{}"),
-                    "timestamp": row["timestamp"].isoformat() if hasattr(row["timestamp"], "isoformat") else str(row["timestamp"])
+                    "details": row["details"]
+                    if isinstance(row["details"], dict)
+                    else json.loads(row["details"] or "{}"),
+                    "timestamp": row["timestamp"].isoformat()
+                    if hasattr(row["timestamp"], "isoformat")
+                    else str(row["timestamp"]),
                 }
                 for row in rows
             ]
@@ -578,13 +594,17 @@ class PermanentObservabilityDaemon:
 
             pool = get_pool()
 
-            rows = await pool.fetch("""
+            rows = await pool.fetch(
+                """
                 SELECT event_id, event_type, severity, message, details, timestamp
                 FROM ai_observability_events
                 WHERE service = $1
                   AND timestamp > NOW() - INTERVAL '%s hours'
                 ORDER BY timestamp DESC
-            """ % hours, service)
+            """
+                % hours,
+                service,
+            )
 
             return [
                 {
@@ -592,8 +612,12 @@ class PermanentObservabilityDaemon:
                     "event_type": row["event_type"],
                     "severity": row["severity"],
                     "message": row["message"],
-                    "details": row["details"] if isinstance(row["details"], dict) else json.loads(row["details"] or "{}"),
-                    "timestamp": row["timestamp"].isoformat() if hasattr(row["timestamp"], "isoformat") else str(row["timestamp"])
+                    "details": row["details"]
+                    if isinstance(row["details"], dict)
+                    else json.loads(row["details"] or "{}"),
+                    "timestamp": row["timestamp"].isoformat()
+                    if hasattr(row["timestamp"], "isoformat")
+                    else str(row["timestamp"]),
                 }
                 for row in rows
             ]
@@ -614,7 +638,7 @@ class PermanentObservabilityDaemon:
             "last_check": self.stats.last_check,
             "consecutive_failures": self.stats.consecutive_failures,
             "running": self.running,
-            "queued_events": len(self._event_queue)
+            "queued_events": len(self._event_queue),
         }
 
 
@@ -650,7 +674,7 @@ async def capture_custom_event(
     service: str,
     message: str,
     severity: str = "info",
-    details: Optional[dict] = None
+    details: Optional[dict] = None,
 ) -> None:
     """Capture a custom event from external code"""
     daemon = get_observability_daemon()
@@ -659,7 +683,7 @@ async def capture_custom_event(
         service=service,
         severity=AlertSeverity(severity),
         message=message,
-        details=details or {}
+        details=details or {},
     )
 
 
@@ -676,16 +700,11 @@ async def get_system_health_summary() -> dict:
                 "status": health.status.value,
                 "response_time_ms": health.response_time_ms,
                 "http_code": health.http_code,
-                "error": health.error
+                "error": health.error,
             }
 
     # Count by status
-    status_counts = {
-        "healthy": 0,
-        "degraded": 0,
-        "unhealthy": 0,
-        "unknown": 0
-    }
+    status_counts = {"healthy": 0, "degraded": 0, "unhealthy": 0, "unknown": 0}
     for health in results.values():
         status_counts[health["status"]] += 1
 
@@ -699,7 +718,7 @@ async def get_system_health_summary() -> dict:
         "overall": overall,
         "services": results,
         "counts": status_counts,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
