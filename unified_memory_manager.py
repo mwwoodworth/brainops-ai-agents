@@ -134,15 +134,27 @@ class UnifiedMemoryManager:
                 self._current_conn = conn  # Store for backward compat
                 try:
                     cursor = conn.cursor(cursor_factory=RealDictCursor)
-                    # Set tenant context for RLS — without this, all rows are filtered out
+                    # Set tenant context for RLS — without this, all rows are filtered out.
+                    # Pool uses autocommit=True so SET LOCAL (transaction-scoped) won't persist.
+                    # Use set_config(..., false) for session-level scope instead, then reset after.
                     if self.tenant_id:
                         cursor.execute(
-                            "SELECT set_config('app.current_tenant_id', %s, true)",
+                            "SELECT set_config('app.current_tenant_id', %s, false)",
                             [self.tenant_id],
                         )
                     yield cursor
                     cursor.close()
                 finally:
+                    # Reset session-level tenant context to prevent cross-request leaks
+                    try:
+                        if self.tenant_id:
+                            reset_cur = conn.cursor()
+                            reset_cur.execute(
+                                "SELECT set_config('app.current_tenant_id', '', false)"
+                            )
+                            reset_cur.close()
+                    except Exception:
+                        pass
                     self._current_conn = None
 
         return cursor_context()
