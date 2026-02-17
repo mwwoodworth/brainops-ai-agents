@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 RENDER_API_KEY = os.getenv("RENDER_API_KEY", "")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "BrainOps Alerts <matt@myroofgenius.com>")
+RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "BrainOps AI <ops@myroofgenius.com>")
 ALERT_EMAIL = os.getenv("ALERT_EMAIL", "matthew@weathercraft.net")
 BRAINOPS_API_KEY = os.getenv("BRAINOPS_API_KEY", "")
 

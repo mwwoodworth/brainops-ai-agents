@@ -41,9 +41,7 @@ logger = logging.getLogger(__name__)
 
 # ── Alert configuration ──────────────────────────────────────────────
 RESEND_API_KEY = (os.getenv("RESEND_API_KEY") or "").strip()
-RESEND_FROM_EMAIL = (
-    os.getenv("RESEND_FROM_EMAIL") or "BrainOps Alerts <matt@myroofgenius.com>"
-).strip()
+RESEND_FROM_EMAIL = (os.getenv("RESEND_FROM_EMAIL") or "BrainOps AI <ops@myroofgenius.com>").strip()
 ALERT_EMAIL = (
     os.getenv("ALERT_EMAIL") or os.getenv("OWNER_EMAIL") or "matthew@weathercraft.net"
 ).strip()
