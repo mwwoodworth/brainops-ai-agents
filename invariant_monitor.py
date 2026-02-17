@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 RESEND_API_KEY = (os.getenv("RESEND_API_KEY") or "").strip()
 RESEND_FROM_EMAIL = (os.getenv("RESEND_FROM_EMAIL") or "BrainOps AI <ops@myroofgenius.com>").strip()
 ALERT_EMAIL = (
-    os.getenv("ALERT_EMAIL") or os.getenv("OWNER_EMAIL") or "matthew@weathercraft.net"
+    os.getenv("ALERT_EMAIL") or os.getenv("OWNER_EMAIL") or "mwwoodworth@gmail.com"
 ).strip()
 TWILIO_ACCOUNT_SID = (os.getenv("TWILIO_ACCOUNT_SID") or "").strip()
 TWILIO_AUTH_TOKEN = (os.getenv("TWILIO_AUTH_TOKEN") or "").strip()
