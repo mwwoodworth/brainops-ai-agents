@@ -390,10 +390,16 @@ async def recall_memory(query: RecallQuery):
             pass  # Ignore invalid type, search all
 
     try:
+        # Resolve tenant_id from config (recall requires it for RLS)
+        tenant_id = memory.tenant_id or config.tenant.default_tenant_id
+        if not tenant_id:
+            raise HTTPException(status_code=500, detail="No tenant_id configured for memory recall")
+
         # recall() is synchronous (psycopg2) — run in thread
         results = await asyncio.to_thread(
             memory.recall,
             query.query,
+            tenant_id=tenant_id,
             context=query.context,
             limit=query.limit,
             memory_type=mem_type,
