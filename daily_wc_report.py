@@ -24,7 +24,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 WC_REPORT_RECIPIENT = "matthew@weathercraft.net"
-REPORT_FROM = os.getenv("RESEND_FROM_EMAIL", "Matt @ BrainStack <matt@myroofgenius.com>")
+REPORT_FROM = os.getenv("RESEND_FROM_EMAIL", "BrainOps AI <ops@myroofgenius.com>")
 
 
 async def generate_daily_wc_report() -> dict[str, Any]:
@@ -57,7 +57,8 @@ async def generate_daily_wc_report() -> dict[str, Any]:
 
     try:
         # Fetch all real prospects
-        prospects = await pool.fetch("""
+        prospects = await pool.fetch(
+            """
             SELECT id, company_name, contact_name, email, phone, website,
                    source, stage, status, score, location, metadata,
                    created_at, updated_at
@@ -65,7 +66,8 @@ async def generate_daily_wc_report() -> dict[str, Any]:
             WHERE (is_test = false OR is_test IS NULL)
               AND (is_demo = false OR is_demo IS NULL)
             ORDER BY score DESC
-        """)
+        """
+        )
 
         if not prospects:
             logger.info("No real prospects found - skipping daily report")
@@ -111,7 +113,10 @@ async def generate_daily_wc_report() -> dict[str, Any]:
                 other_prospects.append(row)
 
             # Check if new in last 24h
-            if p["created_at"] and (now - p["created_at"].replace(tzinfo=timezone.utc)).total_seconds() < 86400:
+            if (
+                p["created_at"]
+                and (now - p["created_at"].replace(tzinfo=timezone.utc)).total_seconds() < 86400
+            ):
                 new_24h.append(row)
 
         stats["active_bids"] = len(active_bids)
@@ -120,21 +125,29 @@ async def generate_daily_wc_report() -> dict[str, Any]:
         stats["new_24h"] = len(new_24h)
 
         # Check outreach status
-        outreach_stats = await pool.fetchrow("""
+        outreach_stats = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) FILTER (WHERE status = 'queued') as queued,
                 COUNT(*) FILTER (WHERE status = 'sent') as sent,
                 COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled
             FROM ai_email_queue
             WHERE metadata->>'campaign_id' = 'co_commercial_reroof'
-        """)
+        """
+        )
 
         # Build HTML report
         date_str = now.strftime("%B %d, %Y")
         subject = _build_subject(active_bids, property_mgmt, pipeline, new_24h)
         body = _build_html_report(
-            date_str, active_bids, property_mgmt, pipeline,
-            new_24h, other_prospects, outreach_stats, stats
+            date_str,
+            active_bids,
+            property_mgmt,
+            pipeline,
+            new_24h,
+            other_prospects,
+            outreach_stats,
+            stats,
         )
 
         # Queue the email
@@ -184,7 +197,9 @@ def _build_subject(active_bids, property_mgmt, pipeline, new_24h) -> str:
     if active_bids:
         parts.append(f"{len(active_bids)} Active Bid{'s' if len(active_bids) != 1 else ''}")
     if property_mgmt:
-        parts.append(f"{len(property_mgmt)} Property Mgmt Target{'s' if len(property_mgmt) != 1 else ''}")
+        parts.append(
+            f"{len(property_mgmt)} Property Mgmt Target{'s' if len(property_mgmt) != 1 else ''}"
+        )
     if pipeline:
         parts.append(f"{len(pipeline)} Pipeline Project{'s' if len(pipeline) != 1 else ''}")
     if new_24h:
@@ -194,39 +209,58 @@ def _build_subject(active_bids, property_mgmt, pipeline, new_24h) -> str:
     return f"CO Commercial Reroof: {summary}"
 
 
-def _build_html_report(date_str, active_bids, property_mgmt, pipeline,
-                       new_24h, other_prospects, outreach_stats, stats) -> str:
+def _build_html_report(
+    date_str, active_bids, property_mgmt, pipeline, new_24h, other_prospects, outreach_stats, stats
+) -> str:
     html = []
     html.append('<div style="font-family:Arial,sans-serif;max-width:700px;color:#333;">')
-    html.append(f'<h2 style="color:#1a365d;">Colorado Commercial Reroof - Daily Intelligence Report</h2>')
-    html.append(f'<p style="color:#666;">Compiled: {date_str} | Weathercraft Roofing Campaign System</p>')
+    html.append(
+        f'<h2 style="color:#1a365d;">Colorado Commercial Reroof - Daily Intelligence Report</h2>'
+    )
+    html.append(
+        f'<p style="color:#666;">Compiled: {date_str} | Weathercraft Roofing Campaign System</p>'
+    )
     html.append('<hr style="border:1px solid #e2e8f0;">')
 
     # Active Bids
     if active_bids:
         html.append('<h3 style="color:#c53030;">ACTIVE BID OPPORTUNITIES (Act Now)</h3>')
-        html.append(_build_table(
-            ["Project", "Location", "Scope", "Deadline"],
-            [[
-                f"<strong>{b['company']}</strong><br>{b['roof_system']}",
-                b["location"],
-                b["notes"][:200],
-                b["bid_deadline"] or "Check status",
-            ] for b in active_bids]
-        ))
+        html.append(
+            _build_table(
+                ["Project", "Location", "Scope", "Deadline"],
+                [
+                    [
+                        f"<strong>{b['company']}</strong><br>{b['roof_system']}",
+                        b["location"],
+                        b["notes"][:200],
+                        b["bid_deadline"] or "Check status",
+                    ]
+                    for b in active_bids
+                ],
+            )
+        )
 
     # Property Management
     if property_mgmt:
-        html.append('<h3 style="color:#2b6cb0;">PROPERTY MANAGEMENT TARGETS (Outreach Candidates)</h3>')
-        html.append('<p style="color:#666;font-size:13px;">Getting on preferred vendor lists = recurring reroof work.</p>')
-        html.append(_build_table(
-            ["Company", "Location", "Portfolio"],
-            [[
-                f"<strong>{p['company']}</strong>",
-                p["location"],
-                p["notes"][:200],
-            ] for p in property_mgmt]
-        ))
+        html.append(
+            '<h3 style="color:#2b6cb0;">PROPERTY MANAGEMENT TARGETS (Outreach Candidates)</h3>'
+        )
+        html.append(
+            '<p style="color:#666;font-size:13px;">Getting on preferred vendor lists = recurring reroof work.</p>'
+        )
+        html.append(
+            _build_table(
+                ["Company", "Location", "Portfolio"],
+                [
+                    [
+                        f"<strong>{p['company']}</strong>",
+                        p["location"],
+                        p["notes"][:200],
+                    ]
+                    for p in property_mgmt
+                ],
+            )
+        )
 
     # Pipeline
     if pipeline:
@@ -240,20 +274,27 @@ def _build_html_report(date_str, active_bids, property_mgmt, pipeline,
     if new_24h:
         html.append(f'<h3 style="color:#d69e2e;">NEW IN LAST 24 HOURS ({len(new_24h)})</h3>')
         for n in new_24h:
-            html.append(f'<p><strong>{n["company"]}</strong> - {n["location"]}. Score: {n["score"]}. {n["notes"][:150]}</p>')
+            html.append(
+                f'<p><strong>{n["company"]}</strong> - {n["location"]}. Score: {n["score"]}. {n["notes"][:150]}</p>'
+            )
 
     # Other prospects
     if other_prospects:
         html.append(f'<h3 style="color:#718096;">OTHER PROSPECTS ({len(other_prospects)})</h3>')
-        html.append(_build_table(
-            ["Company", "Location", "Score", "Stage"],
-            [[
-                f"<strong>{o['company']}</strong>",
-                o["location"],
-                str(o["score"]),
-                o["stage"],
-            ] for o in other_prospects[:10]]
-        ))
+        html.append(
+            _build_table(
+                ["Company", "Location", "Score", "Stage"],
+                [
+                    [
+                        f"<strong>{o['company']}</strong>",
+                        o["location"],
+                        str(o["score"]),
+                        o["stage"],
+                    ]
+                    for o in other_prospects[:10]
+                ],
+            )
+        )
         if len(other_prospects) > 10:
             html.append(f'<p style="color:#999;">...and {len(other_prospects) - 10} more</p>')
 
@@ -267,30 +308,30 @@ def _build_html_report(date_str, active_bids, property_mgmt, pipeline,
     if outreach_stats:
         html.append(f' | Emails Sent: {outreach_stats["sent"] or 0}')
         html.append(f' | Queued: {outreach_stats["queued"] or 0}')
-    html.append('</p>')
+    html.append("</p>")
 
     # Action items
     if active_bids:
         html.append('<h3 style="color:#c53030;">IMMEDIATE ACTION ITEMS</h3>')
-        html.append('<ul>')
+        html.append("<ul>")
         for b in active_bids:
             deadline = f" - Deadline: {b['bid_deadline']}" if b.get("bid_deadline") else ""
             html.append(f'<li><strong>BID:</strong> {b["company"]}{deadline}</li>')
-        html.append('</ul>')
+        html.append("</ul>")
 
     # Bid portal reminder
     html.append('<h3 style="color:#4a5568;">BID PORTAL REGISTRATION</h3>')
     html.append('<ul style="font-size:13px;">')
-    html.append('<li>BidNet Direct / RMEPS - bidnetdirect.com/colorado (FREE)</li>')
-    html.append('<li>SAM.gov - Required for federal/state bids (FREE)</li>')
-    html.append('<li>Colorado OSC - osc.colorado.gov/spco/solicitations (FREE)</li>')
-    html.append('<li>City of COS Procurement - coloradosprings.gov/procurement (FREE)</li>')
-    html.append('</ul>')
+    html.append("<li>BidNet Direct / RMEPS - bidnetdirect.com/colorado (FREE)</li>")
+    html.append("<li>SAM.gov - Required for federal/state bids (FREE)</li>")
+    html.append("<li>Colorado OSC - osc.colorado.gov/spco/solicitations (FREE)</li>")
+    html.append("<li>City of COS Procurement - coloradosprings.gov/procurement (FREE)</li>")
+    html.append("</ul>")
 
     html.append('<hr style="border:1px solid #e2e8f0;">')
     html.append('<p style="color:#999;font-size:11px;">Generated by BrainOps AI Campaign System | ')
-    html.append('All bid deadlines should be independently verified via official portals.</p>')
-    html.append('</div>')
+    html.append("All bid deadlines should be independently verified via official portals.</p>")
+    html.append("</div>")
 
     return "\n".join(html)
 
@@ -300,7 +341,7 @@ def _build_table(headers: list[str], rows: list[list[str]]) -> str:
     html.append('<tr style="background:#f7fafc;">')
     for h in headers:
         html.append(f'<th style="text-align:left;padding:8px;border:1px solid #e2e8f0;">{h}</th>')
-    html.append('</tr>')
+    html.append("</tr>")
     for i, row in enumerate(rows):
         bg = ' style="background:#f7fafc;"' if i % 2 == 1 else ""
         html.append(f"<tr{bg}>")
