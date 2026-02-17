@@ -155,6 +155,16 @@ except ImportError:
     run_outreach_cycle = None
     logging.warning("Outreach Executor unavailable")
 
+# Lead Discovery (scans ERP customers for re-engagement, upsell, referral leads)
+try:
+    from revenue_pipeline_agents import LeadDiscoveryAgentReal
+
+    LEAD_DISCOVERY_AVAILABLE = True
+except ImportError:
+    LEAD_DISCOVERY_AVAILABLE = False
+    LeadDiscoveryAgentReal = None
+    logging.warning("Lead Discovery Agent unavailable")
+
 # Daily WC Intelligence Report
 try:
     from daily_wc_report import generate_daily_wc_report
@@ -1705,6 +1715,20 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("Daily Briefing failed: %s", exc, exc_info=True)
 
+    def _run_lead_discovery(self):
+        """Scan ERP customers for re-engagement, upsell, and referral leads."""
+        if not LEAD_DISCOVERY_AVAILABLE:
+            logger.debug("Lead Discovery skipped: not available")
+            return
+        try:
+            agent = LeadDiscoveryAgentReal()
+            result = run_on_main_loop(agent.discover_all_leads(), timeout=120)
+            discovered = result.get("leads_discovered", 0)
+            stored = result.get("leads_stored", 0)
+            logger.info("Lead Discovery: discovered=%s, stored=%s", discovered, stored)
+        except Exception as exc:
+            logger.error("Lead Discovery failed: %s", exc, exc_info=True)
+
     def _run_outreach_executor(self):
         """Execute outreach cycle: process ai_scheduled_outreach + run campaigns for new leads.
         DISABLED: Requires ENABLE_OUTREACH_EXECUTOR=true env var.
@@ -2078,6 +2102,27 @@ class AgentScheduler:
             logger.info("Scheduled Daily Ops Briefing every 24 hours")
         except Exception as exc:
             logger.error("Failed to schedule Daily Ops Briefing: %s", exc, exc_info=True)
+
+        # Lead Discovery: scan ERP customers for new revenue leads every 12 hours
+        if LEAD_DISCOVERY_AVAILABLE:
+            try:
+                job_id = "lead_discovery"
+                self.scheduler.add_job(
+                    func=self._run_lead_discovery,
+                    trigger=IntervalTrigger(hours=12),
+                    id=job_id,
+                    name="Lead Discovery",
+                    replace_existing=True,
+                )
+                self.registered_jobs[job_id] = {
+                    "agent_id": "lead_discovery",
+                    "agent_name": "LeadDiscoveryAgentReal",
+                    "frequency_minutes": 720,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+                logger.info("Scheduled Lead Discovery every 12 hours")
+            except Exception as exc:
+                logger.error("Failed to schedule Lead Discovery: %s", exc, exc_info=True)
 
         # Keep execution logs clean: auto-timeout stuck rows regularly so `brainops verify` stays green.
         cleanup_enabled_env = os.getenv("ENABLE_STUCK_EXECUTION_CLEANUP")
