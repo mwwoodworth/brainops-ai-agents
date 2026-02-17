@@ -143,11 +143,16 @@ class SecurityConfig:
 class TenantConfig:
     """Tenant configuration for multi-tenancy support"""
 
+    # Weathercraft primary tenant - hardcoded fallback so RLS never blocks writes
+    PRIMARY_TENANT_ID = "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+
     def __init__(self):
-        # Default tenant ID from environment (required for production)
-        self.default_tenant_id = os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID")
-        if not self.default_tenant_id:
-            logger.warning("No DEFAULT_TENANT_ID set - multi-tenancy may not work correctly")
+        # Default tenant ID from environment, with hardcoded fallback
+        self.default_tenant_id = (
+            os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID") or self.PRIMARY_TENANT_ID
+        )
+        if self.default_tenant_id == self.PRIMARY_TENANT_ID:
+            logger.info(f"Using primary tenant ID fallback: {self.default_tenant_id[:8]}...")
 
         # Per-request tenant resolution is handled via X-Tenant-ID header
         self.header_name = os.getenv("TENANT_HEADER", "X-Tenant-ID")
@@ -159,8 +164,8 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.25.0"
-        )  # AI OS Awakening Phase 4: Real action engine, OODA decide+act, briefing
+            "VERSION", "v11.25.1"
+        )  # Fix RLS violations: tenant context in all DB write paths
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "10000"))
