@@ -21,11 +21,12 @@ from psycopg2 import sql
 from psycopg2.extras import Json, RealDictCursor
 from utils.embedding_provider import generate_embedding_sync
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -35,13 +36,15 @@ class CustomJSONEncoder(json.JSONEncoder):
             return float(obj)
         elif isinstance(obj, Enum):
             return obj.value
-        elif hasattr(obj, '__dict__'):
+        elif hasattr(obj, "__dict__"):
             return obj.__dict__
         return super().default(obj)
+
 
 # Use shared connection pool - CRITICAL for preventing connection exhaustion
 try:
     from database.sync_pool import get_sync_pool
+
     USING_SHARED_POOL = True
 except ImportError:
     USING_SHARED_POOL = False
@@ -50,16 +53,18 @@ except ImportError:
 
 class MemoryType(Enum):
     """Types of memory in the unified system"""
-    EPISODIC = "episodic"      # Specific events and experiences
-    SEMANTIC = "semantic"      # Facts and knowledge
+
+    EPISODIC = "episodic"  # Specific events and experiences
+    SEMANTIC = "semantic"  # Facts and knowledge
     PROCEDURAL = "procedural"  # How to do things
-    WORKING = "working"        # Short-term active memory
-    META = "meta"             # Memory about memories
+    WORKING = "working"  # Short-term active memory
+    META = "meta"  # Memory about memories
 
 
 @dataclass
 class Memory:
     """Unified memory structure"""
+
     memory_type: MemoryType
     content: dict[str, Any]
     source_system: str
@@ -81,7 +86,7 @@ class UnifiedMemoryManager:
     def __init__(self, tenant_id: Optional[str] = None):
         self.embedding_cache = {}
         self.consolidation_threshold = 0.85  # Similarity threshold for consolidation
-        self.tenant_id = tenant_id or os.getenv('TENANT_ID')
+        self.tenant_id = tenant_id or os.getenv("TENANT_ID") or os.getenv("DEFAULT_TENANT_ID")
         self._pool = None
         self._init_pool()
 
@@ -106,7 +111,7 @@ class UnifiedMemoryManager:
     @property
     def conn(self) -> Optional[psycopg2.extensions.connection]:
         """Backward compatibility - get connection from pool for current operation"""
-        if hasattr(self, '_current_conn') and self._current_conn:
+        if hasattr(self, "_current_conn") and self._current_conn:
             return self._current_conn
         return None
 
@@ -129,6 +134,12 @@ class UnifiedMemoryManager:
                 self._current_conn = conn  # Store for backward compat
                 try:
                     cursor = conn.cursor(cursor_factory=RealDictCursor)
+                    # Set tenant context for RLS — without this, all rows are filtered out
+                    if self.tenant_id:
+                        cursor.execute(
+                            "SELECT set_config('app.current_tenant_id', %s, true)",
+                            [self.tenant_id],
+                        )
                     yield cursor
                     cursor.close()
                 finally:
@@ -182,15 +193,18 @@ class UnifiedMemoryManager:
                 if not cur:
                     return
 
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO unified_brain_logs (id, system, action, data, created_at)
                     VALUES (%s, %s, %s, %s, NOW())
-                """, (
-                    str(uuid.uuid4()),
-                    system,
-                    action,
-                    json.dumps(data, cls=CustomJSONEncoder),
-                ))
+                """,
+                    (
+                        str(uuid.uuid4()),
+                        system,
+                        action,
+                        json.dumps(data, cls=CustomJSONEncoder),
+                    ),
+                )
 
         except Exception as exc:
             logger.warning("Failed to log to unified brain: %s", exc, exc_info=True)
@@ -198,7 +212,7 @@ class UnifiedMemoryManager:
     def store(self, memory: Memory) -> str:
         """Store a memory with deduplication and linking"""
         if not memory.tenant_id:
-             # Try to use instance tenant_id if memory tenant_id is missing
+            # Try to use instance tenant_id if memory tenant_id is missing
             if self.tenant_id:
                 memory.tenant_id = self.tenant_id
             else:
@@ -209,18 +223,24 @@ class UnifiedMemoryManager:
             existing = self._find_duplicate(memory)
             if existing:
                 # Reinforce existing memory instead of creating duplicate
-                mem_id = self._reinforce_memory(existing['id'], memory)
-                self.log_to_brain("memory_system", "memory_reinforced", {
-                    "memory_id": mem_id,
-                    "type": memory.memory_type.value,
-                    "source": memory.source_system
-                })
+                mem_id = self._reinforce_memory(existing["id"], memory)
+                self.log_to_brain(
+                    "memory_system",
+                    "memory_reinforced",
+                    {
+                        "memory_id": mem_id,
+                        "type": memory.memory_type.value,
+                        "source": memory.source_system,
+                    },
+                )
                 return mem_id
 
             # Generate embedding if we have content
             embedding = self._generate_embedding(memory.content)
             if embedding is None:
-                logger.warning("Memory will be stored without embedding - semantic search unavailable for this memory")
+                logger.warning(
+                    "Memory will be stored without embedding - semantic search unavailable for this memory"
+                )
 
             # Find related memories
             related = self._find_related_memories(memory.content, memory.tenant_id, limit=5)
@@ -248,35 +268,42 @@ class UnifiedMemoryManager:
                 content_json = json.dumps(memory.content, cls=CustomJSONEncoder)
                 metadata_json = json.dumps(memory.metadata or {}, cls=CustomJSONEncoder)
 
-                cur.execute(query, (
-                    memory.memory_type.value,
-                    content_json,
-                    memory.source_system,
-                    memory.source_agent,
-                    memory.created_by,
-                    memory.importance_score,
-                    memory.tags or [],
-                    metadata_json,
-                    memory.context_id,
-                    memory.parent_memory_id,
-                    [r['id'] for r in related] if related else None,
-                    memory.expires_at,
-                    memory.tenant_id,
-                    embedding,
-                    search_text
-                ))
+                cur.execute(
+                    query,
+                    (
+                        memory.memory_type.value,
+                        content_json,
+                        memory.source_system,
+                        memory.source_agent,
+                        memory.created_by,
+                        memory.importance_score,
+                        memory.tags or [],
+                        metadata_json,
+                        memory.context_id,
+                        memory.parent_memory_id,
+                        [r["id"] for r in related] if related else None,
+                        memory.expires_at,
+                        memory.tenant_id,
+                        embedding,
+                        search_text,
+                    ),
+                )
 
                 result = cur.fetchone()
-                memory_id = result['id'] if result else None
+                memory_id = result["id"] if result else None
 
                 logger.info(f"✅ Stored memory {memory_id} ({memory.memory_type.value})")
 
-                self.log_to_brain("memory_system", "memory_stored", {
-                    "memory_id": memory_id,
-                    "type": memory.memory_type.value,
-                    "source": memory.source_system,
-                    "tags": memory.tags
-                })
+                self.log_to_brain(
+                    "memory_system",
+                    "memory_stored",
+                    {
+                        "memory_id": memory_id,
+                        "type": memory.memory_type.value,
+                        "source": memory.source_system,
+                        "tags": memory.tags,
+                    },
+                )
 
                 return memory_id
 
@@ -284,32 +311,46 @@ class UnifiedMemoryManager:
             logger.error(f"❌ Failed to store memory: {e}")
             return None
 
-    async def store_async(self, content: str, memory_type: str = "operational", category: str = None, metadata: dict = None) -> str:
+    async def store_async(
+        self,
+        content: str,
+        memory_type: str = "operational",
+        category: str = None,
+        metadata: dict = None,
+    ) -> str:
         """Async wrapper for store to match app.py interface"""
         # Map string memory_type to Enum
         try:
             mem_type = MemoryType(memory_type.lower())
         except ValueError:
-            mem_type = MemoryType.SEMANTIC # Default
+            mem_type = MemoryType.SEMANTIC  # Default
 
         # Construct Memory object
         mem = Memory(
             memory_type=mem_type,
-            content={"text": content, "category": category} if isinstance(content, str) else content,
+            content={"text": content, "category": category}
+            if isinstance(content, str)
+            else content,
             source_system="api",
             source_agent="user",
             created_by="api_user",
             importance_score=0.5,
             tags=[category] if category else [],
             metadata=metadata or {},
-            tenant_id=self.tenant_id
+            tenant_id=self.tenant_id,
         )
 
         # Run sync store in thread pool
         return await asyncio.to_thread(self.store, mem)
 
-    def recall(self, query: Union[str, dict], tenant_id: str = None, context: Optional[str] = None,
-               limit: int = 10, memory_type: Optional[MemoryType] = None) -> list[dict]:
+    def recall(
+        self,
+        query: Union[str, dict],
+        tenant_id: str = None,
+        context: Optional[str] = None,
+        limit: int = 10,
+        memory_type: Optional[MemoryType] = None,
+    ) -> list[dict]:
         """Recall relevant memories with semantic search"""
         # Use instance tenant_id if not provided
         tenant_id = tenant_id or self.tenant_id
@@ -369,14 +410,18 @@ class UnifiedMemoryManager:
 
                 # Update access counts
                 if memories:
-                    memory_ids = [m['id'] for m in memories]
+                    memory_ids = [m["id"] for m in memories]
                     self._update_access_counts(memory_ids)
 
-                    self.log_to_brain("memory_system", "memory_recalled", {
-                        "query": query if isinstance(query, str) else "vector",
-                        "count": len(memories),
-                        "top_score": float(memories[0].get('similarity') or 0.0)
-                    })
+                    self.log_to_brain(
+                        "memory_system",
+                        "memory_recalled",
+                        {
+                            "query": query if isinstance(query, str) else "vector",
+                            "count": len(memories),
+                            "top_score": float(memories[0].get("similarity") or 0.0),
+                        },
+                    )
 
                 logger.info(f"📚 Recalled {len(memories)} relevant memories")
                 return [dict(m) for m in memories]
@@ -394,7 +439,9 @@ class UnifiedMemoryManager:
             except ValueError as exc:
                 logger.debug("Invalid memory_type %s: %s", memory_type, exc)
 
-        return await asyncio.to_thread(self.recall, query, self.tenant_id, limit=limit, memory_type=mem_type)
+        return await asyncio.to_thread(
+            self.recall, query, self.tenant_id, limit=limit, memory_type=mem_type
+        )
 
     async def recall_async(self, query, tenant_id=None, context=None, limit=10, memory_type=None):
         """Async wrapper for recall - use from async contexts to avoid blocking the event loop"""
@@ -424,14 +471,20 @@ class UnifiedMemoryManager:
         """Async wrapper for store (Memory object) - use from async contexts"""
         return await asyncio.to_thread(self.store, memory)
 
-    def _keyword_search(self, query: Union[str, dict], tenant_id: str, context: Optional[str] = None,
-                       limit: int = 10, memory_type: Optional[MemoryType] = None) -> list[dict]:
+    def _keyword_search(
+        self,
+        query: Union[str, dict],
+        tenant_id: str,
+        context: Optional[str] = None,
+        limit: int = 10,
+        memory_type: Optional[MemoryType] = None,
+    ) -> list[dict]:
         """Fallback keyword search when embeddings are unavailable"""
         try:
             search_term = query if isinstance(query, str) else str(query)
             # Basic sanitization
-            search_term = search_term.replace('%', '')
-            
+            search_term = search_term.replace("%", "")
+
             with self._get_cursor() as cur:
                 base_query = """
                 SELECT
@@ -442,33 +495,37 @@ class UnifiedMemoryManager:
                 WHERE tenant_id = %s
                 AND (search_text ILIKE %s OR content::text ILIKE %s)
                 """
-                
+
                 params = [tenant_id, f"%{search_term}%", f"%{search_term}%"]
-                
+
                 if context:
                     base_query += " AND context_id = %s"
                     params.append(context)
-                    
+
                 if memory_type:
                     base_query += " AND memory_type = %s"
                     params.append(memory_type.value)
-                    
+
                 base_query += " ORDER BY importance_score DESC LIMIT %s"
                 params.append(limit)
-                
+
                 cur.execute(base_query, params)
                 memories = cur.fetchall()
-                
+
                 if memories:
-                    logger.info(f"🔎 Keyword recall found {len(memories)} results for '{search_term}'")
-                
+                    logger.info(
+                        f"🔎 Keyword recall found {len(memories)} results for '{search_term}'"
+                    )
+
                 return [dict(m) for m in memories]
-                
+
         except Exception as e:
             logger.error(f"❌ Keyword search failed: {e}")
             return []
 
-    def synthesize(self, tenant_id: str = None, time_window: timedelta = timedelta(hours=24)) -> list[dict]:
+    def synthesize(
+        self, tenant_id: str = None, time_window: timedelta = timedelta(hours=24)
+    ) -> list[dict]:
         """Synthesize insights from recent memories"""
         tenant_id = tenant_id or self.tenant_id
         if not tenant_id:
@@ -499,29 +556,33 @@ class UnifiedMemoryManager:
 
                 for pattern in patterns:
                     insight = {
-                        'type': 'pattern',
-                        'confidence': pattern['confidence'],
-                        'description': pattern['description'],
-                        'supporting_memories': pattern['memory_count'],
-                        'recommended_action': pattern['action'],
-                        'impact': pattern['estimated_impact'],
-                        'discovered_at': datetime.now().isoformat()
+                        "type": "pattern",
+                        "confidence": pattern["confidence"],
+                        "description": pattern["description"],
+                        "supporting_memories": pattern["memory_count"],
+                        "recommended_action": pattern["action"],
+                        "impact": pattern["estimated_impact"],
+                        "discovered_at": datetime.now().isoformat(),
                     }
                     insights.append(insight)
 
                     # Store the insight as a meta memory
-                    self.store(Memory(
-                        memory_type=MemoryType.META,
-                        content=insight,
-                        source_system='memory_synthesis',
-                        source_agent='synthesizer',
-                        created_by='unified_memory_manager',
-                        importance_score=pattern['confidence'],
-                        tags=['insight', 'pattern', 'synthesis'],
-                        tenant_id=tenant_id
-                    ))
+                    self.store(
+                        Memory(
+                            memory_type=MemoryType.META,
+                            content=insight,
+                            source_system="memory_synthesis",
+                            source_agent="synthesizer",
+                            created_by="unified_memory_manager",
+                            importance_score=pattern["confidence"],
+                            tags=["insight", "pattern", "synthesis"],
+                            tenant_id=tenant_id,
+                        )
+                    )
 
-                logger.info(f"🧠 Synthesized {len(insights)} insights from {len(memories)} memories")
+                logger.info(
+                    f"🧠 Synthesized {len(insights)} insights from {len(memories)} memories"
+                )
                 return insights
 
         except Exception as e:
@@ -560,10 +621,7 @@ class UnifiedMemoryManager:
 
                 for pair in similar_pairs:
                     # Merge the memories
-                    merged_content = self._merge_memories(
-                        pair['content1'],
-                        pair['content2']
-                    )
+                    merged_content = self._merge_memories(pair["content1"], pair["content2"])
 
                     # Update the first memory with merged content
                     update_query = """
@@ -573,7 +631,7 @@ class UnifiedMemoryManager:
                         reinforcement_count = reinforcement_count + 1
                     WHERE id = %s
                     """
-                    cur.execute(update_query, (Json(merged_content), pair['id1']))
+                    cur.execute(update_query, (Json(merged_content), pair["id1"]))
 
                     # Mark the second memory as consolidated
                     delete_query = """
@@ -586,10 +644,7 @@ class UnifiedMemoryManager:
                         )
                     WHERE id = %s
                     """
-                    cur.execute(delete_query, (
-                        json.dumps(str(pair['id1'])),
-                        pair['id2']
-                    ))
+                    cur.execute(delete_query, (json.dumps(str(pair["id1"])), pair["id2"]))
 
                     consolidated_count += 1
 
@@ -597,10 +652,11 @@ class UnifiedMemoryManager:
                 logger.info(f"♻️ Consolidated {consolidated_count} memory pairs")
 
                 if consolidated_count > 0:
-                    self.log_to_brain("memory_system", "memory_consolidated", {
-                        "count": consolidated_count,
-                        "aggressive": aggressive
-                    })
+                    self.log_to_brain(
+                        "memory_system",
+                        "memory_consolidated",
+                        {"count": consolidated_count, "aggressive": aggressive},
+                    )
 
         except Exception as e:
             logger.error(f"❌ Failed to consolidate memories: {e}")
@@ -616,16 +672,16 @@ class UnifiedMemoryManager:
         # All data should migrate TO unified_ai_memory (the CANONICAL table).
         # Do NOT add unified_ai_memory to this list!
         tables_to_migrate = [
-            'ai_context_memory',
-            'ai_persistent_memory',
-            'agent_memory',
-            'cross_ai_memory',
-            'production_memory',
-            'unified_memory',  # Legacy table - migrate data to unified_ai_memory
-            'ai_memory',       # Legacy table with 1 row
-            'ai_memories',     # Legacy table with 3 rows
-            'ai_memory_store', # Legacy table with 3 rows
-            'system_memory'
+            "ai_context_memory",
+            "ai_persistent_memory",
+            "agent_memory",
+            "cross_ai_memory",
+            "production_memory",
+            "unified_memory",  # Legacy table - migrate data to unified_ai_memory
+            "ai_memory",  # Legacy table with 1 row
+            "ai_memories",  # Legacy table with 3 rows
+            "ai_memory_store",  # Legacy table with 3 rows
+            "system_memory",
         ]
 
         total_migrated = 0
@@ -644,7 +700,8 @@ class UnifiedMemoryManager:
         """Migrate a single table to unified memory"""
         # Validate table name to prevent SQL injection
         import re
-        if not re.match(r'^[a-z_][a-z0-9_]*$', table_name):
+
+        if not re.match(r"^[a-z_][a-z0-9_]*$", table_name):
             raise ValueError(f"Invalid table name: {table_name}")
         try:
             with self._get_cursor() as cur:
@@ -657,7 +714,7 @@ class UnifiedMemoryManager:
                 )
                 """
                 cur.execute(check_query, (table_name,))
-                if not cur.fetchone()['exists']:
+                if not cur.fetchone()["exists"]:
                     return 0
 
                 # Get recent data from old table
@@ -676,17 +733,19 @@ class UnifiedMemoryManager:
                         # Convert to unified format
                         memory = Memory(
                             memory_type=MemoryType.SEMANTIC,
-                            content=old_mem.get('content') or old_mem.get('memory_data') or dict(old_mem),
+                            content=old_mem.get("content")
+                            or old_mem.get("memory_data")
+                            or dict(old_mem),
                             source_system=table_name,
-                            source_agent='migrated',
-                            created_by='migration',
-                            importance_score=old_mem.get('importance', 0.5),
-                            tags=['migrated', table_name],
-                            metadata={'original_id': str(old_mem.get('id', ''))},
+                            source_agent="migrated",
+                            created_by="migration",
+                            importance_score=old_mem.get("importance", 0.5),
+                            tags=["migrated", table_name],
+                            metadata={"original_id": str(old_mem.get("id", ""))},
                             # created_at=old_mem.get('created_at'), # Memory dataclass doesn't have created_at in __init__?
                             # Wait, checking Memory dataclass... it doesn't have created_at in the definition above!
                             # It has expires_at.
-                            tenant_id=tenant_id
+                            tenant_id=tenant_id,
                         )
                         self.store(memory)
                         migrated += 1
@@ -716,7 +775,15 @@ class UnifiedMemoryManager:
                     AND tenant_id = %s
                 LIMIT 1
                 """
-                cur.execute(query, (content_hash, memory.memory_type.value, memory.source_system, memory.tenant_id))
+                cur.execute(
+                    query,
+                    (
+                        content_hash,
+                        memory.memory_type.value,
+                        memory.source_system,
+                        memory.tenant_id,
+                    ),
+                )
                 return cur.fetchone()
         except (TypeError, ValueError, psycopg2.Error) as exc:
             logger.warning("Failed to find duplicate memory: %s", exc, exc_info=True)
@@ -784,7 +851,7 @@ class UnifiedMemoryManager:
                 if isinstance(value, str):
                     parts.append(value)
 
-        return ' '.join(parts)
+        return " ".join(parts)
 
     def _update_access_counts(self, memory_ids: list[str]):
         """Update access counts for recalled memories"""
@@ -805,7 +872,7 @@ class UnifiedMemoryManager:
         # Group by source system
         system_groups = {}
         for mem in memories:
-            system = mem.get('source_system', 'unknown')
+            system = mem.get("source_system", "unknown")
             if system not in system_groups:
                 system_groups[system] = []
             system_groups[system].append(mem)
@@ -815,11 +882,11 @@ class UnifiedMemoryManager:
             if len(group_memories) >= 3:
                 # Pattern detected
                 pattern = {
-                    'confidence': min(0.9, len(group_memories) / 10),
-                    'description': f"High activity in {system} system",
-                    'memory_count': len(group_memories),
-                    'action': f"Optimize {system} for increased load",
-                    'estimated_impact': f"{len(group_memories) * 100} operations/day"
+                    "confidence": min(0.9, len(group_memories) / 10),
+                    "description": f"High activity in {system} system",
+                    "memory_count": len(group_memories),
+                    "action": f"Optimize {system} for increased load",
+                    "estimated_impact": f"{len(group_memories) * 100} operations/day",
                 }
                 patterns.append(pattern)
 
@@ -842,7 +909,9 @@ class UnifiedMemoryManager:
 
         return merged
 
-    def apply_retention_policy(self, tenant_id: str = None, aggressive: bool = False) -> dict[str, int]:
+    def apply_retention_policy(
+        self, tenant_id: str = None, aggressive: bool = False
+    ) -> dict[str, int]:
         """
         Apply importance-based retention policy
         Returns: statistics about retained/removed memories
@@ -853,10 +922,11 @@ class UnifiedMemoryManager:
 
         try:
             with self._get_cursor() as cur:
-                stats = {'retained': 0, 'removed': 0, 'promoted': 0, 'demoted': 0}
+                stats = {"retained": 0, "removed": 0, "promoted": 0, "demoted": 0}
 
                 # Calculate retention score: importance * access_frequency * recency
-                cur.execute("""
+                cur.execute(
+                    """
                     WITH retention_scores AS (
                         SELECT
                             id,
@@ -877,7 +947,9 @@ class UnifiedMemoryManager:
                         age_days
                     FROM retention_scores
                     ORDER BY retention_score ASC
-                """, (tenant_id,))
+                """,
+                    (tenant_id,),
+                )
 
                 memories = cur.fetchall()
 
@@ -886,37 +958,50 @@ class UnifiedMemoryManager:
                 high_threshold = 0.8 if aggressive else 0.9
 
                 for mem in memories:
-                    retention_score = float(mem.get('retention_score') or 0.0)
+                    retention_score = float(mem.get("retention_score") or 0.0)
 
                     # Remove very low value memories
-                    if retention_score < low_threshold and mem['age_days'] > 30:
-                        cur.execute("""
+                    if retention_score < low_threshold and mem["age_days"] > 30:
+                        cur.execute(
+                            """
                             UPDATE unified_ai_memory
                             SET expires_at = NOW() + INTERVAL '7 days'
                             WHERE id = %s
-                        """, (mem['id'],))
-                        stats['removed'] += 1
+                        """,
+                            (mem["id"],),
+                        )
+                        stats["removed"] += 1
 
                     # Promote high-value memories
-                    elif retention_score > high_threshold and mem['importance_score'] < 0.9:
-                        cur.execute("""
+                    elif retention_score > high_threshold and mem["importance_score"] < 0.9:
+                        cur.execute(
+                            """
                             UPDATE unified_ai_memory
                             SET importance_score = LEAST(importance_score + 0.1, 1.0)
                             WHERE id = %s
-                        """, (mem['id'],))
-                        stats['promoted'] += 1
+                        """,
+                            (mem["id"],),
+                        )
+                        stats["promoted"] += 1
 
                     # Demote low-access old memories
-                    elif mem['access_count'] < 2 and mem['age_days'] > 60 and mem['importance_score'] > 0.3:
-                        cur.execute("""
+                    elif (
+                        mem["access_count"] < 2
+                        and mem["age_days"] > 60
+                        and mem["importance_score"] > 0.3
+                    ):
+                        cur.execute(
+                            """
                             UPDATE unified_ai_memory
                             SET importance_score = GREATEST(importance_score - 0.1, 0.2)
                             WHERE id = %s
-                        """, (mem['id'],))
-                        stats['demoted'] += 1
+                        """,
+                            (mem["id"],),
+                        )
+                        stats["demoted"] += 1
 
                     else:
-                        stats['retained'] += 1
+                        stats["retained"] += 1
 
                 self.conn.commit()
                 logger.info(f"✅ Retention policy applied: {stats}")
@@ -925,7 +1010,7 @@ class UnifiedMemoryManager:
         except Exception as e:
             logger.error(f"❌ Failed to apply retention policy: {e}")
             # Note: Connection rollback is handled automatically by the pool
-            return {'error': str(e)}
+            return {"error": str(e)}
 
     def auto_garbage_collect(self, tenant_id: str = None, dry_run: bool = False) -> dict[str, int]:
         """
@@ -937,33 +1022,40 @@ class UnifiedMemoryManager:
 
         try:
             with self._get_cursor() as cur:
-                stats = {'expired': 0, 'low_value': 0, 'total': 0}
+                stats = {"expired": 0, "low_value": 0, "total": 0}
 
                 # Archive expired memories (soft delete for safety)
                 if not dry_run:
-                    cur.execute("""
+                    cur.execute(
+                        """
                         UPDATE unified_ai_memory
                         SET archived = TRUE, archived_at = NOW()
                         WHERE tenant_id = %s
                         AND archived = FALSE
                         AND expires_at IS NOT NULL
                         AND expires_at < NOW()
-                    """, (tenant_id,))
-                    stats['expired'] = cur.rowcount
+                    """,
+                        (tenant_id,),
+                    )
+                    stats["expired"] = cur.rowcount
                 else:
-                    cur.execute("""
+                    cur.execute(
+                        """
                         SELECT COUNT(*) as count
                         FROM unified_ai_memory
                         WHERE tenant_id = %s
                         AND archived = FALSE
                         AND expires_at IS NOT NULL
                         AND expires_at < NOW()
-                    """, (tenant_id,))
-                    stats['expired'] = cur.fetchone()['count']
+                    """,
+                        (tenant_id,),
+                    )
+                    stats["expired"] = cur.fetchone()["count"]
 
                 # Archive old, low-value memories (soft delete for safety)
                 if not dry_run:
-                    cur.execute("""
+                    cur.execute(
+                        """
                         UPDATE unified_ai_memory
                         SET archived = TRUE, archived_at = NOW()
                         WHERE tenant_id = %s
@@ -971,10 +1063,13 @@ class UnifiedMemoryManager:
                         AND importance_score < 0.3
                         AND access_count < 3
                         AND created_at < NOW() - INTERVAL '90 days'
-                    """, (tenant_id,))
-                    stats['low_value'] = cur.rowcount
+                    """,
+                        (tenant_id,),
+                    )
+                    stats["low_value"] = cur.rowcount
                 else:
-                    cur.execute("""
+                    cur.execute(
+                        """
                         SELECT COUNT(*) as count
                         FROM unified_ai_memory
                         WHERE tenant_id = %s
@@ -982,10 +1077,12 @@ class UnifiedMemoryManager:
                         AND importance_score < 0.3
                         AND access_count < 3
                         AND created_at < NOW() - INTERVAL '90 days'
-                    """, (tenant_id,))
-                    stats['low_value'] = cur.fetchone()['count']
+                    """,
+                        (tenant_id,),
+                    )
+                    stats["low_value"] = cur.fetchone()["count"]
 
-                stats['total'] = stats['expired'] + stats['low_value']
+                stats["total"] = stats["expired"] + stats["low_value"]
 
                 if not dry_run:
                     self.conn.commit()
@@ -998,7 +1095,7 @@ class UnifiedMemoryManager:
         except Exception as e:
             logger.error(f"❌ Failed to garbage collect: {e}")
             # Note: Connection rollback is handled automatically by the pool
-            return {'error': str(e)}
+            return {"error": str(e)}
 
     def get_stats(self, tenant_id: str = None) -> dict:
         """Get memory system statistics"""
@@ -1084,13 +1181,20 @@ class UnifiedMemoryManager:
                     ) RETURNING id
                     """,
                     (
-                        session_id, episode_type, question, objective,
+                        session_id,
+                        episode_type,
+                        question,
+                        objective,
                         Json(plan) if plan else None,
                         retrieval_queries,
                         sources_used,
                         Json(sources_ranked) if sources_ranked else None,
-                        strategy_notes, outcome, outcome_score, duration_ms,
-                        agent_id, tid,
+                        strategy_notes,
+                        outcome,
+                        outcome_score,
+                        duration_ms,
+                        agent_id,
+                        tid,
                         Json(metadata or {}),
                         embedding,
                     ),
@@ -1098,14 +1202,20 @@ class UnifiedMemoryManager:
                 row = cur.fetchone()
                 episode_id = str(row["id"]) if row else None
 
-                self.log_to_brain("episodic_memory", "episode_stored", {
-                    "episode_id": episode_id,
-                    "session_id": session_id,
-                    "episode_type": episode_type,
-                    "outcome": outcome,
-                    "outcome_score": outcome_score,
-                })
-                logger.info("Stored episode %s (type=%s, outcome=%s)", episode_id, episode_type, outcome)
+                self.log_to_brain(
+                    "episodic_memory",
+                    "episode_stored",
+                    {
+                        "episode_id": episode_id,
+                        "session_id": session_id,
+                        "episode_type": episode_type,
+                        "outcome": outcome,
+                        "outcome_score": outcome_score,
+                    },
+                )
+                logger.info(
+                    "Stored episode %s (type=%s, outcome=%s)", episode_id, episode_type, outcome
+                )
                 return episode_id
 
         except Exception as exc:
@@ -1151,10 +1261,14 @@ class UnifiedMemoryManager:
                         LIMIT %s
                         """,
                         (
-                            embedding, episode_type, episode_type,
+                            embedding,
+                            episode_type,
+                            episode_type,
                             min_outcome_score,
-                            tid, tid,
-                            embedding, limit,
+                            tid,
+                            tid,
+                            embedding,
+                            limit,
                         ),
                     )
                 else:
@@ -1222,7 +1336,6 @@ class UnifiedMemoryManager:
             # Fallback to standard vector recall
             return self.recall(query, tenant_id=tid, limit=limit)
 
-
     def unified_retrieval(
         self,
         query: str,
@@ -1238,9 +1351,9 @@ class UnifiedMemoryManager:
         """
         tid = tenant_id or self.tenant_id
         embedding = self._generate_embedding({"text": query})
-        
+
         results = []
-        
+
         try:
             with self._get_cursor() as cur:
                 if not cur:
@@ -1252,16 +1365,18 @@ class UnifiedMemoryManager:
                     SELECT id, content, 'memory' as source_type, score_fused as score
                     FROM hybrid_search_unified_memory(%s, %s::vector, %s::uuid, %s)
                     """,
-                    (query, embedding, tid, limit)
+                    (query, embedding, tid, limit),
                 )
                 memory_rows = cur.fetchall()
                 for row in memory_rows:
-                    results.append({
-                        "id": str(row["id"]),
-                        "content": row["content"],
-                        "type": "memory",
-                        "score": row["score"]
-                    })
+                    results.append(
+                        {
+                            "id": str(row["id"]),
+                            "content": row["content"],
+                            "type": "memory",
+                            "score": row["score"],
+                        }
+                    )
 
                 # 2. Search Documents (Knowledge Base)
                 # Check if function exists first to be safe, though we verified schema
@@ -1275,17 +1390,19 @@ class UnifiedMemoryManager:
                         ORDER BY embedding <=> %s::vector
                         LIMIT %s
                         """,
-                        (embedding, tid, embedding, limit)
+                        (embedding, tid, embedding, limit),
                     )
                     doc_rows = cur.fetchall()
                     for row in doc_rows:
-                        results.append({
-                            "id": str(row["id"]),
-                            "content": row["content"],
-                            "metadata": row["metadata"],
-                            "type": "document",
-                            "score": row["score"]
-                        })
+                        results.append(
+                            {
+                                "id": str(row["id"]),
+                                "content": row["content"],
+                                "metadata": row["metadata"],
+                                "type": "document",
+                                "score": row["score"],
+                            }
+                        )
                 except Exception as doc_exc:
                     logger.warning("Document search failed (table/func missing?): %s", doc_exc)
 
@@ -1303,22 +1420,24 @@ class UnifiedMemoryManager:
                         ORDER BY embedding <=> %s::vector
                         LIMIT %s
                         """,
-                        (embedding, embedding, embedding, limit)
+                        (embedding, embedding, embedding, limit),
                     )
                     epi_rows = cur.fetchall()
                     for row in epi_rows:
-                        results.append({
-                            "id": str(row["id"]),
-                            "content": {
-                                "question": row.get("question"),
-                                "objective": row.get("objective"),
-                                "outcome": row.get("outcome"),
-                            },
-                            "type": "episode",
-                            "episode_type": row.get("episode_type"),
-                            "session_id": row.get("session_id"),
-                            "score": row["score"]
-                        })
+                        results.append(
+                            {
+                                "id": str(row["id"]),
+                                "content": {
+                                    "question": row.get("question"),
+                                    "objective": row.get("objective"),
+                                    "outcome": row.get("outcome"),
+                                },
+                                "type": "episode",
+                                "episode_type": row.get("episode_type"),
+                                "session_id": row.get("session_id"),
+                                "score": row["score"],
+                            }
+                        )
                 except Exception as epi_exc:
                     logger.warning("Episodic recall in unified_retrieval failed: %s", epi_exc)
 
@@ -1334,6 +1453,7 @@ class UnifiedMemoryManager:
 # Singleton instance
 memory_manager = None
 
+
 def get_memory_manager() -> UnifiedMemoryManager:
     """Get or create the singleton memory manager"""
     global memory_manager
@@ -1348,18 +1468,21 @@ if __name__ == "__main__":
 
     # Test with a dummy tenant ID for local execution
     TEST_TENANT = "test-tenant-id"
-    manager.tenant_id = TEST_TENANT # Ensure tenant ID is set for test
+    manager.tenant_id = TEST_TENANT  # Ensure tenant ID is set for test
 
     # Store a test memory
     test_memory = Memory(
         memory_type=MemoryType.SEMANTIC,
-        content={"test": "Unified memory system operational", "timestamp": datetime.now().isoformat()},
+        content={
+            "test": "Unified memory system operational",
+            "timestamp": datetime.now().isoformat(),
+        },
         source_system="test",
         source_agent="initializer",
         created_by="system",
         importance_score=0.9,
         tags=["test", "initialization"],
-        tenant_id=TEST_TENANT
+        tenant_id=TEST_TENANT,
     )
 
     try:
