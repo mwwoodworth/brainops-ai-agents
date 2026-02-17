@@ -40,7 +40,11 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
 if ENVIRONMENT == "production":
     STRICT_STARTUP = True
 IS_PRODUCTION = ENVIRONMENT in ("production", "prod")
-STRICT_AGENT_EXECUTION = os.getenv("BRAINOPS_STRICT_AGENT_EXECUTION", "").lower() in ("1", "true", "yes")
+STRICT_AGENT_EXECUTION = os.getenv("BRAINOPS_STRICT_AGENT_EXECUTION", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 if STRICT_STARTUP:
     STRICT_AGENT_EXECUTION = True
 
@@ -65,6 +69,7 @@ def _handle_optional_import(feature: str, exc: Exception) -> None:
         raise RuntimeError(f"{feature} failed to load in strict mode: {exc}") from exc
     logger.warning("%s not available: %s", feature, exc)
 
+
 # Optional AI SDKs
 try:
     import anthropic
@@ -81,6 +86,7 @@ except Exception as exc:
 # Graph Context Provider for Phase 2 enhancements
 try:
     from graph_context_provider import GraphContextProvider, get_graph_context_provider
+
     GRAPH_CONTEXT_AVAILABLE = True
 except Exception as exc:
     GRAPH_CONTEXT_AVAILABLE = False
@@ -89,6 +95,7 @@ except Exception as exc:
 # Unified System Integration - wires ALL systems together
 try:
     from unified_system_integration import get_unified_integration
+
     UNIFIED_INTEGRATION_AVAILABLE = True
 except Exception as exc:
     UNIFIED_INTEGRATION_AVAILABLE = False
@@ -96,8 +103,13 @@ except Exception as exc:
 
 # Agent Memory SDK - RBA/WBA Enforcement (Total Completion Protocol)
 try:
-    from agent_memory_sdk import AgentMemoryClient, EnforcementViolationError, EnforcementBlockedError
+    from agent_memory_sdk import (
+        AgentMemoryClient,
+        EnforcementViolationError,
+        EnforcementBlockedError,
+    )
     from memory_enforcement import MemoryObjectType, EvidenceLevel
+
     AGENT_MEMORY_SDK_AVAILABLE = True
 except Exception as exc:
     AGENT_MEMORY_SDK_AVAILABLE = False
@@ -117,11 +129,13 @@ async def _http_get(url: str, *, timeout_seconds: float = 5.0) -> httpx.Response
     async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
         return await client.get(url)
 
+
 def validate_version(version: str) -> bool:
     """Validate version string to prevent command injection"""
     if not version:
         return False
-    return bool(re.match(r'^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$', version))
+    return bool(re.match(r"^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$", version))
+
 
 def _coerce_uuid(value: Any) -> Optional[str]:
     """Best-effort UUID normalization for execution tracking."""
@@ -132,9 +146,11 @@ def _coerce_uuid(value: Any) -> Optional[str]:
     except (ValueError, TypeError, AttributeError):
         return None
 
+
 # Import REAL AI Core
 try:
     from ai_core import RealAICore
+
     ai_core = RealAICore()
     USE_REAL_AI = True
 except Exception as exc:
@@ -145,6 +161,7 @@ except Exception as exc:
 # LangGraph (optional)
 try:
     from langgraph.graph import END, StateGraph
+
     LANGGRAPH_AVAILABLE = True
 except Exception as exc:
     LANGGRAPH_AVAILABLE = False
@@ -158,6 +175,7 @@ try:
     from customer_acquisition_agents import OutreachAgent as AcqOutreachAgent
     from customer_acquisition_agents import SocialMediaAgent as AcqSocialMediaAgent
     from customer_acquisition_agents import WebSearchAgent as AcqWebSearchAgent
+
     ACQUISITION_AGENTS_AVAILABLE = True
 except Exception as exc:
     ACQUISITION_AGENTS_AVAILABLE = False
@@ -166,6 +184,7 @@ except Exception as exc:
 # Content Generation Agent
 try:
     from content_generation_agent import ContentGeneratorAgent
+
     CONTENT_AGENT_AVAILABLE = True
 except Exception as exc:
     CONTENT_AGENT_AVAILABLE = False
@@ -174,6 +193,7 @@ except Exception as exc:
 # Knowledge Agent - Permanent memory and context management
 try:
     from knowledge_agent import KnowledgeAgent
+
     KNOWLEDGE_AGENT_AVAILABLE = True
 except Exception as exc:
     KNOWLEDGE_AGENT_AVAILABLE = False
@@ -182,6 +202,7 @@ except Exception as exc:
 # UI Tester Agent - Automated UI testing with Playwright
 try:
     from ui_tester_agent import UITesterAgent
+
     UI_TESTER_AVAILABLE = True
 except Exception as exc:
     UI_TESTER_AVAILABLE = False
@@ -190,22 +211,19 @@ except Exception as exc:
 # Playwright UI Testing Agent - AI vision + database reporting
 try:
     from ui_testing_playwright import PlaywrightUITestingAgent
+
     UI_PLAYWRIGHT_TESTING_AVAILABLE = True
 except Exception as exc:
     UI_PLAYWRIGHT_TESTING_AVAILABLE = False
     _handle_optional_import("Playwright UI testing agent", exc)
 
-# TRUE E2E UI Testing Agent - Human-like comprehensive UI testing
-try:
-    from true_e2e_ui_testing import TrueE2EUITestingAgent
-    TRUE_E2E_UI_TESTING_AVAILABLE = True
-except Exception as exc:
-    TRUE_E2E_UI_TESTING_AVAILABLE = False
-    _handle_optional_import("TRUE E2E UI testing agent", exc)
+# TRUE E2E UI Testing Agent - archived (dead code)
+TRUE_E2E_UI_TESTING_AVAILABLE = False
 
 # AI-Human Task Management Agent - Bidirectional task coordination
 try:
     from ai_human_task_management import AIHumanTaskAgent
+
     AI_HUMAN_TASK_AVAILABLE = True
 except Exception as exc:
     AI_HUMAN_TASK_AVAILABLE = False
@@ -214,6 +232,7 @@ except Exception as exc:
 # Deployment Monitor Agent - Render/Vercel deployment monitoring
 try:
     from deployment_monitor_agent import DeploymentMonitorAgent
+
     DEPLOYMENT_MONITOR_AVAILABLE = True
 except Exception as exc:
     DEPLOYMENT_MONITOR_AVAILABLE = False
@@ -222,10 +241,12 @@ except Exception as exc:
 # Revenue Pipeline Agents - REAL implementations
 try:
     from revenue_pipeline_agents import LeadDiscoveryAgentReal, NurtureExecutorAgentReal
+
     REVENUE_PIPELINE_AVAILABLE = True
     logger.info("✅ Revenue pipeline agents loaded successfully")
 except Exception as exc:
     import traceback
+
     REVENUE_PIPELINE_AVAILABLE = False
     logger.error("❌ Revenue pipeline agents FAILED to load: %s", exc)
     logger.error("Traceback: %s", traceback.format_exc())
@@ -234,6 +255,7 @@ except Exception as exc:
 # Market Analyzer Agent - REAL implementation
 try:
     from market_analyzer import MarketAnalyzerAgent
+
     MARKET_ANALYZER_AVAILABLE = True
 except Exception as exc:
     MARKET_ANALYZER_AVAILABLE = False
@@ -242,6 +264,7 @@ except Exception as exc:
 # Hallucination Prevention - SAC3 validation for all AI outputs
 try:
     from hallucination_prevention import get_hallucination_controller
+
     HALLUCINATION_PREVENTION_AVAILABLE = True
 except Exception as exc:
     HALLUCINATION_PREVENTION_AVAILABLE = False
@@ -250,6 +273,7 @@ except Exception as exc:
 # Live Memory Brain - Persistent memory storage for agent executions
 try:
     from live_memory_brain import MemoryType, get_live_brain
+
     LIVE_MEMORY_BRAIN_AVAILABLE = True
 except Exception as exc:
     LIVE_MEMORY_BRAIN_AVAILABLE = False
@@ -289,6 +313,7 @@ else:
 
 # ============== AGENT EXECUTION LOGGER ==============
 
+
 class AgentExecutionLogger:
     """
     Logs detailed execution phases to agent_execution_logs table.
@@ -298,7 +323,9 @@ class AgentExecutionLogger:
             retry, completed, failed, memory_operations
     """
 
-    def __init__(self, agent_name: str, agent_id: str, task_id: str, execution_id: Optional[str] = None):
+    def __init__(
+        self, agent_name: str, agent_id: str, task_id: str, execution_id: Optional[str] = None
+    ):
         self.agent_name = agent_name
         self.agent_id = agent_id
         self.task_id = task_id
@@ -311,12 +338,13 @@ class AgentExecutionLogger:
         self,
         phase: str,
         phase_data: Optional[dict[str, Any]] = None,
-        duration_ms: Optional[float] = None
+        duration_ms: Optional[float] = None,
     ) -> None:
         """Log an execution phase to the agent_execution_logs table."""
         try:
             pool = get_pool()
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO agent_execution_logs (
                     agent_name, agent_id, task_id, execution_phase,
                     phase_data, duration_ms, memory_operations, timestamp
@@ -328,7 +356,7 @@ class AgentExecutionLogger:
                 phase,
                 json.dumps(phase_data or {}, default=str),
                 duration_ms,
-                json.dumps(self.memory_operations, default=str)
+                json.dumps(self.memory_operations, default=str),
             )
             self._logger.debug(f"Logged phase '{phase}' for task {self.task_id}")
         except Exception as e:
@@ -338,11 +366,7 @@ class AgentExecutionLogger:
         """Mark the start of a phase for duration tracking."""
         self._phase_start_times[phase] = datetime.now(timezone.utc)
 
-    async def end_phase(
-        self,
-        phase: str,
-        phase_data: Optional[dict[str, Any]] = None
-    ) -> None:
+    async def end_phase(self, phase: str, phase_data: Optional[dict[str, Any]] = None) -> None:
         """End a phase and log it with calculated duration."""
         duration_ms = None
         if phase in self._phase_start_times:
@@ -352,53 +376,51 @@ class AgentExecutionLogger:
         await self.log_phase(phase, phase_data, duration_ms)
 
     def add_memory_operation(
-        self,
-        operation: str,
-        key: str,
-        success: bool,
-        details: Optional[dict[str, Any]] = None
+        self, operation: str, key: str, success: bool, details: Optional[dict[str, Any]] = None
     ) -> None:
         """Record a memory operation for this execution."""
-        self.memory_operations.append({
-            "operation": operation,
-            "key": key,
-            "success": success,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "details": details or {}
-        })
+        self.memory_operations.append(
+            {
+                "operation": operation,
+                "key": key,
+                "success": success,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "details": details or {},
+            }
+        )
 
     async def log_started(self, task: dict[str, Any]) -> None:
         """Log execution start."""
-        await self.log_phase("started", {
-            "task_type": task.get("action", task.get("type", "generic")),
-            "task_keys": list(task.keys()) if isinstance(task, dict) else [],
-            "has_data": bool(task.get("data"))
-        })
+        await self.log_phase(
+            "started",
+            {
+                "task_type": task.get("action", task.get("type", "generic")),
+                "task_keys": list(task.keys()) if isinstance(task, dict) else [],
+                "has_data": bool(task.get("data")),
+            },
+        )
 
     async def log_context_enrichment(
-        self,
-        enriched: bool,
-        context_info: Optional[dict[str, Any]] = None
+        self, enriched: bool, context_info: Optional[dict[str, Any]] = None
     ) -> None:
         """Log context enrichment phase."""
-        await self.log_phase("context_enrichment", {
-            "enriched": enriched,
-            "context_info": context_info or {}
-        })
+        await self.log_phase(
+            "context_enrichment", {"enriched": enriched, "context_info": context_info or {}}
+        )
 
     async def log_agent_resolution(
-        self,
-        original_name: str,
-        resolved_name: str,
-        found_in_registry: bool
+        self, original_name: str, resolved_name: str, found_in_registry: bool
     ) -> None:
         """Log agent resolution/alias mapping."""
-        await self.log_phase("agent_resolution", {
-            "original_name": original_name,
-            "resolved_name": resolved_name,
-            "was_aliased": original_name != resolved_name,
-            "found_in_registry": found_in_registry
-        })
+        await self.log_phase(
+            "agent_resolution",
+            {
+                "original_name": original_name,
+                "resolved_name": resolved_name,
+                "was_aliased": original_name != resolved_name,
+                "found_in_registry": found_in_registry,
+            },
+        )
 
     async def log_execution_attempt(
         self,
@@ -406,42 +428,33 @@ class AgentExecutionLogger:
         max_attempts: int,
         duration_ms: float,
         success: bool,
-        error: Optional[str] = None
+        error: Optional[str] = None,
     ) -> None:
         """Log an execution attempt (including retries)."""
         phase = "execution" if success else "retry"
-        await self.log_phase(phase, {
-            "attempt": attempt,
-            "max_attempts": max_attempts,
-            "success": success,
-            "error": error
-        }, duration_ms)
+        await self.log_phase(
+            phase,
+            {"attempt": attempt, "max_attempts": max_attempts, "success": success, "error": error},
+            duration_ms,
+        )
 
-    async def log_completed(
-        self,
-        result: dict[str, Any],
-        total_duration_ms: float
-    ) -> None:
+    async def log_completed(self, result: dict[str, Any], total_duration_ms: float) -> None:
         """Log successful completion."""
-        await self.log_phase("completed", {
-            "status": result.get("status", "completed"),
-            "has_result": bool(result),
-            "result_keys": list(result.keys()) if isinstance(result, dict) else [],
-            "original_agent": result.get("_original_agent"),
-            "resolved_agent": result.get("_resolved_agent")
-        }, total_duration_ms)
+        await self.log_phase(
+            "completed",
+            {
+                "status": result.get("status", "completed"),
+                "has_result": bool(result),
+                "result_keys": list(result.keys()) if isinstance(result, dict) else [],
+                "original_agent": result.get("_original_agent"),
+                "resolved_agent": result.get("_resolved_agent"),
+            },
+            total_duration_ms,
+        )
 
-    async def log_failed(
-        self,
-        error: str,
-        total_duration_ms: float,
-        attempts: int
-    ) -> None:
+    async def log_failed(self, error: str, total_duration_ms: float, attempts: int) -> None:
         """Log execution failure."""
-        await self.log_phase("failed", {
-            "error": error,
-            "attempts": attempts
-        }, total_duration_ms)
+        await self.log_phase("failed", {"error": error, "attempts": attempts}, total_duration_ms)
 
 
 class AgentExecutor:
@@ -483,9 +496,7 @@ class AgentExecutor:
         return self.graph_context_provider
 
     async def _enrich_task_with_codebase_context(
-        self,
-        task: dict[str, Any],
-        agent_name: str
+        self, task: dict[str, Any], agent_name: str
     ) -> dict[str, Any]:
         """
         Enrich task with relevant codebase context from the graph.
@@ -514,9 +525,7 @@ class AgentExecutor:
 
             # Fetch codebase context
             context = await provider.get_context_for_task(
-                task_description=str(task_description),
-                repos=repos,
-                include_relationships=True
+                task_description=str(task_description), repos=repos, include_relationships=True
             )
 
             # Add context to task if relevant
@@ -527,7 +536,7 @@ class AgentExecutor:
                     "functions": [f["name"] for f in context.functions[:10]],
                     "endpoints": [e["name"] for e in context.endpoints[:5]],
                     "relevance_score": context.relevance_score,
-                    "query_time_ms": context.query_time_ms
+                    "query_time_ms": context.query_time_ms,
                 }
                 logger.info(
                     f"Enriched task with {len(context.functions)} functions, "
@@ -580,7 +589,16 @@ class AgentExecutor:
             "contract_agent",
         )
         # Expanded keywords for substring matching
-        high_stakes_keywords = {"deploy", "spend", "delete", "destroy", "wipe", "remove", "transfer", "grant"}
+        high_stakes_keywords = {
+            "deploy",
+            "spend",
+            "delete",
+            "destroy",
+            "wipe",
+            "remove",
+            "transfer",
+            "grant",
+        }
 
         agent_matches = any(key.replace("_agent", "") in agent_label for key in high_stakes_agents)
         type_matches = agent_type in high_stakes_agents
@@ -595,7 +613,10 @@ class AgentExecutor:
             redacted = {}
             for key, value in payload.items():
                 key_lower = str(key).lower()
-                if any(token in key_lower for token in ("api_key", "secret", "token", "password", "authorization")):
+                if any(
+                    token in key_lower
+                    for token in ("api_key", "secret", "token", "password", "authorization")
+                ):
                     redacted[key] = "[REDACTED]"
                 else:
                     redacted[key] = self._redact_sensitive(value)
@@ -604,9 +625,7 @@ class AgentExecutor:
             return [self._redact_sensitive(item) for item in payload]
         return payload
 
-    async def _run_reasoning_guard(
-        self, agent_name: str, task: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _run_reasoning_guard(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
         """Run a reasoning + critique guard for high-stakes actions."""
         # If reasoning guard is disabled, pass through
         if not ENABLE_REASONING_GUARD:
@@ -619,7 +638,9 @@ class AgentExecutor:
                 logger.warning("Reasoning guard: ai_core unavailable, failing OPEN (configured)")
                 return {"block": None, "reasoning": None, "critique": None}
             else:
-                logger.warning("Reasoning guard: ai_core unavailable, failing CLOSED (secure default)")
+                logger.warning(
+                    "Reasoning guard: ai_core unavailable, failing CLOSED (secure default)"
+                )
                 task_id = str(task.get("id") or task.get("task_id") or uuid.uuid4())
                 block = {
                     "status": "manual_approval_required",
@@ -655,26 +676,34 @@ class AgentExecutor:
             )
             reasoning_json = ai_core._safe_json(reasoning_result.get("reasoning", ""))
         except Exception as e:
-            logger.warning(f"Reasoning guard exception for {agent_name}: {e}. Blocking task {task_id} for safety.")
+            logger.warning(
+                f"Reasoning guard exception for {agent_name}: {e}. Blocking task {task_id} for safety."
+            )
             block = {
                 "status": "manual_approval_required",
                 "agent": agent_name,
                 "reason": f"Reasoning Guard unavailable ({type(e).__name__}) - Action blocked for safety",
                 "task_id": task_id,
             }
-            await self._store_reasoning_audit(agent_name, task_context, None, None, "blocked_system_failure")
+            await self._store_reasoning_audit(
+                agent_name, task_context, None, None, "blocked_system_failure"
+            )
             return {"block": block, "reasoning": None, "critique": None}
 
         if not reasoning_json:
             # STRICT SAFETY: Fail CLOSED if reasoning fails (API error, empty response, etc)
-            logger.warning(f"Reasoning guard failed to generate valid response for {agent_name}. Blocking task {task_id} for safety.")
+            logger.warning(
+                f"Reasoning guard failed to generate valid response for {agent_name}. Blocking task {task_id} for safety."
+            )
             block = {
                 "status": "manual_approval_required",
                 "agent": agent_name,
                 "reason": "Reasoning Guard unavailable (AI error) - Action blocked for safety",
                 "task_id": task_id,
             }
-            await self._store_reasoning_audit(agent_name, task_context, None, None, "blocked_system_failure")
+            await self._store_reasoning_audit(
+                agent_name, task_context, None, None, "blocked_system_failure"
+            )
             return {"block": block, "reasoning": None, "critique": None}
 
         critique_prompt = (
@@ -703,7 +732,11 @@ class AgentExecutor:
         block_requested = bool((critique_json or {}).get("block"))
 
         block = None
-        if confidence < REASONING_GUARD_CONFIDENCE_THRESHOLD or severity == "high" or block_requested:
+        if (
+            confidence < REASONING_GUARD_CONFIDENCE_THRESHOLD
+            or severity == "high"
+            or block_requested
+        ):
             block = {
                 "status": "manual_approval_required",
                 "agent": agent_name,
@@ -789,7 +822,8 @@ class AgentExecutor:
 
             # Ensure table exists
 
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO agent_action_audits (
                     agent_name,
                     action,
@@ -807,7 +841,7 @@ class AgentExecutor:
                 normalized_confidence,
                 getattr(getattr(assessment, "confidence_level", None), "value", None),
                 getattr(assessment, "requires_human_review", False),
-                json.dumps(asdict(assessment), default=str) if assessment else None
+                json.dumps(asdict(assessment), default=str) if assessment else None,
             )
 
         except Exception as e:
@@ -843,73 +877,76 @@ class AgentExecutor:
     def _load_agent_implementations(self):
         """Load all agent implementations"""
         # DevOps Agents
-        self.agents['Monitor'] = MonitorAgent()
-        self.agents['SystemMonitor'] = SystemMonitorAgent()
-        self.agents['DevOpsAgent'] = DevOpsAgent()
-        self.agents['DeploymentAgent'] = DeploymentAgent()
-        self.agents['DatabaseOptimizer'] = DatabaseOptimizerAgent()
+        self.agents["Monitor"] = MonitorAgent()
+        self.agents["SystemMonitor"] = SystemMonitorAgent()
+        self.agents["DevOpsAgent"] = DevOpsAgent()
+        self.agents["DeploymentAgent"] = DeploymentAgent()
+        self.agents["DatabaseOptimizer"] = DatabaseOptimizerAgent()
 
         # Workflow Agents
-        self.agents['WorkflowEngine'] = WorkflowEngineAgent()
-        self.agents['WorkflowAutomation'] = WorkflowEngineAgent()  # Alias for database 'WorkflowAutomation' agent
-        self.agents['CustomerAgent'] = CustomerAgent()
-        self.agents['InvoicingAgent'] = InvoicingAgent()
+        self.agents["WorkflowEngine"] = WorkflowEngineAgent()
+        self.agents[
+            "WorkflowAutomation"
+        ] = WorkflowEngineAgent()  # Alias for database 'WorkflowAutomation' agent
+        self.agents["CustomerAgent"] = CustomerAgent()
+        self.agents["InvoicingAgent"] = InvoicingAgent()
 
         # Analytics Agents
-        self.agents['CustomerIntelligence'] = CustomerIntelligenceAgent()
-        self.agents['PredictiveAnalyzer'] = PredictiveAnalyzerAgent()
-        self.agents['RevenueOptimizer'] = RevenueOptimizerAgent()
-        
+        self.agents["CustomerIntelligence"] = CustomerIntelligenceAgent()
+        self.agents["PredictiveAnalyzer"] = PredictiveAnalyzerAgent()
+        self.agents["RevenueOptimizer"] = RevenueOptimizerAgent()
+
         if MARKET_ANALYZER_AVAILABLE:
             try:
-                self.agents['MarketAnalyzer'] = MarketAnalyzerAgent()
+                self.agents["MarketAnalyzer"] = MarketAnalyzerAgent()
                 logger.info("Market Analyzer agent registered")
             except Exception as e:
                 logger.warning(f"Failed to initialize Market Analyzer agent: {e}")
 
-
         # Generator Agents
-        self.agents['ContractGenerator'] = ContractGeneratorAgent()
-        self.agents['ProposalGenerator'] = ProposalGeneratorAgent()
-        self.agents['ReportingAgent'] = ReportingAgent()
+        self.agents["ContractGenerator"] = ContractGeneratorAgent()
+        self.agents["ProposalGenerator"] = ProposalGeneratorAgent()
+        self.agents["ReportingAgent"] = ReportingAgent()
 
         # Operations/Interface Agents
-        self.agents['SecurityMonitor'] = SecurityMonitorAgent()
-        self.agents['WarehouseMonitor'] = WarehouseMonitorAgent()
-        self.agents['TrainingAgent'] = TrainingAgent()
-        self.agents['VendorAgent'] = VendorAgent()
-        self.agents['WarrantyAgent'] = WarrantyAgent()
-        self.agents['PayrollAgent'] = PayrollAgent()
-        self.agents['SEOOptimizer'] = SEOOptimizerAgent()
-        self.agents['TaxCalculator'] = TaxCalculatorAgent()
-        self.agents['TranslationProcessor'] = TranslationProcessorAgent()
-        self.agents['SMSInterface'] = SMSInterfaceAgent()
-        self.agents['VoiceInterface'] = VoiceInterfaceAgent()
-        self.agents['SchedulingAgent'] = SchedulingAgent()  # For crew-allocator alias
+        self.agents["SecurityMonitor"] = SecurityMonitorAgent()
+        self.agents["WarehouseMonitor"] = WarehouseMonitorAgent()
+        self.agents["TrainingAgent"] = TrainingAgent()
+        self.agents["VendorAgent"] = VendorAgent()
+        self.agents["WarrantyAgent"] = WarrantyAgent()
+        self.agents["PayrollAgent"] = PayrollAgent()
+        self.agents["SEOOptimizer"] = SEOOptimizerAgent()
+        self.agents["TaxCalculator"] = TaxCalculatorAgent()
+        self.agents["TranslationProcessor"] = TranslationProcessorAgent()
+        self.agents["SMSInterface"] = SMSInterfaceAgent()
+        self.agents["VoiceInterface"] = VoiceInterfaceAgent()
+        self.agents["SchedulingAgent"] = SchedulingAgent()  # For crew-allocator alias
 
         # Meta Agent
-        self.agents['SelfBuilder'] = SelfBuildingAgent()
+        self.agents["SelfBuilder"] = SelfBuildingAgent()
 
         # Phase 2 Agents
-        self.agents['SystemImprovement'] = SystemImprovementAgentAdapter()
-        self.agents['DevOpsOptimization'] = DevOpsOptimizationAgentAdapter()
-        self.agents['CodeQuality'] = CodeQualityAgentAdapter()
-        self.agents['CustomerSuccess'] = CustomerSuccessAgentAdapter()
-        self.agents['CompetitiveIntelligence'] = CompetitiveIntelligenceAgentAdapter()
-        self.agents['VisionAlignment'] = VisionAlignmentAgentAdapter()
+        self.agents["SystemImprovement"] = SystemImprovementAgentAdapter()
+        self.agents["DevOpsOptimization"] = DevOpsOptimizationAgentAdapter()
+        self.agents["CodeQuality"] = CodeQualityAgentAdapter()
+        self.agents["CustomerSuccess"] = CustomerSuccessAgentAdapter()
+        self.agents["CompetitiveIntelligence"] = CompetitiveIntelligenceAgentAdapter()
+        self.agents["VisionAlignment"] = VisionAlignmentAgentAdapter()
 
         # Customer Acquisition Agents
         if ACQUISITION_AGENTS_AVAILABLE:
-            self.agents['WebSearch'] = AcqWebSearchAgent()
-            self.agents['SocialMedia'] = AcqSocialMediaAgent()
-            self.agents['Outreach'] = AcqOutreachAgent()
-            self.agents['Conversion'] = AcqConversionAgent()
-            logger.info("Customer acquisition agents registered: WebSearch, SocialMedia, Outreach, Conversion")
+            self.agents["WebSearch"] = AcqWebSearchAgent()
+            self.agents["SocialMedia"] = AcqSocialMediaAgent()
+            self.agents["Outreach"] = AcqOutreachAgent()
+            self.agents["Conversion"] = AcqConversionAgent()
+            logger.info(
+                "Customer acquisition agents registered: WebSearch, SocialMedia, Outreach, Conversion"
+            )
 
         # Content Generation Agent
         if CONTENT_AGENT_AVAILABLE:
             try:
-                self.agents['ContentGenerator'] = ContentGeneratorAgent()
+                self.agents["ContentGenerator"] = ContentGeneratorAgent()
                 logger.info("Content generation agent registered: ContentGenerator")
             except Exception as e:
                 logger.warning(f"Failed to initialize Content generation agent: {e}")
@@ -917,7 +954,7 @@ class AgentExecutor:
         # Knowledge Agent - Permanent memory and context management
         if KNOWLEDGE_AGENT_AVAILABLE:
             try:
-                self.agents['Knowledge'] = KnowledgeAgent(DB_CONFIG)
+                self.agents["Knowledge"] = KnowledgeAgent(DB_CONFIG)
                 logger.info("Knowledge agent registered")
             except Exception as e:
                 logger.warning(f"Failed to initialize Knowledge agent: {e}")
@@ -925,7 +962,7 @@ class AgentExecutor:
         # UI Tester Agent - Automated UI testing
         if UI_TESTER_AVAILABLE:
             try:
-                self.agents['UITester'] = UITesterAgent()
+                self.agents["UITester"] = UITesterAgent()
                 logger.info("UI tester agent registered")
             except Exception as e:
                 logger.warning(f"Failed to initialize UI tester agent: {e}")
@@ -933,7 +970,7 @@ class AgentExecutor:
         # Playwright UI Testing Agent - AI vision + database reporting
         if UI_PLAYWRIGHT_TESTING_AVAILABLE:
             try:
-                self.agents['UIPlaywrightTesting'] = PlaywrightUITestingAgent()
+                self.agents["UIPlaywrightTesting"] = PlaywrightUITestingAgent()
                 logger.info("Playwright UI testing agent registered")
             except Exception as e:
                 logger.warning(f"Failed to initialize Playwright UI testing agent: {e}")
@@ -941,7 +978,7 @@ class AgentExecutor:
         # TRUE E2E UI Testing Agent - Human-like comprehensive testing
         if TRUE_E2E_UI_TESTING_AVAILABLE:
             try:
-                self.agents['TrueE2EUITesting'] = TrueE2EUITestingAgent()
+                self.agents["TrueE2EUITesting"] = TrueE2EUITestingAgent()
                 logger.info("TRUE E2E UI testing agent registered")
             except Exception as e:
                 logger.warning(f"Failed to initialize TRUE E2E UI testing agent: {e}")
@@ -949,7 +986,7 @@ class AgentExecutor:
         # AI-Human Task Management Agent
         if AI_HUMAN_TASK_AVAILABLE:
             try:
-                self.agents['AIHumanTaskManager'] = AIHumanTaskAgent()
+                self.agents["AIHumanTaskManager"] = AIHumanTaskAgent()
                 logger.info("AI-Human Task Management agent registered")
             except Exception as e:
                 logger.warning(f"Failed to initialize AI-Human Task Management agent: {e}")
@@ -957,7 +994,7 @@ class AgentExecutor:
         # Deployment Monitor Agent - Deployment monitoring
         if DEPLOYMENT_MONITOR_AVAILABLE:
             try:
-                self.agents['DeploymentMonitor'] = DeploymentMonitorAgent()
+                self.agents["DeploymentMonitor"] = DeploymentMonitorAgent()
                 logger.info("Deployment monitor agent registered")
             except Exception as e:
                 logger.warning(f"Failed to initialize Deployment monitor agent: {e}")
@@ -965,26 +1002,30 @@ class AgentExecutor:
         # Revenue Pipeline Agents - REAL implementations that query customer/jobs data
         if REVENUE_PIPELINE_AVAILABLE:
             try:
-                self.agents['LeadDiscoveryAgentReal'] = LeadDiscoveryAgentReal()
-                self.agents['NurtureExecutorAgentReal'] = NurtureExecutorAgentReal()
-                logger.info("Revenue pipeline agents registered: LeadDiscoveryAgentReal, NurtureExecutorAgentReal")
+                self.agents["LeadDiscoveryAgentReal"] = LeadDiscoveryAgentReal()
+                self.agents["NurtureExecutorAgentReal"] = NurtureExecutorAgentReal()
+                logger.info(
+                    "Revenue pipeline agents registered: LeadDiscoveryAgentReal, NurtureExecutorAgentReal"
+                )
             except Exception as e:
                 logger.warning(f"Failed to initialize Revenue pipeline agents: {e}")
 
         # REAL Stub Agent Implementations - Replace AI simulation with actual database queries
         # These are critical agents that were previously falling back to _generic_execute()
         try:
-            self.agents['LeadQualificationAgent'] = LeadQualificationTaskAgent()
-            self.agents['LeadScorer'] = LeadScorerAgent()
-            self.agents['CampaignAgent'] = CampaignAgent()
-            self.agents['EmailMarketingAgent'] = EmailMarketingAgent()
-            self.agents['InventoryAgent'] = InventoryAgent()
-            self.agents['SchedulingAgent'] = SchedulingAgent()
-            self.agents['NotificationAgent'] = NotificationAgent()
-            self.agents['OnboardingAgent'] = OnboardingAgent()
-            self.agents['ComplianceAgent'] = ComplianceAgent()
-            self.agents['MetricsCalculator'] = MetricsCalculatorAgent()
-            logger.info("Real stub agents registered: LeadScorer, CampaignAgent, EmailMarketingAgent, InventoryAgent, SchedulingAgent, NotificationAgent, OnboardingAgent, ComplianceAgent, MetricsCalculator")
+            self.agents["LeadQualificationAgent"] = LeadQualificationTaskAgent()
+            self.agents["LeadScorer"] = LeadScorerAgent()
+            self.agents["CampaignAgent"] = CampaignAgent()
+            self.agents["EmailMarketingAgent"] = EmailMarketingAgent()
+            self.agents["InventoryAgent"] = InventoryAgent()
+            self.agents["SchedulingAgent"] = SchedulingAgent()
+            self.agents["NotificationAgent"] = NotificationAgent()
+            self.agents["OnboardingAgent"] = OnboardingAgent()
+            self.agents["ComplianceAgent"] = ComplianceAgent()
+            self.agents["MetricsCalculator"] = MetricsCalculatorAgent()
+            logger.info(
+                "Real stub agents registered: LeadScorer, CampaignAgent, EmailMarketingAgent, InventoryAgent, SchedulingAgent, NotificationAgent, OnboardingAgent, ComplianceAgent, MetricsCalculator"
+            )
         except Exception as e:
             logger.warning(f"Failed to initialize real stub agents: {e}")
 
@@ -996,174 +1037,165 @@ class AgentExecutor:
     # NOTE: Agents with REAL implementations are now registered directly and removed from aliases
     AGENT_ALIASES = {
         # Monitor agents -> Monitor or SystemMonitor
-        'HealthMonitor': 'SystemMonitor',
-        'DashboardMonitor': 'Monitor',
-        'PerformanceMonitor': 'Monitor',
-        'ExpenseMonitor': 'Monitor',
-        'QualityAgent': 'Monitor',
-        'SafetyAgent': 'Monitor',
-        'APIManagementAgent': 'Monitor',
+        "HealthMonitor": "SystemMonitor",
+        "DashboardMonitor": "Monitor",
+        "PerformanceMonitor": "Monitor",
+        "ExpenseMonitor": "Monitor",
+        "QualityAgent": "Monitor",
+        "SafetyAgent": "Monitor",
+        "APIManagementAgent": "Monitor",
         # NOTE: ComplianceAgent now has REAL implementation - removed from aliases
-
         # Revenue/Analytics agents -> Dedicated agents
         # Note: 'RevenueOptimizer' now has its own dedicated agent (registered directly)
-        'InsightsAnalyzer': 'PredictiveAnalyzer',
+        "InsightsAnalyzer": "PredictiveAnalyzer",
         # NOTE: MetricsCalculator now has REAL implementation - removed from aliases
-        'BudgetingAgent': 'RevenueOptimizer',
-        'market-analyzer': 'MarketAnalyzer',
-        'MarketAnalyzer': 'MarketAnalyzer',
-
+        "BudgetingAgent": "RevenueOptimizer",
+        "market-analyzer": "MarketAnalyzer",
+        "MarketAnalyzer": "MarketAnalyzer",
         # Lead agents -> REAL revenue pipeline agents
-        'LeadGenerationAgent': 'LeadDiscoveryAgentReal',
-        'LeadDiscoveryAgent': 'LeadDiscoveryAgentReal',  # REAL: Queries customers/jobs tables
+        "LeadGenerationAgent": "LeadDiscoveryAgentReal",
+        "LeadDiscoveryAgent": "LeadDiscoveryAgentReal",  # REAL: Queries customers/jobs tables
         # NOTE: LeadScorer now has REAL implementation - registered directly
-        'DealClosingAgent': 'Conversion',
-        'NurtureExecutorAgent': 'NurtureExecutorAgentReal',  # REAL: Creates sequences, queues emails
-        'RevenueProposalAgent': 'ProposalGenerator',
-
+        "DealClosingAgent": "Conversion",
+        "NurtureExecutorAgent": "NurtureExecutorAgentReal",  # REAL: Creates sequences, queues emails
+        "RevenueProposalAgent": "ProposalGenerator",
         # Workflow agents - many map to CustomerAgent or REAL implementations
         # NOTE: CampaignAgent, EmailMarketingAgent, InventoryAgent, NotificationAgent now have REAL implementations
-        'BackupAgent': 'SystemMonitor',
-        'BenefitsAgent': 'CustomerAgent',
-        'DeliveryAgent': 'CustomerAgent',
-        'DispatchAgent': 'CustomerAgent',
-        'InsuranceAgent': 'CustomerAgent',
-        'IntegrationAgent': 'SystemMonitor',
-        'PayrollAgent': 'CustomerAgent',
-        'PermitWorkflow': 'CustomerAgent',
-        'ProcurementAgent': 'CustomerAgent',
-        'RecruitingAgent': 'CustomerAgent',
-        'RoutingAgent': 'CustomerAgent',
-        'LogisticsOptimizer': 'CustomerAgent',
+        "BackupAgent": "SystemMonitor",
+        "BenefitsAgent": "CustomerAgent",
+        "DeliveryAgent": "CustomerAgent",
+        "DispatchAgent": "CustomerAgent",
+        "InsuranceAgent": "CustomerAgent",
+        "IntegrationAgent": "SystemMonitor",
+        "PayrollAgent": "CustomerAgent",
+        "PermitWorkflow": "CustomerAgent",
+        "ProcurementAgent": "CustomerAgent",
+        "RecruitingAgent": "CustomerAgent",
+        "RoutingAgent": "CustomerAgent",
+        "LogisticsOptimizer": "CustomerAgent",
         # NOTE: OnboardingAgent now has REAL implementation - removed from aliases
-
         # Estimation/Scheduling
-        'EstimationAgent': 'ProposalGenerator',
-        'Elena': 'ProposalGenerator',
-        'IntelligentScheduler': 'SchedulingAgent',  # Now routes to REAL SchedulingAgent
-        'Scheduler': 'SchedulingAgent',  # Now routes to REAL SchedulingAgent
-
+        "EstimationAgent": "ProposalGenerator",
+        "Elena": "ProposalGenerator",
+        "IntelligentScheduler": "SchedulingAgent",  # Now routes to REAL SchedulingAgent
+        "Scheduler": "SchedulingAgent",  # Now routes to REAL SchedulingAgent
         # UI Testing
-        'UITesting': 'UIPlaywrightTesting',
-        'UIUXTesting': 'UIPlaywrightTesting',
-        'PlaywrightUITesting': 'UIPlaywrightTesting',
-        'TrueE2E': 'TrueE2EUITesting',
-        'E2EUITesting': 'TrueE2EUITesting',
-        'HumanLikeUITesting': 'TrueE2EUITesting',
-        'ComprehensiveUITesting': 'TrueE2EUITesting',
-
+        "UITesting": "UIPlaywrightTesting",
+        "UIUXTesting": "UIPlaywrightTesting",
+        "PlaywrightUITesting": "UIPlaywrightTesting",
+        "TrueE2E": "TrueE2EUITesting",
+        "E2EUITesting": "TrueE2EUITesting",
+        "HumanLikeUITesting": "TrueE2EUITesting",
+        "ComprehensiveUITesting": "TrueE2EUITesting",
         # AI-Human Task Management
-        'TaskManager': 'AIHumanTaskManager',
-        'HumanTasks': 'AIHumanTaskManager',
-        'AITasks': 'AIHumanTaskManager',
-        'TaskCoordinator': 'AIHumanTaskManager',
-
+        "TaskManager": "AIHumanTaskManager",
+        "HumanTasks": "AIHumanTaskManager",
+        "AITasks": "AIHumanTaskManager",
+        "TaskCoordinator": "AIHumanTaskManager",
         # Invoicing
-        'Invoicer': 'InvoicingAgent',
-
+        "Invoicer": "InvoicingAgent",
         # Chat/Interface
-        'ChatInterface': 'CustomerSuccess',
-        'SMSInterface': 'SMSInterface',
-        'VoiceInterface': 'VoiceInterface',
-        'VoiceAssistant': 'VoiceInterface',
-        'SMSAutomation': 'SMSInterface',
-        'TranslationService': 'TranslationProcessor',
-        'TranslationProcessor': 'TranslationProcessor',
-
+        "ChatInterface": "CustomerSuccess",
+        "SMSInterface": "SMSInterface",
+        "VoiceInterface": "VoiceInterface",
+        "VoiceAssistant": "VoiceInterface",
+        "SMSAutomation": "SMSInterface",
+        "TranslationService": "TranslationProcessor",
+        "TranslationProcessor": "TranslationProcessor",
         # Ops aliases from deployment registries
-        'CampaignManager': 'CampaignAgent',
-        'PayrollProcessor': 'PayrollAgent',
-        'InventoryManager': 'InventoryAgent',
-        'DispatchOptimizer': 'SchedulingAgent',
-        'RouteOptimizer': 'SchedulingAgent',
-        'QualityAssurance': 'Monitor',
-        'SafetyCompliance': 'ComplianceAgent',
-        'RegulatoryCompliance': 'ComplianceAgent',
-        'BudgetForecaster': 'RevenueOptimizer',
-        'CashFlowManager': 'RevenueOptimizer',
-        'ProfitMaximizer': 'RevenueOptimizer',
-        'CostReduction': 'RevenueOptimizer',
-        'BillingAutomation': 'InvoicingAgent',
-        'CollectionAgent': 'InvoicingAgent',
-        'LeadGenerator': 'LeadDiscoveryAgentReal',
-        'SocialMediaBot': 'SocialMedia',
-        'ContentAgent': 'ContentGenerator',
-        'BlogAgent': 'ContentGenerator',
-        'BlogAutomation': 'ContentGenerator',
-        'EmailMarketing': 'EmailMarketingAgent',
-        'ContentCreator': 'SocialMedia',
-        'BrandManager': 'SocialMedia',
-        'CustomerAcquisition': 'Outreach',
-        'SalesForecaster': 'PredictiveAnalyzer',
-        'ConversionOptimizer': 'Conversion',
-        'PredictiveAnalytics': 'PredictiveAnalyzer',
-        'ReportGenerator': 'ReportingAgent',
-        'DashboardManager': 'Monitor',
-        'MetricsTracker': 'MetricsCalculator',
-        'InsightsEngine': 'PredictiveAnalyzer',
-        'TrendAnalyzer': 'PredictiveAnalyzer',
-        'DataValidator': 'ComplianceAgent',
-        'AnomalyDetector': 'Monitor',
-        'ForecastEngine': 'PredictiveAnalyzer',
-        'ChatbotAgent': 'CustomerSuccess',
-        'NotificationManager': 'NotificationAgent',
-        'ContractManager': 'ContractGenerator',
-        'PermitTracker': 'CustomerAgent',
-        'InsuranceManager': 'CustomerAgent',
-        'WarrantyTracker': 'WarrantyAgent',
-        'VendorManager': 'VendorAgent',
-        'LogisticsCoordinator': 'SchedulingAgent',
-        'WarehouseOptimizer': 'WarehouseMonitor',
-        'DeliveryTracker': 'CustomerAgent',
-        'OnboardingManager': 'OnboardingAgent',
-        'TrainingCoordinator': 'TrainingAgent',
-        'PerformanceEvaluator': 'MetricsCalculator',
-        'BenefitsAdministrator': 'CustomerAgent',
-        'SecurityAgent': 'SecurityMonitor',
-        'BackupManager': 'SystemMonitor',
-        'IntegrationHub': 'SystemMonitor',
-        'APIManager': 'Monitor',
+        "CampaignManager": "CampaignAgent",
+        "PayrollProcessor": "PayrollAgent",
+        "InventoryManager": "InventoryAgent",
+        "DispatchOptimizer": "SchedulingAgent",
+        "RouteOptimizer": "SchedulingAgent",
+        "QualityAssurance": "Monitor",
+        "SafetyCompliance": "ComplianceAgent",
+        "RegulatoryCompliance": "ComplianceAgent",
+        "BudgetForecaster": "RevenueOptimizer",
+        "CashFlowManager": "RevenueOptimizer",
+        "ProfitMaximizer": "RevenueOptimizer",
+        "CostReduction": "RevenueOptimizer",
+        "BillingAutomation": "InvoicingAgent",
+        "CollectionAgent": "InvoicingAgent",
+        "LeadGenerator": "LeadDiscoveryAgentReal",
+        "SocialMediaBot": "SocialMedia",
+        "ContentAgent": "ContentGenerator",
+        "BlogAgent": "ContentGenerator",
+        "BlogAutomation": "ContentGenerator",
+        "EmailMarketing": "EmailMarketingAgent",
+        "ContentCreator": "SocialMedia",
+        "BrandManager": "SocialMedia",
+        "CustomerAcquisition": "Outreach",
+        "SalesForecaster": "PredictiveAnalyzer",
+        "ConversionOptimizer": "Conversion",
+        "PredictiveAnalytics": "PredictiveAnalyzer",
+        "ReportGenerator": "ReportingAgent",
+        "DashboardManager": "Monitor",
+        "MetricsTracker": "MetricsCalculator",
+        "InsightsEngine": "PredictiveAnalyzer",
+        "TrendAnalyzer": "PredictiveAnalyzer",
+        "DataValidator": "ComplianceAgent",
+        "AnomalyDetector": "Monitor",
+        "ForecastEngine": "PredictiveAnalyzer",
+        "ChatbotAgent": "CustomerSuccess",
+        "NotificationManager": "NotificationAgent",
+        "ContractManager": "ContractGenerator",
+        "PermitTracker": "CustomerAgent",
+        "InsuranceManager": "CustomerAgent",
+        "WarrantyTracker": "WarrantyAgent",
+        "VendorManager": "VendorAgent",
+        "LogisticsCoordinator": "SchedulingAgent",
+        "WarehouseOptimizer": "WarehouseMonitor",
+        "DeliveryTracker": "CustomerAgent",
+        "OnboardingManager": "OnboardingAgent",
+        "TrainingCoordinator": "TrainingAgent",
+        "PerformanceEvaluator": "MetricsCalculator",
+        "BenefitsAdministrator": "CustomerAgent",
+        "SecurityAgent": "SecurityMonitor",
+        "BackupManager": "SystemMonitor",
+        "IntegrationHub": "SystemMonitor",
+        "APIManager": "Monitor",
         # Phantom agent aliases - route unimplemented names to real implementations
         # NOTE: Target names must match ACTUAL loaded agent names (see /agents endpoint)
-        'workflow-orchestrator': 'WorkflowAutomation',
-        'WorkflowEngine': 'WorkflowAutomation',  # WorkflowEngine doesn't exist, use WorkflowAutomation
+        "workflow-orchestrator": "WorkflowAutomation",
+        "WorkflowEngine": "WorkflowAutomation",  # WorkflowEngine doesn't exist, use WorkflowAutomation
         # Additional phantom agent aliases for ERP workflow compatibility
-        'crew-allocator': 'SchedulingAgent',  # For crew assignment tasks - maps to registered SchedulingAgent
-        'Scheduler': 'SchedulingAgent',  # Alias for compatibility - Scheduler maps to SchedulingAgent
-        'collections-manager': 'InvoicingAgent',  # For collections/follow-up tasks
-        'payment-handler': 'InvoicingAgent',  # For payment link tasks
-        'customer-intelligence': 'CustomerIntelligence',  # Maps to real CustomerIntelligence agent
-        'intelligent-estimator': 'ProposalGenerator',  # For estimation tasks (like Elena)
-        'general_agent': 'WorkflowAutomation',  # General purpose workflow
-        'general': 'WorkflowAutomation',  # Fix: 'general' alias for fallback routing
-        'marcus_agent': 'PredictiveAnalyzer',  # For revenue prediction tasks
-        'workflow_orchestrator': 'WorkflowAutomation',
-        'workflow': 'WorkflowAutomation',
-        'monitor': 'Monitor',
-        'MonitoringAgent': 'Monitor',
-        'optimizer': 'RevenueOptimizer',
-        'analytics': 'PredictiveAnalyzer',
-        'analyzer': 'PredictiveAnalyzer',
-        'automation': 'WorkflowAutomation',
-        'calculator': 'MetricsCalculator',
-        'generator': 'ContentGenerator',
-        'interface': 'CustomerAgent',
-        'processor': 'TranslationProcessor',
-        'universal': 'WorkflowAutomation',
-        'InvoiceAgent': 'InvoicingAgent',
-        'LeadScoringAgent': 'LeadScorer',
+        "crew-allocator": "SchedulingAgent",  # For crew assignment tasks - maps to registered SchedulingAgent
+        "Scheduler": "SchedulingAgent",  # Alias for compatibility - Scheduler maps to SchedulingAgent
+        "collections-manager": "InvoicingAgent",  # For collections/follow-up tasks
+        "payment-handler": "InvoicingAgent",  # For payment link tasks
+        "customer-intelligence": "CustomerIntelligence",  # Maps to real CustomerIntelligence agent
+        "intelligent-estimator": "ProposalGenerator",  # For estimation tasks (like Elena)
+        "general_agent": "WorkflowAutomation",  # General purpose workflow
+        "general": "WorkflowAutomation",  # Fix: 'general' alias for fallback routing
+        "marcus_agent": "PredictiveAnalyzer",  # For revenue prediction tasks
+        "workflow_orchestrator": "WorkflowAutomation",
+        "workflow": "WorkflowAutomation",
+        "monitor": "Monitor",
+        "MonitoringAgent": "Monitor",
+        "optimizer": "RevenueOptimizer",
+        "analytics": "PredictiveAnalyzer",
+        "analyzer": "PredictiveAnalyzer",
+        "automation": "WorkflowAutomation",
+        "calculator": "MetricsCalculator",
+        "generator": "ContentGenerator",
+        "interface": "CustomerAgent",
+        "processor": "TranslationProcessor",
+        "universal": "WorkflowAutomation",
+        "InvoiceAgent": "InvoicingAgent",
+        "LeadScoringAgent": "LeadScorer",
         # FIX: Add missing agent aliases for OODA-generated task names
         # These exact names appear in ai_agent_executions as failures
-        'LeadGeneration': 'LeadDiscoveryAgentReal',  # OODA uses this name
-        'EstimateProcessor': 'ProposalGenerator',  # For estimate processing tasks
-        'CustomerRetention': 'CustomerAgent',  # For retention workflows
-        'system_improvement': 'SystemImprovement',  # lowercase version
-        'collections-manager_agent': 'InvoicingAgent',  # with _agent suffix
-        'payment-handler_agent': 'InvoicingAgent',  # with _agent suffix
-        'customer-intelligence_agent': 'CustomerIntelligence',  # with _agent suffix
-        'crew-allocator_agent': 'SchedulingAgent',  # with _agent suffix
-        'workflow-orchestrator_agent': 'WorkflowAutomation',  # with _agent suffix
-        'general_agent_agent': 'WorkflowAutomation',  # double-suffix fix
+        "LeadGeneration": "LeadDiscoveryAgentReal",  # OODA uses this name
+        "EstimateProcessor": "ProposalGenerator",  # For estimate processing tasks
+        "CustomerRetention": "CustomerAgent",  # For retention workflows
+        "system_improvement": "SystemImprovement",  # lowercase version
+        "collections-manager_agent": "InvoicingAgent",  # with _agent suffix
+        "payment-handler_agent": "InvoicingAgent",  # with _agent suffix
+        "customer-intelligence_agent": "CustomerIntelligence",  # with _agent suffix
+        "crew-allocator_agent": "SchedulingAgent",  # with _agent suffix
+        "workflow-orchestrator_agent": "WorkflowAutomation",  # with _agent suffix
+        "general_agent_agent": "WorkflowAutomation",  # double-suffix fix
     }
 
     def _resolve_agent_name(self, agent_name: str) -> str:
@@ -1196,8 +1228,7 @@ class AgentExecutor:
 
         if self.workflow_runner is None:
             self.workflow_runner = LangGraphWorkflowRunner(
-                executor=self,
-                ai_core_instance=ai_core if USE_REAL_AI else None
+                executor=self, ai_core_instance=ai_core if USE_REAL_AI else None
             )
         return self.workflow_runner
 
@@ -1213,7 +1244,8 @@ class AgentExecutor:
         task["correlation_id"] = correlation_id
         try:
             pool = get_pool()
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO ai_agent_executions
                     (id, agent_name, task_type, input_data, status, correlation_id)
                 VALUES ($1, $2, $3, $4::jsonb, $5, $6)
@@ -1228,8 +1260,12 @@ class AgentExecutor:
             )
             # Emit context event: agent_started
             await self._emit_context_event(
-                pool, correlation_id, "agent", execution_id,
-                agent_name, "agent_started",
+                pool,
+                correlation_id,
+                "agent",
+                execution_id,
+                agent_name,
+                "agent_started",
                 {"task_type": task_type, "execution_id": execution_id},
                 task.get("tenant_id"),
             )
@@ -1249,7 +1285,8 @@ class AgentExecutor:
     ) -> None:
         """Emit a context event to the context_events table."""
         try:
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO context_events
                     (correlation_id, actor_type, actor_id, agent_name,
                      event_type, event_data, tenant_id)
@@ -1281,7 +1318,8 @@ class AgentExecutor:
         correlation_id = task.get("correlation_id", "")
         try:
             pool = get_pool()
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO ai_agent_executions (
                     id, agent_name, task_type, input_data, status,
                     output_data, execution_time_ms, error_message, correlation_id
@@ -1307,10 +1345,17 @@ class AgentExecutor:
             # Emit context event: agent_completed or agent_failed
             event_type = "agent_completed" if status == "completed" else "agent_failed"
             await self._emit_context_event(
-                pool, correlation_id, "agent", execution_id,
-                agent_name, event_type,
-                {"status": status, "duration_ms": int(duration_ms) if duration_ms else 0,
-                 "error": error_message},
+                pool,
+                correlation_id,
+                "agent",
+                execution_id,
+                agent_name,
+                event_type,
+                {
+                    "status": status,
+                    "duration_ms": int(duration_ms) if duration_ms else 0,
+                    "error": error_message,
+                },
                 task.get("tenant_id"),
             )
         except Exception as e:
@@ -1337,15 +1382,22 @@ class AgentExecutor:
         """
         try:
             pool = get_pool()
-            guardrails = await pool.fetch("""
+            guardrails = await pool.fetch(
+                """
                 SELECT name, guardrail_type, config, severity
                 FROM agent_guardrails
                 WHERE agent_name = $1 AND enabled = true
                   AND guardrail_type = 'scope'
-            """, agent_name)
+            """,
+                agent_name,
+            )
 
             for g in guardrails:
-                config = g["config"] if isinstance(g["config"], dict) else json.loads(g["config"] or "{}")
+                config = (
+                    g["config"]
+                    if isinstance(g["config"], dict)
+                    else json.loads(g["config"] or "{}")
+                )
                 triggered = self._evaluate_guardrail_config(config, task)
                 if not triggered:
                     continue
@@ -1357,7 +1409,8 @@ class AgentExecutor:
                     if action == "skip_with_log":
                         logger.warning(
                             "Guardrail [%s] triggered for agent %s — skipping with log (scope pre-check)",
-                            guard_name, agent_name,
+                            guard_name,
+                            agent_name,
                         )
                         task["_guardrail_skip"] = {
                             "guardrail": guard_name,
@@ -1366,12 +1419,17 @@ class AgentExecutor:
                     else:
                         logger.warning(
                             "Guardrail [%s] BLOCKED agent %s execution",
-                            guard_name, agent_name,
+                            guard_name,
+                            agent_name,
                         )
                         raise RuntimeError(f"Execution blocked by guardrail: {guard_name}")
                 else:
-                    logger.info("Guardrail [%s] triggered (severity=%s) for agent %s — logged only",
-                                guard_name, g["severity"], agent_name)
+                    logger.info(
+                        "Guardrail [%s] triggered (severity=%s) for agent %s — logged only",
+                        guard_name,
+                        g["severity"],
+                        agent_name,
+                    )
         except Exception as e:
             if isinstance(e, RuntimeError):
                 raise
@@ -1408,7 +1466,9 @@ class AgentExecutor:
 
         return False
 
-    async def _check_output_guardrails(self, agent_name: str, result: dict[str, Any]) -> dict[str, Any]:
+    async def _check_output_guardrails(
+        self, agent_name: str, result: dict[str, Any]
+    ) -> dict[str, Any]:
         """Validate execution results against 'output' guardrails.
 
         Returns the (possibly modified) result.  If a blocking output guardrail
@@ -1416,15 +1476,22 @@ class AgentExecutor:
         """
         try:
             pool = get_pool()
-            guardrails = await pool.fetch("""
+            guardrails = await pool.fetch(
+                """
                 SELECT name, config, severity
                 FROM agent_guardrails
                 WHERE agent_name = $1 AND enabled = true
                   AND guardrail_type = 'output'
-            """, agent_name)
+            """,
+                agent_name,
+            )
 
             for g in guardrails:
-                config = g["config"] if isinstance(g["config"], dict) else json.loads(g["config"] or "{}")
+                config = (
+                    g["config"]
+                    if isinstance(g["config"], dict)
+                    else json.loads(g["config"] or "{}")
+                )
                 triggered = self._evaluate_guardrail_config(config, result)
                 if not triggered:
                     continue
@@ -1433,7 +1500,8 @@ class AgentExecutor:
                 if g["severity"] == "block":
                     logger.warning(
                         "Output guardrail [%s] BLOCKED result for agent %s",
-                        guard_name, agent_name,
+                        guard_name,
+                        agent_name,
                     )
                     return {
                         "status": "blocked",
@@ -1442,8 +1510,12 @@ class AgentExecutor:
                         "original_status": result.get("status"),
                     }
                 else:
-                    logger.info("Output guardrail [%s] triggered (severity=%s) for agent %s — logged only",
-                                guard_name, g["severity"], agent_name)
+                    logger.info(
+                        "Output guardrail [%s] triggered (severity=%s) for agent %s — logged only",
+                        guard_name,
+                        g["severity"],
+                        agent_name,
+                    )
         except Exception as e:
             logger.warning("Failed to check output guardrails: %s", e)
         return result
@@ -1451,7 +1523,7 @@ class AgentExecutor:
     async def execute(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
         """Execute task with specific agent - NOW WITH UNIFIED SYSTEM INTEGRATION"""
         await self._ensure_agents_loaded()
-        
+
         # Check DB-configured guardrails first
         await self._check_db_guardrails(agent_name, task)
 
@@ -1484,7 +1556,7 @@ class AgentExecutor:
             for key, value in task_data.items():
                 if key not in task:
                     task[key] = value
-        task_type = task.get('action', task.get('type', 'generic'))
+        task_type = task.get("action", task.get("type", "generic"))
         unified_ctx = None
         skip_db_log = bool(
             task.get("_skip_ai_agent_log")
@@ -1550,10 +1622,11 @@ class AgentExecutor:
             await exec_logger.log_context_enrichment(
                 enriched=context_enriched,
                 context_info={
-                    "unified_integration": UNIFIED_INTEGRATION_AVAILABLE and unified_ctx is not None,
+                    "unified_integration": UNIFIED_INTEGRATION_AVAILABLE
+                    and unified_ctx is not None,
                     "codebase_context": bool(task.get("codebase_context")),
-                    "aurea_context": bool(task.get("_aurea_decision_context"))
-                }
+                    "aurea_context": bool(task.get("_aurea_decision_context")),
+                },
             )
 
         assessment_context = None
@@ -1563,7 +1636,9 @@ class AgentExecutor:
             if assessment_result.get("precheck_block"):
                 precheck_block = assessment_result["precheck_block"]
                 if not skip_db_log:
-                    total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
+                    total_duration_ms = (
+                        datetime.now(timezone.utc) - execution_start
+                    ).total_seconds() * 1000
                     await self._log_ai_agent_execution_end(
                         execution_id,
                         agent_name,
@@ -1572,7 +1647,7 @@ class AgentExecutor:
                         precheck_block,
                         "manual_approval_required",
                         total_duration_ms,
-                        None
+                        None,
                     )
                     end_logged = True
                 return precheck_block
@@ -1583,7 +1658,9 @@ class AgentExecutor:
             if reasoning_result.get("block"):
                 precheck_block = reasoning_result["block"]
                 if not skip_db_log:
-                    total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
+                    total_duration_ms = (
+                        datetime.now(timezone.utc) - execution_start
+                    ).total_seconds() * 1000
                     await self._log_ai_agent_execution_end(
                         execution_id,
                         agent_name,
@@ -1604,25 +1681,28 @@ class AgentExecutor:
 
         # Optional LangGraph workflow with review/quality loops
         if LANGGRAPH_AVAILABLE and (
-            task.get("use_langgraph")
-            or task.get("enable_review_loop")
-            or task.get("quality_gate")
+            task.get("use_langgraph") or task.get("enable_review_loop") or task.get("quality_gate")
         ):
             runner = self._get_workflow_runner()
             if runner:
                 # Log LangGraph workflow execution
-                await exec_logger.log_phase("langgraph_workflow", {
-                    "use_langgraph": task.get("use_langgraph"),
-                    "enable_review_loop": task.get("enable_review_loop"),
-                    "quality_gate": task.get("quality_gate")
-                })
+                await exec_logger.log_phase(
+                    "langgraph_workflow",
+                    {
+                        "use_langgraph": task.get("use_langgraph"),
+                        "enable_review_loop": task.get("enable_review_loop"),
+                        "quality_gate": task.get("quality_gate"),
+                    },
+                )
 
                 workflow_start = datetime.now(timezone.utc)
                 result = await runner.run(agent_name, task)
                 (datetime.now(timezone.utc) - workflow_start).total_seconds() * 1000
 
                 # Log workflow completion
-                total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
+                total_duration_ms = (
+                    datetime.now(timezone.utc) - execution_start
+                ).total_seconds() * 1000
                 await exec_logger.log_completed(result, total_duration_ms)
 
                 # UNIFIED INTEGRATION: Post-execution hooks
@@ -1641,11 +1721,11 @@ class AgentExecutor:
                         validation_result = await controller.validate_and_sanitize(
                             content=result.get("result", result),
                             content_type="workflow_execution",
-                            context={"agent_name": agent_name, "workflow": True}
+                            context={"agent_name": agent_name, "workflow": True},
                         )
                         result["hallucination_check"] = {
                             "validated": validation_result.get("is_valid", True),
-                            "confidence": validation_result.get("confidence", 1.0)
+                            "confidence": validation_result.get("confidence", 1.0),
                         }
                     except Exception as e:
                         logger.warning(f"Workflow hallucination check failed: {e}")
@@ -1655,16 +1735,23 @@ class AgentExecutor:
                     try:
                         brain = await get_live_brain()
                         await brain.store(
-                            content={"agent": agent_name, "task": task, "result": result, "workflow": True},
+                            content={
+                                "agent": agent_name,
+                                "task": task,
+                                "result": result,
+                                "workflow": True,
+                            },
                             memory_type=MemoryType.EPISODIC,
-                            importance=0.75
+                            importance=0.75,
                         )
                     except Exception as e:
                         logger.warning(f"Workflow brain storage failed: {e}")
 
                 if not skip_db_log:
                     result_status = result.get("status") if isinstance(result, dict) else None
-                    workflow_status = "failed" if result_status in ("failed", "error") else "completed"
+                    workflow_status = (
+                        "failed" if result_status in ("failed", "error") else "completed"
+                    )
                     error_message = result.get("error") if isinstance(result, dict) else None
                     await self._log_ai_agent_execution_end(
                         execution_id,
@@ -1674,7 +1761,7 @@ class AgentExecutor:
                         result if isinstance(result, dict) else {"result": result},
                         workflow_status,
                         total_duration_ms,
-                        error_message if workflow_status == "failed" else None
+                        error_message if workflow_status == "failed" else None,
                     )
                     end_logged = True
 
@@ -1699,7 +1786,7 @@ class AgentExecutor:
                 await exec_logger.log_agent_resolution(
                     original_name=original_agent_name,
                     resolved_name=resolved_agent_name,
-                    found_in_registry=resolved_agent_name in self.agents
+                    found_in_registry=resolved_agent_name in self.agents,
                 )
 
             if resolved_agent_name not in self.agents:
@@ -1711,7 +1798,11 @@ class AgentExecutor:
             # Retrieve memory context before agent acts
             # PRODUCTION: Enforce memory protocol by default for AGI-level operation
             # Environment variable to control enforcement (default: enforce)
-            memory_enforcement_bypass = os.getenv("MEMORY_ENFORCEMENT_BYPASS", "false").lower() in ("true", "1", "yes")
+            memory_enforcement_bypass = os.getenv("MEMORY_ENFORCEMENT_BYPASS", "false").lower() in (
+                "true",
+                "1",
+                "yes",
+            )
             if AGENT_MEMORY_SDK_AVAILABLE and not task.get("_skip_memory_enforcement"):
                 memory_client = AgentMemoryClient(
                     agent_id=resolved_agent_name,
@@ -1747,7 +1838,9 @@ class AgentExecutor:
                         )
                         # IMPORTANT: memory retrieval should never block execution long enough to trip
                         # task-queue timeouts. Bound it and proceed without context on timeout.
-                        retrieval_timeout_s = float(os.getenv("MEMORY_RETRIEVAL_TIMEOUT_SECONDS", "10"))
+                        retrieval_timeout_s = float(
+                            os.getenv("MEMORY_RETRIEVAL_TIMEOUT_SECONDS", "10")
+                        )
                         memory_context = await asyncio.wait_for(
                             memory_client.retrieve_context(
                                 query=task_description,
@@ -1786,13 +1879,15 @@ class AgentExecutor:
                         )
 
                     # Log successful attempt (skip for OODA fast-path)
-                    attempt_duration = (datetime.now(timezone.utc) - attempt_start).total_seconds() * 1000
+                    attempt_duration = (
+                        datetime.now(timezone.utc) - attempt_start
+                    ).total_seconds() * 1000
                     if not skip_db_log:
                         await exec_logger.log_execution_attempt(
                             attempt=attempt + 1,
                             max_attempts=RETRY_ATTEMPTS,
                             duration_ms=attempt_duration,
-                            success=True
+                            success=True,
                         )
                     attempt + 1
 
@@ -1800,7 +1895,9 @@ class AgentExecutor:
                     break
                 except Exception as e:
                     last_exception = e
-                    attempt_duration = (datetime.now(timezone.utc) - attempt_start).total_seconds() * 1000
+                    attempt_duration = (
+                        datetime.now(timezone.utc) - attempt_start
+                    ).total_seconds() * 1000
 
                     # Log failed attempt (skip for OODA fast-path)
                     if not skip_db_log:
@@ -1809,19 +1906,25 @@ class AgentExecutor:
                             max_attempts=RETRY_ATTEMPTS,
                             duration_ms=attempt_duration,
                             success=False,
-                            error=str(e)
+                            error=str(e),
                         )
 
                     if attempt < RETRY_ATTEMPTS - 1:
-                        wait_time = 2 ** attempt
-                        logger.warning(f"Agent {agent_name} execution failed (attempt {attempt + 1}/{RETRY_ATTEMPTS}). Retrying in {wait_time}s. Error: {e}")
+                        wait_time = 2**attempt
+                        logger.warning(
+                            f"Agent {agent_name} execution failed (attempt {attempt + 1}/{RETRY_ATTEMPTS}). Retrying in {wait_time}s. Error: {e}"
+                        )
                         await asyncio.sleep(wait_time)
                     else:
-                        logger.error(f"Agent {agent_name} execution failed after {RETRY_ATTEMPTS} attempts.")
+                        logger.error(
+                            f"Agent {agent_name} execution failed after {RETRY_ATTEMPTS} attempts."
+                        )
                         raise last_exception from e
 
             # Calculate total duration
-            total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
+            total_duration_ms = (
+                datetime.now(timezone.utc) - execution_start
+            ).total_seconds() * 1000
 
             # Log successful completion (skip for OODA fast-path)
             if not skip_db_log:
@@ -1860,7 +1963,11 @@ class AgentExecutor:
 
             # WBA ENFORCEMENT (Total Completion Protocol)
             # Write execution decision back to memory
-            if AGENT_MEMORY_SDK_AVAILABLE and memory_client and not task.get("_skip_memory_enforcement"):
+            if (
+                AGENT_MEMORY_SDK_AVAILABLE
+                and memory_client
+                and not task.get("_skip_memory_enforcement")
+            ):
                 try:
                     # WBA: Write decision to memory
                     execution_success = result.get("status") not in ("failed", "error")
@@ -1877,7 +1984,9 @@ class AgentExecutor:
                                 "result_summary": str(result.get("result", result))[:500],
                                 "status": "success" if execution_success else "failed",
                                 "duration_ms": total_duration_ms,
-                                "memory_context_count": len(memory_context) if memory_context else 0,
+                                "memory_context_count": len(memory_context)
+                                if memory_context
+                                else 0,
                             },
                             object_type=MemoryObjectType.DECISION,
                             proof_type="execution_log",
@@ -1925,18 +2034,23 @@ class AgentExecutor:
                         context={
                             "agent_name": agent_name,
                             "task_type": task.get("type", "unknown"),
-                            "execution_id": exec_logger.execution_id
-                        }
+                            "execution_id": exec_logger.execution_id,
+                        },
                     )
                     if not validation_result.get("is_valid", True):
-                        logger.warning(f"Hallucination detected in {agent_name}: {validation_result.get('issues', [])}")
+                        logger.warning(
+                            f"Hallucination detected in {agent_name}: {validation_result.get('issues', [])}"
+                        )
                         result["hallucination_check"] = {
                             "validated": False,
                             "issues": validation_result.get("issues", []),
-                            "confidence": validation_result.get("confidence", 0)
+                            "confidence": validation_result.get("confidence", 0),
                         }
                     else:
-                        result["hallucination_check"] = {"validated": True, "confidence": validation_result.get("confidence", 1.0)}
+                        result["hallucination_check"] = {
+                            "validated": True,
+                            "confidence": validation_result.get("confidence", 1.0),
+                        }
                 except Exception as e:
                     logger.warning(f"Hallucination prevention check failed: {e}")
 
@@ -1950,15 +2064,15 @@ class AgentExecutor:
                             "task": task,
                             "result": result,
                             "duration_ms": total_duration_ms,
-                            "success": result.get("status") != "failed"
+                            "success": result.get("status") != "failed",
                         },
                         memory_type=MemoryType.EPISODIC,
                         importance=0.7 if result.get("status") != "failed" else 0.9,
                         context={
                             "execution_id": exec_logger.execution_id,
                             "tenant_id": task.get("tenant_id"),
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
                     )
                     logger.debug(f"Stored execution in brain memory: {agent_name}")
                 except Exception as e:
@@ -1976,7 +2090,7 @@ class AgentExecutor:
                     result if isinstance(result, dict) else {"result": result},
                     execution_status,
                     total_duration_ms,
-                    error_message if execution_status == "failed" else None
+                    error_message if execution_status == "failed" else None,
                 )
                 end_logged = True
 
@@ -1986,7 +2100,9 @@ class AgentExecutor:
             # NOTE: asyncio.CancelledError inherits from BaseException in Python 3.12.
             # If we don't handle it explicitly, timeouts/cancellations can leave
             # ai_agent_executions stuck in "running" forever.
-            total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
+            total_duration_ms = (
+                datetime.now(timezone.utc) - execution_start
+            ).total_seconds() * 1000
             timeout_seconds = task.get("execution_timeout_seconds")
             parsed_timeout = None
             if timeout_seconds is not None:
@@ -2044,13 +2160,13 @@ class AgentExecutor:
 
         except Exception as e:
             # Calculate total duration for failure
-            total_duration_ms = (datetime.now(timezone.utc) - execution_start).total_seconds() * 1000
+            total_duration_ms = (
+                datetime.now(timezone.utc) - execution_start
+            ).total_seconds() * 1000
 
             # Log failure
             await exec_logger.log_failed(
-                error=str(e),
-                total_duration_ms=total_duration_ms,
-                attempts=RETRY_ATTEMPTS
+                error=str(e), total_duration_ms=total_duration_ms, attempts=RETRY_ATTEMPTS
             )
             if not skip_db_log:
                 await self._log_ai_agent_execution_end(
@@ -2061,7 +2177,7 @@ class AgentExecutor:
                     {"status": "failed", "error": str(e)},
                     "failed",
                     total_duration_ms,
-                    str(e)
+                    str(e),
                 )
                 end_logged = True
 
@@ -2072,7 +2188,9 @@ class AgentExecutor:
                     if "is not implemented" in str(e):
                         logger.debug(f"Agent {agent_name} not yet implemented (skipped)")
                     else:
-                        logger.error(f"Agent {agent_name} failed with unified error tracking: {error_info}")
+                        logger.error(
+                            f"Agent {agent_name} failed with unified error tracking: {error_info}"
+                        )
                 except Exception as ue:
                     logger.warning(f"Unified error handler failed: {ue}")
             raise
@@ -2085,9 +2203,7 @@ class AgentExecutor:
 
     async def _generic_execute(self, agent_name: str, task: dict[str, Any]) -> dict[str, Any]:
         """Generic execution is disabled to prevent simulated responses."""
-        raise RuntimeError(
-            f"Agent '{agent_name}' is not implemented and no fallback is allowed."
-        )
+        raise RuntimeError(f"Agent '{agent_name}' is not implemented and no fallback is allowed.")
 
     # ============== REPAIR LOOP (Synthesize -> Validate -> Repair -> Retry) ==============
 
@@ -2100,8 +2216,7 @@ class AgentExecutor:
             return False, "Result is empty/None"
         # A result that only contains metadata keys but no substance is suspicious
         substance_keys = {
-            k for k in result
-            if not k.startswith("_") and k not in ("status", "agent", "timestamp")
+            k for k in result if not k.startswith("_") and k not in ("status", "agent", "timestamp")
         }
         if not substance_keys:
             return False, "Result contains only metadata keys with no substantive content"
@@ -2112,7 +2227,9 @@ class AgentExecutor:
         return True, ""
 
     @staticmethod
-    def _validate_no_hallucinated_urls(result: dict[str, Any], task: dict[str, Any]) -> tuple[bool, str]:
+    def _validate_no_hallucinated_urls(
+        result: dict[str, Any], task: dict[str, Any]
+    ) -> tuple[bool, str]:
         """If the result contains URLs, verify they reference known/expected domains."""
         KNOWN_DOMAINS = {
             "brainops-ai-agents.onrender.com",
@@ -2135,7 +2252,7 @@ class AgentExecutor:
         }
         result_str = json.dumps(result, default=str)
         # Simple URL extraction — intentionally broad
-        url_pattern = re.compile(r'https?://([a-zA-Z0-9._-]+)')
+        url_pattern = re.compile(r"https?://([a-zA-Z0-9._-]+)")
         found_domains = set(url_pattern.findall(result_str))
         hallucinated = []
         for domain in found_domains:
@@ -2418,8 +2535,10 @@ from base_agent import BaseAgent
 
 # ============== LANGGRAPH REVIEW WORKFLOW ==============
 
+
 class LangGraphWorkflowState(TypedDict):
     """Shared state for LangGraph-enabled executions with review loops."""
+
     task: dict[str, Any]
     default_agent: str
     selected_agent: str
@@ -2444,7 +2563,7 @@ class LangGraphWorkflowRunner:
         executor: AgentExecutor,
         ai_core_instance: Optional[Any],
         max_review_cycles: int = 2,
-        quality_threshold: int = 75
+        quality_threshold: int = 75,
     ):
         self.executor = executor
         self.ai_core = ai_core_instance
@@ -2466,19 +2585,10 @@ class LangGraphWorkflowRunner:
         workflow.add_conditional_edges(
             "review",
             self._review_decision,
-            {
-                "retry": "execute",
-                "approved": "quality_gate",
-                "fail": END
-            }
+            {"retry": "execute", "approved": "quality_gate", "fail": END},
         )
         workflow.add_conditional_edges(
-            "quality_gate",
-            self._quality_decision,
-            {
-                "pass": END,
-                "fix": "execute"
-            }
+            "quality_gate", self._quality_decision, {"pass": END, "fix": "execute"}
         )
         workflow.set_entry_point("route")
         return workflow.compile()
@@ -2497,8 +2607,7 @@ class LangGraphWorkflowRunner:
         if self.ai_core:
             try:
                 routing = await self.ai_core.route_agent(
-                    task=state["task"],
-                    candidate_agents=list(self.executor.agents.keys())
+                    task=state["task"], candidate_agents=list(self.executor.agents.keys())
                 )
                 state["selected_agent"] = routing.get("agent", requested_agent)
                 state["metadata"]["routing_decision"] = routing
@@ -2540,34 +2649,30 @@ class LangGraphWorkflowRunner:
         state["status"] = "review"
         result_payload = state.get("result")
         if not self.ai_core:
-            state["review_feedback"].append({
-                "approved": True,
-                "issues": [],
-                "summary": "AI core unavailable, review skipped"
-            })
+            state["review_feedback"].append(
+                {"approved": True, "issues": [], "summary": "AI core unavailable, review skipped"}
+            )
             return state
 
         try:
             criteria = state["task"].get("review_criteria") or [
                 "accuracy",
                 "actionability",
-                "risk awareness"
+                "risk awareness",
             ]
             review = await self.ai_core.review_and_refine(
                 draft=result_payload,
                 context={"task": state["task"], "agent": state["selected_agent"]},
                 criteria=criteria,
-                max_iterations=1
+                max_iterations=1,
             )
             state["result"] = review.get("content", result_payload)
             state["review_feedback"].append(review)
         except Exception as e:
             logger.error(f"Review loop failed: {e}")
-            state["review_feedback"].append({
-                "approved": False,
-                "issues": [str(e)],
-                "summary": "Review failed"
-            })
+            state["review_feedback"].append(
+                {"approved": False, "issues": [str(e)], "summary": "Review failed"}
+            )
         return state
 
     def _review_decision(self, state: LangGraphWorkflowState) -> str:
@@ -2598,7 +2703,7 @@ class LangGraphWorkflowRunner:
                 "pass": True,
                 "score": 100,
                 "issues": ["Quality gate skipped: AI core unavailable"],
-                "actions": []
+                "actions": [],
             }
             return state
 
@@ -2606,17 +2711,12 @@ class LangGraphWorkflowRunner:
             gate = await self.ai_core.quality_gate(
                 output=state.get("result"),
                 criteria=state["task"].get("quality_criteria"),
-                min_score=self.quality_threshold
+                min_score=self.quality_threshold,
             )
             state["quality_report"] = gate
         except Exception as e:
             logger.error(f"Quality gate failed: {e}")
-            state["quality_report"] = {
-                "pass": False,
-                "score": 0,
-                "issues": [str(e)],
-                "actions": []
-            }
+            state["quality_report"] = {"pass": False, "score": 0, "issues": [str(e)], "actions": []}
 
         return state
 
@@ -2654,8 +2754,8 @@ class LangGraphWorkflowRunner:
             "status": "initialized",
             "metadata": {
                 "max_attempts": task.get("max_attempts", self.max_review_cycles + 1),
-                "started_at": datetime.now(timezone.utc).isoformat()
-            }
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            },
         }
 
         final_state = await self.workflow.ainvoke(initial_state)
@@ -2667,11 +2767,12 @@ class LangGraphWorkflowRunner:
             "review_feedback": final_state.get("review_feedback", []),
             "quality_report": final_state.get("quality_report", {}),
             "attempts": final_state.get("attempt"),
-            "metadata": final_state.get("metadata", {})
+            "metadata": final_state.get("metadata", {}),
         }
 
 
 # ============== DEVOPS AGENTS ==============
+
 
 class MonitorAgent(BaseAgent):
     """Monitors system health and performance"""
@@ -2681,25 +2782,22 @@ class MonitorAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute monitoring task"""
-        action = task.get('action', 'full_check')
+        action = task.get("action", "full_check")
 
-        if action == 'full_check':
+        if action == "full_check":
             return await self.full_system_check()
-        elif action == 'backend_check':
+        elif action == "backend_check":
             return await self.check_backend()
-        elif action == 'database_check':
+        elif action == "database_check":
             return await self.check_database()
-        elif action == 'frontend_check':
+        elif action == "frontend_check":
             return await self.check_frontends()
         else:
             return await self.full_system_check()
 
     async def full_system_check(self) -> dict[str, Any]:
         """Perform complete system health check with parallel I/O"""
-        results = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "checks": {}
-        }
+        results = {"timestamp": datetime.now(timezone.utc).isoformat(), "checks": {}}
 
         # Run ALL checks in parallel for speed
         async def _check_backend():
@@ -2708,7 +2806,7 @@ class MonitorAgent(BaseAgent):
                 return "backend", {
                     "status": "healthy" if response.status_code == 200 else "unhealthy",
                     "code": response.status_code,
-                    "data": response.json() if response.status_code == 200 else None
+                    "data": response.json() if response.status_code == 200 else None,
                 }
             except Exception as e:
                 return "backend", {"status": "error", "error": str(e)[:200]}
@@ -2724,8 +2822,8 @@ class MonitorAgent(BaseAgent):
                 )
                 return "database", {
                     "status": "healthy",
-                    "customers": row['customers'] if row else 0,
-                    "jobs": row['jobs'] if row else 0
+                    "customers": row["customers"] if row else 0,
+                    "jobs": row["jobs"] if row else 0,
                 }
             except Exception as e:
                 return "database", {"status": "error", "error": str(e)[:200]}
@@ -2735,7 +2833,7 @@ class MonitorAgent(BaseAgent):
                 response = await _http_get(url, timeout_seconds=5.0)
                 return name, {
                     "status": "online" if response.status_code == 200 else "error",
-                    "code": response.status_code
+                    "code": response.status_code,
                 }
             except Exception as e:
                 return name, {"status": "error", "error": str(e)[:200]}
@@ -2746,7 +2844,7 @@ class MonitorAgent(BaseAgent):
             _check_database(),
             _check_frontend("MyRoofGenius", "https://myroofgenius.com"),
             _check_frontend("WeatherCraft", "https://weathercraft-erp.vercel.app"),
-            return_exceptions=True
+            return_exceptions=True,
         )
 
         for result in check_results:
@@ -2757,8 +2855,7 @@ class MonitorAgent(BaseAgent):
 
         # Determine overall status
         all_healthy = all(
-            check.get("status") in ["healthy", "online"]
-            for check in results["checks"].values()
+            check.get("status") in ["healthy", "online"] for check in results["checks"].values()
         )
         results["overall_status"] = "healthy" if all_healthy else "degraded"
 
@@ -2771,7 +2868,7 @@ class MonitorAgent(BaseAgent):
             response = await _http_get(f"{BACKEND_URL}/api/v1/health", timeout_seconds=5.0)
             return {
                 "status": "healthy" if response.status_code == 200 else "unhealthy",
-                "data": response.json() if response.status_code == 200 else None
+                "data": response.json() if response.status_code == 200 else None,
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -2782,7 +2879,8 @@ class MonitorAgent(BaseAgent):
             pool = get_pool()
 
             # REAL METRICS: Core business data counts from production tables
-            stats = await pool.fetchrow("""
+            stats = await pool.fetchrow(
+                """
                 SELECT
                     (SELECT COUNT(*) FROM customers) as customers,
                     (SELECT COUNT(*) FROM customers WHERE is_active = true OR status = 'active') as active_customers,
@@ -2794,31 +2892,34 @@ class MonitorAgent(BaseAgent):
                     (SELECT COUNT(*) FROM ai_agents WHERE status = 'active') as active_agents,
                     (SELECT COUNT(*) FROM ai_agent_executions WHERE created_at > NOW() - INTERVAL '24 hours') as agent_executions_24h,
                     (SELECT COUNT(*) FROM ai_customer_health) as customer_health_records
-            """)
+            """
+            )
 
             # REAL METRICS: Recent agent activity
-            recent_activity = await pool.fetchrow("""
+            recent_activity = await pool.fetchrow(
+                """
                 SELECT
                     MAX(created_at) as last_agent_execution,
                     COUNT(*) FILTER (WHERE status = 'completed') as completed_24h,
                     COUNT(*) FILTER (WHERE status = 'failed') as failed_24h
                 FROM ai_agent_executions
                 WHERE created_at > NOW() - INTERVAL '24 hours'
-            """)
+            """
+            )
 
             result = {
                 "status": "healthy",
                 "stats": dict(stats) if stats else {},
                 "agent_activity": dict(recent_activity) if recent_activity else {},
-                "data_source": "production_database"
+                "data_source": "production_database",
             }
 
             # Add health alerts based on real metrics
             if stats:
                 alerts = []
-                if stats['agent_executions_24h'] < 10:
+                if stats["agent_executions_24h"] < 10:
                     alerts.append("Low agent activity in last 24 hours")
-                if stats['jobs_last_30d'] == 0:
+                if stats["jobs_last_30d"] == 0:
                     alerts.append("No jobs created in last 30 days")
                 if alerts:
                     result["alerts"] = alerts
@@ -2832,7 +2933,7 @@ class MonitorAgent(BaseAgent):
         sites = {
             "MyRoofGenius": "https://myroofgenius.com",
             "WeatherCraft": "https://weathercraft-erp.vercel.app",
-            "TaskOS": "https://brainops-task-os.vercel.app"
+            "TaskOS": "https://brainops-task-os.vercel.app",
         }
 
         async def _check(name, url):
@@ -2840,14 +2941,13 @@ class MonitorAgent(BaseAgent):
                 response = await _http_get(url, timeout_seconds=5.0)
                 return name, {
                     "status": "online" if response.status_code in [200, 307] else "error",
-                    "code": response.status_code
+                    "code": response.status_code,
                 }
             except Exception as e:
                 return name, {"status": "error", "error": str(e)[:200]}
 
         check_results = await asyncio.gather(
-            *[_check(name, url) for name, url in sites.items()],
-            return_exceptions=True
+            *[_check(name, url) for name, url in sites.items()], return_exceptions=True
         )
 
         results = {}
@@ -2865,7 +2965,7 @@ class SystemMonitorAgent(BaseAgent):
         "backend": "srv-d1tfs4idbo4c73di6k00",  # brainops-backend-prod
         "brainops-backend": "srv-d1tfs4idbo4c73di6k00",
         "brainops-ai-agents": "srv-d413iu75r7bs738btc10",
-        "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770"
+        "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770",
     }
 
     def __init__(self):
@@ -2890,9 +2990,7 @@ class SystemMonitorAgent(BaseAgent):
             return self._truthy(task.get("autofix"))
         # Safe-by-default in production: disabled unless explicitly enabled.
         env_value = (
-            os.getenv("BRAINOPS_OPS_AUTOFIX_ENABLED")
-            or os.getenv("BRAINOPS_AUTOFIX_ENABLED")
-            or ""
+            os.getenv("BRAINOPS_OPS_AUTOFIX_ENABLED") or os.getenv("BRAINOPS_AUTOFIX_ENABLED") or ""
         )
         return self._truthy(env_value)
 
@@ -2901,6 +2999,7 @@ class SystemMonitorAgent(BaseAgent):
         if self._mcp_client is None:
             try:
                 from mcp_integration import get_mcp_client
+
                 self._mcp_client = get_mcp_client()
             except ImportError:
                 logger.warning("MCP integration not available")
@@ -2918,11 +3017,13 @@ class SystemMonitorAgent(BaseAgent):
         issues = []
         for service, status in health["checks"].items():
             if status.get("status") not in ["healthy", "online"]:
-                issues.append({
-                    "service": service,
-                    "status": status.get("status"),
-                    "error": status.get("error")
-                })
+                issues.append(
+                    {
+                        "service": service,
+                        "status": status.get("status"),
+                        "error": status.get("error"),
+                    }
+                )
 
         # PROTECTED MODE (default): suggestions only, no infra changes.
         # This avoids autonomous restarts/rollbacks that can destabilize production.
@@ -2932,11 +3033,13 @@ class SystemMonitorAgent(BaseAgent):
                 service = issue.get("service")
                 if not service:
                     continue
-                recommended.append({
-                    "service": service,
-                    "suggested_action": "investigate",
-                    "note": "Autofix disabled; no infrastructure actions executed",
-                })
+                recommended.append(
+                    {
+                        "service": service,
+                        "suggested_action": "investigate",
+                        "note": "Autofix disabled; no infrastructure actions executed",
+                    }
+                )
 
             return {
                 "status": "completed",
@@ -2957,6 +3060,7 @@ class SystemMonitorAgent(BaseAgent):
         incidents_recorded = 0
         try:
             from enhanced_self_healing import EnhancedSelfHealing
+
             self_healing = EnhancedSelfHealing()
             await self_healing.initialize()
 
@@ -2964,16 +3068,18 @@ class SystemMonitorAgent(BaseAgent):
                 # Build metrics dict for anomaly detection
                 metrics = {
                     "error_rate": 1.0 if issue.get("status") == "error" else 0.5,
-                    "availability": 0.0 if issue.get("status") in ["offline", "error"] else 0.5
+                    "availability": 0.0 if issue.get("status") in ["offline", "error"] else 0.5,
                 }
                 incident = await self_healing.detect_anomaly(
                     component=issue["service"],
                     metrics=metrics,
-                    context={"error": issue.get("error"), "detected_by": "SystemMonitorAgent"}
+                    context={"error": issue.get("error"), "detected_by": "SystemMonitorAgent"},
                 )
                 if incident:
                     incidents_recorded += 1
-                    logger.info(f"Self-healing incident recorded for {issue['service']}: {incident.incident_id}")
+                    logger.info(
+                        f"Self-healing incident recorded for {issue['service']}: {incident.incident_id}"
+                    )
         except Exception as e:
             logger.warning(f"Could not record self-healing incidents: {e}")
 
@@ -2992,7 +3098,7 @@ class SystemMonitorAgent(BaseAgent):
             "fixes_attempted": len(fixes),
             "fixes": fixes,
             "mcp_enabled": self._mcp_client is not None,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     async def attempt_fix(self, issue: dict) -> dict:
@@ -3012,7 +3118,9 @@ class SystemMonitorAgent(BaseAgent):
             service_id = self.RENDER_SERVICE_IDS.get(service)
             if service_id and mcp:
                 try:
-                    logger.info(f"MCP: Attempting to restart Render service {service} ({service_id})")
+                    logger.info(
+                        f"MCP: Attempting to restart Render service {service} ({service_id})"
+                    )
                     result = await mcp.render_restart_service(service_id)
                     if result.success:
                         logger.info(f"MCP: Successfully restarted {service}")
@@ -3021,7 +3129,7 @@ class SystemMonitorAgent(BaseAgent):
                             "action": "mcp_restart_triggered",
                             "status": "completed",
                             "mcp_result": result.result,
-                            "duration_ms": result.duration_ms
+                            "duration_ms": result.duration_ms,
                         }
                     else:
                         logger.warning(f"MCP: Failed to restart {service}: {result.error}")
@@ -3029,7 +3137,7 @@ class SystemMonitorAgent(BaseAgent):
                             "service": service,
                             "action": "mcp_restart_failed",
                             "status": "failed",
-                            "error": result.error
+                            "error": result.error,
                         }
                 except Exception as e:
                     logger.error(f"MCP restart exception for {service}: {e}")
@@ -3037,14 +3145,14 @@ class SystemMonitorAgent(BaseAgent):
                         "service": service,
                         "action": "mcp_restart_error",
                         "status": "failed",
-                        "error": str(e)
+                        "error": str(e),
                     }
             else:
                 return {
                     "service": service,
                     "action": "restart_requested",
                     "status": "manual_intervention_needed",
-                    "note": "MCP not available or service ID unknown"
+                    "note": "MCP not available or service ID unknown",
                 }
 
         elif service == "database":
@@ -3060,7 +3168,7 @@ class SystemMonitorAgent(BaseAgent):
                             "service": service,
                             "action": "mcp_vacuum_analyze",
                             "status": "completed",
-                            "duration_ms": result.duration_ms
+                            "duration_ms": result.duration_ms,
                         }
                     else:
                         # Fallback to stats reset
@@ -3070,48 +3178,36 @@ class SystemMonitorAgent(BaseAgent):
                             "service": service,
                             "action": "stats_reset",
                             "status": "completed",
-                            "note": "MCP failed, used direct connection"
+                            "note": "MCP failed, used direct connection",
                         }
                 except Exception as e:
                     logger.warning(f"MCP database operation failed: {e}")
                     try:
                         pool = get_pool()
                         await pool.execute("SELECT pg_stat_reset()")
-                        return {
-                            "service": service,
-                            "action": "stats_reset",
-                            "status": "completed"
-                        }
+                        return {"service": service, "action": "stats_reset", "status": "completed"}
                     except Exception as exc:
                         logger.error("Fallback pg_stat_reset failed: %s", exc, exc_info=True)
                         return {
                             "service": service,
                             "action": "reconnect_failed",
-                            "status": "failed"
+                            "status": "failed",
                         }
             else:
                 # Fallback without MCP
                 try:
                     pool = get_pool()
                     await pool.execute("SELECT pg_stat_reset()")
-                    return {
-                        "service": service,
-                        "action": "stats_reset",
-                        "status": "completed"
-                    }
+                    return {"service": service, "action": "stats_reset", "status": "completed"}
                 except Exception as exc:
                     logger.error("Fallback pg_stat_reset failed: %s", exc, exc_info=True)
-                    return {
-                        "service": service,
-                        "action": "reconnect_failed",
-                        "status": "failed"
-                    }
+                    return {"service": service, "action": "reconnect_failed", "status": "failed"}
 
         else:
             return {
                 "service": service,
                 "action": "no_auto_fix_available",
-                "status": "manual_intervention_needed"
+                "status": "manual_intervention_needed",
             }
 
 
@@ -3136,7 +3232,7 @@ class DeploymentAgent(BaseAgent):
         "ai-agents": "srv-d413iu75r7bs738btc10",
         "brainops-ai-agents": "srv-d413iu75r7bs738btc10",
         "mcp-bridge": "srv-d4rhvg63jp1c73918770",
-        "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770"
+        "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770",
     }
 
     def __init__(self):
@@ -3148,6 +3244,7 @@ class DeploymentAgent(BaseAgent):
         if self._mcp_client is None:
             try:
                 from mcp_integration import get_mcp_client
+
                 self._mcp_client = get_mcp_client()
             except ImportError:
                 logger.warning("MCP integration not available for DeploymentAgent")
@@ -3155,22 +3252,22 @@ class DeploymentAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute deployment task with MCP support"""
-        action = task.get('action', 'deploy')
-        service = task.get('service', 'backend')
+        action = task.get("action", "deploy")
+        service = task.get("service", "backend")
 
-        if action == 'deploy':
-            return await self.deploy_service(service, task.get('version'))
-        elif action == 'rollback':
+        if action == "deploy":
+            return await self.deploy_service(service, task.get("version"))
+        elif action == "rollback":
             return await self.rollback_service(service)
-        elif action == 'build':
-            return await self.build_docker(service, task.get('version'))
-        elif action == 'mcp_deploy':
+        elif action == "build":
+            return await self.build_docker(service, task.get("version"))
+        elif action == "mcp_deploy":
             # Direct MCP deployment
             return await self._mcp_trigger_deploy(service)
-        elif action == 'mcp_create_pr':
+        elif action == "mcp_create_pr":
             # Create GitHub PR via MCP
             return await self._mcp_create_pr(task)
-        elif action == 'mcp_create_issue':
+        elif action == "mcp_create_issue":
             # Create GitHub issue via MCP
             return await self._mcp_create_issue(task)
         else:
@@ -3180,7 +3277,11 @@ class DeploymentAgent(BaseAgent):
         """Trigger deployment via MCP Bridge"""
         mcp = await self._get_mcp_client()
         if not mcp:
-            return {"status": "error", "message": "MCP client not available", "fallback": "use_legacy"}
+            return {
+                "status": "error",
+                "message": "MCP client not available",
+                "fallback": "use_legacy",
+            }
 
         service_id = self.RENDER_SERVICE_IDS.get(service)
         if not service_id:
@@ -3196,13 +3297,13 @@ class DeploymentAgent(BaseAgent):
                     "service_id": service_id,
                     "mcp_result": result.result,
                     "duration_ms": result.duration_ms,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             else:
                 return {
                     "status": "error",
                     "message": f"MCP deployment failed: {result.error}",
-                    "service_id": service_id
+                    "service_id": service_id,
                 }
         except Exception as e:
             return {"status": "error", "message": str(e)}
@@ -3222,11 +3323,7 @@ class DeploymentAgent(BaseAgent):
         try:
             logger.info(f"MCP: Creating GitHub PR for {repo}: {title}")
             result = await mcp.github_create_pr(
-                repo=repo,
-                title=title,
-                body=body,
-                head=head,
-                base=base
+                repo=repo, title=title, body=body, head=head, base=base
             )
             if result.success:
                 return {
@@ -3236,14 +3333,10 @@ class DeploymentAgent(BaseAgent):
                     "title": title,
                     "pr_data": result.result,
                     "duration_ms": result.duration_ms,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             else:
-                return {
-                    "status": "error",
-                    "action": "mcp_create_pr",
-                    "error": result.error
-                }
+                return {"status": "error", "action": "mcp_create_pr", "error": result.error}
         except Exception as e:
             return {"status": "error", "action": "mcp_create_pr", "error": str(e)}
 
@@ -3259,11 +3352,7 @@ class DeploymentAgent(BaseAgent):
 
         try:
             logger.info(f"MCP: Creating GitHub Issue for {repo}: {title}")
-            result = await mcp.github_create_issue(
-                repo=repo,
-                title=title,
-                body=body
-            )
+            result = await mcp.github_create_issue(repo=repo, title=title, body=body)
             if result.success:
                 return {
                     "status": "success",
@@ -3272,14 +3361,10 @@ class DeploymentAgent(BaseAgent):
                     "title": title,
                     "issue_data": result.result,
                     "duration_ms": result.duration_ms,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             else:
-                return {
-                    "status": "error",
-                    "action": "mcp_create_issue",
-                    "error": result.error
-                }
+                return {"status": "error", "action": "mcp_create_issue", "error": result.error}
         except Exception as e:
             return {"status": "error", "action": "mcp_create_issue", "error": str(e)}
 
@@ -3294,9 +3379,9 @@ class DeploymentAgent(BaseAgent):
             logger.warning(f"MCP deployment failed, falling back to legacy: {mcp_result}")
 
         # Fallback to legacy methods
-        if service == 'backend':
+        if service == "backend":
             return await self.deploy_backend(version)
-        elif service in ['ai-agents', 'brainops-ai-agents']:
+        elif service in ["ai-agents", "brainops-ai-agents"]:
             return await self.deploy_ai_agents()
         else:
             return {"status": "error", "message": f"Unknown service: {service}"}
@@ -3311,8 +3396,8 @@ class DeploymentAgent(BaseAgent):
                 return {"status": "error", "message": f"Invalid version format: {version}"}
 
             # Build Docker image
-            build_result = await self.build_docker('backend', version)
-            if build_result['status'] != 'success':
+            build_result = await self.build_docker("backend", version)
+            if build_result["status"] != "success":
                 return build_result
 
             # Push to Docker Hub
@@ -3323,27 +3408,27 @@ class DeploymentAgent(BaseAgent):
                 return {
                     "status": "error",
                     "message": "Failed to push Docker image",
-                    "error": result.stderr
+                    "error": result.stderr,
                 }
 
             # Trigger Render deployment via MCP
             mcp = await self._get_mcp_client()
             if mcp:
-                deploy_result = await self._mcp_trigger_deploy('backend')
+                deploy_result = await self._mcp_trigger_deploy("backend")
                 if deploy_result.get("status") == "success":
                     return {
                         "status": "success",
                         "message": f"Backend deployed with version {version} via MCP",
                         "version": version,
                         "mcp_result": deploy_result,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 
             return {
                 "status": "success",
                 "message": f"Backend deployed with version {version}",
                 "version": version,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}
@@ -3353,7 +3438,7 @@ class DeploymentAgent(BaseAgent):
         # Try MCP deployment first
         mcp = await self._get_mcp_client()
         if mcp:
-            mcp_result = await self._mcp_trigger_deploy('ai-agents')
+            mcp_result = await self._mcp_trigger_deploy("ai-agents")
             if mcp_result.get("status") == "success":
                 return mcp_result
 
@@ -3364,14 +3449,14 @@ class DeploymentAgent(BaseAgent):
                 cwd="/home/matt-woodworth/brainops-ai-agents",
                 shell=False,
                 capture_output=True,
-                text=True
+                text=True,
             )
 
             return {
                 "status": "success" if result.returncode == 0 else "error",
                 "message": "AI Agents deployment triggered via GitHub",
                 "output": result.stdout,
-                "error": result.stderr if result.returncode != 0 else None
+                "error": result.stderr if result.returncode != 0 else None,
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}
@@ -3382,20 +3467,22 @@ class DeploymentAgent(BaseAgent):
             if not validate_version(version):
                 return {"status": "error", "message": f"Invalid version format: {version}"}
 
-            if service == 'backend':
+            if service == "backend":
                 path = "/home/matt-woodworth/fastapi-operator-env"
                 image = f"mwwoodworth/brainops-backend:{version}"
             else:
                 return {"status": "error", "message": f"Unknown service: {service}"}
 
             build_cmd = ["docker", "build", "-t", image, "."]
-            result = subprocess.run(build_cmd, cwd=path, shell=False, capture_output=True, text=True)
+            result = subprocess.run(
+                build_cmd, cwd=path, shell=False, capture_output=True, text=True
+            )
 
             return {
                 "status": "success" if result.returncode == 0 else "error",
                 "message": f"Docker build {'successful' if result.returncode == 0 else 'failed'}",
                 "image": image,
-                "output": result.stdout[-500:] if result.returncode == 0 else result.stderr
+                "output": result.stdout[-500:] if result.returncode == 0 else result.stderr,
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}
@@ -3408,12 +3495,15 @@ class DeploymentAgent(BaseAgent):
         SERVICE_IDS = {
             "ai-agents": "srv-d413iu75r7bs738btc10",
             "backend": "srv-d1tfs4idbo4c73di6k00",
-            "mcp-bridge": "srv-d4rhvg63jp1c73918770"
+            "mcp-bridge": "srv-d4rhvg63jp1c73918770",
         }
 
         service_id = SERVICE_IDS.get(service)
         if not service_id:
-            return {"status": "error", "message": f"Unknown service: {service}. Valid: {list(SERVICE_IDS.keys())}"}
+            return {
+                "status": "error",
+                "message": f"Unknown service: {service}. Valid: {list(SERVICE_IDS.keys())}",
+            }
 
         render_api_key = os.getenv("RENDER_API_KEY")
         if not render_api_key:
@@ -3425,10 +3515,13 @@ class DeploymentAgent(BaseAgent):
                 headers = {"Authorization": f"Bearer {render_api_key}"}
                 async with session.get(
                     f"https://api.render.com/v1/services/{service_id}/deploys?limit=10",
-                    headers=headers
+                    headers=headers,
                 ) as resp:
                     if resp.status != 200:
-                        return {"status": "error", "message": f"Failed to get deploys: HTTP {resp.status}"}
+                        return {
+                            "status": "error",
+                            "message": f"Failed to get deploys: HTTP {resp.status}",
+                        }
 
                     deploys = await resp.json()
 
@@ -3441,7 +3534,10 @@ class DeploymentAgent(BaseAgent):
                             break
 
                     if not previous_deploy:
-                        return {"status": "error", "message": "No previous successful deploy found to rollback to"}
+                        return {
+                            "status": "error",
+                            "message": "No previous successful deploy found to rollback to",
+                        }
 
                     previous_image = previous_deploy.get("image", {}).get("ref", "unknown")
 
@@ -3449,7 +3545,7 @@ class DeploymentAgent(BaseAgent):
                     async with session.post(
                         f"https://api.render.com/v1/services/{service_id}/deploys",
                         headers={**headers, "Content-Type": "application/json"},
-                        json={"clearCache": "do_not_clear"}
+                        json={"clearCache": "do_not_clear"},
                     ) as deploy_resp:
                         if deploy_resp.status in [200, 201]:
                             result = await deploy_resp.json()
@@ -3458,10 +3554,13 @@ class DeploymentAgent(BaseAgent):
                                 "message": f"Rollback initiated for {service}",
                                 "previous_image": previous_image,
                                 "deploy_id": result.get("id"),
-                                "rollback_to": previous_deploy.get("id")
+                                "rollback_to": previous_deploy.get("id"),
                             }
                         else:
-                            return {"status": "error", "message": f"Rollback deploy failed: HTTP {deploy_resp.status}"}
+                            return {
+                                "status": "error",
+                                "message": f"Rollback deploy failed: HTTP {deploy_resp.status}",
+                            }
 
         except Exception as e:
             logger.error(f"Rollback failed: {e}")
@@ -3476,13 +3575,13 @@ class DatabaseOptimizerAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute database optimization"""
-        action = task.get('action', 'analyze')
+        action = task.get("action", "analyze")
 
-        if action == 'analyze':
+        if action == "analyze":
             return await self.analyze_performance()
-        elif action == 'optimize':
+        elif action == "optimize":
             return await self.optimize_database()
-        elif action == 'cleanup':
+        elif action == "cleanup":
             return await self.cleanup_tables()
         else:
             return await self.analyze_performance()
@@ -3493,7 +3592,8 @@ class DatabaseOptimizerAgent(BaseAgent):
             pool = get_pool()
 
             # Get table sizes
-            table_sizes = await pool.fetch("""
+            table_sizes = await pool.fetch(
+                """
                 SELECT
                     schemaname,
                     tablename,
@@ -3502,11 +3602,13 @@ class DatabaseOptimizerAgent(BaseAgent):
                 FROM pg_stat_user_tables
                 ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
                 LIMIT 10
-            """)
+            """
+            )
 
             # Get slow queries
             try:
-                slow_queries = await pool.fetch("""
+                slow_queries = await pool.fetch(
+                    """
                     SELECT
                         calls,
                         total_exec_time,
@@ -3516,7 +3618,8 @@ class DatabaseOptimizerAgent(BaseAgent):
                     WHERE query NOT LIKE '%pg_stat%'
                     ORDER BY mean_exec_time DESC
                     LIMIT 5
-                """)
+                """
+                )
             except Exception as exc:
                 logger.warning("Failed to load slow queries: %s", exc, exc_info=True)
                 slow_queries = []
@@ -3526,8 +3629,8 @@ class DatabaseOptimizerAgent(BaseAgent):
                 "analysis": {
                     "largest_tables": [dict(t) for t in table_sizes],
                     "slow_queries": [dict(q) for q in slow_queries] if slow_queries else [],
-                    "recommendations": self.generate_recommendations(table_sizes, slow_queries)
-                }
+                    "recommendations": self.generate_recommendations(table_sizes, slow_queries),
+                },
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -3544,24 +3647,28 @@ class DatabaseOptimizerAgent(BaseAgent):
             optimizations.append("VACUUM ANALYZE completed")
 
             # Reindex
-            reindex_cmds = await pool.fetch("""
+            reindex_cmds = await pool.fetch(
+                """
                 SELECT 'REINDEX TABLE ' || tablename || ';' as cmd
                 FROM pg_tables
                 WHERE schemaname = 'public'
                 LIMIT 5
-            """)
+            """
+            )
 
             for cmd_row in reindex_cmds:
                 try:
-                    await pool.execute(cmd_row['cmd'])
+                    await pool.execute(cmd_row["cmd"])
                     optimizations.append(f"Reindexed: {cmd_row['cmd']}")
                 except Exception as reindex_error:
-                    logger.warning(f"Reindex operation failed: {cmd_row.get('cmd', 'unknown')}: {reindex_error}")
+                    logger.warning(
+                        f"Reindex operation failed: {cmd_row.get('cmd', 'unknown')}: {reindex_error}"
+                    )
 
             return {
                 "status": "completed",
                 "optimizations": optimizations,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -3574,18 +3681,17 @@ class DatabaseOptimizerAgent(BaseAgent):
             cleanups = []
 
             # Clean old logs
-            result = await pool.execute("""
+            result = await pool.execute(
+                """
                 DELETE FROM agent_executions
                 WHERE completed_at < NOW() - INTERVAL '30 days'
-            """)
+            """
+            )
             # asyncpg returns status string like 'DELETE 5'
-            count = result.split()[-1] if result else '0'
+            count = result.split()[-1] if result else "0"
             cleanups.append(f"Deleted {count} old agent executions")
 
-            return {
-                "status": "completed",
-                "cleanups": cleanups
-            }
+            return {"status": "completed", "cleanups": cleanups}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -3595,7 +3701,7 @@ class DatabaseOptimizerAgent(BaseAgent):
 
         # Check for large tables
         for table in tables:
-            if table.get('rows', 0) > 100000:
+            if table.get("rows", 0) > 100000:
                 recommendations.append(f"Consider partitioning table {table['tablename']}")
 
         # Check for missing indexes
@@ -3607,6 +3713,7 @@ class DatabaseOptimizerAgent(BaseAgent):
 
 # ============== WORKFLOW AGENTS ==============
 
+
 class WorkflowEngineAgent(BaseAgent):
     """Orchestrates complex workflows"""
 
@@ -3615,13 +3722,13 @@ class WorkflowEngineAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute workflow"""
-        workflow_type = task.get('workflow_type', 'custom')
+        workflow_type = task.get("workflow_type", "custom")
 
-        if workflow_type == 'deployment_pipeline':
+        if workflow_type == "deployment_pipeline":
             return await self.deployment_pipeline(task)
-        elif workflow_type == 'customer_onboarding':
+        elif workflow_type == "customer_onboarding":
             return await self.customer_onboarding(task)
-        elif workflow_type == 'invoice_generation':
+        elif workflow_type == "invoice_generation":
             return await self.invoice_generation(task)
         else:
             return await self.custom_workflow(task)
@@ -3631,17 +3738,17 @@ class WorkflowEngineAgent(BaseAgent):
         steps = []
 
         # Step 1: Run tests (real implementation)
-        test_result = await self._run_tests(task.get('service', 'ai-agents'))
+        test_result = await self._run_tests(task.get("service", "ai-agents"))
         steps.append({"step": "tests", "result": test_result})
 
         # Step 2: Build
         deploy_agent = DeploymentAgent()
-        build_result = await deploy_agent.build_docker('backend', task.get('version', 'latest'))
+        build_result = await deploy_agent.build_docker("backend", task.get("version", "latest"))
         steps.append({"step": "build", "result": build_result})
 
         # Step 3: Deploy
-        if build_result['status'] == 'success':
-            deploy_result = await deploy_agent.deploy_backend(task.get('version'))
+        if build_result["status"] == "success":
+            deploy_result = await deploy_agent.deploy_backend(task.get("version"))
             steps.append({"step": "deploy", "result": deploy_result})
 
         # Step 4: Verify
@@ -3653,7 +3760,10 @@ class WorkflowEngineAgent(BaseAgent):
             "status": "completed",
             "workflow": "deployment_pipeline",
             "steps": steps,
-            "success": all(s.get('result', {}).get('status') in ['success', 'healthy', 'skipped'] for s in steps)
+            "success": all(
+                s.get("result", {}).get("status") in ["success", "healthy", "skipped"]
+                for s in steps
+            ),
         }
 
     async def _run_tests(self, service: str) -> dict:
@@ -3663,7 +3773,7 @@ class WorkflowEngineAgent(BaseAgent):
         SERVICE_HEALTH_ENDPOINTS = {
             "ai-agents": "https://brainops-ai-agents.onrender.com/health",
             "backend": "https://brainops-backend-prod.onrender.com/health",
-            "mcp-bridge": "https://brainops-mcp-bridge.onrender.com/health"
+            "mcp-bridge": "https://brainops-mcp-bridge.onrender.com/health",
         }
 
         tests_run = []
@@ -3673,28 +3783,35 @@ class WorkflowEngineAgent(BaseAgent):
         health_url = SERVICE_HEALTH_ENDPOINTS.get(service)
         if health_url:
             try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as session:
                     async with session.get(health_url) as resp:
                         if resp.status == 200:
                             tests_run.append({"test": "health_check", "passed": True})
                             tests_passed += 1
                         else:
-                            tests_run.append({"test": "health_check", "passed": False, "status": resp.status})
+                            tests_run.append(
+                                {"test": "health_check", "passed": False, "status": resp.status}
+                            )
             except Exception as e:
                 tests_run.append({"test": "health_check", "passed": False, "error": str(e)})
 
         # Test 2: E2E tests if available
         try:
             from comprehensive_e2e_tests import run_comprehensive_e2e
+
             e2e_result = await run_comprehensive_e2e(service if service != "ai-agents" else None)
             passed = e2e_result.get("passed", 0)
             total = e2e_result.get("total", 0)
-            tests_run.append({
-                "test": "e2e_comprehensive",
-                "passed": passed == total,
-                "passed_count": passed,
-                "total": total
-            })
+            tests_run.append(
+                {
+                    "test": "e2e_comprehensive",
+                    "passed": passed == total,
+                    "passed_count": passed,
+                    "total": total,
+                }
+            )
             if passed == total:
                 tests_passed += 1
         except Exception as e:
@@ -3717,62 +3834,56 @@ class WorkflowEngineAgent(BaseAgent):
             "tests_run": len(tests_run),
             "tests_passed": tests_passed,
             "all_passed": all_passed,
-            "details": tests_run
+            "details": tests_run,
         }
 
     async def customer_onboarding(self, task: dict) -> dict:
         """Customer onboarding workflow"""
-        customer_data = task.get('customer', {})
+        customer_data = task.get("customer", {})
         steps = []
 
         # Step 1: Create customer
-        steps.append({
-            "step": "create_customer",
-            "status": "completed",
-            "customer_id": customer_data.get('id', 'new_customer')
-        })
+        steps.append(
+            {
+                "step": "create_customer",
+                "status": "completed",
+                "customer_id": customer_data.get("id", "new_customer"),
+            }
+        )
 
         # Step 2: Send welcome email
-        steps.append({
-            "step": "welcome_email",
-            "status": "completed"
-        })
+        steps.append({"step": "welcome_email", "status": "completed"})
 
         # Step 3: Create initial estimate
-        steps.append({
-            "step": "initial_estimate",
-            "status": "completed"
-        })
+        steps.append({"step": "initial_estimate", "status": "completed"})
 
-        return {
-            "status": "completed",
-            "workflow": "customer_onboarding",
-            "steps": steps
-        }
+        return {"status": "completed", "workflow": "customer_onboarding", "steps": steps}
 
     async def invoice_generation(self, task: dict) -> dict:
         """Invoice generation workflow"""
         # Use InvoicingAgent for real execution
-        if 'job_id' in task:
+        if "job_id" in task:
             invoice_agent = InvoicingAgent()
             # Ensure action is set to generate
-            task['action'] = 'generate'
+            task["action"] = "generate"
             return await invoice_agent.execute(task)
 
         # Fallback if no job_id provided - Try to find a recent completed job without invoice
         try:
             pool = get_pool()
-            recent_job = await pool.fetchrow("""
+            recent_job = await pool.fetchrow(
+                """
                 SELECT id FROM jobs
                 WHERE status = 'completed'
                 AND id NOT IN (SELECT job_id FROM invoices)
                 ORDER BY completed_at DESC
                 LIMIT 1
-            """)
+            """
+            )
 
             if recent_job:
-                task['job_id'] = recent_job['id']
-                task['action'] = 'generate'
+                task["job_id"] = recent_job["id"]
+                task["action"] = "generate"
                 invoice_agent = InvoicingAgent()
                 return await invoice_agent.execute(task)
         except Exception as e:
@@ -3780,16 +3891,12 @@ class WorkflowEngineAgent(BaseAgent):
 
         return {
             "status": "failed",
-            "error": "No job_id provided and no pending completed jobs found for invoice generation."
+            "error": "No job_id provided and no pending completed jobs found for invoice generation.",
         }
 
     async def custom_workflow(self, task: dict) -> dict:
         """Execute custom workflow"""
-        return {
-            "status": "completed",
-            "workflow": "custom",
-            "task": task
-        }
+        return {"status": "completed", "workflow": "custom", "task": task}
 
 
 class CustomerAgent(BaseAgent):
@@ -3800,13 +3907,13 @@ class CustomerAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute customer workflow"""
-        action = task.get('action', 'analyze')
+        action = task.get("action", "analyze")
 
-        if action == 'analyze':
+        if action == "analyze":
             return await self.analyze_customers()
-        elif action == 'segment':
+        elif action == "segment":
             return await self.segment_customers()
-        elif action == 'outreach':
+        elif action == "outreach":
             return await self.customer_outreach(task)
         else:
             return await self.analyze_customers()
@@ -3817,16 +3924,19 @@ class CustomerAgent(BaseAgent):
             pool = get_pool()
 
             # Get customer statistics
-            stats = await pool.fetchrow("""
+            stats = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as total_customers,
                     COUNT(CASE WHEN created_at > NOW() - INTERVAL '30 days' THEN 1 END) as new_customers,
                     COUNT(CASE WHEN status = 'active' THEN 1 END) as active_customers
                 FROM customers
-            """)
+            """
+            )
 
             # Get top customers
-            top_customers = await pool.fetch("""
+            top_customers = await pool.fetch(
+                """
                 SELECT c.name, COUNT(j.id) as job_count, SUM(i.total_amount) as total_revenue
                 FROM customers c
                 LEFT JOIN jobs j ON c.id = j.customer_id
@@ -3834,7 +3944,8 @@ class CustomerAgent(BaseAgent):
                 GROUP BY c.id, c.name
                 ORDER BY total_revenue DESC NULLS LAST
                 LIMIT 5
-            """)
+            """
+            )
             top_customers_list = [dict(c) for c in top_customers]
 
             insights = "Insights not available."
@@ -3855,7 +3966,7 @@ class CustomerAgent(BaseAgent):
                 "status": "completed",
                 "statistics": dict(stats) if stats else {},
                 "top_customers": top_customers_list,
-                "ai_insights": insights
+                "ai_insights": insights,
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -3866,7 +3977,8 @@ class CustomerAgent(BaseAgent):
             pool = get_pool()
 
             # Segment by activity
-            segments = await pool.fetch("""
+            segments = await pool.fetch(
+                """
                 SELECT
                     CASE
                         WHEN job_count > 10 THEN 'VIP'
@@ -3882,7 +3994,8 @@ class CustomerAgent(BaseAgent):
                     GROUP BY c.id
                 ) customer_jobs
                 GROUP BY segment
-            """)
+            """
+            )
             segments_list = [dict(s) for s in segments]
 
             recommendations = {}
@@ -3896,7 +4009,7 @@ class CustomerAgent(BaseAgent):
                     """
                     response = await ai_core.generate(prompt, model="gpt-3.5-turbo")
 
-                    json_match = re.search(r'\{[\s\S]*?\}', response)
+                    json_match = re.search(r"\{[\s\S]*?\}", response)
                     if json_match:
                         recommendations = json.loads(json_match.group())
                 except Exception as e:
@@ -3905,15 +4018,15 @@ class CustomerAgent(BaseAgent):
             return {
                 "status": "completed",
                 "segments": segments_list,
-                "marketing_recommendations": recommendations
+                "marketing_recommendations": recommendations,
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     async def customer_outreach(self, task: dict) -> dict:
         """Execute customer outreach campaign with AI-generated content"""
-        segment = task.get('segment', 'all')
-        context = task.get('context', 'general update')
+        segment = task.get("segment", "all")
+        context = task.get("context", "general update")
 
         try:
             prompt = f"""
@@ -3929,7 +4042,7 @@ class CustomerAgent(BaseAgent):
 
             response = await ai_core.generate(prompt, model="gpt-4", temperature=0.7)
 
-            json_match = re.search(r'\{[\s\S]*?\}', response)
+            json_match = re.search(r"\{[\s\S]*?\}", response)
             message_data = json.loads(json_match.group()) if json_match else {"body": response}
 
             return {
@@ -3937,7 +4050,7 @@ class CustomerAgent(BaseAgent):
                 "action": "outreach",
                 "segment": segment,
                 "message": message_data,
-                "generated_at": datetime.now(timezone.utc).isoformat()
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -3951,22 +4064,27 @@ class InvoicingAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute invoicing task"""
-        action = task.get('action', 'generate')
+        action = task.get("action", "generate")
 
         if action in ("scheduled_run", "scheduled"):
             # Scheduled health check - return status report
             return await self.invoice_report(include_ai_summary=False)
-        elif action in ("invoice_overdue_handler", "handle_overdue_invoices", "collect_invoices", "collection"):
+        elif action in (
+            "invoice_overdue_handler",
+            "handle_overdue_invoices",
+            "collect_invoices",
+            "collection",
+        ):
             return await self.handle_overdue_invoices(task)
         elif action in ("schedule_follow_up", "schedule_followup", "follow_up", "followup"):
             return await self.schedule_follow_up(task)
         elif action in ("send_payment_links", "send_payment_link", "payment_link", "payment_links"):
             return await self.send_payment_links(task)
-        elif action in ('generate', 'generate_invoice'):
+        elif action in ("generate", "generate_invoice"):
             return await self.generate_invoice(task)
-        elif action in ('send', 'send_invoice'):
+        elif action in ("send", "send_invoice"):
             return await self.send_invoice(task)
-        elif action in ('report', 'invoice_report'):
+        elif action in ("report", "invoice_report"):
             return await self.invoice_report(include_ai_summary=True)
         else:
             return {"status": "error", "error": f"Unknown action: {action}"}
@@ -3987,8 +4105,7 @@ class InvoicingAgent(BaseAgent):
             # The upstream guard in send_payment_links() should have already returned.
             # Return only a dedicated test key; NEVER fall back to the live key.
             return (
-                os.getenv("STRIPE_API_KEY_TEST")
-                or os.getenv("STRIPE_SECRET_KEY_TEST")
+                os.getenv("STRIPE_API_KEY_TEST") or os.getenv("STRIPE_SECRET_KEY_TEST")
                 # No fallback to live keys -- returning None will cause a safe error.
             )
         return (
@@ -4012,10 +4129,18 @@ class InvoicingAgent(BaseAgent):
             task.get("invoice_id"),
             trigger_condition.get("invoice_id"),
             trigger_condition.get("entity_id"),
-            (trigger_condition.get("invoice") or {}).get("entity_id") if isinstance(trigger_condition.get("invoice"), dict) else None,
-            (trigger_condition.get("invoice") or {}).get("id") if isinstance(trigger_condition.get("invoice"), dict) else None,
-            (trigger_condition.get("context") or {}).get("invoice_id") if isinstance(trigger_condition.get("context"), dict) else None,
-            (trigger_condition.get("context") or {}).get("invoiceId") if isinstance(trigger_condition.get("context"), dict) else None,
+            (trigger_condition.get("invoice") or {}).get("entity_id")
+            if isinstance(trigger_condition.get("invoice"), dict)
+            else None,
+            (trigger_condition.get("invoice") or {}).get("id")
+            if isinstance(trigger_condition.get("invoice"), dict)
+            else None,
+            (trigger_condition.get("context") or {}).get("invoice_id")
+            if isinstance(trigger_condition.get("context"), dict)
+            else None,
+            (trigger_condition.get("context") or {}).get("invoiceId")
+            if isinstance(trigger_condition.get("context"), dict)
+            else None,
         ]
         for cand in candidates:
             if cand:
@@ -4103,7 +4228,7 @@ class InvoicingAgent(BaseAgent):
             tenant_pool = get_tenant_pool(tenant_id)
 
             seq_id = await self._create_payment_reminder_followup(
-                pool, # Pass original pool to helper if it doesn't support wrapper yet, but MAIN update below must use wrapper
+                pool,  # Pass original pool to helper if it doesn't support wrapper yet, but MAIN update below must use wrapper
                 tenant_id=tenant_id,
                 invoice_id=str(invoice_id),
                 customer_name=customer_name,
@@ -4134,7 +4259,7 @@ class InvoicingAgent(BaseAgent):
                                 "source": "invoicing_agent.schedule_follow_up",
                             }
                         ),
-                        tenant_id
+                        tenant_id,
                     )
                 except Exception as e:
                     self.logger.warning("Failed to update invoice followup metadata: %s", e)
@@ -4238,7 +4363,9 @@ class InvoicingAgent(BaseAgent):
                 if amount_cents <= 0:
                     raw_amount = task.get("amount")
                     try:
-                        amount_cents = int(round(float(raw_amount) * 100)) if raw_amount is not None else 0
+                        amount_cents = (
+                            int(round(float(raw_amount) * 100)) if raw_amount is not None else 0
+                        )
                     except Exception:
                         amount_cents = 0
 
@@ -4261,7 +4388,9 @@ class InvoicingAgent(BaseAgent):
                     )
                 )
             except Exception as e:
-                self.logger.warning("Failed to determine tenant is_test; defaulting to safe skip: %s", e)
+                self.logger.warning(
+                    "Failed to determine tenant is_test; defaulting to safe skip: %s", e
+                )
                 # Safe-by-default: if we can't determine tenant status, treat as test
                 # to avoid polluting live Stripe with demo data.
                 is_test_tenant = True
@@ -4292,13 +4421,22 @@ class InvoicingAgent(BaseAgent):
 
             try:
                 import stripe
+
                 stripe.api_key = stripe_key
             except ImportError as e:
                 return {"status": "error", "error": f"Stripe SDK not installed: {e}"}
 
-            app_url = (os.getenv("WEATHERCRAFT_ERP_URL") or "https://weathercraft-erp.vercel.app").rstrip("/")
-            success_url = os.getenv("STRIPE_INVOICE_SUCCESS_URL") or f"{app_url}/?payment=success&invoice_id={invoice_id}"
-            cancel_url = os.getenv("STRIPE_INVOICE_CANCEL_URL") or f"{app_url}/?payment=cancel&invoice_id={invoice_id}"
+            app_url = (
+                os.getenv("WEATHERCRAFT_ERP_URL") or "https://weathercraft-erp.vercel.app"
+            ).rstrip("/")
+            success_url = (
+                os.getenv("STRIPE_INVOICE_SUCCESS_URL")
+                or f"{app_url}/?payment=success&invoice_id={invoice_id}"
+            )
+            cancel_url = (
+                os.getenv("STRIPE_INVOICE_CANCEL_URL")
+                or f"{app_url}/?payment=cancel&invoice_id={invoice_id}"
+            )
 
             # Create a Stripe Checkout Session URL (works with dynamic amounts).
             session = stripe.checkout.Session.create(
@@ -4345,10 +4483,12 @@ class InvoicingAgent(BaseAgent):
                     """,
                     invoice_id,
                     str(payment_link),
-                    tenant_id
+                    tenant_id,
                 )
             except Exception as e:
-                self.logger.warning("Failed to persist stripe_payment_link on invoice %s: %s", invoice_id, e)
+                self.logger.warning(
+                    "Failed to persist stripe_payment_link on invoice %s: %s", invoice_id, e
+                )
 
             # Optionally queue an email for delivery by the outbound subsystem.
             outreach_live = self._is_live_outreach_enabled()
@@ -4574,7 +4714,9 @@ Weathercraft""",
 
         max_items = int(os.getenv("INVOICE_OVERDUE_HANDLER_MAX_ITEMS", "25"))
         max_reminders = int(os.getenv("INVOICE_OVERDUE_MAX_REMINDERS", "5"))
-        min_hours_between_reminders = int(os.getenv("INVOICE_OVERDUE_MIN_HOURS_BETWEEN_REMINDERS", "23"))
+        min_hours_between_reminders = int(
+            os.getenv("INVOICE_OVERDUE_MIN_HOURS_BETWEEN_REMINDERS", "23")
+        )
 
         try:
             pool = get_pool()
@@ -4659,7 +4801,11 @@ Weathercraft""",
                     customer_name = str(inv.get("customer_name") or "Customer")
                     customer_email = str(inv.get("customer_email") or "")
 
-                    priority = "high" if days_overdue >= 30 else ("medium" if days_overdue >= 14 else "low")
+                    priority = (
+                        "high"
+                        if days_overdue >= 30
+                        else ("medium" if days_overdue >= 14 else "low")
+                    )
                     strategy = {
                         "type": "invoice_overdue_handler",
                         "days_overdue": days_overdue,
@@ -4673,7 +4819,9 @@ Weathercraft""",
                     followup = {
                         "followup_type": "payment_reminder",
                         "priority": priority,
-                        "suggested_next_action": "schedule_payment_reminder_sequence" if not dry_run else "review_collection_plan",
+                        "suggested_next_action": "schedule_payment_reminder_sequence"
+                        if not dry_run
+                        else "review_collection_plan",
                     }
 
                     # Always update AI fields for observability.
@@ -4733,7 +4881,9 @@ Weathercraft""",
                         reminders_scheduled += 1
 
                 except Exception as inv_exc:
-                    self.logger.warning("Invoice overdue handler failed for invoice row: %s", inv_exc)
+                    self.logger.warning(
+                        "Invoice overdue handler failed for invoice row: %s", inv_exc
+                    )
                     skipped += 1
 
             return {
@@ -4752,7 +4902,7 @@ Weathercraft""",
 
     async def generate_invoice(self, task: dict) -> dict:
         """Generate invoice with AI-enhanced content"""
-        job_id = task.get('job_id')
+        job_id = task.get("job_id")
 
         if not job_id:
             return {"status": "error", "message": "job_id required"}
@@ -4761,12 +4911,15 @@ Weathercraft""",
             pool = get_pool()
 
             # Get job details
-            job = await pool.fetchrow("""
+            job = await pool.fetchrow(
+                """
                 SELECT j.*, c.name as customer_name, c.email
                 FROM jobs j
                 JOIN customers c ON j.customer_id = c.id
                 WHERE j.id = $1
-            """, job_id)
+            """,
+                job_id,
+            )
 
             if not job:
                 return {"status": "error", "message": "Job not found"}
@@ -4806,7 +4959,7 @@ Weathercraft""",
                     "status": "completed",
                     "invoice_id": str(existing["id"]),
                     "invoice_number": existing.get("invoice_number"),
-                    "customer": job['customer_name'],
+                    "customer": job["customer_name"],
                     "ai_note": ai_note,
                     "note": "Existing invoice found for job; returning latest invoice.",
                 }
@@ -4825,7 +4978,10 @@ Weathercraft""",
             # Invoice schema requires invoice_date/due_date and cents fields.
             payment_terms_days = int(task.get("payment_terms_days") or 30)
             line_items = task.get("line_items") or [
-                {"description": job.get("description") or "Roofing Services", "amount_cents": amount_cents}
+                {
+                    "description": job.get("description") or "Roofing Services",
+                    "amount_cents": amount_cents,
+                }
             ]
 
             invoice_row = await pool.fetchrow(
@@ -4862,32 +5018,35 @@ Weathercraft""",
                 ai_note,
             )
 
-            invoice_id = invoice_row['id'] if invoice_row else None
+            invoice_id = invoice_row["id"] if invoice_row else None
 
             return {
                 "status": "completed",
                 "invoice_id": invoice_id,
                 "invoice_number": invoice_number,
-                "customer": job['customer_name'],
-                "ai_note": ai_note
+                "customer": job["customer_name"],
+                "ai_note": ai_note,
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     async def send_invoice(self, task: dict) -> dict:
         """Send invoice to customer with AI-generated email"""
-        invoice_id = task.get('invoice_id')
+        invoice_id = task.get("invoice_id")
 
         email_content = None
         if USE_REAL_AI:
             try:
                 pool = get_pool()
-                invoice = await pool.fetchrow("""
+                invoice = await pool.fetchrow(
+                    """
                     SELECT i.*, c.name as customer_name, c.email
                     FROM invoices i
                     JOIN customers c ON i.customer_id = c.id
                     WHERE i.id = $1
-                """, invoice_id)
+                """,
+                    invoice_id,
+                )
 
                 if invoice:
                     prompt = f"""
@@ -4900,7 +5059,7 @@ Weathercraft""",
                     """
                     response = await ai_core.generate(prompt, model="gpt-3.5-turbo")
 
-                    json_match = re.search(r'\{[\s\S]*?\}', response)
+                    json_match = re.search(r"\{[\s\S]*?\}", response)
                     if json_match:
                         email_content = json.loads(json_match.group())
             except Exception as e:
@@ -4911,7 +5070,7 @@ Weathercraft""",
             "status": "completed",
             "action": "invoice_sent",
             "invoice_id": invoice_id,
-            "generated_email": email_content
+            "generated_email": email_content,
         }
 
     async def invoice_report(self, *, include_ai_summary: bool = True) -> dict:
@@ -4919,7 +5078,8 @@ Weathercraft""",
         try:
             pool = get_pool()
 
-            report = await pool.fetchrow("""
+            report = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as total_invoices,
                     COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid,
@@ -4927,7 +5087,8 @@ Weathercraft""",
                     SUM(total_amount) as total_amount
                 FROM invoices
                 WHERE created_at > NOW() - INTERVAL '30 days'
-            """)
+            """
+            )
 
             report_dict = dict(report) if report else {}
 
@@ -4944,16 +5105,13 @@ Weathercraft""",
                 except Exception as e:
                     self.logger.warning(f"AI summary generation failed: {e}")
 
-            return {
-                "status": "completed",
-                "report": report_dict,
-                "ai_summary": summary
-            }
+            return {"status": "completed", "report": report_dict, "ai_summary": summary}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
 
 # ============== ANALYTICS AGENTS ==============
+
 
 class CustomerIntelligenceAgent(BaseAgent):
     """Analyzes REAL customer data from production database for actionable insights"""
@@ -4963,17 +5121,17 @@ class CustomerIntelligenceAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute customer intelligence analysis on REAL business data"""
-        analysis_type = task.get('type', task.get('action', 'full_analysis'))
+        analysis_type = task.get("type", task.get("action", "full_analysis"))
 
-        if analysis_type == 'churn_risk':
+        if analysis_type == "churn_risk":
             return await self.analyze_churn_risk()
-        elif analysis_type == 'upsell':
+        elif analysis_type == "upsell":
             return await self.identify_upsell_opportunities()
-        elif analysis_type == 'lifetime_value':
+        elif analysis_type == "lifetime_value":
             return await self.calculate_lifetime_value()
-        elif analysis_type == 'segmentation':
+        elif analysis_type == "segmentation":
             return await self.advanced_segmentation()
-        elif analysis_type == 'full_analysis':
+        elif analysis_type == "full_analysis":
             return await self.full_customer_analysis()
         else:
             return await self.full_customer_analysis()
@@ -4986,18 +5144,20 @@ class CustomerIntelligenceAgent(BaseAgent):
                 "status": "completed",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data_source": "production_database",
-                "analyses": {}
+                "analyses": {},
             }
 
             # 1. Get total customer/job counts
-            counts = await pool.fetchrow("""
+            counts = await pool.fetchrow(
+                """
                 SELECT
                     (SELECT COUNT(*) FROM customers) as total_customers,
                     (SELECT COUNT(*) FROM customers WHERE is_active = true OR status = 'active') as active_customers,
                     (SELECT COUNT(*) FROM jobs) as total_jobs,
                     (SELECT COUNT(*) FROM invoices) as total_invoices,
                     (SELECT COALESCE(SUM(total_cents)/100.0, 0) FROM invoices WHERE status = 'paid') as total_revenue
-            """)
+            """
+            )
             results["summary"] = dict(counts) if counts else {}
 
             # 2. Churn risk analysis
@@ -5025,7 +5185,8 @@ class CustomerIntelligenceAgent(BaseAgent):
             pool = get_pool()
 
             # REAL QUERY: Customers with no jobs in 12+ months (high churn risk)
-            high_risk = await pool.fetch("""
+            high_risk = await pool.fetch(
+                """
                 SELECT
                     c.id,
                     c.name,
@@ -5044,10 +5205,12 @@ class CustomerIntelligenceAgent(BaseAgent):
                    OR MAX(j.created_at) IS NULL
                 ORDER BY days_since_last_job DESC NULLS FIRST
                 LIMIT 50
-            """)
+            """
+            )
 
             # Medium risk: 6-12 months inactive
-            medium_risk = await pool.fetch("""
+            medium_risk = await pool.fetch(
+                """
                 SELECT
                     c.id,
                     c.name,
@@ -5064,7 +5227,8 @@ class CustomerIntelligenceAgent(BaseAgent):
                 HAVING MAX(j.created_at) BETWEEN NOW() - INTERVAL '12 months' AND NOW() - INTERVAL '6 months'
                 ORDER BY days_since_last_job DESC
                 LIMIT 50
-            """)
+            """
+            )
 
             return {
                 "high_risk_count": len(high_risk),
@@ -5075,8 +5239,8 @@ class CustomerIntelligenceAgent(BaseAgent):
                     f"URGENT: {len(high_risk)} customers have had no jobs in 12+ months",
                     f"ATTENTION: {len(medium_risk)} customers inactive for 6-12 months",
                     "Recommended actions: Re-engagement campaigns, special offers, follow-up calls",
-                    "Consider maintenance contract offers for high-value dormant customers"
-                ]
+                    "Consider maintenance contract offers for high-value dormant customers",
+                ],
             }
         except Exception as e:
             self.logger.error(f"Churn risk analysis failed: {e}")
@@ -5088,7 +5252,8 @@ class CustomerIntelligenceAgent(BaseAgent):
             pool = get_pool()
 
             # REAL QUERY: Customers with high average job value (upsell candidates)
-            high_value_customers = await pool.fetch("""
+            high_value_customers = await pool.fetch(
+                """
                 SELECT
                     c.id,
                     c.name,
@@ -5107,10 +5272,12 @@ class CustomerIntelligenceAgent(BaseAgent):
                 HAVING COALESCE(AVG(j.actual_revenue), AVG(j.estimated_revenue)) > 5000
                 ORDER BY avg_job_value DESC
                 LIMIT 30
-            """)
+            """
+            )
 
             # Repeat customers (high loyalty, good for premium services)
-            repeat_customers = await pool.fetch("""
+            repeat_customers = await pool.fetch(
+                """
                 SELECT
                     c.id,
                     c.name,
@@ -5125,7 +5292,8 @@ class CustomerIntelligenceAgent(BaseAgent):
                 HAVING COUNT(j.id) >= 3
                 ORDER BY job_count DESC, total_revenue DESC
                 LIMIT 30
-            """)
+            """
+            )
 
             return {
                 "high_value_count": len(high_value_customers),
@@ -5136,8 +5304,8 @@ class CustomerIntelligenceAgent(BaseAgent):
                     f"TARGET: {len(high_value_customers)} high-value customers (avg job >$5k) for premium services",
                     f"LOYALTY: {len(repeat_customers)} repeat customers ideal for maintenance contracts",
                     "Upsell strategies: Extended warranties, annual maintenance plans, premium materials",
-                    "Consider referral program for loyal customers"
-                ]
+                    "Consider referral program for loyal customers",
+                ],
             }
         except Exception as e:
             self.logger.error(f"Upsell opportunity analysis failed: {e}")
@@ -5151,9 +5319,9 @@ class CustomerIntelligenceAgent(BaseAgent):
 
             for customer in customers[:20]:  # Limit to 20 per OODA run for speed
                 try:
-                    days_inactive = customer.get('days_since_last_job') or 999
-                    total_revenue = float(customer.get('total_revenue') or 0)
-                    total_jobs = int(customer.get('total_jobs') or 0)
+                    days_inactive = customer.get("days_since_last_job") or 999
+                    total_revenue = float(customer.get("total_revenue") or 0)
+                    total_jobs = int(customer.get("total_jobs") or 0)
 
                     health_score = 100
                     if days_inactive > 365:
@@ -5168,30 +5336,28 @@ class CustomerIntelligenceAgent(BaseAgent):
                     churn_probability = min(0.95, days_inactive / 500.0) if days_inactive else 0.1
 
                     if days_inactive > 365:
-                        churn_risk, health_category = 'critical', 'at_risk'
+                        churn_risk, health_category = "critical", "at_risk"
                     elif days_inactive > 180:
-                        churn_risk, health_category = 'high', 'declining'
+                        churn_risk, health_category = "high", "declining"
                     elif days_inactive > 90:
-                        churn_risk, health_category = 'medium', 'watch'
+                        churn_risk, health_category = "medium", "watch"
                     else:
-                        churn_risk, health_category = 'low', 'healthy'
+                        churn_risk, health_category = "low", "healthy"
 
                     retention_strategies = []
-                    if churn_risk in ('critical', 'high'):
+                    if churn_risk in ("critical", "high"):
                         retention_strategies = [
-                            'Send re-engagement email',
-                            'Offer 10% discount on next service',
-                            'Schedule follow-up call'
+                            "Send re-engagement email",
+                            "Offer 10% discount on next service",
+                            "Schedule follow-up call",
                         ]
-                    elif churn_risk == 'medium':
-                        retention_strategies = [
-                            'Send maintenance reminder',
-                            'Offer loyalty reward'
-                        ]
+                    elif churn_risk == "medium":
+                        retention_strategies = ["Send maintenance reminder", "Offer loyalty reward"]
 
-                    tenant_id = customer.get('tenant_id', '51e728c5-94e8-4ae0-8a0a-6a08d1fb3457')
+                    tenant_id = customer.get("tenant_id", "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457")
 
-                    await pool.execute("""
+                    await pool.execute(
+                        """
                         INSERT INTO ai_customer_health (
                             customer_id, tenant_id, health_score, health_category,
                             churn_probability, churn_risk, lifetime_value,
@@ -5200,14 +5366,22 @@ class CustomerIntelligenceAgent(BaseAgent):
                         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW(), NOW())
                         ON CONFLICT (id) DO NOTHING
                     """,
-                        customer['id'], tenant_id, health_score, health_category,
-                        churn_probability, churn_risk, total_revenue, days_inactive,
+                        customer["id"],
+                        tenant_id,
+                        health_score,
+                        health_category,
+                        churn_probability,
+                        churn_risk,
+                        total_revenue,
+                        days_inactive,
                         f"Inactive for {days_inactive} days" if days_inactive else "Unknown",
-                        retention_strategies
+                        retention_strategies,
                     )
                     stored_count += 1
                 except Exception as inner_e:
-                    self.logger.warning(f"Failed to store health for customer {customer.get('id')}: {inner_e!r}")
+                    self.logger.warning(
+                        f"Failed to store health for customer {customer.get('id')}: {inner_e!r}"
+                    )
                     continue
 
             self.logger.info(f"Stored {stored_count} customer health insights")
@@ -5221,7 +5395,8 @@ class CustomerIntelligenceAgent(BaseAgent):
         try:
             pool = get_pool()
 
-            ltv_data = await pool.fetch("""
+            ltv_data = await pool.fetch(
+                """
                 SELECT
                     c.id,
                     c.name,
@@ -5240,10 +5415,11 @@ class CustomerIntelligenceAgent(BaseAgent):
                 HAVING COUNT(DISTINCT j.id) > 0
                 ORDER BY total_revenue DESC
                 LIMIT 50
-            """)
+            """
+            )
 
             # Calculate aggregate stats
-            total_ltv = sum(float(c['total_revenue'] or 0) for c in ltv_data)
+            total_ltv = sum(float(c["total_revenue"] or 0) for c in ltv_data)
             avg_ltv = total_ltv / len(ltv_data) if ltv_data else 0
 
             return {
@@ -5252,7 +5428,7 @@ class CustomerIntelligenceAgent(BaseAgent):
                 "total_ltv": total_ltv,
                 "average_ltv": avg_ltv,
                 "top_customers": [dict(c) for c in ltv_data[:20]],
-                "customer_lifetime_values": [dict(c) for c in ltv_data]
+                "customer_lifetime_values": [dict(c) for c in ltv_data],
             }
         except Exception as e:
             self.logger.error(f"LTV calculation failed: {e}")
@@ -5264,7 +5440,8 @@ class CustomerIntelligenceAgent(BaseAgent):
             pool = get_pool()
 
             # Fetch customers with their real metrics
-            customers = await pool.fetch("""
+            customers = await pool.fetch(
+                """
                 SELECT
                     c.id,
                     c.name,
@@ -5277,7 +5454,8 @@ class CustomerIntelligenceAgent(BaseAgent):
                 WHERE c.is_active = true OR c.status = 'active'
                 GROUP BY c.id, c.name
                 LIMIT 100
-            """)
+            """
+            )
 
             if not customers:
                 return {"status": "completed", "segments": {}}
@@ -5300,48 +5478,60 @@ class CustomerIntelligenceAgent(BaseAgent):
 
                     response = await ai_core.generate(prompt, model="gpt-4", temperature=0.2)
 
-                    json_match = re.search(r'\{[\s\S]*?\}', response)
+                    json_match = re.search(r"\{[\s\S]*?\}", response)
                     if json_match:
                         return {
                             "status": "completed",
                             "segments": json.loads(json_match.group()),
-                            "ai_powered": True
+                            "ai_powered": True,
                         }
                 except Exception as ai_e:
                     self.logger.warning(f"AI segmentation failed, using rule-based: {ai_e}")
 
             # Rule-based segmentation fallback
             segments = {
-                "VIP": {"count": 0, "customer_ids": [], "characteristics": ["High revenue", "Multiple jobs"]},
-                "At_Risk": {"count": 0, "customer_ids": [], "characteristics": ["Long inactive period"]},
-                "New": {"count": 0, "customer_ids": [], "characteristics": ["Recent customer", "Few jobs"]},
-                "Steady": {"count": 0, "customer_ids": [], "characteristics": ["Regular activity"]}
+                "VIP": {
+                    "count": 0,
+                    "customer_ids": [],
+                    "characteristics": ["High revenue", "Multiple jobs"],
+                },
+                "At_Risk": {
+                    "count": 0,
+                    "customer_ids": [],
+                    "characteristics": ["Long inactive period"],
+                },
+                "New": {
+                    "count": 0,
+                    "customer_ids": [],
+                    "characteristics": ["Recent customer", "Few jobs"],
+                },
+                "Steady": {"count": 0, "customer_ids": [], "characteristics": ["Regular activity"]},
             }
 
             for c in customers_data:
-                revenue = float(c.get('revenue') or 0)
-                jobs = int(c.get('jobs') or 0)
-                days_inactive = int(c.get('days_inactive') or 0) if c.get('days_inactive') else 999
-                tenure = int(c.get('tenure_days') or 0)
+                revenue = float(c.get("revenue") or 0)
+                jobs = int(c.get("jobs") or 0)
+                days_inactive = int(c.get("days_inactive") or 0) if c.get("days_inactive") else 999
+                tenure = int(c.get("tenure_days") or 0)
 
                 if revenue > 10000 and jobs >= 2:
                     segments["VIP"]["count"] += 1
-                    segments["VIP"]["customer_ids"].append(str(c['id']))
+                    segments["VIP"]["customer_ids"].append(str(c["id"]))
                 elif days_inactive > 180:
                     segments["At_Risk"]["count"] += 1
-                    segments["At_Risk"]["customer_ids"].append(str(c['id']))
+                    segments["At_Risk"]["customer_ids"].append(str(c["id"]))
                 elif tenure < 90:
                     segments["New"]["count"] += 1
-                    segments["New"]["customer_ids"].append(str(c['id']))
+                    segments["New"]["customer_ids"].append(str(c["id"]))
                 else:
                     segments["Steady"]["count"] += 1
-                    segments["Steady"]["customer_ids"].append(str(c['id']))
+                    segments["Steady"]["customer_ids"].append(str(c["id"]))
 
             return {
                 "status": "completed",
                 "segments": segments,
                 "ai_powered": False,
-                "total_analyzed": len(customers_data)
+                "total_analyzed": len(customers_data),
             }
 
         except Exception as e:
@@ -5361,13 +5551,13 @@ class PredictiveAnalyzerAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute predictive analysis"""
-        prediction_type = task.get('type', 'revenue')
+        prediction_type = task.get("type", "revenue")
 
-        if prediction_type == 'revenue':
+        if prediction_type == "revenue":
             return await self.predict_revenue()
-        elif prediction_type == 'demand':
+        elif prediction_type == "demand":
             return await self.predict_demand()
-        elif prediction_type == 'seasonality':
+        elif prediction_type == "seasonality":
             return await self.analyze_seasonality()
         else:
             return {"status": "error", "message": f"Unknown prediction type: {prediction_type}"}
@@ -5378,7 +5568,8 @@ class PredictiveAnalyzerAgent(BaseAgent):
             pool = get_pool()
 
             # Get historical revenue data
-            historical = await pool.fetch("""
+            historical = await pool.fetch(
+                """
                 SELECT
                     DATE_TRUNC('month', created_at) as month,
                     SUM(total_amount) as revenue
@@ -5387,19 +5578,21 @@ class PredictiveAnalyzerAgent(BaseAgent):
                 GROUP BY month
                 ORDER BY month DESC
                 LIMIT 12
-            """)
+            """
+            )
 
             # Simple projection (would use ML in production)
             if historical:
-                avg_monthly = float(sum(float(h['revenue'] or 0) for h in historical) / len(historical))
+                avg_monthly = float(
+                    sum(float(h["revenue"] or 0) for h in historical) / len(historical)
+                )
                 growth_rate = 1.1  # 10% growth assumption
 
                 predictions = []
                 for i in range(1, 4):  # Next 3 months
-                    predictions.append({
-                        "month": i,
-                        "predicted_revenue": avg_monthly * (growth_rate ** i)
-                    })
+                    predictions.append(
+                        {"month": i, "predicted_revenue": avg_monthly * (growth_rate**i)}
+                    )
 
                 # Enhance with AI insights if available
                 if USE_REAL_AI:
@@ -5415,11 +5608,11 @@ class PredictiveAnalyzerAgent(BaseAgent):
                         """
                         response = await ai_core.generate(prompt, model="gpt-4", temperature=0.3)
 
-                        json_match = re.search(r'\{[\s\S]*?\}', response)
+                        json_match = re.search(r"\{[\s\S]*?\}", response)
                         if json_match:
                             data = json.loads(json_match.group())
-                            if 'refined_predictions' in data:
-                                predictions = data['refined_predictions']
+                            if "refined_predictions" in data:
+                                predictions = data["refined_predictions"]
                     except Exception as e:
                         self.logger.warning(f"AI revenue prediction failed: {e}")
 
@@ -5429,7 +5622,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
             return {
                 "status": "completed",
                 "historical_data": [dict(h) for h in historical],
-                "predictions": predictions
+                "predictions": predictions,
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -5438,8 +5631,10 @@ class PredictiveAnalyzerAgent(BaseAgent):
         """Predict service demand using Real AI"""
         try:
             pool = get_pool()
-            result = await pool.fetchrow("SELECT COUNT(*) as count FROM jobs WHERE created_at > NOW() - INTERVAL '30 days'")
-            recent_jobs = result['count'] if result else 0
+            result = await pool.fetchrow(
+                "SELECT COUNT(*) as count FROM jobs WHERE created_at > NOW() - INTERVAL '30 days'"
+            )
+            recent_jobs = result["count"] if result else 0
 
             prompt = f"""
             Predict roofing service demand for the next quarter based on:
@@ -5455,7 +5650,7 @@ class PredictiveAnalyzerAgent(BaseAgent):
 
             response = await ai_core.generate(prompt, model="gpt-4", temperature=0.3)
 
-            json_match = re.search(r'\{[\s\S]*?\}', response)
+            json_match = re.search(r"\{[\s\S]*?\}", response)
             if json_match:
                 return json.loads(json_match.group())
 
@@ -5469,7 +5664,8 @@ class PredictiveAnalyzerAgent(BaseAgent):
         try:
             pool = get_pool()
 
-            seasonal_data = await pool.fetch("""
+            seasonal_data = await pool.fetch(
+                """
                 SELECT
                     EXTRACT(month FROM created_at) as month,
                     COUNT(*) as job_count,
@@ -5478,12 +5674,10 @@ class PredictiveAnalyzerAgent(BaseAgent):
                 LEFT JOIN invoices i ON j.id = i.job_id
                 GROUP BY month
                 ORDER BY month
-            """)
+            """
+            )
 
-            return {
-                "status": "completed",
-                "seasonal_patterns": [dict(s) for s in seasonal_data]
-            }
+            return {"status": "completed", "seasonal_patterns": [dict(s) for s in seasonal_data]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -5496,15 +5690,15 @@ class RevenueOptimizerAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute revenue optimization analysis on REAL business data"""
-        analysis_type = task.get('type', task.get('action', 'full_analysis'))
+        analysis_type = task.get("type", task.get("action", "full_analysis"))
 
-        if analysis_type == 'monthly_revenue':
+        if analysis_type == "monthly_revenue":
             return await self.analyze_monthly_revenue()
-        elif analysis_type == 'top_customers':
+        elif analysis_type == "top_customers":
             return await self.get_top_customers_by_revenue()
-        elif analysis_type == 'pricing':
+        elif analysis_type == "pricing":
             return await self.analyze_pricing_optimization()
-        elif analysis_type == 'full_analysis':
+        elif analysis_type == "full_analysis":
             return await self.full_revenue_analysis()
         else:
             return await self.full_revenue_analysis()
@@ -5517,11 +5711,12 @@ class RevenueOptimizerAgent(BaseAgent):
                 "status": "completed",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data_source": "production_database",
-                "analyses": {}
+                "analyses": {},
             }
 
             # 1. Overall revenue summary
-            summary = await pool.fetchrow("""
+            summary = await pool.fetchrow(
+                """
                 SELECT
                     (SELECT COUNT(*) FROM jobs) as total_jobs,
                     (SELECT COUNT(*) FROM invoices) as total_invoices,
@@ -5530,7 +5725,8 @@ class RevenueOptimizerAgent(BaseAgent):
                     (SELECT COALESCE(SUM(actual_revenue), 0) FROM jobs WHERE actual_revenue IS NOT NULL) as jobs_revenue,
                     (SELECT AVG(actual_revenue) FROM jobs WHERE actual_revenue IS NOT NULL) as avg_job_value,
                     (SELECT COUNT(*) FROM jobs WHERE status = 'completed') as completed_jobs
-            """)
+            """
+            )
             results["summary"] = dict(summary) if summary else {}
 
             # 2. Monthly revenue trends
@@ -5559,7 +5755,8 @@ class RevenueOptimizerAgent(BaseAgent):
             pool = get_pool()
 
             # REAL QUERY: Revenue by month from jobs table
-            monthly_jobs = await pool.fetch("""
+            monthly_jobs = await pool.fetch(
+                """
                 SELECT
                     DATE_TRUNC('month', created_at) as month,
                     COUNT(*) as job_count,
@@ -5571,10 +5768,12 @@ class RevenueOptimizerAgent(BaseAgent):
                 GROUP BY DATE_TRUNC('month', created_at)
                 ORDER BY month DESC
                 LIMIT 12
-            """)
+            """
+            )
 
             # REAL QUERY: Invoice data by month
-            monthly_invoices = await pool.fetch("""
+            monthly_invoices = await pool.fetch(
+                """
                 SELECT
                     DATE_TRUNC('month', invoice_date) as month,
                     COUNT(*) as invoice_count,
@@ -5586,13 +5785,16 @@ class RevenueOptimizerAgent(BaseAgent):
                 GROUP BY DATE_TRUNC('month', invoice_date)
                 ORDER BY month DESC
                 LIMIT 12
-            """)
+            """
+            )
 
             # Calculate growth rate
             if len(monthly_jobs) >= 2:
-                current_month = float(monthly_jobs[0]['total_revenue'] or 0)
-                prev_month = float(monthly_jobs[1]['total_revenue'] or 0)
-                growth_rate = ((current_month - prev_month) / prev_month * 100) if prev_month > 0 else 0
+                current_month = float(monthly_jobs[0]["total_revenue"] or 0)
+                prev_month = float(monthly_jobs[1]["total_revenue"] or 0)
+                growth_rate = (
+                    ((current_month - prev_month) / prev_month * 100) if prev_month > 0 else 0
+                )
             else:
                 growth_rate = 0
 
@@ -5600,7 +5802,11 @@ class RevenueOptimizerAgent(BaseAgent):
                 "monthly_job_revenue": [dict(m) for m in monthly_jobs],
                 "monthly_invoices": [dict(m) for m in monthly_invoices],
                 "growth_rate_pct": round(growth_rate, 2),
-                "trend": "growing" if growth_rate > 5 else "declining" if growth_rate < -5 else "stable"
+                "trend": "growing"
+                if growth_rate > 5
+                else "declining"
+                if growth_rate < -5
+                else "stable",
             }
         except Exception as e:
             self.logger.error(f"Monthly revenue analysis failed: {e}")
@@ -5612,7 +5818,8 @@ class RevenueOptimizerAgent(BaseAgent):
             pool = get_pool()
 
             # REAL QUERY: Top customers by revenue from jobs
-            top_customers = await pool.fetch("""
+            top_customers = await pool.fetch(
+                """
                 SELECT
                     c.id,
                     c.name,
@@ -5629,18 +5836,23 @@ class RevenueOptimizerAgent(BaseAgent):
                 GROUP BY c.id, c.name, c.email, c.phone
                 ORDER BY total_revenue DESC
                 LIMIT 20
-            """)
+            """
+            )
 
             # Calculate concentration
-            total_revenue = sum(float(c['total_revenue'] or 0) for c in top_customers)
-            top_5_revenue = sum(float(c['total_revenue'] or 0) for c in top_customers[:5])
+            total_revenue = sum(float(c["total_revenue"] or 0) for c in top_customers)
+            top_5_revenue = sum(float(c["total_revenue"] or 0) for c in top_customers[:5])
             concentration = (top_5_revenue / total_revenue * 100) if total_revenue > 0 else 0
 
             return {
                 "top_customers": [dict(c) for c in top_customers],
                 "total_revenue_top_20": total_revenue,
                 "top_5_concentration_pct": round(concentration, 2),
-                "risk_assessment": "HIGH" if concentration > 50 else "MEDIUM" if concentration > 30 else "LOW"
+                "risk_assessment": "HIGH"
+                if concentration > 50
+                else "MEDIUM"
+                if concentration > 30
+                else "LOW",
             }
         except Exception as e:
             self.logger.error(f"Top customers analysis failed: {e}")
@@ -5652,7 +5864,8 @@ class RevenueOptimizerAgent(BaseAgent):
             pool = get_pool()
 
             # REAL QUERY: Job value distribution
-            value_distribution = await pool.fetch("""
+            value_distribution = await pool.fetch(
+                """
                 SELECT
                     CASE
                         WHEN COALESCE(actual_revenue, estimated_revenue) < 1000 THEN 'Under $1k'
@@ -5668,10 +5881,12 @@ class RevenueOptimizerAgent(BaseAgent):
                 WHERE actual_revenue IS NOT NULL OR estimated_revenue IS NOT NULL
                 GROUP BY value_tier
                 ORDER BY avg_value DESC
-            """)
+            """
+            )
 
             # REAL QUERY: Profit margin analysis (if costs available)
-            margin_analysis = await pool.fetch("""
+            margin_analysis = await pool.fetch(
+                """
                 SELECT
                     (ROUND(((actual_revenue - actual_costs)::float / actual_revenue * 100) / 10) * 10) as margin_tier,
                     COUNT(*) as job_count,
@@ -5682,10 +5897,12 @@ class RevenueOptimizerAgent(BaseAgent):
                 GROUP BY 1
                 ORDER BY margin_tier DESC
                 LIMIT 10
-            """)
+            """
+            )
 
             # REAL QUERY: Underpriced jobs (estimate vs actual)
-            underpriced = await pool.fetch("""
+            underpriced = await pool.fetch(
+                """
                 SELECT
                     COUNT(*) as count,
                     AVG(actual_revenue - estimated_revenue) as avg_undercharge
@@ -5693,9 +5910,12 @@ class RevenueOptimizerAgent(BaseAgent):
                 WHERE actual_revenue > estimated_revenue * 1.2
                   AND estimated_revenue > 0
                   AND actual_revenue > 0
-            """)
+            """
+            )
 
-            underpriced_info = dict(underpriced[0]) if underpriced else {"count": 0, "avg_undercharge": 0}
+            underpriced_info = (
+                dict(underpriced[0]) if underpriced else {"count": 0, "avg_undercharge": 0}
+            )
 
             return {
                 "value_distribution": [dict(v) for v in value_distribution],
@@ -5704,8 +5924,8 @@ class RevenueOptimizerAgent(BaseAgent):
                 "recommendations": [
                     "Focus on $5k-$25k jobs for optimal revenue-to-effort ratio",
                     f"Review {underpriced_info.get('count', 0)} potentially underpriced jobs",
-                    "Consider implementing value-based pricing for premium services"
-                ]
+                    "Consider implementing value-based pricing for premium services",
+                ],
             }
         except Exception as e:
             self.logger.error(f"Pricing analysis failed: {e}")
@@ -5721,18 +5941,26 @@ class RevenueOptimizerAgent(BaseAgent):
 
         # Revenue trend recommendations
         if monthly.get("trend") == "declining":
-            recommendations.append("ALERT: Revenue is declining. Review sales pipeline and customer engagement.")
+            recommendations.append(
+                "ALERT: Revenue is declining. Review sales pipeline and customer engagement."
+            )
         elif monthly.get("trend") == "growing":
-            recommendations.append("Revenue is growing! Consider expanding capacity or raising prices.")
+            recommendations.append(
+                "Revenue is growing! Consider expanding capacity or raising prices."
+            )
 
         # Customer concentration recommendations
         if customers.get("risk_assessment") == "HIGH":
-            recommendations.append("HIGH RISK: Top 5 customers account for >50% of revenue. Diversify customer base.")
+            recommendations.append(
+                "HIGH RISK: Top 5 customers account for >50% of revenue. Diversify customer base."
+            )
 
         # Average job value recommendations
         avg_job = summary.get("avg_job_value", 0)
         if avg_job and avg_job < 3000:
-            recommendations.append(f"Average job value (${avg_job:.2f}) is low. Focus on higher-value projects.")
+            recommendations.append(
+                f"Average job value (${avg_job:.2f}) is low. Focus on higher-value projects."
+            )
 
         # Completed jobs ratio
         total_jobs = summary.get("total_jobs", 0)
@@ -5740,7 +5968,9 @@ class RevenueOptimizerAgent(BaseAgent):
         if total_jobs > 0:
             completion_rate = completed / total_jobs * 100
             if completion_rate < 70:
-                recommendations.append(f"Job completion rate ({completion_rate:.1f}%) is below target. Review pipeline bottlenecks.")
+                recommendations.append(
+                    f"Job completion rate ({completion_rate:.1f}%) is below target. Review pipeline bottlenecks."
+                )
 
         if not recommendations:
             recommendations.append("Revenue metrics are healthy. Continue monitoring for trends.")
@@ -5749,6 +5979,7 @@ class RevenueOptimizerAgent(BaseAgent):
 
 
 # ============== GENERATOR AGENTS ==============
+
 
 class ContractGeneratorAgent(BaseAgent):
     """Generates contracts using AI"""
@@ -5766,11 +5997,11 @@ class ContractGeneratorAgent(BaseAgent):
                 "message": "Contract generator operational",
             }
 
-        contract_type = task.get('type', 'service')
-        tenant_id = task.get('tenant_id') or task.get('tenantId')
-        customer_id = task.get('customer_id')
-        customer_data = task.get('customer') or {}
-        job_data = task.get('job_data') or {}
+        contract_type = task.get("type", "service")
+        tenant_id = task.get("tenant_id") or task.get("tenantId")
+        customer_id = task.get("customer_id")
+        customer_data = task.get("customer") or {}
+        job_data = task.get("job_data") or {}
 
         customer = None
 
@@ -5781,23 +6012,26 @@ class ContractGeneratorAgent(BaseAgent):
                 if tenant_id:
                     customer = await pool.fetchrow(
                         "SELECT * FROM customers WHERE id = $1 AND tenant_id = $2",
-                        customer_id, tenant_id
+                        customer_id,
+                        tenant_id,
                     )
                 else:
                     customer = await pool.fetchrow(
-                        "SELECT * FROM customers WHERE id = $1",
-                        customer_id
+                        "SELECT * FROM customers WHERE id = $1", customer_id
                     )
 
                 if not customer:
                     return {"status": "error", "message": "Customer not found"}
             else:
-                customer_email = customer_data.get('email') if isinstance(customer_data, dict) else None
+                customer_email = (
+                    customer_data.get("email") if isinstance(customer_data, dict) else None
+                )
 
                 if customer_email and tenant_id:
                     customer = await pool.fetchrow(
                         "SELECT * FROM customers WHERE lower(email) = lower($1) AND tenant_id = $2 ORDER BY created_at DESC LIMIT 1",
-                        customer_email, tenant_id
+                        customer_email,
+                        tenant_id,
                     )
 
                 if not customer:
@@ -5806,21 +6040,21 @@ class ContractGeneratorAgent(BaseAgent):
 
                     customer = {
                         "id": None,
-                        "name": customer_data.get('name') or 'Valued Customer',
-                        "email": customer_data.get('email'),
-                        "address": customer_data.get('address'),
+                        "name": customer_data.get("name") or "Valued Customer",
+                        "email": customer_data.get("email"),
+                        "address": customer_data.get("address"),
                     }
 
-            customer_name = customer.get('name') or 'Valued Customer'
-            customer_email = customer.get('email')
-            customer_address = customer.get('address')
+            customer_name = customer.get("name") or "Valued Customer"
+            customer_email = customer.get("email")
+            customer_address = customer.get("address")
 
-            project_name = job_data.get('project_name') if isinstance(job_data, dict) else None
-            project_address = job_data.get('address') if isinstance(job_data, dict) else None
-            description = job_data.get('description') if isinstance(job_data, dict) else None
-            amount = job_data.get('amount') if isinstance(job_data, dict) else None
-            currency = job_data.get('currency') if isinstance(job_data, dict) else None
-            due_date = job_data.get('due_date') if isinstance(job_data, dict) else None
+            project_name = job_data.get("project_name") if isinstance(job_data, dict) else None
+            project_address = job_data.get("address") if isinstance(job_data, dict) else None
+            description = job_data.get("description") if isinstance(job_data, dict) else None
+            amount = job_data.get("amount") if isinstance(job_data, dict) else None
+            currency = job_data.get("currency") if isinstance(job_data, dict) else None
+            due_date = job_data.get("due_date") if isinstance(job_data, dict) else None
 
             prompt_parts = [
                 f"Generate a professional {contract_type} contract for a roofing/services company.",
@@ -5843,13 +6077,17 @@ class ContractGeneratorAgent(BaseAgent):
             if description:
                 prompt_parts.append(f"Scope/Description: {description}")
             if amount is not None:
-                prompt_parts.append(f"Bid/Estimated Amount: {amount}{(' ' + currency) if currency else ''}")
+                prompt_parts.append(
+                    f"Bid/Estimated Amount: {amount}{(' ' + currency) if currency else ''}"
+                )
 
-            prompt_parts.extend([
-                "",
-                "Include: scope, payment terms, change orders, schedule/timeline, warranties, permits, safety, cancellation, dispute resolution, signatures.",
-                "Do not invent specific licensing numbers or guarantees; use placeholders where appropriate.",
-            ])
+            prompt_parts.extend(
+                [
+                    "",
+                    "Include: scope, payment terms, change orders, schedule/timeline, warranties, permits, safety, cancellation, dispute resolution, signatures.",
+                    "Do not invent specific licensing numbers or guarantees; use placeholders where appropriate.",
+                ]
+            )
 
             prompt = "\n".join(prompt_parts)
 
@@ -5862,7 +6100,7 @@ class ContractGeneratorAgent(BaseAgent):
                         prompt,
                         model="gpt-4",
                         system_prompt="You are a legal contract generator.",
-                        max_tokens=2000
+                        max_tokens=2000,
                     )
                     ai_generated = True
                 except Exception as e:
@@ -5921,7 +6159,7 @@ Contractor: _________________________ Date: ____________
                 "status": "completed",
                 "contract": contract_text,
                 "customer": customer_name,
-                "customer_id": customer.get('id'),
+                "customer_id": customer.get("id"),
                 "ai_generated": ai_generated,
             }
         except Exception as e:
@@ -5944,9 +6182,9 @@ class ProposalGeneratorAgent(BaseAgent):
                 "message": "Proposal generator operational",
             }
 
-        proposal_type = task.get('type', 'roofing')
-        customer_data = task.get('customer', {})
-        job_data = task.get('job_data', {})
+        proposal_type = task.get("type", "roofing")
+        customer_data = task.get("customer", {})
+        job_data = task.get("job_data", {})
 
         # Use REAL AI to generate proposal
         if USE_REAL_AI:
@@ -5956,18 +6194,14 @@ class ProposalGeneratorAgent(BaseAgent):
 
                 proposal = {
                     "title": f"{proposal_type.title()} Services Proposal",
-                    "customer": customer_data.get('name', 'Valued Customer'),
-                    "date": datetime.now().strftime('%Y-%m-%d'),
+                    "customer": customer_data.get("name", "Valued Customer"),
+                    "date": datetime.now().strftime("%Y-%m-%d"),
                     "content": proposal_content,  # REAL AI content
                     "generated_by": "GPT-4",
-                    "ai_powered": True
+                    "ai_powered": True,
                 }
 
-                return {
-                    "status": "completed",
-                    "proposal": proposal,
-                    "ai_generated": True
-                }
+                return {"status": "completed", "proposal": proposal, "ai_generated": True}
             except Exception as e:
                 logger.error(f"AI proposal generation failed: {e}")
                 # Fallback to template if AI fails
@@ -5975,22 +6209,18 @@ class ProposalGeneratorAgent(BaseAgent):
         # Fallback template (only if AI not available)
         proposal = {
             "title": f"{proposal_type.title()} Services Proposal",
-            "customer": customer_data.get('name', 'Valued Customer'),
-            "date": datetime.now().strftime('%Y-%m-%d'),
+            "customer": customer_data.get("name", "Valued Customer"),
+            "date": datetime.now().strftime("%Y-%m-%d"),
             "sections": [
                 {"title": "Executive Summary", "content": "Professional roofing services"},
                 {"title": "Scope of Work", "content": "Complete roof inspection and repair"},
                 {"title": "Timeline", "content": "2-3 weeks"},
-                {"title": "Investment", "content": "$5,000 - $15,000"}
+                {"title": "Investment", "content": "$5,000 - $15,000"},
             ],
-            "ai_powered": False
+            "ai_powered": False,
         }
 
-        return {
-            "status": "completed",
-            "proposal": proposal,
-            "ai_generated": False
-        }
+        return {"status": "completed", "proposal": proposal, "ai_generated": False}
 
 
 class ReportingAgent(BaseAgent):
@@ -6001,13 +6231,13 @@ class ReportingAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Generate report"""
-        report_type = task.get('type', 'summary')
+        report_type = task.get("type", "summary")
 
-        if report_type == 'executive':
+        if report_type == "executive":
             return await self.executive_report()
-        elif report_type == 'performance':
+        elif report_type == "performance":
             return await self.performance_report()
-        elif report_type == 'financial':
+        elif report_type == "financial":
             return await self.financial_report()
         else:
             return await self.summary_report()
@@ -6018,13 +6248,15 @@ class ReportingAgent(BaseAgent):
             pool = get_pool()
 
             # Gather key metrics
-            metrics = await pool.fetchrow("""
+            metrics = await pool.fetchrow(
+                """
                 SELECT
                     (SELECT COUNT(*) FROM customers) as total_customers,
                     (SELECT COUNT(*) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days') as recent_jobs,
                     (SELECT SUM(total_amount) FROM invoices WHERE created_at > NOW() - INTERVAL '30 days') as monthly_revenue,
                     (SELECT COUNT(*) FROM ai_agents WHERE status = 'active') as active_agents
-            """)
+            """
+            )
 
             metrics_dict = dict(metrics) if metrics else {}
 
@@ -6045,16 +6277,16 @@ class ReportingAgent(BaseAgent):
                 "status": "completed",
                 "report": {
                     "title": "Executive Summary",
-                    "date": datetime.now().strftime('%Y-%m-%d'),
+                    "date": datetime.now().strftime("%Y-%m-%d"),
                     "metrics": metrics_dict,
                     "summary_text": summary_text,
                     "insights": [
                         f"Total customer base: {metrics_dict.get('total_customers', 0)}",
                         f"Jobs this month: {metrics_dict.get('recent_jobs', 0)}",
                         f"Monthly revenue: ${metrics_dict.get('monthly_revenue') or 0:,.2f}",
-                        f"AI agents operational: {metrics_dict.get('active_agents', 0)}"
-                    ]
-                }
+                        f"AI agents operational: {metrics_dict.get('active_agents', 0)}",
+                    ],
+                },
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -6068,9 +6300,9 @@ class ReportingAgent(BaseAgent):
             "status": "completed",
             "report": {
                 "title": "System Performance Report",
-                "date": datetime.now().strftime('%Y-%m-%d'),
-                "health_status": health
-            }
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "health_status": health,
+            },
         }
 
     async def financial_report(self) -> dict:
@@ -6081,7 +6313,7 @@ class ReportingAgent(BaseAgent):
         commentary = ""
         if USE_REAL_AI:
             try:
-                data = invoice_report.get('report', {})
+                data = invoice_report.get("report", {})
                 prompt = f"""
                 Provide financial commentary on this invoice data:
                 {json.dumps(data, default=str)}
@@ -6096,10 +6328,10 @@ class ReportingAgent(BaseAgent):
             "status": "completed",
             "report": {
                 "title": "Financial Report",
-                "date": datetime.now().strftime('%Y-%m-%d'),
-                "invoice_summary": invoice_report.get('report', {}),
-                "commentary": commentary
-            }
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "invoice_summary": invoice_report.get("report", {}),
+                "commentary": commentary,
+            },
         }
 
     async def summary_report(self) -> dict:
@@ -6108,13 +6340,14 @@ class ReportingAgent(BaseAgent):
             "status": "completed",
             "report": {
                 "title": "Summary Report",
-                "date": datetime.now().strftime('%Y-%m-%d'),
-                "content": "System operational summary"
-            }
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "content": "System operational summary",
+            },
         }
 
 
 # ============== SELF-BUILDING AGENT ==============
+
 
 class SelfBuildingAgent(BaseAgent):
     """Agent that can build and deploy other agents"""
@@ -6124,22 +6357,22 @@ class SelfBuildingAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute self-building task"""
-        action = task.get('action', 'create')
+        action = task.get("action", "create")
 
-        if action == 'create':
+        if action == "create":
             return await self.create_agent(task)
-        elif action == 'deploy':
+        elif action == "deploy":
             return await self.deploy_agents()
-        elif action == 'optimize':
+        elif action == "optimize":
             return await self.optimize_agents()
         else:
             return {"status": "error", "message": f"Unknown action: {action}"}
 
     async def create_agent(self, task: dict) -> dict:
         """Create a new agent"""
-        agent_name = task.get('name', f"Agent_{datetime.now().strftime('%Y%m%d%H%M%S')}")
-        agent_type = task.get('type', 'workflow')
-        capabilities = task.get('capabilities', [])
+        agent_name = task.get("name", f"Agent_{datetime.now().strftime('%Y%m%d%H%M%S')}")
+        agent_type = task.get("type", "workflow")
+        capabilities = task.get("capabilities", [])
 
         try:
             pool = get_pool()
@@ -6150,19 +6383,24 @@ class SelfBuildingAgent(BaseAgent):
                 return {"status": "error", "message": f"Agent {agent_name} already exists"}
 
             # Create new agent
-            new_agent = await pool.fetchrow("""
+            new_agent = await pool.fetchrow(
+                """
                 INSERT INTO ai_agents (name, type, status, capabilities, created_at)
                 VALUES ($1, $2, 'active', $3, NOW())
                 RETURNING id
-            """, agent_name, agent_type, json.dumps(capabilities))
+            """,
+                agent_name,
+                agent_type,
+                json.dumps(capabilities),
+            )
 
-            agent_id = new_agent['id'] if new_agent else None
+            agent_id = new_agent["id"] if new_agent else None
 
             return {
                 "status": "completed",
                 "agent_id": agent_id,
                 "agent_name": agent_name,
-                "message": f"Agent {agent_name} created successfully"
+                "message": f"Agent {agent_name} created successfully",
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -6172,10 +6410,7 @@ class SelfBuildingAgent(BaseAgent):
         deploy_agent = DeploymentAgent()
         result = await deploy_agent.deploy_ai_agents()
 
-        return {
-            "status": "completed",
-            "deployment": result
-        }
+        return {"status": "completed", "deployment": result}
 
     async def optimize_agents(self) -> dict:
         """Optimize agent performance"""
@@ -6183,7 +6418,8 @@ class SelfBuildingAgent(BaseAgent):
             pool = get_pool()
 
             # Analyze agent performance
-            performance = await pool.fetch("""
+            performance = await pool.fetch(
+                """
                 SELECT
                     a.name,
                     COUNT(ae.id) as executions,
@@ -6193,13 +6429,16 @@ class SelfBuildingAgent(BaseAgent):
                 WHERE ae.completed_at > NOW() - INTERVAL '7 days'
                 GROUP BY a.id, a.name
                 ORDER BY executions DESC
-            """)
+            """
+            )
 
             # Generate optimization recommendations
             recommendations = []
             for agent in performance:
-                if agent['avg_execution_time'] and agent['avg_execution_time'] > 10:
-                    recommendations.append(f"Optimize {agent['name']} - avg time {agent['avg_execution_time']:.2f}s")
+                if agent["avg_execution_time"] and agent["avg_execution_time"] > 10:
+                    recommendations.append(
+                        f"Optimize {agent['name']} - avg time {agent['avg_execution_time']:.2f}s"
+                    )
 
             if USE_REAL_AI and performance:
                 try:
@@ -6217,13 +6456,15 @@ class SelfBuildingAgent(BaseAgent):
 
             if os.getenv("ENABLE_DSPY_OPTIMIZATION", "false").lower() == "true":
                 try:
-                    lead_rows = await pool.fetch("""
+                    lead_rows = await pool.fetch(
+                        """
                         SELECT contact_name, email, lead_source, estimated_value, stage, metadata
                         FROM revenue_leads
                         WHERE email IS NOT NULL
                         ORDER BY updated_at DESC NULLS LAST
                         LIMIT 25
-                    """)
+                    """
+                    )
 
                     training_samples = []
                     for lead in lead_rows:
@@ -6239,7 +6480,10 @@ class SelfBuildingAgent(BaseAgent):
                             default=str,
                         )
                         revenue_metrics = json.dumps(
-                            {"estimated_value": lead.get("estimated_value"), "stage": lead.get("stage")},
+                            {
+                                "estimated_value": lead.get("estimated_value"),
+                                "stage": lead.get("stage"),
+                            },
                             default=str,
                         )
                         training_samples.append(
@@ -6262,7 +6506,7 @@ class SelfBuildingAgent(BaseAgent):
             return {
                 "status": "completed",
                 "performance_analysis": [dict(p) for p in performance],
-                "recommendations": recommendations
+                "recommendations": recommendations,
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -6270,6 +6514,7 @@ class SelfBuildingAgent(BaseAgent):
 
 # ============== REAL STUB AGENT IMPLEMENTATIONS ==============
 # These replace the AI-simulated fallback with actual database queries
+
 
 class LeadQualificationTaskAgent(BaseAgent):
     """REAL ERP lead qualification agent - updates public.leads with AI/heuristic scoring."""
@@ -6295,7 +6540,13 @@ class LeadQualificationTaskAgent(BaseAgent):
         payload = trigger.get("payload") if isinstance(trigger.get("payload"), dict) else {}
 
         lead_id = (
-            str(payload.get("leadId") or payload.get("id") or task.get("lead_id") or task.get("leadId") or "")
+            str(
+                payload.get("leadId")
+                or payload.get("id")
+                or task.get("lead_id")
+                or task.get("leadId")
+                or ""
+            )
         ).strip()
 
         if not tenant_id:
@@ -6307,6 +6558,7 @@ class LeadQualificationTaskAgent(BaseAgent):
         result = await qualifier.qualify_lead(lead_id, payload)
         return {"status": "completed", "result": result}
 
+
 class LeadScorerAgent(BaseAgent):
     """REAL lead scoring agent - queries revenue_leads and advanced_lead_metrics tables"""
 
@@ -6315,13 +6567,13 @@ class LeadScorerAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Score leads based on real database data"""
-        action = task.get('action', task.get('type', 'score_all'))
+        action = task.get("action", task.get("type", "score_all"))
 
-        if action == 'score_lead':
-            return await self.score_single_lead(task.get('lead_id'))
-        elif action == 'top_leads':
-            return await self.get_top_leads(task.get('limit', 20))
-        elif action == 'tier_distribution':
+        if action == "score_lead":
+            return await self.score_single_lead(task.get("lead_id"))
+        elif action == "top_leads":
+            return await self.get_top_leads(task.get("limit", 20))
+        elif action == "tier_distribution":
             return await self.get_tier_distribution()
         else:
             return await self.score_all_leads()
@@ -6332,7 +6584,8 @@ class LeadScorerAgent(BaseAgent):
             pool = get_pool()
 
             # Get lead scoring metrics from database
-            lead_metrics = await pool.fetch("""
+            lead_metrics = await pool.fetch(
+                """
                 SELECT
                     rl.id,
                     rl.company_name,
@@ -6353,10 +6606,12 @@ class LeadScorerAgent(BaseAgent):
                 WHERE rl.stage NOT IN ('won', 'lost')
                 ORDER BY alm.composite_score DESC NULLS LAST
                 LIMIT 100
-            """)
+            """
+            )
 
             # Get tier distribution
-            tier_stats = await pool.fetch("""
+            tier_stats = await pool.fetch(
+                """
                 SELECT
                     tier,
                     COUNT(*) as count,
@@ -6365,10 +6620,12 @@ class LeadScorerAgent(BaseAgent):
                 FROM advanced_lead_metrics
                 GROUP BY tier
                 ORDER BY avg_score DESC NULLS LAST
-            """)
+            """
+            )
 
             # Get stage breakdown
-            stage_stats = await pool.fetch("""
+            stage_stats = await pool.fetch(
+                """
                 SELECT
                     stage,
                     COUNT(*) as count,
@@ -6377,7 +6634,8 @@ class LeadScorerAgent(BaseAgent):
                 FROM revenue_leads
                 WHERE stage NOT IN ('won', 'lost')
                 GROUP BY stage
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
@@ -6390,8 +6648,8 @@ class LeadScorerAgent(BaseAgent):
                 "recommendations": [
                     f"Focus on {len([l for l in lead_metrics if l.get('tier') == 'A'])} A-tier leads",
                     "Top leads have highest conversion probability in next 30 days",
-                    "Consider nurture campaigns for B/C tier leads"
-                ]
+                    "Consider nurture campaigns for B/C tier leads",
+                ],
             }
         except Exception as e:
             self.logger.error(f"Lead scoring failed: {e}")
@@ -6404,7 +6662,8 @@ class LeadScorerAgent(BaseAgent):
             if not lead_id:
                 return {"status": "error", "error": "lead_id required"}
 
-            lead = await pool.fetchrow("""
+            lead = await pool.fetchrow(
+                """
                 SELECT
                     rl.*,
                     alm.composite_score,
@@ -6421,7 +6680,9 @@ class LeadScorerAgent(BaseAgent):
                 FROM revenue_leads rl
                 LEFT JOIN advanced_lead_metrics alm ON rl.id = alm.lead_id
                 WHERE rl.id = $1
-            """, lead_id)
+            """,
+                lead_id,
+            )
 
             if not lead:
                 return {"status": "error", "error": f"Lead {lead_id} not found"}
@@ -6430,14 +6691,14 @@ class LeadScorerAgent(BaseAgent):
                 "status": "completed",
                 "lead": dict(lead),
                 "score_breakdown": {
-                    "composite": lead.get('composite_score'),
-                    "behavioral": lead.get('behavioral_score'),
-                    "firmographic": lead.get('firmographic_score'),
-                    "intent": lead.get('intent_score'),
-                    "velocity": lead.get('velocity_score'),
-                    "financial": lead.get('financial_score')
+                    "composite": lead.get("composite_score"),
+                    "behavioral": lead.get("behavioral_score"),
+                    "firmographic": lead.get("firmographic_score"),
+                    "intent": lead.get("intent_score"),
+                    "velocity": lead.get("velocity_score"),
+                    "financial": lead.get("financial_score"),
                 },
-                "recommendation": lead.get('next_best_action')
+                "recommendation": lead.get("next_best_action"),
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -6446,7 +6707,8 @@ class LeadScorerAgent(BaseAgent):
         """Get top scoring leads"""
         try:
             pool = get_pool()
-            leads = await pool.fetch("""
+            leads = await pool.fetch(
+                """
                 SELECT
                     rl.id,
                     rl.company_name,
@@ -6463,12 +6725,14 @@ class LeadScorerAgent(BaseAgent):
                 WHERE rl.stage NOT IN ('won', 'lost')
                 ORDER BY alm.composite_score DESC NULLS LAST
                 LIMIT $1
-            """, limit)
+            """,
+                limit,
+            )
 
             return {
                 "status": "completed",
                 "top_leads": [dict(l) for l in leads],
-                "count": len(leads)
+                "count": len(leads),
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -6477,7 +6741,8 @@ class LeadScorerAgent(BaseAgent):
         """Get distribution of leads by tier"""
         try:
             pool = get_pool()
-            distribution = await pool.fetch("""
+            distribution = await pool.fetch(
+                """
                 SELECT
                     tier,
                     COUNT(*) as count,
@@ -6489,12 +6754,10 @@ class LeadScorerAgent(BaseAgent):
                 WHERE rl.stage NOT IN ('won', 'lost')
                 GROUP BY tier
                 ORDER BY avg_score DESC NULLS LAST
-            """)
+            """
+            )
 
-            return {
-                "status": "completed",
-                "tier_distribution": [dict(d) for d in distribution]
-            }
+            return {"status": "completed", "tier_distribution": [dict(d) for d in distribution]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -6507,7 +6770,7 @@ class CampaignAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute campaign management tasks"""
-        action = task.get('action', task.get('type', 'overview'))
+        action = task.get("action", task.get("type", "overview"))
 
         # Scheduled runs should never fail on missing campaign tables; treat as a health check.
         if action in ("scheduled_run", "scheduled") or (not action and task.get("scheduled")):
@@ -6517,11 +6780,11 @@ class CampaignAgent(BaseAgent):
                 "message": "Campaign agent operational",
             }
 
-        if action == 'create':
+        if action == "create":
             return await self.create_campaign(task)
-        elif action == 'performance':
-            return await self.get_campaign_performance(task.get('campaign_id'))
-        elif action == 'active_campaigns':
+        elif action == "performance":
+            return await self.get_campaign_performance(task.get("campaign_id"))
+        elif action == "active_campaigns":
             return await self.get_active_campaigns()
         else:
             return await self.get_campaign_overview()
@@ -6532,7 +6795,8 @@ class CampaignAgent(BaseAgent):
             pool = get_pool()
 
             # Get nurture sequence stats
-            sequences = await pool.fetch("""
+            sequences = await pool.fetch(
+                """
                 SELECT
                     ns.id,
                     ns.sequence_name,
@@ -6549,10 +6813,12 @@ class CampaignAgent(BaseAgent):
                 GROUP BY ns.id, ns.sequence_name, ns.sequence_type, ns.status, ns.trigger_type, ns.created_at
                 ORDER BY ns.created_at DESC
                 LIMIT 20
-            """)
+            """
+            )
 
             # Get aggregate metrics
-            metrics = await pool.fetchrow("""
+            metrics = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(DISTINCT ns.id) as total_sequences,
                     COUNT(DISTINCT le.id) as total_enrollments,
@@ -6562,7 +6828,8 @@ class CampaignAgent(BaseAgent):
                 FROM ai_nurture_sequences ns
                 LEFT JOIN ai_lead_enrollments le ON ns.id = le.sequence_id
                 LEFT JOIN ai_nurture_metrics nm ON ns.id = nm.sequence_id
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
@@ -6573,8 +6840,8 @@ class CampaignAgent(BaseAgent):
                 "recommendations": [
                     "Active campaigns with low engagement may need content refresh",
                     "Consider A/B testing subject lines for better open rates",
-                    "Review completed sequences for conversion optimization"
-                ]
+                    "Review completed sequences for conversion optimization",
+                ],
             }
         except Exception as e:
             self.logger.error(f"Campaign overview failed: {e}")
@@ -6584,7 +6851,8 @@ class CampaignAgent(BaseAgent):
         """Get currently active campaigns"""
         try:
             pool = get_pool()
-            campaigns = await pool.fetch("""
+            campaigns = await pool.fetch(
+                """
                 SELECT
                     ns.id,
                     ns.sequence_name,
@@ -6599,12 +6867,13 @@ class CampaignAgent(BaseAgent):
                 WHERE ns.status = 'active'
                 GROUP BY ns.id, ns.sequence_name, ns.sequence_type, ns.status
                 ORDER BY active_now DESC
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
                 "active_campaigns": [dict(c) for c in campaigns],
-                "count": len(campaigns)
+                "count": len(campaigns),
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -6617,15 +6886,19 @@ class CampaignAgent(BaseAgent):
                 return {"status": "error", "error": "campaign_id required"}
 
             # Get campaign details
-            campaign = await pool.fetchrow("""
+            campaign = await pool.fetchrow(
+                """
                 SELECT * FROM ai_nurture_sequences WHERE id = $1
-            """, campaign_id)
+            """,
+                campaign_id,
+            )
 
             if not campaign:
                 return {"status": "error", "error": f"Campaign {campaign_id} not found"}
 
             # Get metrics over time
-            metrics = await pool.fetch("""
+            metrics = await pool.fetch(
+                """
                 SELECT
                     metric_date,
                     enrollments,
@@ -6640,10 +6913,13 @@ class CampaignAgent(BaseAgent):
                 WHERE sequence_id = $1
                 ORDER BY metric_date DESC
                 LIMIT 30
-            """, campaign_id)
+            """,
+                campaign_id,
+            )
 
             # Get enrollment stats
-            enrollments = await pool.fetchrow("""
+            enrollments = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as total,
                     COUNT(CASE WHEN status = 'active' THEN 1 END) as active,
@@ -6652,13 +6928,15 @@ class CampaignAgent(BaseAgent):
                     AVG(engagement_score) as avg_engagement
                 FROM ai_lead_enrollments
                 WHERE sequence_id = $1
-            """, campaign_id)
+            """,
+                campaign_id,
+            )
 
             return {
                 "status": "completed",
                 "campaign": dict(campaign),
                 "enrollment_stats": dict(enrollments) if enrollments else {},
-                "daily_metrics": [dict(m) for m in metrics]
+                "daily_metrics": [dict(m) for m in metrics],
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -6667,21 +6945,26 @@ class CampaignAgent(BaseAgent):
         """Create a new nurture campaign"""
         try:
             pool = get_pool()
-            campaign_name = task.get('name', f"Campaign_{datetime.now().strftime('%Y%m%d')}")
-            campaign_type = task.get('campaign_type', 'nurture')
-            trigger_type = task.get('trigger_type', 'manual')
+            campaign_name = task.get("name", f"Campaign_{datetime.now().strftime('%Y%m%d')}")
+            campaign_type = task.get("campaign_type", "nurture")
+            trigger_type = task.get("trigger_type", "manual")
 
-            result = await pool.fetchrow("""
+            result = await pool.fetchrow(
+                """
                 INSERT INTO ai_nurture_sequences (sequence_name, sequence_type, status, trigger_type, created_at)
                 VALUES ($1, $2, 'draft', $3, NOW())
                 RETURNING id, sequence_name
-            """, campaign_name, campaign_type, trigger_type)
+            """,
+                campaign_name,
+                campaign_type,
+                trigger_type,
+            )
 
             return {
                 "status": "completed",
-                "campaign_id": str(result['id']),
-                "campaign_name": result['sequence_name'],
-                "message": f"Campaign '{campaign_name}' created successfully"
+                "campaign_id": str(result["id"]),
+                "campaign_name": result["sequence_name"],
+                "message": f"Campaign '{campaign_name}' created successfully",
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -6695,15 +6978,15 @@ class EmailMarketingAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute email marketing tasks"""
-        action = task.get('action', task.get('type', 'overview'))
+        action = task.get("action", task.get("type", "overview"))
 
-        if action == 'send':
+        if action == "send":
             return await self.queue_email(task)
-        elif action == 'sequence_status':
-            return await self.get_sequence_status(task.get('sequence_id'))
-        elif action == 'engagement_report':
+        elif action == "sequence_status":
+            return await self.get_sequence_status(task.get("sequence_id"))
+        elif action == "engagement_report":
             return await self.get_engagement_report()
-        elif action == 'pending_emails':
+        elif action == "pending_emails":
             return await self.get_pending_emails()
         else:
             return await self.get_email_overview()
@@ -6714,7 +6997,8 @@ class EmailMarketingAgent(BaseAgent):
             pool = get_pool()
 
             # Get email sequence stats
-            sequences = await pool.fetch("""
+            sequences = await pool.fetch(
+                """
                 SELECT
                     es.id,
                     es.sequence_type,
@@ -6728,10 +7012,12 @@ class EmailMarketingAgent(BaseAgent):
                 LEFT JOIN revenue_leads rl ON es.lead_id = rl.id
                 ORDER BY es.created_at DESC
                 LIMIT 50
-            """)
+            """
+            )
 
             # Get aggregate stats
-            stats = await pool.fetchrow("""
+            stats = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as total_sequences,
                     COUNT(CASE WHEN status = 'sent' THEN 1 END) as sent,
@@ -6739,10 +7025,12 @@ class EmailMarketingAgent(BaseAgent):
                     COUNT(CASE WHEN status = 'queued' THEN 1 END) as queued,
                     COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
                 FROM ai_email_sequences
-            """)
+            """
+            )
 
             # Get touchpoint execution stats
-            touchpoint_stats = await pool.fetchrow("""
+            touchpoint_stats = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as total_executions,
                     COUNT(CASE WHEN status = 'sent' THEN 1 END) as sent,
@@ -6750,7 +7038,8 @@ class EmailMarketingAgent(BaseAgent):
                     COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
                 FROM ai_touchpoint_executions
                 WHERE scheduled_for > NOW() - INTERVAL '30 days'
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
@@ -6762,8 +7051,8 @@ class EmailMarketingAgent(BaseAgent):
                 "recommendations": [
                     "Review failed sequences for delivery issues",
                     "Queued emails should be processed within 24 hours",
-                    "Consider re-engagement for stale leads"
-                ]
+                    "Consider re-engagement for stale leads",
+                ],
             }
         except Exception as e:
             self.logger.error(f"Email overview failed: {e}")
@@ -6773,7 +7062,8 @@ class EmailMarketingAgent(BaseAgent):
         """Get pending/scheduled emails"""
         try:
             pool = get_pool()
-            pending = await pool.fetch("""
+            pending = await pool.fetch(
+                """
                 SELECT
                     te.id,
                     te.scheduled_for,
@@ -6788,12 +7078,13 @@ class EmailMarketingAgent(BaseAgent):
                   AND te.scheduled_for > NOW()
                 ORDER BY te.scheduled_for ASC
                 LIMIT 50
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
                 "pending_emails": [dict(p) for p in pending],
-                "count": len(pending)
+                "count": len(pending),
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -6804,7 +7095,8 @@ class EmailMarketingAgent(BaseAgent):
             pool = get_pool()
 
             # Get engagement by type
-            engagement = await pool.fetch("""
+            engagement = await pool.fetch(
+                """
                 SELECT
                     engagement_type,
                     COUNT(*) as count,
@@ -6813,10 +7105,12 @@ class EmailMarketingAgent(BaseAgent):
                 WHERE engagement_timestamp > NOW() - INTERVAL '30 days'
                 GROUP BY engagement_type
                 ORDER BY count DESC
-            """)
+            """
+            )
 
             # Get daily engagement trend
-            daily = await pool.fetch("""
+            daily = await pool.fetch(
+                """
                 SELECT
                     DATE(engagement_timestamp) as date,
                     COUNT(*) as engagements,
@@ -6827,12 +7121,13 @@ class EmailMarketingAgent(BaseAgent):
                 WHERE engagement_timestamp > NOW() - INTERVAL '30 days'
                 GROUP BY DATE(engagement_timestamp)
                 ORDER BY date DESC
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
                 "engagement_by_type": [dict(e) for e in engagement],
-                "daily_trend": [dict(d) for d in daily]
+                "daily_trend": [dict(d) for d in daily],
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -6844,17 +7139,17 @@ class EmailMarketingAgent(BaseAgent):
             if not sequence_id:
                 return {"status": "error", "error": "sequence_id required"}
 
-            sequence = await pool.fetchrow("""
+            sequence = await pool.fetchrow(
+                """
                 SELECT * FROM ai_email_sequences WHERE id = $1
-            """, sequence_id)
+            """,
+                sequence_id,
+            )
 
             if not sequence:
                 return {"status": "error", "error": f"Sequence {sequence_id} not found"}
 
-            return {
-                "status": "completed",
-                "sequence": dict(sequence)
-            }
+            return {"status": "completed", "sequence": dict(sequence)}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -6862,23 +7157,27 @@ class EmailMarketingAgent(BaseAgent):
         """Queue an email for sending"""
         try:
             pool = get_pool()
-            lead_id = task.get('lead_id')
-            subject = task.get('subject', 'Follow-up')
-            body = task.get('body', '')
+            lead_id = task.get("lead_id")
+            subject = task.get("subject", "Follow-up")
+            body = task.get("body", "")
 
             if not lead_id:
                 return {"status": "error", "error": "lead_id required"}
 
-            result = await pool.fetchrow("""
+            result = await pool.fetchrow(
+                """
                 INSERT INTO ai_email_sequences (lead_id, sequence_type, emails, status, created_at)
                 VALUES ($1, 'single', $2::jsonb, 'queued', NOW())
                 RETURNING id
-            """, lead_id, json.dumps([{"subject": subject, "body": body}]))
+            """,
+                lead_id,
+                json.dumps([{"subject": subject, "body": body}]),
+            )
 
             return {
                 "status": "completed",
-                "sequence_id": str(result['id']),
-                "message": "Email queued successfully"
+                "sequence_id": str(result["id"]),
+                "message": "Email queued successfully",
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -6892,13 +7191,13 @@ class InventoryAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute inventory management tasks"""
-        action = task.get('action', task.get('type', 'overview'))
+        action = task.get("action", task.get("type", "overview"))
 
-        if action == 'low_stock':
+        if action == "low_stock":
             return await self.check_low_stock()
-        elif action == 'usage_report':
+        elif action == "usage_report":
             return await self.get_usage_report()
-        elif action == 'forecast':
+        elif action == "forecast":
             return await self.forecast_demand()
         else:
             return await self.get_inventory_overview()
@@ -6909,7 +7208,8 @@ class InventoryAgent(BaseAgent):
             pool = get_pool()
 
             # Analyze job costs and materials from jobs table
-            material_analysis = await pool.fetch("""
+            material_analysis = await pool.fetch(
+                """
                 SELECT
                     CASE
                         WHEN actual_costs < 1000 THEN 'Small Job (<$1k)'
@@ -6926,10 +7226,12 @@ class InventoryAgent(BaseAgent):
                   AND created_at > NOW() - INTERVAL '12 months'
                 GROUP BY 1
                 ORDER BY avg_cost DESC
-            """)
+            """
+            )
 
             # Get recent job costs trend
-            cost_trend = await pool.fetch("""
+            cost_trend = await pool.fetch(
+                """
                 SELECT
                     DATE_TRUNC('month', created_at) as month,
                     COUNT(*) as jobs,
@@ -6945,10 +7247,12 @@ class InventoryAgent(BaseAgent):
                 GROUP BY DATE_TRUNC('month', created_at)
                 ORDER BY month DESC
                 LIMIT 12
-            """)
+            """
+            )
 
             # Get summary stats
-            summary = await pool.fetchrow("""
+            summary = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as total_jobs,
                     SUM(actual_costs) as total_material_costs,
@@ -6960,7 +7264,8 @@ class InventoryAgent(BaseAgent):
                 FROM jobs
                 WHERE actual_costs IS NOT NULL AND actual_costs > 0
                   AND created_at > NOW() - INTERVAL '12 months'
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
@@ -6972,8 +7277,8 @@ class InventoryAgent(BaseAgent):
                 "recommendations": [
                     "Review large jobs for bulk material purchasing opportunities",
                     "Track cost variance between estimated and actual",
-                    "Consider vendor negotiation for high-volume materials"
-                ]
+                    "Consider vendor negotiation for high-volume materials",
+                ],
             }
         except Exception as e:
             self.logger.error(f"Inventory overview failed: {e}")
@@ -6985,7 +7290,8 @@ class InventoryAgent(BaseAgent):
             pool = get_pool()
 
             # Find jobs where actual costs significantly exceeded estimates
-            overruns = await pool.fetch("""
+            overruns = await pool.fetch(
+                """
                 SELECT
                     id,
                     customer_id,
@@ -7001,13 +7307,14 @@ class InventoryAgent(BaseAgent):
                   AND created_at > NOW() - INTERVAL '6 months'
                 ORDER BY cost_variance DESC
                 LIMIT 20
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
                 "cost_overruns": [dict(o) for o in overruns],
                 "count": len(overruns),
-                "warning": "These jobs had higher than expected material costs"
+                "warning": "These jobs had higher than expected material costs",
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7018,7 +7325,8 @@ class InventoryAgent(BaseAgent):
             pool = get_pool()
 
             # Monthly material costs
-            monthly = await pool.fetch("""
+            monthly = await pool.fetch(
+                """
                 SELECT
                     DATE_TRUNC('month', created_at) as month,
                     COUNT(*) as job_count,
@@ -7030,12 +7338,10 @@ class InventoryAgent(BaseAgent):
                   AND created_at > NOW() - INTERVAL '12 months'
                 GROUP BY DATE_TRUNC('month', created_at)
                 ORDER BY month DESC
-            """)
+            """
+            )
 
-            return {
-                "status": "completed",
-                "monthly_usage": [dict(m) for m in monthly]
-            }
+            return {"status": "completed", "monthly_usage": [dict(m) for m in monthly]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -7045,7 +7351,8 @@ class InventoryAgent(BaseAgent):
             pool = get_pool()
 
             # Get historical averages
-            history = await pool.fetch("""
+            history = await pool.fetch(
+                """
                 SELECT
                     EXTRACT(month FROM created_at) as month_num,
                     COUNT(*) as avg_jobs,
@@ -7055,25 +7362,29 @@ class InventoryAgent(BaseAgent):
                   AND created_at > NOW() - INTERVAL '24 months'
                 GROUP BY EXTRACT(month FROM created_at)
                 ORDER BY month_num
-            """)
+            """
+            )
 
             # Project next 3 months based on patterns
             current_month = datetime.now().month
             forecast = []
             for i in range(1, 4):
                 target_month = ((current_month + i - 1) % 12) + 1
-                historical = next((h for h in history if int(h['month_num']) == target_month), None)
+                historical = next((h for h in history if int(h["month_num"]) == target_month), None)
                 if historical:
-                    forecast.append({
-                        "month": target_month,
-                        "projected_jobs": int(historical['avg_jobs']),
-                        "projected_material_cost": float(historical['avg_cost_per_job'] or 0) * int(historical['avg_jobs'])
-                    })
+                    forecast.append(
+                        {
+                            "month": target_month,
+                            "projected_jobs": int(historical["avg_jobs"]),
+                            "projected_material_cost": float(historical["avg_cost_per_job"] or 0)
+                            * int(historical["avg_jobs"]),
+                        }
+                    )
 
             return {
                 "status": "completed",
                 "forecast": forecast,
-                "historical_patterns": [dict(h) for h in history]
+                "historical_patterns": [dict(h) for h in history],
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7087,15 +7398,15 @@ class SchedulingAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute scheduling tasks"""
-        action = task.get('action', task.get('type', 'overview'))
+        action = task.get("action", task.get("type", "overview"))
 
-        if action == 'capacity':
+        if action == "capacity":
             return await self.analyze_capacity()
-        elif action == 'upcoming':
+        elif action == "upcoming":
             return await self.get_upcoming_jobs()
-        elif action == 'workload':
+        elif action == "workload":
             return await self.analyze_workload()
-        elif action == 'optimize':
+        elif action == "optimize":
             return await self.suggest_optimization()
         else:
             return await self.get_scheduling_overview()
@@ -7106,7 +7417,8 @@ class SchedulingAgent(BaseAgent):
             pool = get_pool()
 
             # Get job status distribution
-            status_dist = await pool.fetch("""
+            status_dist = await pool.fetch(
+                """
                 SELECT
                     status,
                     COUNT(*) as count
@@ -7114,10 +7426,12 @@ class SchedulingAgent(BaseAgent):
                 WHERE created_at > NOW() - INTERVAL '90 days'
                 GROUP BY status
                 ORDER BY count DESC
-            """)
+            """
+            )
 
             # Get daily job volume
-            daily_volume = await pool.fetch("""
+            daily_volume = await pool.fetch(
+                """
                 SELECT
                     DATE(created_at) as date,
                     COUNT(*) as jobs_created,
@@ -7126,10 +7440,12 @@ class SchedulingAgent(BaseAgent):
                 WHERE created_at > NOW() - INTERVAL '30 days'
                 GROUP BY DATE(created_at)
                 ORDER BY date DESC
-            """)
+            """
+            )
 
             # Get jobs by day of week
-            day_pattern = await pool.fetch("""
+            day_pattern = await pool.fetch(
+                """
                 SELECT
                     EXTRACT(dow FROM created_at) as day_of_week,
                     COUNT(*) as avg_jobs
@@ -7137,10 +7453,12 @@ class SchedulingAgent(BaseAgent):
                 WHERE created_at > NOW() - INTERVAL '90 days'
                 GROUP BY EXTRACT(dow FROM created_at)
                 ORDER BY day_of_week
-            """)
+            """
+            )
 
             # Summary stats
-            summary = await pool.fetchrow("""
+            summary = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as total_jobs_90d,
                     COUNT(CASE WHEN status IN ('pending', 'scheduled', 'in_progress') THEN 1 END) as active_jobs,
@@ -7148,7 +7466,8 @@ class SchedulingAgent(BaseAgent):
                     AVG(CASE WHEN actual_revenue IS NOT NULL THEN actual_revenue END) as avg_job_value
                 FROM jobs
                 WHERE created_at > NOW() - INTERVAL '90 days'
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
@@ -7161,8 +7480,8 @@ class SchedulingAgent(BaseAgent):
                 "recommendations": [
                     "Balance workload across days with lower volume",
                     "Consider capacity constraints on peak days",
-                    "Review active jobs for completion timeline"
-                ]
+                    "Review active jobs for completion timeline",
+                ],
             }
         except Exception as e:
             self.logger.error(f"Scheduling overview failed: {e}")
@@ -7174,33 +7493,39 @@ class SchedulingAgent(BaseAgent):
             pool = get_pool()
 
             # Get current workload
-            current = await pool.fetchrow("""
+            current = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as active_jobs,
                     SUM(estimated_revenue) as total_value,
                     AVG(estimated_revenue) as avg_job_value
                 FROM jobs
                 WHERE status IN ('pending', 'scheduled', 'in_progress')
-            """)
+            """
+            )
 
             # Historical completion rate
-            completion_rate = await pool.fetchrow("""
+            completion_rate = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) / 30.0 as daily_completion_rate
                 FROM jobs
                 WHERE status = 'completed'
                   AND created_at > NOW() - INTERVAL '30 days'
-            """)
+            """
+            )
 
-            active_jobs = current['active_jobs'] if current else 0
-            daily_rate = float(completion_rate['daily_completion_rate'] or 1) if completion_rate else 1
+            active_jobs = current["active_jobs"] if current else 0
+            daily_rate = (
+                float(completion_rate["daily_completion_rate"] or 1) if completion_rate else 1
+            )
 
             return {
                 "status": "completed",
                 "current_workload": dict(current) if current else {},
                 "daily_completion_rate": daily_rate,
                 "estimated_days_to_clear": active_jobs / daily_rate if daily_rate > 0 else None,
-                "capacity_status": "over_capacity" if active_jobs > daily_rate * 14 else "normal"
+                "capacity_status": "over_capacity" if active_jobs > daily_rate * 14 else "normal",
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7209,7 +7534,8 @@ class SchedulingAgent(BaseAgent):
         """Get upcoming/pending jobs"""
         try:
             pool = get_pool()
-            jobs = await pool.fetch("""
+            jobs = await pool.fetch(
+                """
                 SELECT
                     j.id,
                     j.status,
@@ -7222,12 +7548,13 @@ class SchedulingAgent(BaseAgent):
                 WHERE j.status IN ('pending', 'scheduled')
                 ORDER BY j.created_at ASC
                 LIMIT 50
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
                 "upcoming_jobs": [dict(j) for j in jobs],
-                "count": len(jobs)
+                "count": len(jobs),
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7238,7 +7565,8 @@ class SchedulingAgent(BaseAgent):
             pool = get_pool()
 
             # Workload by tenant
-            by_tenant = await pool.fetch("""
+            by_tenant = await pool.fetch(
+                """
                 SELECT
                     c.org_id as tenant_id,
                     COUNT(*) as job_count,
@@ -7250,12 +7578,10 @@ class SchedulingAgent(BaseAgent):
                 GROUP BY c.org_id
                 ORDER BY job_count DESC
                 LIMIT 20
-            """)
+            """
+            )
 
-            return {
-                "status": "completed",
-                "workload_by_tenant": [dict(t) for t in by_tenant]
-            }
+            return {"status": "completed", "workload_by_tenant": [dict(t) for t in by_tenant]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -7265,7 +7591,8 @@ class SchedulingAgent(BaseAgent):
             pool = get_pool()
 
             # Find bottlenecks
-            bottlenecks = await pool.fetch("""
+            bottlenecks = await pool.fetch(
+                """
                 SELECT
                     status,
                     COUNT(*) as count,
@@ -7276,25 +7603,28 @@ class SchedulingAgent(BaseAgent):
                 GROUP BY status
                 HAVING COUNT(*) > 5
                 ORDER BY avg_days_in_status DESC
-            """)
+            """
+            )
 
             # Stale jobs
-            stale = await pool.fetchrow("""
+            stale = await pool.fetchrow(
+                """
                 SELECT COUNT(*) as count
                 FROM jobs
                 WHERE status IN ('pending', 'scheduled')
                   AND created_at < NOW() - INTERVAL '14 days'
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
                 "bottlenecks": [dict(b) for b in bottlenecks],
-                "stale_jobs": stale['count'] if stale else 0,
+                "stale_jobs": stale["count"] if stale else 0,
                 "recommendations": [
                     f"Review {stale['count'] if stale else 0} stale jobs older than 14 days",
                     "Consider reassigning jobs stuck in pending status",
-                    "Balance workload across available teams"
-                ]
+                    "Balance workload across available teams",
+                ],
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7308,13 +7638,13 @@ class NotificationAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute notification tasks"""
-        action = task.get('action', task.get('type', 'overview'))
+        action = task.get("action", task.get("type", "overview"))
 
-        if action == 'send':
+        if action == "send":
             return await self.send_notification(task)
-        elif action == 'pending':
+        elif action == "pending":
             return await self.get_pending_notifications()
-        elif action == 'history':
+        elif action == "history":
             return await self.get_notification_history()
         else:
             return await self.get_notification_overview()
@@ -7325,7 +7655,8 @@ class NotificationAgent(BaseAgent):
             pool = get_pool()
 
             # Get realtime event stats (notifications)
-            events = await pool.fetch("""
+            events = await pool.fetch(
+                """
                 SELECT
                     event_type,
                     COUNT(*) as count,
@@ -7335,10 +7666,12 @@ class NotificationAgent(BaseAgent):
                 GROUP BY event_type
                 ORDER BY count DESC
                 LIMIT 10
-            """)
+            """
+            )
 
             # Get recent alerts
-            alerts = await pool.fetch("""
+            alerts = await pool.fetch(
+                """
                 SELECT
                     alert_type,
                     severity,
@@ -7349,17 +7682,20 @@ class NotificationAgent(BaseAgent):
                 WHERE created_at > NOW() - INTERVAL '24 hours'
                 ORDER BY created_at DESC
                 LIMIT 20
-            """)
+            """
+            )
 
             # Summary
-            summary = await pool.fetchrow("""
+            summary = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as total_events_7d,
                     COUNT(DISTINCT event_type) as event_types,
                     (SELECT COUNT(*) FROM ai_system_alerts WHERE resolved_at IS NULL) as unresolved_alerts
                 FROM ai_realtime_events
                 WHERE created_at > NOW() - INTERVAL '7 days'
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
@@ -7369,8 +7705,8 @@ class NotificationAgent(BaseAgent):
                 "recent_alerts": [dict(a) for a in alerts],
                 "recommendations": [
                     "Review unresolved alerts for action items",
-                    "Set up automated responses for common events"
-                ]
+                    "Set up automated responses for common events",
+                ],
             }
         except Exception as e:
             self.logger.error(f"Notification overview failed: {e}")
@@ -7380,18 +7716,20 @@ class NotificationAgent(BaseAgent):
         """Get pending/unresolved notifications"""
         try:
             pool = get_pool()
-            pending = await pool.fetch("""
+            pending = await pool.fetch(
+                """
                 SELECT *
                 FROM ai_system_alerts
                 WHERE resolved_at IS NULL
                 ORDER BY severity DESC, created_at DESC
                 LIMIT 50
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
                 "pending_notifications": [dict(p) for p in pending],
-                "count": len(pending)
+                "count": len(pending),
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7400,17 +7738,16 @@ class NotificationAgent(BaseAgent):
         """Get notification history"""
         try:
             pool = get_pool()
-            history = await pool.fetch("""
+            history = await pool.fetch(
+                """
                 SELECT *
                 FROM ai_system_alerts
                 ORDER BY created_at DESC
                 LIMIT 100
-            """)
+            """
+            )
 
-            return {
-                "status": "completed",
-                "history": [dict(h) for h in history]
-            }
+            return {"status": "completed", "history": [dict(h) for h in history]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -7418,21 +7755,27 @@ class NotificationAgent(BaseAgent):
         """Create/send a notification"""
         try:
             pool = get_pool()
-            alert_type = task.get('type', 'info')
-            severity = task.get('severity', 'low')
-            message = task.get('message', '')
-            component = task.get('component', 'system')
+            alert_type = task.get("type", "info")
+            severity = task.get("severity", "low")
+            message = task.get("message", "")
+            component = task.get("component", "system")
 
-            result = await pool.fetchrow("""
+            result = await pool.fetchrow(
+                """
                 INSERT INTO ai_system_alerts (alert_type, severity, message, component, created_at)
                 VALUES ($1, $2, $3, $4, NOW())
                 RETURNING id
-            """, alert_type, severity, message, component)
+            """,
+                alert_type,
+                severity,
+                message,
+                component,
+            )
 
             return {
                 "status": "completed",
-                "alert_id": str(result['id']),
-                "message": "Notification created successfully"
+                "alert_id": str(result["id"]),
+                "message": "Notification created successfully",
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7446,11 +7789,11 @@ class OnboardingAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute onboarding tasks"""
-        action = task.get('action', task.get('type', 'overview'))
+        action = task.get("action", task.get("type", "overview"))
 
-        if action == 'new_customers':
+        if action == "new_customers":
             return await self.get_new_customers()
-        elif action == 'engagement':
+        elif action == "engagement":
             return await self.analyze_engagement()
         else:
             return await self.get_onboarding_overview()
@@ -7461,7 +7804,8 @@ class OnboardingAgent(BaseAgent):
             pool = get_pool()
 
             # New customers in last 30 days
-            new_customers = await pool.fetch("""
+            new_customers = await pool.fetch(
+                """
                 SELECT
                     c.id,
                     c.name,
@@ -7476,10 +7820,12 @@ class OnboardingAgent(BaseAgent):
                 GROUP BY c.id, c.name, c.email, c.created_at, c.org_id
                 ORDER BY c.created_at DESC
                 LIMIT 50
-            """)
+            """
+            )
 
             # Onboarding funnel
-            funnel = await pool.fetchrow("""
+            funnel = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(DISTINCT c.id) as total_new_customers,
                     COUNT(DISTINCT CASE WHEN j.id IS NOT NULL THEN c.id END) as with_first_job,
@@ -7487,29 +7833,34 @@ class OnboardingAgent(BaseAgent):
                 FROM customers c
                 LEFT JOIN jobs j ON j.customer_id = c.id
                 WHERE c.created_at > NOW() - INTERVAL '30 days'
-            """)
+            """
+            )
 
             # First job time analysis
-            time_to_first_job = await pool.fetchrow("""
+            time_to_first_job = await pool.fetchrow(
+                """
                 SELECT
                     AVG(EXTRACT(days FROM j.created_at - c.created_at)) as avg_days_to_first_job
                 FROM customers c
                 JOIN jobs j ON j.customer_id = c.id
                 WHERE c.created_at > NOW() - INTERVAL '90 days'
                   AND j.created_at = (SELECT MIN(created_at) FROM jobs WHERE customer_id = c.id)
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "funnel": dict(funnel) if funnel else {},
-                "avg_days_to_first_job": time_to_first_job['avg_days_to_first_job'] if time_to_first_job else None,
+                "avg_days_to_first_job": time_to_first_job["avg_days_to_first_job"]
+                if time_to_first_job
+                else None,
                 "new_customers": [dict(c) for c in new_customers],
                 "recommendations": [
                     "Follow up with new customers who haven't scheduled their first job",
                     "Optimize onboarding to reduce time to first job",
-                    "Consider welcome campaigns for new signups"
-                ]
+                    "Consider welcome campaigns for new signups",
+                ],
             }
         except Exception as e:
             self.logger.error(f"Onboarding overview failed: {e}")
@@ -7519,7 +7870,8 @@ class OnboardingAgent(BaseAgent):
         """Get recently added customers"""
         try:
             pool = get_pool()
-            customers = await pool.fetch("""
+            customers = await pool.fetch(
+                """
                 SELECT
                     c.id,
                     c.name,
@@ -7531,12 +7883,13 @@ class OnboardingAgent(BaseAgent):
                 WHERE c.created_at > NOW() - INTERVAL '30 days'
                 ORDER BY c.created_at DESC
                 LIMIT 50
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
                 "new_customers": [dict(c) for c in customers],
-                "count": len(customers)
+                "count": len(customers),
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7547,7 +7900,8 @@ class OnboardingAgent(BaseAgent):
             pool = get_pool()
 
             # Engagement by week
-            weekly = await pool.fetch("""
+            weekly = await pool.fetch(
+                """
                 SELECT
                     DATE_TRUNC('week', c.created_at) as week,
                     COUNT(DISTINCT c.id) as new_customers,
@@ -7558,12 +7912,10 @@ class OnboardingAgent(BaseAgent):
                 WHERE c.created_at > NOW() - INTERVAL '12 weeks'
                 GROUP BY DATE_TRUNC('week', c.created_at)
                 ORDER BY week DESC
-            """)
+            """
+            )
 
-            return {
-                "status": "completed",
-                "weekly_engagement": [dict(w) for w in weekly]
-            }
+            return {"status": "completed", "weekly_engagement": [dict(w) for w in weekly]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -7576,11 +7928,11 @@ class ComplianceAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute compliance tasks"""
-        action = task.get('action', task.get('type', 'overview'))
+        action = task.get("action", task.get("type", "overview"))
 
-        if action == 'audit':
+        if action == "audit":
             return await self.run_audit()
-        elif action == 'data_integrity':
+        elif action == "data_integrity":
             return await self.check_data_integrity()
         else:
             return await self.get_compliance_overview()
@@ -7591,23 +7943,27 @@ class ComplianceAgent(BaseAgent):
             pool = get_pool()
 
             # Check data quality metrics
-            data_quality = await pool.fetchrow("""
+            data_quality = await pool.fetchrow(
+                """
                 SELECT
                     (SELECT COUNT(*) FROM customers WHERE email IS NULL) as customers_no_email,
                     (SELECT COUNT(*) FROM customers WHERE phone IS NULL) as customers_no_phone,
                     (SELECT COUNT(*) FROM jobs WHERE customer_id IS NULL) as orphan_jobs,
                     (SELECT COUNT(*) FROM invoices WHERE job_id IS NULL) as orphan_invoices
-            """)
+            """
+            )
 
             # Recent system alerts
-            alerts = await pool.fetch("""
+            alerts = await pool.fetch(
+                """
                 SELECT alert_type, severity, COUNT(*) as count
                 FROM ai_system_alerts
                 WHERE created_at > NOW() - INTERVAL '7 days'
                 GROUP BY alert_type, severity
                 ORDER BY count DESC
                 LIMIT 10
-            """)
+            """
+            )
 
             # Directive compliance (table was dropped as unused - return empty list)
             directives = []
@@ -7622,8 +7978,8 @@ class ComplianceAgent(BaseAgent):
                 "recommendations": [
                     "Address data quality issues for better compliance",
                     "Review and update active directives regularly",
-                    "Monitor system alerts for compliance violations"
-                ]
+                    "Monitor system alerts for compliance violations",
+                ],
             }
         except Exception as e:
             self.logger.error(f"Compliance overview failed: {e}")
@@ -7633,12 +7989,14 @@ class ComplianceAgent(BaseAgent):
         """Calculate a compliance score based on data quality"""
         if not data_quality:
             return 0.0
-        issues = sum([
-            data_quality.get('customers_no_email', 0),
-            data_quality.get('customers_no_phone', 0),
-            data_quality.get('orphan_jobs', 0) * 2,
-            data_quality.get('orphan_invoices', 0) * 2
-        ])
+        issues = sum(
+            [
+                data_quality.get("customers_no_email", 0),
+                data_quality.get("customers_no_phone", 0),
+                data_quality.get("orphan_jobs", 0) * 2,
+                data_quality.get("orphan_invoices", 0) * 2,
+            ]
+        )
         # Score from 0-100, with fewer issues = higher score
         return max(0, 100 - min(issues, 100))
 
@@ -7652,14 +8010,16 @@ class ComplianceAgent(BaseAgent):
                 "data_integrity": await self.check_data_integrity(),
                 "access_logs": await self._check_access_logs(pool),
                 "encryption_status": {"status": "enabled", "algorithm": "AES-256"},
-                "backup_status": {"last_backup": "automatic", "frequency": "daily"}
+                "backup_status": {"last_backup": "automatic", "frequency": "daily"},
             }
 
             return {
                 "status": "completed",
                 "audit_timestamp": datetime.now(timezone.utc).isoformat(),
                 "results": results,
-                "passed": all(r.get("status") == "completed" for r in results.values() if isinstance(r, dict))
+                "passed": all(
+                    r.get("status") == "completed" for r in results.values() if isinstance(r, dict)
+                ),
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7667,15 +8027,14 @@ class ComplianceAgent(BaseAgent):
     async def _check_access_logs(self, pool) -> dict:
         """Check access logging"""
         try:
-            count = await pool.fetchrow("""
+            count = await pool.fetchrow(
+                """
                 SELECT COUNT(*) as count
                 FROM agent_execution_logs
                 WHERE timestamp > NOW() - INTERVAL '24 hours'
-            """)
-            return {
-                "status": "completed",
-                "logs_24h": count['count'] if count else 0
-            }
+            """
+            )
+            return {"status": "completed", "logs_24h": count["count"] if count else 0}
         except Exception:
             return {"status": "error"}
 
@@ -7685,17 +8044,23 @@ class ComplianceAgent(BaseAgent):
             pool = get_pool()
 
             # Check foreign key integrity
-            integrity = await pool.fetchrow("""
+            integrity = await pool.fetchrow(
+                """
                 SELECT
                     (SELECT COUNT(*) FROM jobs j WHERE NOT EXISTS (SELECT 1 FROM customers c WHERE c.id = j.customer_id)) as orphan_jobs,
                     (SELECT COUNT(*) FROM invoices i WHERE i.job_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.id = i.job_id)) as orphan_invoices
-            """)
+            """
+            )
 
             return {
                 "status": "completed",
-                "orphan_jobs": integrity['orphan_jobs'] if integrity else 0,
-                "orphan_invoices": integrity['orphan_invoices'] if integrity else 0,
-                "integrity_ok": (integrity['orphan_jobs'] == 0 and integrity['orphan_invoices'] == 0) if integrity else False
+                "orphan_jobs": integrity["orphan_jobs"] if integrity else 0,
+                "orphan_invoices": integrity["orphan_invoices"] if integrity else 0,
+                "integrity_ok": (
+                    integrity["orphan_jobs"] == 0 and integrity["orphan_invoices"] == 0
+                )
+                if integrity
+                else False,
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7709,13 +8074,13 @@ class MetricsCalculatorAgent(BaseAgent):
 
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute metrics calculation tasks"""
-        action = task.get('action', task.get('type', 'overview'))
+        action = task.get("action", task.get("type", "overview"))
 
-        if action == 'kpis':
+        if action == "kpis":
             return await self.calculate_kpis()
-        elif action == 'trends':
+        elif action == "trends":
             return await self.calculate_trends()
-        elif action == 'custom':
+        elif action == "custom":
             return await self.calculate_custom_metric(task)
         else:
             return await self.get_metrics_overview()
@@ -7726,7 +8091,8 @@ class MetricsCalculatorAgent(BaseAgent):
             pool = get_pool()
 
             # Core business metrics
-            metrics = await pool.fetchrow("""
+            metrics = await pool.fetchrow(
+                """
                 SELECT
                     (SELECT COUNT(*) FROM customers WHERE is_active = true OR status = 'active') as active_customers,
                     (SELECT COUNT(*) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days') as jobs_30d,
@@ -7734,28 +8100,33 @@ class MetricsCalculatorAgent(BaseAgent):
                     (SELECT COALESCE(SUM(actual_revenue), 0) FROM jobs WHERE created_at > NOW() - INTERVAL '30 days') as revenue_30d,
                     (SELECT COALESCE(AVG(actual_revenue), 0) FROM jobs WHERE actual_revenue IS NOT NULL AND created_at > NOW() - INTERVAL '30 days') as avg_job_value_30d,
                     (SELECT COALESCE(SUM(total_cents)/100.0, 0) FROM invoices WHERE status = 'paid' AND invoice_date > NOW() - INTERVAL '30 days') as collected_30d
-            """)
+            """
+            )
 
             # Growth metrics
-            growth = await pool.fetchrow("""
+            growth = await pool.fetchrow(
+                """
                 SELECT
                     (SELECT COUNT(*) FROM customers WHERE created_at > NOW() - INTERVAL '30 days') as new_customers_30d,
                     (SELECT COUNT(*) FROM customers WHERE created_at BETWEEN NOW() - INTERVAL '60 days' AND NOW() - INTERVAL '30 days') as new_customers_prev_30d
-            """)
+            """
+            )
 
             # Agent performance
-            agent_stats = await pool.fetchrow("""
+            agent_stats = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as total_executions,
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
                     AVG(EXTRACT(milliseconds FROM completed_at - started_at)) as avg_duration_ms
                 FROM agent_executions
                 WHERE started_at > NOW() - INTERVAL '24 hours'
-            """)
+            """
+            )
 
             # Calculate growth rate
-            new_30d = growth['new_customers_30d'] if growth else 0
-            prev_30d = growth['new_customers_prev_30d'] if growth else 1
+            new_30d = growth["new_customers_30d"] if growth else 0
+            prev_30d = growth["new_customers_prev_30d"] if growth else 1
             growth_rate = ((new_30d - prev_30d) / prev_30d * 100) if prev_30d > 0 else 0
 
             return {
@@ -7763,16 +8134,13 @@ class MetricsCalculatorAgent(BaseAgent):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data_source": "production_database",
                 "business_metrics": dict(metrics) if metrics else {},
-                "growth": {
-                    "new_customers_30d": new_30d,
-                    "growth_rate_pct": round(growth_rate, 2)
-                },
+                "growth": {"new_customers_30d": new_30d, "growth_rate_pct": round(growth_rate, 2)},
                 "agent_performance": dict(agent_stats) if agent_stats else {},
                 "health_indicators": {
                     "customer_growth": "healthy" if growth_rate > 0 else "stagnant",
                     "revenue_status": "active",
-                    "agent_status": "operational"
-                }
+                    "agent_status": "operational",
+                },
             }
         except Exception as e:
             self.logger.error(f"Metrics overview failed: {e}")
@@ -7783,7 +8151,8 @@ class MetricsCalculatorAgent(BaseAgent):
         try:
             pool = get_pool()
 
-            kpis = await pool.fetchrow("""
+            kpis = await pool.fetchrow(
+                """
                 SELECT
                     -- Customer KPIs
                     (SELECT COUNT(*) FROM customers WHERE is_active = true) as total_active_customers,
@@ -7800,12 +8169,10 @@ class MetricsCalculatorAgent(BaseAgent):
                     -- Pipeline KPIs
                     (SELECT COALESCE(SUM(estimated_value), 0) FROM revenue_leads WHERE stage NOT IN ('won', 'lost')) as pipeline_value,
                     (SELECT COUNT(*) FROM revenue_leads WHERE stage NOT IN ('won', 'lost')) as active_leads
-            """)
+            """
+            )
 
-            return {
-                "status": "completed",
-                "kpis": dict(kpis) if kpis else {}
-            }
+            return {"status": "completed", "kpis": dict(kpis) if kpis else {}}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -7814,7 +8181,8 @@ class MetricsCalculatorAgent(BaseAgent):
         try:
             pool = get_pool()
 
-            trends = await pool.fetch("""
+            trends = await pool.fetch(
+                """
                 SELECT
                     DATE_TRUNC('week', created_at) as week,
                     COUNT(*) as jobs,
@@ -7825,24 +8193,23 @@ class MetricsCalculatorAgent(BaseAgent):
                 WHERE created_at > NOW() - INTERVAL '12 weeks'
                 GROUP BY DATE_TRUNC('week', created_at)
                 ORDER BY week DESC
-            """)
+            """
+            )
 
-            return {
-                "status": "completed",
-                "weekly_trends": [dict(t) for t in trends]
-            }
+            return {"status": "completed", "weekly_trends": [dict(t) for t in trends]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     async def calculate_custom_metric(self, task: dict) -> dict:
         """Calculate a custom metric based on query"""
-        metric_name = task.get('metric_name', 'custom')
+        metric_name = task.get("metric_name", "custom")
         try:
             pool = get_pool()
 
             # Pre-defined custom metrics
-            if metric_name == 'customer_lifetime_value':
-                result = await pool.fetchrow("""
+            if metric_name == "customer_lifetime_value":
+                result = await pool.fetchrow(
+                    """
                     SELECT
                         AVG(total_revenue) as avg_clv
                     FROM (
@@ -7853,11 +8220,12 @@ class MetricsCalculatorAgent(BaseAgent):
                         WHERE actual_revenue IS NOT NULL
                         GROUP BY customer_id
                     ) as customer_revenue
-                """)
+                """
+                )
                 return {
                     "status": "completed",
                     "metric": "customer_lifetime_value",
-                    "value": float(result['avg_clv']) if result and result['avg_clv'] else 0
+                    "value": float(result["avg_clv"]) if result and result["avg_clv"] else 0,
                 }
             else:
                 return {"status": "error", "error": f"Unknown metric: {metric_name}"}
@@ -7882,29 +8250,35 @@ class SecurityMonitorAgent(BaseAgent):
     async def get_overview(self) -> dict[str, Any]:
         try:
             pool = get_pool()
-            severity_counts = await pool.fetch("""
+            severity_counts = await pool.fetch(
+                """
                 SELECT severity, COUNT(*) as count
                 FROM security_events
                 WHERE created_at > NOW() - INTERVAL '30 days'
                 GROUP BY severity
                 ORDER BY count DESC
-            """)
-            unresolved = await pool.fetchval("""
+            """
+            )
+            unresolved = await pool.fetchval(
+                """
                 SELECT COUNT(*) FROM security_events
                 WHERE resolved IS NOT TRUE
-            """)
-            recent = await pool.fetch("""
+            """
+            )
+            recent = await pool.fetch(
+                """
                 SELECT id, event_type, severity, ip_address, request_path, created_at
                 FROM security_events
                 ORDER BY created_at DESC
                 LIMIT 20
-            """)
+            """
+            )
             return {
                 "status": "completed",
                 "unresolved_count": unresolved or 0,
                 "severity_breakdown": [dict(row) for row in severity_counts],
-                "recent_events": [{**dict(row), 'id': str(row['id'])} for row in recent],
-                "data_source": "security_events"
+                "recent_events": [{**dict(row), "id": str(row["id"])} for row in recent],
+                "data_source": "security_events",
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7912,27 +8286,38 @@ class SecurityMonitorAgent(BaseAgent):
     async def get_recent_events(self, limit: int = 20) -> dict[str, Any]:
         try:
             pool = get_pool()
-            events = await pool.fetch("""
+            events = await pool.fetch(
+                """
                 SELECT id, event_type, severity, ip_address, request_path, created_at
                 FROM security_events
                 ORDER BY created_at DESC
                 LIMIT $1
-            """, max(1, min(limit, 200)))
-            return {"status": "completed", "events": [{**dict(row), 'id': str(row['id'])} for row in events]}
+            """,
+                max(1, min(limit, 200)),
+            )
+            return {
+                "status": "completed",
+                "events": [{**dict(row), "id": str(row["id"])} for row in events],
+            }
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     async def get_unresolved_events(self) -> dict[str, Any]:
         try:
             pool = get_pool()
-            events = await pool.fetch("""
+            events = await pool.fetch(
+                """
                 SELECT id, event_type, severity, ip_address, request_path, created_at
                 FROM security_events
                 WHERE resolved IS NOT TRUE
                 ORDER BY created_at DESC
                 LIMIT 50
-            """)
-            return {"status": "completed", "events": [{**dict(row), 'id': str(row['id'])} for row in events]}
+            """
+            )
+            return {
+                "status": "completed",
+                "events": [{**dict(row), "id": str(row["id"])} for row in events],
+            }
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -7955,29 +8340,35 @@ class WarehouseMonitorAgent(BaseAgent):
     async def get_overview(self) -> dict[str, Any]:
         try:
             pool = get_pool()
-            totals = await pool.fetchrow("""
+            totals = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as item_records,
                     COALESCE(SUM(available_quantity), 0) as available_units,
                     COALESCE(SUM(total_value), 0) as total_value
                 FROM warehouse_inventory
-            """)
-            low_stock = await pool.fetchval("""
+            """
+            )
+            low_stock = await pool.fetchval(
+                """
                 SELECT COUNT(*) FROM warehouse_inventory
                 WHERE available_quantity <= 5
-            """)
-            activity = await pool.fetch("""
+            """
+            )
+            activity = await pool.fetch(
+                """
                 SELECT id, activity_type, description, quantity, created_at
                 FROM warehouse_activity_log
                 ORDER BY created_at DESC
                 LIMIT 20
-            """)
+            """
+            )
             return {
                 "status": "completed",
                 "inventory_totals": dict(totals) if totals else {},
                 "low_stock_count": low_stock or 0,
                 "recent_activity": [dict(row) for row in activity],
-                "data_source": "warehouse_inventory"
+                "data_source": "warehouse_inventory",
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7985,13 +8376,16 @@ class WarehouseMonitorAgent(BaseAgent):
     async def get_low_stock(self, threshold: int) -> dict[str, Any]:
         try:
             pool = get_pool()
-            items = await pool.fetch("""
+            items = await pool.fetch(
+                """
                 SELECT id, item_id, warehouse_id, available_quantity, unit_of_measure, updated_at
                 FROM warehouse_inventory
                 WHERE available_quantity <= $1
                 ORDER BY available_quantity ASC
                 LIMIT 100
-            """, max(0, threshold))
+            """,
+                max(0, threshold),
+            )
             return {"status": "completed", "low_stock": [dict(row) for row in items]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -7999,12 +8393,15 @@ class WarehouseMonitorAgent(BaseAgent):
     async def get_recent_activity(self, limit: int = 50) -> dict[str, Any]:
         try:
             pool = get_pool()
-            activity = await pool.fetch("""
+            activity = await pool.fetch(
+                """
                 SELECT id, activity_type, description, quantity, created_at
                 FROM warehouse_activity_log
                 ORDER BY created_at DESC
                 LIMIT $1
-            """, max(1, min(limit, 200)))
+            """,
+                max(1, min(limit, 200)),
+            )
             return {"status": "completed", "activity": [dict(row) for row in activity]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8028,28 +8425,34 @@ class TrainingAgent(BaseAgent):
     async def get_overview(self) -> dict[str, Any]:
         try:
             pool = get_pool()
-            status_counts = await pool.fetch("""
+            status_counts = await pool.fetch(
+                """
                 SELECT status, COUNT(*) as count
                 FROM training_records
                 GROUP BY status
                 ORDER BY count DESC
-            """)
-            expiring = await pool.fetchval("""
+            """
+            )
+            expiring = await pool.fetchval(
+                """
                 SELECT COUNT(*) FROM training_records
                 WHERE expiry_date IS NOT NULL
                   AND expiry_date <= NOW() + INTERVAL '30 days'
-            """)
-            compliance = await pool.fetch("""
+            """
+            )
+            compliance = await pool.fetch(
+                """
                 SELECT status, COUNT(*) as count
                 FROM training_compliance
                 GROUP BY status
                 ORDER BY count DESC
-            """)
+            """
+            )
             return {
                 "status": "completed",
                 "training_status": [dict(row) for row in status_counts],
                 "expiring_30d": expiring or 0,
-                "compliance_status": [dict(row) for row in compliance]
+                "compliance_status": [dict(row) for row in compliance],
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8057,14 +8460,17 @@ class TrainingAgent(BaseAgent):
     async def get_expiring_trainings(self, days: int) -> dict[str, Any]:
         try:
             pool = get_pool()
-            records = await pool.fetch("""
+            records = await pool.fetch(
+                """
                 SELECT id, employee_id, training_name, expiry_date, status
                 FROM training_records
                 WHERE expiry_date IS NOT NULL
                   AND expiry_date <= NOW() + ($1 || ' days')::interval
                 ORDER BY expiry_date ASC
                 LIMIT 100
-            """, max(1, min(days, 365)))
+            """,
+                max(1, min(days, 365)),
+            )
             return {"status": "completed", "expiring": [dict(row) for row in records]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8072,12 +8478,14 @@ class TrainingAgent(BaseAgent):
     async def get_compliance_status(self) -> dict[str, Any]:
         try:
             pool = get_pool()
-            rows = await pool.fetch("""
+            rows = await pool.fetch(
+                """
                 SELECT id, name, status, updated_at
                 FROM training_compliance
                 ORDER BY updated_at DESC
                 LIMIT 50
-            """)
+            """
+            )
             return {"status": "completed", "compliance": [dict(row) for row in rows]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8099,14 +8507,17 @@ class VendorAgent(BaseAgent):
         try:
             pool = get_pool()
             vendor_count = await pool.fetchval("SELECT COUNT(*) FROM vendors")
-            open_bills = await pool.fetchrow("""
+            open_bills = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as open_bills,
                     COALESCE(SUM(amount_due), 0) as total_due
                 FROM vendor_bills
                 WHERE COALESCE(status, '') NOT IN ('paid', 'void', 'closed')
-            """)
-            due_soon = await pool.fetch("""
+            """
+            )
+            due_soon = await pool.fetch(
+                """
                 SELECT id, vendor_id, bill_number, amount_due, due_date, status
                 FROM vendor_bills
                 WHERE due_date IS NOT NULL
@@ -8114,12 +8525,13 @@ class VendorAgent(BaseAgent):
                   AND COALESCE(status, '') NOT IN ('paid', 'void', 'closed')
                 ORDER BY due_date ASC
                 LIMIT 20
-            """)
+            """
+            )
             return {
                 "status": "completed",
                 "vendor_count": vendor_count or 0,
                 "open_bills": dict(open_bills) if open_bills else {},
-                "due_soon": [dict(row) for row in due_soon]
+                "due_soon": [dict(row) for row in due_soon],
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8127,13 +8539,16 @@ class VendorAgent(BaseAgent):
     async def get_open_bills(self, limit: int = 50) -> dict[str, Any]:
         try:
             pool = get_pool()
-            rows = await pool.fetch("""
+            rows = await pool.fetch(
+                """
                 SELECT id, vendor_id, bill_number, amount_due, due_date, status
                 FROM vendor_bills
                 WHERE COALESCE(status, '') NOT IN ('paid', 'void', 'closed')
                 ORDER BY due_date ASC NULLS LAST
                 LIMIT $1
-            """, max(1, min(limit, 200)))
+            """,
+                max(1, min(limit, 200)),
+            )
             return {"status": "completed", "bills": [dict(row) for row in rows]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8154,29 +8569,35 @@ class WarrantyAgent(BaseAgent):
     async def get_overview(self) -> dict[str, Any]:
         try:
             pool = get_pool()
-            status_counts = await pool.fetch("""
+            status_counts = await pool.fetch(
+                """
                 SELECT status, COUNT(*) as count
                 FROM warranty_claims
                 GROUP BY status
                 ORDER BY count DESC
-            """)
-            recent = await pool.fetch("""
+            """
+            )
+            recent = await pool.fetch(
+                """
                 SELECT id, claim_number, status, claim_date, estimated_cost, actual_cost
                 FROM warranty_claims
                 ORDER BY claim_date DESC NULLS LAST
                 LIMIT 20
-            """)
-            tracking = await pool.fetch("""
+            """
+            )
+            tracking = await pool.fetch(
+                """
                 SELECT id, name, status, updated_at
                 FROM warranty_tracking
                 ORDER BY updated_at DESC
                 LIMIT 20
-            """)
+            """
+            )
             return {
                 "status": "completed",
                 "claim_status": [dict(row) for row in status_counts],
                 "recent_claims": [dict(row) for row in recent],
-                "tracking": [dict(row) for row in tracking]
+                "tracking": [dict(row) for row in tracking],
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8184,13 +8605,16 @@ class WarrantyAgent(BaseAgent):
     async def get_open_claims(self, limit: int = 50) -> dict[str, Any]:
         try:
             pool = get_pool()
-            rows = await pool.fetch("""
+            rows = await pool.fetch(
+                """
                 SELECT id, claim_number, status, claim_date, issue_description
                 FROM warranty_claims
                 WHERE COALESCE(status, '') NOT IN ('closed', 'resolved', 'denied')
                 ORDER BY claim_date DESC NULLS LAST
                 LIMIT $1
-            """, max(1, min(limit, 200)))
+            """,
+                max(1, min(limit, 200)),
+            )
             return {"status": "completed", "claims": [dict(row) for row in rows]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8211,15 +8635,18 @@ class PayrollAgent(BaseAgent):
     async def get_overview(self) -> dict[str, Any]:
         try:
             pool = get_pool()
-            latest = await pool.fetchrow("""
+            latest = await pool.fetchrow(
+                """
                 SELECT *
                 FROM payroll_periods
                 ORDER BY period_end DESC NULLS LAST
                 LIMIT 1
-            """)
+            """
+            )
             totals = None
             if latest:
-                totals = await pool.fetchrow("""
+                totals = await pool.fetchrow(
+                    """
                     SELECT
                         COUNT(*) as record_count,
                         COALESCE(SUM(gross_pay), 0) as gross_pay,
@@ -8227,11 +8654,13 @@ class PayrollAgent(BaseAgent):
                         COALESCE(SUM(net_pay), 0) as net_pay
                     FROM payroll_records
                     WHERE payroll_period_id = $1
-                """, latest["id"])
+                """,
+                    latest["id"],
+                )
             return {
                 "status": "completed",
                 "latest_period": dict(latest) if latest else None,
-                "latest_totals": dict(totals) if totals else None
+                "latest_totals": dict(totals) if totals else None,
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8239,12 +8668,14 @@ class PayrollAgent(BaseAgent):
     async def get_latest_period(self) -> dict[str, Any]:
         try:
             pool = get_pool()
-            period = await pool.fetchrow("""
+            period = await pool.fetchrow(
+                """
                 SELECT *
                 FROM payroll_periods
                 ORDER BY period_end DESC NULLS LAST
                 LIMIT 1
-            """)
+            """
+            )
             return {"status": "completed", "period": dict(period) if period else None}
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8267,22 +8698,26 @@ class SEOOptimizerAgent(BaseAgent):
     async def get_overview(self) -> dict[str, Any]:
         try:
             pool = get_pool()
-            status_counts = await pool.fetch("""
+            status_counts = await pool.fetch(
+                """
                 SELECT status, COUNT(*) as count
                 FROM seo_tools
                 GROUP BY status
                 ORDER BY count DESC
-            """)
-            recent = await pool.fetch("""
+            """
+            )
+            recent = await pool.fetch(
+                """
                 SELECT id, name, status, updated_at
                 FROM seo_tools
                 ORDER BY updated_at DESC NULLS LAST
                 LIMIT 20
-            """)
+            """
+            )
             return {
                 "status": "completed",
                 "tool_status": [dict(row) for row in status_counts],
-                "recent_tools": [dict(row) for row in recent]
+                "recent_tools": [dict(row) for row in recent],
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8290,14 +8725,16 @@ class SEOOptimizerAgent(BaseAgent):
     async def get_audit(self) -> dict[str, Any]:
         try:
             pool = get_pool()
-            stale = await pool.fetch("""
+            stale = await pool.fetch(
+                """
                 SELECT id, name, status, updated_at
                 FROM seo_tools
                 WHERE updated_at IS NULL
                    OR updated_at < NOW() - INTERVAL '30 days'
                 ORDER BY updated_at ASC NULLS FIRST
                 LIMIT 50
-            """)
+            """
+            )
             return {"status": "completed", "stale_tools": [dict(row) for row in stale]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8310,7 +8747,7 @@ class SEOOptimizerAgent(BaseAgent):
             if not USE_REAL_AI or not ai_core:
                 return {
                     "status": "error",
-                    "error": "AI core not configured for SEO recommendations"
+                    "error": "AI core not configured for SEO recommendations",
                 }
             prompt = (
                 "You are an SEO operations analyst. Review the tool status and "
@@ -8318,10 +8755,7 @@ class SEOOptimizerAgent(BaseAgent):
                 f"{json.dumps(overview, default=str)}"
             )
             recommendation_text = await ai_core.generate(prompt, model="gpt-4o-mini")
-            return {
-                "status": "completed",
-                "recommendations": recommendation_text
-            }
+            return {"status": "completed", "recommendations": recommendation_text}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -8342,21 +8776,26 @@ class TaxCalculatorAgent(BaseAgent):
         try:
             pool = get_pool()
             if jurisdiction:
-                rows = await pool.fetch("""
+                rows = await pool.fetch(
+                    """
                     SELECT tax_name, rate, tax_type, jurisdiction, effective_date, end_date
                     FROM tax_rates
                     WHERE is_active = true
                       AND (jurisdiction = $1 OR tax_name = $1)
                     ORDER BY effective_date DESC NULLS LAST
-                """, jurisdiction)
+                """,
+                    jurisdiction,
+                )
             else:
-                rows = await pool.fetch("""
+                rows = await pool.fetch(
+                    """
                     SELECT tax_name, rate, tax_type, jurisdiction, effective_date, end_date
                     FROM tax_rates
                     WHERE is_active = true
                     ORDER BY effective_date DESC NULLS LAST
                     LIMIT 100
-                """)
+                """
+                )
             return {"status": "completed", "rates": [dict(row) for row in rows]}
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8374,23 +8813,28 @@ class TaxCalculatorAgent(BaseAgent):
         try:
             pool = get_pool()
             if jurisdiction:
-                rows = await pool.fetch("""
+                rows = await pool.fetch(
+                    """
                     SELECT tax_name, rate, tax_type, jurisdiction
                     FROM tax_rates
                     WHERE is_active = true
                       AND (jurisdiction = $1 OR tax_name = $1)
                       AND (effective_date IS NULL OR effective_date <= NOW())
                       AND (end_date IS NULL OR end_date >= NOW())
-                """, jurisdiction)
+                """,
+                    jurisdiction,
+                )
             else:
-                rows = await pool.fetch("""
+                rows = await pool.fetch(
+                    """
                     SELECT tax_name, rate, tax_type, jurisdiction
                     FROM tax_rates
                     WHERE is_active = true
                       AND (effective_date IS NULL OR effective_date <= NOW())
                       AND (end_date IS NULL OR end_date >= NOW())
                     LIMIT 20
-                """)
+                """
+                )
 
             if not rows:
                 return {"status": "error", "error": "No active tax rates found"}
@@ -8402,13 +8846,15 @@ class TaxCalculatorAgent(BaseAgent):
                 if rate_val > 1:
                     rate_val = rate_val / 100.0
                 total_rate += rate_val
-                breakdown.append({
-                    "tax_name": row["tax_name"],
-                    "tax_type": row["tax_type"],
-                    "jurisdiction": row["jurisdiction"],
-                    "rate": rate_val,
-                    "tax_amount": round(amount * rate_val, 2)
-                })
+                breakdown.append(
+                    {
+                        "tax_name": row["tax_name"],
+                        "tax_type": row["tax_type"],
+                        "jurisdiction": row["jurisdiction"],
+                        "rate": rate_val,
+                        "tax_amount": round(amount * rate_val, 2),
+                    }
+                )
 
             total_tax = round(amount * total_rate, 2)
             return {
@@ -8417,7 +8863,7 @@ class TaxCalculatorAgent(BaseAgent):
                 "total_rate": round(total_rate, 6),
                 "total_tax": total_tax,
                 "total_with_tax": round(amount + total_tax, 2),
-                "breakdown": breakdown
+                "breakdown": breakdown,
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8461,10 +8907,10 @@ class TranslationProcessorAgent(BaseAgent):
                         "model": model,
                         "messages": [
                             {"role": "system", "content": "You are a translation engine."},
-                            {"role": "user", "content": prompt}
+                            {"role": "user", "content": prompt},
                         ],
-                        "temperature": 0.1
-                    }
+                        "temperature": 0.1,
+                    },
                 )
             if response.status_code != 200:
                 return {"status": "error", "error": f"Translation failed: {response.text}"}
@@ -8485,7 +8931,11 @@ class SMSInterfaceAgent(BaseAgent):
         action = task.get("action", task.get("type", "send"))
         if action == "scheduled_run":
             # Scheduled health check - return status without sending
-            return {"status": "completed", "action": "scheduled_run", "message": "SMS interface operational"}
+            return {
+                "status": "completed",
+                "action": "scheduled_run",
+                "message": "SMS interface operational",
+            }
         if action != "send":
             return {"status": "error", "error": f"Unsupported action: {action}"}
         return await self.send_sms(task)
@@ -8524,13 +8974,11 @@ class SMSInterfaceAgent(BaseAgent):
 
         try:
             client = Client(sid, token)
-            send_kwargs = {
-                "body": message,
-                "from_": from_number,
-                "to": to_number
-            }
+            send_kwargs = {"body": message, "from_": from_number, "to": to_number}
             if media_urls:
-                send_kwargs["media_url"] = media_urls if isinstance(media_urls, list) else [media_urls]
+                send_kwargs["media_url"] = (
+                    media_urls if isinstance(media_urls, list) else [media_urls]
+                )
 
             msg = await asyncio.to_thread(client.messages.create, **send_kwargs)
             await self._log_communication(
@@ -8538,31 +8986,30 @@ class SMSInterfaceAgent(BaseAgent):
                 direction="outbound",
                 subject="SMS",
                 content=message,
-                metadata={"to": to_number, "sid": msg.sid}
+                metadata={"to": to_number, "sid": msg.sid},
             )
-            return {
-                "status": "completed",
-                "message_sid": msg.sid,
-                "to": to_number
-            }
+            return {"status": "completed", "message_sid": msg.sid, "to": to_number}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     async def _log_communication(
-        self,
-        comm_type: str,
-        direction: str,
-        subject: str,
-        content: str,
-        metadata: dict[str, Any]
+        self, comm_type: str, direction: str, subject: str, content: str, metadata: dict[str, Any]
     ) -> None:
         try:
             pool = get_pool()
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO communication_logs
                 (type, direction, subject, content, attachments, created_by)
                 VALUES ($1, $2, $3, $4, $5::jsonb, $6)
-            """, comm_type, direction, subject, content, json.dumps(metadata), self.name)
+            """,
+                comm_type,
+                direction,
+                subject,
+                content,
+                json.dumps(metadata),
+                self.name,
+            )
         except Exception as e:
             self.logger.warning("Failed to log SMS communication: %s", e)
 
@@ -8577,7 +9024,11 @@ class VoiceInterfaceAgent(BaseAgent):
         action = task.get("action", task.get("type", "synthesize"))
         if action == "scheduled_run":
             # Scheduled health check - return status without voice operations
-            return {"status": "completed", "action": "scheduled_run", "message": "Voice interface operational"}
+            return {
+                "status": "completed",
+                "action": "scheduled_run",
+                "message": "Voice interface operational",
+            }
         if action == "transcribe":
             return await self.transcribe(task)
         if action == "synthesize":
@@ -8605,16 +9056,16 @@ class VoiceInterfaceAgent(BaseAgent):
                     headers={
                         "Accept": "audio/mpeg",
                         "Content-Type": "application/json",
-                        "xi-api-key": api_key
+                        "xi-api-key": api_key,
                     },
                     json={
                         "text": text,
                         "model_id": model,
                         "voice_settings": {
                             "stability": task.get("stability", 0.5),
-                            "similarity_boost": task.get("similarity_boost", 0.8)
-                        }
-                    }
+                            "similarity_boost": task.get("similarity_boost", 0.8),
+                        },
+                    },
                 )
             if response.status_code != 200:
                 return {"status": "error", "error": response.text}
@@ -8626,12 +9077,12 @@ class VoiceInterfaceAgent(BaseAgent):
                 direction="outbound",
                 subject="TTS",
                 content=text,
-                metadata={"voice_id": voice_id, "bytes": len(audio_bytes)}
+                metadata={"voice_id": voice_id, "bytes": len(audio_bytes)},
             )
             return {
                 "status": "completed",
                 "audio_base64": audio_b64,
-                "content_type": response.headers.get("content-type", "audio/mpeg")
+                "content_type": response.headers.get("content-type", "audio/mpeg"),
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -8658,15 +9109,12 @@ class VoiceInterfaceAgent(BaseAgent):
                 audio_bytes = base64.b64decode(audio_b64)
                 content_type = task.get("content_type", "audio/mpeg")
 
-            files = {
-                "file": ("audio", audio_bytes, content_type),
-                "model": (None, "whisper-1")
-            }
+            files = {"file": ("audio", audio_bytes, content_type), "model": (None, "whisper-1")}
             async with httpx.AsyncClient(timeout=60) as client:
                 response = await client.post(
                     "https://api.openai.com/v1/audio/transcriptions",
                     headers={"Authorization": f"Bearer {api_key}"},
-                    files=files
+                    files=files,
                 )
             if response.status_code != 200:
                 return {"status": "error", "error": response.text}
@@ -8677,32 +9125,36 @@ class VoiceInterfaceAgent(BaseAgent):
                 direction="inbound",
                 subject="Transcription",
                 content=transcript,
-                metadata={"bytes": len(audio_bytes)}
+                metadata={"bytes": len(audio_bytes)},
             )
             return {"status": "completed", "transcript": transcript}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     async def _log_communication(
-        self,
-        comm_type: str,
-        direction: str,
-        subject: str,
-        content: str,
-        metadata: dict[str, Any]
+        self, comm_type: str, direction: str, subject: str, content: str, metadata: dict[str, Any]
     ) -> None:
         try:
             pool = get_pool()
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO communication_logs
                 (type, direction, subject, content, attachments, created_by)
                 VALUES ($1, $2, $3, $4, $5::jsonb, $6)
-            """, comm_type, direction, subject, content, json.dumps(metadata), self.name)
+            """,
+                comm_type,
+                direction,
+                subject,
+                content,
+                json.dumps(metadata),
+                self.name,
+            )
         except Exception as e:
             self.logger.warning("Failed to log voice communication: %s", e)
 
 
 # ============== PHASE 2 ADAPTERS ==============
+
 
 class SystemImprovementAgentAdapter(BaseAgent):
     """System improvement agent with MCP-powered auto-improvement capabilities"""
@@ -8716,6 +9168,7 @@ class SystemImprovementAgentAdapter(BaseAgent):
         if self._mcp_client is None:
             try:
                 from mcp_integration import get_mcp_client
+
                 self._mcp_client = get_mcp_client()
             except ImportError:
                 logger.warning("MCP integration not available for SystemImprovement")
@@ -8725,6 +9178,7 @@ class SystemImprovementAgentAdapter(BaseAgent):
         tenant_id = task.get("tenant_id", "default")
         try:
             from system_improvement_agent import SystemImprovementAgent
+
             agent = SystemImprovementAgent(tenant_id)
             action = task.get("action")
 
@@ -8737,7 +9191,7 @@ class SystemImprovementAgentAdapter(BaseAgent):
                 return await agent.execute_auto_improvements(
                     dry_run=task.get("dry_run", True),
                     require_approval=task.get("require_approval", True),
-                    approved_actions=task.get("approved_actions", [])
+                    approved_actions=task.get("approved_actions", []),
                 )
             elif action == "mcp_deploy":
                 # Direct MCP deployment trigger
@@ -8765,7 +9219,7 @@ class SystemImprovementAgentAdapter(BaseAgent):
                 "service_id": service_id,
                 "result": result.result,
                 "duration_ms": result.duration_ms,
-                "error": result.error if not result.success else None
+                "error": result.error if not result.success else None,
             }
         except Exception as e:
             return {"status": "error", "action": "mcp_deploy", "error": str(e)}
@@ -8787,7 +9241,7 @@ class SystemImprovementAgentAdapter(BaseAgent):
                 "instances": instances,
                 "result": result.result,
                 "duration_ms": result.duration_ms,
-                "error": result.error if not result.success else None
+                "error": result.error if not result.success else None,
             }
         except Exception as e:
             return {"status": "error", "action": "mcp_scale", "error": str(e)}
@@ -8800,7 +9254,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
     RENDER_SERVICE_IDS = {
         "brainops-ai-agents": "srv-d413iu75r7bs738btc10",
         "brainops-backend-prod": "srv-d1tfs4idbo4c73di6k00",
-        "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770"
+        "brainops-mcp-bridge": "srv-d4rhvg63jp1c73918770",
     }
 
     def __init__(self):
@@ -8812,6 +9266,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
         if self._mcp_client is None:
             try:
                 from mcp_integration import get_mcp_client
+
                 self._mcp_client = get_mcp_client()
             except ImportError:
                 logger.warning("MCP integration not available for DevOpsOptimization")
@@ -8821,6 +9276,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
         tenant_id = task.get("tenant_id", "default")
         try:
             from devops_optimization_agent import DevOpsOptimizationAgent
+
             agent = DevOpsOptimizationAgent(tenant_id)
             action = task.get("action")
 
@@ -8837,7 +9293,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
                     health_result["available_actions"] = [
                         "mcp_restart_service",
                         "mcp_get_logs",
-                        "mcp_trigger_deploy"
+                        "mcp_trigger_deploy",
                     ]
                 return health_result
             elif action == "mcp_restart_service":
@@ -8876,7 +9332,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
                 "service_id": service_id,
                 "result": result.result,
                 "duration_ms": result.duration_ms,
-                "error": result.error if not result.success else None
+                "error": result.error if not result.success else None,
             }
         except Exception as e:
             return {"status": "error", "action": "mcp_restart_service", "error": str(e)}
@@ -8903,7 +9359,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
                 "service_name": service_name,
                 "logs": result.result,
                 "duration_ms": result.duration_ms,
-                "error": result.error if not result.success else None
+                "error": result.error if not result.success else None,
             }
         except Exception as e:
             return {"status": "error", "action": "mcp_get_logs", "error": str(e)}
@@ -8929,7 +9385,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
                 "service_name": service_name,
                 "result": result.result,
                 "duration_ms": result.duration_ms,
-                "error": result.error if not result.success else None
+                "error": result.error if not result.success else None,
             }
         except Exception as e:
             return {"status": "error", "action": "mcp_trigger_deploy", "error": str(e)}
@@ -8952,7 +9408,7 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
             "services_checked": [],
             "restarts_attempted": [],
             "logs_retrieved": [],
-            "errors": []
+            "errors": [],
         }
 
         # Check all services
@@ -8970,38 +9426,44 @@ class DevOpsOptimizationAgentAdapter(BaseAgent):
                         if service_info.success and service_info.result:
                             status = service_info.result.get("status", "unknown")
 
-                        recovery_results["services_checked"].append({
-                            "name": service_name,
-                            "id": service_id,
-                            "status": status
-                        })
+                        recovery_results["services_checked"].append(
+                            {"name": service_name, "id": service_id, "status": status}
+                        )
 
                         # If unhealthy, get logs and restart
                         if status not in ["running", "live"]:
                             # Get logs first
                             logs_result = await mcp.render_get_logs(service_id, lines=50)
-                            recovery_results["logs_retrieved"].append({
-                                "service": service_name,
-                                "success": logs_result.success,
-                                "log_preview": str(logs_result.result)[:500] if logs_result.success else logs_result.error
-                            })
+                            recovery_results["logs_retrieved"].append(
+                                {
+                                    "service": service_name,
+                                    "success": logs_result.success,
+                                    "log_preview": str(logs_result.result)[:500]
+                                    if logs_result.success
+                                    else logs_result.error,
+                                }
+                            )
 
                             # Attempt restart
                             restart_result = await mcp.render_restart_service(service_id)
-                            recovery_results["restarts_attempted"].append({
-                                "service": service_name,
-                                "success": restart_result.success,
-                                "result": restart_result.result if restart_result.success else restart_result.error
-                            })
+                            recovery_results["restarts_attempted"].append(
+                                {
+                                    "service": service_name,
+                                    "success": restart_result.success,
+                                    "result": restart_result.result
+                                    if restart_result.success
+                                    else restart_result.error,
+                                }
+                            )
                     except Exception as e:
-                        recovery_results["errors"].append({
-                            "service": service_name,
-                            "error": str(e)
-                        })
+                        recovery_results["errors"].append(
+                            {"service": service_name, "error": str(e)}
+                        )
         except Exception as e:
             recovery_results["errors"].append({"phase": "service_discovery", "error": str(e)})
 
         return recovery_results
+
 
 class CodeQualityAgentAdapter(BaseAgent):
     def __init__(self):
@@ -9011,6 +9473,7 @@ class CodeQualityAgentAdapter(BaseAgent):
         tenant_id = task.get("tenant_id", "default")
         try:
             from code_quality_agent import CodeQualityAgent
+
             agent = CodeQualityAgent(tenant_id)
             action = task.get("action")
 
@@ -9021,6 +9484,7 @@ class CodeQualityAgentAdapter(BaseAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
+
 class CustomerSuccessAgentAdapter(BaseAgent):
     def __init__(self):
         super().__init__("CustomerSuccess", "customer_success")
@@ -9029,13 +9493,13 @@ class CustomerSuccessAgentAdapter(BaseAgent):
         tenant_id = task.get("tenant_id", "default")
         try:
             from customer_success_agent import CustomerSuccessAgent
+
             agent = CustomerSuccessAgent(tenant_id)
             action = task.get("action")
 
             if action == "generate_onboarding_plan":
                 return await agent.generate_onboarding_plan(
-                    task.get("customer_id", "unknown"),
-                    task.get("plan_type", "standard")
+                    task.get("customer_id", "unknown"), task.get("plan_type", "standard")
                 )
             elif action == "analyze_churn_risk":
                 return await agent.analyze_churn_risk()
@@ -9043,6 +9507,7 @@ class CustomerSuccessAgentAdapter(BaseAgent):
                 return await agent.analyze_customer_health(task.get("customer_id", "unknown"))
         except Exception as e:
             return {"status": "error", "error": str(e)}
+
 
 class CompetitiveIntelligenceAgentAdapter(BaseAgent):
     def __init__(self):
@@ -9052,6 +9517,7 @@ class CompetitiveIntelligenceAgentAdapter(BaseAgent):
         tenant_id = task.get("tenant_id", "default")
         try:
             from competitive_intelligence_agent import CompetitiveIntelligenceAgent
+
             agent = CompetitiveIntelligenceAgent(tenant_id)
             action = task.get("action")
 
@@ -9059,13 +9525,13 @@ class CompetitiveIntelligenceAgentAdapter(BaseAgent):
                 return await agent.analyze_pricing(task.get("market_data", {}))
             elif action == "analyze_market_trends":
                 return await agent.analyze_market_trends(
-                    task.get("industry", "general"),
-                    task.get("timeframe", "quarterly")
+                    task.get("industry", "general"), task.get("timeframe", "quarterly")
                 )
             else:
                 return await agent.monitor_competitors(task.get("competitors", []))
         except Exception as e:
             return {"status": "error", "error": str(e)}
+
 
 class VisionAlignmentAgentAdapter(BaseAgent):
     def __init__(self):
@@ -9075,6 +9541,7 @@ class VisionAlignmentAgentAdapter(BaseAgent):
         tenant_id = task.get("tenant_id", "default")
         try:
             from vision_alignment_agent import VisionAlignmentAgent
+
             agent = VisionAlignmentAgent(tenant_id)
             action = task.get("action")
 
@@ -9084,8 +9551,7 @@ class VisionAlignmentAgentAdapter(BaseAgent):
                 return await agent.generate_vision_report()
             else:
                 return await agent.analyze_alignment(
-                    task.get("decisions", []),
-                    task.get("vision_doc", "")
+                    task.get("decisions", []), task.get("vision_doc", "")
                 )
         except Exception as e:
             return {"status": "error", "error": str(e)}
