@@ -1783,7 +1783,10 @@ class AgentScheduler:
             logger.error("Failed to schedule Invariant Monitor: %s", exc, exc_info=True)
 
         # Register OODA Loop (Consciousness)
-        if OODA_AVAILABLE:
+        # DISABLED: Observes system state but never Decides or Acts. Pure theater.
+        # Re-enable with ENABLE_OODA_LOOP=true when it can take real actions.
+        _enable_ooda = os.getenv("ENABLE_OODA_LOOP", "false").lower() in ("1", "true", "yes")
+        if OODA_AVAILABLE and _enable_ooda:
             try:
                 job_id = "ooda_loop"
                 self.scheduler.add_job(
@@ -1824,9 +1827,14 @@ class AgentScheduler:
             except Exception as exc:
                 logger.error("Failed to schedule Memory Hygiene: %s", exc, exc_info=True)
 
-        # Register Learning Feedback Loop (Total Completion Protocol)
-        # CRITICAL: Finally activates 4,700+ insights that were sitting idle!
-        if LEARNING_FEEDBACK_AVAILABLE:
+        # Register Learning Feedback Loop
+        # DISABLED: Processes patterns nobody reads. Re-enable when real consumers exist.
+        _enable_learning = os.getenv("ENABLE_LEARNING_FEEDBACK", "false").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if LEARNING_FEEDBACK_AVAILABLE and _enable_learning:
             try:
                 job_id = "learning_feedback_loop"
                 self.scheduler.add_job(
@@ -1868,9 +1876,15 @@ class AgentScheduler:
             except Exception as exc:
                 logger.error("Failed to schedule GumroadRevenueAgent: %s", exc, exc_info=True)
 
-        # Register Revenue Pipeline Factory (2026-01-21 - Deep Integration Protocol)
-        # Runs all revenue pipelines: lead nurturing, content marketing, product sales, etc.
-        if REVENUE_FACTORY_AVAILABLE:
+        # Register Revenue Pipeline Factory
+        # DISABLED: Fabricates synthetic leads using AI instead of connecting to real data.
+        # Re-enable with ENABLE_REVENUE_FACTORY=true when wired to real lead sources.
+        _enable_rev_factory = os.getenv("ENABLE_REVENUE_FACTORY", "false").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if REVENUE_FACTORY_AVAILABLE and _enable_rev_factory:
             try:
                 job_id = "revenue_pipeline_factory"
                 self.scheduler.add_job(
@@ -1892,9 +1906,10 @@ class AgentScheduler:
             except Exception as exc:
                 logger.error("Failed to schedule RevenuePipelineFactory: %s", exc, exc_info=True)
 
-        # Register Platform Cross-Sell (2026-01-22 - Revenue Integration)
-        # Enrolls MRG and BSS platform users in targeted cross-sell email sequences
-        if CROSS_SELL_AVAILABLE:
+        # Register Platform Cross-Sell
+        # DISABLED: 0 subscribers to cross-sell. Re-enable when there are paying customers.
+        _enable_cross_sell = os.getenv("ENABLE_CROSS_SELL", "false").lower() in ("1", "true", "yes")
+        if CROSS_SELL_AVAILABLE and _enable_cross_sell:
             try:
                 job_id = "platform_cross_sell"
                 self.scheduler.add_job(
@@ -1914,8 +1929,10 @@ class AgentScheduler:
             except Exception as exc:
                 logger.error("Failed to schedule Platform Cross-Sell: %s", exc, exc_info=True)
 
-        # Register Daily Report Executor (2026-02-08 - Automated Reporting Fix)
-        if REPORTING_AVAILABLE:
+        # Register Daily Report Executor
+        # DISABLED: Reports on near-empty data. Re-enable when real activity exists.
+        _enable_reports = os.getenv("ENABLE_DAILY_REPORTS", "false").lower() in ("1", "true", "yes")
+        if REPORTING_AVAILABLE and _enable_reports:
             try:
                 job_id = "daily_report_executor"
                 self.scheduler.add_job(
@@ -1959,11 +1976,13 @@ class AgentScheduler:
                 logger.error("Failed to schedule Google Keep Sync: %s", exc, exc_info=True)
 
         # Register Follow-up Executor (payment reminders, outreach sequences)
+        # DISABLED BY DEFAULT: Currently follows up on fabricated leads.
+        # Re-enable when real leads exist in the pipeline.
         followup_enabled_env = os.getenv("ENABLE_FOLLOWUP_EXECUTION")
         enable_followups = (
             followup_enabled_env.lower() in ("1", "true", "yes")
             if followup_enabled_env is not None
-            else True
+            else False
         )
         if FOLLOWUP_AVAILABLE and enable_followups:
             try:
