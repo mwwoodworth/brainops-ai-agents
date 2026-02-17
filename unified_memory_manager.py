@@ -144,6 +144,10 @@ class UnifiedMemoryManager:
                             "SELECT set_config('app.current_tenant_id', %s, true)",
                             [self.tenant_id],
                         )
+                    # Increase IVFFlat probes from default 1 to 10 for better recall.
+                    # With lists=300, probes=10 searches ~3.3% of the index which
+                    # balances query speed with result quality.
+                    cursor.execute("SET LOCAL ivfflat.probes = 10")
                     yield cursor
                     conn.commit()
                     cursor.close()

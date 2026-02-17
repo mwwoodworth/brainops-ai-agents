@@ -159,8 +159,8 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.23.1"
-        )  # Fix pgvector string format for psycopg2, agent scheduler, embedding diagnostic
+            "VERSION", "v11.23.2"
+        )  # L2-normalize embeddings, IVFFlat probes=10
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "10000"))

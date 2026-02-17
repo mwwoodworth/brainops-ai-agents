@@ -30,13 +30,19 @@ def get_embedding_max_chars() -> int:
 
 
 def get_openai_model() -> str:
-    return os.getenv("EMBEDDING_OPENAI_MODEL", "text-embedding-3-small").strip() or "text-embedding-3-small"
+    return (
+        os.getenv("EMBEDDING_OPENAI_MODEL", "text-embedding-3-small").strip()
+        or "text-embedding-3-small"
+    )
 
 
 def get_gemini_model() -> str:
     # NOTE: google-generativeai embedContent does NOT support `text-embedding-004` in v1beta
     # for many accounts/regions. `gemini-embedding-001` is the known-good embedContent model.
-    return os.getenv("EMBEDDING_GEMINI_MODEL", "gemini-embedding-001").strip() or "gemini-embedding-001"
+    return (
+        os.getenv("EMBEDDING_GEMINI_MODEL", "gemini-embedding-001").strip()
+        or "gemini-embedding-001"
+    )
 
 
 def get_local_model_name() -> str:
@@ -94,9 +100,15 @@ def normalize_embedding(embedding, dimension: int | None = None):
     except Exception:
         return None
     if len(emb) > dim:
-        return emb[:dim]
-    if len(emb) < dim:
-        return emb + [0.0] * (dim - len(emb))
+        emb = emb[:dim]
+    elif len(emb) < dim:
+        emb = emb + [0.0] * (dim - len(emb))
+    # L2-normalize so all providers produce unit vectors.
+    # Without this, cosine similarity between vectors from different
+    # providers (OpenAI norm~1.0, Gemini norm~0.7) is near-zero.
+    norm = sum(x * x for x in emb) ** 0.5
+    if norm > 0:
+        emb = [x / norm for x in emb]
     return emb
 
 
@@ -120,6 +132,7 @@ def _get_openai_client():
         logger.warning("Failed to import openai: %s", e)
         try:
             import openai  # type: ignore
+
             OpenAI = getattr(openai, "OpenAI", None)
         except Exception:
             OpenAI = None
@@ -133,11 +146,9 @@ def _get_gemini_client():
     global _GEMINI_CLIENT
     if _GEMINI_CLIENT is not None:
         return _GEMINI_CLIENT
-    
+
     api_key = (
-        os.getenv("GOOGLE_AI_API_KEY")
-        or os.getenv("GOOGLE_API_KEY")
-        or os.getenv("GEMINI_API_KEY")
+        os.getenv("GOOGLE_AI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     )
     if not api_key:
         logger.warning("Gemini API key not found")
@@ -146,6 +157,7 @@ def _get_gemini_client():
     # Try standard google-generativeai SDK first (v0.8+)
     try:
         import google.generativeai as genai
+
         genai.configure(api_key=api_key)
         _GEMINI_CLIENT = ("generativeai", genai)
         return _GEMINI_CLIENT
@@ -155,12 +167,13 @@ def _get_gemini_client():
     # Fallback to google-genai SDK (v1.0+)
     try:
         from google import genai
+
         client = genai.Client(api_key=api_key)
         _GEMINI_CLIENT = ("genai", client)
         return _GEMINI_CLIENT
     except ImportError as e:
         logger.warning(f"Failed to import google.genai: {e}")
-    
+
     return None
 
 
@@ -196,10 +209,10 @@ def _embed_gemini(text: str, log: Optional[logging.Logger] = None) -> Optional[l
     client_tuple = _get_gemini_client()
     if not client_tuple:
         return None
-    
+
     sdk_type, client = client_tuple
     primary_model = get_gemini_model()
-    
+
     # Models to try in order of preference.
     # Note: google-generativeai (embedContent) commonly requires a `models/` prefix.
     models_to_try = [
@@ -213,22 +226,25 @@ def _embed_gemini(text: str, log: Optional[logging.Logger] = None) -> Optional[l
         try:
             if sdk_type == "generativeai":
                 # google-generativeai SDK usually expects 'models/' prefix
-                full_model = model_name if model_name.startswith("models/") else f"models/{model_name}"
+                full_model = (
+                    model_name if model_name.startswith("models/") else f"models/{model_name}"
+                )
                 result = client.embed_content(
-                    model=full_model,
-                    content=_truncate(text),
-                    task_type="retrieval_document"
+                    model=full_model, content=_truncate(text), task_type="retrieval_document"
                 )
                 if result and "embedding" in result:
                     return normalize_embedding(result["embedding"])
-            
+
             elif sdk_type == "genai":
                 # google-genai SDK supports explicit embedding config (output_dimensionality),
                 # but keep it optional for compatibility across versions.
-                full_model = model_name if model_name.startswith("models/") else f"models/{model_name}"
+                full_model = (
+                    model_name if model_name.startswith("models/") else f"models/{model_name}"
+                )
                 config = None
                 try:
                     from google.genai import types  # type: ignore
+
                     config = types.EmbedContentConfig(
                         task_type="RETRIEVAL_DOCUMENT",
                         output_dimensionality=get_embedding_dimension(),
@@ -248,7 +264,7 @@ def _embed_gemini(text: str, log: Optional[logging.Logger] = None) -> Optional[l
                 if result and result.embeddings:
                     embedding = list(result.embeddings[0].values)
                     return normalize_embedding(embedding)
-                    
+
             # If we got here with a result, break loop (though return above handles it)
             break
 
@@ -283,7 +299,9 @@ def _hash_embedding(text: str, dimension: int) -> list[float]:
     return embedding
 
 
-def generate_embedding_sync(text: str, log: Optional[logging.Logger] = None) -> Optional[list[float]]:
+def generate_embedding_sync(
+    text: str, log: Optional[logging.Logger] = None
+) -> Optional[list[float]]:
     if text is None:
         return None
     text = text.strip()
@@ -313,10 +331,14 @@ def generate_embedding_sync(text: str, log: Optional[logging.Logger] = None) -> 
 
     if allow_zero_fallback():
         if log:
-            log.warning("All embedding providers failed; using zero embedding (EMBEDDING_ALLOW_ZERO=true)")
+            log.warning(
+                "All embedding providers failed; using zero embedding (EMBEDDING_ALLOW_ZERO=true)"
+            )
         return [0.0] * dimension
     return None
 
 
-async def generate_embedding_async(text: str, log: Optional[logging.Logger] = None) -> Optional[list[float]]:
+async def generate_embedding_async(
+    text: str, log: Optional[logging.Logger] = None
+) -> Optional[list[float]]:
     return await asyncio.to_thread(generate_embedding_sync, text, log)
