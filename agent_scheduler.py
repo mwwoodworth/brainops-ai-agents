@@ -192,6 +192,9 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
 ENABLE_SCHEDULER_PRIORITY_QUEUEING = _env_flag("ENABLE_SCHEDULER_PRIORITY_QUEUEING", False)
 ENABLE_SCHEDULER_EXECUTION_BUDGETS = _env_flag("ENABLE_SCHEDULER_EXECUTION_BUDGETS", False)
+ENABLE_SCHEDULER_AGENT_BENCHMARKING = _env_flag("ENABLE_SCHEDULER_AGENT_BENCHMARKING", False)
+ENABLE_SCHEDULER_DYNAMIC_SELECTION = _env_flag("ENABLE_SCHEDULER_DYNAMIC_SELECTION", False)
+ENABLE_SCHEDULER_HEALTH_AUTORECOVERY = _env_flag("ENABLE_SCHEDULER_HEALTH_AUTORECOVERY", False)
 DEFAULT_SCHEDULER_EXECUTION_BUDGET_SECONDS = int(
     os.getenv("SCHEDULER_EXECUTION_BUDGET_SECONDS", "300")
 )
@@ -310,6 +313,10 @@ class AgentScheduler:
         self.registered_jobs = {}
         self._priority_queueing_enabled = ENABLE_SCHEDULER_PRIORITY_QUEUEING
         self._execution_budget_enabled = ENABLE_SCHEDULER_EXECUTION_BUDGETS
+        self._benchmarking_enabled = ENABLE_SCHEDULER_AGENT_BENCHMARKING
+        self._dynamic_selection_enabled = ENABLE_SCHEDULER_DYNAMIC_SELECTION
+        self._health_autorecovery_enabled = ENABLE_SCHEDULER_HEALTH_AUTORECOVERY
+        self._agent_benchmarks: dict[str, dict[str, Any]] = {}
 
         # Initialize UnifiedBrain for persistent memory integration
         self.brain = None
@@ -365,6 +372,156 @@ class AgentScheduler:
                 logger.warning("Invalid scheduler budget override %s=%s", env_key, override)
         return max(10, DEFAULT_SCHEDULER_EXECUTION_BUDGET_SECONDS)
 
+    @staticmethod
+    def _calculate_quality_score(result: dict[str, Any], execution_time_ms: int, status: str) -> float:
+        """Estimate execution quality score (0-100)."""
+        quality = 75.0
+        if status != "completed":
+            quality = 25.0
+        elif isinstance(result, dict):
+            if isinstance(result.get("quality_score"), (int, float)):
+                quality = float(result.get("quality_score"))
+            elif isinstance(result.get("quality_report"), dict) and isinstance(
+                result["quality_report"].get("score"), (int, float)
+            ):
+                quality = float(result["quality_report"]["score"])
+            elif result.get("status") in {"failed", "error"}:
+                quality = 35.0
+
+        # Mild time penalty for long-running jobs.
+        if execution_time_ms > 0:
+            quality -= min(20.0, execution_time_ms / 5000.0)
+        return max(0.0, min(100.0, quality))
+
+    def _update_benchmark_cache(
+        self,
+        agent_name: str,
+        status: str,
+        execution_time_ms: int,
+        quality_score: float,
+    ) -> None:
+        """Track scheduler-level agent benchmarks in memory."""
+        if not self._benchmarking_enabled:
+            return
+        item = self._agent_benchmarks.get(agent_name) or {
+            "total_runs": 0,
+            "successful_runs": 0,
+            "avg_execution_ms": 0.0,
+            "avg_quality_score": 0.0,
+            "success_rate": 0.0,
+        }
+        item["total_runs"] = int(item.get("total_runs", 0)) + 1
+        item["successful_runs"] = int(item.get("successful_runs", 0)) + (
+            1 if status == "completed" else 0
+        )
+        prev_runs = max(1, item["total_runs"] - 1)
+        item["avg_execution_ms"] = (
+            (float(item.get("avg_execution_ms", 0.0)) * prev_runs) + float(execution_time_ms)
+        ) / float(item["total_runs"])
+        item["avg_quality_score"] = (
+            (float(item.get("avg_quality_score", 0.0)) * prev_runs) + float(quality_score)
+        ) / float(item["total_runs"])
+        item["success_rate"] = item["successful_runs"] / max(1, item["total_runs"])
+        item["updated_at"] = datetime.utcnow().isoformat()
+        self._agent_benchmarks[agent_name] = item
+
+    def _resolve_dynamic_agent_target(self, agent: dict, cur) -> dict:
+        """Pick a healthier peer agent of the same type when the scheduled agent is degraded."""
+        if not self._dynamic_selection_enabled:
+            return agent
+        try:
+            cur.execute(
+                """
+                WITH perf AS (
+                    SELECT
+                        agent_name,
+                        COUNT(*) AS total_runs,
+                        COUNT(*) FILTER (WHERE status = 'completed') AS successful_runs,
+                        COALESCE(AVG(execution_time_ms), 0) AS avg_execution_ms
+                    FROM ai_agent_executions
+                    WHERE created_at > NOW() - INTERVAL '24 hours'
+                    GROUP BY agent_name
+                )
+                SELECT
+                    a.id,
+                    a.name,
+                    a.type,
+                    COALESCE(p.total_runs, 0) AS total_runs,
+                    COALESCE(p.successful_runs, 0) AS successful_runs,
+                    COALESCE(p.avg_execution_ms, 0) AS avg_execution_ms
+                FROM ai_agents a
+                LEFT JOIN perf p ON p.agent_name = a.name
+                WHERE a.status = 'active'
+                  AND a.type = %s
+                ORDER BY
+                    CASE
+                        WHEN COALESCE(p.total_runs, 0) = 0 THEN 0
+                        ELSE (COALESCE(p.successful_runs, 0)::float / NULLIF(p.total_runs, 0))
+                    END DESC,
+                    COALESCE(p.avg_execution_ms, 999999) ASC
+                LIMIT 5
+                """,
+                (agent.get("type"),),
+            )
+            candidates = cur.fetchall() or []
+            if not candidates:
+                return agent
+
+            current_name = agent.get("name")
+            top_candidate = candidates[0]
+            current_metrics = next((c for c in candidates if c.get("name") == current_name), None)
+            if not current_metrics:
+                return agent
+            current_runs = float(current_metrics.get("total_runs") or 0)
+            current_success_rate = (
+                float(current_metrics.get("successful_runs") or 0) / current_runs
+                if current_runs > 0
+                else 1.0
+            )
+
+            top_runs = float(top_candidate.get("total_runs") or 0)
+            top_success_rate = (
+                float(top_candidate.get("successful_runs") or 0) / top_runs if top_runs > 0 else 0.0
+            )
+            if (
+                top_candidate.get("name") != current_name
+                and current_runs >= 3
+                and top_success_rate >= current_success_rate + 0.2
+            ):
+                logger.warning(
+                    "Dynamic scheduler selection switched %s -> %s (success %.2f -> %.2f)",
+                    current_name,
+                    top_candidate.get("name"),
+                    current_success_rate,
+                    top_success_rate,
+                )
+                return top_candidate
+        except Exception as exc:
+            logger.warning("Dynamic agent selection failed: %s", exc)
+        return agent
+
+    def _attempt_agent_autorecovery(self, agent: dict, cur, conn, error: str) -> None:
+        """Best-effort auto-recovery for degraded scheduled agents."""
+        if not self._health_autorecovery_enabled:
+            return
+        try:
+            cur.execute(
+                """
+                UPDATE ai_agents
+                SET status = 'active', updated_at = NOW()
+                WHERE id = %s
+                """,
+                (agent.get("id"),),
+            )
+            conn.commit()
+            logger.warning(
+                "Scheduler auto-recovery reset agent %s after error: %s",
+                agent.get("name"),
+                error[:200],
+            )
+        except Exception as rec_exc:
+            logger.error("Scheduler auto-recovery failed for %s: %s", agent.get("name"), rec_exc)
+
     def execute_agent(self, agent_id: str, agent_name: str):
         """Execute a scheduled agent (SYNCHRONOUS for BackgroundScheduler)"""
         execution_id = str(uuid.uuid4())
@@ -413,6 +570,17 @@ class AgentScheduler:
                         conn.commit()
                         return
 
+                    # Dynamic selection: route to a healthier peer if current agent is degraded.
+                    effective_agent = self._resolve_dynamic_agent_target(agent, cur)
+                    effective_agent_id = str(effective_agent.get("id") or agent_id)
+                    effective_agent_name = str(effective_agent.get("name") or agent_name)
+                    if effective_agent_name != agent_name:
+                        logger.warning(
+                            "Scheduler dynamically selected %s instead of %s for this cycle",
+                            effective_agent_name,
+                            agent_name,
+                        )
+
                     # Execute based on agent type (synchronous)
                     scheduled_meta = next(
                         (
@@ -428,7 +596,7 @@ class AgentScheduler:
                     )
                     execution_budget_seconds = self._resolve_execution_budget_seconds(agent_name)
                     start_time = datetime.utcnow()
-                    result = self._execute_by_type_sync(agent, cur, conn)
+                    result = self._execute_by_type_sync(effective_agent, cur, conn)
                     execution_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
                     execution_time_seconds = execution_time_ms / 1000.0
 
@@ -443,19 +611,47 @@ class AgentScheduler:
                             "error": "scheduler_execution_budget_exceeded",
                             "execution_time_seconds": execution_time_seconds,
                             "execution_budget_seconds": execution_budget_seconds,
-                            "agent_name": agent_name,
+                            "agent_name": effective_agent_name,
                             "priority": inferred_priority,
                         }
                         logger.warning(
                             "Scheduler execution budget exceeded for %s: %.2fs > %ss",
-                            agent_name,
+                            effective_agent_name,
                             execution_time_seconds,
                             execution_budget_seconds,
                         )
                     elif isinstance(result, dict):
                         result.setdefault("scheduler_priority", inferred_priority)
+                        result.setdefault("agent_name", effective_agent_name)
+                        if effective_agent_name != agent_name:
+                            result.setdefault("scheduled_agent_name", agent_name)
+                            result.setdefault("dynamic_selection", True)
                         if execution_budget_seconds:
                             result.setdefault("execution_budget_seconds", execution_budget_seconds)
+
+                    quality_score = self._calculate_quality_score(result, execution_time_ms, final_status)
+                    self._update_benchmark_cache(
+                        effective_agent_name,
+                        final_status,
+                        execution_time_ms,
+                        quality_score,
+                    )
+                    if isinstance(result, dict):
+                        result.setdefault(
+                            "benchmark",
+                            {
+                                "quality_score": round(quality_score, 2),
+                                "avg_execution_ms": round(
+                                    self._agent_benchmarks.get(effective_agent_name, {}).get(
+                                        "avg_execution_ms", execution_time_ms
+                                    ),
+                                    2,
+                                ),
+                                "success_rate": self._agent_benchmarks.get(
+                                    effective_agent_name, {}
+                                ).get("success_rate"),
+                            },
+                        )
 
                     # Record execution completion
                     cur.execute(
@@ -476,13 +672,13 @@ class AgentScheduler:
                             last_active = %s
                         WHERE id = %s
                     """,
-                        (datetime.utcnow(), datetime.utcnow(), agent_id),
+                        (datetime.utcnow(), datetime.utcnow(), effective_agent_id),
                     )
 
                     conn.commit()
                     logger.info(
                         "Agent %s execution finished with status=%s priority=%s",
-                        agent_name,
+                        effective_agent_name,
                         final_status,
                         inferred_priority,
                     )
@@ -494,17 +690,18 @@ class AgentScheduler:
                                 key=f"agent_execution_{execution_id}",
                                 value={
                                     "agent_id": agent_id,
-                                    "agent_name": agent_name,
+                                    "agent_name": effective_agent_name,
                                     "execution_id": execution_id,
-                                    "status": "completed",
+                                    "status": final_status,
                                     "execution_time_ms": execution_time_ms,
+                                    "quality_score": round(quality_score, 2),
                                     "result_summary": str(result)[:500] if result else None,
                                     "timestamp": datetime.utcnow().isoformat(),
                                 },
                                 category="agent_execution",
                                 priority="medium",
                                 source="agent_scheduler",
-                                metadata={"agent_type": agent.get("type", "unknown")},
+                                metadata={"agent_type": effective_agent.get("type", "unknown")},
                             )
                             logger.debug(f"🧠 Stored execution {execution_id} in persistent memory")
                         except Exception as mem_err:
@@ -523,6 +720,8 @@ class AgentScheduler:
                             ("failed", str(e), execution_id),
                         )
                         conn.commit()
+                        if "agent" in locals() and agent:
+                            self._attempt_agent_autorecovery(agent, cur, conn, str(e))
 
                         # Store failure in memory for learning from mistakes
                         if self.brain:
@@ -2376,7 +2575,7 @@ class AgentScheduler:
 
     def get_status(self) -> dict:
         """Get scheduler status"""
-        return {
+        status = {
             "running": self.scheduler.running,
             "total_jobs": len(self.registered_jobs),
             "jobs": [
@@ -2389,6 +2588,9 @@ class AgentScheduler:
                 for job_id, job_info in self.registered_jobs.items()
             ],
         }
+        if self._benchmarking_enabled:
+            status["agent_benchmarks"] = self._agent_benchmarks
+        return status
 
 
 # Create execution tracking table if needed

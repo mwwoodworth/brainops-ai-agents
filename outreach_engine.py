@@ -52,6 +52,8 @@ def _env_flag(name: str, default: str = "false") -> bool:
 
 ENABLE_OUTREACH_AB_TESTING = _env_flag("OUTREACH_ENABLE_AB_TESTING", "true")
 ENABLE_SEND_TIME_OPTIMIZATION = _env_flag("OUTREACH_ENABLE_SEND_TIME_OPTIMIZATION", "true")
+ENABLE_OUTREACH_FOLLOWUP_ESCALATION = _env_flag("OUTREACH_ENABLE_FOLLOWUP_ESCALATION", "false")
+ENABLE_OUTREACH_CHURN_SIGNALING = _env_flag("OUTREACH_ENABLE_CHURN_SIGNALING", "false")
 
 def _parse_metadata(metadata: Any) -> dict:
     """Parse metadata field which may be a string or dict."""
@@ -236,6 +238,19 @@ class OutreachEngine:
         except Exception as e:
             logger.error(f"Failed to get database pool: {e}")
             return None
+
+    def _get_tenant_pool(self, tenant_id: str | None):
+        """Get tenant-scoped pool for new outreach intelligence operations."""
+        resolved_tenant = (tenant_id or "").strip() or os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID")
+        if not resolved_tenant:
+            return self._get_pool()
+        try:
+            from database.async_connection import get_tenant_pool
+
+            return get_tenant_pool(resolved_tenant)
+        except Exception as exc:
+            logger.warning("Tenant pool unavailable for %s: %s", resolved_tenant, exc)
+            return self._get_pool()
 
     def _check_limits(self) -> tuple[int, int]:
         """Check and reset daily limits."""
@@ -939,6 +954,17 @@ class OutreachEngine:
             except Exception as act_err:
                 logger.debug("Lead activity logging skipped for outreach_sent: %s", act_err)
 
+            if ENABLE_OUTREACH_FOLLOWUP_ESCALATION:
+                try:
+                    await self._schedule_next_followup_after_send(
+                        pool=pool,
+                        lead_id=str(draft["lead_id"]),
+                        current_step=int(action_data.get("sequence_step") or 1),
+                        approved_by=approved_by,
+                    )
+                except Exception as followup_exc:
+                    logger.debug("Follow-up auto-schedule skipped: %s", followup_exc)
+
             self._daily_outreach_count += 1
             logger.info(f"Outreach {draft_id[:8]}... approved by {approved_by} and queued (daily count: {self._daily_outreach_count})")
             return True, "Outreach approved and queued"
@@ -1038,6 +1064,232 @@ class OutreachEngine:
         except Exception as exc:
             logger.error("Failed to track engagement for lead %s: %s", lead_id, exc)
             return False, str(exc)
+
+    async def _schedule_next_followup_after_send(
+        self,
+        *,
+        pool,
+        lead_id: str,
+        current_step: int,
+        approved_by: str,
+    ) -> None:
+        """Schedule the next follow-up touchpoint after a send."""
+        if current_step >= 3:
+            return
+
+        days_map = {1: 3, 2: 5}
+        next_step = current_step + 1
+        scheduled_for = datetime.now(timezone.utc) + timedelta(days=days_map.get(current_step, 4))
+        template_name = f"outreach_followup_step_{next_step}"
+
+        existing = await pool.fetchval(
+            """
+            SELECT target_id
+            FROM ai_scheduled_outreach
+            WHERE target_id = $1
+              AND message_template = $2
+              AND status IN ('scheduled', 'queued')
+              AND created_at > NOW() - INTERVAL '3 days'
+            LIMIT 1
+            """,
+            str(lead_id),
+            template_name,
+        )
+        if existing:
+            return
+
+        await pool.execute(
+            """
+            INSERT INTO ai_scheduled_outreach
+            (target_id, channel, message_template, personalization, scheduled_for, status, metadata, created_at)
+            VALUES ($1, 'email', $2, $3, $4, 'scheduled', $5, $6)
+            """,
+            str(lead_id),
+            template_name,
+            json.dumps({"lead_id": str(lead_id), "sequence_step": next_step}),
+            scheduled_for,
+            json.dumps(
+                {
+                    "source": "outreach_engine",
+                    "trigger": "auto_followup_after_send",
+                    "approved_by": approved_by,
+                    "sequence_step": next_step,
+                    "escalation_level": 1 if next_step == 2 else 2,
+                }
+            ),
+            datetime.now(timezone.utc),
+        )
+
+    async def schedule_followup_escalations(
+        self,
+        tenant_id: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Proactively schedule escalated followups for inactive leads."""
+        if not ENABLE_OUTREACH_FOLLOWUP_ESCALATION:
+            return {"status": "skipped", "reason": "OUTREACH_ENABLE_FOLLOWUP_ESCALATION=false"}
+
+        pool = self._get_tenant_pool(tenant_id)
+        if not pool:
+            return {"status": "error", "error": "Database not available"}
+
+        rows = await pool.fetch(
+            """
+            WITH engagement AS (
+                SELECT lead_id, MAX(created_at) AS last_event_at
+                FROM lead_activities
+                GROUP BY lead_id
+            )
+            SELECT
+                rl.id,
+                rl.stage,
+                rl.company_name,
+                COALESCE(eng.last_event_at, rl.last_contact, rl.updated_at, rl.created_at) AS last_touch_at,
+                EXTRACT(DAY FROM (NOW() - COALESCE(eng.last_event_at, rl.last_contact, rl.updated_at, rl.created_at))) AS idle_days
+            FROM revenue_leads rl
+            LEFT JOIN engagement eng ON eng.lead_id = rl.id
+            WHERE rl.stage IN ('contacted', 'outreach_sent', 'replied', 'qualified', 'proposal_sent', 'negotiating')
+            ORDER BY idle_days DESC NULLS LAST
+            LIMIT $1
+            """,
+            max(1, limit),
+        )
+
+        scheduled = 0
+        escalated = 0
+        for row in rows:
+            idle_days = float(row.get("idle_days") or 0.0)
+            if idle_days < 3:
+                continue
+            escalation_level = min(3, 1 + int(idle_days // 5))
+            template_name = f"outreach_lifecycle_followup_l{escalation_level}"
+            scheduled_for = datetime.now(timezone.utc) + timedelta(hours=6 if escalation_level >= 3 else 24)
+
+            exists = await pool.fetchval(
+                """
+                SELECT target_id
+                FROM ai_scheduled_outreach
+                WHERE target_id = $1
+                  AND message_template = $2
+                  AND status IN ('scheduled', 'queued')
+                  AND created_at > NOW() - INTERVAL '24 hours'
+                LIMIT 1
+                """,
+                str(row["id"]),
+                template_name,
+            )
+            if exists:
+                continue
+
+            await pool.execute(
+                """
+                INSERT INTO ai_scheduled_outreach
+                (target_id, channel, message_template, personalization, scheduled_for, status, metadata, created_at)
+                VALUES ($1, 'email', $2, $3, $4, 'scheduled', $5, $6)
+                """,
+                str(row["id"]),
+                template_name,
+                json.dumps(
+                    {
+                        "lead_id": str(row["id"]),
+                        "company_name": row.get("company_name"),
+                        "stage": row.get("stage"),
+                    }
+                ),
+                scheduled_for,
+                json.dumps(
+                    {
+                        "source": "outreach_engine",
+                        "idle_days": idle_days,
+                        "escalation_level": escalation_level,
+                    }
+                ),
+                datetime.now(timezone.utc),
+            )
+            scheduled += 1
+            if escalation_level >= 2:
+                escalated += 1
+
+        return {
+            "status": "completed",
+            "evaluated": len(rows),
+            "scheduled": scheduled,
+            "escalated": escalated,
+        }
+
+    async def predict_pipeline_churn_from_engagement(
+        self,
+        tenant_id: str | None = None,
+        limit: int = 75,
+    ) -> dict[str, Any]:
+        """Predict churn risk from engagement patterns for open leads."""
+        if not ENABLE_OUTREACH_CHURN_SIGNALING:
+            return {"status": "skipped", "reason": "OUTREACH_ENABLE_CHURN_SIGNALING=false"}
+
+        pool = self._get_tenant_pool(tenant_id)
+        if not pool:
+            return {"status": "error", "error": "Database not available"}
+
+        rows = await pool.fetch(
+            """
+            WITH engagement AS (
+                SELECT
+                    lead_id,
+                    COUNT(*) FILTER (WHERE event_type = 'email_open') AS opens,
+                    COUNT(*) FILTER (WHERE event_type = 'email_click') AS clicks,
+                    COUNT(*) FILTER (WHERE event_type = 'reply_received') AS replies,
+                    MAX(created_at) AS last_event_at
+                FROM lead_activities
+                WHERE created_at > NOW() - INTERVAL '45 days'
+                GROUP BY lead_id
+            )
+            SELECT
+                rl.id,
+                rl.company_name,
+                rl.stage,
+                rl.value_estimate,
+                COALESCE(eng.opens, 0) AS opens,
+                COALESCE(eng.clicks, 0) AS clicks,
+                COALESCE(eng.replies, 0) AS replies,
+                EXTRACT(DAY FROM (NOW() - COALESCE(eng.last_event_at, rl.updated_at, rl.created_at))) AS inactive_days
+            FROM revenue_leads rl
+            LEFT JOIN engagement eng ON eng.lead_id = rl.id
+            WHERE rl.stage NOT IN ('won', 'paid', 'lost')
+            ORDER BY inactive_days DESC NULLS LAST
+            LIMIT $1
+            """,
+            max(10, limit),
+        )
+
+        risk_items: list[dict[str, Any]] = []
+        for row in rows:
+            inactive_days = float(row.get("inactive_days") or 0.0)
+            opens = int(row.get("opens") or 0)
+            clicks = int(row.get("clicks") or 0)
+            replies = int(row.get("replies") or 0)
+            engagement = min(1.0, opens * 0.05 + clicks * 0.2 + replies * 0.5)
+            churn_probability = min(0.99, max(0.02, (inactive_days / 35.0) * 0.7 + (1.0 - engagement) * 0.3))
+            if churn_probability < 0.55:
+                continue
+            risk_items.append(
+                {
+                    "lead_id": str(row["id"]),
+                    "company_name": row.get("company_name"),
+                    "stage": row.get("stage"),
+                    "value_estimate": float(row.get("value_estimate") or 0.0),
+                    "inactive_days": inactive_days,
+                    "churn_probability": round(churn_probability, 3),
+                    "recommended_action": "escalated_followup" if churn_probability >= 0.8 else "nurture_refresh",
+                }
+            )
+
+        risk_items.sort(key=lambda x: x["churn_probability"], reverse=True)
+        return {
+            "status": "completed",
+            "at_risk_count": len(risk_items),
+            "high_risk_count": len([x for x in risk_items if x["churn_probability"] >= 0.8]),
+            "items": risk_items[:25],
+        }
 
     async def get_ab_test_stats(self, days: int = 30) -> dict[str, Any]:
         """Return A/B performance summary for outreach variants."""
@@ -1145,6 +1397,8 @@ class OutreachEngine:
             "features": {
                 "ab_testing": ENABLE_OUTREACH_AB_TESTING,
                 "send_time_optimization": ENABLE_SEND_TIME_OPTIMIZATION,
+                "followup_escalation": ENABLE_OUTREACH_FOLLOWUP_ESCALATION,
+                "churn_signaling": ENABLE_OUTREACH_CHURN_SIGNALING,
             },
             "drafts": {
                 "total": sum(status_counts.values()),
