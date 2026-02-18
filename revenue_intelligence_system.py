@@ -26,6 +26,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Optional, Dict, List
 from dataclasses import dataclass, field, asdict
 from enum import Enum
+from urllib.parse import unquote, urlparse
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -113,26 +114,37 @@ class BusinessState:
 
 def _get_db_config():
     """Get database configuration."""
-    database_url = os.getenv('DATABASE_URL')
+    host = os.getenv("DB_HOST", "")
+    database = os.getenv("DB_NAME", "postgres")
+    user = os.getenv("DB_USER", "")
+    password = os.getenv("DB_PASSWORD", "")
+    port = int(os.getenv("DB_PORT", "5432"))
+
+    database_url = os.getenv("DATABASE_URL", "")
     if database_url:
-        match = re.match(
-            r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)',
-            database_url
-        )
-        if match:
-            return {
-                'host': match.group(3),
-                'database': match.group(5),
-                'user': match.group(1),
-                'password': match.group(2),
-                'port': int(match.group(4))
-            }
+        parsed = urlparse(database_url)
+        if parsed.scheme.startswith("postgres"):
+            host = parsed.hostname or host
+            if parsed.path and parsed.path != "/":
+                database = unquote(parsed.path.lstrip("/")) or database
+            user = unquote(parsed.username) if parsed.username else user
+            password = unquote(parsed.password) if parsed.password else password
+            port = parsed.port or port
+
+    if host and "pooler.supabase.com" in host and port == 5432:
+        port = 6543
+
+    use_ssl = (os.getenv("DB_SSL", "true") or "").strip().lower() not in ("false", "0", "no")
+    sslmode = "require" if use_ssl else "prefer"
+
     return {
-        "host": os.getenv("DB_HOST", ""),
-        "database": os.getenv("DB_NAME", ""),
-        "user": os.getenv("DB_USER", ""),
-        "password": os.getenv("DB_PASSWORD", ""),
-        "port": int(os.getenv("DB_PORT", "5432"))
+        "host": host,
+        "database": database,
+        "user": user,
+        "password": password,
+        "port": int(port),
+        "sslmode": sslmode,
+        "connect_timeout": 10,
     }
 
 

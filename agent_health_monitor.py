@@ -6,6 +6,7 @@ Provides automatic restart and healing capabilities
 
 import logging
 import os
+import uuid
 from datetime import datetime
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -14,6 +15,27 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
+PRIMARY_TENANT_ID = "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+
+
+def _normalize_uuid(value: str | None) -> str | None:
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    try:
+        return str(uuid.UUID(candidate))
+    except Exception:
+        return None
+
+
+def _resolve_tenant_id() -> str:
+    return (
+        _normalize_uuid(os.getenv("DEFAULT_TENANT_ID"))
+        or _normalize_uuid(os.getenv("TENANT_ID"))
+        or PRIMARY_TENANT_ID
+    )
 
 def _build_db_config() -> dict[str, Any]:
     host = os.getenv("DB_HOST")
@@ -57,6 +79,7 @@ class AgentHealthMonitor:
 
     def __init__(self, skip_table_init: bool = False):
         self.db_config = DB_CONFIG
+        self.tenant_id = _resolve_tenant_id()
         self._health_tables_initialized = False
         if not skip_table_init:
             self._ensure_health_tables()
@@ -113,6 +136,13 @@ class AgentHealthMonitor:
             if conn and should_close_conn:
                 conn.close()
 
+    def _apply_tenant_context(self, cur) -> None:
+        if self.tenant_id:
+            cur.execute(
+                "SELECT set_config('app.current_tenant_id', %s, true)",
+                (self.tenant_id,),
+            )
+
     def check_all_agents_health(self, conn=None, cur=None) -> dict[str, Any]:
         """Check health of all agents and update status"""
         should_close_conn = False
@@ -129,6 +159,7 @@ class AgentHealthMonitor:
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 should_close_cur = True
 
+            self._apply_tenant_context(cur)
             self._ensure_health_tables(conn=conn, cur=cur)
 
             # Get all agents with their execution statistics
@@ -170,9 +201,9 @@ class AgentHealthMonitor:
                         last_success, last_failure, consecutive_failures,
                         total_executions, total_successes, total_failures,
                         average_execution_time_ms, error_rate, uptime_percentage,
-                        checked_at
+                        checked_at, tenant_id
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
                     ON CONFLICT (agent_id) DO UPDATE SET
                         health_status = EXCLUDED.health_status,
                         last_execution = EXCLUDED.last_execution,
@@ -185,6 +216,7 @@ class AgentHealthMonitor:
                         average_execution_time_ms = EXCLUDED.average_execution_time_ms,
                         error_rate = EXCLUDED.error_rate,
                         uptime_percentage = EXCLUDED.uptime_percentage,
+                        tenant_id = EXCLUDED.tenant_id,
                         checked_at = NOW()
                 """, (
                     agent['agent_id'],
@@ -199,7 +231,8 @@ class AgentHealthMonitor:
                     agent['failures_24h'] or 0,
                     float(agent['avg_time_ms'] or 0),
                     health_status['error_rate'],
-                    health_status['uptime_percentage']
+                    health_status['uptime_percentage'],
+                    self.tenant_id,
                 ))
 
                 # Create alerts for critical agents
@@ -316,6 +349,7 @@ class AgentHealthMonitor:
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 should_close_cur = True
 
+            self._apply_tenant_context(cur)
             self._ensure_health_tables(conn=conn, cur=cur)
 
             # Get current status
@@ -396,6 +430,7 @@ class AgentHealthMonitor:
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 should_close_cur = True
 
+            self._apply_tenant_context(cur)
             self._ensure_health_tables(conn=conn, cur=cur)
 
             # Find critical agents
@@ -446,6 +481,7 @@ class AgentHealthMonitor:
 
         try:
             cur = conn.cursor(cursor_factory=RealDictCursor)
+            self._apply_tenant_context(cur)
             self._ensure_health_tables(conn=conn, cur=cur)
 
             # Get health summary
