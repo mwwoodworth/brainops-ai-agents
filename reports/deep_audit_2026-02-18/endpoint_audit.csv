@@ -1,0 +1,99 @@
+method,path,function,line,uses_persistent_memory,status,notes
+GET,/,root,3004,False,LIKELY_REAL,Has implementation logic
+POST,/agents/product/run,run_product_agent,3026,False,LIKELY_REAL,Has implementation logic
+POST,/email/send,send_email_endpoint,3077,False,LIKELY_REAL,Has implementation logic
+GET,/health,health_check,3114,False,LIKELY_REAL,Has implementation logic
+GET,/healthz,healthz,3314,False,LIKELY_REAL,Has implementation logic
+GET,/system/awareness,system_awareness,3324,False,LIKELY_REAL,Has implementation logic
+GET,/system/alerts,get_system_alerts,3552,False,LIKELY_REAL,Has implementation logic
+GET,/ready,readiness_check,3603,False,LIKELY_REAL,Has implementation logic
+GET,/capabilities,capabilities,3626,False,LIKELY_REAL,Has implementation logic
+GET,/diagnostics,diagnostics,3646,False,LIKELY_REAL,Has implementation logic
+GET,/alive,alive_status,3709,False,LIKELY_REAL,Has implementation logic
+GET,/alive/thoughts,get_recent_thoughts,3756,False,LIKELY_REAL,Has implementation logic
+GET,/awareness,get_awareness_status,3774,False,LIKELY_REAL,Has implementation logic
+GET,/awareness/report,get_full_awareness_report,3789,False,LIKELY_REAL,Has implementation logic
+GET,/awareness/pulse,get_system_pulse,3804,False,LIKELY_REAL,Has implementation logic
+GET,/truth,get_truth,3825,False,LIKELY_REAL,Has implementation logic
+GET,/truth/quick,get_truth_quick,3843,False,LIKELY_REAL,Has implementation logic
+POST,/api/v1/telemetry/events,receive_telemetry_events,3865,False,LIKELY_REAL,Has implementation logic
+POST,/api/v1/knowledge/store-legacy,store_knowledge,3913,True,LIKELY_REAL,Has implementation logic
+GET,/observability/metrics,observability_metrics,3953,False,LIKELY_REAL,Has implementation logic
+GET,/debug/database,debug_database,3981,False,LIKELY_REAL,Has implementation logic
+GET,/debug/aurea,debug_aurea,4040,False,LIKELY_REAL,Has implementation logic
+GET,/debug/scheduler,debug_scheduler,4060,False,LIKELY_REAL,Has implementation logic
+GET,/email/status,email_queue_status,4090,False,LIKELY_DEGRADED,Dependency-gated
+POST,/email/process,process_email_queue_endpoint,4104,False,LIKELY_DEGRADED,Dependency-gated
+POST,/email/test,test_email_sending,4129,False,LIKELY_DEGRADED,Dependency-gated
+GET,/email/scheduler-stats,email_scheduler_stats,4152,False,LIKELY_DEGRADED,Dependency-gated
+GET,/systems/usage,systems_usage,4188,False,LIKELY_REAL,Has implementation logic
+GET,/ai/providers/status,providers_status,4239,False,LIKELY_REAL,Has implementation logic
+GET,/agents,get_agents,4250,False,LIKELY_REAL,Has implementation logic
+POST,/agents/{agent_id}/execute,execute_agent,4383,False,LIKELY_DEGRADED,Dependency-gated
+GET,/agents/status,get_all_agents_status,4562,False,LIKELY_REAL,Has implementation logic
+GET,/agents/{agent_id},get_agent,4645,False,LIKELY_REAL,Has implementation logic
+GET,/agents/{agent_id}/history,get_agent_history,4668,False,LIKELY_REAL,Has implementation logic
+GET,/executions,get_executions,4731,False,LIKELY_REAL,Has implementation logic
+POST,/execute,execute_scheduled_agents,4823,False,LIKELY_DEGRADED,Dependency-gated
+POST,/self-heal/trigger,trigger_self_healing,5007,False,LIKELY_REAL,Has implementation logic
+POST,/training/capture-interaction,capture_interaction,5169,False,LIKELY_DEGRADED,Dependency-gated
+GET,/training/stats,get_training_stats,5202,False,LIKELY_DEGRADED,Dependency-gated
+GET,/scheduler/status,get_scheduler_status,5232,False,LIKELY_DEGRADED,Dependency-gated
+POST,/scheduler/restart-stuck,restart_stuck_executions,5281,False,LIKELY_REAL,Has implementation logic
+POST,/agents/health/check,check_agents_health,5310,False,LIKELY_DEGRADED,Dependency-gated
+POST,/agents/{agent_id}/restart,restart_agent,5327,False,LIKELY_DEGRADED,Dependency-gated
+POST,/agents/health/auto-restart,auto_restart_critical_agents,5356,False,LIKELY_DEGRADED,Dependency-gated
+POST,/scheduler/activate-all,activate_all_agents_scheduler,5373,False,LIKELY_DEGRADED,Dependency-gated
+POST,/agents/execute,execute_agent_generic,5459,False,LIKELY_DEGRADED,Dependency-gated
+POST,/agents/schedule,schedule_agent,5593,False,LIKELY_REAL,Has implementation logic
+GET,/brain/decide,brain_decide,5669,False,LIKELY_REAL,Has implementation logic
+POST,/brain/learn,brain_learn,5745,False,LIKELY_REAL,Has implementation logic
+GET,/consciousness/status,get_consciousness_status,5806,False,LIKELY_REAL,Has implementation logic
+GET,/meta-intelligence/status,get_meta_intelligence_status,5890,False,LIKELY_REAL,Has implementation logic
+POST,/workflow-engine/status,get_workflow_engine_status,5949,False,LIKELY_DEGRADED,Dependency-gated
+GET,/workflow-engine/status,get_workflow_engine_status,5949,False,LIKELY_DEGRADED,Dependency-gated
+POST,/workflow-automation/status,get_workflow_automation_status,5987,False,LIKELY_REAL,Has implementation logic
+GET,/workflow-automation/status,get_workflow_automation_status,5987,False,LIKELY_REAL,Has implementation logic
+GET,/self-heal/check,check_self_healing,6050,False,LIKELY_REAL,Has implementation logic
+POST,/memory/store,store_memory,6178,True,LIKELY_REAL,Has implementation logic
+GET,/memory/search,search_memory,6210,True,LIKELY_REAL,Has implementation logic
+GET,/memory/unified-search,unified_search,6253,True,LIKELY_REAL,Has implementation logic
+POST,/memory/backfill-embeddings,backfill_embeddings,6303,False,LIKELY_DEGRADED,Dependency-gated
+POST,/memory/force-sync,force_sync_embedded_memory,6413,False,LIKELY_DEGRADED,Dependency-gated
+GET,/memory/stats,get_memory_stats,6452,False,LIKELY_DEGRADED,Dependency-gated
+POST,/ai/self-assess,ai_self_assess,6505,False,LIKELY_DEGRADED,Dependency-gated
+POST,/ai/explain-reasoning,ai_explain_reasoning,6558,False,LIKELY_DEGRADED,Dependency-gated
+POST,/ai/reason,ai_deep_reasoning,6616,False,LIKELY_DEGRADED,Dependency-gated
+POST,/ai/learn-from-mistake,ai_learn_from_mistake,6656,False,LIKELY_DEGRADED,Dependency-gated
+GET,/ai/self-awareness/stats,get_self_awareness_stats,6715,False,LIKELY_DEGRADED,Dependency-gated
+POST,/ai/tasks/execute/{task_id},execute_ai_task,6802,False,LIKELY_DEGRADED,Dependency-gated
+GET,/ai/tasks/stats,get_task_stats,6829,False,LIKELY_DEGRADED,Dependency-gated
+POST,/ai/orchestrate,orchestrate_complex_workflow,6876,False,LIKELY_DEGRADED,Dependency-gated
+POST,/ai/analyze,ai_analyze,6908,False,LIKELY_REAL,Has implementation logic
+GET,/aurea/status,get_aurea_status,7110,False,LIKELY_DEGRADED,Dependency-gated
+POST,/aurea/command/natural_language,execute_aurea_nl_command,7188,False,LIKELY_DEGRADED,Dependency-gated
+POST,/api/v1/knowledge/store,api_v1_knowledge_store,7326,True,LIKELY_REAL,Has implementation logic
+POST,/api/v1/knowledge/query,api_v1_knowledge_query,7396,True,LIKELY_REAL,Has implementation logic
+GET,/api/v1/knowledge/graph/stats,api_v1_knowledge_graph_stats,7485,False,LIKELY_REAL,Has implementation logic
+POST,/api/v1/knowledge/graph/extract,api_v1_knowledge_graph_extract,7551,False,LIKELY_REAL,Has implementation logic
+POST,/api/v1/erp/analyze,api_v1_erp_analyze,7577,False,LIKELY_REAL,Has implementation logic
+POST,/api/v1/agents/execute,api_v1_agents_execute,7865,False,LIKELY_REAL,Has implementation logic
+POST,/api/v1/agents/activate,api_v1_agents_activate,7898,False,LIKELY_REAL,Has implementation logic
+POST,/api/v1/aurea/execute-event,execute_aurea_event,7959,True,LIKELY_REAL,Has implementation logic
+GET,/logs/recent,get_recent_logs,8088,False,LIKELY_REAL,Has implementation logic
+GET,/observability/full,get_full_observability,8119,False,LIKELY_DEGRADED,Dependency-gated
+GET,/debug/all-errors,get_all_errors,8194,False,LIKELY_REAL,Has implementation logic
+GET,/system/unified-status,get_unified_system_status,8223,False,LIKELY_REAL,Has implementation logic
+POST,/content/generate,generate_content,8294,False,LIKELY_DEGRADED,Dependency-gated
+POST,/content/newsletter,generate_newsletter,8350,False,LIKELY_DEGRADED,Dependency-gated
+POST,/content/ebook,generate_ebook,8365,False,LIKELY_DEGRADED,Dependency-gated
+POST,/content/training,generate_training_doc,8384,False,LIKELY_DEGRADED,Dependency-gated
+GET,/content/types,get_content_types,8402,False,LIKELY_REAL,Has implementation logic
+GET,/inventory/products,get_product_inventory,8444,False,LIKELY_REAL,Has implementation logic
+GET,/inventory/revenue,get_revenue_status,8675,False,LIKELY_REAL,Has implementation logic
+GET,/revenue/state,get_complete_business_state,8775,False,LIKELY_DEGRADED,Dependency-gated
+GET,/revenue/live,get_live_revenue_data,8789,False,LIKELY_DEGRADED,Dependency-gated
+GET,/revenue/products,get_all_products_inventory,8798,False,LIKELY_DEGRADED,Dependency-gated
+GET,/revenue/automations,get_automation_health,8812,False,LIKELY_DEGRADED,Dependency-gated
+POST,/revenue/sync-brain,sync_business_state_to_brain,8822,False,LIKELY_DEGRADED,Dependency-gated
+POST,/revenue/event,record_revenue_event,8834,False,LIKELY_DEGRADED,Dependency-gated

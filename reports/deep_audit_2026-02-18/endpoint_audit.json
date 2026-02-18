@@ -1,0 +1,887 @@
+{
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/",
+      "function": "root",
+      "line": 3004,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/agents/product/run",
+      "function": "run_product_agent",
+      "line": 3026,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/email/send",
+      "function": "send_email_endpoint",
+      "line": 3077,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "function": "health_check",
+      "line": 3114,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/healthz",
+      "function": "healthz",
+      "line": 3314,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/system/awareness",
+      "function": "system_awareness",
+      "line": 3324,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/system/alerts",
+      "function": "get_system_alerts",
+      "line": 3552,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/ready",
+      "function": "readiness_check",
+      "line": 3603,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/capabilities",
+      "function": "capabilities",
+      "line": 3626,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/diagnostics",
+      "function": "diagnostics",
+      "line": 3646,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/alive",
+      "function": "alive_status",
+      "line": 3709,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/alive/thoughts",
+      "function": "get_recent_thoughts",
+      "line": 3756,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/awareness",
+      "function": "get_awareness_status",
+      "line": 3774,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/awareness/report",
+      "function": "get_full_awareness_report",
+      "line": 3789,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/awareness/pulse",
+      "function": "get_system_pulse",
+      "line": 3804,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/truth",
+      "function": "get_truth",
+      "line": 3825,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/truth/quick",
+      "function": "get_truth_quick",
+      "line": 3843,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/telemetry/events",
+      "function": "receive_telemetry_events",
+      "line": 3865,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/knowledge/store-legacy",
+      "function": "store_knowledge",
+      "line": 3913,
+      "uses_persistent_memory": true,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/observability/metrics",
+      "function": "observability_metrics",
+      "line": 3953,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/debug/database",
+      "function": "debug_database",
+      "line": 3981,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/debug/aurea",
+      "function": "debug_aurea",
+      "line": 4040,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/debug/scheduler",
+      "function": "debug_scheduler",
+      "line": 4060,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/email/status",
+      "function": "email_queue_status",
+      "line": 4090,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/email/process",
+      "function": "process_email_queue_endpoint",
+      "line": 4104,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/email/test",
+      "function": "test_email_sending",
+      "line": 4129,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/email/scheduler-stats",
+      "function": "email_scheduler_stats",
+      "line": 4152,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/systems/usage",
+      "function": "systems_usage",
+      "line": 4188,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/ai/providers/status",
+      "function": "providers_status",
+      "line": 4239,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/agents",
+      "function": "get_agents",
+      "line": 4250,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/agents/{agent_id}/execute",
+      "function": "execute_agent",
+      "line": 4383,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/agents/status",
+      "function": "get_all_agents_status",
+      "line": 4562,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/agents/{agent_id}",
+      "function": "get_agent",
+      "line": 4645,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/agents/{agent_id}/history",
+      "function": "get_agent_history",
+      "line": 4668,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/executions",
+      "function": "get_executions",
+      "line": 4731,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/execute",
+      "function": "execute_scheduled_agents",
+      "line": 4823,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/self-heal/trigger",
+      "function": "trigger_self_healing",
+      "line": 5007,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/training/capture-interaction",
+      "function": "capture_interaction",
+      "line": 5169,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/training/stats",
+      "function": "get_training_stats",
+      "line": 5202,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduler/status",
+      "function": "get_scheduler_status",
+      "line": 5232,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/scheduler/restart-stuck",
+      "function": "restart_stuck_executions",
+      "line": 5281,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/agents/health/check",
+      "function": "check_agents_health",
+      "line": 5310,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/agents/{agent_id}/restart",
+      "function": "restart_agent",
+      "line": 5327,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/agents/health/auto-restart",
+      "function": "auto_restart_critical_agents",
+      "line": 5356,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/scheduler/activate-all",
+      "function": "activate_all_agents_scheduler",
+      "line": 5373,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/agents/execute",
+      "function": "execute_agent_generic",
+      "line": 5459,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/agents/schedule",
+      "function": "schedule_agent",
+      "line": 5593,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/brain/decide",
+      "function": "brain_decide",
+      "line": 5669,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/brain/learn",
+      "function": "brain_learn",
+      "line": 5745,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/consciousness/status",
+      "function": "get_consciousness_status",
+      "line": 5806,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/meta-intelligence/status",
+      "function": "get_meta_intelligence_status",
+      "line": 5890,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/workflow-engine/status",
+      "function": "get_workflow_engine_status",
+      "line": 5949,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/workflow-engine/status",
+      "function": "get_workflow_engine_status",
+      "line": 5949,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/workflow-automation/status",
+      "function": "get_workflow_automation_status",
+      "line": 5987,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/workflow-automation/status",
+      "function": "get_workflow_automation_status",
+      "line": 5987,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/self-heal/check",
+      "function": "check_self_healing",
+      "line": 6050,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/memory/store",
+      "function": "store_memory",
+      "line": 6178,
+      "uses_persistent_memory": true,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/memory/search",
+      "function": "search_memory",
+      "line": 6210,
+      "uses_persistent_memory": true,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/memory/unified-search",
+      "function": "unified_search",
+      "line": 6253,
+      "uses_persistent_memory": true,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/memory/backfill-embeddings",
+      "function": "backfill_embeddings",
+      "line": 6303,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/memory/force-sync",
+      "function": "force_sync_embedded_memory",
+      "line": 6413,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/memory/stats",
+      "function": "get_memory_stats",
+      "line": 6452,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/ai/self-assess",
+      "function": "ai_self_assess",
+      "line": 6505,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/ai/explain-reasoning",
+      "function": "ai_explain_reasoning",
+      "line": 6558,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/ai/reason",
+      "function": "ai_deep_reasoning",
+      "line": 6616,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/ai/learn-from-mistake",
+      "function": "ai_learn_from_mistake",
+      "line": 6656,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/ai/self-awareness/stats",
+      "function": "get_self_awareness_stats",
+      "line": 6715,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/ai/tasks/execute/{task_id}",
+      "function": "execute_ai_task",
+      "line": 6802,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/ai/tasks/stats",
+      "function": "get_task_stats",
+      "line": 6829,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/ai/orchestrate",
+      "function": "orchestrate_complex_workflow",
+      "line": 6876,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/ai/analyze",
+      "function": "ai_analyze",
+      "line": 6908,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/aurea/status",
+      "function": "get_aurea_status",
+      "line": 7110,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/aurea/command/natural_language",
+      "function": "execute_aurea_nl_command",
+      "line": 7188,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/knowledge/store",
+      "function": "api_v1_knowledge_store",
+      "line": 7326,
+      "uses_persistent_memory": true,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/knowledge/query",
+      "function": "api_v1_knowledge_query",
+      "line": 7396,
+      "uses_persistent_memory": true,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/knowledge/graph/stats",
+      "function": "api_v1_knowledge_graph_stats",
+      "line": 7485,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/knowledge/graph/extract",
+      "function": "api_v1_knowledge_graph_extract",
+      "line": 7551,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/erp/analyze",
+      "function": "api_v1_erp_analyze",
+      "line": 7577,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agents/execute",
+      "function": "api_v1_agents_execute",
+      "line": 7865,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agents/activate",
+      "function": "api_v1_agents_activate",
+      "line": 7898,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/aurea/execute-event",
+      "function": "execute_aurea_event",
+      "line": 7959,
+      "uses_persistent_memory": true,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/logs/recent",
+      "function": "get_recent_logs",
+      "line": 8088,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/observability/full",
+      "function": "get_full_observability",
+      "line": 8119,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/debug/all-errors",
+      "function": "get_all_errors",
+      "line": 8194,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/system/unified-status",
+      "function": "get_unified_system_status",
+      "line": 8223,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "POST",
+      "path": "/content/generate",
+      "function": "generate_content",
+      "line": 8294,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/content/newsletter",
+      "function": "generate_newsletter",
+      "line": 8350,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/content/ebook",
+      "function": "generate_ebook",
+      "line": 8365,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/content/training",
+      "function": "generate_training_doc",
+      "line": 8384,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/content/types",
+      "function": "get_content_types",
+      "line": 8402,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/inventory/products",
+      "function": "get_product_inventory",
+      "line": 8444,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/inventory/revenue",
+      "function": "get_revenue_status",
+      "line": 8675,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_REAL",
+      "notes": "Has implementation logic"
+    },
+    {
+      "method": "GET",
+      "path": "/revenue/state",
+      "function": "get_complete_business_state",
+      "line": 8775,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/revenue/live",
+      "function": "get_live_revenue_data",
+      "line": 8789,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/revenue/products",
+      "function": "get_all_products_inventory",
+      "line": 8798,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "GET",
+      "path": "/revenue/automations",
+      "function": "get_automation_health",
+      "line": 8812,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/revenue/sync-brain",
+      "function": "sync_business_state_to_brain",
+      "line": 8822,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    },
+    {
+      "method": "POST",
+      "path": "/revenue/event",
+      "function": "record_revenue_event",
+      "line": 8834,
+      "uses_persistent_memory": false,
+      "status": "LIKELY_DEGRADED",
+      "notes": "Dependency-gated"
+    }
+  ],
+  "duplicates": []
+}
