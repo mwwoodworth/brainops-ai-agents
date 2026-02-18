@@ -3909,12 +3909,11 @@ async def receive_telemetry_events(request: Request, authenticated: bool = Depen
         return {"success": False, "error": str(e)}
 
 
-@app.post("/api/v1/knowledge/store")
+@app.post("/api/v1/knowledge/store-legacy")
 async def store_knowledge(request: Request, authenticated: bool = Depends(verify_api_key)):
     """
-    Store knowledge/insights from external systems.
-    Allows ERP and other apps to contribute to the AI's knowledge base.
-    Requires API key authentication.
+    Legacy knowledge endpoint kept for backward compatibility.
+    Use POST /api/v1/knowledge/store for the canonical memory-backed path.
     """
     try:
         body = await request.json()
@@ -3928,9 +3927,18 @@ async def store_knowledge(request: Request, authenticated: bool = Depends(verify
         # Store in brain context
         if BRAIN_AVAILABLE:
             try:
-                from api.brain import brain_store
+                from api.brain import brain as unified_brain
 
-                await brain_store(key=key, value=value, category=category)
+                if unified_brain:
+                    await unified_brain.store(
+                        key=key,
+                        value=value,
+                        category=category,
+                        priority="medium",
+                        source="legacy_api_v1_knowledge_store",
+                    )
+                else:
+                    raise RuntimeError("Unified brain instance unavailable")
                 return {"success": True, "key": key}
             except Exception as brain_err:
                 logger.warning(f"Brain store failed: {brain_err}")
@@ -6172,6 +6180,7 @@ async def store_memory(
     content: str = Body(...),
     memory_type: str = Body("operational"),
     category: str = Body(default=None),
+    memory_category: str = Body(default=None),
     metadata: dict[str, Any] = Body(default=None),
 ):
     """
@@ -6184,7 +6193,11 @@ async def store_memory(
     try:
         memory_manager = app.state.memory
         memory_id = await memory_manager.store_async(
-            content=content, memory_type=memory_type, category=category, metadata=metadata or {}
+            content=content,
+            memory_type=memory_type,
+            category=category,
+            memory_category=memory_category,
+            metadata=metadata or {},
         )
         return {"success": True, "memory_id": memory_id, "message": "Memory stored successfully"}
     except Exception as e:
@@ -6199,6 +6212,7 @@ async def search_memory(
     query: str = Query(..., description="Search query"),
     limit: int = Query(10, description="Max results"),
     memory_type: str = Query(None, description="Filter by type"),
+    memory_category: str = Query(None, description="Filter by operational memory category"),
 ):
     """
     Search the AI memory system for relevant memories (requires auth).
@@ -6215,7 +6229,12 @@ async def search_memory(
 
     try:
         memory_manager = app.state.memory
-        memories = await memory_manager.search(query=query, limit=limit, memory_type=memory_type)
+        memories = await memory_manager.search(
+            query=query,
+            limit=limit,
+            memory_type=memory_type,
+            memory_category=memory_category,
+        )
         return {"success": True, "query": query, "count": len(memories), "memories": memories}
     except Exception as e:
         logger.error(f"Failed to search memory: {e}")

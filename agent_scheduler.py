@@ -359,6 +359,25 @@ class AgentScheduler:
             score -= 10
         return max(0, min(100, score))
 
+    @staticmethod
+    def _classify_memory_category(agent_name: str, result: Optional[dict[str, Any]]) -> str:
+        payload = result or {}
+        status = str(payload.get("status") or "").lower()
+        probe = " ".join(
+            [agent_name.lower(), status, str(payload.get("error") or ""), str(payload.get("message") or "")]
+        ).lower()
+        if status in {"failed", "error", "timeout"} or any(
+            token in probe for token in ("critical", "incident", "alert", "error", "failed")
+        ):
+            return "alert"
+        if any(token in probe for token in ("decision", "recommendation", "approve", "reject")):
+            return "decision"
+        if any(token in probe for token in ("learn", "feedback", "pattern", "insight")):
+            return "learning"
+        if any(token in probe for token in ("health", "status", "monitor", "state", "metric")):
+            return "system_state"
+        return "operational"
+
     def _resolve_execution_budget_seconds(self, agent_name: str) -> int:
         """Resolve per-agent execution budget in seconds."""
         if not self._execution_budget_enabled:
@@ -686,6 +705,10 @@ class AgentScheduler:
                     # Store execution result in persistent memory for learning and context
                     if self.brain:
                         try:
+                            memory_category = self._classify_memory_category(
+                                effective_agent_name,
+                                result if isinstance(result, dict) else {"result": result},
+                            )
                             self.brain.store(
                                 key=f"agent_execution_{execution_id}",
                                 value={
@@ -696,12 +719,19 @@ class AgentScheduler:
                                     "execution_time_ms": execution_time_ms,
                                     "quality_score": round(quality_score, 2),
                                     "result_summary": str(result)[:500] if result else None,
+                                    "memory_category": memory_category,
                                     "timestamp": datetime.utcnow().isoformat(),
                                 },
-                                category="agent_execution",
-                                priority="medium",
+                                category=memory_category,
+                                priority="high" if memory_category == "alert" else "medium",
                                 source="agent_scheduler",
-                                metadata={"agent_type": effective_agent.get("type", "unknown")},
+                                metadata={
+                                    "agent_type": effective_agent.get("type", "unknown"),
+                                    "memory_category": memory_category,
+                                    "scheduler_priority": inferred_priority,
+                                    "execution_budget_seconds": execution_budget_seconds,
+                                    "dynamic_selection": effective_agent_name != agent_name,
+                                },
                             )
                             logger.debug(f"🧠 Stored execution {execution_id} in persistent memory")
                         except Exception as mem_err:
@@ -1518,18 +1548,22 @@ class AgentScheduler:
             # Store results in brain
             if self.brain:
                 try:
+                    critical_count = int(health_summary.get("critical", 0) or 0)
+                    memory_category = "alert" if critical_count > 0 else "system_state"
                     self.brain.store(
                         key=f"health_check_{datetime.utcnow().isoformat()}",
                         value={
                             "total_agents": health_summary.get("total_agents", 0),
                             "healthy": health_summary.get("healthy", 0),
                             "degraded": health_summary.get("degraded", 0),
-                            "critical": health_summary.get("critical", 0),
+                            "critical": critical_count,
                             "restarted": restart_result.get("restarted", 0),
+                            "memory_category": memory_category,
                         },
-                        category="health_monitoring",
-                        priority="high" if health_summary.get("critical", 0) > 0 else "medium",
+                        category=memory_category,
+                        priority="high" if critical_count > 0 else "medium",
                         source="health_monitor_agent",
+                        metadata={"memory_category": memory_category},
                     )
                 except Exception as mem_err:
                     logger.warning(f"Failed to store health check in brain: {mem_err}")
@@ -1591,6 +1625,7 @@ class AgentScheduler:
             # Store result in brain memory for learning
             if self.brain:
                 try:
+                    memory_category = "operational"
                     self.brain.store(
                         key=f"email_processing_{datetime.utcnow().isoformat()}",
                         value={
@@ -1602,11 +1637,13 @@ class AgentScheduler:
                             "retried": result.get("retried", 0),
                             "reset_failed": result.get("reset_failed", 0),
                             "provider": result.get("provider", "unknown"),
+                            "memory_category": memory_category,
                             "timestamp": datetime.utcnow().isoformat(),
                         },
-                        category="email_processing",
+                        category=memory_category,
                         priority="medium",
                         source="email_processor_agent",
+                        metadata={"memory_category": memory_category},
                     )
                 except Exception as mem_err:
                     logger.warning(f"Failed to store email processing in brain: {mem_err}")
@@ -1661,6 +1698,7 @@ class AgentScheduler:
             # Store result in brain memory for meta-learning
             if self.brain:
                 try:
+                    memory_category = "learning"
                     self.brain.store(
                         key=f"learning_feedback_loop_{datetime.utcnow().isoformat()}",
                         value={
@@ -1669,11 +1707,13 @@ class AgentScheduler:
                             "proposals_generated": cycle_result.get("proposals_generated", 0),
                             "auto_approved": cycle_result.get("auto_approved", 0),
                             "improvements_applied": cycle_result.get("improvements_applied", 0),
+                            "memory_category": memory_category,
                             "timestamp": datetime.utcnow().isoformat(),
                         },
-                        category="learning_feedback",
+                        category=memory_category,
                         priority="high",
                         source="learning_feedback_loop_agent",
+                        metadata={"memory_category": memory_category},
                     )
                 except Exception as mem_err:
                     logger.warning(f"Failed to store learning cycle in brain: {mem_err}")
