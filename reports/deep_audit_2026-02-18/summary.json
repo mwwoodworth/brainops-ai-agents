@@ -1,0 +1,21 @@
+{
+  "generated_at_utc": "2026-02-18T15:53:25.797202+00:00",
+  "app_file": "app.py",
+  "endpoint_count": 98,
+  "endpoint_status_counts": {
+    "LIKELY_REAL": 58,
+    "LIKELY_DEGRADED": 40
+  },
+  "duplicate_route_count": 0,
+  "active_system_count": 20,
+  "active_system_status_counts": {
+    "ACTIVE_REAL": 20
+  },
+  "python_file_count": 434,
+  "python_file_status_counts": {
+    "DEAD": 125,
+    "ACTIVE_REAL": 308,
+    "ACTIVE_STUB": 1
+  },
+  "report_dir": "reports/deep_audit_2026-02-18"
+}

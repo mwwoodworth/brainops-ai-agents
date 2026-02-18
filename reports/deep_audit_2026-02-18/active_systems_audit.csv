@@ -1,0 +1,21 @@
+system_name,flag,implementation_file,exists,stub_score,status,condition
+AUREA Orchestrator,AUREA_AVAILABLE,aurea_orchestrator.py,True,2,ACTIVE_REAL,"AUREA_AVAILABLE and getattr(app.state, ""aurea"", None)"
+Self-Healing Recovery,SELF_HEALING_AVAILABLE,self_healing_recovery.py,True,0,ACTIVE_REAL,"SELF_HEALING_AVAILABLE and getattr(app.state, ""healer"", None)"
+Memory Manager,MEMORY_AVAILABLE,unified_memory_manager.py,True,0,ACTIVE_REAL,"MEMORY_AVAILABLE and getattr(app.state, ""memory"", None)"
+Embedded Memory (RAG),EMBEDDED_MEMORY_AVAILABLE,embedded_memory_system.py,True,0,ACTIVE_REAL,"EMBEDDED_MEMORY_AVAILABLE and getattr(app.state, ""embedded_memory"", None)"
+Training Pipeline,TRAINING_AVAILABLE,ai_training_pipeline.py,True,0,ACTIVE_REAL,"TRAINING_AVAILABLE and getattr(app.state, ""training"", None)"
+Learning System,LEARNING_AVAILABLE,notebook_lm_plus.py,True,0,ACTIVE_REAL,"LEARNING_AVAILABLE and getattr(app.state, ""learning"", None)"
+Agent Scheduler,SCHEDULER_AVAILABLE,agent_scheduler.py,True,2,ACTIVE_REAL,"SCHEDULER_AVAILABLE and getattr(app.state, ""scheduler"", None)"
+AI Core,AI_AVAILABLE,ai_core.py,True,2,ACTIVE_REAL,AI_AVAILABLE and ai_core
+System Improvement Agent,SYSTEM_IMPROVEMENT_AVAILABLE,system_improvement_agent.py,True,0,ACTIVE_REAL,"SYSTEM_IMPROVEMENT_AVAILABLE and getattr(app.state, ""system_improvement"", None)"
+DevOps Optimization Agent,DEVOPS_AGENT_AVAILABLE,devops_optimization_agent.py,True,2,ACTIVE_REAL,"DEVOPS_AGENT_AVAILABLE and getattr(app.state, ""devops_agent"", None)"
+Code Quality Agent,CODE_QUALITY_AVAILABLE,code_quality_agent.py,True,2,ACTIVE_REAL,"CODE_QUALITY_AVAILABLE and getattr(app.state, ""code_quality"", None)"
+Customer Success Agent,CUSTOMER_SUCCESS_AVAILABLE,customer_success_agent.py,True,0,ACTIVE_REAL,"CUSTOMER_SUCCESS_AVAILABLE and getattr(app.state, ""customer_success"", None)"
+Competitive Intelligence Agent,COMPETITIVE_INTEL_AVAILABLE,competitive_intelligence_agent.py,True,0,ACTIVE_REAL,"COMPETITIVE_INTEL_AVAILABLE and getattr(app.state, ""competitive_intel"", None)"
+Vision Alignment Agent,VISION_ALIGNMENT_AVAILABLE,vision_alignment_agent.py,True,0,ACTIVE_REAL,"VISION_ALIGNMENT_AVAILABLE and getattr(app.state, ""vision_alignment"", None)"
+Self-Healing Reconciler,RECONCILER_AVAILABLE,self_healing_reconciler.py,True,0,ACTIVE_REAL,"RECONCILER_AVAILABLE and getattr(app.state, ""reconciler"", None)"
+"Bleeding Edge AI (OODA, Hallucination, Memory, Dependability, Consciousness, Circuit Breaker)",BLEEDING_EDGE_AVAILABLE,api/bleeding_edge.py,True,0,ACTIVE_REAL,BLEEDING_EDGE_AVAILABLE
+Autonomous Issue Resolver (Detects AND FIXES AI OS Issues),AUTONOMOUS_RESOLVER_AVAILABLE,api/autonomous_resolver.py,True,0,ACTIVE_REAL,AUTONOMOUS_RESOLVER_AVAILABLE
+"Memory Enforcement (RBA/WBA, Verification, Audit)",MEMORY_ENFORCEMENT_AVAILABLE,api/memory_enforcement_api.py,True,0,ACTIVE_REAL,MEMORY_ENFORCEMENT_AVAILABLE
+"Memory Hygiene (Deduplication, Conflicts, Decay)",MEMORY_HYGIENE_AVAILABLE,api/memory_hygiene_api.py,True,0,ACTIVE_REAL,MEMORY_HYGIENE_AVAILABLE
+"Advanced Workflow Engine (LangGraph, OODA, HITL, Checkpoints)",WORKFLOWS_AVAILABLE,api/workflows.py,True,0,ACTIVE_REAL,WORKFLOWS_AVAILABLE

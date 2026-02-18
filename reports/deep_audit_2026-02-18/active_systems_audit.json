@@ -1,0 +1,182 @@
+[
+  {
+    "system_name": "AUREA Orchestrator",
+    "flag": "AUREA_AVAILABLE",
+    "implementation_file": "aurea_orchestrator.py",
+    "exists": true,
+    "stub_score": 2,
+    "status": "ACTIVE_REAL",
+    "condition": "AUREA_AVAILABLE and getattr(app.state, \"aurea\", None)"
+  },
+  {
+    "system_name": "Self-Healing Recovery",
+    "flag": "SELF_HEALING_AVAILABLE",
+    "implementation_file": "self_healing_recovery.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "SELF_HEALING_AVAILABLE and getattr(app.state, \"healer\", None)"
+  },
+  {
+    "system_name": "Memory Manager",
+    "flag": "MEMORY_AVAILABLE",
+    "implementation_file": "unified_memory_manager.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "MEMORY_AVAILABLE and getattr(app.state, \"memory\", None)"
+  },
+  {
+    "system_name": "Embedded Memory (RAG)",
+    "flag": "EMBEDDED_MEMORY_AVAILABLE",
+    "implementation_file": "embedded_memory_system.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "EMBEDDED_MEMORY_AVAILABLE and getattr(app.state, \"embedded_memory\", None)"
+  },
+  {
+    "system_name": "Training Pipeline",
+    "flag": "TRAINING_AVAILABLE",
+    "implementation_file": "ai_training_pipeline.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "TRAINING_AVAILABLE and getattr(app.state, \"training\", None)"
+  },
+  {
+    "system_name": "Learning System",
+    "flag": "LEARNING_AVAILABLE",
+    "implementation_file": "notebook_lm_plus.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "LEARNING_AVAILABLE and getattr(app.state, \"learning\", None)"
+  },
+  {
+    "system_name": "Agent Scheduler",
+    "flag": "SCHEDULER_AVAILABLE",
+    "implementation_file": "agent_scheduler.py",
+    "exists": true,
+    "stub_score": 2,
+    "status": "ACTIVE_REAL",
+    "condition": "SCHEDULER_AVAILABLE and getattr(app.state, \"scheduler\", None)"
+  },
+  {
+    "system_name": "AI Core",
+    "flag": "AI_AVAILABLE",
+    "implementation_file": "ai_core.py",
+    "exists": true,
+    "stub_score": 2,
+    "status": "ACTIVE_REAL",
+    "condition": "AI_AVAILABLE and ai_core"
+  },
+  {
+    "system_name": "System Improvement Agent",
+    "flag": "SYSTEM_IMPROVEMENT_AVAILABLE",
+    "implementation_file": "system_improvement_agent.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "SYSTEM_IMPROVEMENT_AVAILABLE and getattr(app.state, \"system_improvement\", None)"
+  },
+  {
+    "system_name": "DevOps Optimization Agent",
+    "flag": "DEVOPS_AGENT_AVAILABLE",
+    "implementation_file": "devops_optimization_agent.py",
+    "exists": true,
+    "stub_score": 2,
+    "status": "ACTIVE_REAL",
+    "condition": "DEVOPS_AGENT_AVAILABLE and getattr(app.state, \"devops_agent\", None)"
+  },
+  {
+    "system_name": "Code Quality Agent",
+    "flag": "CODE_QUALITY_AVAILABLE",
+    "implementation_file": "code_quality_agent.py",
+    "exists": true,
+    "stub_score": 2,
+    "status": "ACTIVE_REAL",
+    "condition": "CODE_QUALITY_AVAILABLE and getattr(app.state, \"code_quality\", None)"
+  },
+  {
+    "system_name": "Customer Success Agent",
+    "flag": "CUSTOMER_SUCCESS_AVAILABLE",
+    "implementation_file": "customer_success_agent.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "CUSTOMER_SUCCESS_AVAILABLE and getattr(app.state, \"customer_success\", None)"
+  },
+  {
+    "system_name": "Competitive Intelligence Agent",
+    "flag": "COMPETITIVE_INTEL_AVAILABLE",
+    "implementation_file": "competitive_intelligence_agent.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "COMPETITIVE_INTEL_AVAILABLE and getattr(app.state, \"competitive_intel\", None)"
+  },
+  {
+    "system_name": "Vision Alignment Agent",
+    "flag": "VISION_ALIGNMENT_AVAILABLE",
+    "implementation_file": "vision_alignment_agent.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "VISION_ALIGNMENT_AVAILABLE and getattr(app.state, \"vision_alignment\", None)"
+  },
+  {
+    "system_name": "Self-Healing Reconciler",
+    "flag": "RECONCILER_AVAILABLE",
+    "implementation_file": "self_healing_reconciler.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "RECONCILER_AVAILABLE and getattr(app.state, \"reconciler\", None)"
+  },
+  {
+    "system_name": "Bleeding Edge AI (OODA, Hallucination, Memory, Dependability, Consciousness, Circuit Breaker)",
+    "flag": "BLEEDING_EDGE_AVAILABLE",
+    "implementation_file": "api/bleeding_edge.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "BLEEDING_EDGE_AVAILABLE"
+  },
+  {
+    "system_name": "Autonomous Issue Resolver (Detects AND FIXES AI OS Issues)",
+    "flag": "AUTONOMOUS_RESOLVER_AVAILABLE",
+    "implementation_file": "api/autonomous_resolver.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "AUTONOMOUS_RESOLVER_AVAILABLE"
+  },
+  {
+    "system_name": "Memory Enforcement (RBA/WBA, Verification, Audit)",
+    "flag": "MEMORY_ENFORCEMENT_AVAILABLE",
+    "implementation_file": "api/memory_enforcement_api.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "MEMORY_ENFORCEMENT_AVAILABLE"
+  },
+  {
+    "system_name": "Memory Hygiene (Deduplication, Conflicts, Decay)",
+    "flag": "MEMORY_HYGIENE_AVAILABLE",
+    "implementation_file": "api/memory_hygiene_api.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "MEMORY_HYGIENE_AVAILABLE"
+  },
+  {
+    "system_name": "Advanced Workflow Engine (LangGraph, OODA, HITL, Checkpoints)",
+    "flag": "WORKFLOWS_AVAILABLE",
+    "implementation_file": "api/workflows.py",
+    "exists": true,
+    "stub_score": 0,
+    "status": "ACTIVE_REAL",
+    "condition": "WORKFLOWS_AVAILABLE"
+  }
+]
