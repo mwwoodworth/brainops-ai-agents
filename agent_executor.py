@@ -687,6 +687,68 @@ class AgentExecutor:
             level = "complex"
         return {"level": level, "score": round(score, 3), "payload_size": size}
 
+    def _classify_operational_memory_category(
+        self, task: dict[str, Any], result: Optional[dict[str, Any]] = None
+    ) -> str:
+        """Classify memory writes into operational intelligence categories."""
+        action = str(task.get("action") or task.get("type") or "").lower()
+        result_payload = result or {}
+        status = str(result_payload.get("status") or "").lower()
+        probe = " ".join(
+            [
+                action,
+                str(result_payload.get("error") or ""),
+                str(result_payload.get("message") or ""),
+                str(result_payload.get("recommendation") or ""),
+                str(result_payload.get("analysis") or ""),
+            ]
+        ).lower()
+
+        if status in {"failed", "error", "blocked", "timeout"} or any(
+            token in probe for token in ("alert", "critical", "incident", "failed", "error")
+        ):
+            return "alert"
+        if any(
+            token in probe
+            for token in ("decision", "recommendation", "approve", "reject", "strategy")
+        ):
+            return "decision"
+        if any(
+            token in probe
+            for token in ("learn", "lesson", "feedback", "retrospective", "improve", "insight")
+        ):
+            return "learning"
+        if any(
+            token in probe for token in ("status", "health", "monitor", "state", "metric", "pulse")
+        ):
+            return "system_state"
+        return "operational"
+
+    def _build_operational_memory_metadata(
+        self,
+        *,
+        execution_id: str,
+        agent_name: str,
+        task: dict[str, Any],
+        result: Optional[dict[str, Any]],
+        duration_ms: float,
+    ) -> dict[str, Any]:
+        """Build consistent metadata for agent memory writes."""
+        category = self._classify_operational_memory_category(task, result)
+        status = str((result or {}).get("status") or "completed")
+        return {
+            "execution_id": execution_id,
+            "agent_name": agent_name,
+            "task_type": task.get("action", task.get("type", "generic")),
+            "memory_category": category,
+            "category": category,
+            "status": status,
+            "duration_ms": round(float(duration_ms), 2),
+            "tenant_id": task.get("tenant_id"),
+            "source": "agent_executor",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
     async def _load_agent_performance_snapshot(self, tenant_id: str) -> dict[str, dict[str, Any]]:
         """Load per-agent benchmark metrics from recent execution history."""
         if not ENABLE_AGENT_PERFORMANCE_BENCHMARKING:
@@ -2590,6 +2652,16 @@ class AgentExecutor:
                 # LIVE MEMORY BRAIN: Store workflow execution
                 if LIVE_MEMORY_BRAIN_AVAILABLE:
                     try:
+                        memory_meta = self._build_operational_memory_metadata(
+                            execution_id=execution_id,
+                            agent_name=agent_name,
+                            task=task,
+                            result=result if isinstance(result, dict) else {"result": result},
+                            duration_ms=(
+                                datetime.now(timezone.utc) - execution_start
+                            ).total_seconds()
+                            * 1000,
+                        )
                         brain = await get_live_brain()
                         await brain.store(
                             content={
@@ -2597,9 +2669,11 @@ class AgentExecutor:
                                 "task": task,
                                 "result": result,
                                 "workflow": True,
+                                "memory_category": memory_meta["memory_category"],
                             },
                             memory_type=MemoryType.EPISODIC,
                             importance=0.75,
+                            context=memory_meta,
                         )
                     except Exception as e:
                         logger.warning(f"Workflow brain storage failed: {e}")
@@ -2874,6 +2948,13 @@ class AgentExecutor:
                 and not task.get("_skip_memory_enforcement")
             ):
                 try:
+                    memory_meta = self._build_operational_memory_metadata(
+                        execution_id=execution_id,
+                        agent_name=resolved_agent_name,
+                        task=task,
+                        result=result if isinstance(result, dict) else {"result": result},
+                        duration_ms=total_duration_ms,
+                    )
                     # WBA: Write decision to memory
                     execution_success = result.get("status") not in ("failed", "error")
                     decision_title = f"Agent {resolved_agent_name} execution: {task_type}"
@@ -2892,6 +2973,7 @@ class AgentExecutor:
                                 "memory_context_count": len(memory_context)
                                 if memory_context
                                 else 0,
+                                "memory_category": memory_meta["memory_category"],
                             },
                             object_type=MemoryObjectType.DECISION,
                             proof_type="execution_log",
@@ -2899,8 +2981,13 @@ class AgentExecutor:
                                 "execution_id": execution_id,
                                 "correlation_id": memory_client.correlation_id,
                                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "memory_category": memory_meta["memory_category"],
                             },
-                            tags=[f"agent:{resolved_agent_name}", f"task:{task_type}"],
+                            tags=[
+                                f"agent:{resolved_agent_name}",
+                                f"task:{task_type}",
+                                f"category:{memory_meta['memory_category']}",
+                            ],
                             evidence_level=EvidenceLevel.E1_RECORDED,
                         ),
                         timeout=write_timeout_s,
@@ -2962,6 +3049,20 @@ class AgentExecutor:
             # LIVE MEMORY BRAIN: Store execution results for learning (skip for OODA fast-path)
             if LIVE_MEMORY_BRAIN_AVAILABLE and not skip_db_log:
                 try:
+                    memory_meta = self._build_operational_memory_metadata(
+                        execution_id=exec_logger.execution_id,
+                        agent_name=agent_name,
+                        task=task,
+                        result=result if isinstance(result, dict) else {"result": result},
+                        duration_ms=total_duration_ms,
+                    )
+                    memory_importance = (
+                        0.92
+                        if memory_meta["memory_category"] == "alert"
+                        else 0.82
+                        if memory_meta["memory_category"] in {"decision", "system_state"}
+                        else 0.72
+                    )
                     brain = await get_live_brain()
                     await brain.store(
                         content={
@@ -2970,14 +3071,11 @@ class AgentExecutor:
                             "result": result,
                             "duration_ms": total_duration_ms,
                             "success": result.get("status") != "failed",
+                            "memory_category": memory_meta["memory_category"],
                         },
                         memory_type=MemoryType.EPISODIC,
-                        importance=0.7 if result.get("status") != "failed" else 0.9,
-                        context={
-                            "execution_id": exec_logger.execution_id,
-                            "tenant_id": task.get("tenant_id"),
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        },
+                        importance=memory_importance,
+                        context=memory_meta,
                     )
                     logger.debug(f"Stored execution in brain memory: {agent_name}")
                 except Exception as e:

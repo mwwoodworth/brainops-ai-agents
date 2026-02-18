@@ -5,6 +5,7 @@ Single source of truth for ALL BrainOps memory
 import logging
 import os
 import re
+import json
 from datetime import datetime
 import time
 from typing import Any, Optional
@@ -361,6 +362,18 @@ class RecallQuery(BaseModel):
         None, description="Filter by memory type (e.g. semantic, episodic, procedural)"
     )
     context: Optional[str] = Field(None, description="Context ID to filter results")
+    memory_category: Optional[str] = Field(
+        None,
+        description="Operational category filter (operational, decision, alert, learning, system_state)",
+    )
+    categories: Optional[list[str]] = Field(
+        None,
+        description="Optional category list for multi-category operational intelligence recall",
+    )
+    operational_intelligence: bool = Field(
+        True,
+        description="When true, prioritize operational categories over generic execution logs",
+    )
 
 
 @router.post("/recall", response_model=dict[str, Any])
@@ -389,6 +402,16 @@ async def recall_memory(query: RecallQuery):
         except ValueError:
             pass  # Ignore invalid type, search all
 
+    category_filter: Optional[list[str]] = []
+    if query.memory_category:
+        category_filter.append(query.memory_category)
+    if query.categories:
+        category_filter.extend(query.categories)
+    if not category_filter and query.operational_intelligence:
+        category_filter = ["alert", "system_state", "decision", "operational", "learning"]
+    if not category_filter:
+        category_filter = None
+
     try:
         # Resolve tenant_id from config (recall requires it for RLS)
         tenant_id = memory.tenant_id or config.tenant.default_tenant_id
@@ -405,6 +428,7 @@ async def recall_memory(query: RecallQuery):
                 context=query.context,
                 limit=query.limit,
                 memory_type=mem_type,
+                memory_category=category_filter,
             )
         else:
             results = memory.recall(
@@ -413,14 +437,32 @@ async def recall_memory(query: RecallQuery):
                 context=query.context,
                 limit=query.limit,
                 memory_type=mem_type,
+                memory_category=category_filter,
             )
 
         # Sanitize results
         sanitized = []
+        category_counts: dict[str, int] = {}
         for r in results or []:
             entry = dict(r) if hasattr(r, "keys") else r
             # Remove raw embedding vectors from response
             entry.pop("embedding", None)
+            metadata = entry.get("metadata") or {}
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except Exception:
+                    metadata = {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            category = (
+                metadata.get("memory_category")
+                or metadata.get("category")
+                or "operational"
+            )
+            category = str(category)
+            category_counts[category] = category_counts.get(category, 0) + 1
+            entry["memory_category"] = category
             sanitized.append(redact_secrets(entry))
 
         return {
@@ -428,6 +470,12 @@ async def recall_memory(query: RecallQuery):
             "query": query.query,
             "results": sanitized,
             "count": len(sanitized),
+            "filters": {
+                "memory_type": query.memory_type,
+                "categories": category_filter,
+                "operational_intelligence": query.operational_intelligence,
+            },
+            "operational_summary": {"by_category": category_counts},
             "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:

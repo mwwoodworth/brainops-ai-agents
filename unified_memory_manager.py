@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
-from typing import Any, ContextManager, Optional, Union
+from typing import Any, ContextManager, Optional, Sequence, Union
 
 import psycopg2
 from psycopg2 import sql
@@ -74,6 +74,24 @@ class MemoryType(Enum):
     META = "meta"  # Memory about memories
 
 
+OPERATIONAL_MEMORY_CATEGORIES = frozenset(
+    {"operational", "decision", "alert", "learning", "system_state"}
+)
+
+_MEMORY_CATEGORY_ALIASES = {
+    "ops": "operational",
+    "operation": "operational",
+    "operations": "operational",
+    "decisions": "decision",
+    "incident": "alert",
+    "incidents": "alert",
+    "state": "system_state",
+    "status": "system_state",
+    "system": "system_state",
+    "learned": "learning",
+}
+
+
 @dataclass
 class Memory:
     """Unified memory structure"""
@@ -109,6 +127,69 @@ class UnifiedMemoryManager:
         self._last_decay_at: Optional[datetime] = None
         self._pool = None
         self._init_pool()
+
+    @staticmethod
+    def _normalize_memory_category(category: Optional[str]) -> str:
+        """Normalize operational memory category labels without schema changes."""
+        raw = (category or "").strip().lower().replace("-", "_")
+        if not raw:
+            return "operational"
+        normalized = _MEMORY_CATEGORY_ALIASES.get(raw, raw)
+        if normalized in OPERATIONAL_MEMORY_CATEGORIES:
+            return normalized
+        return "operational"
+
+    @classmethod
+    def _normalize_memory_category_filter(
+        cls, memory_category: Optional[Union[str, Sequence[str]]]
+    ) -> list[str]:
+        if memory_category is None:
+            return []
+        if isinstance(memory_category, str):
+            parts = [p.strip() for p in memory_category.split(",") if p.strip()]
+        else:
+            parts = [str(p).strip() for p in memory_category if str(p).strip()]
+        normalized = [cls._normalize_memory_category(part) for part in parts]
+        # Preserve order while deduping
+        return list(dict.fromkeys(normalized))
+
+    def _infer_memory_category(self, memory: "Memory") -> str:
+        """Infer operational category from metadata/content when caller omits it."""
+        metadata = dict(memory.metadata or {})
+        explicit = metadata.get("memory_category") or metadata.get("category")
+        if explicit:
+            return self._normalize_memory_category(str(explicit))
+
+        if memory.memory_type == MemoryType.WORKING:
+            return "system_state"
+        if memory.memory_type == MemoryType.META:
+            return "learning"
+
+        text_parts: list[str] = [str(memory.source_system), str(memory.source_agent)]
+        if isinstance(memory.content, dict):
+            for value in memory.content.values():
+                if isinstance(value, str):
+                    text_parts.append(value)
+            text_parts.append(json.dumps(memory.content, cls=CustomJSONEncoder))
+        else:
+            text_parts.append(str(memory.content))
+
+        probe = " ".join(text_parts).lower()
+        if any(token in probe for token in ("alert", "critical", "incident", "failed", "error")):
+            return "alert"
+        if any(token in probe for token in ("decision", "recommendation", "approved", "rejected")):
+            return "decision"
+        if any(
+            token in probe
+            for token in ("learn", "lesson", "feedback", "retrospective", "insight", "pattern")
+        ):
+            return "learning"
+        if any(
+            token in probe
+            for token in ("system state", "health", "uptime", "status", "snapshot", "metric")
+        ):
+            return "system_state"
+        return "operational"
 
     def _init_pool(self) -> None:
         """Initialize shared connection pool"""
@@ -266,6 +347,20 @@ class UnifiedMemoryManager:
             memory.metadata.setdefault("quality_score", 0.5)
             memory.metadata.setdefault("quality_feedback_count", 0)
 
+        # Operational intelligence categorization lives in metadata/tags so we avoid schema changes.
+        memory.metadata = dict(memory.metadata or {})
+        memory_category = self._infer_memory_category(memory)
+        memory.metadata["memory_category"] = memory_category
+        memory.metadata.setdefault("category", memory_category)
+        memory.metadata.setdefault("source_system", memory.source_system)
+        memory.metadata.setdefault("source_agent", memory.source_agent)
+
+        tags = list(memory.tags or [])
+        category_tag = f"category:{memory_category}"
+        if category_tag not in tags:
+            tags.append(category_tag)
+        memory.tags = tags
+
         try:
             # Check for duplicates
             existing = self._find_duplicate(memory)
@@ -370,27 +465,57 @@ class UnifiedMemoryManager:
         content: str,
         memory_type: str = "operational",
         category: str = None,
+        memory_category: str = None,
         metadata: dict = None,
     ) -> str:
         """Async wrapper for store to match app.py interface"""
+        memory_type_aliases = {
+            "operational": "semantic",
+            "decision": "semantic",
+            "alert": "episodic",
+            "learning": "meta",
+            "system_state": "working",
+        }
+
+        requested_type = (memory_type or "").strip().lower()
+        mapped_type = memory_type_aliases.get(requested_type, requested_type)
+
+        normalized_category = self._normalize_memory_category(
+            memory_category or category or requested_type
+        )
+        merged_metadata = dict(metadata or {})
+        merged_metadata["memory_category"] = normalized_category
+        merged_metadata.setdefault("category", normalized_category)
+
+        tags = [f"category:{normalized_category}"]
+        if category and category != normalized_category:
+            tags.append(str(category))
+
+        payload_content: dict[str, Any]
+        if isinstance(content, str):
+            payload_content = {"text": content, "category": normalized_category}
+        elif isinstance(content, dict):
+            payload_content = dict(content)
+            payload_content.setdefault("category", normalized_category)
+        else:
+            payload_content = {"text": str(content), "category": normalized_category}
+
         # Map string memory_type to Enum
         try:
-            mem_type = MemoryType(memory_type.lower())
+            mem_type = MemoryType(mapped_type)
         except ValueError:
             mem_type = MemoryType.SEMANTIC  # Default
 
         # Construct Memory object
         mem = Memory(
             memory_type=mem_type,
-            content={"text": content, "category": category}
-            if isinstance(content, str)
-            else content,
+            content=payload_content,
             source_system="api",
             source_agent="user",
             created_by="api_user",
             importance_score=0.5,
-            tags=[category] if category else [],
-            metadata=metadata or {},
+            tags=tags,
+            metadata=merged_metadata,
             tenant_id=self.tenant_id,
         )
 
@@ -404,6 +529,7 @@ class UnifiedMemoryManager:
         context: Optional[str] = None,
         limit: int = 10,
         memory_type: Optional[MemoryType] = None,
+        memory_category: Optional[Union[str, Sequence[str]]] = None,
     ) -> list[dict]:
         """Recall relevant memories with semantic search"""
         # Use instance tenant_id if not provided
@@ -434,13 +560,25 @@ class UnifiedMemoryManager:
             # If embedding generation failed, fall back to keyword search
             if query_embedding is None:
                 logger.warning("Embedding generation failed - falling back to keyword search")
-                return self._keyword_search(query, tenant_id, context, limit, memory_type)
+                return self._keyword_search(
+                    query,
+                    tenant_id,
+                    context,
+                    limit,
+                    memory_type,
+                    memory_category=memory_category,
+                )
 
             with self._get_cursor() as cur:
                 # Convert embedding list to pgvector string format [0.1,0.2,...]
                 # psycopg2 serializes lists as {0.1,0.2,...} (array format) but
                 # pgvector ::vector cast expects [0.1,0.2,...] (vector string format)
                 embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
+                category_filters = self._normalize_memory_category_filter(memory_category)
+                category_expr = (
+                    "COALESCE(NULLIF(metadata->>'memory_category', ''), "
+                    "NULLIF(metadata->>'category', ''), 'operational')"
+                )
 
                 # Build the query
                 base_query = """
@@ -465,14 +603,30 @@ class UnifiedMemoryManager:
                     filters.append("memory_type = %s")
                     params.append(memory_type.value)
 
+                if category_filters:
+                    filters.append(f"{category_expr} = ANY(%s::text[])")
+                    params.append(category_filters)
+
                 if filters:
                     base_query += " AND " + " AND ".join(filters)
 
-                # Order by relevance (similarity + importance)
+                # Order by relevance (semantic score + importance + operational category weight)
                 base_query += """
-                ORDER BY (1 - (embedding <=> %s::vector)) * importance_score DESC
+                ORDER BY (
+                    (1 - (embedding <=> %s::vector))
+                    * importance_score
+                    * CASE
+                        WHEN {category_expr} = 'alert' THEN 1.40
+                        WHEN {category_expr} = 'system_state' THEN 1.25
+                        WHEN {category_expr} = 'decision' THEN 1.20
+                        WHEN {category_expr} = 'operational' THEN 1.10
+                        WHEN {category_expr} = 'learning' THEN 1.05
+                        ELSE 1.00
+                      END
+                ) DESC,
+                created_at DESC
                 LIMIT %s
-                """
+                """.format(category_expr=category_expr)
                 params.extend([embedding_str, limit])
 
                 cur.execute(base_query, params)
@@ -519,7 +673,13 @@ class UnifiedMemoryManager:
             logger.error(f"❌ Failed to recall memories: {e}")
             return []
 
-    async def search(self, query: str, limit: int = 10, memory_type: str = None) -> list[dict]:
+    async def search(
+        self,
+        query: str,
+        limit: int = 10,
+        memory_type: str = None,
+        memory_category: Optional[str] = None,
+    ) -> list[dict]:
         """Async wrapper for recall"""
         mem_type = None
         if memory_type:
@@ -528,13 +688,38 @@ class UnifiedMemoryManager:
             except ValueError as exc:
                 logger.debug("Invalid memory_type %s: %s", memory_type, exc)
 
+        category_filter: Optional[Union[str, Sequence[str]]] = None
+        if memory_category:
+            category_filter = memory_category
+
         return await asyncio.to_thread(
-            self.recall, query, self.tenant_id, limit=limit, memory_type=mem_type
+            self.recall,
+            query,
+            self.tenant_id,
+            limit=limit,
+            memory_type=mem_type,
+            memory_category=category_filter,
         )
 
-    async def recall_async(self, query, tenant_id=None, context=None, limit=10, memory_type=None):
+    async def recall_async(
+        self,
+        query,
+        tenant_id=None,
+        context=None,
+        limit=10,
+        memory_type=None,
+        memory_category=None,
+    ):
         """Async wrapper for recall - use from async contexts to avoid blocking the event loop"""
-        return await asyncio.to_thread(self.recall, query, tenant_id, context, limit, memory_type)
+        return await asyncio.to_thread(
+            self.recall,
+            query,
+            tenant_id,
+            context=context,
+            limit=limit,
+            memory_type=memory_type,
+            memory_category=memory_category,
+        )
 
     async def synthesize_async(self, tenant_id=None, time_window=timedelta(hours=24)):
         """Async wrapper for synthesize"""
@@ -607,6 +792,7 @@ class UnifiedMemoryManager:
         context: Optional[str] = None,
         limit: int = 10,
         memory_type: Optional[MemoryType] = None,
+        memory_category: Optional[Union[str, Sequence[str]]] = None,
     ) -> list[dict]:
         """Fallback keyword search when embeddings are unavailable"""
         try:
@@ -615,6 +801,11 @@ class UnifiedMemoryManager:
             search_term = search_term.replace("%", "")
 
             with self._get_cursor() as cur:
+                category_filters = self._normalize_memory_category_filter(memory_category)
+                category_expr = (
+                    "COALESCE(NULLIF(metadata->>'memory_category', ''), "
+                    "NULLIF(metadata->>'category', ''), 'operational')"
+                )
                 base_query = """
                 SELECT
                     id, memory_type, content, source_system, source_agent,
@@ -635,7 +826,24 @@ class UnifiedMemoryManager:
                     base_query += " AND memory_type = %s"
                     params.append(memory_type.value)
 
-                base_query += " ORDER BY importance_score DESC LIMIT %s"
+                if category_filters:
+                    base_query += f" AND {category_expr} = ANY(%s::text[])"
+                    params.append(category_filters)
+
+                base_query += f"""
+                ORDER BY
+                    importance_score
+                    * CASE
+                        WHEN {category_expr} = 'alert' THEN 1.40
+                        WHEN {category_expr} = 'system_state' THEN 1.25
+                        WHEN {category_expr} = 'decision' THEN 1.20
+                        WHEN {category_expr} = 'operational' THEN 1.10
+                        WHEN {category_expr} = 'learning' THEN 1.05
+                        ELSE 1.00
+                      END DESC,
+                    created_at DESC
+                LIMIT %s
+                """
                 params.append(limit)
 
                 cur.execute(base_query, params)
