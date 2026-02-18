@@ -11,6 +11,7 @@ otherwise healthy, this test catches it.
 
 import hashlib
 import hmac as hmac_mod
+import os
 
 import e2e_system_verification as mod
 
@@ -32,7 +33,8 @@ def test_compute_e2e_internal_sig_varies_by_key():
 
 def test_compute_e2e_internal_sig_matches_server_expectation():
     """Signature must match the HMAC the server computes in _rate_limit_key."""
-    api_key = "brainops_prod_key_2025"
+    # Use environment variable or fallback to a placeholder for testing
+    api_key = os.getenv("BRAINOPS_API_KEY", "test_key_placeholder")
     sig = mod._compute_e2e_internal_sig(api_key)
     expected = hmac_mod.new(
         api_key.encode("utf-8"), b"brainops-e2e-internal", hashlib.sha256

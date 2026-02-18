@@ -2617,26 +2617,26 @@ class AUREA:
             # Store detected patterns - uses shared pool
             for pattern in patterns:
                 try:
-                    with _get_pooled_connection() as conn:
-                        cur = conn.cursor()
-                        cur.execute(
-                            """
-                            INSERT INTO aurea_patterns (pattern_type, pattern_description, confidence,
-                                                         frequency, impact_score, pattern_data, tenant_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """,
-                            (
-                                pattern["type"],
-                                pattern["description"],
-                                pattern["confidence"],
-                                1,
-                                0.7,
-                                Json(pattern.get("data", {})),
-                                self.tenant_id,
-                            ),
+                    stored = self._db_execute(
+                        """
+                        INSERT INTO aurea_patterns (
+                            pattern_type, pattern_description, confidence,
+                            frequency, impact_score, pattern_data, tenant_id
                         )
-                        conn.commit()
-                        cur.close()
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            pattern["type"],
+                            pattern["description"],
+                            pattern["confidence"],
+                            1,
+                            0.7,
+                            Json(pattern.get("data", {})),
+                            self.tenant_id,
+                        ),
+                    )
+                    if not stored:
+                        logger.warning("Failed to store pattern: _db_execute returned false")
                 except Exception as e:
                     logger.warning(f"Failed to store pattern: {e}")
 

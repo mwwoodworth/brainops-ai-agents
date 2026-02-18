@@ -28,6 +28,26 @@ from loop_bridge import run_on_main_loop
 # Default tenant ID from environment
 DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457")
 
+
+def _normalize_uuid(value: str | None) -> str | None:
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    try:
+        return str(uuid.UUID(candidate))
+    except Exception:
+        return None
+
+
+def _resolve_tenant_id() -> str:
+    return (
+        _normalize_uuid(os.getenv("DEFAULT_TENANT_ID"))
+        or _normalize_uuid(os.getenv("TENANT_ID"))
+        or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+    )
+
 # Bleeding Edge OODA (Consciousness)
 try:
     from api.bleeding_edge import get_ooda_controller, _ooda_lock
@@ -318,6 +338,7 @@ class AgentScheduler:
         self._dynamic_selection_enabled = ENABLE_SCHEDULER_DYNAMIC_SELECTION
         self._health_autorecovery_enabled = ENABLE_SCHEDULER_HEALTH_AUTORECOVERY
         self._agent_benchmarks: dict[str, dict[str, Any]] = {}
+        self.tenant_id = _resolve_tenant_id()
 
         # Initialize UnifiedBrain for persistent memory integration
         self.brain = None
@@ -332,6 +353,7 @@ class AgentScheduler:
         logger.info(
             f"🔧 AgentScheduler initialized with DB: {self.db_config['host']}:{self.db_config['port']}"
         )
+        logger.info("🔐 AgentScheduler tenant context: %s", self.tenant_id)
 
     @contextmanager
     def get_db_connection(self):
@@ -345,6 +367,13 @@ class AgentScheduler:
         # Connections are now managed by the context manager
         logger.debug("return_db_connection is deprecated; connection is managed by context")
         return None
+
+    def _apply_tenant_context(self, cur, session_scope: bool = True) -> None:
+        if self.tenant_id:
+            cur.execute(
+                "SELECT set_config('app.current_tenant_id', %s, %s)",
+                (self.tenant_id, not session_scope),
+            )
 
     def _infer_job_priority(self, agent_name: str, frequency_minutes: int) -> int:
         """Infer scheduler priority score for an agent job."""
@@ -561,14 +590,16 @@ class AgentScheduler:
                 cur = conn.cursor(cursor_factory=RealDictCursor)
 
                 try:
+                    self._apply_tenant_context(cur, session_scope=True)
+
                     # Record execution start
                     cur.execute(
                         """
                         INSERT INTO ai_agent_executions
-                        (id, agent_name, status)
-                        VALUES (%s, %s, %s)
+                        (id, agent_name, status, tenant_id)
+                        VALUES (%s, %s, %s, %s)
                     """,
-                        (execution_id, agent_name, "running"),
+                        (execution_id, agent_name, "running", self.tenant_id),
                     )
                     conn.commit()
                     logger.info(f"📝 Execution {execution_id} recorded as 'running'")
@@ -771,6 +802,10 @@ class AgentScheduler:
                     except Exception as log_error:
                         logger.error(f"Failed to log error: {log_error}")
                 finally:
+                    try:
+                        cur.execute("RESET app.current_tenant_id")
+                    except Exception:
+                        pass
                     cur.close()
                     # Restore autocommit for pool reuse
                     conn.autocommit = prev_autocommit
