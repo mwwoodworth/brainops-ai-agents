@@ -354,6 +354,7 @@ class NotificationService:
     async def _store_notification(self, notification: TaskNotification):
         """Store notification in database"""
         try:
+            tenant_id = _resolve_valid_tenant_id()
             with get_db_connection() as conn:
                 if not conn:
                     return
@@ -361,8 +362,8 @@ class NotificationService:
                 cur.execute(
                     """
                 INSERT INTO task_notifications
-                (task_id, event_type, severity, message, details, channels, sent_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                (task_id, event_type, severity, message, details, channels, sent_at, tenant_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                     (
                         notification.task_id,
@@ -372,6 +373,7 @@ class NotificationService:
                         Json(notification.details),
                         Json(notification.channels),
                         notification.sent_at,
+                        tenant_id,
                     ),
                 )
                 conn.commit()
