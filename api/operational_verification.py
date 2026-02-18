@@ -194,16 +194,39 @@ class OperationalVerifier:
             if not aurea:
                 return {"status": "not_initialized", "error": "AUREA not found in app state"}
 
-            # Check orchestration loop status
-            loop_running = getattr(aurea, "_orchestrating", False) or getattr(aurea, "is_running", False)
-            last_decision = getattr(aurea, "last_decision_time", None)
-            decision_count = getattr(aurea, "decision_count", 0)
+            runtime_status: dict[str, Any] = {}
+            try:
+                get_status = getattr(aurea, "get_status", None)
+                if callable(get_status):
+                    runtime_status = get_status() or {}
+            except Exception:
+                runtime_status = {}
+
+            # Primary runtime signal is `aurea.running`; keep compatibility fallbacks.
+            loop_running = bool(
+                runtime_status.get("running")
+                or getattr(aurea, "running", False)
+                or getattr(aurea, "_orchestrating", False)
+                or getattr(aurea, "is_running", False)
+            )
+            decision_count = (
+                runtime_status.get("decisions_made")
+                or runtime_status.get("decision_count")
+                or getattr(aurea, "decision_count", 0)
+                or 0
+            )
+            last_decision = runtime_status.get("last_decision_time") or getattr(
+                aurea, "last_decision_time", None
+            )
+            if hasattr(last_decision, "isoformat"):
+                last_decision = last_decision.isoformat()
 
             return {
                 "status": "operational" if loop_running else "stopped",
                 "loop_running": loop_running,
                 "decision_count": decision_count,
-                "last_decision": last_decision.isoformat() if last_decision else None,
+                "last_decision": last_decision,
+                "runtime_status": runtime_status,
                 "latency_ms": round((time.time() - start) * 1000, 2)
             }
         except Exception as e:

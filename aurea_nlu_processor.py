@@ -14,6 +14,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from google.generativeai import GenerativeModel, configure
 
+# Persona/profile resolution for scoped capability gating
+try:
+    from aurea_personas import build_execution_profile
+except Exception:
+    build_execution_profile = None
+
 # Import Power Layer for full operational capability
 try:
     from aurea_power_layer import get_power_layer
@@ -86,11 +92,20 @@ async def _gemini_fallback(prompt: str, system_prompt: str = "") -> str:
 
 class AUREANLUProcessor:
     def __init__(self, llm_model: Any, integration_layer: Any, aurea_instance: Any, ai_board_instance: Any,
-                 db_pool: Any = None, mcp_client: Any = None):
+                 db_pool: Any = None, mcp_client: Any = None, execution_profile: Optional[dict[str, Any]] = None):
         self.llm = llm_model
         self.integration_layer = integration_layer
         self.aurea = aurea_instance
         self.ai_board = ai_board_instance
+        self.execution_profile = execution_profile or {"persona_id": "core", "allowed_scopes": ["admin"]}
+        if build_execution_profile and not execution_profile:
+            try:
+                self.execution_profile = build_execution_profile({})
+            except Exception:
+                pass
+        self.allowed_scopes = self._normalize_allowed_scopes(
+            self.execution_profile.get("allowed_scopes")
+        )
 
         # Initialize Power Layer for full operational capability
         self.power_layer = None
@@ -109,9 +124,49 @@ class AUREANLUProcessor:
             logger.warning("AUREA NLU initialized without AI Board instance; board-related skills will be unavailable.")
 
         # Dynamically built registry of executable actions
-        self.skill_registry = self._build_skill_registry()
+        self.full_skill_registry = self._build_skill_registry()
+        self.skill_registry = self._filter_skills_by_scope(self.full_skill_registry)
+        self.blocked_skill_names = sorted(set(self.full_skill_registry) - set(self.skill_registry))
+        logger.info(
+            "AUREA NLU profile=%s scopes=%s skills=%s blocked=%s",
+            self.execution_profile.get("persona_id", "core"),
+            sorted(self.allowed_scopes),
+            len(self.skill_registry),
+            len(self.blocked_skill_names),
+        )
         self.command_history: list[dict[str, Any]] = []
         self.command_macros = self._load_command_macros()
+
+    @staticmethod
+    def _normalize_allowed_scopes(raw_scopes: Any) -> set[str]:
+        scopes: set[str] = set()
+        if isinstance(raw_scopes, str):
+            scopes = {part.strip().lower() for part in raw_scopes.split(",") if part.strip()}
+        elif isinstance(raw_scopes, (list, tuple, set)):
+            scopes = {str(part).strip().lower() for part in raw_scopes if str(part).strip()}
+
+        scopes = {scope for scope in scopes if scope in {"read_only", "operator", "admin"}}
+        if "admin" in scopes:
+            scopes.update({"operator", "read_only"})
+        elif "operator" in scopes:
+            scopes.add("read_only")
+        if not scopes:
+            scopes = {"read_only"}
+        return scopes
+
+    def _scope_allows(self, required_scope: Any) -> bool:
+        scope = str(required_scope or "read_only").strip().lower()
+        if scope not in {"read_only", "operator", "admin"}:
+            scope = "read_only"
+        return scope in self.allowed_scopes
+
+    def _filter_skills_by_scope(self, registry: dict[str, Any]) -> dict[str, Any]:
+        filtered: dict[str, Any] = {}
+        for skill_name, skill_data in (registry or {}).items():
+            required_scope = skill_data.get("scope", "read_only")
+            if self._scope_allows(required_scope):
+                filtered[skill_name] = skill_data
+        return filtered
 
     def _build_skill_registry(self) -> dict[str, Any]:
         """
@@ -134,11 +189,13 @@ class AUREANLUProcessor:
                             "due_date": "string (ISO format)",
                         },
                         "action": self.integration_layer.create_task,
+                        "scope": "operator",
                     },
                     "get_task_status": {
                         "description": "Get the current status of an AI task.",
                         "parameters": {"task_id": "string"},
                         "action": self.integration_layer.get_task_status,
+                        "scope": "read_only",
                     },
                     "list_tasks": {
                         "description": "List all AI tasks with optional filters.",
@@ -147,21 +204,25 @@ class AUREANLUProcessor:
                             "limit": "integer",
                         },
                         "action": self.integration_layer.list_tasks,
+                        "scope": "read_only",
                     },
                     "execute_task": {
                         "description": "Manually trigger execution of a specific AI task.",
                         "parameters": {"task_id": "string"},
                         "action": self.integration_layer.execute_ai_task,
+                        "scope": "operator",
                     },
                     "get_task_stats": {
                         "description": "Get statistics about the AI task system.",
                         "parameters": {},
                         "action": self.integration_layer.get_task_stats,
+                        "scope": "read_only",
                     },
                     "orchestrate_workflow": {
                         "description": "Execute a complex multi-stage workflow using LangGraph orchestration.",
                         "parameters": {"task_description": "string", "context": "object"},
                         "action": self.integration_layer.orchestrate_complex_workflow,
+                        "scope": "operator",
                     },
                 }
             )
@@ -174,26 +235,31 @@ class AUREANLUProcessor:
                         "description": "Set AUREA's autonomous operation level (0-100).",
                         "parameters": {"level": "integer (0, 25, 50, 75, 100)"},
                         "action": self.aurea.set_autonomy_level,
+                        "scope": "admin",
                     },
                     "get_aurea_status": {
                         "description": "Get AUREA's current operational status and metrics.",
                         "parameters": {},
                         "action": self.aurea.get_status,
+                        "scope": "read_only",
                     },
                     "start_aurea": {
                         "description": "Start AUREA's autonomous orchestration loop.",
                         "parameters": {},
                         "action": self.aurea.orchestrate,
+                        "scope": "admin",
                     },
                     "stop_aurea": {
                         "description": "Stop AUREA's autonomous orchestration loop.",
                         "parameters": {},
                         "action": self.aurea.stop,
+                        "scope": "admin",
                     },
                     "get_system_health": {
                         "description": "Get a comprehensive health report of the entire AI OS.",
                         "parameters": {},
                         "action": self.aurea.get_status,
+                        "scope": "read_only",
                     },
                 }
             )
@@ -206,6 +272,7 @@ class AUREANLUProcessor:
                         "description": "Get the current status of the AI Board of Directors.",
                         "parameters": {},
                         "action": self.ai_board.get_board_status,
+                        "scope": "read_only",
                     },
                     "submit_proposal": {
                         "description": "Submit a strategic proposal to the AI Board for review.",
@@ -216,11 +283,13 @@ class AUREANLUProcessor:
                             "urgency": "integer (1-10)",
                         },
                         "action": self.ai_board.submit_proposal,
+                        "scope": "admin",
                     },
                     "convene_board_meeting": {
                         "description": "Convene an immediate meeting of the AI Board of Directors.",
                         "parameters": {},
                         "action": self.ai_board.convene_meeting,
+                        "scope": "admin",
                     },
                 }
             )
@@ -238,7 +307,8 @@ class AUREANLUProcessor:
         return {
             skill_name: {
                 "description": skill_data.get("description", ""),
-                "parameters": skill_data.get("parameters", {})
+                "parameters": skill_data.get("parameters", {}),
+                "scope": skill_data.get("scope", "read_only"),
             }
             for skill_name, skill_data in self.skill_registry.items()
         }
@@ -537,6 +607,14 @@ class AUREANLUProcessor:
 
         execution_context = await self._build_execution_context(command_text)
         serializable_registry = self._get_serializable_registry()
+        profile_summary = {
+            "persona_id": self.execution_profile.get("persona_id"),
+            "persona_name": self.execution_profile.get("persona_name"),
+            "source": self.execution_profile.get("source"),
+            "user_role": self.execution_profile.get("user_role"),
+            "allowed_scopes": sorted(self.allowed_scopes),
+            "blocked_skills_count": len(self.blocked_skill_names),
+        }
         context_prompt = ""
         if ENABLE_AUREA_CONTEXT_AWARE_EXECUTION and execution_context:
             safe_context = {
@@ -553,9 +631,12 @@ class AUREANLUProcessor:
             You have access to the following tools/skills:
 {json.dumps(serializable_registry, indent=2)}
 {context_prompt}
+            Execution profile and scope limits:
+{json.dumps(profile_summary, indent=2)}
 
             If the command is ambiguous or requires more information, ask clarifying questions.
             If the command implies a high-impact action, set 'requires_confirmation' to true.
+            Never select a skill outside the provided allowed scopes.
             Respond ONLY in JSON format with 'intent', 'parameters', 'confidence', 'requires_confirmation', and 'clarification_needed'.
             Ensure 'parameters' matches the schema of the identified intent's action. If no clear intent is found, use 'UNKNOWN'."""
 
@@ -648,6 +729,17 @@ class AUREANLUProcessor:
     ) -> dict[str, Any]:
         skill = self.skill_registry.get(intent)
         if not (skill and skill.get("action")):
+            if intent in self.full_skill_registry and intent not in self.skill_registry:
+                return {
+                    "status": "permission_denied",
+                    "message": (
+                        f"Intent '{intent}' is outside the allowed capability scopes for "
+                        f"persona '{self.execution_profile.get('persona_id', 'core')}'."
+                    ),
+                    "required_scope": self.full_skill_registry[intent].get("scope", "read_only"),
+                    "allowed_scopes": sorted(self.allowed_scopes),
+                    "intent_data": intent_data,
+                }
             response: dict[str, Any] = {
                 "status": "unknown_intent",
                 "message": f"AUREA does not know how to execute '{intent}'. Please try rephrasing or ask for available commands.",
@@ -658,6 +750,19 @@ class AUREANLUProcessor:
             return response
 
         try:
+            required_scope = skill.get("scope", "read_only")
+            if not self._scope_allows(required_scope):
+                return {
+                    "status": "permission_denied",
+                    "message": (
+                        f"Intent '{intent}' requires scope '{required_scope}', "
+                        f"but allowed scopes are {sorted(self.allowed_scopes)}."
+                    ),
+                    "required_scope": required_scope,
+                    "allowed_scopes": sorted(self.allowed_scopes),
+                    "intent_data": intent_data,
+                }
+
             execution_context = intent_data.get("execution_context", {})
             adjusted_parameters = self._apply_context_aware_defaults(intent, parameters, execution_context)
 

@@ -28,6 +28,34 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+try:
+    from aurea_personas import build_execution_profile, load_persona_prompt
+except Exception:
+    build_execution_profile = None
+    load_persona_prompt = None
+
+
+def _normalize_tenant_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    try:
+        return str(uuid.UUID(candidate))
+    except Exception:
+        return None
+
+
+def _resolve_tenant_id(context: dict[str, Any] | None = None) -> str:
+    context = context or {}
+    return (
+        _normalize_tenant_id(context.get("tenant_id"))
+        or _normalize_tenant_id(os.getenv("DEFAULT_TENANT_ID"))
+        or _normalize_tenant_id(os.getenv("TENANT_ID"))
+        or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+    )
+
 # API Key Security
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -98,10 +126,14 @@ class AUREAStateProvider:
 
     async def _fetch_state(self) -> AUREAStateSnapshot:
         """Actually fetch state from database and AUREA using async pool"""
-        from database.async_connection import get_pool
+        from database.async_connection import get_pool, get_tenant_pool
 
         try:
-            pool = get_pool()
+            try:
+                tenant_id = _resolve_tenant_id()
+                pool = get_tenant_pool(tenant_id)
+            except Exception:
+                pool = get_pool()
 
             # Helper for safe count extraction
             def safe_count(result: dict | None) -> int:
@@ -286,70 +318,40 @@ async def generate_aurea_response(
     # Get live system state
     state = await state_provider.get_live_state()
 
-    # Check if request is from MyRoofGenius
-    source = session.context.get("source", "") if session.context else ""
-    is_roofing_context = source in ["myroofgenius_web", "myroofgenius", "mrg"]
-
-    # Build roofing knowledge context for MyRoofGenius users
-    roofing_knowledge = ""
-    if is_roofing_context:
-        roofing_knowledge = """
-ROOFING EXPERTISE (You are an expert in the roofing industry):
-
-COMMON ROOFING MATERIALS:
-- Asphalt Shingles: Most popular (80% of US homes). 3-tab ($70-100/sq), Architectural ($100-150/sq), Premium ($150-500/sq). 15-30 year lifespan.
-- Metal Roofing: Steel, aluminum, copper, zinc. Standing seam ($300-700/sq), Metal shingles ($200-400/sq). 40-70 year lifespan.
-- Clay/Concrete Tiles: Heavy, durable. $300-500/sq. 50-100+ year lifespan. Common in SW US.
-- Slate: Natural stone, premium. $500-1,500/sq. 75-200 year lifespan.
-- Wood Shakes/Shingles: Cedar, redwood. $200-400/sq. 25-30 year lifespan.
-- EPDM (Rubber): Flat roofs. $3-6/sq ft. 20-25 year lifespan.
-- TPO/PVC: Commercial/flat roofs. $4-8/sq ft. 20-30 year lifespan.
-- Built-Up Roofing (BUR): Commercial. Multiple layers. 15-30 year lifespan.
-- Modified Bitumen: Roll roofing for flat roofs. 10-20 year lifespan.
-
-ROOFING TERMINOLOGY:
-- Square: 100 sq ft of roofing material
-- Pitch/Slope: Rise over run (e.g., 6/12 = 6 inches rise per 12 inches horizontal)
-- Flashing: Metal pieces preventing water intrusion at joints
-- Underlayment: Protective layer under shingles (felt, synthetic)
-- Ridge: Top horizontal line where roof slopes meet
-- Valley: Where two roof slopes meet at an angle
-- Eave: Lower edge of roof overhanging walls
-- Soffit: Underside of eave
-- Fascia: Board running along roof edge
-- Drip Edge: Metal strip at roof edges
-- Ice Dam: Ice buildup at eaves blocking drainage
-
-COMMON ROOF ISSUES:
-- Leaks: Often at flashing, valleys, penetrations
-- Missing/damaged shingles: Wind, age, impact damage
-- Ponding water: Flat roof drainage issues
-- Blistering: Moisture trapped under materials
-- Sagging: Structural issues, excessive weight
-- Poor ventilation: Leads to moisture damage, ice dams
-- Granule loss: Aging asphalt shingles
-- Moss/algae growth: Moisture retention issues
-
-COST ESTIMATION FACTORS:
-- Roof size (squares)
-- Pitch/slope complexity
-- Material choice
-- Tear-off vs. overlay
-- Number of layers to remove
-- Accessibility
-- Geographic location
-- Local labor rates
-- Permits and inspections
-- Waste factor (10-15%)
-
-"""
+    request_context = session.context if isinstance(session.context, dict) else {}
+    if build_execution_profile:
+        execution_profile = build_execution_profile(request_context)
+    else:
+        execution_profile = {
+            "persona_id": "core",
+            "persona_name": "AUREA Core",
+            "allowed_scopes": ["admin", "operator", "read_only"],
+            "source": request_context.get("source"),
+            "user_role": request_context.get("user_role"),
+        }
+    if load_persona_prompt:
+        persona_prompt = load_persona_prompt(execution_profile.get("persona_id", "core"))
+    else:
+        persona_prompt = "You are AUREA. Stay factual, safe, and operationally useful."
 
     # Build context-rich system prompt
     system_prompt = f"""You are AUREA - the Autonomous Universal Resource & Execution Assistant.
-{"You are a roofing industry expert and AI assistant for MyRoofGenius." if is_roofing_context else "You are Matt's AI twin and operational partner for the BrainOps AI OS."}
+You are operating as a contextual projection ("hologram") of AUREA for this request.
 
-{"CRITICAL: You are helping a user with roofing questions. Provide expert, helpful advice about roofing materials, costs, installation, repairs, and best practices." if is_roofing_context else "CRITICAL: You must be HONEST and talk about REAL operations, not fluffy generic AI responses."}
-{roofing_knowledge}
+ACTIVE PERSONA PROFILE:
+- persona_id: {execution_profile.get("persona_id")}
+- persona_name: {execution_profile.get("persona_name")}
+- source: {execution_profile.get("source")}
+- user_role: {execution_profile.get("user_role")}
+- allowed_scopes: {", ".join(execution_profile.get("allowed_scopes", []))}
+
+PERSONA DIRECTIVES:
+{persona_prompt}
+
+CRITICAL:
+- Be HONEST and use only real operational data.
+- Never claim or imply capabilities outside allowed scopes.
+- If a request exceeds scope, clearly say it is out-of-scope and propose a safe alternative.
 
 YOUR CURRENT STATE (RIGHT NOW, LIVE):
 - Decisions made in last hour: {state.decisions_made_last_hour}
@@ -884,6 +886,7 @@ class NLCommand(BaseModel):
     command: str
     session_id: Optional[str] = None
     auto_confirm: bool = False  # Auto-confirm high-impact actions
+    context: Optional[dict[str, Any]] = None
 
 
 @router.post("/command")
@@ -922,7 +925,19 @@ async def execute_natural_language_command(payload: NLCommand):
         except ImportError:
             power_layer = None
 
-        # Initialize NLU with power layer
+        context = payload.context or {}
+        if build_execution_profile:
+            execution_profile = build_execution_profile(context)
+        else:
+            execution_profile = {
+                "persona_id": "core",
+                "persona_name": "AUREA Core",
+                "allowed_scopes": ["admin", "operator", "read_only"],
+                "source": context.get("source"),
+                "user_role": context.get("user_role"),
+            }
+
+        # Initialize NLU with scoped execution profile
         llm = ChatOpenAI(model="gpt-4-turbo-preview", temperature=0.1)
         nlu = AUREANLUProcessor(
             llm_model=llm,
@@ -930,7 +945,8 @@ async def execute_natural_language_command(payload: NLCommand):
             aurea_instance=None,
             ai_board_instance=None,
             db_pool=None,
-            mcp_client=None
+            mcp_client=None,
+            execution_profile=execution_profile,
         )
 
         # Override auto-confirm if requested
@@ -946,6 +962,8 @@ async def execute_natural_language_command(payload: NLCommand):
 
         return {
             "command": payload.command,
+            "context": context,
+            "execution_profile": execution_profile,
             "result": result,
             "timestamp": datetime.now().isoformat(),
             "power_layer_available": power_layer is not None
