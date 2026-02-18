@@ -363,12 +363,10 @@ class UnifiedMemoryManager:
 
     def store(self, memory: Memory) -> str:
         """Store a memory with deduplication and linking"""
-        if not memory.tenant_id:
-            # Try to use instance tenant_id if memory tenant_id is missing
-            if self.tenant_id:
-                memory.tenant_id = self.tenant_id
-            else:
-                raise ValueError("tenant_id is mandatory for memory storage")
+        resolved_memory_tenant = self._resolve_tenant_uuid(memory.tenant_id) or self.tenant_id
+        if not resolved_memory_tenant:
+            raise ValueError("tenant_id is mandatory for memory storage")
+        memory.tenant_id = resolved_memory_tenant
 
         if ENABLE_UNIFIED_MEMORY_DECAY:
             try:
@@ -431,6 +429,10 @@ class UnifiedMemoryManager:
                 if not cur:
                     logger.error("❌ Failed to get cursor from pool")
                     return None
+                cur.execute(
+                    "SELECT set_config('app.current_tenant_id', %s, true)",
+                    [memory.tenant_id],
+                )
 
                 query = """
                 INSERT INTO unified_ai_memory (
