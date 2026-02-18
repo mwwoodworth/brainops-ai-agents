@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -30,6 +31,18 @@ from typing import Any, Optional
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_tenant_uuid(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    try:
+        return str(uuid.UUID(candidate))
+    except Exception:
+        return None
 
 
 class AlertSeverity(str, Enum):
@@ -485,7 +498,10 @@ class PermanentObservabilityDaemon:
             # Set tenant context for RLS (agent_worker has NOBYPASSRLS)
             from config import config as app_config
 
-            tenant_id = app_config.tenant.default_tenant_id
+            tenant_id = (
+                _normalize_tenant_uuid(app_config.tenant.default_tenant_id)
+                or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+            )
 
             # Batch insert events
             for event in events_to_persist:
@@ -495,29 +511,29 @@ class PermanentObservabilityDaemon:
                     timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
 
                 async with pool.acquire() as conn:
-                    # Use session-level (false) because asyncpg auto-commits each
-                    # statement. Transaction-local (true) only lasts for the
-                    # set_config call itself, leaving the INSERT without context.
-                    await conn.execute(
-                        "SELECT set_config('app.current_tenant_id', $1, false)",
-                        tenant_id,
-                    )
-                    await conn.execute(
-                        """
-                        INSERT INTO ai_observability_events
-                        (event_id, event_type, service, severity, message, details, timestamp, tenant_id)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                        ON CONFLICT (event_id) DO NOTHING
-                    """,
-                        event.event_id,
-                        event.event_type,
-                        event.service,
-                        event.severity.value,
-                        event.message,
-                        json.dumps(event.details),
-                        timestamp,
-                        tenant_id,
-                    )
+                    # In Supabase transaction pooling mode, tenant context + write
+                    # must run in the same explicit transaction.
+                    async with conn.transaction():
+                        await conn.execute(
+                            "SELECT set_config('app.current_tenant_id', $1, true)",
+                            tenant_id,
+                        )
+                        await conn.execute(
+                            """
+                            INSERT INTO ai_observability_events
+                            (event_id, event_type, service, severity, message, details, timestamp, tenant_id)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                            ON CONFLICT (event_id) DO NOTHING
+                        """,
+                            event.event_id,
+                            event.event_type,
+                            event.service,
+                            event.severity.value,
+                            event.message,
+                            json.dumps(event.details),
+                            timestamp,
+                            tenant_id,
+                        )
                 event.persisted = True
 
             self.stats.events_persisted += len(events_to_persist)
@@ -542,6 +558,12 @@ class PermanentObservabilityDaemon:
                 return []
 
             pool = get_pool()
+            from config import config as app_config
+
+            tenant_id = (
+                _normalize_tenant_uuid(app_config.tenant.default_tenant_id)
+                or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+            )
 
             query = """
                 SELECT event_id, event_type, service, severity, message, details, timestamp
@@ -564,7 +586,17 @@ class PermanentObservabilityDaemon:
             query += f" ORDER BY timestamp DESC LIMIT ${param_idx}"
             params.append(limit)
 
-            rows = await pool.fetch(query, *params)
+            raw_pool = getattr(pool, "pool", None) or getattr(pool, "_pool", None)
+            if raw_pool is None:
+                rows = await pool.fetch(query, *params)
+            else:
+                async with raw_pool.acquire(timeout=10.0) as conn:
+                    async with conn.transaction():
+                        await conn.execute(
+                            "SELECT set_config('app.current_tenant_id', $1, true)",
+                            tenant_id,
+                        )
+                        rows = await conn.fetch(query, *params)
 
             return [
                 {
@@ -596,8 +628,14 @@ class PermanentObservabilityDaemon:
                 return []
 
             pool = get_pool()
+            from config import config as app_config
 
-            rows = await pool.fetch(
+            tenant_id = (
+                _normalize_tenant_uuid(app_config.tenant.default_tenant_id)
+                or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+            )
+
+            query = (
                 """
                 SELECT event_id, event_type, severity, message, details, timestamp
                 FROM ai_observability_events
@@ -605,9 +643,19 @@ class PermanentObservabilityDaemon:
                   AND timestamp > NOW() - INTERVAL '%s hours'
                 ORDER BY timestamp DESC
             """
-                % hours,
-                service,
+                % hours
             )
+            raw_pool = getattr(pool, "pool", None) or getattr(pool, "_pool", None)
+            if raw_pool is None:
+                rows = await pool.fetch(query, service)
+            else:
+                async with raw_pool.acquire(timeout=10.0) as conn:
+                    async with conn.transaction():
+                        await conn.execute(
+                            "SELECT set_config('app.current_tenant_id', $1, true)",
+                            tenant_id,
+                        )
+                        rows = await conn.fetch(query, service)
 
             return [
                 {

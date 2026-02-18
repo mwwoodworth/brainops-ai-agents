@@ -4,6 +4,7 @@ Centralizes all configuration with environment variable support
 """
 import logging
 import os
+import uuid
 from typing import Optional
 from urllib.parse import unquote, urlparse
 
@@ -146,11 +147,41 @@ class TenantConfig:
     # Weathercraft primary tenant - hardcoded fallback so RLS never blocks writes
     PRIMARY_TENANT_ID = "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
 
+    @staticmethod
+    def _normalize_uuid(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        candidate = str(value).strip()
+        if not candidate:
+            return None
+        try:
+            return str(uuid.UUID(candidate))
+        except Exception:
+            return None
+
     def __init__(self):
-        # Default tenant ID from environment, with hardcoded fallback
+        raw_default_tenant = os.getenv("DEFAULT_TENANT_ID")
+        raw_tenant_id = os.getenv("TENANT_ID")
+
+        # Resolve a valid UUID tenant in priority order:
+        # explicit DEFAULT_TENANT_ID > TENANT_ID > hardcoded primary fallback.
         self.default_tenant_id = (
-            os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID") or self.PRIMARY_TENANT_ID
+            self._normalize_uuid(raw_default_tenant)
+            or self._normalize_uuid(raw_tenant_id)
+            or self.PRIMARY_TENANT_ID
         )
+
+        if raw_default_tenant is not None and self._normalize_uuid(raw_default_tenant) is None:
+            logger.warning(
+                "DEFAULT_TENANT_ID is invalid/empty (%r); falling back to a valid tenant UUID",
+                raw_default_tenant,
+            )
+        elif raw_tenant_id is not None and self._normalize_uuid(raw_tenant_id) is None:
+            logger.warning(
+                "TENANT_ID is invalid/empty (%r); falling back to a valid tenant UUID",
+                raw_tenant_id,
+            )
+
         if self.default_tenant_id == self.PRIMARY_TENANT_ID:
             logger.info(f"Using primary tenant ID fallback: {self.default_tenant_id[:8]}...")
 

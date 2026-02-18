@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -107,36 +108,65 @@ DB_CONFIG = _get_db_config()
 from contextlib import contextmanager
 
 
+def _normalize_tenant_uuid(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    try:
+        return str(uuid.UUID(candidate))
+    except Exception:
+        return None
+
+
+def _resolve_valid_tenant_id() -> str:
+    from config import config as app_config
+
+    return (
+        _normalize_tenant_uuid(app_config.tenant.default_tenant_id)
+        or _normalize_tenant_uuid(os.getenv("DEFAULT_TENANT_ID"))
+        or _normalize_tenant_uuid(os.getenv("TENANT_ID"))
+        or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+    )
+
+
 @contextmanager
 def get_db_connection():
     """Get database connection from shared pool or create direct connection.
 
     Sets app.current_tenant_id for RLS policies (agent_worker has NOBYPASSRLS).
     """
-    from config import config as app_config
-
-    tenant_id = app_config.tenant.default_tenant_id
+    tenant_id = _resolve_valid_tenant_id()
 
     conn = None
-    from_pool = False
     try:
         if SYNC_POOL_AVAILABLE and get_sync_pool:
             pool = get_sync_pool()
             with pool.get_connection() as pooled_conn:
                 if pooled_conn:
-                    # Set tenant context for RLS
-                    if tenant_id:
+                    prev_autocommit = pooled_conn.autocommit
+                    pooled_conn.autocommit = False
+                    try:
+                        # Keep tenant context and DML in one explicit transaction.
                         _cur = pooled_conn.cursor()
                         _cur.execute(
                             "SELECT set_config('app.current_tenant_id', %s, true)",
                             (tenant_id,),
                         )
                         _cur.close()
-                    yield pooled_conn
+                        yield pooled_conn
+                        pooled_conn.commit()
+                    except Exception:
+                        pooled_conn.rollback()
+                        raise
+                    finally:
+                        pooled_conn.autocommit = prev_autocommit
                     return
         # Fallback to direct connection
         conn = psycopg2.connect(**DB_CONFIG)
-        # Set tenant context for RLS
+        conn.autocommit = False
+        # Set tenant context for RLS inside explicit transaction
         if tenant_id:
             _cur = conn.cursor()
             _cur.execute(
@@ -144,9 +174,14 @@ def get_db_connection():
                 (tenant_id,),
             )
             _cur.close()
-        yield conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     finally:
-        if conn and not from_pool:
+        if conn:
             try:
                 conn.close()
             except Exception:
