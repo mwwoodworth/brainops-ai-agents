@@ -839,7 +839,7 @@ try:
     logger.info("✅ Embedded Memory System loaded")
 except ImportError as e:
     EMBEDDED_MEMORY_AVAILABLE = False
-    logger.warning(f"Embedded Memory not available: {e}")
+    logger.exception("Embedded Memory import failed; subsystem disabled")
     get_embedded_memory = None
 
 # Import AI Training Pipeline with fallback
