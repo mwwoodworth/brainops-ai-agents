@@ -164,8 +164,8 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.28.0"
-        )  # LangGraph + LangChain enhancements + full-power CRUD release
+            "VERSION", "v11.29.0"
+        )  # Operational intelligence: memory categorization, brain recall enhancement
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "10000"))
