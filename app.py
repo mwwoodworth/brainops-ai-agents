@@ -1214,34 +1214,19 @@ async def lifespan(app: FastAPI):
 
         # Initialize database pool
         try:
-            pool_config = PoolConfig(
-                host=config.database.host,
-                port=config.database.port,
-                user=config.database.user,
-                password=config.database.password,
-                database=config.database.database,
-                ssl=config.database.ssl,
-                ssl_verify=config.database.ssl_verify,
-            )
-            await init_pool(pool_config)
+            db_ready = await _attempt_db_pool_init_once("deferred_init", timeout=5.0)
             if using_fallback():
                 logger.warning(
                     "⚠️ Running with in-memory fallback datastore (database unreachable)."
                 )
-            else:
+            elif db_ready:
                 logger.info("✅ Database pool initialized")
-
-            # Test connection with short timeout
-            pool = get_pool()
-            try:
-                if await asyncio.wait_for(pool.test_connection(), timeout=5.0):
-                    logger.info("✅ Database connection verified")
-                else:
-                    logger.error("❌ Database connection test failed")
-            except asyncio.TimeoutError:
-                logger.warning("⚠️ Database connection test timed out (will retry)")
+            else:
+                logger.warning("⚠️ Database pool initialized but health check failed during deferred_init")
 
             # Schema verification (read-only) - no DDL, agent_worker has no DDL perms
+            pool = get_pool()
+
             async def verify_schema():
                 try:
                     await asyncio.sleep(2)
@@ -1264,7 +1249,23 @@ async def lifespan(app: FastAPI):
 
             create_safe_task(verify_schema(), "schema_verify")
         except Exception as e:
+            app.state.db_init_error = str(e)
             logger.error(f"❌ Deferred database init failed: {e}")
+
+            async def retry_db_init():
+                attempts = int(os.getenv("DB_INIT_RETRY_ATTEMPTS", "18"))
+                interval_s = float(os.getenv("DB_INIT_RETRY_INTERVAL_S", "10"))
+                for attempt in range(1, attempts + 1):
+                    await asyncio.sleep(interval_s)
+                    if await _attempt_db_pool_init_once(
+                        f"deferred_retry_{attempt}/{attempts}", timeout=5.0
+                    ):
+                        logger.info("✅ Deferred database init retry succeeded (%d/%d)", attempt, attempts)
+                        return
+                    logger.warning("Deferred database init retry failed (%d/%d)", attempt, attempts)
+                logger.error("❌ Deferred database init retries exhausted (%d attempts)", attempts)
+
+            create_safe_task(retry_db_init(), "retry_db_init")
 
     # Schedule deferred init to run after yield
     create_safe_task(deferred_init(), "deferred_init")
@@ -1278,6 +1279,7 @@ async def lifespan(app: FastAPI):
     app.state.memory = None
     app.state.embedded_memory = None
     app.state.embedded_memory_error = None
+    app.state.db_init_error = None
     app.state.nerve_center = None
     app.state.nerve_center_error = None
     app.state.operational_monitor = None
@@ -3144,6 +3146,53 @@ async def send_email_endpoint(
     return {"success": success, "message": message}
 
 
+async def _pool_roundtrip_healthy(pool: Any, timeout: float = 4.0) -> bool:
+    """
+    Prefer pool-based roundtrip health checks.
+
+    Direct new-connection probes can report false negatives when the pool is still
+    serving traffic but the provider temporarily blocks fresh auth attempts.
+    """
+    try:
+        value = await asyncio.wait_for(pool.fetchval("SELECT 1"), timeout=timeout)
+        return str(value) == "1"
+    except asyncio.TimeoutError:
+        logger.warning("Health check pool roundtrip timed out after %.2fs", timeout)
+        return False
+    except Exception as exc:
+        logger.warning("Health check pool roundtrip failed: %s", exc)
+        return False
+
+
+async def _attempt_db_pool_init_once(context: str, timeout: float = 5.0) -> bool:
+    """Best-effort database pool initialization + immediate roundtrip verification."""
+    try:
+        pool_config = PoolConfig(
+            host=config.database.host,
+            port=config.database.port,
+            user=config.database.user,
+            password=config.database.password,
+            database=config.database.database,
+            ssl=config.database.ssl,
+            ssl_verify=config.database.ssl_verify,
+        )
+        await init_pool(pool_config)
+        pool = get_pool()
+        healthy = await _pool_roundtrip_healthy(pool, timeout=timeout)
+        if healthy:
+            app.state.db_init_error = None
+            logger.info("✅ Database pool verified (%s)", context)
+            return True
+
+        app.state.db_init_error = "Pool roundtrip health check failed"
+        logger.warning("Database pool initialized but not healthy (%s)", context)
+        return False
+    except Exception as exc:
+        app.state.db_init_error = str(exc)
+        logger.warning("Database pool init attempt failed (%s): %s", context, exc)
+        return False
+
+
 @app.get("/health")
 @limiter.limit("60/minute")
 async def health_check(
@@ -3176,33 +3225,28 @@ async def health_check(
     async def _build_health_payload() -> dict[str, Any]:
         # Handle case where pool isn't initialized yet (during startup)
         db_timeout = float(os.getenv("DB_HEALTH_TIMEOUT_S", "4.0"))
-        db_timed_out = False
         pool_metrics: dict[str, Any] | None = None
+        pool: Any | None = None
         try:
             pool = get_pool()
-            try:
-                db_healthy = await asyncio.wait_for(pool.test_connection(), timeout=db_timeout)
-            except asyncio.TimeoutError:
-                db_timed_out = True
-                logger.warning("Health check DB test timed out after %.2fs", db_timeout)
-                db_healthy = False
         except RuntimeError as e:
             if "not initialized" in str(e):
-                # Pool not ready yet - return starting status
-                return {
-                    "status": "starting",
-                    "version": VERSION,
-                    "build": BUILD_TIME,
-                    "database": "initializing",
-                    "message": "Service is starting up, database pool initializing...",
-                }
-            raise
-        if db_timed_out:
-            db_status = "timeout"
-        else:
-            db_status = (
-                "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
-            )
+                lazy_ready = await _attempt_db_pool_init_once("health_lazy_init", timeout=max(2.0, db_timeout))
+                if not lazy_ready:
+                    # Pool not ready yet - return starting status
+                    return {
+                        "status": "starting",
+                        "version": VERSION,
+                        "build": BUILD_TIME,
+                        "database": "initializing",
+                        "database_error": getattr(app.state, "db_init_error", None),
+                        "message": "Service is starting up, database pool initializing...",
+                    }
+                pool = get_pool()
+            else:
+                raise
+        db_healthy = await _pool_roundtrip_healthy(pool, timeout=max(2.0, db_timeout))
+        db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
         auth_configured = config.security.auth_configured
 
         # Best-effort pool metrics: helps diagnose pool exhaustion vs. connectivity issues.
@@ -3245,6 +3289,7 @@ async def health_check(
             "version": VERSION,
             "build": BUILD_TIME,
             "database": db_status,
+            "database_error": getattr(app.state, "db_init_error", None),
             "db_pool": pool_metrics,
             "active_systems": active_systems,
             "system_count": len(active_systems),
@@ -7220,6 +7265,17 @@ async def get_aurea_status(request: Request):
                 "websocket": "/aurea/chat/ws/{session_id}",
             },
         }
+    except DatabaseUnavailableError as e:
+        logger.warning("AUREA status requested while database unavailable: %s", e)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "initializing",
+                "aurea_available": False,
+                "message": "Database pool not initialized yet",
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
     except Exception as e:
         logger.error(f"Failed to get AUREA status: {e!r}", exc_info=True)
         return JSONResponse(
