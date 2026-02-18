@@ -9,14 +9,35 @@ import json
 import logging
 import os
 import threading
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from brain_store_helper import brain_store
-from database.async_connection import get_pool, using_fallback
+from database.async_connection import get_pool, get_tenant_pool, using_fallback
 from safe_task import create_safe_task
 
 logger = logging.getLogger("OPERATIONAL_MONITOR")
+
+
+def _normalize_tenant_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    try:
+        return str(uuid.UUID(candidate))
+    except Exception:
+        return None
+
+
+def _resolve_tenant_id() -> str:
+    return (
+        _normalize_tenant_id(os.getenv("DEFAULT_TENANT_ID"))
+        or _normalize_tenant_id(os.getenv("TENANT_ID"))
+        or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+    )
 
 
 class OperationalMonitor:
@@ -27,6 +48,10 @@ class OperationalMonitor:
         self.is_running = False
         self._shutdown_event = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
+        self._started_at = datetime.now(timezone.utc)
+        self._startup_grace_seconds = max(
+            0, int(os.getenv("OPERATIONAL_MONITOR_STARTUP_GRACE_SECONDS", "3600"))
+        )
 
         self._last_run_at: Optional[str] = None
         self._last_error: Optional[str] = None
@@ -72,7 +97,10 @@ class OperationalMonitor:
         if using_fallback():
             return []
 
-        pool = get_pool()
+        try:
+            pool = get_tenant_pool(_resolve_tenant_id())
+        except Exception:
+            pool = get_pool()
         alerts: list[dict[str, Any]] = []
 
         scheduled_alert = await self._check_scheduled_agents(pool)
@@ -93,20 +121,26 @@ class OperationalMonitor:
         return alerts
 
     async def _check_scheduled_agents(self, pool) -> Optional[dict[str, Any]]:
+        # Fresh deploys can legitimately have sparse execution history.
+        uptime_seconds = (datetime.now(timezone.utc) - self._started_at).total_seconds()
+        if uptime_seconds < self._startup_grace_seconds:
+            return None
+
         rows = await pool.fetch(
             """
             SELECT
                 a.name AS agent_name,
+                s.frequency_minutes AS frequency_minutes,
                 MAX(e.created_at) AS last_execution
             FROM agent_schedules s
             JOIN ai_agents a ON a.id = s.agent_id
             LEFT JOIN ai_agent_executions e
               ON e.agent_name = a.name
-             AND e.created_at > NOW() - INTERVAL '1 hour'
+             AND e.created_at > NOW() - make_interval(mins => GREATEST(s.frequency_minutes * 2, 60))
             WHERE s.enabled = TRUE
-            GROUP BY a.name
+            GROUP BY a.name, s.frequency_minutes
             HAVING MAX(e.created_at) IS NULL
-            ORDER BY a.name
+            ORDER BY s.frequency_minutes ASC, a.name
             LIMIT 25
             """
         )
@@ -114,16 +148,25 @@ class OperationalMonitor:
         if not rows:
             return None
 
-        missing_agents = [str(row.get("agent_name")) for row in rows if row.get("agent_name")]
+        missing_agents = []
+        for row in rows:
+            name = str(row.get("agent_name") or "").strip()
+            if not name:
+                continue
+            frequency = row.get("frequency_minutes")
+            if frequency:
+                missing_agents.append(f"{name} ({frequency}m)")
+            else:
+                missing_agents.append(name)
         return {
             "type": "scheduled_agents_missing_execution",
             "severity": "critical" if len(missing_agents) >= 3 else "warning",
             "summary": (
-                f"{len(missing_agents)} scheduled agents have no execution in the last hour"
+                f"{len(missing_agents)} scheduled agents are beyond expected execution window"
             ),
             "details": {
                 "missing_agents": missing_agents,
-                "window": "1 hour",
+                "window": "per-agent frequency * 2 (minimum 60 minutes)",
             },
         }
 
@@ -235,9 +278,12 @@ class OperationalMonitor:
         logger.warning("Operational alert: %s", alert.get("summary", alert.get("type")))
 
     def get_status(self) -> dict[str, Any]:
+        uptime_seconds = (datetime.now(timezone.utc) - self._started_at).total_seconds()
         return {
             "is_running": self.is_running,
             "interval_seconds": self.interval_seconds,
+            "uptime_seconds": round(uptime_seconds, 2),
+            "startup_grace_seconds": self._startup_grace_seconds,
             "last_run_at": self._last_run_at,
             "alerts_emitted": self._alerts_emitted,
             "recent_alerts": list(self._recent_alerts[-10:]),

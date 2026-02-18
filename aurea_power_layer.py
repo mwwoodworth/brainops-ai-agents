@@ -1043,110 +1043,128 @@ class AUREAPowerLayer:
             "query_database": {
                 "description": "Execute a SQL query against the database. Read-only by default.",
                 "parameters": {"sql": "string", "read_only": "boolean (default true)"},
-                "action": self.query_database
+                "action": self.query_database,
+                "scope": "admin",
             },
             "get_table_info": {
                 "description": "Get information about a database table.",
                 "parameters": {"table_name": "string", "schema": "string (default public)"},
-                "action": self.get_table_info
+                "action": self.get_table_info,
+                "scope": "operator",
             },
             "search_tables": {
                 "description": "Search for database tables by name.",
                 "parameters": {"query": "string"},
-                "action": self.search_tables
+                "action": self.search_tables,
+                "scope": "operator",
             },
 
             # Monitoring & Logs
             "get_service_logs": {
                 "description": "Fetch recent logs for a service (agents, backend, mcp).",
                 "parameters": {"service_name": "string", "lines": "integer (default 100)"},
-                "action": self.get_service_logs
+                "action": self.get_service_logs,
+                "scope": "admin",
             },
             
             # Deployment
             "deploy_vercel": {
                 "description": "Deploy a project to Vercel.",
                 "parameters": {"project": "string", "production": "boolean"},
-                "action": self.deploy_vercel
+                "action": self.deploy_vercel,
+                "scope": "admin",
             },
             "deploy_render": {
                 "description": "Deploy a service to Render.",
                 "parameters": {"service": "string"},
-                "action": self.deploy_render
+                "action": self.deploy_render,
+                "scope": "admin",
             },
 
             # Git
             "git_status": {
                 "description": "Get git status for a repository.",
                 "parameters": {"repo_path": "string"},
-                "action": self.git_status
+                "action": self.git_status,
+                "scope": "operator",
             },
             "git_commit_and_push": {
                 "description": "Commit and push changes to a repository.",
                 "parameters": {"repo_path": "string", "message": "string", "files": "list (optional)"},
-                "action": self.git_commit_and_push
+                "action": self.git_commit_and_push,
+                "scope": "admin",
             },
 
             # UI Testing
             "run_playwright_test": {
                 "description": "Run Playwright UI tests against a URL.",
                 "parameters": {"url": "string", "actions": "list (optional)"},
-                "action": self.run_playwright_test
+                "action": self.run_playwright_test,
+                "scope": "operator",
             },
             "check_ui_health": {
                 "description": "Quick health check of a UI.",
                 "parameters": {"url": "string"},
-                "action": self.check_ui_health
+                "action": self.check_ui_health,
+                "scope": "read_only",
             },
 
             # AI Models
             "call_ai_model": {
                 "description": "Call an AI model (gemini, codex, claude, perplexity, openai).",
                 "parameters": {"model": "string", "prompt": "string", "system_prompt": "string (optional)"},
-                "action": self.call_ai_model
+                "action": self.call_ai_model,
+                "scope": "read_only",
             },
 
             # Monitoring
             "check_all_services_health": {
                 "description": "Check health of all BrainOps services.",
                 "parameters": {},
-                "action": self.check_all_services_health
+                "action": self.check_all_services_health,
+                "scope": "read_only",
             },
             "get_system_metrics": {
                 "description": "Get comprehensive system metrics.",
                 "parameters": {},
-                "action": self.get_system_metrics
+                "action": self.get_system_metrics,
+                "scope": "read_only",
             },
 
             # Files
             "read_file": {
                 "description": "Read a file from the filesystem.",
                 "parameters": {"file_path": "string"},
-                "action": self.read_file
+                "action": self.read_file,
+                "scope": "operator",
             },
             "write_file": {
                 "description": "Write a file to the filesystem.",
                 "parameters": {"file_path": "string", "content": "string"},
-                "action": self.write_file
+                "action": self.write_file,
+                "scope": "admin",
             },
 
             # Automation
             "execute_workflow": {
                 "description": "Execute a predefined workflow (full_deploy, health_check_all, db_backup_check, ui_smoke_test).",
                 "parameters": {"workflow_name": "string", "params": "object (optional)"},
-                "action": self.execute_workflow
+                "action": self.execute_workflow,
+                "scope": "admin",
             },
             
             # Voice
             "speak": {
                 "description": "Generate speech from text.",
                 "parameters": {"text": "string"},
-                "action": self.speak
+                "action": self.speak,
+                "scope": "read_only",
             },
             "call_phone": {
                 "description": "Make a phone call to a number with a message.",
                 "parameters": {"number": "string", "message": "string"},
-                "action": self.call_phone
+                "action": self.call_phone,
+                "scope": "admin",
             }
         }
 

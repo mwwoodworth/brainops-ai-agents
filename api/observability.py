@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -86,14 +87,87 @@ class FullDashboard(BaseModel):
 _startup_time = time.time()
 
 
+def _normalize_tenant_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    try:
+        return str(uuid.UUID(candidate))
+    except Exception:
+        return None
+
+
+def _resolve_observability_tenant_id() -> str:
+    return (
+        _normalize_tenant_id(os.getenv("DEFAULT_TENANT_ID"))
+        or _normalize_tenant_id(os.getenv("TENANT_ID"))
+        or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+    )
+
+
+def _get_query_pool() -> tuple[Any, bool]:
+    """Return a tenant-scoped pool when possible plus fallback flag."""
+    from database.async_connection import get_pool, get_tenant_pool, using_fallback
+
+    if using_fallback():
+        return get_pool(), True
+
+    tenant_id = _resolve_observability_tenant_id()
+    try:
+        return get_tenant_pool(tenant_id), False
+    except Exception as exc:
+        logger.warning(
+            "Observability tenant pool unavailable for tenant %s; using base pool: %s",
+            tenant_id,
+            exc,
+        )
+        return get_pool(), False
+
+
+def _runtime_uptime_seconds() -> float:
+    return max(0.0, time.time() - _startup_time)
+
+
+def _agent_activity_min_threshold_24h(uptime_seconds: float | None = None) -> int:
+    grace = int(os.getenv("OBSERVABILITY_AGENT_ACTIVITY_STARTUP_GRACE_SECONDS", "3600"))
+    minimum = int(os.getenv("OBSERVABILITY_AGENT_ACTIVITY_MIN_24H", "10"))
+    uptime = uptime_seconds if uptime_seconds is not None else _runtime_uptime_seconds()
+    if uptime < grace:
+        return 0
+    return max(1, minimum)
+
+
+def _get_runtime_aurea_snapshot() -> dict[str, Any]:
+    """Best-effort runtime AUREA status from in-process app state."""
+    try:
+        from app import app
+
+        aurea = getattr(app.state, "aurea", None)
+        if not aurea:
+            return {}
+
+        snapshot: dict[str, Any] = {}
+        get_status = getattr(aurea, "get_status", None)
+        if callable(get_status):
+            try:
+                snapshot = get_status() or {}
+            except Exception:
+                snapshot = {}
+
+        snapshot.setdefault("running", bool(getattr(aurea, "running", False)))
+        snapshot.setdefault("cycles_completed", int(getattr(aurea, "cycle_count", 0) or 0))
+        return snapshot
+    except Exception:
+        return {}
+
+
 async def _get_database_stats() -> dict[str, Any]:
     """Get database connection and table stats"""
     try:
-        from database.async_connection import get_pool, using_fallback
-
-        pool = get_pool()
-
-        if using_fallback():
+        pool, using_in_memory = _get_query_pool()
+        if using_in_memory:
             return {
                 "status": "fallback",
                 "connected": False,
@@ -102,7 +176,10 @@ async def _get_database_stats() -> dict[str, Any]:
             }
 
         # Test connection
-        connected = await pool.test_connection()
+        if hasattr(pool, "test_connection"):
+            connected = await pool.test_connection()
+        else:
+            connected = bool(await pool.fetchval("SELECT 1"))
         if not connected:
             return {"status": "disconnected", "connected": False, "error": "Connection test failed"}
 
@@ -134,12 +211,29 @@ async def _get_database_stats() -> dict[str, Any]:
 async def _get_aurea_stats() -> dict[str, Any]:
     """Get AUREA orchestrator stats"""
     try:
-        from database.async_connection import get_pool, using_fallback
+        runtime = _get_runtime_aurea_snapshot()
+        runtime_running = bool(runtime.get("running"))
+        runtime_mode = str(runtime.get("autonomy_level") or runtime.get("mode") or "FULL_AUTO")
+        if runtime_mode.startswith("AutonomyLevel."):
+            runtime_mode = runtime_mode.split(".", 1)[1]
 
-        if using_fallback():
-            return {"status": "database_unavailable", "running": False}
-
-        pool = get_pool()
+        pool, using_in_memory = _get_query_pool()
+        if using_in_memory:
+            return {
+                "status": "running" if runtime_running else "database_unavailable",
+                "running": runtime_running,
+                "mode": runtime_mode,
+                "cycles_last_hour": 0,
+                "decisions_24h": {
+                    "total": 0,
+                    "pending": 0,
+                    "completed": 0,
+                    "failed": 0,
+                    "success_rate": 0,
+                },
+                "health_score": 100 if runtime_running else 0,
+                "data_source": "runtime_only",
+            }
 
         # Get cycle count in last hour
         cycles = (
@@ -171,11 +265,12 @@ async def _get_aurea_stats() -> dict[str, Any]:
         failed = decision_stats["failed"] if decision_stats else 0
 
         success_rate = (completed / total_decisions * 100) if total_decisions > 0 else 0
+        running = runtime_running or cycles > 0
 
         return {
-            "status": "running" if cycles > 0 else "stopped",
-            "running": cycles > 0,
-            "mode": "FULL_AUTO",
+            "status": "running" if running else "stopped",
+            "running": running,
+            "mode": runtime_mode,
             "cycles_last_hour": cycles,
             "decisions_24h": {
                 "total": total_decisions,
@@ -184,7 +279,9 @@ async def _get_aurea_stats() -> dict[str, Any]:
                 "failed": failed,
                 "success_rate": round(success_rate, 2),
             },
-            "health_score": round(success_rate, 2),
+            "health_score": round(success_rate, 2) if total_decisions > 0 else (100 if running else 0),
+            "runtime_cycles_completed": runtime.get("cycles_completed", 0),
+            "data_source": "runtime+database",
         }
     except Exception as e:
         logger.error(f"Error getting AUREA stats: {e}")
@@ -194,12 +291,9 @@ async def _get_aurea_stats() -> dict[str, Any]:
 async def _get_agent_stats() -> dict[str, Any]:
     """Get agent execution stats"""
     try:
-        from database.async_connection import get_pool, using_fallback
-
-        if using_fallback():
+        pool, using_in_memory = _get_query_pool()
+        if using_in_memory:
             return {"status": "database_unavailable"}
-
-        pool = get_pool()
 
         # Get execution stats
         executions = await pool.fetch(
@@ -221,15 +315,18 @@ async def _get_agent_stats() -> dict[str, Any]:
         total_successful = sum(r["successful"] for r in executions) if executions else 0
         success_rate = (total_successful / total_executions * 100) if total_executions > 0 else 0
 
-        # Get scheduled agent count
-        scheduled_count = (
-            await pool.fetchval(
-                """
-            SELECT COUNT(*) FROM agent_schedules WHERE enabled = true
-        """
+        scheduled_count = 0
+        try:
+            scheduled_count = (
+                await pool.fetchval(
+                    """
+                SELECT COUNT(*) FROM agent_schedules WHERE enabled = true
+            """
+                )
+                or 0
             )
-            or 0
-        )
+        except Exception as exc:
+            logger.warning("Could not read scheduled agent count: %s", exc)
 
         top_agents = [
             {
@@ -247,6 +344,7 @@ async def _get_agent_stats() -> dict[str, Any]:
             "executions_24h": total_executions,
             "success_rate": round(success_rate, 2),
             "top_agents": top_agents,
+            "data_source": "tenant_scoped_db",
         }
     except Exception as e:
         logger.error(f"Error getting agent stats: {e}")
@@ -256,12 +354,9 @@ async def _get_agent_stats() -> dict[str, Any]:
 async def _get_learning_stats() -> dict[str, Any]:
     """Get learning system stats"""
     try:
-        from database.async_connection import get_pool, using_fallback
-
-        if using_fallback():
+        pool, using_in_memory = _get_query_pool()
+        if using_in_memory:
             return {"status": "database_unavailable"}
-
-        pool = get_pool()
 
         # Get insight counts
         insights_24h = (
@@ -311,12 +406,9 @@ async def _get_learning_stats() -> dict[str, Any]:
 async def _get_self_healing_stats() -> dict[str, Any]:
     """Get self-healing system stats"""
     try:
-        from database.async_connection import get_pool, using_fallback
-
-        if using_fallback():
+        pool, using_in_memory = _get_query_pool()
+        if using_in_memory:
             return {"status": "database_unavailable"}
-
-        pool = get_pool()
 
         # Get remediation stats
         remediations = await pool.fetchrow(
@@ -349,12 +441,9 @@ async def _get_self_healing_stats() -> dict[str, Any]:
 async def _get_memory_stats() -> dict[str, Any]:
     """Get memory system stats"""
     try:
-        from database.async_connection import get_pool, using_fallback
-
-        if using_fallback():
+        pool, using_in_memory = _get_query_pool()
+        if using_in_memory:
             return {"status": "database_unavailable"}
-
-        pool = get_pool()
 
         # Check for unified_brain table
         brain_count = (
@@ -404,12 +493,9 @@ async def _get_memory_stats() -> dict[str, Any]:
 async def _get_revenue_stats() -> dict[str, Any]:
     """Get revenue pipeline stats"""
     try:
-        from database.async_connection import get_pool, using_fallback
-
-        if using_fallback():
+        pool, using_in_memory = _get_query_pool()
+        if using_in_memory:
             return {"status": "database_unavailable"}
-
-        pool = get_pool()
 
         async def _fetch_leads(table: str, include_status: bool) -> dict[str, Any]:
             stage_expr = (
@@ -521,11 +607,12 @@ async def get_full_dashboard() -> dict[str, Any]:
 
     # Determine overall status
     issues = []
+    min_activity_24h = _agent_activity_min_threshold_24h(uptime_seconds=uptime)
     if not db_stats.get("connected"):
         issues.append("database_disconnected")
     if not aurea_stats.get("running"):
         issues.append("aurea_not_running")
-    if agent_stats.get("executions_24h", 0) < 10:
+    if min_activity_24h > 0 and agent_stats.get("executions_24h", 0) < min_activity_24h:
         issues.append("low_agent_activity")
 
     if len(issues) == 0:
@@ -554,6 +641,7 @@ async def get_full_dashboard() -> dict[str, Any]:
         "database": db_stats,
         "aurea": aurea_stats,
         "agents": agent_stats,
+        "agent_activity_threshold_24h": min_activity_24h,
         "learning": learning_stats,
         "self_healing": healing_stats,
         "memory": memory_stats,
@@ -602,7 +690,12 @@ async def deep_health_check() -> dict[str, Any]:
 
     # Check agents
     agent_stats = await _get_agent_stats()
-    agent_healthy = agent_stats.get("executions_24h", 0) > 0
+    min_activity_24h = _agent_activity_min_threshold_24h()
+    agent_healthy = (
+        True
+        if min_activity_24h == 0
+        else agent_stats.get("executions_24h", 0) >= min_activity_24h
+    )
     checks["agents"] = {"healthy": agent_healthy, "details": agent_stats}
 
     # Check memory
@@ -660,13 +753,15 @@ async def get_active_alerts() -> dict[str, Any]:
 
     # Check agents
     agent_stats = await _get_agent_stats()
-    if agent_stats.get("executions_24h", 0) < 10:
+    min_activity_24h = _agent_activity_min_threshold_24h()
+    if min_activity_24h > 0 and agent_stats.get("executions_24h", 0) < min_activity_24h:
         alerts.append(
             {
                 "severity": "medium",
                 "component": "agents",
-                "message": "Low agent activity - only {} executions in 24h".format(
-                    agent_stats.get("executions_24h", 0)
+                "message": "Low agent activity - only {} executions in 24h (threshold: {})".format(
+                    agent_stats.get("executions_24h", 0),
+                    min_activity_24h,
                 ),
                 "timestamp": datetime.utcnow().isoformat(),
             }
@@ -1009,12 +1104,16 @@ async def get_live_system_status() -> dict[str, Any]:
     # Calculate overall health
     issues = []
     critical_issues = []
+    min_activity_24h = _agent_activity_min_threshold_24h()
 
     if not results.get("database", {}).get("connected"):
         critical_issues.append("Database disconnected")
     if not results.get("aurea", {}).get("running"):
         issues.append("AUREA not running")
-    if results.get("agents", {}).get("executions_24h", 0) < 5:
+    if (
+        min_activity_24h > 0
+        and results.get("agents", {}).get("executions_24h", 0) < min_activity_24h
+    ):
         issues.append("Low agent activity")
 
     for service, status in render_status.items():
@@ -1039,6 +1138,7 @@ async def get_live_system_status() -> dict[str, Any]:
             "db_connected": results.get("database", {}).get("connected", False),
             "aurea_running": results.get("aurea", {}).get("running", False),
             "agents_24h": results.get("agents", {}).get("executions_24h", 0),
+            "agents_24h_threshold": min_activity_24h,
             "memories": results.get("memory", {}).get("total_memories", 0),
             "active_tenants": results.get("revenue", {}).get("active_tenants", 0),
         },
