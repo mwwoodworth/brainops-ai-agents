@@ -201,10 +201,34 @@ class SelfAwareAI:
         ]
         try:
             from database.verify_tables import verify_tables_async
+
+            async def _verify() -> bool:
+                return await verify_tables_async(
+                    required_tables, self.db_pool, module_name="ai_self_awareness"
+                )
+
             if not self.db_pool:
                 logger.warning("[ai_self_awareness] No db_pool available, skipping table verification")
                 return
-            ok = await verify_tables_async(required_tables, self.db_pool, module_name="ai_self_awareness")
+
+            # ai_self_awareness can be initialized from background loops while the
+            # shared asyncpg pool is bound to the main FastAPI loop. Use loop_bridge
+            # to execute verification on the owning loop when available.
+            ok: bool
+            try:
+                from loop_bridge import has_main_loop, run_on_main_loop
+
+                if has_main_loop():
+                    dispatched = run_on_main_loop(_verify(), timeout=20.0)
+                    if asyncio.isfuture(dispatched) or isinstance(dispatched, asyncio.Task):
+                        ok = await dispatched
+                    else:
+                        ok = bool(dispatched)
+                else:
+                    ok = await _verify()
+            except Exception:
+                ok = await _verify()
+
             if not ok:
                 return
             self._tables_initialized = True

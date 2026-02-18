@@ -107,6 +107,34 @@ def json_safe_serialize(obj: Any) -> Any:
         return str(obj)
 
 
+def _normalize_tenant_uuid(value: Optional[str]) -> Optional[str]:
+    """Normalize UUID-like tenant identifiers and reject empty/invalid values."""
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    try:
+        return str(uuid.UUID(candidate))
+    except Exception:
+        return None
+
+
+def _resolve_tenant_uuid(candidate: Optional[str]) -> Optional[str]:
+    """Resolve tenant UUID with sane fallbacks for long-running orchestrator loops."""
+    normalized = _normalize_tenant_uuid(candidate)
+    if normalized:
+        return normalized
+
+    for env_key in ("DEFAULT_TENANT_ID", "TENANT_ID"):
+        normalized = _normalize_tenant_uuid(os.getenv(env_key))
+        if normalized:
+            return normalized
+
+    # Weathercraft primary tenant fallback
+    return _normalize_tenant_uuid("51e728c5-94e8-4ae0-8a0a-6a08d1fb3457")
+
+
 # MCP Bridge Configuration
 MCP_BRIDGE_URL = os.getenv("MCP_BRIDGE_URL", "https://brainops-mcp-bridge.onrender.com")
 MCP_API_KEY = (os.getenv("MCP_API_KEY") or os.getenv("BRAINOPS_API_KEY") or "").strip()
@@ -260,10 +288,18 @@ class AUREA:
         tenant_id: Optional[str] = None,
         db_pool: Optional[Any] = None,  # Async database pool injection
     ):
-        if not tenant_id:
-            raise ValueError("tenant_id is required for AUREA")
+        resolved_tenant_id = _resolve_tenant_uuid(tenant_id)
+        if not resolved_tenant_id:
+            raise ValueError("AUREA requires a valid UUID tenant_id")
 
-        self.tenant_id = tenant_id
+        if tenant_id and str(tenant_id).strip() != resolved_tenant_id:
+            logger.warning(
+                "AUREA received non-canonical tenant_id %r; normalized to %s",
+                tenant_id,
+                resolved_tenant_id,
+            )
+
+        self.tenant_id = resolved_tenant_id
         self.autonomy_level = autonomy_level
         self._db_pool = db_pool  # Injected async pool
 
@@ -278,7 +314,7 @@ class AUREA:
             )
 
         self.memory = get_memory_manager()
-        self.activation_system = get_activation_system(tenant_id)
+        self.activation_system = get_activation_system(self.tenant_id)
         self.ai = RealAICore()
         self.board_ref: Optional[Any] = None
         self.safety_ref: Optional[SelfAwareAI] = None
@@ -307,7 +343,7 @@ class AUREA:
         self._init_database()
 
         logger.info(
-            f"🧠 AUREA initialized for tenant {tenant_id} at autonomy level: {autonomy_level.name}"
+            f"🧠 AUREA initialized for tenant {self.tenant_id} at autonomy level: {autonomy_level.name}"
         )
 
     def _recommended_action_cooldown_seconds(self, action: str, default_seconds: int) -> int:
@@ -551,16 +587,34 @@ class AUREA:
         """Get connection from shared pool"""
         return _get_pooled_connection()
 
+    def _apply_tenant_context(self, cursor: Any) -> None:
+        """Apply transaction-local tenant context for RLS-sensitive statements."""
+        if self.tenant_id:
+            cursor.execute(
+                "SELECT set_config('app.current_tenant_id', %s, true)",
+                (self.tenant_id,),
+            )
+
     def _db_fetchall(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         try:
             with self._db_connect() as conn:
                 if not conn:
                     return []
+                prev_autocommit = conn.autocommit
+                conn.autocommit = False
                 cur = conn.cursor(cursor_factory=RealDictCursor)
-                cur.execute(query, params)
-                rows = cur.fetchall()
-                cur.close()
-                return [dict(r) for r in rows]
+                try:
+                    self._apply_tenant_context(cur)
+                    cur.execute(query, params)
+                    rows = cur.fetchall()
+                    conn.commit()
+                    return [dict(r) for r in rows]
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    cur.close()
+                    conn.autocommit = prev_autocommit
         except Exception as e:
             logger.debug(f"DB fetchall failed: {e}")
             return []
@@ -570,11 +624,21 @@ class AUREA:
             with self._db_connect() as conn:
                 if not conn:
                     return None
+                prev_autocommit = conn.autocommit
+                conn.autocommit = False
                 cur = conn.cursor(cursor_factory=RealDictCursor)
-                cur.execute(query, params)
-                row = cur.fetchone()
-                cur.close()
-                return dict(row) if row else None
+                try:
+                    self._apply_tenant_context(cur)
+                    cur.execute(query, params)
+                    row = cur.fetchone()
+                    conn.commit()
+                    return dict(row) if row else None
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    cur.close()
+                    conn.autocommit = prev_autocommit
         except Exception as e:
             logger.debug(f"DB fetchone failed: {e}")
             return None
@@ -584,17 +648,20 @@ class AUREA:
             with self._db_connect() as conn:
                 if not conn:
                     return False
+                prev_autocommit = conn.autocommit
+                conn.autocommit = False
                 cur = conn.cursor()
-                # Set tenant context for RLS (agent_worker has NOBYPASSRLS)
-                if self.tenant_id:
-                    cur.execute(
-                        "SELECT set_config('app.current_tenant_id', %s, true)",
-                        (self.tenant_id,),
-                    )
-                cur.execute(query, params)
-                conn.commit()
-                cur.close()
-                return True
+                try:
+                    self._apply_tenant_context(cur)
+                    cur.execute(query, params)
+                    conn.commit()
+                    return True
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    cur.close()
+                    conn.autocommit = prev_autocommit
         except Exception as e:
             logger.warning(f"DB execute failed: {e}")
             return False
@@ -2902,45 +2969,45 @@ class AUREA:
         """Store cycle metrics in database - uses shared pool"""
         try:
             with _get_pooled_connection() as conn:
+                prev_autocommit = conn.autocommit
+                conn.autocommit = False
                 cur = conn.cursor()
-
-                # Set tenant context for RLS (agent_worker has NOBYPASSRLS)
-                if self.tenant_id:
+                try:
+                    self._apply_tenant_context(cur)
                     cur.execute(
-                        "SELECT set_config('app.current_tenant_id', %s, true)",
-                        (self.tenant_id,),
+                        """
+                        INSERT INTO aurea_cycle_metrics
+                        (cycle_number, timestamp, observations_count, decisions_count,
+                         actions_executed, actions_successful, actions_failed, cycle_duration_seconds,
+                         learning_insights_generated, health_score, autonomy_level,
+                         patterns_detected, goals_achieved, goals_set, tenant_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                        (
+                            metrics.cycle_number,
+                            metrics.timestamp,
+                            metrics.observations_count,
+                            metrics.decisions_count,
+                            metrics.actions_executed,
+                            metrics.actions_successful,
+                            metrics.actions_failed,
+                            metrics.cycle_duration_seconds,
+                            metrics.learning_insights_generated,
+                            metrics.health_score,
+                            metrics.autonomy_level,
+                            Json(metrics.patterns_detected),
+                            metrics.goals_achieved,
+                            metrics.goals_set,
+                            self.tenant_id,
+                        ),
                     )
-
-                cur.execute(
-                    """
-                    INSERT INTO aurea_cycle_metrics
-                    (cycle_number, timestamp, observations_count, decisions_count,
-                     actions_executed, actions_successful, actions_failed, cycle_duration_seconds,
-                     learning_insights_generated, health_score, autonomy_level,
-                     patterns_detected, goals_achieved, goals_set, tenant_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                    (
-                        metrics.cycle_number,
-                        metrics.timestamp,
-                        metrics.observations_count,
-                        metrics.decisions_count,
-                        metrics.actions_executed,
-                        metrics.actions_successful,
-                        metrics.actions_failed,
-                        metrics.cycle_duration_seconds,
-                        metrics.learning_insights_generated,
-                        metrics.health_score,
-                        metrics.autonomy_level,
-                        Json(metrics.patterns_detected),
-                        metrics.goals_achieved,
-                        metrics.goals_set,
-                        self.tenant_id,
-                    ),
-                )
-
-                conn.commit()
-                cur.close()
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    cur.close()
+                    conn.autocommit = prev_autocommit
 
             # Also store in unified brain (convert datetime to string for JSON)
             metrics_dict = asdict(metrics)

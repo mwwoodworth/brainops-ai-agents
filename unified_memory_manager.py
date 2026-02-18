@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import uuid
 import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -114,16 +115,39 @@ class Memory:
 class UnifiedMemoryManager:
     """Enterprise-grade unified memory management system"""
 
+    @staticmethod
+    def _normalize_tenant_uuid(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        candidate = str(value).strip()
+        if not candidate:
+            return None
+        try:
+            return str(uuid.UUID(candidate))
+        except Exception:
+            return None
+
+    @classmethod
+    def _resolve_tenant_uuid(cls, candidate: Optional[str]) -> str:
+        resolved = (
+            cls._normalize_tenant_uuid(candidate)
+            or cls._normalize_tenant_uuid(os.getenv("TENANT_ID"))
+            or cls._normalize_tenant_uuid(os.getenv("DEFAULT_TENANT_ID"))
+            or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+        )
+        return resolved
+
     def __init__(self, tenant_id: Optional[str] = None):
         self.embedding_cache = {}
         self.consolidation_threshold = 0.85  # Similarity threshold for consolidation
         # Resolve tenant_id: explicit > env var > hardcoded fallback (Weathercraft primary tenant)
-        self.tenant_id = (
-            tenant_id
-            or os.getenv("TENANT_ID")
-            or os.getenv("DEFAULT_TENANT_ID")
-            or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"  # Weathercraft primary tenant fallback
-        )
+        self.tenant_id = self._resolve_tenant_uuid(tenant_id)
+        if tenant_id and self._normalize_tenant_uuid(tenant_id) is None:
+            logger.warning(
+                "UnifiedMemoryManager received invalid tenant_id=%r; normalized to %s",
+                tenant_id,
+                self.tenant_id,
+            )
         self._last_decay_at: Optional[datetime] = None
         self._pool = None
         self._init_pool()
@@ -278,16 +302,30 @@ class UnifiedMemoryManager:
                 logger.error("❌ Failed to get connection from pool")
                 return None
             try:
+                prev_autocommit = conn.autocommit
+                conn.autocommit = False
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute(query, params)
-                if fetch_one:
-                    result = cursor.fetchone()
-                elif fetch_all:
-                    result = cursor.fetchall()
-                else:
-                    result = True
-                cursor.close()
-                return result
+                try:
+                    if self.tenant_id:
+                        cursor.execute(
+                            "SELECT set_config('app.current_tenant_id', %s, true)",
+                            [self.tenant_id],
+                        )
+                    cursor.execute(query, params)
+                    if fetch_one:
+                        result = cursor.fetchone()
+                    elif fetch_all:
+                        result = cursor.fetchall()
+                    else:
+                        result = True
+                    conn.commit()
+                    return result
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    cursor.close()
+                    conn.autocommit = prev_autocommit
             except Exception as exc:
                 logger.error("❌ Query execution failed: %s", exc, exc_info=True)
                 return None
