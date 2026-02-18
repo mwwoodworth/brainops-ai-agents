@@ -31,7 +31,7 @@ async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
 # Models
 class TextToSpeechRequest(BaseModel):
     text: str
-    voice_id: Optional[str] = "elevenlabs-conversational" # Default or env
+    voice_id: Optional[str] = None
     optimize_latency: int = 3
 
 class OutboundCallRequest(BaseModel):
@@ -41,6 +41,8 @@ class OutboundCallRequest(BaseModel):
 
 # Services
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+DEFAULT_ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+DEFAULT_ELEVENLABS_MODEL = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER")
@@ -51,33 +53,77 @@ async def generate_speech(request: TextToSpeechRequest, api_key: str = Depends(v
     if not ELEVENLABS_API_KEY:
         raise HTTPException(status_code=503, detail="ElevenLabs not configured")
 
-    voice_id = request.voice_id or os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM") # Default Rachel
-    
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     headers = {
         "xi-api-key": ELEVENLABS_API_KEY,
         "Content-Type": "application/json"
     }
     data = {
         "text": request.text,
-        "model_id": "eleven_monolingual_v1",
         "voice_settings": {
             "stability": 0.5,
             "similarity_boost": 0.5
         }
     }
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=data, headers=headers, timeout=30.0)
-        
-    if response.status_code != 200:
-        raise HTTPException(status_code=500, detail=f"ElevenLabs error: {response.text}")
+    model_candidates: list[str] = []
+    for model_id in [
+        DEFAULT_ELEVENLABS_MODEL,
+        "eleven_multilingual_v2",
+        "eleven_turbo_v2_5",
+        "eleven_monolingual_v1",
+    ]:
+        if model_id and model_id not in model_candidates:
+            model_candidates.append(model_id)
 
-    # In a real app we might stream this or upload to S3. 
-    # For now, we return binary directly or a success status if used internally.
-    # To make it useful via API, let's return the content type and binary.
-    from fastapi.responses import Response
-    return Response(content=response.content, media_type="audio/mpeg")
+    voice_candidates: list[str] = []
+    for candidate in [
+        request.voice_id,
+        DEFAULT_ELEVENLABS_VOICE_ID,
+        "21m00Tcm4TlvDq8ikWAM",
+    ]:
+        if candidate and candidate not in voice_candidates:
+            voice_candidates.append(candidate)
+
+    last_status = 500
+    last_error = "Unknown ElevenLabs error"
+    async with httpx.AsyncClient() as client:
+        response = None
+        for voice_id in voice_candidates:
+            url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+            for model_id in model_candidates:
+                payload = {**data, "model_id": model_id}
+                response = await client.post(url, json=payload, headers=headers, timeout=30.0)
+                if response.status_code == 200:
+                    from fastapi.responses import Response
+
+                    return Response(content=response.content, media_type="audio/mpeg")
+
+                last_status = response.status_code
+                last_error = response.text
+                response_text_l = response.text.lower()
+                is_voice_error = (
+                    ("invalid_uid" in response_text_l or "invalid id" in response_text_l)
+                    and response.status_code in {400, 404, 422}
+                )
+                is_model_error = "model" in response_text_l and response.status_code in {400, 404, 422}
+
+                if is_voice_error:
+                    logger.warning(
+                        "ElevenLabs voice '%s' rejected (%s), trying fallback voice",
+                        voice_id,
+                        response.status_code,
+                    )
+                    break
+                if is_model_error:
+                    logger.warning(
+                        "ElevenLabs model '%s' rejected (%s), trying fallback model",
+                        model_id,
+                        response.status_code,
+                    )
+                    continue
+                break
+
+    raise HTTPException(status_code=500, detail=f"ElevenLabs error ({last_status}): {last_error}")
 
 @router.post("/call")
 async def make_call(request: OutboundCallRequest, api_key: str = Depends(verify_api_key)):

@@ -273,11 +273,9 @@ class RevenueOperator:
         # Get real revenue
         real_revenue = await pool.fetchrow("""
             SELECT COALESCE(SUM(amount), 0) as total
-            FROM ai_invoices i
-            JOIN revenue_leads rl ON i.lead_id = rl.id
-            WHERE i.status = 'paid'
-            AND rl.email NOT ILIKE '%test%'
-            AND rl.email NOT ILIKE '%example%'
+            FROM real_revenue_tracking
+            WHERE COALESCE(is_verified, false) = true
+              AND COALESCE(is_demo, false) = false
         """)
         revenue_total = float(real_revenue["total"] or 0) if real_revenue else 0
 
@@ -291,7 +289,8 @@ class RevenueOperator:
 
         # Get reply count
         replies = await pool.fetchrow("""
-            SELECT COUNT(*) as count FROM lead_engagement_history
+            SELECT COUNT(*) as count
+            FROM lead_activities
             WHERE event_type = 'reply_received'
         """)
         reply_count = replies["count"] if replies else 0

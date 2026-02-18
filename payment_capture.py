@@ -436,6 +436,22 @@ BrainOps Team""",
             })
         )
 
+        # Phase 2: Revenue reinforcement
+        # Best-effort: queue a recompilation so outreach learns from real cash outcomes.
+        try:
+            from optimization.revenue_prompt_compile_queue import enqueue_revenue_prompt_compile_task
+
+            await enqueue_revenue_prompt_compile_task(
+                pool=pool,
+                tenant_id=str(invoice.get("tenant_id") or "") or None,
+                lead_id=str(invoice.get("lead_id") or ""),
+                reason="real_revenue_tracking:invoice_paid",
+                priority=95,
+                force=True,
+            )
+        except Exception as exc:
+            logger.debug("Revenue prompt compile enqueue skipped after payment: %s", exc)
+
         logger.info(f"REAL REVENUE: Invoice {invoice_id[:8]}... marked PAID - ${float(invoice['amount']):.2f}")
         return True, f"Payment confirmed. REAL REVENUE: ${float(invoice['amount']):.2f}"
 

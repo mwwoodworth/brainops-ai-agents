@@ -67,12 +67,13 @@ if ("pooler.supabase.com" in _db_host or "pooler.supabase.com" in _db_url) and o
 ) == "5432":
     os.environ["DB_PORT"] = "6543"
 
-from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query, Request, Security
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
+from starlette.requests import HTTPConnection
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -169,6 +170,11 @@ def _rate_limit_key(request: Request) -> str:
         or request.headers.get("x-api-key")
         or request.headers.get("X-Api-Key")
     )
+    if not api_key:
+        try:
+            api_key = request.query_params.get("api_key") or request.query_params.get("token")
+        except Exception:
+            api_key = None
     if api_key:
         api_key = api_key.strip()
     if not api_key:
@@ -2121,10 +2127,6 @@ async def record_request_metrics(request: Request, call_next):
         )
 
 
-# API Key authentication
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-jwt_bearer = HTTPBearer(auto_error=False)
-
 # Rate limit 403 error logging to avoid log flooding
 from collections import defaultdict
 
@@ -2133,14 +2135,37 @@ _API_KEY_ERROR_LOG_INTERVAL = 60  # Only log same path/error once per minute
 
 
 async def verify_api_key(
-    request: Request,
-    api_key: str = Security(api_key_header),
-    jwt_token: Optional[HTTPAuthorizationCredentials] = Security(jwt_bearer),
+    request: Optional[Request] = None,
+    websocket: Optional[WebSocket] = None,
 ) -> bool:
     """
     Verify authentication using either API Key or JWT.
     Prioritizes Master Key, then JWT, then Configured API Keys.
     """
+    connection: HTTPConnection | None = request or websocket
+    if connection is None:
+        raise HTTPException(status_code=500, detail="Authentication context missing")
+
+    api_key = (
+        connection.headers.get("X-API-Key")
+        or connection.headers.get("x-api-key")
+        or connection.headers.get("X-Api-Key")
+    )
+    if not api_key:
+        try:
+            api_key = connection.query_params.get("api_key") or connection.query_params.get("token")
+        except Exception:
+            api_key = None
+    if api_key:
+        api_key = api_key.strip()
+
+    auth_header = connection.headers.get("authorization", "")
+    jwt_token: Optional[HTTPAuthorizationCredentials] = None
+    if auth_header.lower().startswith("bearer "):
+        bearer_token = auth_header[7:].strip()
+        if bearer_token:
+            jwt_token = HTTPAuthorizationCredentials(scheme="Bearer", credentials=bearer_token)
+
     # 0. Check Master Key (Immediate Override)
     # Check headers directly to catch it before JWT processing
     # (FastAPI dependencies might have already parsed it into api_key or jwt_token)
@@ -2152,7 +2177,6 @@ async def verify_api_key(
 
     # Check Authorization header manually for master key
     # SECURITY: Use exact match, not substring matching (fixes potential bypass)
-    auth_header = request.headers.get("authorization", "")
     if master_key and auth_header:
         # Handle "Bearer <token>" format
         if auth_header.lower().startswith("bearer "):
@@ -2167,7 +2191,7 @@ async def verify_api_key(
         return True
 
     # 1. Try JWT first (User Context)
-    if jwt_token:
+    if jwt_token and request is not None:
         # If the token in jwt_token is the master key, we already returned True above.
         # So if we are here, it's a real JWT candidate.
         try:
@@ -2204,7 +2228,7 @@ async def verify_api_key(
 
     if not provided:
         # Rate-limit logging of missing API key errors
-        path = request.url.path
+        path = connection.url.path
         error_key = f"missing:{path}"
         now = time.time()
         if now - _api_key_error_log_times[error_key] > _API_KEY_ERROR_LOG_INTERVAL:
@@ -2220,7 +2244,7 @@ async def verify_api_key(
 
     if provided not in config.security.valid_api_keys:
         # Rate-limit logging of invalid API key errors
-        path = request.url.path
+        path = connection.url.path
         error_key = f"invalid:{path}"
         now = time.time()
         if now - _api_key_error_log_times[error_key] > _API_KEY_ERROR_LOG_INTERVAL:
@@ -3158,6 +3182,13 @@ async def health_check(
         active_systems = _collect_active_systems()
 
         embedded_memory_stats = None
+        if EMBEDDED_MEMORY_AVAILABLE and getattr(app.state, "embedded_memory", None) is None:
+            try:
+                app.state.embedded_memory = await asyncio.wait_for(get_embedded_memory(), timeout=5.0)
+                logger.info("✅ Embedded Memory System lazily initialized from /health")
+            except Exception as exc:
+                logger.warning("Embedded memory lazy init failed during /health: %s", exc)
+
         if EMBEDDED_MEMORY_AVAILABLE and getattr(app.state, "embedded_memory", None):
             try:
                 embedded_memory_stats = app.state.embedded_memory.get_stats()
@@ -6923,8 +6954,74 @@ async def ai_analyze(request: Request, payload: AIAnalyzeRequest = Body(...)):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+def _normalize_tenant_uuid(candidate: Any) -> Optional[str]:
+    """Return canonical UUID string or None when input is missing/invalid."""
+    if candidate is None:
+        return None
+    try:
+        raw = str(candidate).strip()
+    except Exception:
+        return None
+
+    if not raw or raw.lower() in {"null", "none", "undefined"}:
+        return None
+
+    try:
+        return str(uuid.UUID(raw))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _resolve_tenant_uuid_from_request(request: Optional[HTTPConnection]) -> Optional[str]:
+    """Resolve tenant UUID from request context, then fall back to configured default."""
+    candidates: list[Any] = []
+    if request is not None:
+        try:
+            candidates.append(request.headers.get(config.tenant.header_name))
+        except Exception:
+            pass
+
+        state = getattr(request, "state", None)
+        if state is not None:
+            candidates.append(getattr(state, "tenant_id", None))
+            user = getattr(state, "user", None)
+            if isinstance(user, dict):
+                candidates.append(user.get("tenant_id"))
+
+    candidates.extend([config.tenant.default_tenant_id, os.getenv("DEFAULT_TENANT_ID")])
+
+    for candidate in candidates:
+        normalized = _normalize_tenant_uuid(candidate)
+        if normalized:
+            return normalized
+    return None
+
+
+async def _fetchval_with_tenant_context(
+    pool: Any,
+    query: str,
+    *args: Any,
+    tenant_uuid: Optional[str] = None,
+):
+    """
+    Execute fetchval in a transaction with explicit tenant context.
+    Prevents stale/invalid session tenant settings (e.g. empty string UUID).
+    """
+    raw_pool = getattr(pool, "pool", None) or getattr(pool, "_pool", None)
+    if raw_pool is None:
+        return await pool.fetchval(query, *args)
+
+    async with raw_pool.acquire(timeout=10.0) as conn:
+        async with conn.transaction():
+            if tenant_uuid:
+                await conn.execute("SELECT set_config('app.current_tenant_id', $1, true)", tenant_uuid)
+            else:
+                await conn.execute("RESET app.current_tenant_id")
+            return await conn.fetchval(query, *args)
+
+
 @app.get("/aurea/status", dependencies=SECURED_DEPENDENCIES)
-async def get_aurea_status():
+async def get_aurea_status(request: Request):
     """
     Get AUREA operational status - checks actual OODA loop activity (requires auth).
     This endpoint verifies real AUREA activity in the database.
@@ -6944,25 +7041,32 @@ async def get_aurea_status():
                 },
             }
 
-        # Use pool methods directly (they handle acquire internally)
-        recent_cycles = await pool.fetchval(
+        tenant_uuid = _resolve_tenant_uuid_from_request(request)
+
+        recent_cycles = await _fetchval_with_tenant_context(
+            pool,
             """
             SELECT COUNT(*) FROM aurea_state
             WHERE timestamp > NOW() - INTERVAL '5 minutes'
-        """
+        """,
+            tenant_uuid=tenant_uuid,
         )
 
-        recent_decisions = await pool.fetchval(
+        recent_decisions = await _fetchval_with_tenant_context(
+            pool,
             """
             SELECT COUNT(*) FROM aurea_decisions
             WHERE created_at > NOW() - INTERVAL '1 hour'
-        """
+        """,
+            tenant_uuid=tenant_uuid,
         )
 
-        active_agents = await pool.fetchval(
+        active_agents = await _fetchval_with_tenant_context(
+            pool,
             """
             SELECT COUNT(*) FROM ai_agents WHERE status = 'active'
-        """
+        """,
+            tenant_uuid=tenant_uuid,
         )
 
         # AUREA is operational if we have recent OODA cycles
@@ -6974,6 +7078,7 @@ async def get_aurea_status():
             "ooda_cycles_last_5min": recent_cycles,
             "decisions_last_hour": recent_decisions,
             "active_agents": active_agents,
+            "tenant_id": tenant_uuid,
             "timestamp": datetime.utcnow().isoformat(),
             "endpoints": {
                 "full_status": "/aurea/chat/status",
@@ -7006,7 +7111,50 @@ async def execute_aurea_nl_command(request: Request, payload: AureaCommandReques
     - "Execute task abc-123"
     """
     if not hasattr(app.state, "aurea_nlu") or not app.state.aurea_nlu:
-        raise HTTPException(status_code=503, detail="AUREA NLU Processor not available")
+        logger.warning(
+            "AUREA NLU processor unavailable; using /aurea/chat/command fallback for '%s'",
+            payload.command_text,
+        )
+        try:
+            from api.aurea_chat import NLCommand, execute_natural_language_command
+
+            fallback_response = await execute_natural_language_command(
+                NLCommand(command=payload.command_text)
+            )
+
+            if isinstance(fallback_response, JSONResponse):
+                try:
+                    parsed = json.loads(fallback_response.body.decode("utf-8"))
+                except Exception:
+                    parsed = {"detail": fallback_response.body.decode("utf-8", errors="ignore")}
+                if fallback_response.status_code >= 400:
+                    raise HTTPException(
+                        status_code=fallback_response.status_code,
+                        detail=parsed.get("error") or parsed.get("detail") or "AUREA fallback failed",
+                    )
+                return {
+                    "success": True,
+                    "command": payload.command_text,
+                    "result": parsed,
+                    "processor": "chat-command-fallback",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+
+            return {
+                "success": True,
+                "command": payload.command_text,
+                "result": fallback_response,
+                "processor": "chat-command-fallback",
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        except HTTPException:
+            raise
+        except Exception as fallback_error:
+            logger.error("AUREA fallback command execution failed: %s", fallback_error, exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail=f"AUREA NLU Processor not available; fallback failed: {fallback_error}",
+            ) from fallback_error
 
     try:
         command_text = payload.command_text
@@ -7986,14 +8134,16 @@ async def get_all_errors():
 
 
 @app.get("/system/unified-status", dependencies=[Depends(verify_api_key)])
-async def get_unified_system_status():
+async def get_unified_system_status(request: Request):
     """Get unified status of the entire AI OS"""
     pool = get_pool()
+    tenant_uuid = _resolve_tenant_uuid_from_request(request)
 
     status = {
         "version": VERSION,
         "timestamp": datetime.utcnow().isoformat(),
         "overall_health": "healthy",
+        "tenant_id": tenant_uuid,
         "components": {},
     }
 
@@ -8012,7 +8162,11 @@ async def get_unified_system_status():
     issues = []
     for name, query in components:
         try:
-            result = await pool.fetchval(query)
+            result = await _fetchval_with_tenant_context(
+                pool,
+                query,
+                tenant_uuid=tenant_uuid,
+            )
             status["components"][name] = {"status": "ok", "value": result}
         except Exception as e:
             status["components"][name] = {"status": "error", "error": str(e)}

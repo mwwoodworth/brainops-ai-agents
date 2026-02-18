@@ -636,6 +636,52 @@ class NurtureExecutorAgentReal(BaseAgent):
                 days_delay = touchpoint.get('day', 0)
                 scheduled_for = datetime.now(timezone.utc) + timedelta(days=days_delay)
 
+                subject = touchpoint.get('subject', 'Update from Your Roofing Team')
+                body = touchpoint.get('body', '')
+                optimizer_meta: dict[str, Any] = {}
+                try:
+                    from optimization.revenue_prompt_optimizer import get_revenue_prompt_optimizer
+
+                    optimizer = get_revenue_prompt_optimizer()
+                    leads_context = json.dumps(
+                        {
+                            "lead_id": lead_id,
+                            "company_name": lead_data.get("company_name"),
+                            "contact_name": lead_data.get("contact_name"),
+                            "email": lead_data.get("email"),
+                            "industry": lead_data.get("industry"),
+                            "source": lead_data.get("source"),
+                            "metadata": lead_metadata,
+                        },
+                        default=str,
+                    )
+                    revenue_metrics = json.dumps(
+                        {
+                            "pipeline_stage": lead_data.get("stage"),
+                            "lead_type": lead_type,
+                            "sequence_id": sequence_id,
+                            "touchpoint_day": days_delay,
+                            "scheduled_for": scheduled_for.isoformat(),
+                        },
+                        default=str,
+                    )
+                    opt = await optimizer.optimize(
+                        leads=leads_context,
+                        revenue_metrics=revenue_metrics,
+                        subject=subject,
+                        body=body,
+                        pool=pool,
+                    )
+                    subject = opt.subject
+                    body = opt.body
+                    optimizer_meta = {
+                        "used_optimizer": opt.used_optimizer,
+                        "compiled": opt.compiled,
+                        "compiled_at": opt.compiled_at,
+                    }
+                except Exception as exc:
+                    self.logger.debug("DSPy revenue optimizer unavailable: %s", exc)
+
                 email_id = str(uuid.uuid4())
                 await pool.execute("""
                     INSERT INTO ai_email_queue (
@@ -645,8 +691,8 @@ class NurtureExecutorAgentReal(BaseAgent):
                 """,
                     email_id,
                     lead_data.get('email'),
-                    touchpoint.get('subject', 'Update from Your Roofing Team'),
-                    touchpoint.get('body', ''),
+                    subject,
+                    body,
                     scheduled_for,
                     'queued',
                     json.dumps({
@@ -657,6 +703,7 @@ class NurtureExecutorAgentReal(BaseAgent):
                         "lead_type": lead_type,
                         "is_test": lead_is_test,
                         "is_demo": lead_is_demo,
+                        "prompt_optimizer": optimizer_meta,
                     })
                 )
 

@@ -22,6 +22,16 @@ from psycopg2.extras import Json
 
 logger = logging.getLogger(__name__)
 
+
+def _is_test_email(email: str | None) -> bool:
+    if not email:
+        return True
+    lowered = email.strip().lower()
+    return any(
+        token in lowered
+        for token in ("test", "example", "demo", "sample", "fake", "placeholder", "localhost")
+    )
+
 # Reroof Genius Sequence
 REROOF_GENIUS_SEQUENCE = {
     "name": "Reroof Genius - Residential Replacement",
@@ -274,7 +284,17 @@ def enroll_lead_in_segment_sequence(
                 VALUES (%s, %s, %s, %s, %s, 'queued', %s)
             """, (
                 str(uuid.uuid4()), email, personalized_subject, personalized_body, scheduled_date,
-                Json({"enrollment_id": enrollment_id, "sequence": segment})
+                Json(
+                    {
+                        "enrollment_id": enrollment_id,
+                        "sequence": segment,
+                        "segment": segment,
+                        "lead_id": lead_id,
+                        "source": "lead_segmentation_sequence",
+                        "touchpoint_number": tp_num,
+                        "is_test": _is_test_email(email),
+                    }
+                ),
             ))
 
         conn.commit()

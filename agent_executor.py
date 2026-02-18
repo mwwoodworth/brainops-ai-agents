@@ -6365,6 +6365,8 @@ class SelfBuildingAgent(BaseAgent):
             return await self.deploy_agents()
         elif action == "optimize":
             return await self.optimize_agents()
+        elif action in ("implement_proposal", "implement_improvement_proposal", "self_code"):
+            return await self.implement_improvement_proposal(task)
         else:
             return {"status": "error", "message": f"Unknown action: {action}"}
 
@@ -6510,6 +6512,140 @@ class SelfBuildingAgent(BaseAgent):
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
+
+    async def implement_improvement_proposal(self, task: dict[str, Any]) -> dict[str, Any]:
+        """
+        Phase 1: Self-Coding Engine.
+
+        Takes an approved `ai_improvement_proposals` row and turns it into a git branch + (optional) PR.
+        This is OFF by default and must be explicitly enabled via env vars.
+        """
+        proposal_id = str(task.get("proposal_id") or task.get("id") or "").strip()
+        if not proposal_id:
+            return {"status": "error", "error": "missing_proposal_id"}
+
+        repo_path_raw = str(
+            task.get("repo_path")
+            or os.getenv("SELF_CODING_DEFAULT_REPO_PATH")
+            or str(_REPO_ROOT)
+        ).strip()
+        repo_path = Path(repo_path_raw).expanduser().resolve()
+
+        # Pull proposal details from DB.
+        try:
+            pool = get_pool()
+            row = await pool.fetchrow(
+                """
+                SELECT
+                    id, title, description, improvement_type, risk_level,
+                    implementation_steps, success_criteria, tenant_id, status
+                FROM ai_improvement_proposals
+                WHERE id = $1
+                """,
+                proposal_id,
+            )
+        except Exception as exc:
+            return {"status": "error", "error": f"proposal_fetch_failed:{exc}"}
+
+        if not row:
+            return {"status": "error", "error": "proposal_not_found", "proposal_id": proposal_id}
+
+        proposal = dict(row)
+        status = (proposal.get("status") or "").strip().lower()
+        if status not in {"approved", "queued_for_self_build", "implementing"}:
+            return {
+                "status": "skipped",
+                "reason": f"proposal_status_not_actionable:{status}",
+                "proposal_id": proposal_id,
+            }
+
+        codebase_prompt_context = ""
+        ctx = task.get("codebase_context") or {}
+        if isinstance(ctx, dict):
+            codebase_prompt_context = str(ctx.get("prompt_context") or "").strip()
+
+        from self_coding_engine import PatchContext, implement_proposal_with_pr
+
+        patch_ctx = PatchContext(
+            repo_path=repo_path,
+            proposal_id=str(proposal.get("id") or proposal_id),
+            title=str(proposal.get("title") or "Improvement Proposal"),
+            description=str(proposal.get("description") or ""),
+            improvement_type=str(proposal.get("improvement_type") or ""),
+            risk_level=str(proposal.get("risk_level") or ""),
+            implementation_steps=list(proposal.get("implementation_steps") or []),
+            success_criteria=list(proposal.get("success_criteria") or []),
+            codebase_prompt_context=codebase_prompt_context,
+        )
+
+        mcp_client = None
+        try:
+            from mcp_integration import get_mcp_client
+
+            mcp_client = get_mcp_client()
+        except Exception:
+            mcp_client = None
+
+        github_repo = (
+            str(task.get("github_repo") or "").strip()
+            or os.getenv("SELF_CODING_GITHUB_REPO")
+            or os.getenv("GITHUB_REPO")
+            or "mwwoodworth/brainops-ai-agents"
+        )
+        base_branch = str(task.get("base_branch") or os.getenv("SELF_CODING_BASE_BRANCH") or "main").strip()
+
+        test_command = task.get("test_command")
+        if isinstance(test_command, str) and test_command.strip():
+            # `SELF_CODING_TEST_COMMAND` uses comma-separated args; support that shape too.
+            test_command = [part for part in test_command.split() if part]
+        if not isinstance(test_command, list):
+            test_command = None
+
+        result = await implement_proposal_with_pr(
+            ctx=patch_ctx,
+            ai_core=ai_core if USE_REAL_AI else None,
+            mcp_client=mcp_client,
+            github_repo=github_repo,
+            base_branch=base_branch,
+            test_command=test_command,
+        )
+
+        # Persist execution outcome back to the proposal for traceability.
+        try:
+            new_status = "queued_for_self_build"
+            if result.get("status") == "completed":
+                if result.get("pr") and isinstance(result.get("pr"), dict) and not result["pr"].get("error"):
+                    new_status = "pr_opened"
+                else:
+                    new_status = "self_build_completed"
+            elif result.get("status") == "skipped":
+                new_status = status  # keep original
+            else:
+                new_status = status  # keep original for retry/debug
+
+            notes = (
+                f"SelfBuilder result={result.get('status')} "
+                f"branch={result.get('branch')} commit={result.get('commit')} "
+                f"pushed={result.get('pushed')} pr={result.get('pr')}"
+            )
+
+            await pool.execute(
+                """
+                UPDATE ai_improvement_proposals
+                SET status = $1,
+                    implementation_notes = $2,
+                    completed_at = CASE WHEN $1 IN ('completed', 'pr_opened', 'self_build_completed') THEN NOW() ELSE completed_at END
+                WHERE id = $3
+                """,
+                new_status,
+                notes[:4000],
+                proposal_id,
+            )
+        except Exception as exc:
+            # Don't fail the agent if DB writeback fails; surface it in the result.
+            result["_proposal_update_error"] = str(exc)
+
+        return result
 
 
 # ============== REAL STUB AGENT IMPLEMENTATIONS ==============

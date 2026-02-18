@@ -312,6 +312,76 @@ async def get_complete_awareness() -> dict[str, Any]:
         logger.warning(f"Revenue check failed: {e}")
 
     # ============================================
+    # 5.5 DSPY REVENUE OPTIMIZER - Is the reward loop wired?
+    # ============================================
+    dspy_optimizer: dict[str, Any] = {"enabled": False, "compiled": False}
+    try:
+        from optimization.revenue_prompt_optimizer import get_revenue_prompt_optimizer
+
+        optimizer = get_revenue_prompt_optimizer()
+        dspy_optimizer = optimizer.status()
+
+        # Summarize recent compile tasks (if task queue is being used)
+        compile_stats = await _safe_query(
+            pool,
+            """
+            SELECT status, COUNT(*) as count, MAX(created_at) as last_created
+            FROM ai_task_queue
+            WHERE task_type = 'revenue_prompt_compile'
+              AND created_at > NOW() - INTERVAL '24 hours'
+            GROUP BY status
+            """,
+            default=[],
+        )
+        dspy_optimizer["compile_tasks_24h"] = [
+            {
+                "status": r.get("status"),
+                "count": int(r.get("count") or 0),
+                "last_created": r.get("last_created").isoformat() if r.get("last_created") else None,
+            }
+            for r in (compile_stats or [])
+        ]
+
+        last_task_rows = await _safe_query(
+            pool,
+            """
+            SELECT id, status, created_at, completed_at, error_message
+            FROM ai_task_queue
+            WHERE task_type = 'revenue_prompt_compile'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            default=[],
+        )
+        if last_task_rows:
+            r0 = last_task_rows[0]
+            dspy_optimizer["last_compile_task"] = {
+                "id": str(r0.get("id")),
+                "status": r0.get("status"),
+                "created_at": r0.get("created_at").isoformat() if r0.get("created_at") else None,
+                "completed_at": r0.get("completed_at").isoformat() if r0.get("completed_at") else None,
+                "error_message": r0.get("error_message"),
+            }
+
+        if dspy_optimizer.get("enabled") and not dspy_optimizer.get("compiled"):
+            recommendations.append(
+                "DSPy optimizer enabled but not compiled yet (need more training samples or POST /api/v1/revenue/prompt-optimizer/compile)"
+            )
+
+        if dspy_optimizer.get("auto_recompile") and not dspy_optimizer.get("enabled"):
+            alerts.append(
+                {
+                    "severity": "info",
+                    "system": "dspy_optimizer",
+                    "message": "DSPY_REVENUE_AUTO_RECOMPILE is enabled but optimizer is disabled/unavailable",
+                    "timestamp": now.isoformat(),
+                }
+            )
+
+    except Exception as e:
+        logger.debug(f"DSPy optimizer status unavailable: {e}")
+
+    # ============================================
     # 6. RECENT ACTIVITY - What just happened?
     # ============================================
     recent_activity = {}
@@ -433,6 +503,8 @@ async def get_complete_awareness() -> dict[str, Any]:
                 COUNT(*) as total,
                 COUNT(*) FILTER (WHERE status = 'proposed') as pending,
                 COUNT(*) FILTER (WHERE status = 'approved') as approved,
+                COUNT(*) FILTER (WHERE status = 'queued_for_self_build') as queued_for_self_build,
+                COUNT(*) FILTER (WHERE status = 'pr_opened') as pr_opened,
                 COUNT(*) FILTER (WHERE status = 'completed') as completed
             FROM ai_improvement_proposals
         """)
@@ -447,6 +519,8 @@ async def get_complete_awareness() -> dict[str, Any]:
             "insights_24hr": ins.get('recent', 0) or 0,
             "pending_proposals": prop.get('pending', 0) or 0,
             "approved_proposals": prop.get('approved', 0) or 0,
+            "queued_for_self_build": prop.get('queued_for_self_build', 0) or 0,
+            "pr_opened": prop.get('pr_opened', 0) or 0,
             "completed_proposals": prop.get('completed', 0) or 0
         }
 
@@ -496,6 +570,7 @@ async def get_complete_awareness() -> dict[str, Any]:
             "aurea_orchestrator": aurea_health,
             "memory": memory_health,
             "revenue": revenue_health,
+            "dspy_revenue_optimizer": dspy_optimizer,
             "memory_enforcement": enforcement_health,
             "learning_feedback": learning_health
         },

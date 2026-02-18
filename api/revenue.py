@@ -94,6 +94,11 @@ class ProposalRequest(BaseModel):
     pricing_tier: str = "standard"
 
 
+class PromptOptimizerCompileRequest(BaseModel):
+    """Request to (re)compile the revenue prompt optimizer."""
+    force: bool = True
+
+
 @router.get("/status")
 async def get_revenue_status():
     """Get current revenue system status"""
@@ -143,6 +148,40 @@ async def get_revenue_status():
     except Exception as e:
         logger.error(f"Error getting revenue status: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/prompt-optimizer/status")
+async def get_prompt_optimizer_status() -> dict[str, Any]:
+    """Get the current DSPy revenue optimizer status for this running instance."""
+    try:
+        from optimization.revenue_prompt_optimizer import get_revenue_prompt_optimizer
+
+        optimizer = get_revenue_prompt_optimizer()
+        return {"success": True, "status": optimizer.status()}
+    except Exception as e:
+        logger.warning("Failed to read prompt optimizer status: %s", e)
+        return {"success": False, "error": str(e), "status": {"enabled": False}}
+
+
+@router.post("/prompt-optimizer/compile")
+async def compile_prompt_optimizer(payload: PromptOptimizerCompileRequest) -> dict[str, Any]:
+    """
+    Force a compile of the DSPy revenue optimizer using REAL outcomes.
+
+    Notes:
+    - This is best-effort and safe; if DSPy is unavailable or disabled, returns skipped.
+    - Compilation is still rate-limited unless `force=true`.
+    """
+    try:
+        from optimization.revenue_prompt_optimizer import get_revenue_prompt_optimizer
+
+        optimizer = get_revenue_prompt_optimizer()
+        pool = get_pool()
+        result = await optimizer.ensure_compiled(pool=pool, force=bool(payload.force))
+        return {"success": True, "result": result, "status": optimizer.status()}
+    except Exception as e:
+        logger.error("Prompt optimizer compile failed: %s", e)
+        raise HTTPException(status_code=500, detail="Prompt optimizer compile failed") from e
 
 
 @router.post("/discover-leads")
